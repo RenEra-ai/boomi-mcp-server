@@ -67,6 +67,18 @@ PROCESS_IR_SCHEMA_INVALID = "PROCESS_IR_SCHEMA_INVALID"
 PROCESS_IR_REFERENCE_INVALID_FORMAT = "PROCESS_IR_REFERENCE_INVALID_FORMAT"
 PROCESS_IR_CAPABILITY_UNSUPPORTED = "PROCESS_IR_CAPABILITY_UNSUPPORTED"
 
+# --- ProcessIR compiler CFG/lowering (M12.2 / issue #137; ADR-001 §7) ---------
+# First codes of the PROCESS_IR_SEMANTIC_* / PROCESS_IR_COMPILE_* families.
+# SEMANTIC_* are user-authored semantic defects that survived schema validation;
+# COMPILE_* are compiler/emission-plan defects (an internal invariant broke, not
+# the caller's input). Later introducers (#138, #140-#143) ADD codes here.
+PROCESS_IR_SEMANTIC_UNREACHABLE = "PROCESS_IR_SEMANTIC_UNREACHABLE"
+PROCESS_IR_SEMANTIC_MISSING_TERMINAL = "PROCESS_IR_SEMANTIC_MISSING_TERMINAL"
+PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW = "PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW"
+PROCESS_IR_COMPILE_INTERNAL = "PROCESS_IR_COMPILE_INTERNAL"
+PROCESS_IR_COMPILE_NONDETERMINISTIC = "PROCESS_IR_COMPILE_NONDETERMINISTIC"
+PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID = "PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID"
+
 
 @dataclass(frozen=True)
 class ErrorCodeSpec:
@@ -317,6 +329,54 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             retryable=False,
             summary="The payload requests a gated/unsupported ProcessIR capability (keyed cache, secret carriage, ...).",
             owner="#136",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_UNREACHABLE,
+            category="process_ir",
+            retryable=False,
+            summary="A lowered node is not reachable from the compiler's single control-flow entry.",
+            owner="#137",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
+            category="process_ir",
+            retryable=False,
+            summary="A control-flow path does not reach a valid terminal (stop/return/exception/routed target).",
+            owner="#137",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "Control flow is ambiguous: multiple entries, a join/cycle, an invalid "
+                "successor, or flow continuing past a terminal."
+            ),
+            owner="#137",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_COMPILE_INTERNAL,
+            category="process_ir",
+            retryable=False,
+            summary="A compiler invariant broke (duplicate or dangling internal id) — a compiler defect, not authored input.",
+            owner="#137",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_COMPILE_NONDETERMINISTIC,
+            category="process_ir",
+            retryable=False,
+            summary="Compiler output is not in canonical order, so two compilations could differ.",
+            owner="#137",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "The emission plan is invalid: unresolved symbol, bad wiring, layout, or "
+                "synthetic-shape synthesis."
+            ),
+            owner="#137",
         ),
     )
 }

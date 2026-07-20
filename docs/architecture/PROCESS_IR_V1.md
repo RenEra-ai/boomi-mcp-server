@@ -2,12 +2,16 @@
 
 **Status:** shipped dark. The models exist (`src/boomi_mcp/models/process_ir.py`) and are
 exported from `boomi_mcp.models`, but **nothing at runtime constructs or consumes them yet**:
-this issue adds **no MCP surface, no compiler, no CFG, no emission plan, no emitter or XML
-behavior change, and no deprecation** of any existing surface. `flow_sequence` and every other
-legacy dialect continue through their unchanged paths until the #139 adapters cut over.
+#136 adds **no MCP surface, no emitter or XML behavior change, and no deprecation** of any
+existing surface. A **dark internal compiler now exists** (#137: semantic CFG + emission-plan
+lowering, `src/boomi_mcp/compiler/process_ir/`), but no runtime or MCP path consumes it either —
+importing `boomi_mcp.models` or `server` must not pull it in, and that is pinned by test.
+`flow_sequence` and every other legacy dialect continue through their unchanged paths until the
+#139 adapters cut over.
 **References:** [ADR-001](ADR-001-process-ir-authority.md) (authority model, §7 error families,
-§11 security), [M12 Compatibility Inventory](M12_COMPATIBILITY_INVENTORY.md) (frozen baseline),
-issue #136 / epic #134.
+§11 security), [ProcessIR Compiler V1](PROCESS_IR_COMPILER_V1.md) (the #137 CFG/lowering
+contracts consuming these models), [M12 Compatibility Inventory](M12_COMPATIBILITY_INVENTORY.md)
+(frozen baseline), issue #136 / epic #134.
 
 ProcessIRV1 is the **promotion of the frozen `flow_sequence` vocabulary** into a strict,
 versioned, discriminated model family (ADR-001 §12: it is a successor and normalization, not a
@@ -161,7 +165,10 @@ Published as the immutable `PROCESS_IR_V1_CAPABILITIES` manifest (not an authore
 
 ## 9. Ownership boundaries (#137–#143)
 
-- **#137** owns the compiler CFG + lowering contracts consuming these models; **#138** the
+- **#137** owns the compiler CFG + lowering contracts consuming these models (shipped dark —
+  see [PROCESS_IR_COMPILER_V1](PROCESS_IR_COMPILER_V1.md); it adds the `PROCESS_IR_SEMANTIC_*`
+  and `PROCESS_IR_COMPILE_*` families and rejects listener entry with #136's
+  `PROCESS_IR_CAPABILITY_UNSUPPORTED` until #140); **#138** the
   verified emitter registry; **#139** the production legacy adapters (including the legacy
   config-root leniency — inventory §2.7 — which #136 deliberately does NOT tighten); **#141/#142**
   the gated control-flow/error-handling capabilities; **#143** CFG-aware semantic validation.

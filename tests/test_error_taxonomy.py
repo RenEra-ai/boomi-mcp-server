@@ -96,8 +96,58 @@ def test_expected_codes_present():
         "PROCESS_IR_SCHEMA_INVALID",
         "PROCESS_IR_REFERENCE_INVALID_FORMAT",
         "PROCESS_IR_CAPABILITY_UNSUPPORTED",
+        # ProcessIR compiler CFG/lowering (#137, ADR-001 §7)
+        "PROCESS_IR_SEMANTIC_UNREACHABLE",
+        "PROCESS_IR_SEMANTIC_MISSING_TERMINAL",
+        "PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW",
+        "PROCESS_IR_COMPILE_INTERNAL",
+        "PROCESS_IR_COMPILE_NONDETERMINISTIC",
+        "PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID",
     }
     assert expected <= set(ERROR_TAXONOMY)
+
+
+_ISSUE_137_CODES = (
+    "PROCESS_IR_SEMANTIC_UNREACHABLE",
+    "PROCESS_IR_SEMANTIC_MISSING_TERMINAL",
+    "PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW",
+    "PROCESS_IR_COMPILE_INTERNAL",
+    "PROCESS_IR_COMPILE_NONDETERMINISTIC",
+    "PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID",
+)
+
+_ISSUE_136_CODES = (
+    "PROCESS_IR_SCHEMA_UNKNOWN_NODE",
+    "PROCESS_IR_SCHEMA_UNKNOWN_FIELD",
+    "PROCESS_IR_SCHEMA_INVALID_CARDINALITY",
+    "PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED",
+    "PROCESS_IR_SCHEMA_INVALID",
+    "PROCESS_IR_REFERENCE_INVALID_FORMAT",
+    "PROCESS_IR_CAPABILITY_UNSUPPORTED",
+)
+
+
+def test_issue_137_codes_owned_and_categorized():
+    for code in _ISSUE_137_CODES:
+        spec = ERROR_TAXONOMY[code]
+        assert spec.owner == "#137", code
+        assert spec.category == "process_ir", code
+        assert spec.retryable is False, code
+
+
+def test_issue_136_codes_still_owned_by_136():
+    """Guards the silent-overwrite hazard in ``ERROR_TAXONOMY``.
+
+    The taxonomy is a dict comprehension keyed on ``spec.code``, so a duplicate
+    ``ErrorCodeSpec`` for an existing code would replace the earlier entry —
+    last-wins, no error, no warning. Nothing else in this file would notice:
+    ``test_expected_codes_present`` uses a subset check, and the other tests
+    iterate the already-collapsed dict. #137 references
+    ``PROCESS_IR_CAPABILITY_UNSUPPORTED`` (for its listener guard) rather than
+    re-registering it; this pins that it stayed #136's.
+    """
+    for code in _ISSUE_136_CODES:
+        assert ERROR_TAXONOMY[code].owner == "#136", code
 
 
 def test_superseded_advisory_code_absent():

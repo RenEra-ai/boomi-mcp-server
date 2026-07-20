@@ -1107,3 +1107,76 @@ def test_existing_rest_pipeline_unchanged_regression():
     lowered = SyncPipelineBuilder.lower_config(_linear_with_map())
     assert lowered["target"]["connector_type"] == "rest"
     assert lowered["source"]["connector_type"] == "database"
+
+
+# ---------------------------------------------------------------------------
+# Research gate (#137 M12.2): construction order cannot change lowering
+# ---------------------------------------------------------------------------
+
+
+def test_all_stage_and_dependency_permutations_lower_identically():
+    """Stage order comes from the edge graph, never from list position.
+
+    ``_linear_stage_order`` walks from the single indegree-0 stage, so all 6
+    orderings of a three-stage chain x both dependency-list orderings (12
+    permutations) must lower to identical config AND emit byte-identical XML.
+
+    This is the #137 research gate: the emission-plan schema may only be frozen
+    once equivalent-but-shuffled construction is proven not to reach output.
+    """
+    import itertools
+
+    stages = {
+        "source": _read_stage("source"),
+        "transform": _map_stage("transform"),
+        "target": _send_stage("target"),
+    }
+    edges = [
+        {"from_stage": "source", "to_stage": "transform"},
+        {"from_stage": "transform", "to_stage": "target"},
+    ]
+
+    baseline_config = None
+    baseline_xml = None
+    seen = 0
+    for stage_order in itertools.permutations(("source", "transform", "target")):
+        for edge_order in itertools.permutations(range(len(edges))):
+            cfg = _sync_config(
+                [stages[key] for key in stage_order],
+                [edges[index] for index in edge_order],
+            )
+            lowered = SyncPipelineBuilder.lower_config(cfg)
+            emitted = SyncPipelineBuilder.build(
+                cfg, name="PermutationProcess", folder_name="PermutationFolder"
+            )
+            if baseline_config is None:
+                baseline_config, baseline_xml = lowered, emitted
+            assert lowered == baseline_config, stage_order
+            assert emitted == baseline_xml, (stage_order, edge_order)
+            seen += 1
+    assert seen == 12
+
+
+def test_no_transport_shape_between_connector_and_map():
+    """The source connector wires straight to the map — nothing is interposed.
+
+    Pinned because the #137 research gate had to establish whether a
+    connector-to-map transport shape existed (it does not); a future emitter
+    that inserted one would silently shift every downstream shape index.
+    """
+    import re
+
+    emitted = SyncPipelineBuilder.build(
+        _linear_with_map(), name="TransportProbe", folder_name="TransportFolder"
+    )
+    shapes = re.findall(r'<shape[^>]*\bname="(shape\d+)"[^>]*\bshapetype="([^"]+)"', emitted)
+    assert [kind for _name, kind in shapes] == [
+        "start",
+        "connectoraction",
+        "map",
+        "connectoraction",
+        "stop",
+    ]
+    # And the source connector's only dragpoint targets the map shape directly.
+    source_block = emitted.split('name="shape2"')[1].split("</shape>")[0]
+    assert 'toShape="shape3"' in source_block

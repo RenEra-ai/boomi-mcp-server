@@ -239,6 +239,8 @@ Every diagnostic in these families must carry: a **stable code**, the **authored
 
 Existing legacy codes — for example `SYNC_PIPELINE_CONFIG_INVALID`, `SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED`, `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID`, `PLAINTEXT_SECRET_REJECTED` — **stay stable** until an adapter mapping from legacy code to IR-family code is separately reviewed under #139. No existing code is renamed, removed, or re-scoped by this ADR.
 
+**Implementation note (#137, M12.2).** The `PROCESS_IR_SEMANTIC_*` and `PROCESS_IR_COMPILE_*` families are now introduced in the shared `boomi_mcp.errors` registry by their first introducer, #137, with six codes: `PROCESS_IR_SEMANTIC_UNREACHABLE`, `PROCESS_IR_SEMANTIC_MISSING_TERMINAL`, `PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW`, `PROCESS_IR_COMPILE_INTERNAL`, `PROCESS_IR_COMPILE_NONDETERMINISTIC`, `PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID` (all `category="process_ir"`, `retryable=False`, `owner="#137"`). Per the paragraph above, #137 **references** `PROCESS_IR_CAPABILITY_UNSUPPORTED` for its listener-entry gate rather than re-registering it — `ERROR_TAXONOMY` is a dict comprehension keyed on `spec.code`, so a duplicate entry would silently overwrite #136's and re-scope the family owner. The accepted decision above is unchanged; see [PROCESS_IR_COMPILER_V1](PROCESS_IR_COMPILER_V1.md).
+
 ## 8. Capability and Non-Goal Matrix
 
 Every authoring capability sits in exactly one of four states:
