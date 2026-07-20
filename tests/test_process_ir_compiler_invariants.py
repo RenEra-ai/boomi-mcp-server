@@ -971,3 +971,102 @@ def test_synthetic_stop_must_follow_its_routed_target():
         _raises(check_emission_plan_invariants, plan, cfg, symbols).code
         == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
     )
+
+
+def test_swapped_decision_transitions_are_rejected():
+    """Swapping BOTH cfg_edge_id and to_shape_id leaves each wire self-consistent.
+
+    Each transition still names an edge leaving the node and targets that edge's
+    shape — but the dragpoint labels are fixed by POSITION, so True would route
+    down the false arm. Only comparing the ORDERED edge-id sequence catches it.
+    """
+    cfg = _decision_cfg()
+    decision_input = DecisionInputV1(
+        comparison="equals",
+        left={"value_type": "static", "static_value": "a"},
+        right={"value_type": "static", "static_value": "b"},
+    )
+
+    def _plan(first_edge, first_target, second_edge, second_target):
+        return EmissionPlanV1(
+            entry_shape_id="shape1",
+            nodes=(
+                _plan_node(
+                    1, StartNoActionInputV1(), role="start",
+                    out=[_wire(1, 1, 2, provenance="synthetic")],
+                ),
+                _plan_node(
+                    2, decision_input, cfg_node="n1", path="/body/steps/0",
+                    out=[
+                        _wire(2, 1, first_target, identifier="true", text="True",
+                              cfg_edge_id=first_edge),
+                        _wire(2, 2, second_target, identifier="false", text="False",
+                              y=DECISION_FALSE_DRAGPOINT_Y, cfg_edge_id=second_edge),
+                    ],
+                ),
+                _plan_node(3, StopInputV1(), cfg_node="n2",
+                           path="/body/steps/0/true_arm/terminal"),
+                _plan_node(4, StopInputV1(), cfg_node="n3",
+                           path="/body/steps/0/false_arm/terminal"),
+            ),
+            terminal_shape_ids=("shape3", "shape4"),
+        )
+
+    # Correct wiring passes.
+    check_emission_plan_invariants(
+        _plan("e1", 3, "e2", 4), cfg, SymbolTableV1(symbols=())
+    )
+    # Coherently swapped wiring must NOT.
+    swapped = _plan("e2", 4, "e1", 3)
+    assert _check_plan(swapped, cfg).code == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+
+
+def test_ordinary_transition_cannot_hide_behind_synthetic_provenance():
+    """Relabelling a real wire as synthetic must not skip CFG correspondence."""
+    base = _linear_plan()
+    disguised = base.nodes[1].outgoing[0].model_copy(
+        update={"provenance": "synthetic", "cfg_edge_id": None}
+    )
+    node = base.nodes[1].model_copy(update={"outgoing": (disguised,)})
+    broken = base.model_copy(update={"nodes": (base.nodes[0], node, base.nodes[2])})
+    assert _check_plan(broken).code == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+
+
+def test_source_endpoint_cannot_be_a_routed_target():
+    """``routed_target`` on a SOURCE would append a synthetic Stop after it."""
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(
+                1,
+                ConnectorSemanticV1(
+                    role="source", connection_ref="$ref:c", operation_ref="$ref:o"
+                ),
+                path="/body/steps/0/legs/0/terminal",
+                exit_role="routed_target",
+            ),
+        ),
+        edges=(),
+        exit_node_ids=("n1",),
+    )
+    assert _raises(check_cfg_invariants, cfg).code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+
+
+def test_routed_target_must_sit_in_a_terminal_position():
+    """A ROOT target is followed by an authored Stop and is not itself an exit."""
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(
+                1,
+                ConnectorSemanticV1(
+                    role="target", connection_ref="$ref:c", operation_ref="$ref:o"
+                ),
+                path="/body/steps/0",
+                exit_role="routed_target",
+            ),
+        ),
+        edges=(),
+        exit_node_ids=("n1",),
+    )
+    assert _raises(check_cfg_invariants, cfg).code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW

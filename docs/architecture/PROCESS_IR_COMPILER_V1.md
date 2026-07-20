@@ -235,9 +235,17 @@ ids, unreachable nodes, missing terminals, noncanonical ordinals) they enforce:
   to an earlier one.
 - **Per-source local ordinals unique and contiguous** — sorted order alone accepts two edges sharing
   `(source, local_ordinal)`, which plan lowering would silently renumber.
-- **Transitions match their CFG edge** — a transition must name a real edge *leaving that node* and
-  target that edge's shape. Checking only that the target shape exists would let a corrupted plan
-  turn a `message -> stop` edge into a self-loop. The synthetic Start must wire to the CFG entry.
+- **Transitions match their CFG edges, IN ORDER** — a node's ordered `cfg_edge_id` sequence must
+  equal its ordered CFG out-edges, and each transition must target that edge's shape. Per-transition
+  checking alone is too weak: swapping *both* the `cfg_edge_id` and `to_shape_id` of a Decision's
+  two wires leaves each individually consistent while the position-fixed dragpoint labels route
+  `True` down the false arm. The synthetic Start must wire to the CFG entry, and `synthetic`
+  provenance is restricted to exactly the Start wire and routed-target Stop wires — otherwise a
+  malformed plan could relabel an ordinary wire as synthetic and skip correspondence entirely.
+- **`routed_target` is role- and position-checked** — only a `target` endpoint may carry it (a
+  *source* marked routed would get a synthetic Stop appended after it), and only in a leg/arm
+  `/terminal` position (a root target is followed by an authored Stop, so accepting it there would
+  synthesise a second one). Keying the exit-role table on `semantic_kind` alone missed both.
 - **Emitter input matches the node's semantics** (and, for connectors, its role), so a Map node
   cannot carry a `MessageInputV1`.
 - **Every component id came from the symbol table** — the `symbols` argument is genuinely consulted,

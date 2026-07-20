@@ -308,12 +308,28 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
         kind = node.semantic.semantic_kind
         role = node.exit_role
         allowed = _ALLOWED_EXIT_ROLES.get(kind, (None,))
+        if kind == "connector":
+            # Keying on semantic_kind alone would let a SOURCE endpoint claim
+            # ``routed_target``, and the plan would then append a synthetic Stop
+            # after the source connector. Only a target endpoint can be routed.
+            allowed = (None, "routed_target") if node.semantic.role == "target" else (None,)
         if role not in allowed:
             raise _fail(
                 PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
                 _SEMANTIC_PHASE,
                 node.source_path,
                 "exit role is not valid for this node's semantics",
+                node.node_id,
+            )
+        # A routed target is by definition a leg/arm TERMINAL. A root target is
+        # followed by an authored Stop and is not itself an exit, so accepting
+        # ``routed_target`` at a root position would synthesise a second Stop.
+        if role == "routed_target" and not node.source_path.endswith("/terminal"):
+            raise _fail(
+                PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+                _SEMANTIC_PHASE,
+                node.source_path,
+                "routed_target is only valid in a leg/arm terminal position",
                 node.node_id,
             )
 
@@ -727,6 +743,54 @@ def check_emission_plan_invariants(
                 path,
                 "transition local ordinals are not contiguous from 1",
             )
+
+        # A node's transitions must be its CFG edges, IN ORDER. Checking each
+        # transition independently is too weak: swapping BOTH the cfg_edge_id
+        # and to_shape_id of a Decision's two transitions leaves each one
+        # individually consistent, while the position-fixed dragpoint labels
+        # then route True down the false arm. Comparing the ordered edge-id
+        # sequence closes that.
+        if node.origin == "ir":
+            cfg_out = [
+                edge for edge in cfg.edges if edge.source_node_id == node.cfg_node_id
+            ]
+            if cfg_by_id[node.cfg_node_id].exit_role == "routed_target":
+                # Its one transition is the compiler-owned Stop wire, checked
+                # for adjacency above; it has no CFG edges by construction.
+                if [item.provenance for item in transitions] != ["synthetic"]:
+                    raise _fail(
+                        PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                        _PLAN_PHASE,
+                        path,
+                        "a routed target must carry exactly one synthetic stop wire",
+                    )
+            else:
+                if [item.cfg_edge_id for item in transitions] != [
+                    edge.edge_id for edge in cfg_out
+                ]:
+                    raise _fail(
+                        PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                        _PLAN_PHASE,
+                        path,
+                        "plan transitions do not match the node's ordered CFG edges",
+                    )
+                # Otherwise a malformed plan could relabel an ordinary wire as
+                # synthetic and skip CFG correspondence entirely.
+                if any(item.provenance != "cfg_edge" for item in transitions):
+                    raise _fail(
+                        PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                        _PLAN_PHASE,
+                        path,
+                        "only Start and routed-target wires may be synthetic",
+                    )
+        elif node.synthetic_role == "start":
+            if [item.provenance for item in transitions] != ["synthetic"]:
+                raise _fail(
+                    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                    _PLAN_PHASE,
+                    path,
+                    "the synthetic start must carry exactly one synthetic wire",
+                )
         for transition in transitions:
             if transition.to_shape_id not in by_shape:
                 raise _fail(
