@@ -216,18 +216,39 @@ def _capability_error(message: str) -> PydanticCustomError:
     return PydanticCustomError("process_ir_capability_unsupported", message)  # noqa: EM101
 
 
+def _keyed_cache_true_only(value: bool) -> bool:
+    """Legacy parity: only the all-document form is emittable — any non-True
+    value is a keyed/indexed cache request, which is capability-gated."""
+    if value is not True:
+        raise _capability_error("keyed/indexed cache retrieval is capability-gated in ProcessIR v1")
+    return value
+
+
+# Strict boolean (1/1.0 rejected) that must be True; schema keeps `const: true`.
+KeyedCacheAllDocsV1 = Annotated[StrictBool, AfterValidator(_keyed_cache_true_only)]
+
+
+def _use_cache_true_only(value: bool) -> bool:
+    if value is not True:
+        raise ValueError("use_cache must be true (script compilation caching is required)")
+    return value
+
+
+UseCacheTrueV1 = Annotated[StrictBool, AfterValidator(_use_cache_true_only)]
+
+
 # ---------------------------------------------------------------------------
 # Property sources (Set Properties source_values entries)
 # ---------------------------------------------------------------------------
 
 
 class StaticPropertySourceV1(_ProcessIRBase):
-    value_type: Literal["static"] = "static"
+    value_type: Literal["static"]
     value: str = Field(..., description="Literal value (may be empty)")
 
 
 class CurrentPropertySourceV1(_ProcessIRBase):
-    value_type: Literal["current"] = "current"
+    value_type: Literal["current"]
 
 
 def _require_non_blank(model: Any, *fields: str) -> None:
@@ -239,7 +260,7 @@ def _require_non_blank(model: Any, *fields: str) -> None:
 
 
 class ProfilePropertySourceV1(_ProcessIRBase):
-    value_type: Literal["profile"] = "profile"
+    value_type: Literal["profile"]
     element_id: str = Field(..., min_length=1)
     element_name: str = Field(..., min_length=1)
     profile_ref: ComponentRefV1
@@ -252,7 +273,7 @@ class ProfilePropertySourceV1(_ProcessIRBase):
 
 
 class DdpPropertySourceV1(_ProcessIRBase):
-    value_type: Literal["ddp"] = "ddp"
+    value_type: Literal["ddp"]
     property_name: str = Field(..., min_length=1)
     default_value: Optional[str] = None
 
@@ -263,7 +284,7 @@ class DdpPropertySourceV1(_ProcessIRBase):
 
 
 class DppPropertySourceV1(_ProcessIRBase):
-    value_type: Literal["dpp"] = "dpp"
+    value_type: Literal["dpp"]
     property_name: str = Field(..., min_length=1)
     default_value: Optional[str] = None
 
@@ -294,10 +315,10 @@ PropertySourceV1 = Annotated[
 
 
 class CustomScriptingOpV1(_ProcessIRBase):
-    operation: Literal["custom_scripting"] = "custom_scripting"
+    operation: Literal["custom_scripting"]
     script: str = Field(..., min_length=1)
     language: Literal["groovy2"] = "groovy2"
-    use_cache: Literal[True] = True
+    use_cache: UseCacheTrueV1 = Field(default=True, json_schema_extra={"const": True})
 
     @model_validator(mode="after")
     def _script_non_blank(self) -> "CustomScriptingOpV1":
@@ -307,7 +328,7 @@ class CustomScriptingOpV1(_ProcessIRBase):
 
 
 class SplitDocumentsOpV1(_ProcessIRBase):
-    operation: Literal["split_documents"] = "split_documents"
+    operation: Literal["split_documents"]
     profile_type: Literal["json", "xml"]
     profile_ref: ComponentRefV1
     link_element_key: str = Field(..., min_length=1)
@@ -320,7 +341,7 @@ class SplitDocumentsOpV1(_ProcessIRBase):
 
 
 class CombineDocumentsOpV1(_ProcessIRBase):
-    operation: Literal["combine_documents"] = "combine_documents"
+    operation: Literal["combine_documents"]
     profile_type: Literal["json", "xml"]
     profile_ref: ComponentRefV1
     link_element_key: str = Field(..., min_length=1)
@@ -349,7 +370,7 @@ DataProcessOperationV1 = Annotated[
 
 
 class TrackOperandV1(_ProcessIRBase):
-    value_type: Literal["track"] = "track"
+    value_type: Literal["track"]
     property_id: str = Field(..., min_length=1)
     property_name: Optional[str] = None
     default_value: Optional[str] = None
@@ -362,7 +383,7 @@ class TrackOperandV1(_ProcessIRBase):
 
 
 class StaticOperandV1(_ProcessIRBase):
-    value_type: Literal["static"] = "static"
+    value_type: Literal["static"]
     static_value: str = Field(..., description="Literal comparison value (may be empty)")
 
 
@@ -381,7 +402,7 @@ class SourceEndpointV1(_ProcessIRBase):
     """Current-parity source placeholder. Connector family/action metadata is
     NEVER authored — the compiler derives it from the component symbol table."""
 
-    kind: Literal["source"] = "source"
+    kind: Literal["source"]
     connection_ref: ComponentRefV1
     operation_ref: ComponentRefV1
     label: Optional[str] = None
@@ -390,32 +411,32 @@ class SourceEndpointV1(_ProcessIRBase):
 class TargetEndpointV1(_ProcessIRBase):
     """Current-parity target placeholder (see SourceEndpointV1)."""
 
-    kind: Literal["target"] = "target"
+    kind: Literal["target"]
     connection_ref: ComponentRefV1
     operation_ref: ComponentRefV1
     label: Optional[str] = None
 
 
 class FlowControlNodeV1(_ProcessIRBase):
-    kind: Literal["flow_control"] = "flow_control"
+    kind: Literal["flow_control"]
     for_each_count: StrictInt = Field(..., gt=0)
     label: Optional[str] = None
 
 
 class MessageNodeV1(_ProcessIRBase):
-    kind: Literal["message"] = "message"
+    kind: Literal["message"]
     text: str = Field(..., min_length=1)
     label: Optional[str] = None
 
 
 class MapRefNodeV1(_ProcessIRBase):
-    kind: Literal["map_ref"] = "map_ref"
+    kind: Literal["map_ref"]
     map_ref: ComponentRefV1
     label: Optional[str] = None
 
 
 class DataProcessNodeV1(_ProcessIRBase):
-    kind: Literal["data_process"] = "data_process"
+    kind: Literal["data_process"]
     steps: List[DataProcessOperationV1] = Field(..., min_length=1)
     label: Optional[str] = None
 
@@ -424,7 +445,7 @@ class CachePutNodeV1(_ProcessIRBase):
     """Add to Cache write. CONSUMES the document stream — the containing
     sequence rules require a stream-replacing cache read right after it."""
 
-    kind: Literal["cache_put"] = "cache_put"
+    kind: Literal["cache_put"]
     cache_ref: ComponentRefV1
     label: Optional[str] = None
 
@@ -432,10 +453,10 @@ class CachePutNodeV1(_ProcessIRBase):
 class DocumentCacheRetrieveNodeV1(_ProcessIRBase):
     """Legacy all-document Document Cache Retrieve (M10.5 parity node)."""
 
-    kind: Literal["document_cache_retrieve"] = "document_cache_retrieve"
+    kind: Literal["document_cache_retrieve"]
     cache_ref: ComponentRefV1
     empty_cache_behavior: Literal["stopprocess"] = "stopprocess"
-    load_all_documents: Literal[True] = True
+    load_all_documents: KeyedCacheAllDocsV1 = Field(default=True, json_schema_extra={"const": True})
     label: Optional[str] = None
 
 
@@ -443,7 +464,7 @@ class CacheGetNodeV1(_ProcessIRBase):
     """Authored all-document cache read; ``external_writer`` carries the
     authored lineage assertion (cache populated outside this process)."""
 
-    kind: Literal["cache_get"] = "cache_get"
+    kind: Literal["cache_get"]
     cache_ref: ComponentRefV1
     empty_cache_behavior: Literal["stopprocess"] = "stopprocess"
     external_writer: StrictBool = False
@@ -451,9 +472,9 @@ class CacheGetNodeV1(_ProcessIRBase):
 
 
 class CacheRemoveNodeV1(_ProcessIRBase):
-    kind: Literal["cache_remove"] = "cache_remove"
+    kind: Literal["cache_remove"]
     cache_ref: ComponentRefV1
-    remove_all_documents: Literal[True] = True
+    remove_all_documents: KeyedCacheAllDocsV1 = Field(default=True, json_schema_extra={"const": True})
     label: Optional[str] = None
 
 
@@ -478,7 +499,7 @@ def _validate_bare_property_name(name: str) -> None:
 
 
 class SetDdpNodeV1(_ProcessIRBase):
-    kind: Literal["set_ddp"] = "set_ddp"
+    kind: Literal["set_ddp"]
     name: str = Field(..., min_length=1, description="Bare property name (no wire prefix)")
     source_values: List[PropertySourceV1] = Field(..., min_length=1)
     label: Optional[str] = None
@@ -490,7 +511,7 @@ class SetDdpNodeV1(_ProcessIRBase):
 
 
 class SetDppNodeV1(_ProcessIRBase):
-    kind: Literal["set_dpp"] = "set_dpp"
+    kind: Literal["set_dpp"]
     name: str = Field(..., min_length=1, description="Bare property name (no wire prefix)")
     source_values: List[PropertySourceV1] = Field(..., min_length=1)
     persist: StrictBool = False
@@ -506,7 +527,7 @@ class ProcessCallNodeV1(_ProcessIRBase):
     """Standalone Process Call (wrapper parity). ``process_ref`` accepts a
     '$ref:KEY' in-spec child token or a literal existing component id."""
 
-    kind: Literal["process_call"] = "process_call"
+    kind: Literal["process_call"]
     process_ref: ComponentRefV1
     wait: StrictBool = True
     abort_on_error: StrictBool = False
@@ -521,11 +542,11 @@ class ProcessCallNodeV1(_ProcessIRBase):
 class StopNodeV1(_ProcessIRBase):
     """Successful-stop terminal (continue semantics are emitter-owned)."""
 
-    kind: Literal["stop"] = "stop"
+    kind: Literal["stop"]
 
 
 class ReturnDocumentsNodeV1(_ProcessIRBase):
-    kind: Literal["return_documents"] = "return_documents"
+    kind: Literal["return_documents"]
     label: Optional[str] = None
 
 
@@ -534,7 +555,7 @@ class ExceptionNodeV1(_ProcessIRBase):
     exception step key set (title/message_template/stop_single_document/
     parameter_source only)."""
 
-    kind: Literal["exception"] = "exception"
+    kind: Literal["exception"]
     message_template: str = Field(..., min_length=1)
     title: Optional[str] = None
     stop_single_document: StrictBool = False
@@ -605,7 +626,7 @@ class BranchLegV1(_ProcessIRBase):
 
 
 class BranchNodeV1(_ProcessIRBase):
-    kind: Literal["branch"] = "branch"
+    kind: Literal["branch"]
     legs: List[BranchLegV1] = Field(..., min_length=2, max_length=25)
     label: Optional[str] = None
 
@@ -659,7 +680,7 @@ class DecisionFalseArmV1(_ProcessIRBase):
 
 
 class DecisionNodeV1(_ProcessIRBase):
-    kind: Literal["decision"] = "decision"
+    kind: Literal["decision"]
     comparison: Literal[
         "equals",
         "greaterthaneq",
@@ -735,7 +756,7 @@ class SequenceNodeV1(_ProcessIRBase):
       read (never by the target/terminal).
     """
 
-    kind: Literal["sequence"] = "sequence"
+    kind: Literal["sequence"]
     steps: List[ProcessNodeV1] = Field(..., min_length=1)
 
     @model_validator(mode="after")
@@ -994,19 +1015,6 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
                 message="keyed/indexed cache retrieval is capability-gated in ProcessIR v1",
             )
         return _diagnostic(PROCESS_IR_SCHEMA_UNKNOWN_FIELD, path)
-
-    if err_type == "literal_error" and isinstance(last, str) and last in (
-        "load_all_documents",
-        "remove_all_documents",
-    ):
-        # Legacy parity: load_all_documents/remove_all_documents accept only
-        # True — any other value is a keyed/indexed cache request, which the
-        # capability manifest marks gated (not a generic schema mismatch).
-        return _diagnostic(
-            PROCESS_IR_CAPABILITY_UNSUPPORTED,
-            path,
-            message="keyed/indexed cache retrieval is capability-gated in ProcessIR v1",
-        )
 
     if err_type in ("union_tag_invalid", "union_tag_not_found"):
         ctx = error.get("ctx") or {}

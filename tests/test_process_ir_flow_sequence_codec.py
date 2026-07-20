@@ -423,3 +423,158 @@ def test_return_documents_ir_has_no_dead_target():
     kinds = [s.kind for s in ir.body.steps]
     assert kinds == ["source", "message", "return_documents"]
     assert "target" not in kinds
+
+
+# ---------------------------------------------------------------------------
+# Impl-review round 2: malformed blocks are typed rejections, never silently
+# normalized/dropped; legacy field semantics are exact
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "rd",
+    ["yes", {"label": "x"}, {"enabled": "true"}, {"enabled": True, "bogus": 1}, {"enabled": True, "label": 5}],
+    ids=["non-dict", "missing-enabled", "string-enabled", "extra-key", "non-string-label"],
+)
+def test_malformed_return_documents_rejected_not_disabled(rd):
+    config = _linear_config({"kind": "message", "message_text": "m"})
+    config["return_documents"] = rd
+    with pytest.raises(ProcessIRValidationError) as exc_info:
+        legacy_flow_sequence_to_ir(config)
+    assert exc_info.value.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID
+
+
+def test_malformed_return_documents_rejected_even_with_control_terminal():
+    config = _linear_config(
+        {"kind": "message", "message_text": "m"},
+        {"kind": "exception", "message_template": "x {1}"},
+    )
+    config["return_documents"] = "yes"
+    with pytest.raises(ProcessIRValidationError) as exc_info:
+        legacy_flow_sequence_to_ir(config)
+    assert exc_info.value.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID
+
+
+@pytest.mark.parametrize(
+    "reliability",
+    ["yes", {"retry_count": "2"}, {"dlq": "x"}, {"retry_count": -1}, {"retry_count": 6, "dlq": {"mode": "disabled"}}],
+    ids=["non-dict", "string-retry", "non-dict-dlq", "negative-retry", "over-range-retry"],
+)
+def test_malformed_reliability_is_typed_error_not_crash(reliability):
+    config = _linear_config({"kind": "message", "message_text": "m"})
+    config["reliability"] = reliability
+    with pytest.raises(ProcessIRValidationError) as exc_info:
+        legacy_flow_sequence_to_ir(config)
+    assert exc_info.value.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID
+
+
+@pytest.mark.parametrize("bad_steps", [False, 0, "", {}], ids=["False", "0", "empty-str", "dict"])
+def test_falsy_non_list_steps_rejected(bad_steps):
+    branch_cfg = _linear_config(
+        {"kind": "message", "message_text": "m"},
+        {
+            "kind": "branch",
+            "legs": [
+                {"steps": bad_steps, "target": copy.deepcopy(_SHARED["target_b"])},
+                {"steps": [], "target": copy.deepcopy(_SHARED["target_b"])},
+            ],
+        },
+    )
+    with pytest.raises(ProcessIRValidationError):
+        legacy_flow_sequence_to_ir(branch_cfg)
+    decision_cfg = _linear_config(
+        {
+            "kind": "decision",
+            "comparison": "equals",
+            "left": {"value_type": "static", "static_value": ""},
+            "right": {"value_type": "static", "static_value": ""},
+            "true_steps": bad_steps,
+            "false_steps": [{"kind": "message", "message_text": "f"}],
+        }
+    )
+    with pytest.raises(ProcessIRValidationError):
+        legacy_flow_sequence_to_ir(decision_cfg)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        {"subprocess_ref": "literal-id"},
+        {"process_id": "$ref:child"},
+        {"subprocess_ref": "$ref:"},
+        {"subprocess_ref": "$ref:child", "wait": None},
+        {"subprocess_ref": "$ref:child", "abort_on_error": "false"},
+    ],
+    ids=["literal-in-sref", "ref-in-pid", "empty-ref-key", "null-wait", "string-abort"],
+)
+def test_process_call_field_semantics_enforced(call):
+    config = {"process_kind": "wrapper_subprocess", "process_calls": [call]}
+    with pytest.raises(ProcessIRValidationError) as exc_info:
+        legacy_flow_sequence_to_ir(config)
+    assert exc_info.value.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID
+
+
+def test_builder_accepted_normalizations_ride_through():
+    # external_writer=null is treated as absent by the builder; a padded
+    # comparison is builder-accepted and emitted stripped — both normalize.
+    config = _linear_config(
+        {"kind": "cache_put", "document_cache_id": "$ref:cache"},
+        {"kind": "cache_get", "document_cache_id": "$ref:cache", "external_writer": None},
+        {"kind": "decision", "comparison": " equals ",
+         "left": {"value_type": "static", "static_value": ""},
+         "right": {"value_type": "static", "static_value": ""},
+         "true_steps": [],
+         "false_steps": [{"kind": "message", "message_text": "f"}]},
+    )
+    ir = legacy_flow_sequence_to_ir(config)
+    cache_get = next(s for s in ir.body.steps if s.kind == "cache_get")
+    assert cache_get.external_writer is False
+    assert ir.body.steps[-1].comparison == "equals"
+
+
+def test_context_deep_immutability_and_fallback_key_hygiene():
+    context = build_context(with_fallback=True)
+    with pytest.raises(TypeError):
+        context.operation_bindings["new"] = ConnectorBindingV1(connector_type="x", action_type="y")
+    with pytest.raises(Exception):
+        ConnectorResolutionContextV1(fallback_target={"connector_type": "rest_client", "shape_id": "shape1"})
+    # Post-construction mutation must not bypass the key hygiene (QA #163).
+    with pytest.raises(TypeError):
+        context.fallback_target["shape_id"] = "shape-INJECTED"
+    # Default-constructed contexts are equally read-only (review r2).
+    default_context = ConnectorResolutionContextV1()
+    with pytest.raises(TypeError):
+        default_context.operation_bindings["x"] = ConnectorBindingV1(
+            connector_type="x", action_type="y"
+        )
+    # Freezing must not break standard pydantic operations (review r2b):
+    # serialization and deep copies work, and the deep copy stays read-only.
+    dumped = context.model_dump(mode="json")
+    assert dumped["fallback_target"]["connector_type"] == "rest_client"
+    assert context.model_dump_json()
+    deep = context.model_copy(deep=True)
+    with pytest.raises(TypeError):
+        deep.operation_bindings["x"] = ConnectorBindingV1(connector_type="x", action_type="y")
+    with pytest.raises(TypeError):
+        deep.fallback_target["shape_id"] = "shape-INJECTED"
+    # Inherited in-place mutation paths are blocked too (review r2c): |= must
+    # raise WITHOUT mutating, and a re-called __init__ must raise.
+    before = dict(context.fallback_target)
+    with pytest.raises(TypeError):
+        context.fallback_target |= {"shape_id": "shape-INJECTED"}
+    assert dict(context.fallback_target) == before
+    with pytest.raises(TypeError):
+        context.fallback_target.__init__({"shape_id": "shape-INJECTED"})
+    assert dict(context.fallback_target) == before
+    # Not a dict subclass, so UNBOUND dict mutators cannot apply either
+    # (review r2d): dict.__setitem__ / dict.update reject the foreign type.
+    with pytest.raises(TypeError):
+        dict.__setitem__(context.fallback_target, "shape_id", "shape-INJECTED")
+    with pytest.raises(TypeError):
+        dict.update(context.fallback_target, {"shape_id": "shape-INJECTED"})
+    assert dict(context.fallback_target) == before
+    # The backing store is a read-only proxy too (review r2e) — reaching for
+    # the private attribute cannot mutate it.
+    with pytest.raises(TypeError):
+        context.fallback_target._data["shape_id"] = "shape-INJECTED"
+    assert dict(context.fallback_target) == before

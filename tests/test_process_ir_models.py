@@ -357,6 +357,22 @@ def test_keyed_cache_literal_false_is_capability_gated():
     ]
 
 
+@pytest.mark.parametrize("truthy_int", [1, 1.0])
+def test_strict_true_fields_reject_int_coercion(truthy_int):
+    retrieve = {"kind": "document_cache_retrieve", "cache_ref": "$ref:c", "load_all_documents": truthy_int}
+    err = parse_error(linear_doc(retrieve))
+    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID
+    op = {"operation": "custom_scripting", "script": "s", "use_cache": truthy_int}
+    err = parse_error(linear_doc({"kind": "data_process", "steps": [op]}))
+    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID
+
+
+def test_use_cache_false_rejected():
+    op = {"operation": "custom_scripting", "script": "s", "use_cache": False}
+    err = parse_error(linear_doc({"kind": "data_process", "steps": [op]}))
+    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID
+
+
 # ---------------------------------------------------------------------------
 # Version + payload-shape gates
 # ---------------------------------------------------------------------------
@@ -651,6 +667,36 @@ def _walk_schema_objects(schema):
             yield from _walk_schema_objects(item)
 
 
+def test_every_discriminator_is_schema_required():
+    # Schema/runtime agreement: a node without its discriminator must fail the
+    # SCHEMA too, not only runtime parsing (impl-review r1 high finding).
+    schema = process_ir_v1_json_schema()
+    for name, definition in schema["$defs"].items():
+        props = definition.get("properties", {})
+        required = set(definition.get("required", []))
+        for disc in ("kind", "value_type", "operation"):
+            if disc in props:
+                assert disc in required, f"{name}.{disc} must be schema-required"
+    assert "version" in set(schema.get("required", []))
+
+
+def test_kindless_node_fails_the_json_schema():
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = process_ir_v1_json_schema()
+    items = schema["$defs"]["SequenceNodeV1"]["properties"]["steps"]["items"]
+    node_schema = {"$defs": schema["$defs"], **items}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({"text": "x"}, node_schema)
+
+
+def test_strict_true_fields_keep_const_true_in_schema():
+    schema = process_ir_v1_json_schema()
+    defs = schema["$defs"]
+    assert defs["DocumentCacheRetrieveNodeV1"]["properties"]["load_all_documents"]["const"] is True
+    assert defs["CacheRemoveNodeV1"]["properties"]["remove_all_documents"]["const"] is True
+    assert defs["CustomScriptingOpV1"]["properties"]["use_cache"]["const"] is True
+
+
 def test_schema_closed_discriminated_union():
     schema = process_ir_v1_json_schema()
     body_defs = schema["$defs"]
@@ -748,6 +794,7 @@ def test_canonical_schema_golden_pin():
 def test_package_exports_pinned():
     for name in (
         "ProcessIRV1", "SequenceNodeV1", "ProcessNodeV1", "LinearNodeV1", "ComponentRefV1",
+        "PropertySourceV1", "DataProcessOperationV1", "DecisionOperandV1",
         "ProcessIRDiagnostic", "ProcessIRValidationError", "parse_process_ir_v1",
         "canonical_process_ir_json", "canonical_process_ir_schema_json",
         "process_ir_v1_json_schema", "PROCESS_IR_V1_CAPABILITIES", "PROCESS_IR_VERSION",

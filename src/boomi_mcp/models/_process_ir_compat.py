@@ -38,9 +38,11 @@ canonical(legacy->IR->legacy->IR)`` — NOT legacy spelling identity.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from collections.abc import Mapping as MappingABC
+from types import MappingProxyType
+from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from .process_ir import (
     ProcessIRDiagnostic,
@@ -52,6 +54,44 @@ from ..errors import (
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_SCHEMA_INVALID,
 )
+
+
+class _FrozenMapping(MappingABC):
+    """Read-only mapping that is NOT a dict subclass, so no ``dict`` mutator —
+    bound or unbound (``dict.__setitem__(m, ...)``, review r2d) — applies to
+    it. Deep copies and pickles reproduce a frozen instance; the paired
+    ``field_serializer``s keep standard Pydantic ``model_dump``/JSON working
+    (a ``MappingProxyType`` broke those, review r2b)."""
+
+    __slots__ = ("_data",)
+
+    def __init__(self, data: Mapping[str, Any]):
+        # One-shot population: a re-called __init__ must not re-point the
+        # storage (review r2c). The backing store is itself a read-only proxy
+        # over a private copy so `._data[...] = ...` cannot mutate it either
+        # (review r2e) — serialization never touches it directly (the field
+        # serializers and __reduce__ go through dict(...) copies).
+        if hasattr(self, "_data"):
+            raise TypeError("context mappings are read-only")
+        object.__setattr__(self, "_data", MappingProxyType(dict(data)))
+
+    def __setattr__(self, name: str, value: Any):
+        raise TypeError("context mappings are read-only")
+
+    def __getitem__(self, key: str) -> Any:
+        return self._data[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def __repr__(self) -> str:
+        return f"_FrozenMapping({self._data!r})"
+
+    def __reduce__(self):
+        return (self.__class__, (dict(self._data),))
 
 
 class ConnectorBindingV1(BaseModel):
@@ -75,11 +115,49 @@ class ConnectorResolutionContextV1(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    operation_bindings: Mapping[str, ConnectorBindingV1] = Field(default_factory=dict)
-    fallback_target: Optional[Dict[str, str]] = Field(
-        default=None,
-        description="Legacy target binding dict {connector_type, connection_id, operation_id, action_type}",
+    # validate_default=True: field validators must also run for the defaults,
+    # or a default-constructed context would keep a mutable dict (review r2).
+    operation_bindings: Mapping[str, ConnectorBindingV1] = Field(
+        default_factory=dict, validate_default=True
     )
+    fallback_target: Optional[Mapping[str, str]] = Field(
+        default=None,
+        validate_default=True,
+        description="Legacy target binding dict {connector_type, connection_id, operation_id, action_type[, label]}",
+    )
+
+    @field_validator("operation_bindings", mode="after")
+    @classmethod
+    def _freeze_bindings(cls, value: Mapping[str, ConnectorBindingV1]):
+        # Deep read-only: frozen=True only blocks attribute reassignment; the
+        # mapping itself must be immutable too.
+        return _FrozenMapping(value)
+
+    @field_validator("fallback_target", mode="after")
+    @classmethod
+    def _check_fallback_keys(cls, value: Optional[Mapping[str, str]]):
+        if value is None:
+            return None
+        extra = set(value) - _BINDING_KEYS
+        if extra:
+            raise ValueError(
+                f"fallback_target carries non-binding key(s): {sorted(extra)}"
+            )
+        # Read-only defensive copy — post-construction mutation must not be
+        # able to bypass the key hygiene above (QA #163).
+        return _FrozenMapping(value)
+
+    @field_serializer("operation_bindings")
+    def _serialize_bindings(
+        self, value: Mapping[str, ConnectorBindingV1]
+    ) -> Dict[str, ConnectorBindingV1]:
+        return dict(value)
+
+    @field_serializer("fallback_target")
+    def _serialize_fallback(
+        self, value: Optional[Mapping[str, str]]
+    ) -> Optional[Dict[str, str]]:
+        return None if value is None else dict(value)
 
 
 def _reject(code: str, path: str, message: str) -> ProcessIRValidationError:
@@ -208,6 +286,52 @@ def _require_dict(value: Any, path: str, what: str) -> Dict[str, Any]:
     if not isinstance(value, dict):
         raise _reject(PROCESS_IR_SCHEMA_INVALID, path, f"{what} must be a JSON object")
     return value
+
+
+def _require_steps_list(value: Any, path: str) -> List[Any]:
+    """Absent/None defaults to []; anything else must be a real list (legacy
+    parity — the builder rejects non-list steps values, incl. falsy ones)."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise _reject(PROCESS_IR_SCHEMA_INVALID, path, "steps must be a list")
+    return value
+
+
+def _validated_return_documents(cfg: Dict[str, Any]) -> bool:
+    """Validate the optional return_documents block up front; return enabled.
+
+    Legacy parity (_validate_return_documents): the block must be an object
+    with only enabled/label keys, a strict-boolean enabled, and a string label
+    — malformed blocks are rejected, never silently treated as disabled.
+    """
+    rd = cfg.get("return_documents")
+    if rd is None:
+        return False
+    if not isinstance(rd, dict):
+        raise _reject(
+            PROCESS_IR_SCHEMA_INVALID, "/return_documents",
+            "return_documents must be a JSON object",
+        )
+    extra = set(rd) - {"enabled", "label"}
+    if extra:
+        raise _reject(
+            PROCESS_IR_SCHEMA_INVALID, "/return_documents",
+            "unsupported return_documents key(s)",
+        )
+    enabled = rd.get("enabled")
+    if not isinstance(enabled, bool):
+        raise _reject(
+            PROCESS_IR_SCHEMA_INVALID, "/return_documents/enabled",
+            "return_documents.enabled must be a boolean",
+        )
+    label = rd.get("label")
+    if label is not None and not isinstance(label, str):
+        raise _reject(
+            PROCESS_IR_SCHEMA_INVALID, "/return_documents/label",
+            "return_documents.label must be a string",
+        )
+    return enabled
 
 
 def _check_step_keys(step: Dict[str, Any], legacy_kind: str, path: str) -> None:
@@ -383,7 +507,8 @@ def _convert_linear_step(step: Dict[str, Any], legacy_kind: str, path: str) -> D
         node = {"kind": kind, "cache_ref": step.get("document_cache_id")}
         if "empty_cache_behavior" in step:
             node["empty_cache_behavior"] = step.get("empty_cache_behavior")
-        if "external_writer" in step:
+        # Legacy treats an explicit null external_writer as absent (default False).
+        if step.get("external_writer") is not None:
             node["external_writer"] = step.get("external_writer")
         return _maybe_label(step, node)
     if kind == "cache_remove":
@@ -439,9 +564,7 @@ def _convert_branch_step(step: Dict[str, Any], path: str) -> Dict[str, Any]:
         extra = set(leg) - {"steps", "target"}
         if extra:
             raise _reject(PROCESS_IR_SCHEMA_INVALID, leg_path, "unsupported branch leg key(s)")
-        raw_steps = leg.get("steps") or []
-        if not isinstance(raw_steps, list):
-            raise _reject(PROCESS_IR_SCHEMA_INVALID, f"{leg_path}/steps", "steps must be a list")
+        raw_steps = _require_steps_list(leg.get("steps"), f"{leg_path}/steps")
         steps = [
             _convert_linear_step(
                 _require_dict(s, f"{leg_path}/steps/{j}", "step"),
@@ -506,15 +629,15 @@ def _convert_decision_step(
     step: Dict[str, Any], path: str, root_target: Dict[str, Any]
 ) -> Dict[str, Any]:
     _check_step_keys(step, "decision", path)
-    true_raw = step.get("true_steps") or []
-    false_raw = step.get("false_steps") or []
-    if not isinstance(true_raw, list) or not isinstance(false_raw, list):
-        raise _reject(PROCESS_IR_SCHEMA_INVALID, path, "true_steps/false_steps must be lists")
+    true_raw = _require_steps_list(step.get("true_steps"), f"{path}/true_steps")
+    false_raw = _require_steps_list(step.get("false_steps"), f"{path}/false_steps")
     true_steps, true_terminal = _split_arm_steps(true_raw, f"{path}/true_steps")
     false_steps, false_terminal = _split_arm_steps(false_raw, f"{path}/false_steps")
+    comparison = step.get("comparison")
     node: Dict[str, Any] = {
         "kind": "decision",
-        "comparison": step.get("comparison"),
+        # Legacy accepts a padded comparison and emits it stripped — normalize.
+        "comparison": comparison.strip() if isinstance(comparison, str) else comparison,
         "left": _convert_operand(step.get("left"), f"{path}/left"),
         "right": _convert_operand(step.get("right"), f"{path}/right"),
         # D1: the root target is the true leg's emitted fallthrough — it lives
@@ -543,6 +666,7 @@ def legacy_flow_sequence_to_ir(config: Any) -> ProcessIRV1:
                 PROCESS_IR_SCHEMA_INVALID, "/process_calls",
                 "process_calls must be a non-empty list",
             )
+        rd_enabled = _validated_return_documents(cfg)
         steps: List[Dict[str, Any]] = []
         for i, raw_call in enumerate(calls):
             call = _require_dict(raw_call, f"/process_calls/{i}", "process call")
@@ -560,13 +684,33 @@ def legacy_flow_sequence_to_ir(config: Any) -> ProcessIRV1:
                     PROCESS_IR_SCHEMA_INVALID, f"/process_calls/{i}",
                     "exactly one of subprocess_ref / process_id is required",
                 )
-            node: Dict[str, Any] = {"kind": "process_call", "process_ref": sref if has_sref else pid}
-            if call.get("wait") is not None:
-                node["wait"] = call.get("wait")
-            if call.get("abort_on_error") is not None:
-                node["abort_on_error"] = call.get("abort_on_error")
+            # Legacy field semantics are exact (never rewritten across fields):
+            # subprocess_ref is an exact '$ref:KEY' token, process_id a literal.
+            if has_sref:
+                if not sref.startswith("$ref:") or not sref[len("$ref:"):]:
+                    raise _reject(
+                        PROCESS_IR_SCHEMA_INVALID, f"/process_calls/{i}/subprocess_ref",
+                        "subprocess_ref must be an exact '$ref:KEY' token (use process_id for a literal id)",
+                    )
+                token = sref
+            else:
+                if pid.strip().startswith("$ref:"):
+                    raise _reject(
+                        PROCESS_IR_SCHEMA_INVALID, f"/process_calls/{i}/process_id",
+                        "process_id must be a literal component id (use subprocess_ref for a '$ref:KEY')",
+                    )
+                token = pid
+            node: Dict[str, Any] = {"kind": "process_call", "process_ref": token}
+            for flag in ("wait", "abort_on_error"):
+                if flag in call:
+                    if not isinstance(call[flag], bool):
+                        raise _reject(
+                            PROCESS_IR_SCHEMA_INVALID, f"/process_calls/{i}/{flag}",
+                            f"{flag} must be a boolean when present",
+                        )
+                    node[flag] = call[flag]
             steps.append(_maybe_label(call, node))
-        steps.append(_terminal_from_return_documents(cfg))
+        steps.append(_return_documents_node(cfg) if rd_enabled else {"kind": "stop"})
         return parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": steps}})
 
     if process_kind != "database_to_api_sync":
@@ -593,15 +737,40 @@ def legacy_flow_sequence_to_ir(config: Any) -> ProcessIRV1:
                 "a non-passthrough transform sibling is outside the codec scope",
             )
     reliability = cfg.get("reliability")
-    if isinstance(reliability, dict):
-        requests_try_catch = (
-            (isinstance(reliability.get("retry_count"), int) and reliability.get("retry_count"))
-            or str((reliability.get("dlq") or {}).get("mode") or "").strip().lower()
-            in ("document_cache_ref", "error_subprocess_ref")
+    if reliability is not None:
+        if not isinstance(reliability, dict):
+            raise _reject(
+                PROCESS_IR_SCHEMA_INVALID, "/reliability",
+                "reliability must be a JSON object",
+            )
+        retry_count = reliability.get("retry_count", 0)
+        if (
+            not isinstance(retry_count, int)
+            or isinstance(retry_count, bool)
+            or retry_count < 0
+            or retry_count > 5
+        ):
+            # Legacy parity: the builder rejects retry counts outside 0..5 —
+            # an out-of-range value is never a no-op.
+            raise _reject(
+                PROCESS_IR_SCHEMA_INVALID, "/reliability/retry_count",
+                "reliability.retry_count must be an integer in 0..5",
+            )
+        dlq = reliability.get("dlq")
+        dlq_mode = ""
+        if dlq is not None:
+            if not isinstance(dlq, dict):
+                raise _reject(
+                    PROCESS_IR_SCHEMA_INVALID, "/reliability/dlq",
+                    "reliability.dlq must be a JSON object",
+                )
+            dlq_mode = str(dlq.get("mode") or "").strip().lower()
+        if (
+            retry_count > 0
+            or dlq_mode in ("document_cache_ref", "error_subprocess_ref")
             or reliability.get("catch_exception") is not None
             or reliability.get("catch_notify") is not None
-        )
-        if requests_try_catch:
+        ):
             raise _reject(
                 PROCESS_IR_CAPABILITY_UNSUPPORTED, "/reliability",
                 "Try/Catch reliability is outside the codec scope (scoped error handling is #142)",
@@ -633,8 +802,7 @@ def legacy_flow_sequence_to_ir(config: Any) -> ProcessIRV1:
 
     last = seq[-1]
     last_kind = str((last.get("kind") if isinstance(last, dict) else "") or "").strip()
-    rd = cfg.get("return_documents")
-    rd_enabled = isinstance(rd, dict) and rd.get("enabled") is True
+    rd_enabled = _validated_return_documents(cfg)
 
     steps = [{**source_node}]
     control_terminal: Optional[Dict[str, Any]] = None
@@ -673,30 +841,20 @@ def legacy_flow_sequence_to_ir(config: Any) -> ProcessIRV1:
         # Legacy Return Documents path emits ONLY `returndocuments` after the
         # sequence (_target_terminal_entries) — the root target is dead config
         # and is not represented (same D2 rule as branch/exception).
-        steps.append(_terminal_from_return_documents(cfg))
+        steps.append(_return_documents_node(cfg))
     else:
         steps.append(target_node)
-        # rd is absent/disabled here — this still validates a disabled block's
-        # keys and returns the stop terminal.
-        steps.append(_terminal_from_return_documents(cfg))
+        steps.append({"kind": "stop"})
     return parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": steps}})
 
 
-def _terminal_from_return_documents(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    rd = cfg.get("return_documents")
-    if isinstance(rd, dict):
-        extra = set(rd) - {"enabled", "label"}
-        if extra:
-            raise _reject(
-                PROCESS_IR_SCHEMA_INVALID, "/return_documents",
-                "unsupported return_documents key(s)",
-            )
-        if rd.get("enabled") is True:
-            node: Dict[str, Any] = {"kind": "return_documents"}
-            if rd.get("label") is not None:
-                node["label"] = rd.get("label")
-            return node
-    return {"kind": "stop"}
+def _return_documents_node(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the RD terminal node from an already-validated enabled block."""
+    rd = cfg["return_documents"]
+    node: Dict[str, Any] = {"kind": "return_documents"}
+    if rd.get("label") is not None:
+        node["label"] = rd.get("label")
+    return node
 
 
 # ---------------------------------------------------------------------------
