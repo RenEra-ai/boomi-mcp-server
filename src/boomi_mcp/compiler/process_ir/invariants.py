@@ -1029,13 +1029,20 @@ def check_emission_plan_invariants(
             "",
             "terminal_shape_ids is not the canonical ordered set of terminal shapes",
         )
-    # A plan with NO terminal at all. Kept as defense-in-depth. It became
-    # unreachable once this function started validating the CFG up front (a
-    # CFG-valid graph always has an exit node, whose plan shape is necessarily a
-    # leaf), but it is retained deliberately: it was removed once as "dead",
-    # and that turned out to be wrong. Note the earlier rationale for the
-    # cyclic n1 -> n2 -> n1 case was itself imprecise — ``check_cfg_invariants``
-    # rejects that graph for having ZERO entries, before its cycle check runs.
+    # A plan with NO terminal at all. Kept as defense-in-depth.
+    #
+    # It became unreachable once this function began validating the CFG up
+    # front: a CFG-valid graph always has at least one exit node, and every exit
+    # yields a leaf shape — though by two different routes. A non-routed exit
+    # (stop / return_documents / exception / cache_stage) has no CFG out-edges,
+    # so its own plan shape is the leaf. A ``routed_target`` is NOT itself a
+    # leaf: it wires to the synthetic Stop that must immediately follow it, and
+    # that Stop is the leaf. Either way the canonical terminal set is non-empty.
+    #
+    # Retained deliberately anyway: this guard was removed once as "dead" and
+    # that call was wrong. (The earlier rationale was also imprecise — the
+    # cyclic n1 -> n2 -> n1 case is rejected for having ZERO entries, before the
+    # cycle check runs.)
     if not declared_terminals:
         raise _fail(
             PROCESS_IR_SEMANTIC_MISSING_TERMINAL,

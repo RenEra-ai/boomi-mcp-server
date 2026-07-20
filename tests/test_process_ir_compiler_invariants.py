@@ -1824,13 +1824,16 @@ def test_plan_validation_is_linear_in_symbols_too():
 
 
 def test_terminal_free_cyclic_plan_is_rejected():
-    """A plan with no terminal at all must be rejected by the PLAN checker alone.
+    """A hand-built cyclic CFG must be rejected by the PLAN checker alone.
 
-    ``check_emission_plan_invariants`` is exported independently and does not
-    call ``check_cfg_invariants``, so a hand-built cyclic CFG (n1 -> n2 -> n1)
-    reaches it with every node carrying an outgoing transition that faithfully
-    matches its own malformed CFG edge. Forward-only ordering is a CFG-checker
-    invariant, not a plan-checker one, so nothing upstream catches this.
+    This case previously slipped through: ``check_emission_plan_invariants`` is
+    exported independently, and back then it did not validate the CFG, so a
+    cyclic ``n1 -> n2 -> n1`` reached it with every node carrying an outgoing
+    transition that faithfully matched its own malformed CFG edge.
+
+    The plan checker now validates the CFG up front, so this is rejected
+    earlier and more precisely: the cycle leaves ZERO nodes without an inbound
+    edge, which trips the single-entry rule before the cycle rule ever runs.
     """
     from boomi_mcp.compiler.process_ir.contracts import MessageInputV1 as _Msg
 
