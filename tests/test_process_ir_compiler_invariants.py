@@ -1820,3 +1820,39 @@ def test_plan_validation_is_linear_in_symbols_too():
         "symbol tuple iteration grew from {0} to {1} when nodes+symbols grew 8x "
         "— reference resolution is scanning per lookup".format(small, large)
     )
+
+
+def test_terminal_free_cyclic_plan_is_rejected():
+    """A plan with no terminal at all must be rejected by the PLAN checker alone.
+
+    ``check_emission_plan_invariants`` is exported independently and does not
+    call ``check_cfg_invariants``, so a hand-built cyclic CFG (n1 -> n2 -> n1)
+    reaches it with every node carrying an outgoing transition that faithfully
+    matches its own malformed CFG edge. Forward-only ordering is a CFG-checker
+    invariant, not a plan-checker one, so nothing upstream catches this.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import MessageInputV1 as _Msg
+
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(_node(1, _msg("a")), _node(2, _msg("b"), path="/body/steps/1")),
+        edges=(_edge(1, 1, 2), _edge(2, 2, 1)),
+        exit_node_ids=(),
+    )
+    plan = EmissionPlanV1(
+        entry_shape_id="shape1",
+        nodes=(
+            _plan_node(1, StartNoActionInputV1(), role="start",
+                       out=[_wire(1, 1, 2, provenance="synthetic")]),
+            _plan_node(2, _Msg(text="a"), cfg_node="n1", path="/body/steps/0",
+                       out=[_wire(2, 1, 3, cfg_edge_id="e1")]),
+            _plan_node(3, _Msg(text="b"), cfg_node="n2", path="/body/steps/1",
+                       out=[_wire(3, 1, 2, cfg_edge_id="e2")]),
+        ),
+        terminal_shape_ids=(),
+    )
+    diagnostic = _raises(
+        check_emission_plan_invariants, plan, cfg, SymbolTableV1(symbols=())
+    )
+    assert diagnostic.code == PROCESS_IR_SEMANTIC_MISSING_TERMINAL
+    assert diagnostic.message == "the emission plan declares no terminal shape"

@@ -1016,11 +1016,19 @@ def check_emission_plan_invariants(
             "",
             "terminal_shape_ids is not the canonical ordered set of terminal shapes",
         )
-    # NOTE: there is deliberately no separate "declares no terminal" branch.
-    # It would be dead: an empty canonical set means every node has an outgoing
-    # transition, and since plan wiring must match forward-only CFG edges, the
-    # highest-ordinal node could only wire to a shape that does not exist —
-    # rejected earlier by the ordered-CFG-edge check. Verified by probe.
+    # A plan with NO terminal at all. This is genuinely reachable and must stay:
+    # ``check_emission_plan_invariants`` is exported independently and does NOT
+    # call ``check_cfg_invariants``, so a hand-built CYCLIC CFG (n1 -> n2 -> n1)
+    # reaches here with every node carrying an outgoing transition that faithfully
+    # matches its own malformed CFG edge. Forward-only ordering is a CFG-checker
+    # invariant, not a plan-checker one, so nothing upstream rejects it.
+    if not declared_terminals:
+        raise _fail(
+            PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
+            _PLAN_PHASE,
+            "",
+            "the emission plan declares no terminal shape",
+        )
 
 
 __all__: List[str] = [
