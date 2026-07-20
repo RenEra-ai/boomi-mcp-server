@@ -504,7 +504,20 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
 def check_emission_plan_invariants(
     plan: EmissionPlanV1, cfg: SemanticCfgV1, symbols: SymbolTableV1
 ) -> None:
-    """Validate the emission plan against the CFG it was lowered from."""
+    """Validate the emission plan against the CFG it was lowered from.
+
+    The CFG is validated FIRST. Many plan invariants are stated against the CFG
+    and silently borrow its guarantees — "one plan node per CFG node" borrows id
+    and path uniqueness and canonical node order; transition-to-edge
+    correspondence borrows endpoint uniqueness, canonical edge order and edge
+    kinds; routed-target Stop synthesis borrows valid exit roles and positions.
+    Reachability, acyclicity, join-freedom and forward-only flow are borrowed
+    outright. Since this function is exported and can be called directly, a
+    caller who skipped ``check_cfg_invariants`` would get silent acceptance of a
+    malformed CFG rather than a diagnostic. Re-validating is O(V+E) — cheap
+    against the cost of shipping a plan built from a broken graph.
+    """
+    check_cfg_invariants(cfg)
     nodes = list(plan.nodes)
     if not nodes:
         raise _fail(
@@ -1016,12 +1029,13 @@ def check_emission_plan_invariants(
             "",
             "terminal_shape_ids is not the canonical ordered set of terminal shapes",
         )
-    # A plan with NO terminal at all. This is genuinely reachable and must stay:
-    # ``check_emission_plan_invariants`` is exported independently and does NOT
-    # call ``check_cfg_invariants``, so a hand-built CYCLIC CFG (n1 -> n2 -> n1)
-    # reaches here with every node carrying an outgoing transition that faithfully
-    # matches its own malformed CFG edge. Forward-only ordering is a CFG-checker
-    # invariant, not a plan-checker one, so nothing upstream rejects it.
+    # A plan with NO terminal at all. Kept as defense-in-depth. It became
+    # unreachable once this function started validating the CFG up front (a
+    # CFG-valid graph always has an exit node, whose plan shape is necessarily a
+    # leaf), but it is retained deliberately: it was removed once as "dead",
+    # and that turned out to be wrong. Note the earlier rationale for the
+    # cyclic n1 -> n2 -> n1 case was itself imprecise — ``check_cfg_invariants``
+    # rejects that graph for having ZERO entries, before its cycle check runs.
     if not declared_terminals:
         raise _fail(
             PROCESS_IR_SEMANTIC_MISSING_TERMINAL,

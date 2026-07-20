@@ -956,6 +956,7 @@ def test_synthetic_stop_must_follow_its_routed_target():
                 ConnectorSemanticV1(
                     role="target", connection_ref="$ref:c", operation_ref="$ref:o"
                 ),
+                path="/body/steps/0/legs/0/terminal",
                 exit_role="routed_target",
             ),
         ),
@@ -981,7 +982,7 @@ def test_synthetic_stop_must_follow_its_routed_target():
                     operation_id="oid",
                 ),
                 cfg_node="n1",
-                path="/body/steps/0",
+                path="/body/steps/0/legs/0/terminal",
                 out=[_wire(2, 1, 4, provenance="synthetic")],
             ),
             _plan_node(3, _Msg(text="interloper"), role="terminal_stop"),
@@ -1854,5 +1855,95 @@ def test_terminal_free_cyclic_plan_is_rejected():
     diagnostic = _raises(
         check_emission_plan_invariants, plan, cfg, SymbolTableV1(symbols=())
     )
-    assert diagnostic.code == PROCESS_IR_SEMANTIC_MISSING_TERMINAL
-    assert diagnostic.message == "the emission plan declares no terminal shape"
+    # Now rejected by the CFG prerequisite check the plan checker runs up front.
+    # ``n1 -> n2 -> n1`` has ZERO entry nodes (every node has an inbound edge),
+    # which is caught before the cycle rule — the rejection is earlier and the
+    # code more precise than the terminal-free guard that used to catch it.
+    assert diagnostic.code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+    assert diagnostic.message == "the CFG must have exactly one entry node"
+
+
+@pytest.mark.parametrize(
+    "name,cfg_factory,expected",
+    [
+        # A non-terminal leaf: the plan checker used to accept this whenever the
+        # corresponding shape was simply declared terminal, because it never
+        # consulted the CFG's own exit roles.
+        (
+            "non_terminal_leaf",
+            lambda: SemanticCfgV1(
+                entry_node_id="n1",
+                nodes=(_node(1, _msg("lonely")),),
+                edges=(),
+                exit_node_ids=(),
+            ),
+            PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
+        ),
+        # Backward edge — forward-only is a CFG-checker invariant.
+        (
+            "backward_edge",
+            lambda: SemanticCfgV1(
+                entry_node_id="n1",
+                nodes=(
+                    _node(1),
+                    _node(2, StopSemanticV1(), path="/body/steps/1", exit_role="stop"),
+                    _node(3, path="/body/steps/2"),
+                ),
+                edges=(_edge(1, 1, 3), _edge(2, 3, 2, kind="terminal")),
+                exit_node_ids=("n2",),
+            ),
+            PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+        ),
+        # A join — also CFG-checker-only.
+        (
+            "join",
+            lambda: SemanticCfgV1(
+                entry_node_id="n1",
+                nodes=(
+                    _node(1, BranchSemanticV1(leg_count=2)),
+                    _node(2, path="/body/steps/0/legs/0/terminal"),
+                    _node(
+                        3, StopSemanticV1(),
+                        path="/body/steps/0/legs/1/terminal", exit_role="stop",
+                    ),
+                ),
+                edges=(
+                    _edge(1, 1, 2, kind="branch_leg", local=1, leg_ordinal=1),
+                    _edge(2, 1, 3, kind="branch_leg", local=2, leg_ordinal=2),
+                    _edge(3, 2, 3, kind="terminal"),
+                ),
+                exit_node_ids=("n3",),
+            ),
+            PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+        ),
+        # A dangling edge source.
+        (
+            "dangling_edge",
+            lambda: SemanticCfgV1(
+                entry_node_id="n1",
+                nodes=(_node(1), _node(2, StopSemanticV1(), path="/body/steps/1",
+                                       exit_role="stop")),
+                edges=(_edge(1, 1, 2, kind="terminal"), _edge(2, 9, 2)),
+                exit_node_ids=("n2",),
+            ),
+            PROCESS_IR_COMPILE_INTERNAL,
+        ),
+    ],
+)
+def test_plan_checker_rejects_a_malformed_cfg_standalone(name, cfg_factory, expected):
+    """The exported plan checker must not borrow unverified CFG guarantees.
+
+    Most plan invariants are stated *against* the CFG and silently assume it is
+    valid — reachability, acyclicity, join-freedom and forward-only flow are
+    borrowed outright. Because this function is exported and callable directly,
+    a caller who skipped ``check_cfg_invariants`` would previously get silent
+    acceptance of a malformed graph instead of a diagnostic. It now validates
+    the CFG up front, so each case below is rejected no matter what plan is
+    supplied.
+    """
+    cfg = cfg_factory()
+    plan = _linear_plan()  # the plan is irrelevant; the CFG is rejected first
+    assert (
+        _raises(check_emission_plan_invariants, plan, cfg, SymbolTableV1(symbols=())).code
+        == expected
+    ), name

@@ -272,6 +272,17 @@ ids, unreachable nodes, missing terminals, noncanonical ordinals) they enforce:
   declared, so a multi-exit plan could otherwise wire one synthetic Stop onward to another exit and
   simply omit it from the declaration.
 
+**The plan checker validates the CFG first.** Most plan invariants are stated *against* the CFG and
+silently borrow its guarantees: "one plan node per CFG node" borrows id/path uniqueness and canonical
+node order; transition-to-edge correspondence borrows endpoint uniqueness, canonical edge order and
+edge kinds; routed-target Stop synthesis borrows valid exit roles and positions; and reachability,
+acyclicity, join-freedom and forward-only flow are borrowed outright. Because
+`check_emission_plan_invariants` is **exported and callable directly**, a caller who skipped
+`check_cfg_invariants` would get silent acceptance of a malformed graph rather than a diagnostic — so
+it now re-validates the CFG up front. That is O(V+E), cheap against the cost of shipping a plan built
+from a broken graph, and it closes the class rather than the instance: this was first noticed as a
+single leafless-cycle hole, and enumerating the borrowed invariants showed the hole was general.
+
 **Complexity.** Validation is linear in nodes+edges. Two places matter: CFG out-edges are grouped
 by source **once** before the plan-node loop (rescanning `cfg.edges` per node would make it O(V·E)),
 and reference resolution runs against an index built **once per pass** via
