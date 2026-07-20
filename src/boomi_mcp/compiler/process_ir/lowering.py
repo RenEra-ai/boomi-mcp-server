@@ -556,10 +556,9 @@ def lower_process_ir_to_cfg(ir: ProcessIRV1) -> SemanticCfgV1:
 # ---------------------------------------------------------------------------
 
 
-def _resolve(
-    symbols: SymbolTableV1, ref: str, path: str, node_id: str
-) -> ComponentSymbolV1:
-    symbol = symbols.lookup(ref)
+def _resolve(symbols, ref: str, path: str, node_id: str) -> ComponentSymbolV1:
+    """Resolve one reference. ``symbols`` is a prebuilt ref->symbol index."""
+    symbol = symbols.get(ref)
     if symbol is None:
         raise raise_compile_error(
             PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
@@ -645,8 +644,14 @@ def _resolved_dataprocess_step(
     )
 
 
-def _emitter_input_for(node: CfgNodeV1, symbols: SymbolTableV1) -> Any:
-    """Resolve one CFG node into its fully-bound emitter input."""
+def _emitter_input_for(node: CfgNodeV1, symbols, index=None) -> Any:
+    """Resolve one CFG node into its fully-bound emitter input.
+
+    ``symbols`` may be a ``SymbolTableV1`` or a prebuilt ref->symbol index.
+    Callers resolving many nodes pass the index so lookup stays O(1) per ref.
+    """
+    if isinstance(symbols, SymbolTableV1):
+        symbols = index if index is not None else symbols.build_index()
     semantic = node.semantic
     path = node.source_path
     node_id = node.node_id
@@ -877,6 +882,8 @@ def lower_cfg_to_emission_plan(
     # Pass A: assign plan ordinals. The synthetic Start takes shape1; each CFG
     # node follows in ordinal order; a routed target is immediately followed by
     # its compiler-owned Stop (builder ``fallthrough=[target, stop]``, :5690).
+    # Built ONCE: resolving per node against a scan would be O(nodes x symbols).
+    symbol_index = symbols.build_index()
     ordinal_for_cfg_node = {}
     synthetic_stop_for = {}
     next_ordinal = 2
@@ -964,7 +971,7 @@ def lower_cfg_to_emission_plan(
                 cfg_node_id=node.node_id,
                 source_path=node.source_path,
                 origin="ir",
-                emitter_input=_emitter_input_for(node, symbols),
+                emitter_input=_emitter_input_for(node, symbol_index),
                 layout=EmissionLayoutV1(x=shape_x(ordinal), y=SHAPE_Y),
                 outgoing=tuple(transitions),
             )

@@ -274,11 +274,19 @@ ids, unreachable nodes, missing terminals, noncanonical ordinals) they enforce:
 
 **Complexity.** Validation is linear in nodes+edges. Two places matter: CFG out-edges are grouped
 by source **once** before the plan-node loop (rescanning `cfg.edges` per node would make it O(V·E)),
-and `SymbolTableV1.lookup` is index-backed rather than a linear scan (the checker resolves every
-node's references, so a scan would make it O(nodes x symbols)). The index is built **eagerly** at
-construction, not lazily: pydantic v2 includes private attributes in `__eq__`, so a lazy cache would
-make two identical tables compare unequal once one had been used. `SequenceNodeV1.steps` has no
-upper bound, so neither cost is bounded by the schema. `test_plan_validation_scales_linearly_with_node_count`
+and reference resolution runs against an index built **once per pass** via
+`SymbolTableV1.build_index()` (the checker resolves every node's references, so a per-reference scan
+would make it O(nodes x symbols)). The index is deliberately **not** cached on the model: pydantic v2
+includes private attributes in `__eq__`, so a lazy cache makes two identical tables compare unequal
+once one is used; `model_copy(update=...)` does not re-run `model_post_init`, so an eager cache goes
+stale and silently resolves a present symbol to `None`; and a private attr stays writable despite
+`frozen=True`. `SequenceNodeV1.steps` has no upper bound, so neither cost is bounded by the schema.
+
+Both dimensions are guarded structurally (iteration-counting, not wall-clock, so they cannot flake):
+`test_plan_validation_never_rescans_cfg_edges_per_node` for the edge dimension and
+`test_plan_validation_is_linear_in_symbols_too` for the symbol dimension — the latter exists because
+the node-count guards pass an EMPTY symbol table and so are blind to lookup cost. Each was verified
+to FAIL when its optimisation is reverted. `test_plan_validation_scales_linearly_with_node_count`
 guards this and is calibrated to discriminate (measured: ~8.3× for 8× nodes grouped, ~30× rescanned;
 it fails if the rescan returns, and sizes below ~400 do not discriminate at all).
 - **Emitter input matches the node's semantics** (and, for connectors, its role), so a Map node

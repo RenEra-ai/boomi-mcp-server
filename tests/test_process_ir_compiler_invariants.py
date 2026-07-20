@@ -1618,9 +1618,11 @@ def test_synthetic_stop_with_flipped_continue_is_rejected():
 def test_branch_leg_prefix_matching_respects_pointer_boundaries():
     """``/legs/1`` must not match ``/legs/10`` — a Branch may have 25 legs.
 
-    Without a trailing-slash boundary, leg 2's subtree prefix ``/legs/1``
-    silently accepts a target living in leg 11, so a misrouted control edge
-    survives for any branch with 11 or more legs.
+    NOTE on construction: this mutates a target's ``source_path``, NOT the edge
+    wiring. Retargeting edges cannot discriminate here — reachability runs
+    before the leg rule and forces the leg->subtree map to be the identity
+    permutation, so any swap makes the *other* leg violate the same rule with
+    the same message, and the test would pass even without the boundary fix.
     """
     leg_count = 12
     nodes = [_node(1, BranchSemanticV1(leg_count=leg_count))]
@@ -1647,12 +1649,14 @@ def test_branch_leg_prefix_matching_respects_pointer_boundaries():
     )
     check_cfg_invariants(cfg)  # the honest 12-leg branch is valid
 
-    # Now point leg 2 (prefix "/legs/1") at leg 11's node ("/legs/10/terminal").
-    misrouted = list(cfg.edges)
-    misrouted[1] = misrouted[1].model_copy(update={"target_node_id": "n12"})
-    # Give leg 11's own edge the vacated target so only ONE rule is violated.
-    misrouted[10] = misrouted[10].model_copy(update={"target_node_id": "n3"})
-    broken = cfg.model_copy(update={"edges": tuple(misrouted)})
+    # Leg 2's edge (prefix "/legs/1") now points at a node whose authored path
+    # is "/legs/10/..." — which a bare prefix test accepts and a boundary-aware
+    # one rejects. Only this one node moves, so exactly one rule is violated.
+    moved = list(cfg.nodes)
+    moved[2] = moved[2].model_copy(
+        update={"source_path": "/body/steps/0/legs/10/terminal/nested"}
+    )
+    broken = cfg.model_copy(update={"nodes": tuple(moved)})
     diagnostic = _raises(check_cfg_invariants, broken)
     assert diagnostic.code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
     assert diagnostic.message == "a branch leg targets a node outside its own leg"
@@ -1712,3 +1716,78 @@ def test_symbol_lookup_is_indexed_not_a_linear_scan():
     symbols.lookup("$ref:s1")
     assert symbols == twin
     assert "index" not in symbols.model_dump_json()
+
+
+def test_plan_validation_is_linear_in_symbols_too():
+    """Guard the SYMBOL dimension, which the node-count guards cannot see.
+
+    ``test_plan_validation_scales_linearly_with_node_count`` passes an EMPTY
+    symbol table and message-only nodes, so symbol-lookup cost is zero there.
+    This builds N map nodes each with its OWN ``map_ref`` so nodes and symbols
+    grow together — the shape that turns a per-reference scan into O(N²).
+    """
+    from boomi_mcp.compiler.process_ir.contracts import MapInputV1, MapSemanticV1
+
+    def _count(size):
+        nodes = [
+            _node(i, MapSemanticV1(map_ref="$ref:m{0}".format(i)),
+                  path="/body/steps/{0}".format(i - 1))
+            for i in range(1, size)
+        ]
+        nodes.append(
+            _node(size, StopSemanticV1(), path="/body/steps/{0}".format(size - 1),
+                  exit_role="stop")
+        )
+        edges = [
+            _edge(i, i, i + 1, kind="terminal" if i + 1 == size else "ordering")
+            for i in range(1, size)
+        ]
+        cfg = SemanticCfgV1(
+            entry_node_id="n1", nodes=tuple(nodes), edges=tuple(edges),
+            exit_node_ids=("n{0}".format(size),),
+        )
+        symbols = SymbolTableV1(
+            symbols=tuple(
+                ComponentSymbolV1(
+                    ref="$ref:m{0}".format(i),
+                    component_id="c{0}".format(i),
+                    component_type="t",
+                )
+                for i in range(1, size)
+            )
+        )
+        plan_nodes = [
+            _plan_node(1, StartNoActionInputV1(), role="start",
+                       out=[_wire(1, 1, 2, provenance="synthetic")])
+        ]
+        for i in range(1, size + 1):
+            ordinal = i + 1
+            is_last = i == size
+            plan_nodes.append(
+                _plan_node(
+                    ordinal,
+                    StopInputV1() if is_last else MapInputV1(map_id="c{0}".format(i)),
+                    cfg_node="n{0}".format(i),
+                    path="/body/steps/{0}".format(i - 1),
+                    out=() if is_last else [
+                        _wire(ordinal, 1, ordinal + 1, cfg_edge_id="e{0}".format(i))
+                    ],
+                )
+            )
+        plan = EmissionPlanV1(
+            entry_shape_id="shape1", nodes=tuple(plan_nodes),
+            terminal_shape_ids=("shape{0}".format(size + 1),),
+        )
+        counting = _CountingTuple(symbols.symbols)
+        instrumented = symbols.model_copy(update={"symbols": counting})
+        check_emission_plan_invariants(plan, cfg, instrumented)
+        return counting.iterations
+
+    small, large = _count(100), _count(800)
+    # Index built once per validation, so the symbol tuple is walked a constant
+    # number of times regardless of how many nodes resolve references. A
+    # per-reference scan would walk it once per reference (~N times).
+    assert small == large, (
+        "symbol tuple iteration grew from {0} to {1} when nodes+symbols grew 8x "
+        "— reference resolution is scanning per lookup".format(small, large)
+    )

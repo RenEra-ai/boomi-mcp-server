@@ -602,6 +602,8 @@ def check_emission_plan_invariants(
     # --- symbol resolution --------------------------------------------------
     # Every component id the plan carries must have come from the symbol table.
     known_component_ids = {symbol.component_id for symbol in symbols.symbols}
+    # Built ONCE for the per-node recomputation below.
+    symbol_index = symbols.build_index()
     for node in nodes:
         emitter = node.emitter_input
         for field in _RESOLVED_ID_FIELDS:
@@ -732,7 +734,9 @@ def check_emission_plan_invariants(
             # simpler than enumerating per-field rules.
             from .lowering import _emitter_input_for
 
-            expected_input = _emitter_input_for(cfg_by_id[node.cfg_node_id], symbols)
+            expected_input = _emitter_input_for(
+                cfg_by_id[node.cfg_node_id], symbol_index
+            )
             if node.emitter_input != expected_input:
                 raise _fail(
                     PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
@@ -998,6 +1002,8 @@ def check_emission_plan_invariants(
             "a shape with no outgoing transition is not declared terminal",
         )
     # Whatever remains is a duplicate or a reordering — genuinely nondeterministic.
+    # (The old trailing per-node re-check of the same predicate was removed: it
+    # is exactly the ``missing`` test above and could never fire.)
     if declared_terminals != canonical_terminals:
         raise _fail(
             PROCESS_IR_COMPILE_NONDETERMINISTIC,
@@ -1012,14 +1018,6 @@ def check_emission_plan_invariants(
             "",
             "the emission plan declares no terminal shape",
         )
-    for node in nodes:
-        if not node.outgoing and node.shape_id not in declared_terminals:
-            raise _fail(
-                PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
-                _PLAN_PHASE,
-                node.source_path or "",
-                "a shape with no outgoing transition is not declared terminal",
-            )
 
 
 __all__: List[str] = [
