@@ -194,6 +194,27 @@ def test_build_xml_equals_process_flow_builder_with_map():
     assert xml_sync == xml_core
 
 
+def test_sync_pipeline_matches_golden_fixture():
+    """Byte golden (#138): a DIRECT raw-byte anchor for a non-listener SyncPipeline
+    build. The ``xml_sync == xml_core`` test above compares two callers through the
+    one shared renderer, so it cannot catch a drift in that shared template; a
+    committed fixture pins the actual bytes."""
+    from pathlib import Path
+
+    fixture = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "golden_xml"
+        / "sync_pipeline_db_read_map_rest_send.xml"
+    )
+    emitted = SyncPipelineBuilder.build(
+        _linear_with_map(),
+        name="Sync DB Read Map REST Send Golden",
+        folder_name="Golden/Fixtures",
+    )
+    assert emitted == fixture.read_text()
+
+
 def test_build_xml_equals_process_flow_builder_passthrough():
     no_map = _linear_no_map(method="PATCH")
     lowered = SyncPipelineBuilder.lower_config(no_map)

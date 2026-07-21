@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..connector_builder import BuilderValidationError, _escape_xml
+from ..connector_builder import BuilderValidationError
 from . import rendering
 from .rendering import (
     _CATCH_DRAGPOINT_Y,
@@ -36,6 +36,7 @@ from .rendering import (
     _SHAPE_Y,
     _START_SHAPE_X,
     _START_SHAPE_Y,
+    RenderConnectorDynamicPath,
     RenderDataProcessStep,
     RenderDecisionValue,
     RenderExceptionBinding,
@@ -92,32 +93,20 @@ def _emit_connectoraction(
     next_name: Optional[str],
     shape_index: int,
 ) -> str:
-    # Issue #100 G2 dynamic-path branch (legacy-only): compute the
-    # <dynamicProperties> Path body + parameter-profile attribute exactly as
-    # before, then hand the pre-formed XML to the shared connector renderer.
+    # Issue #100 G2 dynamic-path branch (legacy-only): translate the validated
+    # dynamic-path dict into neutral values; rendering.py owns the template.
     dynamic_path = params.get("dynamic_path")
+    dp = None
     if isinstance(dynamic_path, dict) and dynamic_path:
-        ddp_name = _escape_xml(str(dynamic_path.get("ddp_name") or "").strip())
-        profile_id = _escape_xml(str(dynamic_path.get("request_profile_id") or "").strip())
         has_profile_segment = any(
             isinstance(seg, dict) and seg.get("type") == "profile"
             for seg in (dynamic_path.get("segments") or [])
         )
-        parameter_profile_attr = (
-            f' parameter-profile="{profile_id}"' if (profile_id and has_profile_segment) else ''
+        dp = RenderConnectorDynamicPath(
+            ddp_name=str(dynamic_path.get("ddp_name") or ""),
+            request_profile_id=str(dynamic_path.get("request_profile_id") or ""),
+            has_profile_segment=has_profile_segment,
         )
-        inner = (
-            '<parameters/>'
-            '<dynamicProperties>'
-            '<propertyvalue childKey="" key="path" name="Path" valueType="track">'
-            f'<trackparameter defaultValue="" propertyId="dynamicdocument.{ddp_name}" '
-            f'propertyName="Dynamic Document Property - {ddp_name}"/>'
-            '</propertyvalue>'
-            '</dynamicProperties>'
-        )
-    else:
-        parameter_profile_attr = ''
-        inner = '<parameters/><dynamicProperties/>'
 
     ctx = linear_ctx(shape_name, shape_index, [next_name])
     return rendering.render_connectoraction(
@@ -127,8 +116,7 @@ def _emit_connectoraction(
         action_type=params["action_type"],
         connection_id=params["connection_id"],
         operation_id=params["operation_id"],
-        inner=inner,
-        parameter_profile_attr=parameter_profile_attr,
+        dynamic_path=dp,
     )
 
 

@@ -233,6 +233,25 @@ def test_error_subprocess_emits_terminal_processcall():
     assert list(shapes[5].find("dragpoints")) == []
 
 
+_ERROR_SUBPROCESS_FIXTURE = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "golden_xml"
+    / "try_catch_dlq_error_subprocess.xml"
+)
+
+
+def test_error_subprocess_matches_golden_fixture():
+    """Byte golden (#138): the catch-row error-subprocess ProcessCall variant had
+    only structural coverage; freeze its bytes so the extracted processcall emitter
+    is proven byte-identical."""
+    cfg = _config({"mode": "error_subprocess_ref", "process_id": _PROC_ID})
+    emitted = ProcessFlowBuilder.build(
+        cfg, name="TryCatch Error Subprocess Golden", folder_name="Golden/Fixtures"
+    )
+    assert emitted == _ERROR_SUBPROCESS_FIXTURE.read_text()
+
+
 def test_transform_is_inside_try_path():
     cfg = _config(
         {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},

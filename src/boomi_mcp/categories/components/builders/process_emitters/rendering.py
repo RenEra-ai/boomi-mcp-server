@@ -184,6 +184,19 @@ class RenderExceptionBinding:
     kind: str
 
 
+@dataclass(frozen=True, slots=True)
+class RenderConnectorDynamicPath:
+    """The legacy-only REST dynamic "Path" property on a connector step (#100 G2).
+
+    Neutral values only; this module owns the ``<dynamicProperties>`` template and
+    the ``parameter-profile`` attribute derivation, so no adapter re-serializes it.
+    """
+
+    ddp_name: str
+    request_profile_id: str
+    has_profile_segment: bool
+
+
 # ---------------------------------------------------------------------------
 # Dragpoint serialization (single copy of the two attribute-order forms).
 # ---------------------------------------------------------------------------
@@ -353,15 +366,14 @@ def render_connectoraction(
     action_type: str,
     connection_id: str,
     operation_id: str,
-    inner: str = '<parameters/><dynamicProperties/>',
-    parameter_profile_attr: str = '',
+    dynamic_path: Optional[RenderConnectorDynamicPath] = None,
 ) -> str:
     """Mid-flow connectoraction shape.
 
-    ``inner`` / ``parameter_profile_attr`` are pre-formed XML supplied by the
-    caller: the simple form (the ProcessIR registry) uses the defaults; the
-    legacy dynamic-path branch (issue #100 G2) supplies the ``<dynamicProperties>``
-    body and the ``parameter-profile`` attribute.
+    ``dynamic_path`` is ``None`` for the simple form (the ProcessIR registry). The
+    legacy REST dynamic-path branch (issue #100 G2) passes neutral values and THIS
+    module builds the ``<dynamicProperties>`` "Path" body and the
+    ``parameter-profile`` attribute — the template lives here, not in the adapter.
     """
     dragpoints = render_dragpoints(ctx.transitions)
     userlabel = _escape_xml(userlabel or "")
@@ -369,6 +381,28 @@ def render_connectoraction(
     action_type = _escape_xml(action_type)
     connection_id = _escape_xml(connection_id)
     operation_id = _escape_xml(operation_id)
+    if dynamic_path is None:
+        parameter_profile_attr = ''
+        inner = '<parameters/><dynamicProperties/>'
+    else:
+        ddp_name = _escape_xml(str(dynamic_path.ddp_name or "").strip())
+        profile_id = _escape_xml(str(dynamic_path.request_profile_id or "").strip())
+        # parameter-profile is meaningful only with a <profileelement> segment; a
+        # ddp/dpp-only path carries none, so omit the attribute (never emit it empty).
+        parameter_profile_attr = (
+            f' parameter-profile="{profile_id}"'
+            if (profile_id and dynamic_path.has_profile_segment)
+            else ''
+        )
+        inner = (
+            '<parameters/>'
+            '<dynamicProperties>'
+            '<propertyvalue childKey="" key="path" name="Path" valueType="track">'
+            f'<trackparameter defaultValue="" propertyId="dynamicdocument.{ddp_name}" '
+            f'propertyName="Dynamic Document Property - {ddp_name}"/>'
+            '</propertyvalue>'
+            '</dynamicProperties>'
+        )
     return (
         f'<shape image="connectoraction_icon" name="{ctx.shape_id}" '
         f'shapetype="connectoraction" userlabel="{userlabel}" '

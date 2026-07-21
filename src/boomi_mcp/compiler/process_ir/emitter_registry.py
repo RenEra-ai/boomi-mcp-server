@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Callable, Dict, List, Mapping, Optional, Tuple
 
 from pydantic import BaseModel, TypeAdapter
@@ -499,9 +500,46 @@ def _pre_dataprocess(inp) -> Optional[str]:
     if not inp.steps:
         return "data process requires at least one step"
     for step in inp.steps:
-        pt = getattr(step, "profile_type", None)
-        if pt is not None and str(pt).strip().lower() not in _DP_PROFILE_KINDS:
-            return "unsupported data-process profile_type"
+        if step.operation == "custom_scripting":
+            # The legacy emitter hard-codes groovy2 + useCache=true, so it can
+            # NEVER emit any other language or useCache=false. Requiring them keeps
+            # the registry within the legacy's byte-output space (an arbitrary
+            # ``language``/``use_cache`` would emit a form the legacy cannot).
+            if step.language != rendering._DATAPROCESS_SCRIPT_LANGUAGE:
+                return "unsupported custom-scripting language"
+            if step.use_cache is not True:
+                return "custom-scripting useCache must be true"
+        else:  # split_documents / combine_documents
+            pt = str(getattr(step, "profile_type", "")).strip().lower()
+            if pt not in _DP_PROFILE_KINDS:
+                return "unsupported data-process profile_type"
+            # A split/combine step MUST reference a profile; a blank id would emit
+            # ``profileId=""`` and (because the requirement scan skips blank ids)
+            # escape symbol resolution entirely.
+            if not getattr(step, "profile_id", ""):
+                return "data-process profile step requires a profile reference"
+    return None
+
+
+def _pre_decision(inp) -> Optional[str]:
+    # The legacy decision emitter raises on a track operand with a blank
+    # property_id (it would emit ``propertyId=""``).
+    for operand in (inp.left, inp.right):
+        if operand.value_type == "track" and not str(operand.property_id or "").strip():
+            return "decision track operand requires a property id"
+    return None
+
+
+def _pre_exception(inp) -> Optional[str]:
+    # The resolved ``binding`` and the legacy ``parameter_source`` must agree — the
+    # legacy emitter derives the exParameters form from parameter_source, so an
+    # inconsistent pair would emit a binding that disagrees with the authored
+    # source. Mirror the legacy mapping (anything but none/current_document ->
+    # caught_error).
+    src = str(inp.parameter_source or "caught_error").strip().lower()
+    expected = src if src in ("none", "current_document") else "caught_error"
+    if inp.binding.binding != expected:
+        return "exception binding disagrees with parameter_source"
     return None
 
 
@@ -524,8 +562,8 @@ _REGISTRATIONS: Tuple[EmitterRegistration, ...] = (
     EmitterRegistration("setproperties_step", SetPropertiesStepInputV1, "documentproperties", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_setproperties, _emit_setproperties),
     EmitterRegistration("processcall", ProcessCallInputV1, "processcall", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_process, _emit_processcall),
     EmitterRegistration("branch", BranchInputV1, "branch", CAPABILITY_PROCESS_IR_V1, BRANCH, _no_requirements, _emit_branch),
-    EmitterRegistration("decision", DecisionInputV1, "decision", CAPABILITY_PROCESS_IR_V1, EXACT_TWO, _no_requirements, _emit_decision),
-    EmitterRegistration("exception", ExceptionInputV1, "exception", CAPABILITY_PROCESS_IR_V1, EXACT_ZERO, _no_requirements, _emit_exception),
+    EmitterRegistration("decision", DecisionInputV1, "decision", CAPABILITY_PROCESS_IR_V1, EXACT_TWO, _no_requirements, _emit_decision, _pre_decision),
+    EmitterRegistration("exception", ExceptionInputV1, "exception", CAPABILITY_PROCESS_IR_V1, EXACT_ZERO, _no_requirements, _emit_exception, _pre_exception),
     EmitterRegistration("stop", StopInputV1, "stop", CAPABILITY_PROCESS_IR_V1, EXACT_ZERO, _no_requirements, _emit_stop),
     EmitterRegistration("returndocuments", ReturnDocumentsInputV1, "returndocuments", CAPABILITY_PROCESS_IR_V1, EXACT_ZERO, _no_requirements, _emit_returndocuments),
 )
@@ -539,7 +577,9 @@ def _build_registry(
         if reg.emitter_kind in registry:
             raise ValueError(f"duplicate emitter registration: {reg.emitter_kind!r}")
         registry[reg.emitter_kind] = reg
-    return registry
+    # Read-only after construction: nothing may add a kind (e.g. ``emit_fragment``)
+    # to the canonical registry after coverage validation.
+    return MappingProxyType(registry)
 
 
 def discriminator_keys() -> frozenset:
@@ -621,7 +661,10 @@ def _preflight_node(
                        internal_node_id=node.cfg_node_id)
         )
         return diags, None, ()
-    if not isinstance(inp, reg.input_type):
+    # Exact type, not isinstance: a subclass of the expected input model (e.g. one
+    # smuggling raw legacy config) would pass isinstance and reach the emitter,
+    # violating the "emitters receive no raw legacy config" contract.
+    if type(inp) is not reg.input_type:
         diags.append(
             diagnostic(PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID, "xml_emission", path,
                        internal_node_id=node.cfg_node_id)
@@ -748,8 +791,15 @@ def emit_process(
                             node.source_path or "")]
             )
 
-    # Post-emission structural oracle.
-    verifier = _verifier_summary(verify_process_graph(process_xml))
+    # Post-emission structural oracle. Guard the invocation/adaptation so an
+    # unexpected verifier failure becomes a value-free INTERNAL diagnostic rather
+    # than escaping raw (its text could echo emitted content).
+    try:
+        verifier = _verifier_summary(verify_process_graph(process_xml))
+    except Exception:  # noqa: BLE001 — never leak internals
+        raise ProcessIRCompileError(
+            [diagnostic(PROCESS_IR_COMPILE_INTERNAL, "post_emission_verification", "")]
+        ) from None
     if verifier.errors:
         raise ProcessIRCompileError(
             [diagnostic(PROCESS_IR_COMPILE_VERIFIER_FAILED, "post_emission_verification", "")]

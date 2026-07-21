@@ -23,12 +23,14 @@ from boomi_mcp.compiler.process_ir import emitter_registry as R
 from boomi_mcp.compiler.process_ir.contracts import (
     ConnectorActionInputV1,
     DataProcessInputV1,
+    DecisionInputV1,
     DocCacheRetrieveInputV1,
     EmissionLayoutV1,
     EmissionNodeV1,
     EmissionPlanV1,
     EmissionTransitionV1,
     ComponentSymbolV1,
+    ExceptionInputV1,
     MapInputV1,
     StartNoActionInputV1,
     StopInputV1,
@@ -306,6 +308,63 @@ def test_resolved_symbols_are_actual_component_symbols():
     assert diags == []
     assert narrowed and all(isinstance(s, ComponentSymbolV1) for s in narrowed)
     assert [s.component_id for s in narrowed] == ["MAP"]
+
+
+@pytest.mark.parametrize("bad_step", [
+    {"operation": "custom_scripting", "key": 1, "index": 1, "script": "x",
+     "language": "python", "use_cache": True},          # unsupported language
+    {"operation": "custom_scripting", "key": 1, "index": 1, "script": "x",
+     "language": "groovy2", "use_cache": False},         # use_cache must be true
+    {"operation": "split_documents", "key": 1, "index": 1, "profile_type": "json",
+     "profile_id": "", "link_element_key": "k", "link_element_name": "n"},  # blank profile
+])
+def test_dataprocess_renderer_invariants_reject_bad_steps(bad_step):
+    plan = _dataprocess_plan(DataProcessInputV1(steps=(bad_step,), userlabel="dp"))
+    symbols = SymbolTableV1(symbols=(
+        ComponentSymbolV1(ref="p", component_id="PROF", component_type="profile.json"),
+    ))
+    with pytest.raises(ProcessIRCompileError) as exc:
+        R.emit_process(plan, symbols)
+    assert PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID in [d.code for d in exc.value.diagnostics]
+
+
+def test_decision_track_operand_requires_property_id():
+    dec = DecisionInputV1(
+        comparison="equals",
+        left={"value_type": "track", "property_id": "", "property_name": "S"},
+        right={"value_type": "static", "static_value": "x"},
+        userlabel="d",
+    )
+    start = _node(1, StartNoActionInputV1(), outgoing=(_t(1, 1, "shape2"),), origin="synthetic", role="start")
+    node = _node(2, dec, outgoing=(
+        _t(2, 1, "shape3", identifier="true", text="True"),
+        _t(2, 2, "shape3", identifier="false", text="False"),
+    ))
+    stop = _node(3, StopInputV1(), origin="synthetic", role="terminal_stop")
+    plan = EmissionPlanV1(entry_shape_id="shape1", nodes=(start, node, stop), terminal_shape_ids=("shape3",))
+    with pytest.raises(ProcessIRCompileError) as exc:
+        R.emit_process(plan, SymbolTableV1(symbols=()))
+    assert PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID in [d.code for d in exc.value.diagnostics]
+
+
+def test_exception_binding_must_agree_with_parameter_source():
+    exc_input = ExceptionInputV1(
+        message_template="boom",
+        parameter_source="none",           # says no binding...
+        binding={"binding": "caught_error"},  # ...but binding disagrees
+    )
+    start = _node(1, StartNoActionInputV1(), outgoing=(_t(1, 1, "shape2"),), origin="synthetic", role="start")
+    node = _node(2, exc_input, outgoing=())
+    plan = EmissionPlanV1(entry_shape_id="shape1", nodes=(start, node), terminal_shape_ids=("shape2",))
+    with pytest.raises(ProcessIRCompileError) as exc:
+        R.emit_process(plan, SymbolTableV1(symbols=()))
+    assert PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID in [d.code for d in exc.value.diagnostics]
+
+
+def test_registry_mapping_is_immutable():
+    # emit_fragment (or anything) must not be insertable after coverage validation.
+    with pytest.raises(TypeError):
+        R._REGISTRY["emit_fragment"] = R.registration_for("map")
 
 
 # ---------------------------------------------------------------------------
