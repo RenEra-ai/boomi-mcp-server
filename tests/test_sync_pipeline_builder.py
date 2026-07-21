@@ -207,12 +207,15 @@ def test_sync_pipeline_matches_golden_fixture():
         / "golden_xml"
         / "sync_pipeline_db_read_map_rest_send.xml"
     )
+    from boomi_mcp.categories.components.process_graph_verifier import verify_process_graph
+
     emitted = SyncPipelineBuilder.build(
         _linear_with_map(),
         name="Sync DB Read Map REST Send Golden",
         folder_name="Golden/Fixtures",
     )
     assert emitted == fixture.read_text()
+    assert verify_process_graph(emitted)["errors"] == []
 
 
 def test_build_xml_equals_process_flow_builder_passthrough():

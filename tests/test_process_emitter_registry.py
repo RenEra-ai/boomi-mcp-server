@@ -367,6 +367,38 @@ def test_registry_mapping_is_immutable():
         R._REGISTRY["emit_fragment"] = R.registration_for("map")
 
 
+def test_subclass_input_is_rejected_by_exact_type_check():
+    # A subclass of the expected input model (e.g. one smuggling raw legacy config)
+    # must NOT reach the emitter — exact type, not isinstance.
+    class _EvilMap(MapInputV1):
+        pass
+
+    node = EmissionNodeV1.model_construct(
+        ordinal=2,
+        shape_id="shape2",
+        origin="ir",
+        emitter_input=_EvilMap(map_id="MAP", userlabel="m"),
+        layout=EmissionLayoutV1(x=1.0, y=1.0),
+        outgoing=(_t(2, 1, "shape3"),),
+    )
+    idx = R._component_symbol_index(_map_symbols())
+    diags, reg, _narrowed = R._preflight_node(node, idx, R.CAPABILITY_PROCESS_IR_V1)
+    assert reg is None
+    assert PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID in [d.code for d in diags]
+
+
+def test_verifier_exception_becomes_value_free_internal(monkeypatch):
+    def boom(_xml):
+        raise RuntimeError("secret verifier detail")
+
+    monkeypatch.setattr(R, "verify_process_graph", boom)
+    with pytest.raises(ProcessIRCompileError) as exc:
+        R.emit_process(_linear_map_plan(), _map_symbols())
+    assert [d.code for d in exc.value.diagnostics] == [PROCESS_IR_COMPILE_INTERNAL]
+    assert exc.value.diagnostics[0].phase == "post_emission_verification"
+    assert "secret" not in str(exc.value)
+
+
 # ---------------------------------------------------------------------------
 # Whole-plan fail-closed: a bad later node blocks ALL emission
 # ---------------------------------------------------------------------------

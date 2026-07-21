@@ -65,7 +65,7 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Unknown-field behavior | The dict survives the spec envelope verbatim (§2.2); on lowering, extras inside the pipeline are rejected by `PipelineSpec(extra="forbid")` (§2.4); around it, the sync_pipeline top-level allowlist governs (§2.6) |
 | Error codes | `SYNC_PIPELINE_CONFIG_INVALID`, `SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED`, `SYNC_PIPELINE_STAGE_UNSUPPORTED` (see 1.3) |
 | Fixtures / tests | `tests/test_sync_pipeline_builder.py` (77 tests), `tests/test_integration_builder.py:6967,7161,7256,8190,8327`, `tests/test_process_flow_builder_listener.py`, `tests/test_builder_xml_invariants.py:1277`, `tests/test_schema_template_process_flow.py:602,656`, pattern e2e suites |
-| Assertion strength | Lowered-dict equality + differential XML equality vs `ProcessFlowBuilder.build` (see §3 — **no committed sync_pipeline golden**) |
+| Assertion strength | Lowered-dict equality + differential XML equality vs `ProcessFlowBuilder.build`, plus (since #138) a committed raw-byte golden `sync_pipeline_db_read_map_rest_send.xml` |
 | Adapter issue | #139 (the linear `sync_pipeline` adapter must produce a ProcessIRV1 root); lowering contract ownership moves under #137 |
 | Migration gate | Golden parity in #139: adapter output must match today's lowered `database_to_api_sync` config and XML before any rerouting |
 
@@ -557,10 +557,12 @@ from that same copy behind the `EmissionPlanV1` boundary. Compatibility facts:
   permanently excluded, `route` no entry).
 - **Zero normalized comparisons remain among the process-emitter goldens.** The eight C14N-compared
   fixtures (try_catch/notify/connector-scoped/exception/processcall/archetype) were converted to raw
-  `==`; three new raw fixtures freeze the previously structural-only paths (`listener_wss_start.xml`,
-  `dynamic_path_target_profile.xml`, `dynamic_path_source_ddp.xml`). **No existing golden's committed
-  bytes changed.** The `tests/fixtures/process_overrides/` `strip_text` behavior test stays (it
-  covers component-envelope serialization, which remains in `ProcessFlowBuilder`).
+  `==`; five new raw fixtures freeze previously structural-only or differential-only paths
+  (`listener_wss_start.xml`, `dynamic_path_target_profile.xml`, `dynamic_path_source_ddp.xml`,
+  `try_catch_dlq_error_subprocess.xml`, and the first committed `sync_pipeline_db_read_map_rest_send.xml`).
+  **No existing golden's committed bytes changed.** The `tests/fixtures/process_overrides/`
+  `strip_text` behavior test stays (it covers component-envelope serialization, which remains in
+  `ProcessFlowBuilder`).
 - No public schema/request/default/error/dispatch/plan/apply/verification behavior changed; the
   legacy builder keeps its external error contract. See
   `docs/architecture/PROCESS_EMITTER_REGISTRY_V1.md`.

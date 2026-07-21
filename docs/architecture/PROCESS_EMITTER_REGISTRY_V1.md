@@ -138,9 +138,11 @@ caught exception text is ever interpolated.
 Byte parity is the hard gate. Two layers of oracle:
 
 - **Existing raw-byte goldens** in `tests/fixtures/golden_xml/` (converted from C14N to raw `==` in
-  #138), plus three new frozen fixtures for the previously structural-only paths
-  (`listener_wss_start.xml`, `dynamic_path_target_profile.xml`, `dynamic_path_source_ddp.xml`). No
-  existing golden's committed bytes changed.
+  #138), plus five new frozen fixtures for previously structural-only or differential-only paths
+  (`listener_wss_start.xml`, `dynamic_path_target_profile.xml`, `dynamic_path_source_ddp.xml`,
+  `try_catch_dlq_error_subprocess.xml` — the catch-row error-subprocess ProcessCall variant, and
+  `sync_pipeline_db_read_map_rest_send.xml` — a direct byte anchor for a non-listener SyncPipeline
+  build). No existing golden's committed bytes changed.
 - **`tests/test_process_emitter_parity.py`**: for the three golden IR documents (`process_ir_v1.json`
   — `control_flow`, `linear_flow`, `wrapper_flow`, which together exercise **all 17** emitter kinds),
   the registry's `emit_process` shapes equal the UNCHANGED legacy builder's `<shapes>` byte-for-byte,

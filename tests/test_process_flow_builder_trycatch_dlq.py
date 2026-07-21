@@ -245,11 +245,14 @@ def test_error_subprocess_matches_golden_fixture():
     """Byte golden (#138): the catch-row error-subprocess ProcessCall variant had
     only structural coverage; freeze its bytes so the extracted processcall emitter
     is proven byte-identical."""
+    from boomi_mcp.categories.components.process_graph_verifier import verify_process_graph
+
     cfg = _config({"mode": "error_subprocess_ref", "process_id": _PROC_ID})
     emitted = ProcessFlowBuilder.build(
         cfg, name="TryCatch Error Subprocess Golden", folder_name="Golden/Fixtures"
     )
     assert emitted == _ERROR_SUBPROCESS_FIXTURE.read_text()
+    assert verify_process_graph(emitted)["errors"] == []
 
 
 def test_transform_is_inside_try_path():

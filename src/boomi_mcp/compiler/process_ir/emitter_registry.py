@@ -493,31 +493,38 @@ def _pre_doccacheremove(inp) -> Optional[str]:
     return None
 
 
+def _blank(value) -> bool:
+    return not isinstance(value, str) or not value.strip()
+
+
 def _pre_dataprocess(inp) -> Optional[str]:
-    # A Data Process with no steps serializes to a semantically broken empty
-    # ``<dataprocess></dataprocess>`` (well-formed XML the topology verifier will
-    # not catch); the legacy emitter raises on it, so the registry rejects it too.
+    # Mirror the legacy ``validate_config`` gate (process_flow_builder
+    # ``_validate_dataprocess_transform`` / ``_validate_dataprocess_profile_step``)
+    # — the authoritative authoring path REJECTS these before emission, so the
+    # registry preflight must reject them too (the bypass emitter is lenient by
+    # design, but it is not the contract). An empty ``<dataprocess>``, empty
+    # ``<script>`` or blank link element is well-formed XML the topology verifier
+    # cannot catch and would silently drop documents at runtime.
     if not inp.steps:
         return "data process requires at least one step"
     for step in inp.steps:
         if step.operation == "custom_scripting":
-            # The legacy emitter hard-codes groovy2 + useCache=true, so it can
-            # NEVER emit any other language or useCache=false. Requiring them keeps
-            # the registry within the legacy's byte-output space (an arbitrary
-            # ``language``/``use_cache`` would emit a form the legacy cannot).
             if step.language != rendering._DATAPROCESS_SCRIPT_LANGUAGE:
                 return "unsupported custom-scripting language"
             if step.use_cache is not True:
                 return "custom-scripting useCache must be true"
+            if _blank(step.script):
+                return "custom-scripting script must be a non-empty string"
         else:  # split_documents / combine_documents
-            pt = str(getattr(step, "profile_type", "")).strip().lower()
-            if pt not in _DP_PROFILE_KINDS:
+            if str(getattr(step, "profile_type", "")).strip().lower() not in _DP_PROFILE_KINDS:
                 return "unsupported data-process profile_type"
-            # A split/combine step MUST reference a profile; a blank id would emit
-            # ``profileId=""`` and (because the requirement scan skips blank ids)
-            # escape symbol resolution entirely.
-            if not getattr(step, "profile_id", ""):
-                return "data-process profile step requires a profile reference"
+            for key in ("profile_id", "link_element_key", "link_element_name"):
+                if _blank(getattr(step, key, "")):
+                    return f"data-process {key} must be a non-empty string"
+            if step.operation == "combine_documents" and _blank(
+                getattr(step, "combine_into_link_element_key", "")
+            ):
+                return "combine_into_link_element_key must be a non-empty string"
     return None
 
 
