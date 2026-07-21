@@ -94,7 +94,14 @@ _CONNECTOR_ACTION_TYPES = ("connector-action",)
 _MAP_TYPES = ("transform.map",)
 _CACHE_TYPES = ("documentcache",)
 _PROCESS_TYPES = ("process",)
-_PROFILE_TYPES = ("profile.json", "profile.xml")
+# A Data Process split/combine step declares its profile KIND (``json``/``xml``);
+# the resolved profile symbol must carry the matching Boomi component type. A
+# Set-Properties profile source already declares the full component type
+# (``profile.json``/``profile.xml``/``profile.db``), so it is required verbatim.
+# Requiring the SPECIFIC type (not the whole family) keeps the fail-closed check
+# from accepting a json-declared step backed only by an xml profile — a mismatch
+# the topology-only graph verifier cannot catch (#138 review).
+_DP_PROFILE_COMPONENT_TYPE = {"json": "profile.json", "xml": "profile.xml"}
 _SETPROP_PROFILE_TYPES = ("profile.db", "profile.json", "profile.xml")
 
 
@@ -427,11 +434,19 @@ def _req_map(inp) -> Tuple[SymbolRequirement, ...]:
 
 
 def _req_dataprocess(inp) -> Tuple[SymbolRequirement, ...]:
-    return tuple(
-        SymbolRequirement("profile", step.profile_id, _PROFILE_TYPES)
-        for step in inp.steps
-        if getattr(step, "profile_id", "")
-    )
+    reqs = []
+    for step in inp.steps:
+        profile_id = getattr(step, "profile_id", "")
+        if not profile_id:
+            continue
+        kind = str(getattr(step, "profile_type", "")).strip().lower()
+        # Require the SPECIFIC matching component type. An unsupported kind maps to
+        # nothing, so the requirement can never be satisfied (fails closed); the
+        # precondition also flags it as EMITTER_INPUT_INVALID.
+        component_type = _DP_PROFILE_COMPONENT_TYPE.get(kind)
+        types = (component_type,) if component_type else ()
+        reqs.append(SymbolRequirement("profile", profile_id, types))
+    return tuple(reqs)
 
 
 def _req_cache(inp) -> Tuple[SymbolRequirement, ...]:
@@ -439,11 +454,17 @@ def _req_cache(inp) -> Tuple[SymbolRequirement, ...]:
 
 
 def _req_setproperties(inp) -> Tuple[SymbolRequirement, ...]:
-    return tuple(
-        SymbolRequirement("profile", source.profile_id, _SETPROP_PROFILE_TYPES)
-        for source in inp.source_values
-        if source.value_type == "profile"
-    )
+    # Each profile source declares its full component type (``profile.json`` etc.);
+    # require exactly that. A declared type outside the supported set can never be
+    # satisfied by a valid profile symbol, so it fails closed.
+    reqs = []
+    for source in inp.source_values:
+        if source.value_type != "profile":
+            continue
+        declared = source.profile_type
+        types = (declared,) if declared in _SETPROP_PROFILE_TYPES else ()
+        reqs.append(SymbolRequirement("profile", source.profile_id, types))
+    return tuple(reqs)
 
 
 def _req_process(inp) -> Tuple[SymbolRequirement, ...]:
@@ -472,6 +493,11 @@ def _pre_doccacheremove(inp) -> Optional[str]:
 
 
 def _pre_dataprocess(inp) -> Optional[str]:
+    # A Data Process with no steps serializes to a semantically broken empty
+    # ``<dataprocess></dataprocess>`` (well-formed XML the topology verifier will
+    # not catch); the legacy emitter raises on it, so the registry rejects it too.
+    if not inp.steps:
+        return "data process requires at least one step"
     for step in inp.steps:
         pt = getattr(step, "profile_type", None)
         if pt is not None and str(pt).strip().lower() not in _DP_PROFILE_KINDS:
@@ -554,12 +580,18 @@ def registration_for(emitter_kind: str) -> Optional[EmitterRegistration]:
 # ---------------------------------------------------------------------------
 
 
-def _component_type_index(symbols: SymbolTableV1) -> Dict[str, set]:
-    """component_id -> set of component_types (duplicate ids collapse by type)."""
-    index: Dict[str, set] = {}
+def _component_symbol_index(symbols: SymbolTableV1) -> Dict[str, tuple]:
+    """component_id -> the resolved symbols carrying it, in canonical ref order.
+
+    Keeps the actual ``ComponentSymbolV1`` objects (not just their types) so the
+    emitter context can advertise the real resolved symbols. ``SymbolTableV1`` is
+    already sorted by ``ref``, so iteration preserves canonical order; two refs may
+    share one component id (intentional reuse), so the value is a tuple.
+    """
+    index: Dict[str, list] = {}
     for symbol in symbols.symbols:
-        index.setdefault(symbol.component_id, set()).add(symbol.component_type)
-    return index
+        index.setdefault(symbol.component_id, []).append(symbol)
+    return {cid: tuple(syms) for cid, syms in index.items()}
 
 
 def _cardinality_ok(card: OutgoingCardinality, inp, node: EmissionNodeV1) -> bool:
@@ -605,17 +637,21 @@ def _preflight_node(
             diagnostic(PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID, "xml_emission", path,
                        internal_node_id=node.cfg_node_id)
         )
-    narrowed: List[object] = []
+    matched: List[object] = []
     for req in reg.requirements(inp):
-        types = id_index.get(req.component_id)
-        if not types or not any(t in types for t in req.component_types):
+        candidates = id_index.get(req.component_id, ())
+        matches = [s for s in candidates if s.component_type in req.component_types]
+        if not matches:
             diags.append(
                 diagnostic(PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED, "reference_resolution", path,
                            internal_node_id=node.cfg_node_id)
             )
         else:
-            narrowed.append(req)
-    return diags, reg, tuple(narrowed)
+            matched.extend(matches)
+    # Deduplicate by ref and return in canonical ref order (a symbol id may back
+    # more than one requirement/slot); these are the ACTUAL resolved symbols.
+    narrowed = tuple(sorted({s.ref: s for s in matched}.values(), key=lambda s: s.ref))
+    return diags, reg, narrowed
 
 
 def _verifier_summary(result: Mapping) -> ProcessVerifierSummaryV1:
@@ -650,7 +686,7 @@ def emit_process(
     failure raises a single ``ProcessIRCompileError`` with value-free diagnostics
     and produces no output.
     """
-    id_index = _component_type_index(resolved_symbols)
+    id_index = _component_symbol_index(resolved_symbols)
 
     # Whole-plan preflight — accumulate every node's diagnostics, then abort once.
     all_diags: List[CompilerDiagnostic] = []

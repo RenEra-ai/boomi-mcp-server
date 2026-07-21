@@ -22,6 +22,7 @@ if _ROOT not in sys.path:
 from boomi_mcp.compiler.process_ir import emitter_registry as R
 from boomi_mcp.compiler.process_ir.contracts import (
     ConnectorActionInputV1,
+    DataProcessInputV1,
     DocCacheRetrieveInputV1,
     EmissionLayoutV1,
     EmissionNodeV1,
@@ -245,6 +246,66 @@ def test_doccacheretrieve_precondition_load_all_documents():
     with pytest.raises(ProcessIRCompileError) as exc:
         R.emit_process(plan, symbols)
     assert PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID in [d.code for d in exc.value.diagnostics]
+
+
+# ---------------------------------------------------------------------------
+# Data Process: non-empty steps + profile-kind must match the resolved symbol
+# ---------------------------------------------------------------------------
+
+
+def _dataprocess_plan(dp_input, *, outgoing=None):
+    if outgoing is None:
+        outgoing = (_t(2, 1, "shape3"),)
+    start = _node(1, StartNoActionInputV1(), outgoing=(_t(1, 1, "shape2"),), origin="synthetic", role="start")
+    dp = _node(2, dp_input, outgoing=outgoing)
+    stop = _node(3, StopInputV1(), origin="synthetic", role="terminal_stop")
+    return EmissionPlanV1(entry_shape_id="shape1", nodes=(start, dp, stop), terminal_shape_ids=("shape3",))
+
+
+_SPLIT_XML_STEP = {
+    "operation": "split_documents",
+    "key": 1,
+    "index": 1,
+    "profile_type": "xml",
+    "profile_id": "PROF",
+    "link_element_key": "k",
+    "link_element_name": "n",
+}
+
+
+def test_empty_dataprocess_is_rejected():
+    plan = _dataprocess_plan(DataProcessInputV1(steps=(), userlabel="dp"))
+    with pytest.raises(ProcessIRCompileError) as exc:
+        R.emit_process(plan, SymbolTableV1(symbols=()))
+    assert PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID in [d.code for d in exc.value.diagnostics]
+
+
+def test_dataprocess_profile_kind_must_match_symbol_type():
+    plan = _dataprocess_plan(DataProcessInputV1(steps=(_SPLIT_XML_STEP,), userlabel="dp"))
+    # An xml-declared step whose symbol is only profile.json must NOT resolve.
+    json_syms = SymbolTableV1(symbols=(
+        ComponentSymbolV1(ref="p", component_id="PROF", component_type="profile.json"),
+    ))
+    with pytest.raises(ProcessIRCompileError) as exc:
+        R.emit_process(plan, json_syms)
+    assert PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED in [d.code for d in exc.value.diagnostics]
+    # The matching profile.xml symbol resolves and emits clean.
+    xml_syms = SymbolTableV1(symbols=(
+        ComponentSymbolV1(ref="p", component_id="PROF", component_type="profile.xml"),
+    ))
+    assert R.emit_process(plan, xml_syms).verifier.errors == ()
+
+
+def test_resolved_symbols_are_actual_component_symbols():
+    # EmitterContext.resolved_symbols must carry the resolved ComponentSymbolV1
+    # objects, not the SymbolRequirement descriptors.
+    idx = R._component_symbol_index(_map_symbols())
+    diags, reg, narrowed = R._preflight_node(
+        _linear_map_plan().nodes[1], idx, R.CAPABILITY_PROCESS_IR_V1
+    )
+    assert diags == []
+    assert narrowed and all(isinstance(s, ComponentSymbolV1) for s in narrowed)
+    assert [s.component_id for s in narrowed] == ["MAP"]
 
 
 # ---------------------------------------------------------------------------

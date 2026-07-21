@@ -48,50 +48,78 @@ GOLDEN_DOCS = json.loads((_FIXTURES / "process_ir_v1.json").read_text())
 _SHARED = json.loads((_FIXTURES / "flow_sequence_compat_cases.json").read_text())["shared"]
 _BINDINGS = _SHARED["bindings"]
 
-# Canonical Boomi component types per reference role — the registry validates
-# these (unlike the compiler's sentinel-typed symbol fixtures).
-_ROLE_TYPE = {
-    "connection_ref": "connector-settings",
-    "operation_ref": "connector-action",
-    "map_ref": "transform.map",
-    "cache_ref": "documentcache",
-    "process_ref": "process",
-}
-_REF_FIELDS = {
-    "connector": ("connection_ref", "operation_ref"),
-    "map": ("map_ref",),
-    "cache_put": ("cache_ref",),
-    "cache_get": ("cache_ref",),
-    "document_cache_retrieve": ("cache_ref",),
-    "cache_remove": ("cache_ref",),
-    "process_call": ("process_ref",),
-}
+# A Data Process step declares its profile KIND (json/xml); the registry requires
+# the matching Boomi component type on the resolved symbol.
+_DP_PROFILE_COMPONENT_TYPE = {"json": "profile.json", "xml": "profile.xml"}
 
 
-def _canonical_symbols(cfg) -> SymbolTableV1:
-    ref_type = {}
+def _sentinel_symbols(cfg) -> SymbolTableV1:
+    """A symbol per authored ref, typed only enough for lowering (which resolves
+    ref -> component_id and ignores the type). Component id == the ref token."""
+    refs = set()
     for node in cfg.nodes:
         s = node.semantic
-        for field in _REF_FIELDS.get(s.semantic_kind, ()):
-            ref_type[getattr(s, field)] = _ROLE_TYPE[field]
-        if s.semantic_kind == "data_process":
-            for step in s.steps:
-                if getattr(step, "profile_ref", None):
-                    ref_type[step.profile_ref] = "profile.json"
-        if s.semantic_kind == "set_property":
-            for src in s.source_values:
-                if getattr(src, "profile_ref", None):
-                    ref_type[src.profile_ref] = "profile.json"
+        for field in ("connection_ref", "operation_ref", "map_ref", "cache_ref", "process_ref"):
+            if getattr(s, field, None):
+                refs.add(getattr(s, field))
+        for step in getattr(s, "steps", ()):
+            if getattr(step, "profile_ref", None):
+                refs.add(step.profile_ref)
+        for src in getattr(s, "source_values", ()):
+            if getattr(src, "profile_ref", None):
+                refs.add(src.profile_ref)
     symbols = []
-    for ref in sorted(ref_type):
-        binding = _BINDINGS.get(ref)
+    for ref in sorted(refs):
+        b = _BINDINGS.get(ref)
         symbols.append(
             ComponentSymbolV1(
                 ref=ref,
                 component_id=ref,
-                component_type=ref_type[ref],
-                connector_type=binding["connector_type"] if binding else None,
-                action_type=binding["action_type"] if binding else None,
+                component_type="sentinel",
+                connector_type=b["connector_type"] if b else None,
+                action_type=b["action_type"] if b else None,
+            )
+        )
+    return SymbolTableV1(symbols=tuple(symbols))
+
+
+def _symbols_from_plan(plan) -> SymbolTableV1:
+    """The registry-canonical symbol table, typed from the plan's RESOLVED emitter
+    inputs — exactly the component types the registry requirement check validates
+    (component id == the resolved id, which equals the authored ref token)."""
+    id_type = {}
+    for node in plan.nodes:
+        e = node.emitter_input
+        k = e.emitter_kind
+        if k in ("connectoraction_source", "connectoraction_target"):
+            id_type[e.connection_id] = "connector-settings"
+            id_type[e.operation_id] = "connector-action"
+        elif k == "map":
+            id_type[e.map_id] = "transform.map"
+        elif k in ("doccacheload", "doccacheretrieve", "doccacheremove"):
+            id_type[e.document_cache_id] = "documentcache"
+        elif k == "processcall":
+            id_type[e.process_id] = "process"
+        elif k == "dataprocess":
+            for st in e.steps:
+                pid = getattr(st, "profile_id", "")
+                if pid:
+                    kind = str(getattr(st, "profile_type", "")).strip().lower()
+                    id_type[pid] = _DP_PROFILE_COMPONENT_TYPE.get(kind, "profile.json")
+        elif k == "setproperties_step":
+            for src in e.source_values:
+                if src.value_type == "profile":
+                    id_type[src.profile_id] = src.profile_type
+    symbols = []
+    for cid in sorted(id_type):
+        b = _BINDINGS.get(cid)
+        symbols.append(
+            ComponentSymbolV1(
+                ref=cid,
+                component_id=cid,
+                component_type=id_type[cid],
+                connector_type=b["connector_type"] if b else None,
+                action_type=b["action_type"] if b else None,
             )
         )
     return SymbolTableV1(symbols=tuple(symbols))
@@ -120,8 +148,8 @@ def _build_legacy(config, name="ParityProcess"):
 def _emit(doc_name):
     ir = parse_process_ir_v1(GOLDEN_DOCS[doc_name])
     cfg = lowering.lower_process_ir_to_cfg(ir)
-    symbols = _canonical_symbols(cfg)
-    plan = lowering.lower_cfg_to_emission_plan(cfg, symbols)
+    plan = lowering.lower_cfg_to_emission_plan(cfg, _sentinel_symbols(cfg))
+    symbols = _symbols_from_plan(plan)
     return ir, emit_process(plan, symbols)
 
 
