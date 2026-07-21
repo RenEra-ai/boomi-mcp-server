@@ -83,7 +83,7 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Unknown-field behavior | Fail-closed at both levels — see §2.6 |
 | Error codes | `SYNC_PIPELINE_CONFIG_INVALID` (unknown top-level key, bad pipeline, non-control-flow gated blocks — `:6839-6862`), `SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED` (`branch`/`process_calls` gated keys `:6844-6847`, non-`ordering` edges `:6890-6900`, non-linear chains `:7015-7020`), `SYNC_PIPELINE_STAGE_UNSUPPORTED` (reserved stage kinds `:6905-6915`) |
 | Fixtures / tests | `tests/test_sync_pipeline_builder.py` (dedicated, 77 tests); plus the reader suites in 1.2 |
-| Assertion strength | Differential: `lower_config` output equals the hand-written `database_to_api_sync` core dict (`tests/test_sync_pipeline_builder.py:151-189`) and emitted XML is byte-identical to `ProcessFlowBuilder.build` of that core (`:191-195`). **No committed `sync_pipeline_*.xml` golden exists** (§3) |
+| Assertion strength | Differential: `lower_config` output equals the hand-written `database_to_api_sync` core dict (`tests/test_sync_pipeline_builder.py:151-189`) and emitted XML is byte-identical to `ProcessFlowBuilder.build` of that core (`:191-195`); since #138 there is ALSO a committed raw-byte golden `sync_pipeline_db_read_map_rest_send.xml` (§3.4) |
 | Adapter issue | #139 (adapter + golden parity); compile contracts #137 |
 | Migration gate | #139 must add golden parity fixtures for the lowered surface before the adapter is rerouted through ProcessIRV1; the reject-don't-drop allowlists must be preserved verbatim (legacy codes stay stable per ADR-001) |
 
@@ -414,20 +414,23 @@ JSON examples are structural round-trips.
 | `m11_cache_property_basic.xml` | `tests/test_m11_composed_examples.py:73` |
 | `m11_processproperty_map_function.xml` | `tests/test_m11_composed_examples.py:96` |
 
-### 3.2 Canonicalized XML equality (`ET.canonicalize(emitted) == ET.canonicalize(golden)`)
+### 3.2 Formerly canonicalized goldens — converted to raw byte equality (#138)
 
-Whitespace/attribute-order tolerant — NOT byte-locked:
+These eight were compared via `ET.canonicalize(...)` (whitespace/attribute-order tolerant) until
+#138 (M12.3), which converted them to raw `==` byte equality so the emitter-registry extraction has a
+strict byte gate. They now belong to the byte-locked set (§3.1); no committed bytes changed in the
+conversion (each already reproduced byte-for-byte).
 
 | Golden | Comparing test |
 |---|---|
-| `try_catch_dlq_document_cache.xml` | `tests/test_process_flow_builder_trycatch_dlq.py:123` |
-| `try_catch_dlq_retry_count_2.xml` | `tests/test_process_flow_builder_trycatch_dlq.py:142` |
-| `try_catch_notify_dlq_document_cache.xml` | `tests/test_process_flow_builder_trycatch_dlq.py:444` |
-| `connector_scoped_trycatch_notify_dlq_document_cache.xml` | `tests/test_process_flow_builder_trycatch_dlq.py:689` |
-| `exception_catch_path.xml` | `tests/test_process_flow_builder_trycatch_dlq.py:882` |
-| `processcall_standalone_parent.xml` | `tests/test_wrapper_subprocess_builder.py:82` |
-| `try_catch_dlq_document_cache_archetype.xml` | `tests/patterns/test_database_to_api_sync_dlq.py:445` |
-| `try_catch_notify_dlq_document_cache_archetype.xml` | `tests/patterns/test_database_to_api_sync_dlq.py:552` |
+| `try_catch_dlq_document_cache.xml` | `tests/test_process_flow_builder_trycatch_dlq.py` |
+| `try_catch_dlq_retry_count_2.xml` | `tests/test_process_flow_builder_trycatch_dlq.py` |
+| `try_catch_notify_dlq_document_cache.xml` | `tests/test_process_flow_builder_trycatch_dlq.py` |
+| `connector_scoped_trycatch_notify_dlq_document_cache.xml` | `tests/test_process_flow_builder_trycatch_dlq.py` |
+| `exception_catch_path.xml` | `tests/test_process_flow_builder_trycatch_dlq.py` |
+| `processcall_standalone_parent.xml` | `tests/test_wrapper_subprocess_builder.py` |
+| `try_catch_dlq_document_cache_archetype.xml` | `tests/patterns/test_database_to_api_sync_dlq.py` |
+| `try_catch_notify_dlq_document_cache_archetype.xml` | `tests/patterns/test_database_to_api_sync_dlq.py` |
 
 ### 3.3 Structural verification (no golden-file comparison)
 
@@ -439,19 +442,25 @@ Whitespace/attribute-order tolerant — NOT byte-locked:
   (`:134-144`).
 - `tests/test_process_graph_verifier.py` — verifier-report assertions over built XML.
 
-### 3.4 No `sync_pipeline_*.xml` golden exists
+### 3.4 `sync_pipeline_*.xml` golden coverage
 
-There is **no committed golden XML for sync_pipeline emission**. Its XML coverage rides on:
+Since #138 (M12.3) there is ONE committed raw-byte golden for sync_pipeline emission —
+`sync_pipeline_db_read_map_rest_send.xml` (`tests/test_sync_pipeline_builder.py`
+`test_sync_pipeline_matches_golden_fixture`), a direct byte anchor for a non-listener
+db-read → map → rest-send build (the differential `xml_sync == xml_core` check compares two callers
+through the ONE shared renderer, so it cannot catch a drift in that shared template; the committed
+fixture pins the actual bytes). The remaining sync_pipeline XML coverage still rides on:
 
 1. **Differential equality** in `tests/test_sync_pipeline_builder.py`: `lower_config` output must
-   equal the hand-written `database_to_api_sync` core dict (`_CORE_CONFIG` `:151`, asserts
-   `:169-189`), and `SyncPipelineBuilder.build` XML must be byte-identical to
-   `ProcessFlowBuilder.build` of that core (`test_build_xml_equals_process_flow_builder_with_map`
-   `:191-195`) — equality against another builder's live output, not against a committed file.
+   equal the hand-written `database_to_api_sync` core dict (`_CORE_CONFIG` `:151`), and
+   `SyncPipelineBuilder.build` XML must be byte-identical to `ProcessFlowBuilder.build` of that core
+   (`test_build_xml_equals_process_flow_builder_with_map`) — equality against another builder's live
+   output.
 2. The lowered `database_to_api_sync` surface's own goldens (the `try_catch_*` /
    `*document_cache*` archetype goldens in §3.2 and the shape goldens in §3.1).
 
-Adding true golden parity fixtures for the adapter is #139 scope.
+Broadening golden parity across every sync_pipeline variant (listener, fetch/write, SOAP) remains
+#139 adapter scope; #138 added the first committed sync_pipeline byte anchor.
 
 ### 3.5 JSON example fixtures (M8 / M11 / authoring)
 
@@ -508,7 +517,7 @@ verify surfaces · #147 M12.12 complete migration, documentation, examples, and 
 | Surface | Owning issue(s) | Migration gate (must close in the owning issue — never silently tightened) |
 |---|---|---|
 | `IntegrationSpecV1.pipeline` | #139 | Silent-precedence baseline (§2.5) replaced by derived equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT`; the field becomes a compiler-derived summary for a single-process spec, a preserved frozen inert value for a zero-process spec, and (on the strict surface / after announced V1 deprecation) a rejected ambiguous input for a multi-process spec — V1 preserves it inert until then (ADR §5) |
-| `main_process.config.pipeline` / `sync_pipeline` | #139 (adapter), #137 (lowering contracts) | Golden parity for the lowered config + XML (§3.4 has no committed golden today); `SYNC_PIPELINE_*` codes stay stable until the adapter mapping review |
+| `main_process.config.pipeline` / `sync_pipeline` | #139 (adapter), #137 (lowering contracts) | Golden parity for the lowered config + XML (§3.4 — #138 added the first committed sync_pipeline golden; #139 broadens variant coverage); `SYNC_PIPELINE_*` codes stay stable until the adapter mapping review |
 | `flow_sequence` | #136 (new strict ProcessIRV1 models — **LANDED** 2026-07-19, dark: models + `PROCESS_IR_*` codes in `boomi_mcp.errors` + goldens, zero legacy-surface change; §3.7), #139 (legacy config-root adapter), #143 (semantic validation) | #136's half of this gate is CLOSED: the **new** ProcessIRV1 models are strict and the frozen vocabulary is losslessly representable (codec parity, §3.7); the **legacy** permissive config root (§2.7 — unknown top-level keys around a flow_sequence are ignored) stays with **#139**'s adapter, which maps today's accepted extras as a compatibility no-op (still accepted) — never a quiet allowlist add and never rejected without an announced deprecation (§9); `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` stays stable |
 | `wrapper_subprocess` | #139 | **Root/call extras accepted-and-ignored** (§2.8) is a gate: the adapter maps them as a compatibility no-op (still accepted), never rejecting a currently-accepted extra without an announced deprecation (§9); `PLAINTEXT_SECRET_REJECTED` and the `PROCESS_REF_*` codes stay stable |
 | Legacy `source`/`transform`/`target` blocks | #139 | Adapter + parity gates before any deprecation (ADR-001 versioning policy) |
