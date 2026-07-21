@@ -542,3 +542,25 @@ announced-policy-before-removal gate** — #139 lands the derived-equality recon
 currently-accepted contradictory/ambiguous input ships only behind an announced deprecation with a
 documented replacement surface (not by design at #139's cutover, and not via the no-op rule).
 Un-goldened parity gaps are closed by establishing baselines (§3.4), not by a no-op.
+
+## #138 M12.3 — process-emitter registry extraction (mechanical consolidation)
+
+The verified shape serializers were extracted out of `ProcessFlowBuilder` into
+`categories/components/builders/process_emitters/` (a single copy of every template + layout
+primitives), and a typed, test-only registry (`compiler/process_ir/emitter_registry.py`) now emits
+from that same copy behind the `EmissionPlanV1` boundary. Compatibility facts:
+
+- **17 registry keys / 16 model classes** (the `connectoraction_source`/`connectoraction_target`
+  keys share `ConnectorActionInputV1`). Every currently-emitted process shape kind has exactly one
+  registered typed emitter or a documented legacy-only exception (`_emit_start_listen` → #140,
+  `_emit_catcherrors`/`_emit_notify` → #142, connector `dynamic_path` → #139/#140, `emit_fragment`
+  permanently excluded, `route` no entry).
+- **Zero normalized comparisons remain among the process-emitter goldens.** The eight C14N-compared
+  fixtures (try_catch/notify/connector-scoped/exception/processcall/archetype) were converted to raw
+  `==`; three new raw fixtures freeze the previously structural-only paths (`listener_wss_start.xml`,
+  `dynamic_path_target_profile.xml`, `dynamic_path_source_ddp.xml`). **No existing golden's committed
+  bytes changed.** The `tests/fixtures/process_overrides/` `strip_text` behavior test stays (it
+  covers component-envelope serialization, which remains in `ProcessFlowBuilder`).
+- No public schema/request/default/error/dispatch/plan/apply/verification behavior changed; the
+  legacy builder keeps its external error contract. See
+  `docs/architecture/PROCESS_EMITTER_REGISTRY_V1.md`.

@@ -174,3 +174,12 @@ Published as the immutable `PROCESS_IR_V1_CAPABILITIES` manifest (not an authore
   the gated control-flow/error-handling capabilities; **#143** CFG-aware semantic validation.
 - Strictness applies to the **new** IR surface only. No existing request contract is removed,
   reinterpreted, or tightened by #136; the #135 freeze suite runs unchanged.
+
+## #138 M12.3 update — EmissionPlanV1 has a verified internal consumer
+
+`EmissionPlanV1` now has a **test-only** consumer: the process-emitter registry (#138,
+`compiler/process_ir/emitter_registry.py`, `emit_process`). It reuses the byte-proven shape
+serializers extracted into `process_emitters/` and emits XML byte-identical to the legacy builder for
+all 17 emitter kinds. There is still **no MCP/runtime adapter** — the registry is imported directly,
+never exported, and invoked by no tool or production builder; #139 owns the production cutover. See
+`docs/architecture/PROCESS_EMITTER_REGISTRY_V1.md`.

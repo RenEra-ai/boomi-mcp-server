@@ -16,8 +16,9 @@ exports (no XML invented from docs):
     error branch.
 
 Structure is asserted with ElementTree (matching test_process_flow_builder.py)
-plus a committed golden fixture compared via XML canonicalization (robust to
-attribute ordering — the repo deliberately commits no byte-exact fixtures).
+plus a committed golden fixture compared byte-for-byte (raw ``==``): the M12.3
+(#138) emitter-registry extraction makes byte parity the hard gate, so these
+builder-generated goldens are frozen as exact bytes, not canonicalized.
 """
 
 from __future__ import annotations
@@ -112,15 +113,15 @@ def _by_type(shapes):
 def test_document_cache_matches_golden_fixture():
     """The canonical document_cache_ref build must match the committed golden.
 
-    Compared via C14N canonicalization so attribute ordering is not brittle —
-    if an emitter changes shape structure, the canonical forms diverge and
-    this fails (regenerate the fixture deliberately, not accidentally)."""
+    Compared byte-for-byte (raw ``==``): the builder emission is deterministic
+    (fixed attribute order), so any byte change fails this and must be a
+    deliberate fixture regeneration, not an accidental drift (#138 byte gate)."""
     cfg = _config({"mode": "document_cache_ref", "document_cache_id": _CACHE_ID})
     emitted = ProcessFlowBuilder.build(
         cfg, name="TryCatch DLQ Golden", folder_name="Golden/Fixtures"
     )
     expected = _FIXTURE.read_text()
-    assert ET.canonicalize(emitted) == ET.canonicalize(expected)
+    assert emitted == expected
 
 
 _FIXTURE_RETRY2 = (
@@ -139,7 +140,7 @@ def test_document_cache_retry_count_2_matches_golden_fixture():
     emitted = ProcessFlowBuilder.build(
         cfg, name="TryCatch DLQ Retry2 Golden", folder_name="Golden/Fixtures"
     )
-    assert ET.canonicalize(emitted) == ET.canonicalize(_FIXTURE_RETRY2.read_text())
+    assert emitted == _FIXTURE_RETRY2.read_text()
 
 
 @pytest.mark.parametrize("retry_count", [1, 2, 5])
@@ -441,7 +442,7 @@ def test_notify_document_cache_matches_golden_fixture():
     emitted = ProcessFlowBuilder.build(
         cfg, name="TryCatch Notify DLQ Golden", folder_name="Golden/Fixtures"
     )
-    assert ET.canonicalize(emitted) == ET.canonicalize(_NOTIFY_FIXTURE.read_text())
+    assert emitted == _NOTIFY_FIXTURE.read_text()
 
 
 def test_notify_document_cache_shape_sequence():
@@ -686,7 +687,7 @@ def test_connector_scope_matches_golden_fixture():
     emitted = ProcessFlowBuilder.build(
         cfg, name="Connector Scope DLQ Golden", folder_name="Golden/Fixtures"
     )
-    assert ET.canonicalize(emitted) == ET.canonicalize(_CONNECTOR_SCOPE_FIXTURE.read_text())
+    assert emitted == _CONNECTOR_SCOPE_FIXTURE.read_text()
 
 
 def test_connector_scope_emits_two_try_catch_with_retry_placement():
@@ -879,7 +880,7 @@ def test_exception_catch_path_matches_golden_fixture():
         cfg, name="Exception Catch Path", folder_name="Golden/Fixtures"
     )
     expected = _EXCEPTION_FIXTURE.read_text()
-    assert ET.canonicalize(emitted) == ET.canonicalize(expected)
+    assert emitted == expected
 
 
 def test_exception_terminal_after_dlq_route():

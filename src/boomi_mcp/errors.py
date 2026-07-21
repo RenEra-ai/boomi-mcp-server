@@ -79,6 +79,16 @@ PROCESS_IR_COMPILE_INTERNAL = "PROCESS_IR_COMPILE_INTERNAL"
 PROCESS_IR_COMPILE_NONDETERMINISTIC = "PROCESS_IR_COMPILE_NONDETERMINISTIC"
 PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID = "PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID"
 
+# --- ProcessIR process-emitter registry (M12.3 / issue #138) ------------------
+# Fail-closed defects raised by the typed emitter registry when it turns an
+# emission plan into process XML. Emitter-facing compiler defects; the legacy
+# builder entrypoints keep their existing external error contract unchanged.
+PROCESS_IR_COMPILE_EMITTER_MISSING = "PROCESS_IR_COMPILE_EMITTER_MISSING"
+PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID = "PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID"
+PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED = "PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED"
+PROCESS_IR_COMPILE_XML_INVALID = "PROCESS_IR_COMPILE_XML_INVALID"
+PROCESS_IR_COMPILE_VERIFIER_FAILED = "PROCESS_IR_COMPILE_VERIFIER_FAILED"
+
 
 @dataclass(frozen=True)
 class ErrorCodeSpec:
@@ -377,6 +387,53 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "synthetic-shape synthesis."
             ),
             owner="#137",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_COMPILE_EMITTER_MISSING,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "No registered emitter for an emission-plan node kind (or it is not "
+                "supported at the current capability level)."
+            ),
+            owner="#138",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "An emitter input is invalid: wrong typed input for the node kind, a bad "
+                "renderer precondition, or an outgoing-cardinality mismatch."
+            ),
+            owner="#138",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A required component symbol is absent, or present only with an "
+                "incompatible component type, for an emitter node."
+            ),
+            owner="#138",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_COMPILE_XML_INVALID,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "Emitted process XML is malformed, or its shape count/name/type "
+                "disagrees with the emission plan."
+            ),
+            owner="#138",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_COMPILE_VERIFIER_FAILED,
+            category="process_ir",
+            retryable=False,
+            summary="The process graph verifier reported errors on registry-emitted XML.",
+            owner="#138",
         ),
     )
 }

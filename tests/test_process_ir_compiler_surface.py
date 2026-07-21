@@ -76,6 +76,13 @@ FORBIDDEN_NAMES = (
     "routed_target",
     "start_noaction",
     "provenance_path",
+    # #138 M12.3 process-emitter registry — dark, test-only, never a public surface.
+    "emit_process",
+    "EmitterRegistration",
+    "EmitterContext",
+    "ProcessEmissionArtifactV1",
+    "ProcessVerifierSummaryV1",
+    "SymbolRequirement",
 )
 
 
@@ -204,6 +211,37 @@ def test_compiler_package_is_importable_directly():
     from boomi_mcp.compiler.process_ir import compile_process_ir_v1
 
     assert callable(compile_process_ir_v1)
+
+
+def test_process_emitter_registry_stays_out_of_the_package_all():
+    """#138's registry is a TEST-ONLY consumer imported directly — it must not be
+    re-exported through the compiler package's ``__all__`` (which would make it a
+    public surface)."""
+    from boomi_mcp.compiler.process_ir import __all__ as compiler_all
+
+    for name in ("emit_process", "EmitterRegistration", "ProcessEmissionArtifactV1"):
+        assert name not in compiler_all
+
+
+def test_importing_the_compiler_package_does_not_eager_import_the_registry():
+    """Importing the compiler package must not pull in the emitter registry (and
+    thereby the graph verifier), keeping the dark package's import graph minimal."""
+    import subprocess
+
+    code = (
+        "import sys; import boomi_mcp.compiler.process_ir; "
+        "print('RESULT:' + str("
+        "'boomi_mcp.compiler.process_ir.emitter_registry' in sys.modules))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, PYTHONPATH=_src),
+        cwd=_project_root,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "RESULT:False" in result.stdout, result.stdout
 
 
 # ---------------------------------------------------------------------------

@@ -442,7 +442,7 @@ def _build_archetype_process_xml(spec: dict, name: str = "Archetype DLQ Golden")
 def test_archetype_document_cache_ref_matches_golden():
     spec = _emit({"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}})
     emitted = _build_archetype_process_xml(spec)
-    assert ET.canonicalize(emitted) == ET.canonicalize(_GOLDEN.read_text())
+    assert emitted == _GOLDEN.read_text()
 
 
 def test_archetype_dlq_shape_sequence_is_trycatch_with_map_and_dlq():
@@ -549,7 +549,7 @@ def test_catch_notify_operational_intent_records_no_echo():
 def test_archetype_notify_matches_golden():
     spec = _emit(_WIRED_DC, catch_notify=_CATCH_NOTIFY)
     emitted = _build_archetype_process_xml(spec, name="Archetype Notify DLQ Golden")
-    assert ET.canonicalize(emitted) == ET.canonicalize(_NOTIFY_GOLDEN.read_text())
+    assert emitted == _NOTIFY_GOLDEN.read_text()
 
 
 def test_archetype_notify_shape_sequence():

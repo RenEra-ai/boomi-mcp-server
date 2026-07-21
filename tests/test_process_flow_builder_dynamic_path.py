@@ -458,3 +458,40 @@ def test_dynamic_path_adapter_matches_generic_set_ddp_emission():
         3,
     )
     assert adapter_xml == generic_xml
+
+
+# ---------------------------------------------------------------------------
+# Byte goldens (issue #138 M12.3): the connector dynamic-path branch and the
+# Set-Properties path emitters had only structural coverage before the
+# emitter-registry extraction. Freeze the current builder bytes so the move
+# to the shared renderers is proven byte-identical, not merely structurally
+# equivalent. Fixtures were generated through the authoritative builder.
+# ---------------------------------------------------------------------------
+
+from pathlib import Path  # noqa: E402
+
+from boomi_mcp.categories.components.process_graph_verifier import (  # noqa: E402
+    verify_process_graph,
+)
+
+_GOLDEN_DIR = Path(__file__).resolve().parent / "fixtures" / "golden_xml"
+
+
+def test_dynamic_path_target_profile_matches_golden():
+    xml = ProcessFlowBuilder.build(
+        _config(dynamic_path=_dynamic_path()),
+        name="Dynamic Path Profile Golden",
+        folder_name="Golden/Fixtures",
+    )
+    assert xml == (_GOLDEN_DIR / "dynamic_path_target_profile.xml").read_text()
+    assert verify_process_graph(xml)["errors"] == []
+
+
+def test_dynamic_path_source_ddp_matches_golden():
+    xml = ProcessFlowBuilder.build(
+        _config(dynamic_path=_ddp_dynamic_path()),
+        name="Dynamic Path DDP Golden",
+        folder_name="Golden/Fixtures",
+    )
+    assert xml == (_GOLDEN_DIR / "dynamic_path_source_ddp.xml").read_text()
+    assert verify_process_graph(xml)["errors"] == []

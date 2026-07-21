@@ -8,7 +8,8 @@ failure), ``wait="true"``, empty parameters/returnpaths. The DLQ catch-leg
 processcall (abort="true") is unchanged — see test_process_flow_builder_trycatch_dlq.
 
 Structure is asserted with ElementTree plus a committed golden fixture compared
-via XML canonicalization (matching the repo's other process-builder goldens).
+byte-for-byte (raw ``==``), matching the repo's other process-builder goldens
+and the #138 emitter-registry byte-parity gate.
 """
 
 from __future__ import annotations
@@ -79,7 +80,7 @@ def test_standalone_processcall_matches_golden_fixture():
     emitted = WrapperSubprocessBuilder.build(
         cfg, name="Wrapper Parent Golden", folder_name="Golden/Fixtures"
     )
-    assert ET.canonicalize(emitted) == ET.canonicalize(_GOLDEN.read_text())
+    assert emitted == _GOLDEN.read_text()
 
 
 def test_parent_shape_sequence_and_wiring():

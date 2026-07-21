@@ -103,6 +103,12 @@ def test_expected_codes_present():
         "PROCESS_IR_COMPILE_INTERNAL",
         "PROCESS_IR_COMPILE_NONDETERMINISTIC",
         "PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID",
+        # ProcessIR process-emitter registry (#138, M12.3)
+        "PROCESS_IR_COMPILE_EMITTER_MISSING",
+        "PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID",
+        "PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED",
+        "PROCESS_IR_COMPILE_XML_INVALID",
+        "PROCESS_IR_COMPILE_VERIFIER_FAILED",
     }
     assert expected <= set(ERROR_TAXONOMY)
 
@@ -127,12 +133,35 @@ _ISSUE_136_CODES = (
 )
 
 
+_ISSUE_138_CODES = (
+    "PROCESS_IR_COMPILE_EMITTER_MISSING",
+    "PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID",
+    "PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED",
+    "PROCESS_IR_COMPILE_XML_INVALID",
+    "PROCESS_IR_COMPILE_VERIFIER_FAILED",
+)
+
+
 def test_issue_137_codes_owned_and_categorized():
     for code in _ISSUE_137_CODES:
         spec = ERROR_TAXONOMY[code]
         assert spec.owner == "#137", code
         assert spec.category == "process_ir", code
         assert spec.retryable is False, code
+
+
+def test_issue_138_codes_owned_and_categorized():
+    for code in _ISSUE_138_CODES:
+        spec = ERROR_TAXONOMY[code]
+        assert spec.owner == "#138", code
+        assert spec.category == "process_ir", code
+        assert spec.retryable is False, code
+
+
+def test_process_ir_compile_internal_not_re_registered_by_138():
+    # #138 REUSES the existing PROCESS_IR_COMPILE_INTERNAL rather than adding a
+    # duplicate taxonomy key — it stays #137's.
+    assert ERROR_TAXONOMY["PROCESS_IR_COMPILE_INTERNAL"].owner == "#137"
 
 
 def test_issue_136_codes_still_owned_by_136():

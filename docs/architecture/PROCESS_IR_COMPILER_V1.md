@@ -370,3 +370,16 @@ tag, attribute order, escaping rule, and image name is its boundary, not this on
 the production legacy adapters. **#141/#142** own the gated control-flow and error-handling
 capabilities (continuation after Branch/Decision, scoped Try/Catch — the reserved `catch` edge
 kind). **#143** owns CFG-aware semantic validation built on these types.
+
+## 10. #138 M12.3 — the test-only emitter registry (shipped)
+
+The verified process-emitter registry named as #138's boundary in §9 now exists at
+`src/boomi_mcp/compiler/process_ir/emitter_registry.py`. It is the first consumer of
+`EmissionPlanV1`: `emit_process(plan, symbols) -> ProcessEmissionArtifactV1` dispatches each planned
+shape to a typed emitter keyed by the closed `emitter_kind` discriminator, reusing the byte-proven
+serializers now extracted into `categories/components/builders/process_emitters/`. It stays **DARK /
+test-only** (imported directly, never through this package's `__all__`; no MCP tool or production
+builder invokes it) until #139's production cutover. Contract, the 17-key manifest, the fail-closed
+diagnostic mapping (the five new `PROCESS_IR_COMPILE_*` codes + the reused
+`PROCESS_IR_COMPILE_INTERNAL`, plus the `xml_emission`/`post_emission_verification` phases), and the
+byte-parity evidence: **`docs/architecture/PROCESS_EMITTER_REGISTRY_V1.md`**.

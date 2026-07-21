@@ -24,8 +24,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from ...errors import (
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+    PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID,
+    PROCESS_IR_COMPILE_EMITTER_MISSING,
     PROCESS_IR_COMPILE_INTERNAL,
     PROCESS_IR_COMPILE_NONDETERMINISTIC,
+    PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED,
+    PROCESS_IR_COMPILE_VERIFIER_FAILED,
+    PROCESS_IR_COMPILE_XML_INVALID,
     PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
     PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
     PROCESS_IR_SEMANTIC_UNREACHABLE,
@@ -36,6 +41,11 @@ CompilerPhase = Literal[
     "reference_resolution",
     "semantic_lowering",
     "emission_planning",
+    # Issue #138: the typed emitter registry turns an emission plan into XML
+    # (xml_emission), then re-checks it with the graph verifier
+    # (post_emission_verification). Ranked after emission_planning.
+    "xml_emission",
+    "post_emission_verification",
 ]
 
 # Diagnostics sort by pipeline order first, so the earliest failure reads first.
@@ -44,6 +54,8 @@ _PHASE_RANK = {
     "reference_resolution": 1,
     "semantic_lowering": 2,
     "emission_planning": 3,
+    "xml_emission": 4,
+    "post_emission_verification": 5,
 }
 
 ROOT_NODE_IDENTITY = "<root>"
@@ -83,6 +95,26 @@ _REMEDIATION = {
         "This construct is capability-gated in ProcessIR v1; see the capability "
         "manifest for the owning issue."
     ),
+    PROCESS_IR_COMPILE_EMITTER_MISSING: (
+        "This node kind has no registered emitter at the current capability level; "
+        "this is a compiler defect or a capability gap — please report it."
+    ),
+    PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID: (
+        "The emitter received a typed input that does not match the node kind, or a "
+        "shape's outgoing wiring is invalid; this is a compiler defect — please report it."
+    ),
+    PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED: (
+        "Provide a component symbol of the required type for this node's references; "
+        "if every reference resolves, this is a compiler defect — please report it."
+    ),
+    PROCESS_IR_COMPILE_XML_INVALID: (
+        "The emitted process XML is malformed or disagrees with the emission plan; "
+        "this is a compiler defect — please report it."
+    ),
+    PROCESS_IR_COMPILE_VERIFIER_FAILED: (
+        "The process graph verifier rejected the emitted XML; this is a compiler "
+        "defect — please report it with the authored path."
+    ),
 }
 
 _MESSAGES = {
@@ -95,6 +127,11 @@ _MESSAGES = {
     PROCESS_IR_CAPABILITY_UNSUPPORTED: (
         "the payload requests a gated/unsupported ProcessIR capability"
     ),
+    PROCESS_IR_COMPILE_EMITTER_MISSING: "no registered emitter for the node kind",
+    PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID: "emitter input is invalid for the node kind",
+    PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED: "a required component symbol is unresolved",
+    PROCESS_IR_COMPILE_XML_INVALID: "emitted process XML is invalid",
+    PROCESS_IR_COMPILE_VERIFIER_FAILED: "the process graph verifier reported errors",
 }
 
 

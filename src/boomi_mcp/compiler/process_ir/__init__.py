@@ -1,9 +1,12 @@
 """Internal ProcessIR compiler: CFG + emission-plan lowering (issue #137, M12.2).
 
-DARK. Nothing at runtime constructs or consumes these types: no MCP tool, no
-builder, no emitter, no JSON Schema. The legacy ``flow_sequence`` path is
-unchanged and stays authoritative until #138 (emitter registry) and #139
-(production adapters) reach parity.
+DARK. No MCP tool, production builder, or JSON Schema constructs or consumes
+these types. Since #138 (M12.3) a TEST-ONLY consumer exists — the typed
+process-emitter registry in ``emitter_registry`` turns an ``EmissionPlanV1`` into
+process XML for parity tests — but it is imported directly (never via this
+package's ``__all__``), is invoked by no MCP tool or production builder, and adds
+no eager compiler/builder import coupling. The legacy ``flow_sequence`` path is
+unchanged and stays authoritative until #139 (production adapters) reaches parity.
 
 Pipeline::
 

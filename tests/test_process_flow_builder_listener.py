@@ -407,3 +407,29 @@ def test_flow_sequence_with_wss_source_rejected():
     err = ProcessFlowBuilder.validate_config(config, allow_listener_source=True)
     assert err is not None
     assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+
+
+# ---------------------------------------------------------------------------
+# Byte golden (issue #138 M12.3): the WSS Listen start shape (start_listen) had
+# only structural coverage before the emitter-registry extraction. Freeze the
+# current builder bytes so the move to the shared renderer is proven
+# byte-identical. Fixture generated through the authoritative builder.
+# ---------------------------------------------------------------------------
+
+from pathlib import Path  # noqa: E402
+
+from boomi_mcp.categories.components.process_graph_verifier import (  # noqa: E402
+    verify_process_graph,
+)
+
+_GOLDEN_DIR = Path(__file__).resolve().parent / "fixtures" / "golden_xml"
+
+
+def test_listener_wss_start_matches_golden():
+    xml = SyncPipelineBuilder.build(
+        _listener_pipeline_config(),
+        name="Listener WSS Start Golden",
+        folder_name="Golden/Fixtures",
+    )
+    assert xml == (_GOLDEN_DIR / "listener_wss_start.xml").read_text()
+    assert verify_process_graph(xml)["errors"] == []
