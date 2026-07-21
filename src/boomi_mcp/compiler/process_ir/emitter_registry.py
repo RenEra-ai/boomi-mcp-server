@@ -642,7 +642,7 @@ def _preflight_node(
     # sharing one profile) and that id may have many aliases, so memoize the alias
     # scan per requirement key and deduplicate refs incrementally — never an
     # O(requirements x aliases) accumulate-then-dedup.
-    matched: Dict[str, object] = {}  # ref -> symbol, insertion order
+    matched: Dict[str, object] = {}  # ref -> symbol
     match_cache: Dict[tuple, tuple] = {}
     for req in reg.requirements(inp):
         key = (req.component_id, req.component_types)
@@ -651,14 +651,17 @@ def _preflight_node(
             candidates = id_index.get(req.component_id, ())
             matches = tuple(s for s in candidates if s.component_type in req.component_types)
             match_cache[key] = matches
+            # Merge each distinct requirement's matches ONCE, on the cache miss, so
+            # R duplicate requirements do not re-merge A aliases R times.
+            for s in matches:
+                matched.setdefault(s.ref, s)
+        # Unresolved is per-requirement (a repeated missing id is still one defect
+        # per authored reference), so the diagnostic is appended on hit or miss.
         if not matches:
             diags.append(
                 diagnostic(PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED, "reference_resolution", path,
                            internal_node_id=node.cfg_node_id)
             )
-        else:
-            for s in matches:
-                matched.setdefault(s.ref, s)
     # Canonical ref order; these are the ACTUAL resolved symbols.
     narrowed = tuple(sorted(matched.values(), key=lambda s: s.ref))
     return diags, reg, narrowed
