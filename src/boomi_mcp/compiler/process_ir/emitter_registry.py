@@ -637,20 +637,30 @@ def _preflight_node(
             diagnostic(PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID, "xml_emission", path,
                        internal_node_id=node.cfg_node_id)
         )
-    matched: List[object] = []
+    # Resolve each requirement to its actual compatible symbols. A node may repeat
+    # the same (component_id, types) requirement (e.g. many Data Process steps
+    # sharing one profile) and that id may have many aliases, so memoize the alias
+    # scan per requirement key and deduplicate refs incrementally — never an
+    # O(requirements x aliases) accumulate-then-dedup.
+    matched: Dict[str, object] = {}  # ref -> symbol, insertion order
+    match_cache: Dict[tuple, tuple] = {}
     for req in reg.requirements(inp):
-        candidates = id_index.get(req.component_id, ())
-        matches = [s for s in candidates if s.component_type in req.component_types]
+        key = (req.component_id, req.component_types)
+        matches = match_cache.get(key)
+        if matches is None:
+            candidates = id_index.get(req.component_id, ())
+            matches = tuple(s for s in candidates if s.component_type in req.component_types)
+            match_cache[key] = matches
         if not matches:
             diags.append(
                 diagnostic(PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED, "reference_resolution", path,
                            internal_node_id=node.cfg_node_id)
             )
         else:
-            matched.extend(matches)
-    # Deduplicate by ref and return in canonical ref order (a symbol id may back
-    # more than one requirement/slot); these are the ACTUAL resolved symbols.
-    narrowed = tuple(sorted({s.ref: s for s in matched}.values(), key=lambda s: s.ref))
+            for s in matches:
+                matched.setdefault(s.ref, s)
+    # Canonical ref order; these are the ACTUAL resolved symbols.
+    narrowed = tuple(sorted(matched.values(), key=lambda s: s.ref))
     return diags, reg, narrowed
 
 
