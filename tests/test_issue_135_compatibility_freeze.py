@@ -18,8 +18,9 @@ ProcessIR consolidation (ADR-001, docs/architecture/) will migrate:
   and disagreeing authored-view variants), and multi-authored (with no collision,
   one of two colliding, and both colliding to reuse) -- each carrying a
   top-level pipeline, each accepted today,
-- the ``spec.pipeline`` secret-scan gap, in BOTH its zero-component isolation and
-  its component-bearing form (with a control proving a real scanner ran),
+- the ``spec.pipeline`` secret scan (CLOSED by #139 M12.4; ADR-001 §11), in BOTH
+  its zero-component and its component-bearing form — the former known gap is now
+  rejected with ``PLAINTEXT_SECRET_REJECTED`` before any plan echo,
 - ``sync_pipeline`` top-level key gate (unknown + gated keys, exact
   code/field pairs),
 - ``flow_sequence`` per-step key/kind strictness,
@@ -217,98 +218,66 @@ def test_zero_process_pipeline_accepted_and_preserved_through_build_plan():
     assert [s["kind"] for s in echoed["stages"]] == case["expected_stage_kinds"]
 
 
-def test_zero_process_pipeline_secret_config_echoed_is_known_gap():
-    """KNOWN GAP characterization (ADR-001 §5 security-precedence note + §11;
-    compatibility inventory §2.5). A zero-process spec (`components: []`) whose
-    top-level `spec.pipeline` stage `config` carries a SECRET-SHAPED key is
-    ACCEPTED and the secret value is ECHOED BACK UNCHANGED by `_build_plan` —
-    because the per-component `scan_forbidden_secret_fields` scanners (invoked
-    per component at integration_builder.py:5338/5479/5566/5625/5744/5774 and
-    the generic/profile scanner at :6032) traverse only each component's own
-    raw_config, never the top-level `spec.pipeline`; `StageSpec.config` is an
-    open `Dict[str, Any]`. The gap is
-    component-independent (no scanner ever reaches spec.pipeline); components=[]
-    is just the cleanest isolation (zero scanners run at all). That
-    component-independence is NOT self-attested here — it is measured by the
-    sibling `test_component_bearing_pipeline_secret_config_echoed_is_known_gap`,
-    whose control run proves a real component scanner fires while this same gap
-    holds in the very same plan.
+def test_zero_process_pipeline_secret_config_now_rejected():
+    """#139 M12.4 CLOSES the ADR-001 §11 gap this test used to CHARACTERIZE.
 
-    This is the leak ADR §11 flags. It is PRE-EXISTING (not introduced by #135)
-    and #135 only CHARACTERIZES it — it does NOT fix it (a runtime secret scan
-    over `spec.pipeline` stage config is a behavior change owned by the #139
-    legacy adapter, whose contract already forbids promoting free-form
-    credential fields into derived pipeline summaries). Frozen, NOT endorsed:
-    if a downstream scan starts rejecting/redacting this, flip this test.
+    A zero-process spec (`components: []`) whose top-level `spec.pipeline` stage
+    `config` carries a SECRET-SHAPED key used to be ACCEPTED with the secret value
+    ECHOED BACK UNCHANGED — the per-component `scan_forbidden_secret_fields`
+    scanners never traversed the top-level `spec.pipeline` (`StageSpec.config` is
+    an open `Dict[str, Any]`). #139 adds a top-level pipeline secret scan in
+    `_build_plan` (right after normalization, before any synthesis / echo /
+    mutation), so the value is now safely rejected and never echoed. This was the
+    sibling of the previous known-gap pair; both are flipped to the fixed
+    behavior exactly as their frozen note directed.
 
     The sentinel value is a PLACEHOLDER token (§11: fixtures use sentinels only),
     never a real secret.
     """
     case = _case("zero_process_pipeline_with_secret")
-    secret_key = case["secret_key"]
     secret_val = case["secret_sentinel"]
 
-    # Accepted: zero-process spec plans clean, no executable steps.
     plan = _build_plan(MagicMock(), copy.deepcopy(case["config"]))
-    assert plan["_success"] is True
-    assert plan["steps"] == []
-
-    # THE GAP: the secret-shaped value survives verbatim in the echoed spec —
-    # no scan touched it, no redaction happened.
-    echoed_stage_cfg = plan["integration_spec"]["pipeline"]["stages"][0]["config"]
-    assert echoed_stage_cfg[secret_key] == secret_val
-
-    # And it is NOT surfaced as any validation error / rejection (no scanner ran).
-    assert "PLAINTEXT_SECRET_REJECTED" not in json.dumps(plan)
+    # Rejected before any plan echo — no executable steps, no integration_spec echo.
+    assert plan["_success"] is False
+    assert plan["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+    # The value-free path is reported; the secret value never appears anywhere.
+    assert "pipeline.stages[0].config" in plan["error"]
+    assert secret_val not in json.dumps(plan)
 
 
 @patch("src.boomi_mcp.categories.integration_builder.paginate_metadata")
-def test_component_bearing_pipeline_secret_config_echoed_is_known_gap(mock_pag):
-    """Component-BEARING half of the same KNOWN GAP (ADR-001 §5 security-precedence
-    note + §11; compatibility inventory §2.5). The sibling
-    `test_zero_process_pipeline_secret_config_echoed_is_known_gap` isolates the gap
-    with `components: []` (zero scanners run at all); this case proves the strictly
-    STRONGER claim the inventory actually makes — that no scanner traverses the
-    top-level `spec.pipeline` **whatever components exist**.
+def test_component_bearing_pipeline_secret_config_now_rejected(mock_pag):
+    """Component-BEARING half of the same gap, now CLOSED by #139 M12.4.
 
-    The control run is what licenses that claim: it is the SAME spec with the sentinel
-    ALSO planted in the component's own config, and it fails with
-    PLAINTEXT_SECRET_REJECTED — so that component's scanner demonstrably runs on this
-    exact shape, and the `spec.pipeline` secret still sails past it unscanned in the
-    very same plan.
+    Previously the inventory's stronger claim was that no scanner traverses the
+    top-level `spec.pipeline` **whatever components exist**, so a clean-planning
+    component alongside a `spec.pipeline` secret echoed that secret unredacted.
+    #139's top-level pipeline scan runs BEFORE any component step is built, so the
+    presence of a valid component no longer lets the pipeline secret through: the
+    plan is rejected early with PLAINTEXT_SECRET_REJECTED and the value is never
+    echoed. (The per-component scanners still reject a secret in a component's own
+    config — covered by the per-builder secret tests; that path is unchanged.)
 
-    Frozen, NOT endorsed (the leak is PRE-EXISTING and owned by #139): if a downstream
-    scan starts rejecting/redacting the spec.pipeline value, flip this test.
     The sentinel is a PLACEHOLDER token (§11), never a real secret.
     """
     mock_pag.return_value = []
     case = _case("component_bearing_pipeline_with_secret")
-    secret_key = case["secret_key"]
     secret_val = case["secret_sentinel"]
 
-    # THE GAP: components exist and plan clean, yet the spec.pipeline secret is echoed.
+    # A valid component no longer shields the spec.pipeline secret — rejected early.
     plan = _build_plan(MagicMock(), copy.deepcopy(case["config"]))
-    # Clean-planned means NO error steps (`_build_plan` hardcodes _success=True).
-    assert [s for s in plan["steps"] if str(s["planned_action"]).startswith("error")] == []
-    comp_step = next(s for s in plan["steps"] if s["key"] == case["component_key"])
-    assert comp_step["planned_action"] == case["expected_component_action"]
-    echoed_stage_cfg = plan["integration_spec"]["pipeline"]["stages"][0]["config"]
-    assert echoed_stage_cfg[secret_key] == secret_val
-    assert "PLAINTEXT_SECRET_REJECTED" not in json.dumps(plan)
+    assert plan["_success"] is False
+    assert plan["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+    assert "pipeline.stages[0].config" in plan["error"]
+    assert secret_val not in json.dumps(plan)
 
-    # THE CONTROL: the same sentinel in the component's OWN config IS rejected, proving
-    # a real scanner traverses this component — while the spec.pipeline copy survives
-    # unredacted in that same plan.
+    # The control config (secret in BOTH the component AND the pipeline) is also
+    # rejected — the pipeline scan preempts, and either way no secret is echoed.
     control = _build_plan(MagicMock(), copy.deepcopy(case["control_config"]))
-    control_step = next(s for s in control["steps"] if s["key"] == case["component_key"])
-    assert control_step["planned_action"] == case["control_expected_action"]
-    assert (
-        control_step["validation_error"]["error_code"]
-        == case["control_expected_error_code"]
-    )
-    assert control_step["validation_error"]["field"] == case["control_secret_key"]
-    control_stage_cfg = control["integration_spec"]["pipeline"]["stages"][0]["config"]
-    assert control_stage_cfg[secret_key] == secret_val
+    assert control["_success"] is False
+    assert control["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+    assert secret_val not in json.dumps(control)
 
 
 def test_normalize_drops_top_level_pipeline():

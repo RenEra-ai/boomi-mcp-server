@@ -1,13 +1,20 @@
 # ProcessIRV1 — Strict Semantic Process Models (issue #136, M12.1)
 
-**Status:** shipped dark. The models exist (`src/boomi_mcp/models/process_ir.py`) and are
-exported from `boomi_mcp.models`, but **nothing at runtime constructs or consumes them yet**:
-#136 adds **no MCP surface, no emitter or XML behavior change, and no deprecation** of any
-existing surface. A **dark internal compiler now exists** (#137: semantic CFG + emission-plan
-lowering, `src/boomi_mcp/compiler/process_ir/`), but no runtime or MCP path consumes it either —
-importing `boomi_mcp.models` or `server` must not pull it in, and that is pinned by test.
-`flow_sequence` and every other legacy dialect continue through their unchanged paths until the
-#139 adapters cut over.
+**Status:** shipped dark; the FIRST production cutover landed in #139A (2026-07-22). The models exist
+(`src/boomi_mcp/models/process_ir.py`) and are exported from `boomi_mcp.models`; there is **no direct
+ProcessIR authoring surface** — a caller never hand-writes IR. #136 added no MCP surface. **Production
+ingress now exists** for two legacy dialects: `wrapper_subprocess` and the composed
+`database_to_api_sync/flow_sequence` are normalized by the legacy adapters
+(`src/boomi_mcp/compiler/process_ir/legacy_adapters/`, #139A) into `ProcessIRV1` and then
+`compile_process_ir_v1 → emit_process`, replacing their pre-#139 per-dialect XML orchestration
+byte-identically. The **compatibility projection** the adapter applies: an already-validated legacy
+config's currently-executed fields feed the IR; safe unknown root/binding keys are recorded as
+`compatibility_noop_paths` (never rejected); connector/component references become symbol requirements
+(connector metadata rides on the operation symbol, ADR-001 §6); envelope data (description, folder,
+process_extensions) stays OUTSIDE the IR, owned by the component assembler. Direct ProcessIR authoring
+stays dark. Every OTHER legacy dialect (ordinary `database_to_api_sync`, `sync_pipeline`, listeners,
+recipes) continues through its unchanged path until a later #139 slice cuts it over — see the
+[compatibility inventory](M12_COMPATIBILITY_INVENTORY.md) #139 ledger.
 **References:** [ADR-001](ADR-001-process-ir-authority.md) (authority model, §7 error families,
 §11 security), [ProcessIR Compiler V1](PROCESS_IR_COMPILER_V1.md) (the #137 CFG/lowering
 contracts consuming these models), [M12 Compatibility Inventory](M12_COMPATIBILITY_INVENTORY.md)

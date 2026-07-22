@@ -104,8 +104,9 @@ def _canonical_connector_metadata(role: str, connector_type: str, action_type: s
     The legacy builder does NOT emit a symbol's connector family verbatim: it
     resolves aliases to the canonical subtype (``rest_client`` ->
     ``officialboomi-X3979C-rest-prod``, ``soap_client`` -> ``wssoapclientsdk``)
-    and normalises action case, with rules that differ by role
-    (``_source_prefix_flow_entries:5467`` vs ``_target_terminal_entries:5500``):
+    and normalises action case, with rules that differ by role (the source vs
+    target rules the pre-#139 composed emitter applied; that path now routes
+    through this compiler, so this helper is the single canonicaliser):
 
     * source, REST family -> canonical subtype, action upper-cased
     * source, other       -> canonical subtype LOWER-cased, action left raw

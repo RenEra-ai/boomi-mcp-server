@@ -4410,365 +4410,6 @@ def _sequence_is_linear_only(steps: Any) -> bool:
     return True
 
 
-# --- composed emission --------------------------------------------------------
-
-
-def _seq_step_to_flow_entry(step: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
-    """Map a LINEAR flow-sequence step to an ``(emit_kind, params)`` flow entry.
-
-    ``emit_kind`` is the shape kind the emitter dispatches on (``flowcontrol`` /
-    ``message`` / ``map`` / ``dataprocess`` / ``doccacheload`` / ``doccacheretrieve``
-    / ``doccacheremove``); ``params`` matches the keys the corresponding emitter
-    reads, so each composed shape reuses its byte-accurate single-shape emitter.
-    """
-    kind = str(step.get("kind") or "").strip()
-    label = str(step.get("label") or "")
-    if kind == "flow_control":
-        return ("flowcontrol", {"for_each_count": step.get("for_each_count"), "userlabel": label})
-    if kind == "message":
-        return ("message", {"text": str(step.get("message_text") or ""), "userlabel": label})
-    if kind == "map_ref":
-        return ("map", {"map_id": str(step.get("map_ref") or "").strip(), "userlabel": label})
-    if kind == "dataprocess":
-        return ("dataprocess", {"steps": step.get("steps") or [], "userlabel": label})
-    if kind == "doccacheload":
-        return (
-            "doccacheload",
-            {"document_cache_id": str(step.get("document_cache_id") or "").strip(), "userlabel": label},
-        )
-    if kind == "doccacheretrieve":
-        return (
-            "doccacheretrieve",
-            {
-                "document_cache_id": str(step.get("document_cache_id") or "").strip(),
-                "empty_cache_behavior": str(
-                    step.get("empty_cache_behavior") or _DOCCACHE_RETRIEVE_DEFAULT_EMPTY_BEHAVIOR
-                ).strip(),
-                "load_all_documents": step.get("load_all_documents", True),
-                "userlabel": label,
-            },
-        )
-    if kind == "doccacheremove":
-        return (
-            "doccacheremove",
-            {
-                "document_cache_id": str(step.get("document_cache_id") or "").strip(),
-                "remove_all_documents": step.get("remove_all_documents", True),
-                "userlabel": label,
-            },
-        )
-    if kind == "cache_put":
-        # Issue #122 M11.3: authored alias over the byte-locked Add to Cache
-        # (doccacheload) emitter.
-        return (
-            "doccacheload",
-            {"document_cache_id": str(step.get("document_cache_id") or "").strip(), "userlabel": label},
-        )
-    if kind == "cache_get":
-        # Issue #122 M11.3: authored alias over the all-document retrieve.
-        return (
-            "doccacheretrieve",
-            {
-                "document_cache_id": str(step.get("document_cache_id") or "").strip(),
-                "empty_cache_behavior": str(
-                    step.get("empty_cache_behavior") or _DOCCACHE_RETRIEVE_DEFAULT_EMPTY_BEHAVIOR
-                ).strip(),
-                "load_all_documents": True,
-                "userlabel": label,
-            },
-        )
-    if kind in ("set_ddp", "set_dpp"):
-        # Issue #121 M11.2: generic DDP/DPP Set Properties step.
-        return (
-            "setproperties_step",
-            {
-                "scope": "ddp" if kind == "set_ddp" else "dpp",
-                "name": str(step.get("name") or "").strip(),
-                "source_values": step.get("source_values") or [],
-                "persist": bool(step.get("persist", False)),
-                "userlabel": label,
-            },
-        )
-    raise BuilderValidationError(  # pragma: no cover — defensive
-        f"Unknown linear flow_sequence step kind {kind!r}.",
-        error_code="PROCESS_XML_VALIDATION_FAILED",
-        field="flow_sequence",
-        hint="Internal builder bug — please report.",
-    )
-
-
-def _seq_exception_params(step: Dict[str, Any]) -> Dict[str, Any]:
-    """Map an ``exception`` step to the params ``_emit_exception`` reads."""
-    return {
-        "title": step.get("title"),
-        "message_template": step.get("message_template"),
-        "stop_single_document": step.get("stop_single_document", False),
-        "parameter_source": step.get("parameter_source"),
-    }
-
-
-def _source_prefix_flow_entries(config: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
-    """Build the shared ``start -> source`` prefix flow entries (issue #117).
-
-    Reuses build()'s source canonicalization (DB source for the base protocol;
-    REST source handled defensively for symmetry) minus dynamic_path — a
-    flow_sequence rejects a source dynamic_path, so the source connector is plain.
-    """
-    source = config.get("source") or {}
-    source_canonical_type = _canonical_connector_type(source.get("connector_type"))
-    source_action_raw = str(source.get("action_type") or "").strip()
-    source_is_rest = _resolve_rest_connector_type(source.get("connector_type")) is not None
-    if source_is_rest:
-        source_connector_type = source_canonical_type
-        source_action_type = source_action_raw.upper()
-    else:
-        source_connector_type = source_canonical_type.lower()
-        source_action_type = source_action_raw
-    return [
-        ("start_noaction", {}),
-        (
-            "connectoraction_source",
-            {
-                "connector_type": source_connector_type,
-                "action_type": source_action_type,
-                "connection_id": str(source.get("connection_id") or "").strip(),
-                "operation_id": str(source.get("operation_id") or "").strip(),
-                "userlabel": str(source.get("label") or ""),
-                "dynamic_path": None,
-            },
-        ),
-    ]
-
-
-def _target_terminal_entries(config: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
-    """The default success terminal flow entries: ``target -> Stop`` (or a single
-    ``Return Documents`` terminal when return_documents.enabled on a linear sequence)."""
-    rd = config.get("return_documents")
-    if isinstance(rd, dict) and rd.get("enabled") is True:
-        return [("returndocuments", {"label": str(rd.get("label") or "")})]
-    target = config.get("target") or {}
-    return [
-        (
-            "connectoraction_target",
-            {
-                "connector_type": _canonical_connector_type(target.get("connector_type")),
-                "action_type": str(target.get("action_type") or "").strip().upper(),
-                "connection_id": str(target.get("connection_id") or "").strip(),
-                "operation_id": str(target.get("operation_id") or "").strip(),
-                "userlabel": str(target.get("label") or ""),
-                "dynamic_path": None,
-            },
-        ),
-        ("stop", {"continue_": True}),
-    ]
-
-
-def _emit_seq_linear(
-    emit_kind: str,
-    params: Dict[str, Any],
-    shape_name: str,
-    next_name: Optional[str],
-    shape_index: int,
-) -> str:
-    """Emit one LINEAR composed-sequence shape forwarding to ``next_name``.
-
-    ``doccacheload`` is emitted via ``_emit_doccacheload`` directly (it is not a
-    ``_emit_flow_shape`` dispatch kind — it ships as a catch-leg terminal today),
-    placing it on the main row (``_SHAPE_Y``). Every other linear kind goes through
-    the existing ``_emit_flow_shape`` dispatch.
-    """
-    if emit_kind == "doccacheload":
-        return _emit_doccacheload(
-            shape_name,
-            str(params.get("document_cache_id") or "").strip(),
-            shape_index,
-            next_name=next_name,
-            y=_SHAPE_Y,
-            dragpoint_y=_DRAGPOINT_Y,
-            userlabel=str(params.get("userlabel") or ""),
-        )
-    return _emit_flow_shape(emit_kind, params, shape_name, next_name, shape_index)
-
-
-def _append_linear_entries(
-    parts: List[str], entries: List[Tuple[str, Dict[str, Any]]], start_index: int
-) -> int:
-    """Emit ``entries`` as a forward chain (the last entry terminal). Returns next index."""
-    idx = start_index
-    m = len(entries)
-    for j, (kind, params) in enumerate(entries):
-        name = f"shape{idx}"
-        nxt = None if j == m - 1 else f"shape{idx + 1}"
-        parts.append(_emit_flow_shape(kind, params, name, nxt, idx))
-        idx += 1
-    return idx
-
-
-def _append_path(
-    parts: List[str],
-    steps: List[Dict[str, Any]],
-    start_index: int,
-    *,
-    fallthrough: List[Tuple[str, Dict[str, Any]]],
-    config: Dict[str, Any],
-) -> int:
-    """Emit one path = linear prefix + a terminal, starting at ``start_index``.
-
-    The terminal is the last step when it is a control (decision/branch) or terminal
-    (exception) kind, otherwise the ``fallthrough`` entries (a linear continuation
-    ending in Stop / Return Documents). The shape before the terminal forwards into
-    the terminal's first shape. Returns the next free shape index. Index allocation
-    is depth-first and matches the legacy branch/decision emitters' positional walk.
-    """
-    terminal_step: Optional[Dict[str, Any]] = None
-    linear_prefix: List[Dict[str, Any]] = steps
-    if steps:
-        last_kind = str((steps[-1].get("kind") if isinstance(steps[-1], dict) else "") or "").strip()
-        if last_kind in (_FLOW_SEQUENCE_CONTROL_KINDS | _FLOW_SEQUENCE_TERMINAL_KINDS):
-            linear_prefix = steps[:-1]
-            terminal_step = steps[-1]
-
-    idx = start_index
-    has_continuation = terminal_step is not None or bool(fallthrough)
-    for j, step in enumerate(linear_prefix):
-        emit_kind, params = _seq_step_to_flow_entry(step)
-        name = f"shape{idx}"
-        # Last linear shape forwards into the first terminal/fallthrough shape;
-        # with NO continuation (a target-less staging leg, companion review P1)
-        # it is emitted terminal — the live doccacheload pattern.
-        is_last = j == len(linear_prefix) - 1
-        nxt = None if (is_last and not has_continuation) else f"shape{idx + 1}"
-        parts.append(_emit_seq_linear(emit_kind, params, name, nxt, idx))
-        idx += 1
-
-    if terminal_step is None:
-        return _append_linear_entries(parts, fallthrough, idx)
-    kind = str(terminal_step.get("kind") or "").strip()
-    if kind == "exception":
-        parts.append(_emit_exception(f"shape{idx}", _seq_exception_params(terminal_step), idx, y=_SHAPE_Y))
-        return idx + 1
-    if kind == "decision":
-        return _append_decision(parts, terminal_step, idx, config=config)
-    if kind == "branch":
-        return _append_branch(parts, terminal_step, idx, config=config)
-    raise BuilderValidationError(  # pragma: no cover — kind already validated
-        f"Unknown terminal flow_sequence step kind {kind!r}.",
-        error_code="PROCESS_XML_VALIDATION_FAILED",
-        field="flow_sequence",
-        hint="Internal builder bug — please report.",
-    )
-
-
-def _append_decision(
-    parts: List[str],
-    decision_step: Dict[str, Any],
-    decision_index: int,
-    *,
-    config: Dict[str, Any],
-) -> int:
-    """Emit a composed Decision + its true/false legs (issue #117).
-
-    The TRUE leg falls through to the top-level success terminal (target -> Stop /
-    Return Documents); the FALSE (reject) leg falls through to its own Stop. Either
-    leg may itself end in a nested branch or exception. Emits ``decision -> true leg
-    -> false leg`` (the same shape order the legacy ``_emit_decision_shapes`` uses).
-    """
-    success = _target_terminal_entries(config)
-    true_start = decision_index + 1
-    true_parts: List[str] = []
-    false_start = _append_path(
-        true_parts,
-        decision_step.get("true_steps") or [],
-        true_start,
-        fallthrough=success,
-        config=config,
-    )
-    false_parts: List[str] = []
-    end_index = _append_path(
-        false_parts,
-        decision_step.get("false_steps") or [],
-        false_start,
-        fallthrough=[("stop", {"continue_": True})],
-        config=config,
-    )
-    parts.append(
-        _emit_decision(
-            f"shape{decision_index}",
-            decision_step,
-            f"shape{true_start}",
-            f"shape{false_start}",
-            decision_index,
-        )
-    )
-    parts.extend(true_parts)
-    parts.extend(false_parts)
-    return end_index
-
-
-def _append_branch(
-    parts: List[str],
-    branch_step: Dict[str, Any],
-    branch_index: int,
-    *,
-    config: Dict[str, Any],
-) -> int:
-    """Emit a composed Branch + N independent legs (issue #117).
-
-    Each leg is its own linear sub-flow (``leg.steps``) ending in the leg's own
-    ``target -> Stop`` — forward-only, no join/merge (the legacy fan-out contract).
-    Emits ``branch -> leg1 -> leg2 -> ...`` (the same shape order as
-    ``_emit_branch_shapes``).
-    """
-    legs = branch_step.get("legs") or []
-    leg_first_names: List[str] = []
-    leg_parts: List[str] = []
-    cur = branch_index + 1
-    for leg in legs:
-        leg_first_names.append(f"shape{cur}")
-        if leg.get("target") is None:
-            # Companion review P1: a staging leg (ends in cache_put) has no
-            # target — the path terminates at the cache write.
-            fallthrough: List[Tuple[str, Dict[str, Any]]] = []
-        else:
-            fallthrough = [
-                ("connectoraction_target", _branch_target_params(leg.get("target") or {})),
-                ("stop", {"continue_": True}),
-            ]
-        cur = _append_path(
-            leg_parts, leg.get("steps") or [], cur, fallthrough=fallthrough, config=config
-        )
-    parts.append(
-        _emit_branch(
-            f"shape{branch_index}",
-            leg_first_names,
-            branch_index,
-            userlabel=str(branch_step.get("label") or ""),
-        )
-    )
-    parts.extend(leg_parts)
-    return cur
-
-
-def _emit_composed_flow_shapes(
-    prefix: List[Tuple[str, Dict[str, Any]]],
-    steps: List[Dict[str, Any]],
-    config: Dict[str, Any],
-) -> List[str]:
-    """Emit ``start -> source -> <composed flow_sequence>`` (issue #117).
-
-    The prefix shapes (start, source) chain forward; the last prefix shape forwards
-    to the first sequence shape (index ``len(prefix)+1``). The sequence is laid out
-    by ``_append_path`` with the top-level success terminal as its fallthrough.
-    """
-    parts: List[str] = []
-    p = len(prefix)
-    for i, (kind, params) in enumerate(prefix):
-        idx = i + 1
-        parts.append(_emit_flow_shape(kind, params, f"shape{idx}", f"shape{idx + 1}", idx))
-    _append_path(parts, steps, p + 1, fallthrough=_target_terminal_entries(config), config=config)
-    return parts
-
-
 def _build_composed_process_flow(
     config: Dict[str, Any], *, name: str, folder_name: Optional[str] = None
 ) -> str:
@@ -4784,8 +4425,33 @@ def _build_composed_process_flow(
     lineage_err = validate_config_lineage(config)
     if lineage_err is not None:
         raise lineage_err
-    prefix = _source_prefix_flow_entries(config)
-    shape_xml_parts = _emit_composed_flow_shapes(prefix, config.get("flow_sequence") or [], config)
+    # Issue #139 M12.4: the composed shapes (start -> source -> <flow_sequence>)
+    # are now produced by the ONE canonical chain (legacy config -> ProcessIRV1
+    # -> compile_process_ir_v1 -> emit_process) instead of the pre-#139
+    # _source_prefix_flow_entries + _emit_composed_flow_shapes orchestration. The
+    # component envelope, description, folder, and processOverrides are unchanged,
+    # so the emitted XML stays byte-identical (pinned by the flow_sequence + M11
+    # goldens and the emitter-parity oracle). A post-validation adapter/compile/
+    # emit failure is an internal parity defect; translate it to the builder's
+    # existing external code rather than leak a compiler diagnostic.
+    from ....compiler.process_ir.diagnostics import ProcessIRCompileError
+    from ....compiler.process_ir.legacy_adapters.contracts import LegacyAdapterError
+    from ....compiler.process_ir.legacy_adapters.emission import emit_legacy_result
+    from ....compiler.process_ir.legacy_adapters.flow_sequence import (
+        adapt_flow_sequence,
+    )
+
+    try:
+        result = adapt_flow_sequence(config)
+        shape_xml_parts = list(emit_legacy_result(result).shape_xml_parts)
+    except (LegacyAdapterError, ProcessIRCompileError) as exc:
+        raise BuilderValidationError(
+            "flow_sequence process could not be lowered to the canonical "
+            "process IR.",
+            error_code="PROCESS_XML_VALIDATION_FAILED",
+            field="config",
+            hint="Internal builder/compiler parity defect — please report.",
+        ) from exc
     process_overrides_xml = ""
     connections = _extract_process_extension_connections(config)
     if connections:
@@ -5414,14 +5080,15 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
         """
         description = str(config.get("description") or "")
         calls = config.get("process_calls") or []
-        flow: List[Tuple[str, Dict[str, Any]]] = [("start_noaction", {})]
+        # Totality guard on a validate_config-bypass path: never emit a
+        # <processcall processId=""> — raise the same PROCESS_REF_MISSING the
+        # pre-#139 emitter did, and BEFORE the canonical adapter runs so this
+        # error keeps precedence over a process_extensions or emission defect.
         for call in calls:
             # process_id (literal) or subprocess_ref (a $ref:KEY already resolved
             # to an id by integration_builder before build()).
             pid = str(call.get("process_id") or call.get("subprocess_ref") or "").strip()
             if not pid:
-                # Stay total on the validate_config-bypass path: never emit
-                # <processcall processId=""> — raise instead.
                 raise BuilderValidationError(
                     "wrapper_subprocess process call is missing a resolved "
                     "target process id.",
@@ -5429,30 +5096,51 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
                     field="process_calls",
                     hint="Set subprocess_ref ('$ref:KEY') or process_id on each process call.",
                 )
-            flow.append((
-                "processcall",
-                {
-                    "process_id": pid,
-                    "wait": bool(call.get("wait", True)),
-                    "abort": bool(call.get("abort_on_error", False)),
-                    "userlabel": str(call.get("label") or ""),
-                },
-            ))
-        # Issue #107 M10.3: a wrapper/facade that is itself a subprocess may end
-        # in Return Documents to hand its documents back to the caller; default
-        # stays a Stop (byte-for-byte the pre-#107 wrapper output).
-        flow.append(_terminal_flow_entry(config))
         # Issue #99 G3: emit the hoisted/declared connection env-extension
         # override points so the wrapper-deployed package surfaces them through
         # get_extensions. Absent block -> empty <bns:processOverrides> (the
         # pre-#99 wrapper output is byte-for-byte unchanged). _extract stays
-        # defensive so build() is total on a validate_config-bypass path.
+        # defensive so build() is total on a validate_config-bypass path, and it
+        # raises PROCESS_EXTENSIONS_INVALID here (before emission) exactly as
+        # before.
         process_overrides_xml = ""
         connections = _extract_process_extension_connections(config)
         if connections:
             process_overrides_xml = _emit_process_overrides(connections)
+        # Issue #139 M12.4: the parent's shapes (start -> processcall(s) ->
+        # stop|returndocuments) are now produced by the ONE canonical chain
+        # (legacy config -> ProcessIRV1 -> compile_process_ir_v1 -> emit_process)
+        # instead of the pre-#139 _emit_linear_shapes orchestration. The
+        # component envelope, description, folder, and processOverrides are
+        # unchanged, so the emitted XML stays byte-identical (pinned by the
+        # wrapper goldens + the emitter-parity oracle). An adapter/compile/emit
+        # failure on already-validated input is an internal parity defect;
+        # translate it to the builder's existing external code rather than leak a
+        # compiler diagnostic.
+        from ....compiler.process_ir.diagnostics import ProcessIRCompileError
+        from ....compiler.process_ir.legacy_adapters.contracts import (
+            LegacyAdapterError,
+        )
+        from ....compiler.process_ir.legacy_adapters.emission import (
+            emit_legacy_result,
+        )
+        from ....compiler.process_ir.legacy_adapters.wrapper_subprocess import (
+            adapt_wrapper_subprocess,
+        )
+
+        try:
+            result = adapt_wrapper_subprocess(config)
+            shape_xml_parts = list(emit_legacy_result(result).shape_xml_parts)
+        except (LegacyAdapterError, ProcessIRCompileError) as exc:
+            raise BuilderValidationError(
+                "wrapper_subprocess process could not be lowered to the "
+                "canonical process IR.",
+                error_code="PROCESS_XML_VALIDATION_FAILED",
+                field="config",
+                hint="Internal builder/compiler parity defect — please report.",
+            ) from exc
         return _assemble_process_component_xml(
-            _emit_linear_shapes(flow),
+            shape_xml_parts,
             name=name,
             description=description,
             folder_name=folder_name,

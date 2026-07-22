@@ -89,6 +89,20 @@ PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED = "PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED"
 PROCESS_IR_COMPILE_XML_INVALID = "PROCESS_IR_COMPILE_XML_INVALID"
 PROCESS_IR_COMPILE_VERIFIER_FAILED = "PROCESS_IR_COMPILE_VERIFIER_FAILED"
 
+# --- ProcessIR legacy adapters (M12.4 / issue #139; ADR-001 §7) ----------------
+# INTERNAL diagnostics raised inside the legacy-config -> ProcessIR adapter
+# boundary. A migrated public authoring entrypoint (build_integration, the
+# process-flow builders) keeps its existing EXTERNAL error contract: an adapter
+# failure on already-validated input is translated to the builder family
+# (normally PROCESS_XML_VALIDATION_FAILED) before it reaches a caller. Later
+# adapter slices (#139 sync/database/recipe/authority work) ADD codes here,
+# never rename or re-scope these.
+LEGACY_ADAPTER_UNSUPPORTED_KIND = "LEGACY_ADAPTER_UNSUPPORTED_KIND"
+LEGACY_ADAPTER_PIPELINE_DRAFT_ONLY = "LEGACY_ADAPTER_PIPELINE_DRAFT_ONLY"
+LEGACY_ADAPTER_AUTHORITY_CONFLICT = "LEGACY_ADAPTER_AUTHORITY_CONFLICT"
+LEGACY_ADAPTER_SEMANTIC_LOSS = "LEGACY_ADAPTER_SEMANTIC_LOSS"
+LEGACY_ADAPTER_OUTPUT_PARITY_FAILED = "LEGACY_ADAPTER_OUTPUT_PARITY_FAILED"
+
 
 @dataclass(frozen=True)
 class ErrorCodeSpec:
@@ -434,6 +448,56 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             retryable=False,
             summary="The process graph verifier reported errors on registry-emitted XML.",
             owner="#138",
+        ),
+        ErrorCodeSpec(
+            code=LEGACY_ADAPTER_UNSUPPORTED_KIND,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "No legacy adapter is registered for the requested authoring "
+                "dialect / process kind."
+            ),
+            owner="#139",
+        ),
+        ErrorCodeSpec(
+            code=LEGACY_ADAPTER_PIPELINE_DRAFT_ONLY,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A reserved/unlowered PipelineSpec kind was submitted to a legacy "
+                "adapter; it is draft/analysis only and never falsely executable."
+            ),
+            owner="#139",
+        ),
+        ErrorCodeSpec(
+            code=LEGACY_ADAPTER_AUTHORITY_CONFLICT,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A top-level pipeline view disagrees with the normalized single "
+                "authored process on the strict/opt-in surface."
+            ),
+            owner="#139",
+        ),
+        ErrorCodeSpec(
+            code=LEGACY_ADAPTER_SEMANTIC_LOSS,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A legacy field that affects current process XML cannot be "
+                "represented in ProcessIR without loss."
+            ),
+            owner="#139",
+        ),
+        ErrorCodeSpec(
+            code=LEGACY_ADAPTER_OUTPUT_PARITY_FAILED,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "Canonical compile/emit/verify of a legally-validated legacy "
+                "config failed after successful legacy validation."
+            ),
+            owner="#139",
         ),
     )
 }

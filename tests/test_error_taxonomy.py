@@ -158,6 +158,38 @@ def test_issue_138_codes_owned_and_categorized():
         assert spec.retryable is False, code
 
 
+_ISSUE_139_CODES = (
+    "LEGACY_ADAPTER_UNSUPPORTED_KIND",
+    "LEGACY_ADAPTER_PIPELINE_DRAFT_ONLY",
+    "LEGACY_ADAPTER_AUTHORITY_CONFLICT",
+    "LEGACY_ADAPTER_SEMANTIC_LOSS",
+    "LEGACY_ADAPTER_OUTPUT_PARITY_FAILED",
+)
+
+
+def test_issue_139_codes_present():
+    assert set(_ISSUE_139_CODES) <= set(ERROR_TAXONOMY)
+
+
+def test_issue_139_codes_owned_and_categorized():
+    for code in _ISSUE_139_CODES:
+        spec = ERROR_TAXONOMY[code]
+        assert spec.owner == "#139", code
+        assert spec.category == "process_ir", code
+        assert spec.retryable is False, code
+
+
+def test_issue_139_codes_do_not_overwrite_prior_process_ir_codes():
+    # The taxonomy is a last-wins dict comprehension; pin that #139's additions
+    # did not silently re-register a #136/#137/#138 code.
+    for code in _ISSUE_136_CODES:
+        assert ERROR_TAXONOMY[code].owner == "#136", code
+    for code in _ISSUE_137_CODES:
+        assert ERROR_TAXONOMY[code].owner == "#137", code
+    for code in _ISSUE_138_CODES:
+        assert ERROR_TAXONOMY[code].owner == "#138", code
+
+
 def test_process_ir_compile_internal_not_re_registered_by_138():
     # #138 REUSES the existing PROCESS_IR_COMPILE_INTERNAL rather than adding a
     # duplicate taxonomy key — it stays #137's.

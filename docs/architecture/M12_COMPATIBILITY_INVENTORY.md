@@ -49,7 +49,7 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Fixtures / tests | The 4 pattern e2e tests above; #135 freeze suite `tests/test_issue_135_compatibility_freeze.py` |
 | Assertion strength | Structural (dict/None comparisons); no XML coverage possible (emits nothing) |
 | Adapter issue | #139 (M12.4 legacy adapters and golden parity) — must become a compiler-derived summary **for a single-process spec** (authored values checked by derived equality, or — on the strict surface / after announced V1 deprecation — rejected with `LEGACY_ADAPTER_AUTHORITY_CONFLICT`, never precedence; V1 preserves a disagreeing value inert until then); a **zero-process** spec's authored pipeline is preserved as a frozen inert value and a **multi-process** one is rejected as ambiguous on the strict surface (V1 preserves it inert until an announced §9 deprecation — ADR §5) |
-| Migration gate | Today the executable nested pipeline **wins silently** when the two disagree (nothing reconciles them — §2.5). #139 closes this; until then the freeze test pins the silent-precedence baseline |
+| Migration gate | Today the executable nested pipeline **wins silently** when the two disagree (nothing reconciles them — §2.5); the strict `version="1.1"` authority selector that resolves this is **designed, not activated** in #139A (see the ledger below) — the freeze test still pins the silent-precedence baseline. **#139A DID close the ADR-001 §11 secret gap:** a plaintext secret in the top-level `spec.pipeline` stage config is now rejected with `PLAINTEXT_SECRET_REJECTED` (value-free path) in `_build_plan` before any echo/mutation — the two former known-gap freeze tests are flipped to the rejection behavior |
 
 ### 1.2 `main_process.config.pipeline` (process-config dict `"pipeline"` key)
 
@@ -103,7 +103,7 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Fixtures / tests | 5 committed goldens (§3), `tests/test_process_flow_builder.py` flow_sequence sections, `tests/test_m11_composed_examples.py`, `tests/test_builder_xml_invariants.py` (structural invariants) |
 | Assertion strength | Raw-byte golden equality for the 5 flow_sequence goldens (§3) plus structural ET assertions |
 | Adapter issue | **#136 LANDED** (2026-07-19): the strict ProcessIRV1 models exist dark (`src/boomi_mcp/models/process_ir.py` + the private test-only `_process_ir_compat` codec; see [PROCESS_IR_V1.md](PROCESS_IR_V1.md)) — the legacy `flow_sequence` surface is UNCHANGED; the **legacy** config-root leniency (§2.7) stays under the **#139** legacy adapter's ownership (mapped as a compatibility no-op, not tightened), not #136; semantic validation unification #143 |
-| Migration gate | **#139** owns bringing the permissive **legacy** config root (§2.7) under explicit adapter ownership, mapping today's accepted-but-ignored root extras as a **compatibility no-op** (they stay accepted) — never silently tightened, and **never rejected without a separately announced deprecation** (§9 of ADR-001). #136 only makes the **new** ProcessIRV1 models strict and leaves existing `flow_sequence` input unchanged until #139's cutover; step-level codes stay stable until #139's adapter mapping review |
+| Migration gate | **#139A CUT OVER (2026-07-22):** the composed `flow_sequence` build path now routes through the canonical `ProcessIRV1 → compile_process_ir_v1 → emit_process` chain (see the #139 M12.4 ledger section below); the pre-#139 `_emit_composed_flow_shapes` orchestration is deleted. The permissive **legacy** config root (§2.7) is mapped as a **compatibility no-op** by the adapter's projection (still accepted, recorded as `compatibility_noop_paths`), never tightened, never rejected without a separately announced §9 deprecation. Every existing golden stays byte-identical. Step-level codes stay stable |
 
 ### 1.5 `wrapper_subprocess` (process kind)
 
@@ -120,8 +120,8 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Error codes | `PROCESS_KIND_UNSUPPORTED` (`:6549`), `PROCESS_REF_MISSING` (`:6557` and entry-level), `PROCESS_REF_AMBIGUOUS` (`:6445`), `PROCESS_CALL_CONFIG_INVALID` (`:6487,6498`), `PLAINTEXT_SECRET_REJECTED` (inherited scan, `:564` in `scan_forbidden_secret_fields` `:509`) |
 | Fixtures / tests | Dedicated: `tests/test_wrapper_subprocess_builder.py` (golden `processcall_standalone_parent.xml`), `tests/test_wrapper_subprocess_extensions_hoist.py`; plus `test_integration_builder.py`, `test_process_flow_builder.py:1338-2091`, `test_schema_template_process_flow.py`, `test_design_doctrine.py` |
 | Assertion strength | Raw-byte XML equality since #138 (`processcall_standalone_parent.xml`, `tests/test_wrapper_subprocess_builder.py`; converted from `ET.canonicalize` — §3.2); plus structural shape/wiring assertions |
-| Adapter issue | #139 (named adapter over Process Call semantics) |
-| Migration gate | The accepted-and-ignored root/call extras (§2.8) are a gate to close in #139 — the adapter must map them as a compatibility no-op (still accepted), never silently tighten and never reject a currently-accepted extra without a separately announced deprecation (§9); `PLAINTEXT_SECRET_REJECTED` stays stable |
+| Adapter issue | #139 (named adapter over Process Call semantics) — **#139A LANDED** (adapter `compiler/process_ir/legacy_adapters/wrapper_subprocess.py`) |
+| Migration gate | **#139A CUT OVER (2026-07-22):** `WrapperSubprocessBuilder.build` now produces its shapes through the canonical `ProcessIRV1 → compile → emit_process` chain (see the #139 M12.4 ledger below). The accepted-and-ignored root/call extras (§2.8) are mapped as a **compatibility no-op** (still accepted, recorded as `compatibility_noop_paths`), never tightened, never rejected without a separately announced §9 deprecation. `processcall_standalone_parent.xml` stays byte-identical; `PLAINTEXT_SECRET_REJECTED` and the `PROCESS_REF_MISSING`/`PROCESS_EXTENSIONS_INVALID` totality guards stay stable |
 
 ### 1.6 Primitive `emit_fragment`
 
@@ -582,3 +582,72 @@ from that same copy behind the `EmissionPlanV1` boundary. Compatibility facts:
 - No public schema/request/default/error/dispatch/plan/apply/verification behavior changed; the
   legacy builder keeps its external error contract. See
   `docs/architecture/PROCESS_EMITTER_REGISTRY_V1.md`.
+
+## #139 M12.4 — legacy adapters and golden parity (first slice, #139A)
+
+**Landed 2026-07-22.** This is a deliberately partial first slice of #139: it introduces the internal
+legacy-adapter boundary and cuts TWO executable dialects over to the one canonical path, closes the
+top-level pipeline secret gap, and leaves the rest of #139 explicitly pending (so the issue stays
+OPEN and #140 stays blocked while any executable row below is still `legacy`).
+
+**The adapter boundary.** `src/boomi_mcp/compiler/process_ir/legacy_adapters/` (DARK, imported directly
+by the migrated build paths, never via `process_ir.__all__`):
+
+- `contracts.py` — frozen `LegacyAdapterResultV1` (process_ir + `symbol_requirements` +
+  `compatibility_noop_paths` + reserved `pipeline_view`/`pipeline_view_status`), `LegacySymbolRequirementV1`,
+  `LegacyAdapterDiagnosticV1`, `LegacyAdapterError`. Repr-redacted; carries no XML/CFG/layout/shape-id/
+  credential/raw-config (ADR-001 §6, pinned by `tests/test_legacy_process_ir_adapters.py`).
+- `registry.py` — immutable `MappingProxyType` keyed by **qualified dialect**: migrated =
+  {`wrapper_subprocess`, `database_to_api_sync/flow_sequence`}; reserved-but-unmigrated =
+  {`database_to_api_sync` (ordinary), `sync_pipeline`}.
+- `wrapper_subprocess.py`, `flow_sequence.py` — the two production adapters.
+- `emission.py` — `emit_legacy_result`: builds `SymbolTableV1` from the requirements and drives
+  `compile_process_ir_v1 → emit_process`, returning the verified `shape_xml_parts`.
+
+The `flow_sequence` adapter REUSES the single forward translator `legacy_flow_sequence_to_ir`
+(`models/_process_ir_compat.py`, no longer test-only-imported) on a config projected to the codec's
+known keys; safe unknown root/binding keys are recorded as `compatibility_noop_paths`, never rejected
+(no unknown-field tightening). Its symbol requirements are derived from the compiled emission plan
+(the exact component-id/type pairs the emitter validates), so a role/kind can never be missed or
+mistyped. The `wrapper_subprocess` adapter builds its IR directly (resolved-ref semantics, matching
+`build()`), deduping a repeated child into one requirement.
+
+### #139A migration ledger
+
+| Surface | Adapter | Executed subset | Public error translation | XML fixtures (byte-identical) | Verifier | Live-QA | Cutover status |
+|---|---|---|---|---|---|---|---|
+| `wrapper_subprocess` | `wrapper_subprocess.py` | ordered process_calls + Stop/Return Documents; `wait`/`abort_on_error`/`label` | adapter/compile/emit defect → `PROCESS_XML_VALIDATION_FAILED`; `PROCESS_REF_MISSING`/`PROCESS_EXTENSIONS_INVALID` totality guards preserved (precede the adapter) | `processcall_standalone_parent.xml` | inside `emit_process` (`verify_process_graph`) | required | **canonical** |
+| `database_to_api_sync` / `flow_sequence` | `flow_sequence.py` | 11 linear kinds; terminal branch/decision/exception; nested branch/decision arms; Return-Documents (linear only); target-less cache_put staging legs | adapter/compile/emit defect → `PROCESS_XML_VALIDATION_FAILED`; step/config codes unchanged (validator runs first) | `flow_sequence_decision_branch_map.xml`, `flow_sequence_cache_load_retrieve_remove.xml`, `flow_sequence_exception_terminal.xml`, `set_properties_ddp_dpp_flow_sequence.xml`, `flow_sequence_cache_put_get.xml`, `m11_cache_property_basic.xml`, `m11_processproperty_map_function.xml` | inside `emit_process` | required | **canonical** |
+| composition process emission (`patterns/composition.py`) | (inherits `flow_sequence`) | main process rewritten to `database_to_api_sync` + `flow_sequence=[map_ref, terminal branch]` | via the flow_sequence adapter | archetype-composition suite (raw XML parity) | inside `emit_process` | required | **canonical-inherited** (recipe adapter pending #145) |
+| `sync_pipeline` + 4 sync archetypes | reserved (`registry.RESERVED_DIALECTS`) | — | unchanged (`SYNC_PIPELINE_*`) | `sync_pipeline_db_read_map_rest_send.xml`, `listener_wss_start.xml` | n/a | n/a | **pending-golden/capability** |
+| ordinary `database_to_api_sync` (single/linear, Try-Catch, dynamic path, listener) | reserved | — | unchanged | existing goldens | n/a | n/a | **pending-capability** (needs canonical start_listen / dynamic-path / catcherrors / notify emission) |
+| `emit_fragment` primitives | — | — | unchanged | — | n/a | n/a | **n/a** (never canonical) |
+| top-level `spec.pipeline` | secret scan only | — | `PLAINTEXT_SECRET_REJECTED` (value-free path) | — | n/a | required | **V1-inert; §11 secret gap CLOSED; strict `version="1.1"` selector designed-not-activated** |
+
+### Deletions / no duplicate emitter path
+
+The now-unreachable composed-flow XML orchestration (`_emit_composed_flow_shapes`,
+`_source_prefix_flow_entries`, `_target_terminal_entries`, `_append_path`, `_append_branch`,
+`_append_decision`, `_emit_seq_linear`, `_append_linear_entries`, `_seq_step_to_flow_entry`,
+`_seq_exception_params`) was DELETED from `process_flow_builder.py`; the shared shape templates
+(`_emit_flow_shape`, `_emit_linear_shapes`, `_emit_branch_shapes`, `_emit_decision_shapes`, the
+Try/Catch emitters) stay — they still serve the non-migrated ordinary `database_to_api_sync` paths.
+`tests/test_legacy_adapter_cutover.py` pins their absence and that the migrated builds drive
+`emit_process`/`compile_process_ir_v1`.
+
+### Locked-but-not-activated strict authority selector
+
+`config.integration_spec.version="1.1"` (design fixed in [ADR-001](ADR-001-process-ir-authority.md) §5
+and `.codex/plans/issue-139.md`) is NOT activated in #139A — activation waits until every executable
+dialect (sync/ordinary/listener) has a faithful normalization path so a derived `PipelineSpec` view
+can be computed. Until then V1 preserves a disagreeing top-level pipeline inert (freeze suite), and
+`LEGACY_ADAPTER_AUTHORITY_CONFLICT` / `LEGACY_ADAPTER_PIPELINE_DRAFT_ONLY` are reserved codes.
+
+### Deferred (issue stays OPEN)
+
+sync_pipeline golden-baseline + adapter, ordinary database_to_api_sync (needs canonical listener /
+dynamic-path / catcherrors / notify emission — currently owned by #140/#142), the recipe/archetype
+named adapters (#145), authority activation, and the final cutover that removes the remaining legacy
+XML dispatch. Full-#139 DOD requires either an ownership adjustment allowing parity-only support for
+those already-shipped capabilities or a milestone dependency change; #139A does not fake completion
+around that gap.

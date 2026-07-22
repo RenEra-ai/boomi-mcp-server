@@ -1,11 +1,15 @@
 # Process-Emitter Registry V1 (issue #138, M12.3)
 
-Status: **DARK / test-only.** The registry is the first — and, in #138, the only —
-consumer of `EmissionPlanV1`. No MCP tool, no production builder, and no JSON Schema
-constructs or consumes it. It lives at
-`src/boomi_mcp/compiler/process_ir/emitter_registry.py`, is imported directly (never through
-`boomi_mcp.compiler.process_ir.__all__`), and is exercised only by tests. **#139** owns wrapping
-its output into a deployable Boomi Component envelope and the production cutover.
+Status: **DARK, with the first PRODUCTION consumers as of #139A (2026-07-22).** The registry is the
+consumer of `EmissionPlanV1`. It lives at `src/boomi_mcp/compiler/process_ir/emitter_registry.py`, is
+imported directly (never through `boomi_mcp.compiler.process_ir.__all__`), and stays out of every MCP
+tool / JSON Schema. Since #139A its `emit_process` is driven in production by the legacy adapters
+(`legacy_adapters/emission.py`) for the migrated `wrapper_subprocess` and
+`database_to_api_sync/flow_sequence` build paths: `emit_process` returns the ordered shape fragments +
+the minimal verified `<process>` wrapper, and the **legacy component assembler
+(`_assemble_process_component_xml`) remains the owner of the deployable Boomi Component envelope**
+(description, folder, `processOverrides`, the `<bns:Component>` skeleton). #139 later slices bring the
+remaining dialects; see the [compatibility inventory](M12_COMPATIBILITY_INVENTORY.md) #139 ledger.
 
 This milestone is **mechanical consolidation only**: no new ProcessIR semantic nodes, no
 connector/control-flow capability, no public schema change. It extracts the byte-proven shape

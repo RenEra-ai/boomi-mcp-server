@@ -1,8 +1,14 @@
-"""PRIVATE #136 compatibility codec: frozen ``flow_sequence`` <-> ``ProcessIRV1``.
+"""#136 compatibility codec: frozen ``flow_sequence`` <-> ``ProcessIRV1``.
 
-Dark and unexported — no runtime code imports this module; only the #136 parity
-tests do. It proves the losslessness acceptance criterion (legacy fixture ->
-IR -> legacy -> IR is canonically identical) over the FROZEN semantic scope:
+Unexported. Since #139 (M12.4) its FORWARD core
+(:func:`legacy_flow_sequence_to_ir`) is the single production translator the
+``database_to_api_sync/flow_sequence`` legacy adapter reuses
+(``compiler.process_ir.legacy_adapters.flow_sequence`` calls it on a config
+projected to the codec's known keys); the reverse codec
+(:func:`ir_to_legacy_flow_sequence`) and the strict FROZEN root/scope policy stay
+test-only, exercised by the #136 parity tests. It proves the losslessness
+acceptance criterion (legacy fixture -> IR -> legacy -> IR is canonically
+identical) over the FROZEN semantic scope:
 
 - a ``database_to_api_sync`` config carrying ``source`` + ``target`` +
   ``flow_sequence`` (+ optional ``return_documents``, a passthrough
@@ -10,10 +16,11 @@ IR -> legacy -> IR is canonically identical) over the FROZEN semantic scope:
 - a ``wrapper_subprocess`` config carrying ``process_calls``
   (+ optional ``return_documents``).
 
-Everything else — arbitrary root extras (the legacy root leniency stays #139's
-gate, inventory §2.7), ``process_extensions``, Try/Catch reliability,
-``dynamic_path``, sibling control blocks — is REJECTED here: #139 owns the full
-production adapter, and this codec must never grow into a shadow of it. Any
+Everything else — arbitrary root extras (the legacy root leniency is handled by
+the #139 adapter's projection, which records them as compatibility no-op paths),
+``process_extensions``, Try/Catch reliability, ``dynamic_path``, sibling control
+blocks — is REJECTED by THIS module's frozen scope: the production adapter owns
+the lenient projection, and this codec must never grow into a shadow of it. Any
 compatibility-only machinery here (e.g. ``fallback_target``) has its removal
 gate in #147.
 
