@@ -317,6 +317,14 @@ def test_resolved_symbols_are_actual_component_symbols():
      "language": "groovy2", "use_cache": False},         # use_cache must be true
     {"operation": "split_documents", "key": 1, "index": 1, "profile_type": "json",
      "profile_id": "", "link_element_key": "k", "link_element_name": "n"},  # blank profile
+    {"operation": "split_documents", "key": 1, "index": 1, "profile_type": "JSON",
+     "profile_id": "P", "link_element_key": "k", "link_element_name": "n"},  # uppercase kind
+    {"operation": "split_documents", "key": 1, "index": 1, "profile_type": " json ",
+     "profile_id": "P", "link_element_key": "k", "link_element_name": "n"},  # padded kind
+    {"operation": "split_documents", "key": 1, "index": 1, "profile_type": "json",
+     "profile_id": "P", "link_element_key": "  ", "link_element_name": "n"},  # blank link key
+    {"operation": "custom_scripting", "key": 1, "index": 1, "script": "   ",
+     "language": "groovy2", "use_cache": True},          # blank script
 ])
 def test_dataprocess_renderer_invariants_reject_bad_steps(bad_step):
     plan = _dataprocess_plan(DataProcessInputV1(steps=(bad_step,), userlabel="dp"))
@@ -396,6 +404,9 @@ def test_verifier_exception_becomes_value_free_internal(monkeypatch):
         R.emit_process(_linear_map_plan(), _map_symbols())
     assert [d.code for d in exc.value.diagnostics] == [PROCESS_IR_COMPILE_INTERNAL]
     assert exc.value.diagnostics[0].phase == "post_emission_verification"
+    # Value-free across EVERY diagnostic field (message/remediation included), not
+    # just the exception's str().
+    assert "secret" not in exc.value.diagnostics[0].model_dump_json()
     assert "secret" not in str(exc.value)
 
 

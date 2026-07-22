@@ -440,11 +440,11 @@ def _req_dataprocess(inp) -> Tuple[SymbolRequirement, ...]:
         profile_id = getattr(step, "profile_id", "")
         if not profile_id:
             continue
-        kind = str(getattr(step, "profile_type", "")).strip().lower()
-        # Require the SPECIFIC matching component type. An unsupported kind maps to
-        # nothing, so the requirement can never be satisfied (fails closed); the
-        # precondition also flags it as EMITTER_INPUT_INVALID.
-        component_type = _DP_PROFILE_COMPONENT_TYPE.get(kind)
+        # Exact profile-kind match (no normalization) — mirror the legacy validator
+        # ``_validate_dataprocess_profile_step``, which tests exact membership. An
+        # unsupported/denormalized kind maps to nothing → the requirement can never
+        # be satisfied (fails closed); the precondition also flags it INVALID.
+        component_type = _DP_PROFILE_COMPONENT_TYPE.get(getattr(step, "profile_type", None))
         types = (component_type,) if component_type else ()
         reqs.append(SymbolRequirement("profile", profile_id, types))
     return tuple(reqs)
@@ -516,7 +516,11 @@ def _pre_dataprocess(inp) -> Optional[str]:
             if _blank(step.script):
                 return "custom-scripting script must be a non-empty string"
         else:  # split_documents / combine_documents
-            if str(getattr(step, "profile_type", "")).strip().lower() not in _DP_PROFILE_KINDS:
+            # Exact membership (no strip/lower) — the legacy validate_config gate
+            # (_validate_dataprocess_profile_step) tests exact membership, so
+            # ``"JSON"`` / ``" json "`` must fail here too (and they would also emit a
+            # divergent ``profileType`` attribute).
+            if getattr(step, "profile_type", None) not in _DP_PROFILE_KINDS:
                 return "unsupported data-process profile_type"
             for key in ("profile_id", "link_element_key", "link_element_name"):
                 if _blank(getattr(step, key, "")):
