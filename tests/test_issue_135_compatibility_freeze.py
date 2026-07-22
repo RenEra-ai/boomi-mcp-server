@@ -242,7 +242,7 @@ def test_zero_process_pipeline_secret_config_now_rejected():
     assert plan["_success"] is False
     assert plan["error_code"] == "PLAINTEXT_SECRET_REJECTED"
     # The value-free path is reported; the secret value never appears anywhere.
-    assert "pipeline.stages[0].config" in plan["error"]
+    assert "pipeline.stages" in plan["error"] and "config." in plan["error"]
     assert secret_val not in json.dumps(plan)
 
 
@@ -269,7 +269,7 @@ def test_component_bearing_pipeline_secret_config_now_rejected(mock_pag):
     plan = _build_plan(MagicMock(), copy.deepcopy(case["config"]))
     assert plan["_success"] is False
     assert plan["error_code"] == "PLAINTEXT_SECRET_REJECTED"
-    assert "pipeline.stages[0].config" in plan["error"]
+    assert "pipeline.stages" in plan["error"] and "config." in plan["error"]
     assert secret_val not in json.dumps(plan)
 
     # The control config (secret in BOTH the component AND the pipeline) is also
@@ -278,6 +278,40 @@ def test_component_bearing_pipeline_secret_config_now_rejected(mock_pag):
     assert control["_success"] is False
     assert control["error_code"] == "PLAINTEXT_SECRET_REJECTED"
     assert secret_val not in json.dumps(control)
+
+
+def test_malformed_pipeline_stage_secret_does_not_leak_through_validation_error():
+    """#139A review r1 (P1): the pipeline secret scan runs on the RAW input BEFORE
+    ``_normalize_to_spec`` — so a stage that fails StageSpec model validation (e.g.
+    it carries both ``component_ref`` and a non-empty ``config``) cannot leak the
+    plaintext through the pydantic ValidationError's echoed ``input_value``. The
+    plan is rejected with PLAINTEXT_SECRET_REJECTED and the sentinel never surfaces.
+
+    Sentinel is a PLACEHOLDER token (§11), never a real secret.
+    """
+    sentinel = "SENTINEL-LEAK-not-a-real-secret"
+    cfg = {
+        "integration_spec": {
+            "name": "x",
+            "components": [],
+            "pipeline": {
+                "stages": [
+                    {
+                        "key": "s0",
+                        "stage_type": "transform",
+                        # Both set -> StageSpec XOR validator would raise (and echo
+                        # the config) during normalization if the scan ran too late.
+                        "component_ref": "$ref:foo",
+                        "config": {"password": sentinel},
+                    }
+                ]
+            },
+        }
+    }
+    plan = _build_plan(MagicMock(), copy.deepcopy(cfg))
+    assert plan["_success"] is False
+    assert plan["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+    assert sentinel not in json.dumps(plan, default=str)
 
 
 def test_normalize_drops_top_level_pipeline():

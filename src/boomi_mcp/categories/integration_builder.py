@@ -5091,46 +5091,51 @@ def _resolve_literal_profile_indexes(
 
 
 def _scan_top_level_pipeline_secrets(
-    spec: IntegrationSpecV1,
+    config: Dict[str, Any],
 ) -> Optional[BuilderValidationError]:
-    """Scan the normalized top-level ``spec.pipeline`` for plaintext secrets.
+    """Scan the RAW top-level ``integration_spec.pipeline`` for plaintext secrets.
 
     Issue #139 M12.4 (ADR-001 §11). The top-level ``spec.pipeline`` stage config
     is an INERT compatibility echo on the V1 surface, but the per-component
     ``scan_forbidden_secret_fields`` scanners never traverse it (``StageSpec.config``
     is an open ``Dict[str, Any]``), so a plaintext credential in it used to be
     echoed straight back — the leak ADR §11 flags and #135 only characterized.
-    This closes it with the SAME recursive forbidden-secret policy the component
-    builders use, reporting only the value-free key path, never the value.
+
+    Scans the RAW input pipeline BEFORE ``_normalize_to_spec`` constructs
+    ``IntegrationSpecV1``: a malformed pipeline stage (e.g. a stage carrying both
+    ``component_ref`` and a non-empty ``config``) raises a pydantic
+    ``ValidationError`` during normalization whose text echoes the offending
+    ``config`` value — so scanning the NORMALIZED spec would run too late to stop
+    that leak. Only the ``integration_spec.pipeline`` form is StageSpec-validated
+    (the bare / ``source_description`` forms drop the pipeline before validation,
+    so they neither leak nor emit). Reports only the value-free key path.
     """
-    pipeline = getattr(spec, "pipeline", None)
-    if pipeline is None:
+    if not isinstance(config, dict):
         return None
-    for i, stage in enumerate(getattr(pipeline, "stages", None) or []):
-        stage_config = getattr(stage, "config", None)
-        if not isinstance(stage_config, dict):
-            continue
-        err = ProcessFlowBuilder.scan_forbidden_secret_fields(
-            stage_config, _path_prefix=f"pipeline.stages[{i}].config."
-        )
-        if err is not None:
-            return err
-    return None
+    spec_payload = config.get("integration_spec")
+    if not isinstance(spec_payload, dict):
+        return None
+    pipeline = spec_payload.get("pipeline")
+    if not isinstance(pipeline, (dict, list)):
+        return None
+    return ProcessFlowBuilder.scan_forbidden_secret_fields(
+        pipeline, _path_prefix="pipeline."
+    )
 
 
 def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
-    spec = _normalize_to_spec(config)
     # Issue #139 M12.4 (ADR-001 §11): reject a plaintext secret in the top-level
-    # spec.pipeline BEFORE any synthesis, authority/collision lookup, plan echo, or
-    # mutation — so the value is never echoed back or logged. Runs for zero-,
-    # single-, and multi-process specs, and for V1 even though the field is inert.
-    pipeline_secret_err = _scan_top_level_pipeline_secrets(spec)
+    # integration_spec.pipeline BEFORE normalization (so a malformed stage cannot
+    # leak the value through a pydantic ValidationError), and before any synthesis,
+    # authority/collision lookup, plan echo, or mutation.
+    pipeline_secret_err = _scan_top_level_pipeline_secrets(config)
     if pipeline_secret_err is not None:
         return {
             "_success": False,
             "error_code": pipeline_secret_err.error_code,
             "error": str(pipeline_secret_err),
         }
+    spec = _normalize_to_spec(config)
     # Issue #41 r3: inject transform.function wrappers between any
     # transform.map (map_type='script') and the script.mapping it
     # references. Live Boomi requires the indirection — see

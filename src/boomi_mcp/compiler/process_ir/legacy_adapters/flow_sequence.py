@@ -44,6 +44,100 @@ _ENVELOPE_ROOT_KEYS = frozenset({"process_extensions"})
 
 _DP_PROFILE_COMPONENT_TYPE = {"json": "profile.json", "xml": "profile.xml"}
 
+# Component id/ref keys the pre-#139 builder normalized with ``str(x).strip()``
+# before writing XML (baseline `process_flow_builder.py:901-1088`). The strict
+# ProcessIR reference validator rejects surrounding whitespace, so the adapter
+# must reproduce that coercion or a validated whitespace-padded ref raises.
+_ID_REF_KEYS = frozenset(
+    {"connection_id", "operation_id", "map_ref", "document_cache_id", "profile_id"}
+)
+
+
+def _project_binding(
+    binding: Dict[str, Any], path: str, noop: List[str]
+) -> Dict[str, Any]:
+    """Keep only the binding keys the codec knows; record extras as no-op paths.
+
+    The legacy ``_validate_*_binding`` accepts and ignores unknown binding keys
+    (a lenient location, §2.7), so stripping-and-recording them preserves
+    acceptance instead of tightening the surface."""
+    kept: Dict[str, Any] = {}
+    for bkey, bvalue in binding.items():
+        if bkey in _BINDING_KEYS:
+            kept[bkey] = bvalue
+        else:
+            noop.append(f"{path}/{bkey}")
+    return kept
+
+
+def _project_steps(steps: Any, path: str, noop: List[str]) -> Any:
+    """Project the lenient binding location inside the flow_sequence: a branch
+    leg ``target`` (validated by the same lenient ``_validate_target_binding``).
+    Step keys themselves are strict on both the validator and the codec, so they
+    are left untouched; only leg target bindings and nested decision arms are
+    recursed."""
+    if not isinstance(steps, list):
+        return steps
+    out = []
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            out.append(step)
+            continue
+        kind = str(step.get("kind") or "").strip()
+        new_step = dict(step)
+        if kind == "branch" and isinstance(step.get("legs"), list):
+            new_legs = []
+            for j, leg in enumerate(step["legs"]):
+                if isinstance(leg, dict):
+                    new_leg = dict(leg)
+                    if isinstance(leg.get("target"), dict):
+                        new_leg["target"] = _project_binding(
+                            leg["target"], f"{path}/{i}/legs/{j}/target", noop
+                        )
+                    if isinstance(leg.get("steps"), list):
+                        new_leg["steps"] = _project_steps(
+                            leg["steps"], f"{path}/{i}/legs/{j}/steps", noop
+                        )
+                    new_legs.append(new_leg)
+                else:
+                    new_legs.append(leg)
+            new_step["legs"] = new_legs
+        elif kind == "decision":
+            for arm in ("true_steps", "false_steps"):
+                if isinstance(step.get(arm), list):
+                    new_step[arm] = _project_steps(
+                        step[arm], f"{path}/{i}/{arm}", noop
+                    )
+        out.append(new_step)
+    return out
+
+
+def _coerce_legacy_values(node: Any) -> Any:
+    """Reproduce the pre-#139 builder's value coercion so a validated but
+    non-canonical value survives strict ProcessIR parsing byte-identically:
+    ``str(x or "").strip()`` on component id/ref keys and ``str(x or "")`` on
+    labels — the EXACT idiom the old builder used (baseline
+    `process_flow_builder.py:901-1088`), so a falsy non-string value (0/False)
+    maps to "" identically. A no-op on already-canonical values (so every
+    existing golden is unchanged)."""
+    if isinstance(node, dict):
+        out: Dict[str, Any] = {}
+        for k, v in node.items():
+            if (
+                k in _ID_REF_KEYS
+                and isinstance(v, (str, int, float))
+                and not isinstance(v, bool)
+            ):
+                out[k] = str(v or "").strip()
+            elif k == "label" and v is not None and not isinstance(v, (dict, list)):
+                out[k] = str(v or "")
+            else:
+                out[k] = _coerce_legacy_values(v)
+        return out
+    if isinstance(node, list):
+        return [_coerce_legacy_values(item) for item in node]
+    return node
+
 
 def _project(config: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     """Project a validated config to the codec's known keys; collect noop paths."""
@@ -58,16 +152,14 @@ def _project(config: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
             noop.append(f"/{key}")
             continue
         if key in ("source", "target") and isinstance(value, dict):
-            binding: Dict[str, Any] = {}
-            for bkey, bvalue in value.items():
-                if bkey in _BINDING_KEYS:
-                    binding[bkey] = bvalue
-                else:
-                    noop.append(f"/{key}/{bkey}")
-            projected[key] = binding
+            projected[key] = _project_binding(value, f"/{key}", noop)
+        elif key == "flow_sequence" and isinstance(value, list):
+            projected[key] = _project_steps(value, "/flow_sequence", noop)
         else:
             projected[key] = value
-    return projected, noop
+    # Coerce legacy-accepted non-canonical id/label values AFTER projection so the
+    # config handed to the strict codec matches what the pre-#139 builder emitted.
+    return _coerce_legacy_values(projected), noop
 
 
 def _collect_binding_meta(config: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
@@ -207,7 +299,11 @@ def adapt_flow_sequence(config: Dict[str, Any]) -> LegacyAdapterResultV1:
     """Normalize a validated database_to_api_sync flow_sequence config."""
     projected, noop = _project(config)
     ir = legacy_flow_sequence_to_ir(projected)
-    binding_meta = _collect_binding_meta(config)
+    # Collect connector metadata from the PROJECTED config (same id coercion the
+    # codec saw), so the meta keys match the stripped IR refs — otherwise a
+    # whitespace-padded operation id would key the metadata under the padded
+    # spelling and lowering would find no connector family on the operation symbol.
+    binding_meta = _collect_binding_meta(projected)
     requirements = _requirements_from_ir(ir, binding_meta)
     return LegacyAdapterResultV1(
         process_ir=ir,

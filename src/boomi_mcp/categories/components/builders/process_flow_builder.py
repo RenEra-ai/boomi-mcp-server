@@ -4440,11 +4440,16 @@ def _build_composed_process_flow(
     from ....compiler.process_ir.legacy_adapters.flow_sequence import (
         adapt_flow_sequence,
     )
+    from ....models.process_ir import ProcessIRValidationError
 
     try:
         result = adapt_flow_sequence(config)
         shape_xml_parts = list(emit_legacy_result(result).shape_xml_parts)
-    except (LegacyAdapterError, ProcessIRCompileError) as exc:
+    except (
+        LegacyAdapterError,
+        ProcessIRCompileError,
+        ProcessIRValidationError,
+    ) as exc:
         raise BuilderValidationError(
             "flow_sequence process could not be lowered to the canonical "
             "process IR.",
@@ -5127,11 +5132,16 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
         from ....compiler.process_ir.legacy_adapters.wrapper_subprocess import (
             adapt_wrapper_subprocess,
         )
+        from ....models.process_ir import ProcessIRValidationError
 
         try:
             result = adapt_wrapper_subprocess(config)
             shape_xml_parts = list(emit_legacy_result(result).shape_xml_parts)
-        except (LegacyAdapterError, ProcessIRCompileError) as exc:
+        except (
+            LegacyAdapterError,
+            ProcessIRCompileError,
+            ProcessIRValidationError,
+        ) as exc:
             raise BuilderValidationError(
                 "wrapper_subprocess process could not be lowered to the "
                 "canonical process IR.",

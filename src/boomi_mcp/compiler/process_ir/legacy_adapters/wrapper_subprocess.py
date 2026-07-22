@@ -74,7 +74,11 @@ def adapt_wrapper_subprocess(config: Dict[str, Any]) -> LegacyAdapterResultV1:
             if flag in call and isinstance(call[flag], bool):
                 node[flag] = call[flag]
         if call.get("label") is not None:
-            node["label"] = call["label"]
+            # _validate_processcall_entry does not type-check label; the pre-#139
+            # emitter coerced it with str(... or ""). Reproduce that exactly so a
+            # validated non-string label (e.g. 7) survives strict ProcessIR
+            # parsing byte-identically (a falsy 0/False maps to "").
+            node["label"] = str(call["label"] or "")
         steps.append(node)
         noop_paths.extend(
             f"/process_calls/{i}/{k}" for k in sorted(set(call) - _KNOWN_CALL_KEYS)
@@ -94,7 +98,7 @@ def adapt_wrapper_subprocess(config: Dict[str, Any]) -> LegacyAdapterResultV1:
     if isinstance(rd, dict) and rd.get("enabled") is True:
         terminal: Dict[str, Any] = {"kind": "return_documents"}
         if rd.get("label") is not None:
-            terminal["label"] = rd["label"]
+            terminal["label"] = str(rd["label"] or "")
         steps.append(terminal)
     else:
         steps.append({"kind": "stop"})

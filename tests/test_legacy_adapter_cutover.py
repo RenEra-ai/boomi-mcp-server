@@ -35,6 +35,8 @@ _DB_CONN = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 _DB_OP = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 _REST_CONN = "cccccccc-cccc-cccc-cccc-cccccccccccc"
 _REST_OP = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+_RB_CONN = "55555555-5555-5555-5555-555555555555"
+_RB_OP = "66666666-6666-6666-6666-666666666666"
 
 _WRAPPER_CFG = {
     "process_kind": "wrapper_subprocess",
@@ -138,3 +140,62 @@ def test_post_validation_compile_failure_translates_to_public_code(builder, cfg)
             builder.build(cfg, name="X")
     assert exc.value.error_code == "PROCESS_XML_VALIDATION_FAILED"
     assert "LEGACY_ADAPTER" not in str(exc.value.error_code)
+
+
+# ---------------------------------------------------------------------------
+# Backward compatibility: the adapter must not tighten inputs the legacy
+# validate+build path accepted-and-coerced (Codex #139A review round 1).
+# ---------------------------------------------------------------------------
+
+
+def _base_flow(**over):
+    cfg = dict(_FLOW_CFG)
+    cfg.update(over)
+    return cfg
+
+
+def test_wrapper_non_string_label_still_builds():
+    # validate_config does not type-check label; the pre-#139 emitter did
+    # str(...). A validated non-string label must still build, not raise.
+    cfg = {"process_kind": "wrapper_subprocess", "process_calls": [{"process_id": _C1, "label": 7}]}
+    assert WrapperSubprocessBuilder.validate_config(cfg, depends_on=[]) is None
+    xml = WrapperSubprocessBuilder.build(cfg, name="W")
+    assert 'userlabel="7"' in xml
+
+
+def test_flow_non_string_endpoint_label_still_builds():
+    cfg = _base_flow(
+        flow_sequence=[{"kind": "map_ref", "map_ref": "MAP-1"}],
+        source={"connector_type": "database", "connection_id": _DB_CONN, "operation_id": _DB_OP, "action_type": "Get", "label": 123},
+    )
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    assert "<bns:Component" in ProcessFlowBuilder.build(cfg, name="F")
+
+
+def test_flow_whitespace_padded_ids_are_stripped_like_legacy():
+    # The old builder wrote str(id).strip(); the strict IR ref validator rejects
+    # surrounding whitespace, so the adapter must strip to preserve acceptance
+    # AND byte output (the stripped id, never the padded spelling).
+    padded_op = f"  {_REST_OP}  "
+    cfg = _base_flow(
+        flow_sequence=[{"kind": "map_ref", "map_ref": "MAP-1"}],
+        target={"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": padded_op, "action_type": "POST"},
+    )
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    xml = ProcessFlowBuilder.build(cfg, name="F")
+    assert _REST_OP in xml and padded_op not in xml
+
+
+def test_flow_branch_leg_target_extra_key_still_builds():
+    # A branch leg target is validated by the lenient _validate_target_binding, so
+    # a safe unknown key on it was accepted-and-ignored before — it must remain so.
+    def rt(conn, op, label, **extra):
+        d = {"connector_type": "rest", "connection_id": conn, "operation_id": op, "action_type": "POST", "label": label}
+        d.update(extra)
+        return d
+    cfg = _base_flow(flow_sequence=[{"kind": "branch", "legs": [
+        {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": rt(_REST_CONN, _REST_OP, "A", future_leg_key="x")},
+        {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": rt(_RB_CONN, _RB_OP, "B")},
+    ]}])
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    assert "<bns:Component" in ProcessFlowBuilder.build(cfg, name="F")
