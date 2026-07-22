@@ -199,3 +199,33 @@ def test_flow_branch_leg_target_extra_key_still_builds():
     ]}])
     assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
     assert "<bns:Component" in ProcessFlowBuilder.build(cfg, name="F")
+
+
+def test_flow_conflicting_connector_metadata_for_shared_id_fails_closed():
+    # Codex #139A review r2 (P2): one component id bound with CONFLICTING connector
+    # families (a database source op == a REST target op) is semantically invalid;
+    # the adapter must fail closed to PROCESS_XML_VALIDATION_FAILED rather than
+    # silently emit the source connector with the target's family.
+    shared = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    cfg = _base_flow(
+        source={"connector_type": "database", "connection_id": _DB_CONN, "operation_id": f"  {shared}  ", "action_type": "Get"},
+        target={"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": shared, "action_type": "POST"},
+        flow_sequence=[{"kind": "map_ref", "map_ref": "MAP-1"}],
+    )
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="F")
+    assert exc.value.error_code == "PROCESS_XML_VALIDATION_FAILED"
+
+
+def test_flow_same_endpoint_reused_across_branch_legs_still_builds():
+    # Consistent reuse (same id, same connector family) is NOT a conflict — two
+    # branch legs to one REST endpoint must keep building.
+    def rt(op, label):
+        return {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": op, "action_type": "POST", "label": label}
+    cfg = _base_flow(flow_sequence=[{"kind": "branch", "legs": [
+        {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": rt(_REST_OP, "A")},
+        {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": rt(_REST_OP, "B")},
+    ]}])
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    assert "<bns:Component" in ProcessFlowBuilder.build(cfg, name="F")

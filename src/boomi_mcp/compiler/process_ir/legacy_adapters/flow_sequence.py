@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
+from ....errors import LEGACY_ADAPTER_SEMANTIC_LOSS
 from ....models._process_ir_compat import (
     _BINDING_KEYS as _CODEC_BINDING_KEYS,
     _FLOW_ROOT_KEYS as _CODEC_FLOW_ROOT_KEYS,
@@ -29,7 +30,11 @@ from ....models._process_ir_compat import (
 from ....models.process_ir import ProcessIRV1
 from ..contracts import ComponentSymbolV1, SymbolTableV1
 from ..lowering import lower_cfg_to_emission_plan, lower_process_ir_to_cfg
-from .contracts import LegacyAdapterResultV1, LegacySymbolRequirementV1
+from .contracts import (
+    LegacyAdapterResultV1,
+    LegacySymbolRequirementV1,
+    adapter_diagnostic,
+)
 
 # The frozen codec's own known-key sets (imported, not re-declared, so the two
 # cannot drift). ``source`` / ``target`` / ``flow_sequence`` feed the IR;
@@ -166,39 +171,60 @@ def _collect_binding_meta(config: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
     """Map each connector ref (connection_id AND operation_id) to its derived
     ``connector_type`` / ``action_type``, from source, target, and every
     branch/decision leg target binding. Both ids are keyed (mirrors the #136
-    parity oracle); lowering reads the metadata from the operation symbol only."""
-    meta: Dict[str, Dict[str, str]] = {}
+    parity oracle); lowering reads the metadata from the operation symbol only.
 
-    def add(binding: Any) -> None:
+    A single ``SymbolTableV1`` entry per component id carries ONE connector
+    family, which is correct: a component has one type. If the SAME id is bound
+    with CONFLICTING connector metadata across roles (e.g. a database source and
+    a REST target reusing one operation id — always semantically invalid, and
+    reachable now that padded/unpadded ids normalize together), fail closed with
+    ``LEGACY_ADAPTER_SEMANTIC_LOSS`` (translated by the builder to
+    ``PROCESS_XML_VALIDATION_FAILED``) rather than silently emit one binding with
+    the other's family. Consistent reuse (same id, same family — e.g. two branch
+    legs to one endpoint) is preserved."""
+    meta: Dict[str, Dict[str, Any]] = {}
+    seen_norm: Dict[str, Tuple[str, str]] = {}
+
+    def add(binding: Any, path: str) -> None:
         if not isinstance(binding, dict):
             return
         ct = binding.get("connector_type")
         at = binding.get("action_type")
         pair = {"connector_type": ct, "action_type": at}
+        norm = (str(ct or "").strip().lower(), str(at or "").strip().lower())
         for id_key in ("connection_id", "operation_id"):
             ref = binding.get(id_key)
             if isinstance(ref, str) and ref.strip():
+                ref = ref.strip()
+                if ref in seen_norm and seen_norm[ref] != norm:
+                    raise adapter_diagnostic(
+                        LEGACY_ADAPTER_SEMANTIC_LOSS,
+                        f"{path}/{id_key}",
+                        "the same component id is bound with conflicting "
+                        "connector metadata across roles",
+                    )
+                seen_norm[ref] = norm
                 meta[ref] = pair
 
-    def walk_steps(steps: Any) -> None:
+    def walk_steps(steps: Any, path: str) -> None:
         if not isinstance(steps, list):
             return
-        for step in steps:
+        for i, step in enumerate(steps):
             if not isinstance(step, dict):
                 continue
             kind = str(step.get("kind") or "").strip()
             if kind == "branch":
-                for leg in step.get("legs") or []:
+                for j, leg in enumerate(step.get("legs") or []):
                     if isinstance(leg, dict):
-                        add(leg.get("target"))
-                        walk_steps(leg.get("steps"))
+                        add(leg.get("target"), f"{path}/{i}/legs/{j}/target")
+                        walk_steps(leg.get("steps"), f"{path}/{i}/legs/{j}/steps")
             elif kind == "decision":
-                walk_steps(step.get("true_steps"))
-                walk_steps(step.get("false_steps"))
+                walk_steps(step.get("true_steps"), f"{path}/{i}/true_steps")
+                walk_steps(step.get("false_steps"), f"{path}/{i}/false_steps")
 
-    add(config.get("source"))
-    add(config.get("target"))
-    walk_steps(config.get("flow_sequence"))
+    add(config.get("source"), "/source")
+    add(config.get("target"), "/target")
+    walk_steps(config.get("flow_sequence"), "/flow_sequence")
     return meta
 
 
