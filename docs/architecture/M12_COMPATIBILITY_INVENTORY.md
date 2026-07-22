@@ -119,7 +119,7 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Unknown-field behavior | **Permissive at root and per-call entry** — accepted and ignored, subject only to the secret scan — see §2.8 |
 | Error codes | `PROCESS_KIND_UNSUPPORTED` (`:6549`), `PROCESS_REF_MISSING` (`:6557` and entry-level), `PROCESS_REF_AMBIGUOUS` (`:6445`), `PROCESS_CALL_CONFIG_INVALID` (`:6487,6498`), `PLAINTEXT_SECRET_REJECTED` (inherited scan, `:564` in `scan_forbidden_secret_fields` `:509`) |
 | Fixtures / tests | Dedicated: `tests/test_wrapper_subprocess_builder.py` (golden `processcall_standalone_parent.xml`), `tests/test_wrapper_subprocess_extensions_hoist.py`; plus `test_integration_builder.py`, `test_process_flow_builder.py:1338-2091`, `test_schema_template_process_flow.py`, `test_design_doctrine.py` |
-| Assertion strength | **Canonicalized** XML equality (`ET.canonicalize`, `tests/test_wrapper_subprocess_builder.py:82`) — not raw-byte; plus structural shape/wiring assertions |
+| Assertion strength | Raw-byte XML equality since #138 (`processcall_standalone_parent.xml`, `tests/test_wrapper_subprocess_builder.py`; converted from `ET.canonicalize` — §3.2); plus structural shape/wiring assertions |
 | Adapter issue | #139 (named adapter over Process Call semantics) |
 | Migration gate | The accepted-and-ignored root/call extras (§2.8) are a gate to close in #139 — the adapter must map them as a compatibility no-op (still accepted), never silently tighten and never reject a currently-accepted extra without a separately announced deprecation (§9); `PLAINTEXT_SECRET_REJECTED` stays stable |
 
@@ -387,9 +387,11 @@ contract**; nothing validates fragment keys at the boundary.
 ## 3. Fixture ledger
 
 Golden directory: `tests/fixtures/golden_xml/` (the only golden dir). Each fixture below is
-labeled by the **measured comparison mode of its comparing test** (read on 2026-07-13). XML
-coverage is NOT uniformly byte-locked: 18 goldens are raw-byte, 8 are canonicalized, and the M8
-JSON examples are structural round-trips.
+labeled by the **measured comparison mode of its comparing test**. Since #138 (M12.3) the
+process-emitter goldens are UNIFORMLY byte-locked: all **31** committed `golden_xml/*.xml` fixtures
+are raw-byte, **0 are canonicalized** (the 8 formerly-canonicalized fixtures in §3.2 were converted
+to raw `==` and 5 new byte anchors were added — §3.2/§3.4 and the §138 note). The M8 JSON examples
+remain structural round-trips.
 
 ### 3.1 Raw-byte equality (`emitted == golden.read_text()`)
 
@@ -444,12 +446,17 @@ conversion (each already reproduced byte-for-byte).
 
 ### 3.4 `sync_pipeline_*.xml` golden coverage
 
-Since #138 (M12.3) there is ONE committed raw-byte golden for sync_pipeline emission —
-`sync_pipeline_db_read_map_rest_send.xml` (`tests/test_sync_pipeline_builder.py`
-`test_sync_pipeline_matches_golden_fixture`), a direct byte anchor for a non-listener
-db-read → map → rest-send build (the differential `xml_sync == xml_core` check compares two callers
-through the ONE shared renderer, so it cannot catch a drift in that shared template; the committed
-fixture pins the actual bytes). The remaining sync_pipeline XML coverage still rides on:
+Since #138 (M12.3) there are TWO committed raw-byte goldens built through `SyncPipelineBuilder.build`:
+
+1. `listener_wss_start.xml` — a WSS-listener sync-pipeline build
+   (`tests/test_process_flow_builder_listener.py` `test_listener_wss_start_matches_golden`), and
+2. `sync_pipeline_db_read_map_rest_send.xml` — a non-listener db-read → map → rest-send build
+   (`tests/test_sync_pipeline_builder.py` `test_sync_pipeline_matches_golden_fixture`).
+
+Both compare the complete `SyncPipelineBuilder.build` output byte-for-byte against a committed file.
+This matters because the differential `xml_sync == xml_core` check compares two callers through the
+ONE shared renderer, so it cannot catch a drift in that shared template; the committed fixtures pin
+the actual bytes. The remaining sync_pipeline XML coverage still rides on:
 
 1. **Differential equality** in `tests/test_sync_pipeline_builder.py`: `lower_config` output must
    equal the hand-written `database_to_api_sync` core dict (`_CORE_CONFIG` `:151`), and
@@ -457,10 +464,10 @@ fixture pins the actual bytes). The remaining sync_pipeline XML coverage still r
    (`test_build_xml_equals_process_flow_builder_with_map`) — equality against another builder's live
    output.
 2. The lowered `database_to_api_sync` surface's own goldens (the `try_catch_*` /
-   `*document_cache*` archetype goldens in §3.2 and the shape goldens in §3.1).
+   `*document_cache*` goldens in §3.2 and the shape goldens in §3.1).
 
-Broadening golden parity across every sync_pipeline variant (listener, fetch/write, SOAP) remains
-#139 adapter scope; #138 added the first committed sync_pipeline byte anchor.
+Broadening golden parity across the remaining sync_pipeline variants (fetch/write, SOAP) remains
+#139 adapter scope; #138 added the first committed sync_pipeline byte anchors (listener + linear).
 
 ### 3.5 JSON example fixtures (M8 / M11 / authoring)
 
