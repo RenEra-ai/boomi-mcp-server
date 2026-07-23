@@ -247,25 +247,43 @@ def test_flow_aliasing_is_deterministic_across_repeated_adaptations():
 
 
 def test_flow_nested_and_profile_refs_are_path_pinned():
-    # #139B: representative nested occurrences (branch leg targets, decision-arm
-    # targets, Data Process profile refs, set-property profile refs) each alias to
-    # their exact source pointer.
+    # #139B (architect review): every representative nested occurrence aliases to
+    # its EXACT source pointer with the right selector + type — Data Process profile
+    # refs, set-property profile refs, a DECISION arm's nested map + cache refs, and
+    # a nested branch leg target inside the decision's false arm. Each occurrence's
+    # (pointer, legacy_selector, expected_component_type) is pinned explicitly, so a
+    # wrong or omitted nested path would fail (not just self-consistency).
     result = adapt_flow_sequence(_flow_cfg(flow_sequence=[
         {"kind": "dataprocess", "steps": [{"operation": "split_documents", "profile_type": "json", "profile_id": "PROF-DP", "link_element_key": "1", "link_element_name": "n"}]},
         {"kind": "set_ddp", "name": "D", "source_values": [{"value_type": "profile", "element_id": "E", "element_name": "N", "profile_id": "PROF-SP", "profile_type": "profile.json"}]},
-        {"kind": "branch", "legs": [
-            {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": "op-leg-a0000000000000000000000000", "action_type": "POST", "label": "A"}},
-            {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": {"connector_type": "rest", "connection_id": "55555555-5555-5555-5555-555555555555", "operation_id": "op-leg-b0000000000000000000000000", "action_type": "POST", "label": "B"}},
-        ]},
+        {"kind": "decision", "comparison": "equals",
+         "left": {"value_type": "track", "property_id": "dynamicdocument.D"},
+         "right": {"value_type": "static", "static_value": "A"},
+         "true_steps": [
+             {"kind": "map_ref", "map_ref": "MAP-DEC"},
+             {"kind": "doccacheload", "document_cache_id": "CACHE-DEC"},
+             {"kind": "doccacheretrieve", "document_cache_id": "CACHE-DEC"},
+         ],
+         "false_steps": [{"kind": "branch", "legs": [
+             {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": "op-leg-a0000000000000000000000000", "action_type": "POST", "label": "A"}},
+             {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": {"connector_type": "rest", "connection_id": "55555555-5555-5555-5555-555555555555", "operation_id": "op-leg-b0000000000000000000000000", "action_type": "POST", "label": "B"}},
+         ]}]},
     ]))
     by_ptr = {r.source_pointer: r for r in result.symbol_requirements}
-    assert by_ptr["/flow_sequence/0/steps/0/profile_id"].legacy_selector == "PROF-DP"
-    assert by_ptr["/flow_sequence/0/steps/0/profile_id"].expected_component_type == "profile.json"
-    assert by_ptr["/flow_sequence/1/source_values/0/profile_id"].legacy_selector == "PROF-SP"
-    assert by_ptr["/flow_sequence/2/legs/0/target/operation_id"].legacy_selector == "op-leg-a0000000000000000000000000"
-    assert by_ptr["/flow_sequence/2/legs/1/target/operation_id"].legacy_selector == "op-leg-b0000000000000000000000000"
-    for r in result.symbol_requirements:
-        assert r.ir_ref == f"$ref:legacy.adapter:{r.source_pointer}"
+    expected = {
+        "/flow_sequence/0/steps/0/profile_id": ("PROF-DP", "profile.json"),
+        "/flow_sequence/1/source_values/0/profile_id": ("PROF-SP", "profile.json"),
+        "/flow_sequence/2/true_steps/0/map_ref": ("MAP-DEC", "transform.map"),
+        "/flow_sequence/2/true_steps/1/document_cache_id": ("CACHE-DEC", "documentcache"),
+        "/flow_sequence/2/true_steps/2/document_cache_id": ("CACHE-DEC", "documentcache"),
+        "/flow_sequence/2/false_steps/0/legs/0/target/operation_id": ("op-leg-a0000000000000000000000000", "connector-action"),
+        "/flow_sequence/2/false_steps/0/legs/1/target/operation_id": ("op-leg-b0000000000000000000000000", "connector-action"),
+    }
+    for ptr, (selector, ctype) in expected.items():
+        assert ptr in by_ptr, ptr
+        assert by_ptr[ptr].legacy_selector == selector, ptr
+        assert by_ptr[ptr].expected_component_type == ctype, ptr
+        assert by_ptr[ptr].ir_ref == f"$ref:legacy.adapter:{ptr}", ptr
 
 
 def test_flow_connector_metadata_only_on_operation_requirements():

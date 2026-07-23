@@ -142,24 +142,45 @@ def test_post_validation_compile_failure_translates_to_public_code(builder, cfg)
     assert "LEGACY_ADAPTER" not in str(exc.value.error_code)
 
 
-def test_resolver_receives_only_legacy_selectors_never_aliases():
-    # #139B (architect review): emit_legacy_result must pass ONLY the original
-    # legacy_selector values to the resolver — never a synthetic $ref:legacy.adapter:
-    # alias — and no alias may reach the emitted XML.
+def test_resolver_return_value_lands_in_xml_never_the_alias_or_selector():
+    # #139B (architect review): the resolver's RETURN VALUE (the resolved component
+    # id) is what reaches the XML — proven by a resolver that maps each authored
+    # `$ref:KEY` selector to a DISTINCT real id: the resolved ids appear in the XML,
+    # while neither the `$ref:KEY` selectors nor the synthetic `$ref:legacy.adapter:`
+    # aliases do. Only legacy_selector values are passed to the resolver.
     from boomi_mcp.compiler.process_ir.legacy_adapters.flow_sequence import adapt_flow_sequence
 
-    result = adapt_flow_sequence(_FLOW_CFG)
+    cfg = {
+        "process_kind": "database_to_api_sync",
+        "source": {"connector_type": "database", "connection_id": "$ref:srcconn", "operation_id": "$ref:srcop", "action_type": "Get"},
+        "transform": {"mode": "passthrough"},
+        "target": {"connector_type": "rest", "connection_id": "$ref:tgtconn", "operation_id": "$ref:tgtop", "action_type": "POST"},
+        "flow_sequence": [{"kind": "map_ref", "map_ref": "$ref:themap"}],
+    }
+    result = adapt_flow_sequence(cfg)
+    resolved = {
+        "$ref:srcconn": "res-11111111-1111-1111-1111-111111111111",
+        "$ref:srcop": "res-22222222-2222-2222-2222-222222222222",
+        "$ref:tgtconn": "res-33333333-3333-3333-3333-333333333333",
+        "$ref:tgtop": "res-44444444-4444-4444-4444-444444444444",
+        "$ref:themap": "res-55555555-5555-5555-5555-555555555555",
+    }
     seen = []
 
     def spy(selector):
         seen.append(selector)
-        return selector  # identity (build path)
+        return resolved[selector]
 
-    artifact = emission_mod.emit_legacy_result(result, resolver=spy)
-    selectors = {r.legacy_selector for r in result.symbol_requirements}
-    assert set(seen) == selectors
+    xml = "".join(emission_mod.emit_legacy_result(result, resolver=spy).shape_xml_parts)
+    # Only the authored selectors were passed to the resolver — never an alias.
+    assert set(seen) == set(resolved)
     assert not any(s.startswith("$ref:legacy.adapter:") for s in seen)
-    assert "$ref:legacy.adapter:" not in "".join(artifact.shape_xml_parts)
+    # The resolver's RETURN values land in the XML; selectors and aliases do not.
+    for real_id in resolved.values():
+        assert real_id in xml
+    assert "$ref:legacy.adapter:" not in xml
+    for selector in resolved:
+        assert selector not in xml
 
 
 def test_canonical_emit_failure_internal_cause_is_output_parity_failed():
