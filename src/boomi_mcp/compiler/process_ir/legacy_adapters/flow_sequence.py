@@ -46,6 +46,13 @@ _BINDING_KEYS = _CODEC_BINDING_KEYS
 # component assembler / processOverrides), so they are neither codec input nor a
 # safe-ignored no-op. Stripped from the codec input, never recorded as noop.
 _ENVELOPE_ROOT_KEYS = frozenset({"process_extensions"})
+# Fields the codec actually reads from the lenient inert sibling blocks; any other
+# key there is accepted-and-ignored (recorded as a compatibility no-op path).
+_TRANSFORM_CONSUMED = frozenset({"mode"})
+_RELIABILITY_CONSUMED = frozenset(
+    {"retry_count", "dlq", "catch_exception", "catch_notify"}
+)
+_DLQ_CONSUMED = frozenset({"mode"})
 
 _DP_PROFILE_COMPONENT_TYPE = {"json": "profile.json", "xml": "profile.xml"}
 
@@ -55,6 +62,28 @@ _DP_PROFILE_COMPONENT_TYPE = {"json": "profile.json", "xml": "profile.xml"}
 # must reproduce that coercion or a validated whitespace-padded ref raises.
 _ID_REF_KEYS = frozenset(
     {"connection_id", "operation_id", "map_ref", "document_cache_id", "profile_id"}
+)
+# String-typed IR fields the pre-#139 builder wrote with ``str(x or "")`` (labels
+# and free-text/operand fields). The strict ProcessIR string validators reject a
+# validated-but-non-string value (e.g. a numeric decision-operand default_value),
+# so the adapter reproduces the same coercion. NOT ids (those also .strip()) and
+# NOT structural discriminators (kind/value_type/operation/mode).
+_TEXT_KEYS = frozenset(
+    {
+        "label",
+        "message_text",
+        "name",
+        "comparison",
+        "message_template",
+        "title",
+        "property_name",
+        "default_value",
+        "static_value",
+        "value",
+        "element_id",
+        "element_name",
+        "property_id",
+    }
 )
 
 
@@ -134,7 +163,11 @@ def _coerce_legacy_values(node: Any) -> Any:
                 and not isinstance(v, bool)
             ):
                 out[k] = str(v or "").strip()
-            elif k == "label" and v is not None and not isinstance(v, (dict, list)):
+            elif (
+                k in _TEXT_KEYS
+                and v is not None
+                and not isinstance(v, (dict, list, bool))
+            ):
                 out[k] = str(v or "")
             else:
                 out[k] = _coerce_legacy_values(v)
@@ -162,9 +195,21 @@ def _project(config: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
             projected[key] = _project_steps(value, "/flow_sequence", noop)
         else:
             projected[key] = value
+            # The lenient inert siblings (a passthrough transform, a no-op
+            # reliability block) are passed to the codec wholesale but only their
+            # consumed fields are read; record the ignored extras so
+            # compatibility_noop_paths is complete (the secret/reference walkers
+            # already ran over them in validate_config).
+            if key == "transform" and isinstance(value, dict):
+                noop.extend(f"/transform/{k}" for k in sorted(set(value) - _TRANSFORM_CONSUMED))
+            elif key == "reliability" and isinstance(value, dict):
+                noop.extend(f"/reliability/{k}" for k in sorted(set(value) - _RELIABILITY_CONSUMED))
+                dlq = value.get("dlq")
+                if isinstance(dlq, dict):
+                    noop.extend(f"/reliability/dlq/{k}" for k in sorted(set(dlq) - _DLQ_CONSUMED))
     # Coerce legacy-accepted non-canonical id/label values AFTER projection so the
     # config handed to the strict codec matches what the pre-#139 builder emitted.
-    return _coerce_legacy_values(projected), noop
+    return _coerce_legacy_values(projected), sorted(set(noop))
 
 
 def _collect_binding_meta(config: Dict[str, Any]) -> Dict[str, Dict[str, str]]:

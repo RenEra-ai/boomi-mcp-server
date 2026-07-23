@@ -314,6 +314,28 @@ def test_malformed_pipeline_stage_secret_does_not_leak_through_validation_error(
     assert sentinel not in json.dumps(plan, default=str)
 
 
+def test_multi_process_pipeline_secret_rejected_before_mutation():
+    """#139A review r-arch (finding 7): the top-level pipeline secret scan runs for
+    ZERO-, single-, and MULTI-process specs alike (it precedes cardinality/authority
+    logic). A multi-process spec carrying a pipeline secret is rejected the same way.
+    Sentinel is a PLACEHOLDER token (§11), never a real secret."""
+    sentinel = "SENTINEL-multi-not-a-real-secret"
+    cfg = {
+        "integration_spec": {
+            "name": "x",
+            "components": [
+                {"key": "p1", "type": "process", "config": {"process_kind": "wrapper_subprocess", "process_calls": [{"process_id": "11111111-1111-1111-1111-111111111111"}]}},
+                {"key": "p2", "type": "process", "config": {"process_kind": "wrapper_subprocess", "process_calls": [{"process_id": "22222222-2222-2222-2222-222222222222"}]}},
+            ],
+            "pipeline": {"stages": [{"key": "s0", "stage_type": "transform", "config": {"access_token": sentinel}}]},
+        }
+    }
+    plan = _build_plan(MagicMock(), copy.deepcopy(cfg))
+    assert plan["_success"] is False
+    assert plan["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+    assert sentinel not in json.dumps(plan, default=str)
+
+
 def test_normalize_drops_top_level_pipeline():
     case = _case("normalize_top_level_dropped")
     spec = _normalize_to_spec(case["config"])

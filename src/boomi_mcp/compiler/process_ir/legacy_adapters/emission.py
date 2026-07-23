@@ -16,10 +16,12 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
+from ....errors import LEGACY_ADAPTER_OUTPUT_PARITY_FAILED
 from ..contracts import ComponentSymbolV1, SymbolTableV1
+from ..diagnostics import ProcessIRCompileError
 from ..emitter_registry import ProcessEmissionArtifactV1, emit_process
 from ..pipeline import compile_process_ir_v1
-from .contracts import LegacyAdapterResultV1
+from .contracts import LegacyAdapterResultV1, adapter_diagnostic
 
 Resolver = Callable[[str], str]
 
@@ -43,13 +45,23 @@ def emit_legacy_result(
 ) -> ProcessEmissionArtifactV1:
     """Compile + emit a normalized legacy result into a verified process artifact.
 
-    Raises ``ProcessIRCompileError`` on any compile/emit/verify failure — the
-    caller translates that to its existing public builder error family.
+    A canonical compile/emit/verify failure AFTER successful legacy validation is
+    an output-parity defect: it is wrapped as a value-free ``LegacyAdapterError``
+    carrying ``LEGACY_ADAPTER_OUTPUT_PARITY_FAILED`` (the compiler error chained
+    internally), so the caller translates it to its existing public builder error
+    family while the internal cause is the plan-mandated code.
     """
     resolve: Resolver = resolver or (lambda ref: ref)
     symbols = _symbol_table(result, resolve)
-    _cfg, plan = compile_process_ir_v1(result.process_ir, symbols)
-    return emit_process(plan, symbols)
+    try:
+        _cfg, plan = compile_process_ir_v1(result.process_ir, symbols)
+        return emit_process(plan, symbols)
+    except ProcessIRCompileError as exc:
+        raise adapter_diagnostic(
+            LEGACY_ADAPTER_OUTPUT_PARITY_FAILED,
+            "/",
+            "canonical compile/emit of a validated legacy config failed",
+        ) from exc
 
 
 __all__ = ["emit_legacy_result"]

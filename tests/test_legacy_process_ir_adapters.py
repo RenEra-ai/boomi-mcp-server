@@ -206,3 +206,20 @@ def test_flow_process_extensions_is_envelope_owned_not_noop():
     # codec input nor a recorded no-op.
     result = adapt_flow_sequence(_flow_cfg(process_extensions={"connections": []}))
     assert "/process_extensions" not in result.compatibility_noop_paths
+
+
+def test_flow_records_inert_transform_and_reliability_extras_as_noop():
+    # Codex #139A review r-arch (finding 6): the lenient inert sibling blocks
+    # (transform, reliability, reliability.dlq) are passed to the codec wholesale;
+    # their accepted-and-ignored extras must be recorded as compatibility no-op paths.
+    result = adapt_flow_sequence(_flow_cfg(
+        transform={"mode": "passthrough", "future_t": 1},
+        reliability={"retry_count": 0, "dlq": {"mode": "disabled", "future_d": 2}, "future_r": 3},
+    ))
+    paths = set(result.compatibility_noop_paths)
+    assert "/transform/future_t" in paths
+    assert "/reliability/future_r" in paths
+    assert "/reliability/dlq/future_d" in paths
+    # Consumed fields are never recorded as no-ops.
+    assert "/transform/mode" not in paths
+    assert "/reliability/retry_count" not in paths

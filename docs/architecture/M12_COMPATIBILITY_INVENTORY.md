@@ -617,7 +617,7 @@ mistyped. The `wrapper_subprocess` adapter builds its IR directly (resolved-ref 
 | Surface | Adapter | Executed subset | Public error translation | XML fixtures (byte-identical) | Verifier | Live-QA | Cutover status |
 |---|---|---|---|---|---|---|---|
 | `wrapper_subprocess` | `wrapper_subprocess.py` | ordered process_calls + Stop/Return Documents; `wait`/`abort_on_error`/`label` | adapter/compile/emit defect → `PROCESS_XML_VALIDATION_FAILED`; `PROCESS_REF_MISSING`/`PROCESS_EXTENSIONS_INVALID` totality guards preserved (precede the adapter) | `processcall_standalone_parent.xml` | inside `emit_process` (`verify_process_graph`) | required | **canonical** |
-| `database_to_api_sync` / `flow_sequence` | `flow_sequence.py` | 11 linear kinds; terminal branch/decision/exception; nested branch/decision arms; Return-Documents (linear only); target-less cache_put staging legs | adapter/compile/emit defect → `PROCESS_XML_VALIDATION_FAILED`; step/config codes unchanged (validator runs first) | `flow_sequence_decision_branch_map.xml`, `flow_sequence_cache_load_retrieve_remove.xml`, `flow_sequence_exception_terminal.xml`, `set_properties_ddp_dpp_flow_sequence.xml`, `flow_sequence_cache_put_get.xml`, `m11_cache_property_basic.xml`, `m11_processproperty_map_function.xml` | inside `emit_process` | required | **canonical** |
+| `database_to_api_sync` / `flow_sequence` | `flow_sequence.py` | 11 linear kinds; terminal branch/decision/exception; nested branch/decision arms; Return-Documents (linear only); target-less cache_put staging legs | adapter/compile/emit defect → `PROCESS_XML_VALIDATION_FAILED`; step/config codes unchanged (validator runs first) | `flow_sequence_decision_branch_map.xml`, `flow_sequence_cache_load_retrieve_remove.xml`, `flow_sequence_exception_terminal.xml`, `set_properties_ddp_dpp_flow_sequence.xml`, `flow_sequence_cache_put_get.xml`, `m11_cache_property_basic.xml` (the M11 process; `m11_processproperty_map_function.xml` is a **processproperty component** built by `ProcessPropertyBuilder`, NOT the flow_sequence process — its process is exercised structurally, not as a byte golden) | inside `emit_process` | required | **canonical** |
 | composition process emission (`patterns/composition.py`) | (inherits `flow_sequence`) | main process rewritten to `database_to_api_sync` + `flow_sequence=[map_ref, terminal branch]` | via the flow_sequence adapter | archetype-composition suite (raw XML parity) | inside `emit_process` | required | **canonical-inherited** (recipe adapter pending #145) |
 | `sync_pipeline` + 4 sync archetypes | reserved (`registry.RESERVED_DIALECTS`) | — | unchanged (`SYNC_PIPELINE_*`) | `sync_pipeline_db_read_map_rest_send.xml`, `listener_wss_start.xml` | n/a | n/a | **pending-golden/capability** |
 | ordinary `database_to_api_sync` (single/linear, Try-Catch, dynamic path, listener) | reserved | — | unchanged | existing goldens | n/a | n/a | **pending-capability** (needs canonical start_listen / dynamic-path / catcherrors / notify emission) |
@@ -651,3 +651,27 @@ named adapters (#145), authority activation, and the final cutover that removes 
 XML dispatch. Full-#139 DOD requires either an ownership adjustment allowing parity-only support for
 those already-shipped capabilities or a milestone dependency change; #139A does not fake completion
 around that gap.
+
+**Deferred faithfulness items from the #139A architect review (do NOT affect any valid/deployable
+config — all are invalid-config faithfulness, by-design M12 tightening, or diagnostic completeness):**
+
+- **Role/path-scoped IR references** (the plan's "distinct IR references per semantic role/path").
+  The adapter keys symbols by resolved component id; `SymbolTableV1` permits two refs sharing one
+  component id, but the adapter does not yet emit role-distinct refs. Consequence: a config that
+  reuses ONE component id across INCOMPATIBLE roles (e.g. the same id as both a `map_ref` and a
+  `document_cache_id`, or a database source operation and a REST target operation) fails closed at
+  build (`PROCESS_XML_VALIDATION_FAILED`) rather than reproducing the pre-#139 builder's undeployable
+  output — a single Boomi component cannot be two component types, so no valid/deployable config is
+  affected. Full role-scoping requires codec/IR reference changes and is a follow-up.
+- **Denormalized `profile_type` fail-closed.** A non-canonical-case property-source `profile_type`
+  (e.g. `PROFILE.JSON`) is validate-accepted but the #138 emitter registry deliberately fails closed
+  on denormalized profile kinds (`emitter_registry.py:443-466`, exact membership). The pre-#139
+  renderer passed the spelling through verbatim, producing an undeployable `profileType` (Boomi
+  profile types are canonical lowercase). The cutover surfacing this as a build-time rejection is the
+  intended M12 tightening, not a parity regression on a deployable config.
+- **Full adapter-boundary contract** (`LegacyPathBindingV1`/`path_bindings`, an opaque `legacy_selector`,
+  `Literal`-typed `pipeline_view_status`, `PipelineSpec`-typed `pipeline_view`). The current contract
+  carries `symbol_requirements` + `compatibility_noop_paths` with a coarse `/flow_sequence`
+  source pointer; that is functionally sufficient for the #139A cutover. The richer path-binding /
+  selector contract is needed by the deferred strict authority selector and richer diagnostics —
+  follow-up with that work.

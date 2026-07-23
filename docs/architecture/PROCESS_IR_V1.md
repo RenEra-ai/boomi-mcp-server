@@ -98,9 +98,10 @@ Sequence rules (local/structural — the CFG-aware checks are #137/#143):
 ## 4. Alias normalization (private codec)
 
 The public model has ONE canonical spelling per node. Legacy spellings are normalized only in
-the private `_process_ir_compat` codec (unexported, test-only; #139 may absorb it, and its
-compatibility-only machinery — e.g. the `fallback_target` reconstruction of the
-legacy-required-but-unemitted root target — carries an M12 removal gate in #147):
+the `_process_ir_compat` codec (unexported; since #139A its FORWARD core is REUSED in production
+by the flow_sequence legacy adapter, while its reverse codec + strict frozen-scope policy stay
+test-only — its compatibility-only machinery, e.g. the `fallback_target` reconstruction of the
+legacy-required-but-unemitted root target, carries an M12 removal gate in #147):
 
 | Legacy | IR |
 |---|---|
@@ -184,8 +185,10 @@ Published as the immutable `PROCESS_IR_V1_CAPABILITIES` manifest (not an authore
 
 ## #138 M12.3 update — EmissionPlanV1 has a verified internal consumer
 
-`EmissionPlanV1` now has a **test-only** consumer: the process-emitter registry (#138,
-`compiler/process_ir/emitter_registry.py`, `emit_process`). It reuses the byte-proven shape
+`EmissionPlanV1`'s consumer is the process-emitter registry (#138,
+`compiler/process_ir/emitter_registry.py`, `emit_process`) — test-only at #138, and since #139A a
+PRODUCTION consumer too (the wrapper + flow_sequence legacy adapters drive it via
+`legacy_adapters/emission.py`). It reuses the byte-proven shape
 serializers extracted into `process_emitters/` and emits XML byte-identical to the legacy builder for
 all 17 emitter kinds. There is still **no MCP/runtime adapter** — the registry is imported directly,
 never exported, and invoked by no tool or production builder; #139 owns the production cutover. See

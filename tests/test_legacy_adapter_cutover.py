@@ -142,6 +142,19 @@ def test_post_validation_compile_failure_translates_to_public_code(builder, cfg)
     assert "LEGACY_ADAPTER" not in str(exc.value.error_code)
 
 
+def test_canonical_emit_failure_internal_cause_is_output_parity_failed():
+    # Codex #139A review r-arch (finding 5): emit_legacy_result wraps a canonical
+    # compile/emit failure as the plan-mandated internal LEGACY_ADAPTER_OUTPUT_PARITY_FAILED.
+    from boomi_mcp.compiler.process_ir.legacy_adapters.contracts import LegacyAdapterError
+    from boomi_mcp.compiler.process_ir.legacy_adapters.flow_sequence import adapt_flow_sequence
+
+    result = adapt_flow_sequence(_FLOW_CFG)
+    with patch.object(emission_mod, "emit_process", _raise_compile_error):
+        with pytest.raises(LegacyAdapterError) as exc:
+            emission_mod.emit_legacy_result(result)
+    assert [d.code for d in exc.value.diagnostics] == ["LEGACY_ADAPTER_OUTPUT_PARITY_FAILED"]
+
+
 # ---------------------------------------------------------------------------
 # Backward compatibility: the adapter must not tighten inputs the legacy
 # validate+build path accepted-and-coerced (Codex #139A review round 1).
@@ -170,6 +183,23 @@ def test_flow_non_string_endpoint_label_still_builds():
     )
     assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
     assert "<bns:Component" in ProcessFlowBuilder.build(cfg, name="F")
+
+
+def test_flow_non_string_decision_operand_fields_still_build():
+    # Codex #139A review r-arch (finding 2): validate_config does not type-check the
+    # decision track-operand's property_name/default_value; the pre-#139 renderer
+    # applied str(x or "") — the adapter must reproduce that so a numeric value still
+    # builds instead of raising strict-ProcessIR PROCESS_IR_SCHEMA_INVALID.
+    for field, value in (("default_value", 5), ("property_name", 7)):
+        cfg = _base_flow(flow_sequence=[{
+            "kind": "decision", "comparison": "equals",
+            "left": {"value_type": "track", "property_id": "dynamicdocument.D", field: value},
+            "right": {"value_type": "static", "static_value": "A"},
+            "true_steps": [{"kind": "map_ref", "map_ref": "MAP-1"}],
+            "false_steps": [{"kind": "exception", "message_template": "halt {1}"}],
+        }])
+        assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None, field
+        assert "<bns:Component" in ProcessFlowBuilder.build(cfg, name="F"), field
 
 
 def test_flow_whitespace_padded_ids_are_stripped_like_legacy():
