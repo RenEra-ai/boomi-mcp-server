@@ -173,17 +173,28 @@ def _collect_binding_meta(config: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
     branch/decision leg target binding. Both ids are keyed (mirrors the #136
     parity oracle); lowering reads the metadata from the operation symbol only.
 
-    A single ``SymbolTableV1`` entry per component id carries ONE connector
-    family, which is correct: a component has one type. If the SAME id is bound
-    with CONFLICTING connector metadata across roles (e.g. a database source and
-    a REST target reusing one operation id — always semantically invalid, and
-    reachable now that padded/unpadded ids normalize together), fail closed with
-    ``LEGACY_ADAPTER_SEMANTIC_LOSS`` (translated by the builder to
-    ``PROCESS_XML_VALIDATION_FAILED``) rather than silently emit one binding with
-    the other's family. Consistent reuse (same id, same family — e.g. two branch
-    legs to one endpoint) is preserved."""
+    Only the OPERATION symbol's connector family reaches emitted XML (lowering
+    reads connector metadata from the operation symbol; the connection symbol's
+    family is never read). So the conflict guard applies to OPERATION ids only,
+    and compares the CANONICAL connector family — NOT the raw string and NOT the
+    action_type. That way a single operation id bound to two genuinely different
+    families (e.g. a database source and a REST target reusing one operation id —
+    always semantically invalid, and reachable now that padded/unpadded ids
+    normalize together) fails closed with ``LEGACY_ADAPTER_SEMANTIC_LOSS``
+    (translated by the builder to ``PROCESS_XML_VALIDATION_FAILED``) rather than
+    silently emit one binding with the other's family, while these VALID reuses
+    are preserved: one connection hosting operations with different actions
+    (action belongs to the operation, not the connection), and the same component
+    referenced via equivalent aliases (``rest`` / ``rest_client`` / the canonical
+    subtype all normalize to one family)."""
+    # Lazy import (mirrors lowering._canonical_connector_metadata) so the adapter
+    # does not eagerly pull in the 6k-line builder module.
+    from ....categories.components.builders.process_flow_builder import (
+        _canonical_connector_type,
+    )
+
     meta: Dict[str, Dict[str, Any]] = {}
-    seen_norm: Dict[str, Tuple[str, str]] = {}
+    seen_family: Dict[str, str] = {}
 
     def add(binding: Any, path: str) -> None:
         if not isinstance(binding, dict):
@@ -191,19 +202,20 @@ def _collect_binding_meta(config: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
         ct = binding.get("connector_type")
         at = binding.get("action_type")
         pair = {"connector_type": ct, "action_type": at}
-        norm = (str(ct or "").strip().lower(), str(at or "").strip().lower())
+        family = _canonical_connector_type(ct)
         for id_key in ("connection_id", "operation_id"):
             ref = binding.get(id_key)
             if isinstance(ref, str) and ref.strip():
                 ref = ref.strip()
-                if ref in seen_norm and seen_norm[ref] != norm:
-                    raise adapter_diagnostic(
-                        LEGACY_ADAPTER_SEMANTIC_LOSS,
-                        f"{path}/{id_key}",
-                        "the same component id is bound with conflicting "
-                        "connector metadata across roles",
-                    )
-                seen_norm[ref] = norm
+                if id_key == "operation_id":
+                    if ref in seen_family and seen_family[ref] != family:
+                        raise adapter_diagnostic(
+                            LEGACY_ADAPTER_SEMANTIC_LOSS,
+                            f"{path}/{id_key}",
+                            "the same operation id is bound with conflicting "
+                            "connector families across roles",
+                        )
+                    seen_family[ref] = family
                 meta[ref] = pair
 
     def walk_steps(steps: Any, path: str) -> None:

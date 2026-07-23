@@ -229,3 +229,30 @@ def test_flow_same_endpoint_reused_across_branch_legs_still_builds():
     ]}])
     assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
     assert "<bns:Component" in ProcessFlowBuilder.build(cfg, name="F")
+
+
+_OP_A = "e1111111-1111-1111-1111-111111111111"
+_OP_B = "e2222222-2222-2222-2222-222222222222"
+
+
+def test_flow_shared_connection_with_different_actions_is_not_a_conflict():
+    # Codex #139A review r3 (P1): one REST connection legitimately hosts operations
+    # with different actions (GET + POST). action_type belongs to the operation, not
+    # the connection, so a shared connection_id must NOT be a conflict.
+    cfg = _base_flow(flow_sequence=[{"kind": "branch", "legs": [
+        {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _OP_A, "action_type": "GET", "label": "A"}},
+        {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _OP_B, "action_type": "POST", "label": "B"}},
+    ]}])
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    assert "<bns:Component" in ProcessFlowBuilder.build(cfg, name="F")
+
+
+def test_flow_equivalent_connector_aliases_are_not_a_conflict():
+    # Codex #139A review r3 (P2): rest / rest_client canonicalize to one family, so
+    # the same operation referenced via equivalent aliases is not a conflict.
+    cfg = _base_flow(flow_sequence=[{"kind": "branch", "legs": [
+        {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _OP_A, "action_type": "POST", "label": "A"}},
+        {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": {"connector_type": "rest_client", "connection_id": _REST_CONN, "operation_id": _OP_A, "action_type": "POST", "label": "B"}},
+    ]}])
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    assert "<bns:Component" in ProcessFlowBuilder.build(cfg, name="F")
