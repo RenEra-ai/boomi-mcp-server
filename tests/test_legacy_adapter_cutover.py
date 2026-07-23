@@ -256,3 +256,36 @@ def test_flow_equivalent_connector_aliases_are_not_a_conflict():
     ]}])
     assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
     assert "<bns:Component" in ProcessFlowBuilder.build(cfg, name="F")
+
+
+def test_flow_shared_connection_with_conflicting_family_fails_closed():
+    # Codex #139A review r4 (P1): a database source and a REST target reusing ONE
+    # connection_id references a single connection component as two families — no
+    # Boomi connection can be both, so fail closed (connection conflict = FAMILY,
+    # not action).
+    shared_conn = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    cfg = _base_flow(
+        source={"connector_type": "database", "connection_id": shared_conn, "operation_id": _DB_OP, "action_type": "Get"},
+        target={"connector_type": "rest", "connection_id": shared_conn, "operation_id": _REST_OP, "action_type": "POST"},
+        flow_sequence=[{"kind": "map_ref", "map_ref": "MAP-1"}],
+    )
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="F")
+    assert exc.value.error_code == "PROCESS_XML_VALIDATION_FAILED"
+
+
+def test_flow_same_operation_id_with_conflicting_action_fails_closed():
+    # Codex #139A review r4 (P1): one operation id reused with DIFFERENT actions
+    # (GET on one leg, POST on another) would silently emit one action for both
+    # (POST/POST) — an operation component has one action, so fail closed.
+    def rt(action, label):
+        return {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _OP_A, "action_type": action, "label": label}
+    cfg = _base_flow(flow_sequence=[{"kind": "branch", "legs": [
+        {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": rt("GET", "A")},
+        {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": rt("POST", "B")},
+    ]}])
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="F")
+    assert exc.value.error_code == "PROCESS_XML_VALIDATION_FAILED"

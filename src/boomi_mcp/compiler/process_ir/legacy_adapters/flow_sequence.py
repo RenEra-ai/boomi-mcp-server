@@ -173,20 +173,24 @@ def _collect_binding_meta(config: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
     branch/decision leg target binding. Both ids are keyed (mirrors the #136
     parity oracle); lowering reads the metadata from the operation symbol only.
 
-    Only the OPERATION symbol's connector family reaches emitted XML (lowering
-    reads connector metadata from the operation symbol; the connection symbol's
-    family is never read). So the conflict guard applies to OPERATION ids only,
-    and compares the CANONICAL connector family — NOT the raw string and NOT the
-    action_type. That way a single operation id bound to two genuinely different
-    families (e.g. a database source and a REST target reusing one operation id —
-    always semantically invalid, and reachable now that padded/unpadded ids
-    normalize together) fails closed with ``LEGACY_ADAPTER_SEMANTIC_LOSS``
+    A single ``SymbolTableV1`` entry per component id carries ONE connector fact,
+    so a component id reused with CONTRADICTORY bindings (which no single Boomi
+    component could satisfy) must fail closed with ``LEGACY_ADAPTER_SEMANTIC_LOSS``
     (translated by the builder to ``PROCESS_XML_VALIDATION_FAILED``) rather than
-    silently emit one binding with the other's family, while these VALID reuses
-    are preserved: one connection hosting operations with different actions
-    (action belongs to the operation, not the connection), and the same component
-    referenced via equivalent aliases (``rest`` / ``rest_client`` / the canonical
-    subtype all normalize to one family)."""
+    silently emit one binding with another's metadata. The contradiction is
+    role-specific because Boomi component identity is:
+
+    - a CONNECTION component has one connector FAMILY but hosts operations with
+      different actions, so a reused ``connection_id`` conflicts only on
+      canonical FAMILY (never on action — that belongs to the operation);
+    - an OPERATION component has one family AND one action, so a reused
+      ``operation_id`` conflicts on canonical family OR normalized action.
+
+    Comparing the CANONICAL family (``rest`` / ``rest_client`` / the canonical
+    subtype collapse to one) avoids false positives on equivalent aliases;
+    normalizing the action (case/whitespace) avoids false positives on spelling.
+    Consistent reuse (same id, same family — and same action for an operation) is
+    preserved."""
     # Lazy import (mirrors lowering._canonical_connector_metadata) so the adapter
     # does not eagerly pull in the 6k-line builder module.
     from ....categories.components.builders.process_flow_builder import (
@@ -194,7 +198,8 @@ def _collect_binding_meta(config: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
     )
 
     meta: Dict[str, Dict[str, Any]] = {}
-    seen_family: Dict[str, str] = {}
+    seen_conn_family: Dict[str, str] = {}
+    seen_op_key: Dict[str, Tuple[str, str]] = {}
 
     def add(binding: Any, path: str) -> None:
         if not isinstance(binding, dict):
@@ -203,20 +208,32 @@ def _collect_binding_meta(config: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
         at = binding.get("action_type")
         pair = {"connector_type": ct, "action_type": at}
         family = _canonical_connector_type(ct)
-        for id_key in ("connection_id", "operation_id"):
-            ref = binding.get(id_key)
-            if isinstance(ref, str) and ref.strip():
-                ref = ref.strip()
-                if id_key == "operation_id":
-                    if ref in seen_family and seen_family[ref] != family:
-                        raise adapter_diagnostic(
-                            LEGACY_ADAPTER_SEMANTIC_LOSS,
-                            f"{path}/{id_key}",
-                            "the same operation id is bound with conflicting "
-                            "connector families across roles",
-                        )
-                    seen_family[ref] = family
-                meta[ref] = pair
+        action = str(at or "").strip().lower()
+        conn = binding.get("connection_id")
+        if isinstance(conn, str) and conn.strip():
+            conn = conn.strip()
+            if conn in seen_conn_family and seen_conn_family[conn] != family:
+                raise adapter_diagnostic(
+                    LEGACY_ADAPTER_SEMANTIC_LOSS,
+                    f"{path}/connection_id",
+                    "the same connection id is bound with conflicting connector "
+                    "families across roles",
+                )
+            seen_conn_family[conn] = family
+            meta[conn] = pair
+        op = binding.get("operation_id")
+        if isinstance(op, str) and op.strip():
+            op = op.strip()
+            op_key = (family, action)
+            if op in seen_op_key and seen_op_key[op] != op_key:
+                raise adapter_diagnostic(
+                    LEGACY_ADAPTER_SEMANTIC_LOSS,
+                    f"{path}/operation_id",
+                    "the same operation id is bound with conflicting connector "
+                    "family or action across roles",
+                )
+            seen_op_key[op] = op_key
+            meta[op] = pair
 
     def walk_steps(steps: Any, path: str) -> None:
         if not isinstance(steps, list):
