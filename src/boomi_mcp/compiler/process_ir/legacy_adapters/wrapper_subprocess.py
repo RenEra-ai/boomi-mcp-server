@@ -59,6 +59,7 @@ def adapt_wrapper_subprocess(config: Dict[str, Any]) -> LegacyAdapterResultV1:
             )
         # Mirror WrapperSubprocessBuilder.build: process_id (literal) or
         # subprocess_ref (a $ref:KEY already resolved to an id before build()).
+        selector_key = "process_id" if call.get("process_id") else "subprocess_ref"
         pid = str(call.get("process_id") or call.get("subprocess_ref") or "").strip()
         if not pid:
             raise adapter_diagnostic(
@@ -93,7 +94,7 @@ def adapt_wrapper_subprocess(config: Dict[str, Any]) -> LegacyAdapterResultV1:
                     # same `process` component with no connector metadata, so
                     # same-id dedup stays correct and legacy_selector == ir_ref.
                     legacy_selector=pid,
-                    source_pointer=f"/process_calls/{i}",
+                    source_pointer=f"/process_calls/{i}/{selector_key}",
                     expected_component_type="process",
                 )
             )

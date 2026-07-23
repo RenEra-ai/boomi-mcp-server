@@ -284,9 +284,21 @@ def _requirements_from_ir(
     a reference outside ``_ID_REF_KEYS`` (a future vocabulary addition) that would
     silently reintroduce raw-id collapse — fail closed."""
     cfg = lower_process_ir_to_cfg(ir)
+    aliases = _cfg_refs(cfg)
+    # Fail closed BEFORE lowering: every live CFG reference must have a recorded
+    # alias fact. A future codec vocabulary addition producing a ref from a field
+    # outside ``_ID_REF_KEYS`` would otherwise reach lowering as a raw id and raise
+    # a generic compile error (PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID) —
+    # silently reintroducing raw-id collapse. This is the plan's value-free guard.
+    missing = [a for a in sorted(aliases) if a not in facts]
+    if missing:
+        raise adapter_diagnostic(
+            LEGACY_ADAPTER_SEMANTIC_LOSS,
+            missing[0] if missing[0].startswith(_ALIAS_PREFIX) else "/",
+            "a live IR reference has no recorded legacy selector",
+        )
     # Sentinel table keyed by ALIAS (component_id == alias); connector metadata for
     # operation aliases so lowering canonicalizes the operation's family.
-    aliases = _cfg_refs(cfg)
     sentinel = SymbolTableV1(
         symbols=tuple(
             ComponentSymbolV1(
@@ -335,13 +347,8 @@ def _requirements_from_ir(
 
     requirements = []
     for alias in sorted(id_type):
-        fact = facts.get(alias)
-        if fact is None:
-            raise adapter_diagnostic(
-                LEGACY_ADAPTER_SEMANTIC_LOSS,
-                alias if alias.startswith(_ALIAS_PREFIX) else "/",
-                "a live IR reference has no recorded legacy selector",
-            )
+        # id_type keys are a subset of `aliases`, all validated present above.
+        fact = facts[alias]
         expected = id_type[alias]
         is_operation = expected == "connector-action"
         requirements.append(

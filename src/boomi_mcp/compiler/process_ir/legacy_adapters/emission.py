@@ -6,10 +6,16 @@ by driving the ONE canonical chain:
     result.process_ir --compile_process_ir_v1--> EmissionPlanV1
                        --emit_process(plan, symbols)--> shape_xml_parts
 
-The symbol table is built from the adapter's requirements. On the build path a
-requirement's ``ir_ref`` is already a resolved literal component id, so the
-default resolver is identity; the integration-builder plan preflight passes a
-resolver that maps an unresolved ``$ref:KEY`` to a deterministic placeholder id.
+The symbol table is built from the adapter's requirements. Each symbol's ``ref``
+is the requirement's ``ir_ref`` (for the flow adapter an OCCURRENCE-SCOPED
+``$ref:legacy.adapter:<pointer>`` alias; for the wrapper the process id itself),
+while its ``component_id`` resolves the requirement's ``legacy_selector`` — the
+ORIGINAL id, NEVER the synthetic alias. On the build path the selector is already
+a resolved literal component id, so the default resolver is identity; the
+integration-builder plan preflight passes a resolver that maps an unresolved
+``$ref:KEY`` selector to a deterministic placeholder id. Because the resolver
+receives only the selector, aliases never reach emitted XML, and two aliases that
+share one selector become two symbols with one ``component_id``.
 """
 
 from __future__ import annotations

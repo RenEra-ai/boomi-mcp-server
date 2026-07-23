@@ -192,9 +192,10 @@ def test_flow_reused_id_gets_distinct_aliases_with_independent_metadata():
     assert tgt.connector_type == "rest" and tgt.action_type == "POST"
 
 
-def test_flow_cross_type_id_reuse_yields_two_typed_requirements():
-    # #139B: one id used as both map_ref and document_cache_id -> two aliases with
-    # DISTINCT types resolving to the same real id (was SYMBOL_UNRESOLVED pre-#139B).
+def test_flow_cross_type_id_reuse_yields_typed_requirements():
+    # #139B: one id used as a map_ref and TWICE as a document_cache_id -> three
+    # DISTINCT aliases resolving to the same real id, with the correct type split
+    # (was SYMBOL_UNRESOLVED pre-#139B).
     shared = "cccccccc-cccc-cccc-cccc-cccccccccccc"
     result = adapt_flow_sequence(_flow_cfg(flow_sequence=[
         {"kind": "map_ref", "map_ref": shared},
@@ -202,26 +203,100 @@ def test_flow_cross_type_id_reuse_yields_two_typed_requirements():
         {"kind": "doccacheretrieve", "document_cache_id": shared},
     ]))
     by_ptr = {r.source_pointer: r for r in result.symbol_requirements}
-    assert by_ptr["/flow_sequence/0/map_ref"].expected_component_type == "transform.map"
-    assert by_ptr["/flow_sequence/1/document_cache_id"].expected_component_type == "documentcache"
-    assert by_ptr["/flow_sequence/0/map_ref"].legacy_selector == shared
-    assert by_ptr["/flow_sequence/1/document_cache_id"].legacy_selector == shared
+    ptrs = ["/flow_sequence/0/map_ref", "/flow_sequence/1/document_cache_id", "/flow_sequence/2/document_cache_id"]
+    # All three occurrences present, distinct aliases, one real id.
+    assert {r.ir_ref for p in ptrs for r in [by_ptr[p]]} == {f"$ref:legacy.adapter:{p}" for p in ptrs}
+    assert len({by_ptr[p].ir_ref for p in ptrs}) == 3
+    assert all(by_ptr[p].legacy_selector == shared for p in ptrs)
+    # Type split: one transform.map, two documentcache.
+    types = [by_ptr[p].expected_component_type for p in ptrs]
+    assert types == ["transform.map", "documentcache", "documentcache"]
 
 
-def test_flow_dead_root_target_produces_no_requirement():
+def test_flow_dead_root_target_connection_and_operation_excluded():
     # #139B: a branch terminal makes the root target dead — the codec drops it, so
-    # its alias never reaches the CFG and no requirement is produced for it.
-    dead_op = "dead0000-0000-0000-0000-000000000000"
+    # NEITHER its connection nor its operation alias reaches the CFG (both selectors
+    # absent), while the emitted leg targets remain.
+    dead_conn = "deadc000-0000-0000-0000-00000000c0nn"[:36]
+    dead_op = "dead0000-0000-0000-0000-0000000000op"[:36]
     result = adapt_flow_sequence(_flow_cfg(
-        target={"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": dead_op, "action_type": "POST"},
+        target={"connector_type": "rest", "connection_id": dead_conn, "operation_id": dead_op, "action_type": "POST"},
         flow_sequence=[{"kind": "branch", "legs": [
             {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _REST_OP, "action_type": "POST", "label": "A"}},
             {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": {"connector_type": "rest", "connection_id": "55555555-5555-5555-5555-555555555555", "operation_id": "66666666-6666-6666-6666-666666666666", "action_type": "POST", "label": "B"}},
         ]}],
     ))
     selectors = {r.legacy_selector for r in result.symbol_requirements}
-    assert dead_op not in selectors            # dead root target excluded
-    assert _REST_OP in selectors               # emitted leg target present
+    assert dead_conn not in selectors and dead_op not in selectors  # both dead-target refs excluded
+    assert _REST_OP in selectors                                     # emitted leg target present
+
+
+def test_flow_aliasing_is_deterministic_across_repeated_adaptations():
+    # #139B: aliases are path-only, so repeated adaptation yields the identical
+    # ordered alias set (no authored value, no ordering nondeterminism).
+    first = adapt_flow_sequence(_flow_cfg())
+    second = adapt_flow_sequence(_flow_cfg())
+    assert [r.ir_ref for r in first.symbol_requirements] == [r.ir_ref for r in second.symbol_requirements]
+    assert [r.ir_ref for r in first.symbol_requirements] == sorted(
+        f"$ref:legacy.adapter:{p}" for p in (
+            "/source/connection_id", "/source/operation_id",
+            "/target/connection_id", "/target/operation_id",
+            "/flow_sequence/0/map_ref",
+        )
+    )
+
+
+def test_flow_nested_and_profile_refs_are_path_pinned():
+    # #139B: representative nested occurrences (branch leg targets, decision-arm
+    # targets, Data Process profile refs, set-property profile refs) each alias to
+    # their exact source pointer.
+    result = adapt_flow_sequence(_flow_cfg(flow_sequence=[
+        {"kind": "dataprocess", "steps": [{"operation": "split_documents", "profile_type": "json", "profile_id": "PROF-DP", "link_element_key": "1", "link_element_name": "n"}]},
+        {"kind": "set_ddp", "name": "D", "source_values": [{"value_type": "profile", "element_id": "E", "element_name": "N", "profile_id": "PROF-SP", "profile_type": "profile.json"}]},
+        {"kind": "branch", "legs": [
+            {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": "op-leg-a0000000000000000000000000", "action_type": "POST", "label": "A"}},
+            {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": {"connector_type": "rest", "connection_id": "55555555-5555-5555-5555-555555555555", "operation_id": "op-leg-b0000000000000000000000000", "action_type": "POST", "label": "B"}},
+        ]},
+    ]))
+    by_ptr = {r.source_pointer: r for r in result.symbol_requirements}
+    assert by_ptr["/flow_sequence/0/steps/0/profile_id"].legacy_selector == "PROF-DP"
+    assert by_ptr["/flow_sequence/0/steps/0/profile_id"].expected_component_type == "profile.json"
+    assert by_ptr["/flow_sequence/1/source_values/0/profile_id"].legacy_selector == "PROF-SP"
+    assert by_ptr["/flow_sequence/2/legs/0/target/operation_id"].legacy_selector == "op-leg-a0000000000000000000000000"
+    assert by_ptr["/flow_sequence/2/legs/1/target/operation_id"].legacy_selector == "op-leg-b0000000000000000000000000"
+    for r in result.symbol_requirements:
+        assert r.ir_ref == f"$ref:legacy.adapter:{r.source_pointer}"
+
+
+def test_flow_connector_metadata_only_on_operation_requirements():
+    # #139B: connector_type/action_type are None on every non-connector-action
+    # requirement (connections, maps, caches, profiles, processes).
+    result = adapt_flow_sequence(_flow_cfg(flow_sequence=[
+        {"kind": "map_ref", "map_ref": "MAP-1"},
+        {"kind": "doccacheload", "document_cache_id": "CACHE-1"},
+        {"kind": "doccacheretrieve", "document_cache_id": "CACHE-1"},
+    ]))
+    for r in result.symbol_requirements:
+        if r.expected_component_type != "connector-action":
+            assert r.connector_type is None and r.action_type is None, r.source_pointer
+
+
+def test_flow_live_ref_without_recorded_selector_fails_closed():
+    # #139B med (architect review): a live CFG reference with no recorded alias fact
+    # (a future codec vocabulary addition producing a ref outside _ID_REF_KEYS) must
+    # fail closed with LEGACY_ADAPTER_SEMANTIC_LOSS BEFORE lowering — not a generic
+    # compile error.
+    from boomi_mcp.compiler.process_ir.legacy_adapters import flow_sequence as fs
+    from boomi_mcp.compiler.process_ir.legacy_adapters.contracts import LegacyAdapterError
+    from boomi_mcp.models._process_ir_compat import legacy_flow_sequence_to_ir
+
+    projected, _ = fs._project(_flow_cfg())
+    facts: dict = {}
+    ir = legacy_flow_sequence_to_ir(fs._alias_refs(projected, "", facts))
+    facts.pop(next(a for a in facts if a.endswith("/source/operation_id")))  # simulate an unaliased live ref
+    with pytest.raises(LegacyAdapterError) as exc:
+        fs._requirements_from_ir(ir, facts)
+    assert [d.code for d in exc.value.diagnostics] == ["LEGACY_ADAPTER_SEMANTIC_LOSS"]
 
 
 def test_wrapper_requirements_are_process_typed_and_deduped():

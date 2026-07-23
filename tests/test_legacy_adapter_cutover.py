@@ -142,6 +142,26 @@ def test_post_validation_compile_failure_translates_to_public_code(builder, cfg)
     assert "LEGACY_ADAPTER" not in str(exc.value.error_code)
 
 
+def test_resolver_receives_only_legacy_selectors_never_aliases():
+    # #139B (architect review): emit_legacy_result must pass ONLY the original
+    # legacy_selector values to the resolver — never a synthetic $ref:legacy.adapter:
+    # alias — and no alias may reach the emitted XML.
+    from boomi_mcp.compiler.process_ir.legacy_adapters.flow_sequence import adapt_flow_sequence
+
+    result = adapt_flow_sequence(_FLOW_CFG)
+    seen = []
+
+    def spy(selector):
+        seen.append(selector)
+        return selector  # identity (build path)
+
+    artifact = emission_mod.emit_legacy_result(result, resolver=spy)
+    selectors = {r.legacy_selector for r in result.symbol_requirements}
+    assert set(seen) == selectors
+    assert not any(s.startswith("$ref:legacy.adapter:") for s in seen)
+    assert "$ref:legacy.adapter:" not in "".join(artifact.shape_xml_parts)
+
+
 def test_canonical_emit_failure_internal_cause_is_output_parity_failed():
     # Codex #139A review r-arch (finding 5): emit_legacy_result wraps a canonical
     # compile/emit failure as the plan-mandated internal LEGACY_ADAPTER_OUTPUT_PARITY_FAILED.

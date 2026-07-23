@@ -47,14 +47,19 @@ class _AdapterModel(BaseModel):
 class LegacySymbolRequirementV1(_AdapterModel):
     """One reference the adapter needs the caller to resolve into a component.
 
-    ``ir_ref`` is the OCCURRENCE-SCOPED alias present in the ``ProcessIRV1`` — a
-    ``$ref:legacy.adapter:<RFC6901-pointer>`` token that embeds NO authored value.
-    ``legacy_selector`` is the original post-projection/post-coercion literal
-    component id (or authored ``$ref:KEY``) the caller resolves to a component id.
-    Distinct aliases may therefore resolve to the SAME component id while keeping
-    their own component type and connector metadata, so one id reused across roles
-    never collapses into an incompatible symbol (#139B). Connector metadata is
-    present ONLY on the operation requirement of a connector binding
+    ``ir_ref`` is the reference AS IT APPEARS in the ``ProcessIRV1``. For the flow
+    adapter it is an OCCURRENCE-SCOPED ``$ref:legacy.adapter:<RFC6901-pointer>``
+    alias embedding NO authored value; for the wrapper adapter (whose calls are
+    not role-scoped — a repeated child is the same process component) it is the
+    process id itself, so ``ir_ref == legacy_selector``. ``legacy_selector`` is the
+    original post-projection/post-coercion literal component id (or authored
+    ``$ref:KEY``) the caller resolves to a component id. Distinct aliases may
+    therefore resolve to the SAME component id while keeping their own component
+    type and connector metadata, so one id reused across roles never collapses
+    into an incompatible symbol (#139B). ``source_pointer`` is the exact RFC 6901
+    pointer to the legacy field the reference came from (e.g.
+    ``/target/operation_id``, ``/process_calls/0/process_id``). Connector metadata
+    is present ONLY on the operation requirement of a connector binding
     (``expected_component_type == "connector-action"``).
     """
 
