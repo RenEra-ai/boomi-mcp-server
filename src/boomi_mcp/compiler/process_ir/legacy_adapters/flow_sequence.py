@@ -252,9 +252,39 @@ def _collect_binding_meta(config: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
                 walk_steps(step.get("false_steps"), f"{path}/{i}/false_steps")
 
     add(config.get("source"), "/source")
-    add(config.get("target"), "/target")
+    # The top-level `target` is required by the validator but is DEAD config (not
+    # emitted, dropped from the IR) when a branch/exception terminal or a
+    # return_documents terminal owns the tail — mirror the codec's D1/D2 rule
+    # (legacy_flow_sequence_to_ir). A dead root target must not participate in
+    # conflict detection or metadata: it is not represented in the emitted XML, so
+    # reusing an emitted leg's id with a different action there is not a real
+    # conflict (Codex #139A review r5).
+    if _root_target_emitted(config):
+        add(config.get("target"), "/target")
     walk_steps(config.get("flow_sequence"), "/flow_sequence")
     return meta
+
+
+def _root_target_emitted(config: Dict[str, Any]) -> bool:
+    """True when the top-level ``target`` becomes a real emitted shape.
+
+    Mirrors ``legacy_flow_sequence_to_ir``'s terminal rule: a linear sequence's
+    fallthrough target and a decision TRUE-arm target ARE emitted; a
+    branch/exception terminal drops the root target (D2), and a return_documents
+    terminal replaces it — both leave it dead config."""
+    seq = config.get("flow_sequence")
+    if not isinstance(seq, list) or not seq:
+        return True
+    last = seq[-1]
+    last_kind = str((last.get("kind") if isinstance(last, dict) else "") or "").strip()
+    if last_kind in ("branch", "exception"):
+        return False
+    if last_kind == "decision":
+        return True
+    rd = config.get("return_documents")
+    if isinstance(rd, dict) and rd.get("enabled") is True:
+        return False
+    return True
 
 
 def _requirements_from_ir(

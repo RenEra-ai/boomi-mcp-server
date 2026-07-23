@@ -289,3 +289,22 @@ def test_flow_same_operation_id_with_conflicting_action_fails_closed():
     with pytest.raises(BuilderValidationError) as exc:
         ProcessFlowBuilder.build(cfg, name="F")
     assert exc.value.error_code == "PROCESS_XML_VALIDATION_FAILED"
+
+
+def test_flow_dead_root_target_is_excluded_from_conflict_detection():
+    # Codex #139A review r5 (P2): a branch/exception (or return_documents) terminal
+    # makes the top-level `target` DEAD config (dropped from the IR). A dead root
+    # target reusing an EMITTED leg's operation id with another action is NOT a
+    # real conflict — it must not be flagged, since the branch emits correctly.
+    cfg = _base_flow(
+        target={"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _OP_A, "action_type": "POST"},  # DEAD
+        flow_sequence=[{"kind": "branch", "legs": [
+            {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _OP_A, "action_type": "GET", "label": "A"}},
+            {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": {"connector_type": "rest", "connection_id": _RB_CONN, "operation_id": _RB_OP, "action_type": "POST", "label": "B"}},
+        ]}],
+    )
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    xml = ProcessFlowBuilder.build(cfg, name="F")
+    # The emitted leg keeps its own GET action; the dead root target contributes nothing.
+    assert "<bns:Component" in xml
+    assert 'actionType="GET"' in xml
