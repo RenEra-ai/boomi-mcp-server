@@ -89,6 +89,10 @@ def adapt_wrapper_subprocess(config: Dict[str, Any]) -> LegacyAdapterResultV1:
                 LegacySymbolRequirementV1(
                     role=f"process_call[{i}]",
                     ir_ref=pid,
+                    # Wrapper calls are NOT role-scoped: a repeated child is the
+                    # same `process` component with no connector metadata, so
+                    # same-id dedup stays correct and legacy_selector == ir_ref.
+                    legacy_selector=pid,
                     source_pointer=f"/process_calls/{i}",
                     expected_component_type="process",
                 )

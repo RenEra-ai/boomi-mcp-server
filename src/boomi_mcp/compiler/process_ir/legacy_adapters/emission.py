@@ -27,10 +27,14 @@ Resolver = Callable[[str], str]
 
 
 def _symbol_table(result: LegacyAdapterResultV1, resolver: Resolver) -> SymbolTableV1:
+    # ref is the occurrence-scoped IR alias; component_id resolves the ORIGINAL
+    # legacy_selector (never the synthetic alias). Two aliases sharing one selector
+    # therefore become two symbols with the same component_id but their own type
+    # and connector metadata — no alias ever reaches emitted XML (#139B).
     symbols = tuple(
         ComponentSymbolV1(
             ref=req.ir_ref,
-            component_id=resolver(req.ir_ref),
+            component_id=resolver(req.legacy_selector),
             component_type=req.expected_component_type,
             connector_type=req.connector_type,
             action_type=req.action_type,

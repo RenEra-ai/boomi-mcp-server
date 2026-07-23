@@ -11,9 +11,15 @@ byte-identically. The **compatibility projection** the adapter applies: an alrea
 config's currently-executed fields feed the IR; safe unknown root/binding keys are recorded as
 `compatibility_noop_paths` (never rejected); connector/component references become symbol requirements
 (connector metadata rides on the operation symbol, ADR-001 §6); envelope data (description, folder,
-process_extensions) stays OUTSIDE the IR, owned by the component assembler. Direct ProcessIR authoring
-stays dark. Every OTHER legacy dialect (ordinary `database_to_api_sync`, `sync_pipeline`, listeners,
-recipes) continues through its unchanged path until a later #139 slice cuts it over — see the
+process_extensions) stays OUTSIDE the IR, owned by the component assembler. Since **#139B** the flow
+adapter's IR uses internal OCCURRENCE-SCOPED aliases (`$ref:legacy.adapter:<RFC6901-pointer>`, no
+authored value) in place of raw component ids — each requirement carries a `legacy_selector` that
+resolves through `SymbolTableV1` to the real component id before emission, so aliases NEVER appear in
+XML and one id reused across roles keeps a distinct symbol per occurrence. Direct codec output (and
+the frozen #136 equivalence contract) still contains authored raw refs — only the production adapter
+aliases; all public `ComponentRefV1` semantics are unchanged. Direct ProcessIR authoring stays dark.
+Every OTHER legacy dialect (ordinary `database_to_api_sync`, `sync_pipeline`, listeners, recipes)
+continues through its unchanged path until a later #139 slice cuts it over — see the
 [compatibility inventory](M12_COMPATIBILITY_INVENTORY.md) #139 ledger.
 **References:** [ADR-001](ADR-001-process-ir-authority.md) (authority model, §7 error families,
 §11 security), [ProcessIR Compiler V1](PROCESS_IR_COMPILER_V1.md) (the #137 CFG/lowering

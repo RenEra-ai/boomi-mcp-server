@@ -231,21 +231,39 @@ def test_flow_branch_leg_target_extra_key_still_builds():
     assert "<bns:Component" in ProcessFlowBuilder.build(cfg, name="F")
 
 
-def test_flow_conflicting_connector_metadata_for_shared_id_fails_closed():
-    # Codex #139A review r2 (P2): one component id bound with CONFLICTING connector
-    # families (a database source op == a REST target op) is semantically invalid;
-    # the adapter must fail closed to PROCESS_XML_VALIDATION_FAILED rather than
-    # silently emit the source connector with the target's family.
+def _assert_reuse_byte_faithful(shared_cfg, control_cfg, subs):
+    """#139B oracle: a config that REUSES one id must emit exactly what the
+    distinct-id control emits with each distinct id replaced by the shared id — so
+    reuse is byte-faithful to the pre-#139 builder — and no alias leaks into XML."""
+    shared_xml = ProcessFlowBuilder.build(shared_cfg, name="F")
+    expected = ProcessFlowBuilder.build(control_cfg, name="F")
+    for distinct, shared in subs.items():
+        expected = expected.replace(distinct, shared)
+    assert shared_xml == expected
+    assert "$ref:legacy.adapter:" not in shared_xml
+    return shared_xml
+
+
+def test_flow_conflicting_connector_family_shared_op_builds_byte_faithfully():
+    # Codex #139A r2 -> #139B: a database source op == a REST target op reuses ONE
+    # id across incompatible families. Role-scoped aliases let each occurrence keep
+    # its own family, so it now BUILDS byte-faithfully (was a fail-closed guard).
     shared = "cccccccc-cccc-cccc-cccc-cccccccccccc"
-    cfg = _base_flow(
+    _D_SRC, _D_TGT = "d5d50000-0000-0000-0000-0000000005c1", "d5d50000-0000-0000-0000-0000000007a6"
+    shared_cfg = _base_flow(
         source={"connector_type": "database", "connection_id": _DB_CONN, "operation_id": f"  {shared}  ", "action_type": "Get"},
         target={"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": shared, "action_type": "POST"},
         flow_sequence=[{"kind": "map_ref", "map_ref": "MAP-1"}],
     )
-    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
-    with pytest.raises(BuilderValidationError) as exc:
-        ProcessFlowBuilder.build(cfg, name="F")
-    assert exc.value.error_code == "PROCESS_XML_VALIDATION_FAILED"
+    control_cfg = _base_flow(
+        source={"connector_type": "database", "connection_id": _DB_CONN, "operation_id": _D_SRC, "action_type": "Get"},
+        target={"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _D_TGT, "action_type": "POST"},
+        flow_sequence=[{"kind": "map_ref", "map_ref": "MAP-1"}],
+    )
+    xml = _assert_reuse_byte_faithful(shared_cfg, control_cfg, {_D_SRC: shared, _D_TGT: shared})
+    # Each connector keeps its own family: database for the source, REST for the target.
+    assert 'connectorType="database"' in xml
+    assert "officialboomi-X3979C-rest-prod" in xml
 
 
 def test_flow_same_endpoint_reused_across_branch_legs_still_builds():
@@ -288,37 +306,60 @@ def test_flow_equivalent_connector_aliases_are_not_a_conflict():
     assert "<bns:Component" in ProcessFlowBuilder.build(cfg, name="F")
 
 
-def test_flow_shared_connection_with_conflicting_family_fails_closed():
-    # Codex #139A review r4 (P1): a database source and a REST target reusing ONE
-    # connection_id references a single connection component as two families — no
-    # Boomi connection can be both, so fail closed (connection conflict = FAMILY,
-    # not action).
-    shared_conn = "cccccccc-cccc-cccc-cccc-cccccccccccc"
-    cfg = _base_flow(
-        source={"connector_type": "database", "connection_id": shared_conn, "operation_id": _DB_OP, "action_type": "Get"},
-        target={"connector_type": "rest", "connection_id": shared_conn, "operation_id": _REST_OP, "action_type": "POST"},
+def test_flow_shared_connection_conflicting_family_builds_byte_faithfully():
+    # Codex #139A r4 -> #139B: a database source and a REST target reusing ONE
+    # connection_id now builds byte-faithfully (each occurrence keeps its family).
+    shared = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    _D_SRC, _D_TGT = "d5d50000-0000-0000-0000-0000000005c2", "d5d50000-0000-0000-0000-0000000007a7"
+    shared_cfg = _base_flow(
+        source={"connector_type": "database", "connection_id": shared, "operation_id": _DB_OP, "action_type": "Get"},
+        target={"connector_type": "rest", "connection_id": shared, "operation_id": _REST_OP, "action_type": "POST"},
         flow_sequence=[{"kind": "map_ref", "map_ref": "MAP-1"}],
     )
-    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
-    with pytest.raises(BuilderValidationError) as exc:
-        ProcessFlowBuilder.build(cfg, name="F")
-    assert exc.value.error_code == "PROCESS_XML_VALIDATION_FAILED"
+    control_cfg = _base_flow(
+        source={"connector_type": "database", "connection_id": _D_SRC, "operation_id": _DB_OP, "action_type": "Get"},
+        target={"connector_type": "rest", "connection_id": _D_TGT, "operation_id": _REST_OP, "action_type": "POST"},
+        flow_sequence=[{"kind": "map_ref", "map_ref": "MAP-1"}],
+    )
+    _assert_reuse_byte_faithful(shared_cfg, control_cfg, {_D_SRC: shared, _D_TGT: shared})
 
 
-def test_flow_same_operation_id_with_conflicting_action_fails_closed():
-    # Codex #139A review r4 (P1): one operation id reused with DIFFERENT actions
-    # (GET on one leg, POST on another) would silently emit one action for both
-    # (POST/POST) — an operation component has one action, so fail closed.
-    def rt(action, label):
-        return {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _OP_A, "action_type": action, "label": label}
-    cfg = _base_flow(flow_sequence=[{"kind": "branch", "legs": [
-        {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": rt("GET", "A")},
-        {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": rt("POST", "B")},
+def test_flow_same_operation_id_different_actions_builds_byte_faithfully():
+    # Codex #139A r4 -> #139B: two branch legs reusing one operation id with
+    # DIFFERENT actions (GET, POST) each keep their own action via role-scoping.
+    shared = _OP_A
+    _D_A, _D_B = "d5d50000-0000-0000-0000-00000000000a", "d5d50000-0000-0000-0000-00000000000b"
+    def rt(op, action, label):
+        return {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": op, "action_type": action, "label": label}
+    shared_cfg = _base_flow(flow_sequence=[{"kind": "branch", "legs": [
+        {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": rt(shared, "GET", "A")},
+        {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": rt(shared, "POST", "B")},
     ]}])
-    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
-    with pytest.raises(BuilderValidationError) as exc:
-        ProcessFlowBuilder.build(cfg, name="F")
-    assert exc.value.error_code == "PROCESS_XML_VALIDATION_FAILED"
+    control_cfg = _base_flow(flow_sequence=[{"kind": "branch", "legs": [
+        {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": rt(_D_A, "GET", "A")},
+        {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": rt(_D_B, "POST", "B")},
+    ]}])
+    xml = _assert_reuse_byte_faithful(shared_cfg, control_cfg, {_D_A: shared, _D_B: shared})
+    # Both actions survive — leg A stays GET, leg B stays POST (not POST/POST).
+    assert 'actionType="GET"' in xml and 'actionType="POST"' in xml
+
+
+def test_flow_cross_type_id_reuse_builds_byte_faithfully():
+    # #139B (architect finding 1): one id used as both a map_ref and a
+    # document_cache_id was `PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED` before role
+    # scoping; now the two aliases resolve to the same real id with distinct types,
+    # so it builds byte-faithfully — the real id appears in both mapId and docCache.
+    shared = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    _D_MAP, _D_CACHE = "d5d50000-0000-0000-0000-00000000ma01", "d5d50000-0000-0000-0000-00000000ca01"
+    steps = lambda m, c: [
+        {"kind": "map_ref", "map_ref": m},
+        {"kind": "doccacheload", "document_cache_id": c},
+        {"kind": "doccacheretrieve", "document_cache_id": c},
+    ]
+    shared_cfg = _base_flow(flow_sequence=steps(shared, shared))
+    control_cfg = _base_flow(flow_sequence=steps(_D_MAP, _D_CACHE))
+    xml = _assert_reuse_byte_faithful(shared_cfg, control_cfg, {_D_MAP: shared, _D_CACHE: shared})
+    assert f'mapId="{shared}"' in xml and f'docCache="{shared}"' in xml
 
 
 def test_flow_dead_root_target_is_excluded_from_conflict_detection():
@@ -364,25 +405,25 @@ def test_flow_decision_self_terminating_true_arm_makes_root_target_dead():
     assert "<bns:Component" in xml and 'actionType="GET"' in xml
 
 
-def test_flow_decision_linear_true_arm_root_target_conflict_still_caught():
-    # The converse: a decision with a LINEAR true arm DOES emit the root target as
-    # the true-arm fallthrough, so a genuine conflict with it is still caught.
-    decision = {
-        "kind": "decision", "comparison": "equals",
-        "left": {"value_type": "track", "property_id": "dynamicdocument.D"},
-        "right": {"value_type": "static", "static_value": "A"},
-        "true_steps": [{"kind": "map_ref", "map_ref": "MAP-T"}],
-        "false_steps": [{"kind": "branch", "legs": [
-            {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _OP_A, "action_type": "GET", "label": "A"}},
-            {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": {"connector_type": "rest", "connection_id": _RB_CONN, "operation_id": _RB_OP, "action_type": "POST", "label": "B"}},
-        ]}],
-    }
-    # EMITTED root target (true-arm fallthrough) reuses the false-arm leg's op with a different action.
-    cfg = _base_flow(
-        target={"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _OP_A, "action_type": "POST"},
-        flow_sequence=[decision],
-    )
-    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
-    with pytest.raises(BuilderValidationError) as exc:
-        ProcessFlowBuilder.build(cfg, name="F")
-    assert exc.value.error_code == "PROCESS_XML_VALIDATION_FAILED"
+def test_flow_decision_emitted_root_target_reuse_builds_byte_faithfully():
+    # #139A r-guard -> #139B: a decision with a LINEAR true arm emits the root
+    # target; when it reuses a false-arm leg's op with a different action, each
+    # occurrence keeps its own action via role-scoping, so it now builds faithfully.
+    shared = _OP_A
+    _D_ROOT, _D_LEG = "d5d50000-0000-0000-0000-0000000000c1", "d5d50000-0000-0000-0000-0000000000c2"
+    def decision(leg_op, root_op):
+        return {
+            "kind": "decision", "comparison": "equals",
+            "left": {"value_type": "track", "property_id": "dynamicdocument.D"},
+            "right": {"value_type": "static", "static_value": "A"},
+            "true_steps": [{"kind": "map_ref", "map_ref": "MAP-T"}],
+            "false_steps": [{"kind": "branch", "legs": [
+                {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": leg_op, "action_type": "GET", "label": "A"}},
+                {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": {"connector_type": "rest", "connection_id": _RB_CONN, "operation_id": _RB_OP, "action_type": "POST", "label": "B"}},
+            ]}],
+        }, {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": root_op, "action_type": "POST"}
+    dec_s, tgt_s = decision(shared, shared)
+    dec_c, tgt_c = decision(_D_LEG, _D_ROOT)
+    shared_cfg = _base_flow(target=tgt_s, flow_sequence=[dec_s])
+    control_cfg = _base_flow(target=tgt_c, flow_sequence=[dec_c])
+    _assert_reuse_byte_faithful(shared_cfg, control_cfg, {_D_ROOT: shared, _D_LEG: shared})

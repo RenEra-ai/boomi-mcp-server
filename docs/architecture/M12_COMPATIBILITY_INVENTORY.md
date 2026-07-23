@@ -652,26 +652,33 @@ XML dispatch. Full-#139 DOD requires either an ownership adjustment allowing par
 those already-shipped capabilities or a milestone dependency change; #139A does not fake completion
 around that gap.
 
-**Deferred faithfulness items from the #139A architect review (do NOT affect any valid/deployable
-config — all are invalid-config faithfulness, by-design M12 tightening, or diagnostic completeness):**
+**Deferred faithfulness items (do NOT affect any valid/deployable config):**
 
-- **Role/path-scoped IR references** (the plan's "distinct IR references per semantic role/path").
-  The adapter keys symbols by resolved component id; `SymbolTableV1` permits two refs sharing one
-  component id, but the adapter does not yet emit role-distinct refs. Consequence: a config that
-  reuses ONE component id across INCOMPATIBLE roles (e.g. the same id as both a `map_ref` and a
-  `document_cache_id`, or a database source operation and a REST target operation) fails closed at
-  build (`PROCESS_XML_VALIDATION_FAILED`) rather than reproducing the pre-#139 builder's undeployable
-  output — a single Boomi component cannot be two component types, so no valid/deployable config is
-  affected. Full role-scoping requires codec/IR reference changes and is a follow-up.
 - **Denormalized `profile_type` fail-closed.** A non-canonical-case property-source `profile_type`
   (e.g. `PROFILE.JSON`) is validate-accepted but the #138 emitter registry deliberately fails closed
   on denormalized profile kinds (`emitter_registry.py:443-466`, exact membership). The pre-#139
   renderer passed the spelling through verbatim, producing an undeployable `profileType` (Boomi
   profile types are canonical lowercase). The cutover surfacing this as a build-time rejection is the
   intended M12 tightening, not a parity regression on a deployable config.
-- **Full adapter-boundary contract** (`LegacyPathBindingV1`/`path_bindings`, an opaque `legacy_selector`,
-  `Literal`-typed `pipeline_view_status`, `PipelineSpec`-typed `pipeline_view`). The current contract
-  carries `symbol_requirements` + `compatibility_noop_paths` with a coarse `/flow_sequence`
-  source pointer; that is functionally sufficient for the #139A cutover. The richer path-binding /
-  selector contract is needed by the deferred strict authority selector and richer diagnostics —
-  follow-up with that work.
+- **Remaining adapter-boundary contract** (`LegacyPathBindingV1`/`path_bindings`, `Literal`-typed
+  `pipeline_view_status`, `PipelineSpec`-typed `pipeline_view`). The opaque `legacy_selector` and
+  exact RFC 6901 source pointers were DELIVERED by #139B (see below); the remaining typed
+  path-binding / pipeline-view fields are needed by the deferred strict authority selector — follow-up
+  with that work.
+
+### #139B landed — occurrence-scoped IR references (2026-07-23)
+
+The flow adapter now rewrites every component id/ref occurrence to an OCCURRENCE-SCOPED alias
+`$ref:legacy.adapter:<RFC6901-pointer>` (embedding no authored value) before the unchanged #136 codec
+runs, and each `LegacySymbolRequirementV1` carries a redacted `legacy_selector` (the original id) that
+`emission._symbol_table` resolves to the real `component_id`. Because `SymbolTableV1` permits distinct
+refs sharing one `component_id`, ONE id reused across roles — even incompatible ones (a `map_ref` and
+a `document_cache_id`, or a database source operation and a REST target operation) — now round-trips
+BYTE-FAITHFULLY (proven by control-substitution oracles) instead of failing closed. This DELETED the
+#139A `_collect_binding_meta` connector-conflict guard entirely (no collision is possible) and its
+`_root_target_emitted` predicate (a dead root target's alias never reaches the CFG, so it is excluded
+structurally). All 31 golden_xml + 3 emitter_parity fixtures stay byte-identical; the frozen #136
+codec + its tests are unchanged. A live IR alias with no recorded selector fails closed
+(`LEGACY_ADAPTER_SEMANTIC_LOSS`), guarding future codec vocabulary additions from silently
+reintroducing raw-id collapse. Incompatible-role reuse may still be undeployable in Boomi, but now
+reproduces the pre-#139 builder's accepted byte output instead of failing during canonical compilation.

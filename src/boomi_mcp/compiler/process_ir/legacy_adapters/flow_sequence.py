@@ -9,12 +9,19 @@ rejects a safe unknown field the legacy build path accepted-and-ignored (no
 unknown-field tightening; ADR-001 backward compat) — the stripped keys are
 recorded as ``compatibility_noop_paths`` instead.
 
-The symbol requirements are derived from the compiled emission plan — the exact
-``(component-id, component-type)`` pairs the emitter registry validates — rather
-than a hand-walk of the config, so a role/kind can never be missed or mistyped.
-Connector ``connector_type`` / ``action_type`` is DERIVED from the config
-bindings (source, target, branch/decision leg targets) and rides on the
-operation symbol, mirroring the #136 codec's ``_resolve_binding``.
+Since #139B every id/ref occurrence is rewritten to an OCCURRENCE-SCOPED alias
+(``$ref:legacy.adapter:<RFC6901-pointer>``) before the codec runs, and each
+requirement carries a ``legacy_selector`` (the original id) the caller resolves.
+Distinct aliases can therefore resolve to the SAME component id while keeping
+their own type + connector metadata, so one id reused across roles (even
+incompatible ones, e.g. a ``map_ref`` and a ``document_cache_id``) round-trips
+byte-faithfully instead of collapsing into one symbol — this REPLACES the #139A
+connector-conflict guard (no collision is possible). The requirements are still
+derived from the compiled emission plan (the exact ``(ref, component-type)`` pairs
+the emitter validates); connector ``connector_type`` / ``action_type`` rides on
+the operation requirement, mirroring the #136 codec's ``_resolve_binding``. A dead
+root target is excluded structurally: the codec drops it, so its alias never
+reaches the CFG and produces no requirement.
 """
 
 from __future__ import annotations
@@ -85,6 +92,17 @@ _TEXT_KEYS = frozenset(
         "property_id",
     }
 )
+# Reserved internal alias namespace for occurrence-scoped IR references (#139B).
+# The alias embeds the RFC 6901 pointer to the legacy field and NO authored value;
+# it is a valid ``$ref:`` ComponentRefV1 token (whitespace-free key) that resolves
+# to a real component id through the symbol table before emission — it never
+# appears in emitted XML.
+_ALIAS_PREFIX = "$ref:legacy.adapter:"
+
+
+def _rfc6901(token: str) -> str:
+    """Escape one RFC 6901 reference-token component (``~`` -> ``~0``, ``/`` -> ``~1``)."""
+    return token.replace("~", "~0").replace("/", "~1")
 
 
 def _project_binding(
@@ -212,159 +230,73 @@ def _project(config: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     return _coerce_legacy_values(projected), sorted(set(noop))
 
 
-def _collect_binding_meta(config: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
-    """Map each connector ref (connection_id AND operation_id) to its derived
-    ``connector_type`` / ``action_type``, from source, target, and every
-    branch/decision leg target binding. Both ids are keyed (mirrors the #136
-    parity oracle); lowering reads the metadata from the operation symbol only.
+def _alias_refs(
+    node: Any, pointer: str, facts: Dict[str, Dict[str, Any]]
+) -> Any:
+    """Rewrite every component id/ref occurrence to an occurrence-scoped alias.
 
-    A single ``SymbolTableV1`` entry per component id carries ONE connector fact,
-    so a component id reused with CONTRADICTORY bindings (which no single Boomi
-    component could satisfy) must fail closed with ``LEGACY_ADAPTER_SEMANTIC_LOSS``
-    (translated by the builder to ``PROCESS_XML_VALIDATION_FAILED``) rather than
-    silently emit one binding with another's metadata. The contradiction is
-    role-specific because Boomi component identity is:
-
-    - a CONNECTION component has one connector FAMILY but hosts operations with
-      different actions, so a reused ``connection_id`` conflicts only on
-      canonical FAMILY (never on action — that belongs to the operation);
-    - an OPERATION component has one family AND one action, so a reused
-      ``operation_id`` conflicts on canonical family OR normalized action.
-
-    Comparing the CANONICAL family (``rest`` / ``rest_client`` / the canonical
-    subtype collapse to one) avoids false positives on equivalent aliases;
-    normalizing the action (case/whitespace) avoids false positives on spelling.
-    Consistent reuse (same id, same family — and same action for an operation) is
-    preserved."""
-    # Lazy import (mirrors lowering._canonical_connector_metadata) so the adapter
-    # does not eagerly pull in the 6k-line builder module.
-    from ....categories.components.builders.process_flow_builder import (
-        _canonical_connector_type,
-    )
-
-    meta: Dict[str, Dict[str, Any]] = {}
-    seen_conn_family: Dict[str, str] = {}
-    seen_op_key: Dict[str, Tuple[str, str]] = {}
-
-    def add(binding: Any, path: str) -> None:
-        if not isinstance(binding, dict):
-            return
-        ct = binding.get("connector_type")
-        at = binding.get("action_type")
-        pair = {"connector_type": ct, "action_type": at}
-        family = _canonical_connector_type(ct)
-        action = str(at or "").strip().lower()
-        conn = binding.get("connection_id")
-        if isinstance(conn, str) and conn.strip():
-            conn = conn.strip()
-            if conn in seen_conn_family and seen_conn_family[conn] != family:
-                raise adapter_diagnostic(
-                    LEGACY_ADAPTER_SEMANTIC_LOSS,
-                    f"{path}/connection_id",
-                    "the same connection id is bound with conflicting connector "
-                    "families across roles",
-                )
-            seen_conn_family[conn] = family
-            meta[conn] = pair
-        op = binding.get("operation_id")
-        if isinstance(op, str) and op.strip():
-            op = op.strip()
-            op_key = (family, action)
-            if op in seen_op_key and seen_op_key[op] != op_key:
-                raise adapter_diagnostic(
-                    LEGACY_ADAPTER_SEMANTIC_LOSS,
-                    f"{path}/operation_id",
-                    "the same operation id is bound with conflicting connector "
-                    "family or action across roles",
-                )
-            seen_op_key[op] = op_key
-            meta[op] = pair
-
-    def walk_steps(steps: Any, path: str) -> None:
-        if not isinstance(steps, list):
-            return
-        for i, step in enumerate(steps):
-            if not isinstance(step, dict):
-                continue
-            kind = str(step.get("kind") or "").strip()
-            if kind == "branch":
-                for j, leg in enumerate(step.get("legs") or []):
-                    if isinstance(leg, dict):
-                        add(leg.get("target"), f"{path}/{i}/legs/{j}/target")
-                        walk_steps(leg.get("steps"), f"{path}/{i}/legs/{j}/steps")
-            elif kind == "decision":
-                walk_steps(step.get("true_steps"), f"{path}/{i}/true_steps")
-                walk_steps(step.get("false_steps"), f"{path}/{i}/false_steps")
-
-    add(config.get("source"), "/source")
-    # The top-level `target` is required by the validator but is DEAD config (not
-    # emitted, dropped from the IR) when a branch/exception terminal or a
-    # return_documents terminal owns the tail — mirror the codec's D1/D2 rule
-    # (legacy_flow_sequence_to_ir). A dead root target must not participate in
-    # conflict detection or metadata: it is not represented in the emitted XML, so
-    # reusing an emitted leg's id with a different action there is not a real
-    # conflict (Codex #139A review r5).
-    if _root_target_emitted(config):
-        add(config.get("target"), "/target")
-    walk_steps(config.get("flow_sequence"), "/flow_sequence")
-    return meta
-
-
-def _root_target_emitted(config: Dict[str, Any]) -> bool:
-    """True when the top-level ``target`` becomes a real emitted shape.
-
-    Mirrors ``legacy_flow_sequence_to_ir``'s terminal rule exactly, so a DEAD
-    root target is never conflict-checked:
-
-    - a linear sequence's fallthrough target is emitted, unless a
-      ``return_documents`` terminal replaces it (dead);
-    - a branch/exception terminal drops the root target (D2, dead);
-    - a decision terminal emits the root target as its TRUE-arm fallthrough ONLY
-      when the true arm is linear; a true arm that self-terminates in a nested
-      branch/exception uses that nested terminal instead, so the root target is
-      dead (``_convert_decision_step``: ``true_terminal or dict(root_target)`` via
-      ``_split_arm_steps``)."""
-    seq = config.get("flow_sequence")
-    if not isinstance(seq, list) or not seq:
-        return True
-    last = seq[-1]
-    last_kind = str((last.get("kind") if isinstance(last, dict) else "") or "").strip()
-    if last_kind in ("branch", "exception"):
-        return False
-    if last_kind == "decision":
-        true_steps = last.get("true_steps")
-        if isinstance(true_steps, list) and true_steps:
-            true_last = true_steps[-1]
-            true_last_kind = str(
-                (true_last.get("kind") if isinstance(true_last, dict) else "") or ""
-            ).strip()
-            if true_last_kind in ("branch", "exception"):
-                return False
-        return True
-    rd = config.get("return_documents")
-    if isinstance(rd, dict) and rd.get("enabled") is True:
-        return False
-    return True
+    Walks the projected+coerced payload; for each ``_ID_REF_KEYS`` occurrence it
+    substitutes ``$ref:legacy.adapter:<pointer>`` and records an alias fact
+    (original ``legacy_selector``, exact source pointer, and — only for an
+    ``operation_id`` — the sibling connector metadata). Because each alias is
+    unique by path, two bindings that reuse ONE component id become two distinct
+    IR references, so lowering never collapses them into one symbol (#139B)."""
+    if isinstance(node, dict):
+        out: Dict[str, Any] = {}
+        for k, v in node.items():
+            child = f"{pointer}/{_rfc6901(str(k))}"
+            if k in _ID_REF_KEYS and isinstance(v, str) and v:
+                alias = f"{_ALIAS_PREFIX}{child}"
+                if alias in facts:  # unreachable: pointers are unique
+                    raise adapter_diagnostic(
+                        LEGACY_ADAPTER_SEMANTIC_LOSS,
+                        child,
+                        "duplicate role/path alias generated for one occurrence",
+                    )
+                fact: Dict[str, Any] = {
+                    "legacy_selector": v,
+                    "source_pointer": child,
+                    "connector_type": None,
+                    "action_type": None,
+                }
+                if k == "operation_id":
+                    fact["connector_type"] = node.get("connector_type")
+                    fact["action_type"] = node.get("action_type")
+                facts[alias] = fact
+                out[k] = alias
+            else:
+                out[k] = _alias_refs(v, child, facts)
+        return out
+    if isinstance(node, list):
+        return [_alias_refs(item, f"{pointer}/{i}", facts) for i, item in enumerate(node)]
+    return node
 
 
 def _requirements_from_ir(
-    ir: ProcessIRV1, binding_meta: Dict[str, Dict[str, str]]
+    ir: ProcessIRV1, facts: Dict[str, Dict[str, Any]]
 ) -> Tuple[LegacySymbolRequirementV1, ...]:
     """Derive the exact symbol requirements the emitter validates, from the
-    compiled emission plan (never a config hand-walk)."""
+    compiled emission plan of the ALIAS-bearing IR (never a config hand-walk).
+
+    Every reference the emitter sees is an occurrence-scoped alias; its type comes
+    from the plan and its ``legacy_selector`` + connector metadata come from the
+    recorded alias fact. A live alias with no recorded fact means the codec emitted
+    a reference outside ``_ID_REF_KEYS`` (a future vocabulary addition) that would
+    silently reintroduce raw-id collapse — fail closed."""
     cfg = lower_process_ir_to_cfg(ir)
-    # Sentinel table: component_id == ref, connector metadata for lowering.
-    refs = _cfg_refs(cfg)
+    # Sentinel table keyed by ALIAS (component_id == alias); connector metadata for
+    # operation aliases so lowering canonicalizes the operation's family.
+    aliases = _cfg_refs(cfg)
     sentinel = SymbolTableV1(
         symbols=tuple(
             ComponentSymbolV1(
-                ref=ref,
-                component_id=ref,
+                ref=alias,
+                component_id=alias,
                 component_type="sentinel",
-                connector_type=(binding_meta.get(ref) or {}).get("connector_type"),
-                action_type=(binding_meta.get(ref) or {}).get("action_type"),
+                connector_type=(facts.get(alias) or {}).get("connector_type"),
+                action_type=(facts.get(alias) or {}).get("action_type"),
             )
-            for ref in sorted(refs)
+            for alias in sorted(aliases)
         )
     )
     plan = lower_cfg_to_emission_plan(cfg, sentinel)
@@ -402,16 +334,25 @@ def _requirements_from_ir(
                     role.setdefault(src.profile_id, "setproperties.profile")
 
     requirements = []
-    for cid in sorted(id_type):
-        meta = binding_meta.get(cid) or {}
+    for alias in sorted(id_type):
+        fact = facts.get(alias)
+        if fact is None:
+            raise adapter_diagnostic(
+                LEGACY_ADAPTER_SEMANTIC_LOSS,
+                alias if alias.startswith(_ALIAS_PREFIX) else "/",
+                "a live IR reference has no recorded legacy selector",
+            )
+        expected = id_type[alias]
+        is_operation = expected == "connector-action"
         requirements.append(
             LegacySymbolRequirementV1(
-                role=role.get(cid, "ref"),
-                ir_ref=cid,
-                source_pointer="/flow_sequence",
-                expected_component_type=id_type[cid],
-                connector_type=meta.get("connector_type"),
-                action_type=meta.get("action_type"),
+                role=role.get(alias, "ref"),
+                ir_ref=alias,
+                legacy_selector=fact["legacy_selector"],
+                source_pointer=fact["source_pointer"],
+                expected_component_type=expected,
+                connector_type=fact["connector_type"] if is_operation else None,
+                action_type=fact["action_type"] if is_operation else None,
             )
         )
     return tuple(requirements)
@@ -443,13 +384,15 @@ def _cfg_refs(cfg: Any) -> set:
 def adapt_flow_sequence(config: Dict[str, Any]) -> LegacyAdapterResultV1:
     """Normalize a validated database_to_api_sync flow_sequence config."""
     projected, noop = _project(config)
-    ir = legacy_flow_sequence_to_ir(projected)
-    # Collect connector metadata from the PROJECTED config (same id coercion the
-    # codec saw), so the meta keys match the stripped IR refs — otherwise a
-    # whitespace-padded operation id would key the metadata under the padded
-    # spelling and lowering would find no connector family on the operation symbol.
-    binding_meta = _collect_binding_meta(projected)
-    requirements = _requirements_from_ir(ir, binding_meta)
+    # Validate the RAW (post-coercion) refs through the codec first: aliasing would
+    # otherwise mask a malformed original ref and change #139A error ordering.
+    legacy_flow_sequence_to_ir(projected)
+    # Rewrite every id/ref occurrence to a role/path-scoped alias, then produce the
+    # final IR from the aliased copy through the UNCHANGED codec.
+    facts: Dict[str, Dict[str, Any]] = {}
+    aliased = _alias_refs(projected, "", facts)
+    ir = legacy_flow_sequence_to_ir(aliased)
+    requirements = _requirements_from_ir(ir, facts)
     return LegacyAdapterResultV1(
         process_ir=ir,
         symbol_requirements=requirements,

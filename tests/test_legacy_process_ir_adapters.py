@@ -148,30 +148,92 @@ def test_adapter_result_leaks_no_emission_artifacts(adapt, cfg):
         assert token not in blob, f"adapter result leaked {token!r}"
 
 
-def test_flow_requirements_are_correctly_typed_and_carry_connector_metadata():
+def test_flow_requirements_are_occurrence_scoped_and_typed(_pin=None):
+    # #139B: requirements are keyed by an occurrence-scoped ALIAS
+    # ($ref:legacy.adapter:<pointer>); the real id lives in legacy_selector, and
+    # the emitter type comes from the plan. Index by source_pointer.
     result = adapt_flow_sequence(_flow_cfg())
-    by_ref = {r.ir_ref: r for r in result.symbol_requirements}
-    # Both connector bindings + the map are present with the emitter's exact types.
-    assert by_ref[_DB_CONN].expected_component_type == "connector-settings"
-    assert by_ref[_DB_OP].expected_component_type == "connector-action"
-    assert by_ref[_REST_CONN].expected_component_type == "connector-settings"
-    assert by_ref[_REST_OP].expected_component_type == "connector-action"
-    assert by_ref["MAP-1"].expected_component_type == "transform.map"
-    # Connector metadata rides on the OPERATION requirement, derived from config.
-    assert by_ref[_DB_OP].connector_type == "database"
-    assert by_ref[_DB_OP].action_type == "Get"
-    assert by_ref[_REST_OP].connector_type == "rest"
-    assert by_ref[_REST_OP].action_type == "POST"
+    by_ptr = {r.source_pointer: r for r in result.symbol_requirements}
+    assert by_ptr["/source/connection_id"].expected_component_type == "connector-settings"
+    assert by_ptr["/source/operation_id"].expected_component_type == "connector-action"
+    assert by_ptr["/target/connection_id"].expected_component_type == "connector-settings"
+    assert by_ptr["/target/operation_id"].expected_component_type == "connector-action"
+    assert by_ptr["/flow_sequence/0/map_ref"].expected_component_type == "transform.map"
+    # Aliases are path-only (no authored id) and unique per occurrence.
+    for ptr, r in by_ptr.items():
+        assert r.ir_ref == f"$ref:legacy.adapter:{ptr}"
+    assert len({r.ir_ref for r in result.symbol_requirements}) == len(result.symbol_requirements)
+    # legacy_selector carries the ORIGINAL id.
+    assert by_ptr["/source/operation_id"].legacy_selector == _DB_OP
+    assert by_ptr["/target/operation_id"].legacy_selector == _REST_OP
+    assert by_ptr["/flow_sequence/0/map_ref"].legacy_selector == "MAP-1"
+    # Connector metadata rides on the OPERATION requirement only; not connections.
+    assert by_ptr["/source/operation_id"].connector_type == "database"
+    assert by_ptr["/source/operation_id"].action_type == "Get"
+    assert by_ptr["/target/operation_id"].connector_type == "rest"
+    assert by_ptr["/target/operation_id"].action_type == "POST"
+    assert by_ptr["/source/connection_id"].connector_type is None
+    assert by_ptr["/target/connection_id"].connector_type is None
+
+
+def test_flow_reused_id_gets_distinct_aliases_with_independent_metadata():
+    # #139B: source op == target op reused with different families -> TWO aliases,
+    # one real id in legacy_selector, each keeping its own family/action.
+    shared = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    result = adapt_flow_sequence(_flow_cfg(
+        source={"connector_type": "database", "connection_id": _DB_CONN, "operation_id": shared, "action_type": "Get"},
+        target={"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": shared, "action_type": "POST"},
+    ))
+    by_ptr = {r.source_pointer: r for r in result.symbol_requirements}
+    src, tgt = by_ptr["/source/operation_id"], by_ptr["/target/operation_id"]
+    assert src.ir_ref != tgt.ir_ref                       # distinct aliases
+    assert src.legacy_selector == tgt.legacy_selector == shared  # same real id
+    assert src.connector_type == "database" and src.action_type == "Get"
+    assert tgt.connector_type == "rest" and tgt.action_type == "POST"
+
+
+def test_flow_cross_type_id_reuse_yields_two_typed_requirements():
+    # #139B: one id used as both map_ref and document_cache_id -> two aliases with
+    # DISTINCT types resolving to the same real id (was SYMBOL_UNRESOLVED pre-#139B).
+    shared = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    result = adapt_flow_sequence(_flow_cfg(flow_sequence=[
+        {"kind": "map_ref", "map_ref": shared},
+        {"kind": "doccacheload", "document_cache_id": shared},
+        {"kind": "doccacheretrieve", "document_cache_id": shared},
+    ]))
+    by_ptr = {r.source_pointer: r for r in result.symbol_requirements}
+    assert by_ptr["/flow_sequence/0/map_ref"].expected_component_type == "transform.map"
+    assert by_ptr["/flow_sequence/1/document_cache_id"].expected_component_type == "documentcache"
+    assert by_ptr["/flow_sequence/0/map_ref"].legacy_selector == shared
+    assert by_ptr["/flow_sequence/1/document_cache_id"].legacy_selector == shared
+
+
+def test_flow_dead_root_target_produces_no_requirement():
+    # #139B: a branch terminal makes the root target dead — the codec drops it, so
+    # its alias never reaches the CFG and no requirement is produced for it.
+    dead_op = "dead0000-0000-0000-0000-000000000000"
+    result = adapt_flow_sequence(_flow_cfg(
+        target={"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": dead_op, "action_type": "POST"},
+        flow_sequence=[{"kind": "branch", "legs": [
+            {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _REST_OP, "action_type": "POST", "label": "A"}},
+            {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": {"connector_type": "rest", "connection_id": "55555555-5555-5555-5555-555555555555", "operation_id": "66666666-6666-6666-6666-666666666666", "action_type": "POST", "label": "B"}},
+        ]}],
+    ))
+    selectors = {r.legacy_selector for r in result.symbol_requirements}
+    assert dead_op not in selectors            # dead root target excluded
+    assert _REST_OP in selectors               # emitted leg target present
 
 
 def test_wrapper_requirements_are_process_typed_and_deduped():
     # The same child called twice yields ONE requirement (SymbolTableV1 rejects
-    # duplicate refs; the adapter must not emit a colliding pair).
+    # duplicate refs; the adapter must not emit a colliding pair). Wrapper calls are
+    # NOT role-scoped: legacy_selector == ir_ref == pid.
     result = adapt_wrapper_subprocess(
         {"process_kind": "wrapper_subprocess", "process_calls": [{"process_id": _C1}, {"process_id": _C1}]}
     )
     refs = [r.ir_ref for r in result.symbol_requirements]
     assert refs == [_C1]
+    assert result.symbol_requirements[0].legacy_selector == _C1
     assert result.symbol_requirements[0].expected_component_type == "process"
 
 

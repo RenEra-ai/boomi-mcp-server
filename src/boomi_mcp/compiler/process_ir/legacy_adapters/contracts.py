@@ -47,14 +47,20 @@ class _AdapterModel(BaseModel):
 class LegacySymbolRequirementV1(_AdapterModel):
     """One reference the adapter needs the caller to resolve into a component.
 
-    ``ir_ref`` is the token as it appears in the IR (an already-resolved literal
-    id on the build path, or a ``$ref:KEY`` token on the plan path). Connector
-    metadata is present ONLY on the operation requirement of a connector binding
+    ``ir_ref`` is the OCCURRENCE-SCOPED alias present in the ``ProcessIRV1`` — a
+    ``$ref:legacy.adapter:<RFC6901-pointer>`` token that embeds NO authored value.
+    ``legacy_selector`` is the original post-projection/post-coercion literal
+    component id (or authored ``$ref:KEY``) the caller resolves to a component id.
+    Distinct aliases may therefore resolve to the SAME component id while keeping
+    their own component type and connector metadata, so one id reused across roles
+    never collapses into an incompatible symbol (#139B). Connector metadata is
+    present ONLY on the operation requirement of a connector binding
     (``expected_component_type == "connector-action"``).
     """
 
     role: str = Field(..., min_length=1)
     ir_ref: str = Field(..., min_length=1)
+    legacy_selector: str = Field(..., min_length=1)
     source_pointer: str = Field(..., min_length=1)
     expected_component_type: str = Field(..., min_length=1)
     connector_type: Optional[str] = None
