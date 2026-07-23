@@ -308,3 +308,51 @@ def test_flow_dead_root_target_is_excluded_from_conflict_detection():
     # The emitted leg keeps its own GET action; the dead root target contributes nothing.
     assert "<bns:Component" in xml
     assert 'actionType="GET"' in xml
+
+
+def test_flow_decision_self_terminating_true_arm_makes_root_target_dead():
+    # Codex #139A review r6 (P2): a top-level decision whose true_steps ends in a
+    # nested branch/exception uses that terminal instead of the root target, so the
+    # root target is DEAD and must be excluded from conflict detection.
+    decision = {
+        "kind": "decision", "comparison": "equals",
+        "left": {"value_type": "track", "property_id": "dynamicdocument.D"},
+        "right": {"value_type": "static", "static_value": "A"},
+        "true_steps": [{"kind": "branch", "legs": [
+            {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _OP_A, "action_type": "GET", "label": "A"}},
+            {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": {"connector_type": "rest", "connection_id": _RB_CONN, "operation_id": _RB_OP, "action_type": "POST", "label": "B"}},
+        ]}],
+        "false_steps": [{"kind": "exception", "message_template": "halt {1}"}],
+    }
+    # dead root target reuses the true-arm leg's op id with a DIFFERENT action.
+    cfg = _base_flow(
+        target={"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _OP_A, "action_type": "POST"},
+        flow_sequence=[decision],
+    )
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    xml = ProcessFlowBuilder.build(cfg, name="F")
+    assert "<bns:Component" in xml and 'actionType="GET"' in xml
+
+
+def test_flow_decision_linear_true_arm_root_target_conflict_still_caught():
+    # The converse: a decision with a LINEAR true arm DOES emit the root target as
+    # the true-arm fallthrough, so a genuine conflict with it is still caught.
+    decision = {
+        "kind": "decision", "comparison": "equals",
+        "left": {"value_type": "track", "property_id": "dynamicdocument.D"},
+        "right": {"value_type": "static", "static_value": "A"},
+        "true_steps": [{"kind": "map_ref", "map_ref": "MAP-T"}],
+        "false_steps": [{"kind": "branch", "legs": [
+            {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _OP_A, "action_type": "GET", "label": "A"}},
+            {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": {"connector_type": "rest", "connection_id": _RB_CONN, "operation_id": _RB_OP, "action_type": "POST", "label": "B"}},
+        ]}],
+    }
+    # EMITTED root target (true-arm fallthrough) reuses the false-arm leg's op with a different action.
+    cfg = _base_flow(
+        target={"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _OP_A, "action_type": "POST"},
+        flow_sequence=[decision],
+    )
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="F")
+    assert exc.value.error_code == "PROCESS_XML_VALIDATION_FAILED"

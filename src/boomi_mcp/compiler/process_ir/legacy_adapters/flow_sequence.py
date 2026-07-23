@@ -268,10 +268,17 @@ def _collect_binding_meta(config: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
 def _root_target_emitted(config: Dict[str, Any]) -> bool:
     """True when the top-level ``target`` becomes a real emitted shape.
 
-    Mirrors ``legacy_flow_sequence_to_ir``'s terminal rule: a linear sequence's
-    fallthrough target and a decision TRUE-arm target ARE emitted; a
-    branch/exception terminal drops the root target (D2), and a return_documents
-    terminal replaces it — both leave it dead config."""
+    Mirrors ``legacy_flow_sequence_to_ir``'s terminal rule exactly, so a DEAD
+    root target is never conflict-checked:
+
+    - a linear sequence's fallthrough target is emitted, unless a
+      ``return_documents`` terminal replaces it (dead);
+    - a branch/exception terminal drops the root target (D2, dead);
+    - a decision terminal emits the root target as its TRUE-arm fallthrough ONLY
+      when the true arm is linear; a true arm that self-terminates in a nested
+      branch/exception uses that nested terminal instead, so the root target is
+      dead (``_convert_decision_step``: ``true_terminal or dict(root_target)`` via
+      ``_split_arm_steps``)."""
     seq = config.get("flow_sequence")
     if not isinstance(seq, list) or not seq:
         return True
@@ -280,6 +287,14 @@ def _root_target_emitted(config: Dict[str, Any]) -> bool:
     if last_kind in ("branch", "exception"):
         return False
     if last_kind == "decision":
+        true_steps = last.get("true_steps")
+        if isinstance(true_steps, list) and true_steps:
+            true_last = true_steps[-1]
+            true_last_kind = str(
+                (true_last.get("kind") if isinstance(true_last, dict) else "") or ""
+            ).strip()
+            if true_last_kind in ("branch", "exception"):
+                return False
         return True
     rd = config.get("return_documents")
     if isinstance(rd, dict) and rd.get("enabled") is True:
