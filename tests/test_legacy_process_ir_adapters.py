@@ -35,6 +35,9 @@ from boomi_mcp.compiler.process_ir.legacy_adapters.contracts import (
 from boomi_mcp.compiler.process_ir.legacy_adapters.flow_sequence import (
     adapt_flow_sequence,
 )
+from boomi_mcp.categories.components.builders.process_flow_builder import (
+    ProcessFlowBuilder,
+)
 from boomi_mcp.compiler.process_ir.legacy_adapters.wrapper_subprocess import (
     adapt_wrapper_subprocess,
 )
@@ -284,6 +287,35 @@ def test_flow_nested_and_profile_refs_are_path_pinned():
         assert by_ptr[ptr].legacy_selector == selector, ptr
         assert by_ptr[ptr].expected_component_type == ctype, ptr
         assert by_ptr[ptr].ir_ref == f"$ref:legacy.adapter:{ptr}", ptr
+
+    # PLACEMENT (architect re-review): the requirement side above cannot tell WHERE
+    # each alias lands in the IR. Build the emitted XML and pin the positional order
+    # so a nested-path swap (e.g. leg 0 and leg 1 operations trading positions) fails:
+    # each leg's operation id must sit inside its OWN leg segment (after its map,
+    # before the next leg's map). The two profile refs and the decision-arm cache
+    # are also present, and no alias leaks.
+    xml = ProcessFlowBuilder.build(_flow_cfg(flow_sequence=[
+        {"kind": "dataprocess", "steps": [{"operation": "split_documents", "profile_type": "json", "profile_id": "PROF-DP", "link_element_key": "1", "link_element_name": "n"}]},
+        {"kind": "set_ddp", "name": "D", "source_values": [{"value_type": "profile", "element_id": "E", "element_name": "N", "profile_id": "PROF-SP", "profile_type": "profile.json"}]},
+        {"kind": "decision", "comparison": "equals",
+         "left": {"value_type": "track", "property_id": "dynamicdocument.D"},
+         "right": {"value_type": "static", "static_value": "A"},
+         "true_steps": [
+             {"kind": "map_ref", "map_ref": "MAP-DEC"},
+             {"kind": "doccacheload", "document_cache_id": "CACHE-DEC"},
+             {"kind": "doccacheretrieve", "document_cache_id": "CACHE-DEC"},
+         ],
+         "false_steps": [{"kind": "branch", "legs": [
+             {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": "op-leg-a0000000000000000000000000", "action_type": "POST", "label": "A"}},
+             {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": {"connector_type": "rest", "connection_id": "55555555-5555-5555-5555-555555555555", "operation_id": "op-leg-b0000000000000000000000000", "action_type": "POST", "label": "B"}},
+         ]}]},
+    ]), name="N")
+    assert "$ref:legacy.adapter:" not in xml
+    assert (
+        xml.index("MAP-A") < xml.index("op-leg-a0000000000000000000000000")
+        < xml.index("MAP-B") < xml.index("op-leg-b0000000000000000000000000")
+    )
+    assert "MAP-DEC" in xml and "CACHE-DEC" in xml
 
 
 def test_flow_connector_metadata_only_on_operation_requirements():
