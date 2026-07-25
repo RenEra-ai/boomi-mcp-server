@@ -985,3 +985,72 @@ strict-only input form, `v1_deprecated: false`); the generated JSON schema indep
 `enum: ["1.0","1.1"]` with `default: "1.0"`. `docs/MCP_TOOL_DESIGN.md` carries the full outcome table.
 **V1 is not deprecated and emits no warning** — ADR-001 §9 permits this slice precisely because it
 withdraws no V1 acceptance.
+
+## #140 M12.5 — first-class ConnectorCall and mixed linear flow
+
+**Landed 2026-07-25, DARK.** A new authored node kind (`connector_call`) plus its resolution and
+capability layer, on the canonical `IR → CFG → plan → emit` chain #139 made production. **No public
+surface changes**: no MCP tool, action, request field, `IntegrationSpecV1` field, schema-template
+route, server dispatch, plan/apply behaviour, deployment behaviour, or execution behaviour. Direct
+ProcessIR authoring remains #146's. The only outward addition is the conventional Python model export
+`boomi_mcp.models.ConnectorCallNodeV1` and the node's presence in the *internal* ProcessIR schema —
+both pinned by `tests/test_process_ir_compiler_surface.py`, which also asserts `connector_call`
+reaches no MCP tool schema and no IntegrationSpec schema.
+
+**No legacy dialect changed.** No adapter, archetype, builder, emitter, or renderer was modified;
+`emitter_registry.py`, `process_emitters/rendering.py`, `process_flow_builder.py`,
+`legacy_adapters/`, `_process_ir_compat.py` and `integration_builder.py` are untouched. The emitter
+registry stays at 17 keys (ConnectorCall reuses the two existing connector registrations). Every
+pre-existing XML golden is byte-identical; the only regenerated fixture is
+`tests/fixtures/process_ir/process_ir_v1.schema.json`, which gains the new node.
+
+**Capability matrix (closed allowlist — everything else fails closed by absence).**
+
+| Family | Action | Status | Evidence |
+|---|---|---|---|
+| `officialboomi-X3979C-rest-prod` | `GET`, `PATCH` | supported | operation declares request/response profiles; `rest_fetch`/`rest_send` primitives; live `connectoraction actionType="PATCH"` capture |
+| `wssoapclientsdk` | `EXECUTE` | supported | #126 reference components; request + response XML profiles; both `soap_fetch` and `soap_send` |
+| `database` | `Get` | supported | `ReadProfile` is the output ("in a map, the Read profile is referenced as the source profile") |
+| `database` | `Send` | supported, **terminal** | official Get-vs-Send rule + no response profile — see below |
+| `database` | continuation after `Send` | **gated** | official: a Send "does not return any data to the process for further processing" |
+| WSS `LISTEN` | — | **gated** | no `start_listen` emitter key; the fused legacy entry is unrepresentable |
+| Database **V2** | any | **gated** | different connector, no verified builder/emitter contract; never aliased to legacy `database` |
+| OEM / unrecognized subtypes | any | **gated** | e.g. the live `intappoemprod-…` REST subtype — a family is an opaque account-scoped string |
+| REST `POST`/`PUT`/`DELETE`/`HEAD`/`OPTIONS`/`TRACE` | — | **gated** | no checkout-pinned process binding + cardinality capture |
+| dynamic-path / parameter-bound steps | — | **gated** | only the simple binding is enabled |
+
+Capture ledger: `.codex/plans/issue-140-live-captures.md` (read-only probes + official documentation).
+
+**The one place #140 departs from its own issue text, and why.** The issue's representative flow is
+`REST GET → Map → SOAP EXECUTE → DB Send → REST PATCH → terminal`. Official Boomi documentation states
+a `Send` action "does not return any data to the process for further processing", and Database
+(Legacy) declares no response profile at all — so a call *after* a Send has no documents to consume.
+Per the issue's own research gate ("if any required family/action cannot be safely emitted, gate it
+explicitly instead of inventing fields") that ordering ships **gated**, rejected with
+`PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH`, and the representative flow is realized with the Send
+last — the same five calls, the same three families, the same single map:
+
+```
+REST GET → MapRef → SOAP EXECUTE → REST PATCH → Database Send → Stop
+```
+
+Golden: `tests/fixtures/process_ir/emitter_parity/connector_call_mixed.process.xml`. It is the first
+golden with **no legacy oracle** (the legacy builder cannot express a multi-connector flow); the four
+substitute checks are documented in [PROCESS_IR_COMPILER_V1 §10a](PROCESS_IR_COMPILER_V1.md).
+
+**Error codes.** Seven new codes, all `category="process_ir"`, `retryable=False`, `owner="#140"`,
+added to four families that already exist (ADR-001 §7 — no eleventh family, no code re-registered):
+`PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND`, `PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND`,
+`PROCESS_IR_REFERENCE_CONNECTION_MISMATCH`, `PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED`,
+`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH`, `PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH`,
+`PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID`.
+
+**Materialization DAG untouched.** `integration_builder._topological_order` remains the sole
+component-order algorithm; #140 computes only the runtime CFG and never derives component
+dependencies from it. The two orders stay separate exactly as ADR-001 §1 requires.
+
+**#139 ledger impact: none, except one row's owner.** The "ordinary `database_to_api_sync`" row still
+needs canonical `start_listen` / dynamic-path / `catcherrors` / `notify` emission. #140 **settled the
+listener entry policy** (unsupported — there is no emitter to cut over to) but ships no `start_listen`
+emitter, so that row stays **pending-capability** and the WSS arm of `sync_pipeline` stays on the
+legacy renderer.

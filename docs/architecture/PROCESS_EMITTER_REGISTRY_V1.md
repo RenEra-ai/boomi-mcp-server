@@ -159,3 +159,29 @@ component ids with one compatible alias, cardinality, whole-plan preflight (a ba
 ALL rendering), determinism, symbol-order and registry-order invariance, renderer-exception →
 `PROCESS_IR_COMPILE_INTERNAL`, the absence of `emit_fragment`/`start_listen`/`catcherrors`/`notify`/
 `route`, and the AST/import isolation guard.
+
+## 8. #140 M12.5 — ConnectorCall adds NO registry key
+
+The registry stays at exactly **17 discriminator keys / 16 model classes**. `ConnectorCallNodeV1`
+(#140) reuses the two existing connector registrations rather than introducing a third:
+
+| ConnectorCall placement | emitter key | renderer |
+|---|---|---|
+| the entry call (first step of the sequence) | `connectoraction_source` | `render_connectoraction` |
+| every later call | `connectoraction_target` | `render_connectoraction` (the same function) |
+
+This is sound because the two keys were already degenerate at the XML layer: they share one renderer,
+and since #139C the connector canonicalization rule is **family-conditional and role-independent**, so
+selecting between them changes the plan's discriminator and not a byte of output. The placement is
+derived by the compiler from the call's authored position — a caller authors no role.
+
+Nothing else in this document changes: no renderer, no attribute, no image name, no cardinality rule,
+and no `parameter-profile`/`dynamicProperties` behaviour. #140 enables only the **simple** connector
+binding, so a `connector_call` always renders the `<parameters/>` + empty `<dynamicProperties/>` form —
+the same form the shipped, live-QA-verified `sync_pipeline_*` goldens carry. Dynamic paths and
+parameter binding remain out of the capability allowlist.
+
+The new fixture `tests/fixtures/process_ir/emitter_parity/connector_call_mixed.process.xml` is the
+first golden with **no legacy oracle** (the legacy builder cannot express a multi-connector flow); the
+four checks that stand in for one are listed in
+[PROCESS_IR_COMPILER_V1 §10a](PROCESS_IR_COMPILER_V1.md).

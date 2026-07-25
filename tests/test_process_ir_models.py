@@ -516,6 +516,133 @@ def test_process_call_not_allowed_in_branch_leg():
 
 
 # ---------------------------------------------------------------------------
+# connector_call sequences (issue #140)
+# ---------------------------------------------------------------------------
+
+
+def call(operation_ref="$ref:op", **extra):
+    step = {"kind": "connector_call", "operation_ref": operation_ref}
+    step.update(extra)
+    return step
+
+
+def test_connector_call_sequence_parses_with_multiple_calls_and_a_map():
+    ir = parse_process_ir_v1(
+        doc(
+            call("$ref:op_a", action="GET", label="read"),
+            {"kind": "map_ref", "map_ref": "$ref:m"},
+            call("$ref:op_b"),
+            call("$ref:op_c", action="Send"),
+            {"kind": "stop"},
+        )
+    )
+    assert [step.kind for step in ir.body.steps] == [
+        "connector_call", "map_ref", "connector_call", "connector_call", "stop"
+    ]
+
+
+def test_connector_call_action_is_optional_and_defaults_to_none():
+    ir = parse_process_ir_v1(doc(call(), {"kind": "stop"}))
+    assert ir.body.steps[0].action is None
+    assert ir.body.steps[0].label is None
+
+
+def test_connector_call_return_documents_terminal_is_allowed():
+    parse_process_ir_v1(doc(call(), {"kind": "return_documents"}))
+
+
+@pytest.mark.parametrize(
+    "steps,expect_code",
+    [
+        # a map has no producer before it
+        ([{"kind": "map_ref", "map_ref": "$ref:m"}, call(), {"kind": "stop"}],
+         PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
+        # a trailing map has no consumer after it, so its target profile is
+        # unverifiable — the whole reason maps must be bracketed
+        ([call(), {"kind": "map_ref", "map_ref": "$ref:m"}, {"kind": "stop"}],
+         PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
+        # two maps in a row: the first one's target has no call to check against
+        ([call(), {"kind": "map_ref", "map_ref": "$ref:m"},
+          {"kind": "map_ref", "map_ref": "$ref:m2"}, call(), {"kind": "stop"}],
+         PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
+        # no terminal at all
+        ([call(), call()], PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
+        # a target/stop terminal pair belongs to the legacy dialect
+        ([call(), target(), {"kind": "stop"}], PROCESS_IR_CAPABILITY_UNSUPPORTED),
+        ([source(), call(), {"kind": "stop"}], PROCESS_IR_CAPABILITY_UNSUPPORTED),
+        # process_call mixing stays gated (that is what mixed_connector_execution names)
+        ([call(), {"kind": "process_call", "process_ref": "p"}, {"kind": "stop"}],
+         PROCESS_IR_CAPABILITY_UNSUPPORTED),
+        # every other linear kind stays out of a connector_call sequence for now
+        ([call(), message(), call(), {"kind": "stop"}], PROCESS_IR_CAPABILITY_UNSUPPORTED),
+        ([call(), {"kind": "cache_put", "cache_ref": "$ref:c"}, call(), {"kind": "stop"}],
+         PROCESS_IR_CAPABILITY_UNSUPPORTED),
+        # A control terminal is #141's. The TERMINAL rule is checked before the
+        # body-composition rule, so this reports the terminal requirement — the
+        # actionable half, since stop/return_documents is what the caller must
+        # write to make the sequence legal today.
+        ([call(), decision()], PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
+    ],
+)
+def test_connector_call_sequence_rules(steps, expect_code):
+    err = parse_error(doc(*steps))
+    assert err.diagnostics[0].code == expect_code, codes_of(err)
+
+
+def test_connector_call_is_root_only_and_not_authorable_in_a_branch_leg():
+    """Branch/Decision bodies are #141's. A connector_call inside one is not a
+    cardinality error — the union does not contain it at all."""
+    bad = branch(legs=[
+        {"steps": [call()], "terminal": target()},
+        {"steps": [], "terminal": target()},
+    ])
+    err = parse_error(doc(source(), bad))
+    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_UNKNOWN_NODE
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["connection_ref", "connector_type", "action_type", "config", "profile_ref"],
+)
+def test_connector_call_rejects_derived_and_free_form_fields(field):
+    """A ConnectorCall authors ONE reference and an optional assertion. Anything
+    that would duplicate compiler-derived authority (a connection, a family, an
+    action type, a config bag) is an unknown field."""
+    err = parse_error(doc(call(**{field: "x"}), {"kind": "stop"}))
+    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_UNKNOWN_FIELD
+    assert err.diagnostics[0].path == "/body/steps/0/{0}".format(field)
+
+
+@pytest.mark.parametrize("secret_field", ["password", "auth_token", "client_secret"])
+def test_connector_call_secret_shaped_fields_are_capability_gated_not_unknown(secret_field):
+    """A secret-shaped key must hit the pre-parse secret scan (which names the
+    path but never the value), not the generic unknown-field path."""
+    err = parse_error(doc(call(**{secret_field: "s3cret"}), {"kind": "stop"}))
+    assert err.diagnostics[0].code == PROCESS_IR_CAPABILITY_UNSUPPORTED
+    assert "s3cret" not in str(err)
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\t"])
+def test_connector_call_blank_action_is_rejected(blank):
+    err = parse_error(doc(call(action=blank), {"kind": "stop"}))
+    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY
+    assert err.diagnostics[0].path == "/body/steps/0/action"
+
+
+def test_connector_call_operation_ref_obeys_the_reference_grammar():
+    err = parse_error(doc(call("$ref: spaced"), {"kind": "stop"}))
+    assert err.diagnostics[0].code == PROCESS_IR_REFERENCE_INVALID_FORMAT
+
+
+def test_legacy_sequences_are_untouched_by_the_connector_call_branch():
+    """Guard the guard: the #140 branch is only entered when a connector_call is
+    present, so every legacy shape must still parse exactly as before."""
+    parse_process_ir_v1(doc(source(), {"kind": "map_ref", "map_ref": "$ref:m"}, target(), {"kind": "stop"}))
+    parse_process_ir_v1(doc(source(), {"kind": "return_documents"}))
+    parse_process_ir_v1(doc({"kind": "process_call", "process_ref": "$ref:p"}, {"kind": "stop"}))
+
+
+# ---------------------------------------------------------------------------
 # Reference + property-name syntax
 # ---------------------------------------------------------------------------
 
@@ -705,10 +832,10 @@ def test_schema_closed_discriminated_union():
     assert "discriminator" in steps_items and "oneOf" in steps_items
     mapping = steps_items["discriminator"]["mapping"]
     assert set(mapping) == {
-        "source", "target", "flow_control", "message", "map_ref", "data_process",
-        "cache_put", "document_cache_retrieve", "cache_get", "cache_remove",
-        "set_ddp", "set_dpp", "process_call", "branch", "decision", "exception",
-        "stop", "return_documents",
+        "source", "target", "connector_call", "flow_control", "message", "map_ref",
+        "data_process", "cache_put", "document_cache_retrieve", "cache_get",
+        "cache_remove", "set_ddp", "set_dpp", "process_call", "branch", "decision",
+        "exception", "stop", "return_documents",
     }
 
 
@@ -828,5 +955,20 @@ def test_capability_manifest_immutable_and_complete():
     assert PROCESS_IR_V1_CAPABILITIES["caller_authored_cfg_edges"] == "unsupported"
     assert PROCESS_IR_V1_CAPABILITIES["secret_values"] == "unsupported"
     assert PROCESS_IR_V1_CAPABILITIES["keyed_cache"] == "gated"
+    # #140 shipped ConnectorCall, so this is now the ONE supported row. The
+    # neighbouring gates must stay shut: ``mixed_connector_execution`` names
+    # process_call x connector mixing (the only construct the code references it
+    # for), and Branch/Decision bodies remain #141's.
+    assert PROCESS_IR_V1_CAPABILITIES["generalized_connector_call"] == "supported"
     assert PROCESS_IR_V1_CAPABILITIES["mixed_connector_execution"] == "gated"
-    assert set(PROCESS_IR_V1_CAPABILITIES.values()) <= {"gated", "unsupported"}
+    assert PROCESS_IR_V1_CAPABILITIES["rich_branch_decision_bodies"] == "gated"
+    assert set(PROCESS_IR_V1_CAPABILITIES.values()) <= {
+        "supported",
+        "gated",
+        "unsupported",
+    }
+    assert [
+        name
+        for name, state in PROCESS_IR_V1_CAPABILITIES.items()
+        if state == "supported"
+    ] == ["generalized_connector_call"]

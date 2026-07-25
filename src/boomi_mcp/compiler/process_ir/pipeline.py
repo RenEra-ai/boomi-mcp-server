@@ -19,6 +19,7 @@ from ...models.process_ir import (
     ProcessIRValidationError,
     parse_process_ir_v1,
 )
+from .connector_resolution import validate_connector_calls
 from .contracts import EmissionPlanV1, SemanticCfgV1, SymbolTableV1
 from .diagnostics import (
     CompilerDiagnostic,
@@ -61,6 +62,14 @@ def compile_process_ir_v1(
     # compiler.
     cfg = _guarded("semantic_lowering", lower_process_ir_to_cfg, ir)
     _guarded("semantic_lowering", check_cfg_invariants, cfg)
+    # #140: resolve and validate connector calls BEFORE any emission plan exists,
+    # so a bad reference, an unsupported family/action, an impossible document
+    # cardinality, or a map whose profiles do not line up is rejected long before
+    # an emitter — and therefore before any component mutation. A CFG with no
+    # connector_call node returns immediately, so no pre-#140 dialect is touched.
+    # The phase here only labels an UNEXPECTED crash; the deliberate diagnostics
+    # inside carry their own (reference_resolution / semantic_lowering).
+    _guarded("reference_resolution", validate_connector_calls, cfg, symbols)
     plan = _guarded("emission_planning", lower_cfg_to_emission_plan, cfg, symbols)
     _guarded("emission_planning", check_emission_plan_invariants, plan, cfg, symbols)
     return cfg, plan

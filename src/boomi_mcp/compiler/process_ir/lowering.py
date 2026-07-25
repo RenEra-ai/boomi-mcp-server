@@ -21,9 +21,11 @@ from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
 from ...errors import (
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
+    PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID,
     PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
 )
 from ...models.process_ir import ProcessIRV1
+from .connector_capabilities import canonicalize_connector_metadata
 from .contracts import (
     DECISION_FALSE_DRAGPOINT_Y,
     DRAGPOINT_Y,
@@ -40,6 +42,7 @@ from .contracts import (
     CfgNodeV1,
     ComponentSymbolV1,
     ConnectorActionInputV1,
+    ConnectorCallSemanticV1,
     ConnectorSemanticV1,
     DataProcessInputV1,
     DataProcessSemanticV1,
@@ -143,17 +146,15 @@ def _canonical_connector_metadata(role: str, connector_type: str, action_type: s
     drift) without charging every ``import boomi_mcp.compiler`` for the 7.5k-line
     builder module. ``test_connector_canonicalization_matches_the_legacy_builder``
     pins the agreement.
-    """
-    from ...categories.components.builders.process_flow_builder import (
-        _canonical_connector_type,
-        _resolve_rest_connector_type,
-    )
 
-    canonical = _canonical_connector_type(connector_type)
-    action = str(action_type or "").strip()
-    if _resolve_rest_connector_type(connector_type) is not None:
-        return canonical, action.upper()
-    return canonical.lower(), action
+    #140 moved the BODY to ``connector_capabilities.canonicalize_connector_metadata``
+    so the capability registry and the emitter input are keyed off exactly one
+    canonicalization — a second copy here could drift from the one that decides
+    whether a call is supported at all. This stays as the role-taking wrapper the
+    existing call sites and tests import; ``role`` is still accepted and still
+    unused, because the rule has been role-independent since #139C.
+    """
+    return canonicalize_connector_metadata(connector_type, action_type)
 
 
 def _pointer_escape(token: str) -> str:
@@ -244,7 +245,7 @@ class _CfgBuilder:
         return self.nodes[int(node_id[1:]) - 1].exit_role
 
 
-def _semantic_for(node: Any, *, routed: bool = False) -> Any:
+def _semantic_for(node: Any, *, routed: bool = False, entry: bool = False) -> Any:
     """Snapshot one IR node's OWN facts. Children are flattened into the CFG."""
     kind = node.kind
     label = getattr(node, "label", None)
@@ -254,6 +255,18 @@ def _semantic_for(node: Any, *, routed: bool = False) -> Any:
             role="source" if kind == "source" else "target",
             connection_ref=node.connection_ref,
             operation_ref=node.operation_ref,
+            label=label,
+        )
+    if kind == "connector_call":
+        # ``role`` is DERIVED from position, never authored (ADR-001 §6): the
+        # entry call becomes the ``connectoraction_source`` shape and every later
+        # call a ``connectoraction_target``. The two emitter keys already share
+        # one renderer and, since #139C, one role-independent canonicalization
+        # rule, so this selects a key without changing a byte of output.
+        return ConnectorCallSemanticV1(
+            role="entry" if entry else "downstream",
+            operation_ref=node.operation_ref,
+            action_intent=node.action,
             label=label,
         )
     if kind == "message":
@@ -559,7 +572,9 @@ def lower_process_ir_to_cfg(ir: ProcessIRV1) -> SemanticCfgV1:
         # A root ``target`` is followed by an AUTHORED stop, so it is not itself
         # an exit — the stop is. Only leg/arm targets are routed.
         exit_role = _EXIT_KINDS.get(kind)
-        node_id = builder.add_node(_semantic_for(step), path, exit_role)
+        node_id = builder.add_node(
+            _semantic_for(step, entry=index == 0), path, exit_role
+        )
         if previous is not None:
             builder.add_edge(
                 previous, node_id, _sequential_edge_kind(builder, node_id), 1, path
@@ -735,6 +750,56 @@ def _emitter_input_for(node: CfgNodeV1, symbols: Mapping[str, Any]) -> Any:
             emitter_kind=(
                 "connectoraction_source"
                 if semantic.role == "source"
+                else "connectoraction_target"
+            ),
+            connector_type=connector_type,
+            action_type=action_type,
+            connection_id=connection.component_id,
+            operation_id=operation.component_id,
+            userlabel=label,
+        )
+
+    if kind == "connector_call":
+        # Everything here is re-derived from (CFG node + symbol index) on every
+        # call, which is what lets ``check_emission_plan_invariants`` recompute
+        # and compare exactly. Resolution failures are impossible by the time we
+        # get here — the pipeline runs ``connector_resolution`` first and it
+        # rejects each of these with its own specific code — so anything still
+        # wrong at this point is a COMPILER defect and is reported as one.
+        operation = symbols.get(semantic.operation_ref)
+        if operation is None or not operation.connection_ref:
+            raise raise_compile_error(
+                PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID,
+                "emission_planning",
+                path,
+                internal_node_id=node_id,
+            )
+        connection = symbols.get(operation.connection_ref)
+        if (
+            connection is None
+            or not operation.connector_type
+            or not operation.action_type
+        ):
+            raise raise_compile_error(
+                PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID,
+                "emission_planning",
+                path,
+                internal_node_id=node_id,
+            )
+        connector_type, action_type = canonicalize_connector_metadata(
+            operation.connector_type, operation.action_type
+        )
+        if not connector_type or not action_type:
+            raise raise_compile_error(
+                PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID,
+                "emission_planning",
+                path,
+                internal_node_id=node_id,
+            )
+        return ConnectorActionInputV1(
+            emitter_kind=(
+                "connectoraction_source"
+                if semantic.role == "entry"
                 else "connectoraction_target"
             ),
             connector_type=connector_type,

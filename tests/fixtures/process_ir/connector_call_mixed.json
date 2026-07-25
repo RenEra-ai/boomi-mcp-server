@@ -1,0 +1,36 @@
+{
+  "version": "1",
+  "body": {
+    "kind": "sequence",
+    "steps": [
+      {
+        "kind": "connector_call",
+        "operation_ref": "op_rest_get",
+        "action": "GET",
+        "label": "Read orders"
+      },
+      {
+        "kind": "map_ref",
+        "map_ref": "map_get_to_soap"
+      },
+      {
+        "kind": "connector_call",
+        "operation_ref": "op_soap_execute",
+        "action": "EXECUTE"
+      },
+      {
+        "kind": "connector_call",
+        "operation_ref": "op_rest_patch",
+        "action": "PATCH"
+      },
+      {
+        "kind": "connector_call",
+        "operation_ref": "op_db_send",
+        "action": "Send"
+      },
+      {
+        "kind": "stop"
+      }
+    ]
+  }
+}

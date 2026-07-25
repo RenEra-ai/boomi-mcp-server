@@ -83,6 +83,22 @@ FORBIDDEN_NAMES = (
     "ProcessEmissionArtifactV1",
     "ProcessVerifierSummaryV1",
     "SymbolRequirement",
+    # #140 M12.5 ConnectorCall resolution — dark compiler internals. The AUTHORED
+    # node kind ``connector_call`` is deliberately NOT here: it is part of the
+    # internal ProcessIR schema (and pinned present below), unlike the binding
+    # and capability machinery, which no caller may ever see.
+    "ConnectorCallBindingV1",
+    "ConnectorCallSemanticV1",
+    "ConnectorCapabilityV1",
+    "CONNECTOR_CALL_CAPABILITIES_V1",
+    "resolve_connector_call_bindings",
+    "validate_connector_call_semantics",
+    "canonicalize_connector_metadata",
+    "lookup_capability",
+    "accepts_input",
+    "produces_output",
+    "connectoraction_source",
+    "connectoraction_target",
 )
 
 
@@ -211,6 +227,36 @@ def test_compiler_package_is_importable_directly():
     from boomi_mcp.compiler.process_ir import compile_process_ir_v1
 
     assert callable(compile_process_ir_v1)
+
+
+def test_connector_call_is_in_the_internal_ir_schema_but_no_public_surface():
+    """#140's node kind is authored IR, so it MUST appear in the internal
+    ProcessIR schema — and must reach no MCP tool or IntegrationSpec schema,
+    because direct ProcessIR authoring is #146's to ship, not this issue's."""
+    assert "connector_call" in canonical_process_ir_schema_json()
+    offenders = [
+        tool.name for tool in ALL_TOOLS if "connector_call" in _tool_surface(tool)
+    ]
+    assert offenders == [], offenders
+    spec = getattr(models, "IntegrationSpecV1", None)
+    if spec is not None:
+        assert "connector_call" not in json.dumps(spec.model_json_schema(), sort_keys=True)
+
+
+def test_connector_call_internals_stay_out_of_the_package_all():
+    """The capability registry, the binding table and the resolver are imported
+    directly by the pipeline and must never become a public surface."""
+    from boomi_mcp.compiler.process_ir import __all__ as compiler_all
+
+    for name in (
+        "ConnectorCallBindingV1",
+        "resolve_connector_call_bindings",
+        "validate_connector_call_semantics",
+        "validate_connector_calls",
+        "CONNECTOR_CALL_CAPABILITIES_V1",
+        "lookup_capability",
+    ):
+        assert name not in compiler_all
 
 
 def test_process_emitter_registry_stays_out_of_the_package_all():

@@ -139,6 +139,28 @@ class ComponentSymbolV1(_CompilerModel):
     Carries ONLY what the emitter needs. Connector metadata is DERIVED here and
     is never authored in IR (ADR-001 §6) — it rides on the *operation* symbol,
     mirroring the #136 codec's ``_resolve_binding``.
+
+    #140 adds three optional resolution facts, all defaulted so every symbol every
+    pre-#140 caller builds is unchanged:
+
+    * ``connection_ref`` — the operation's connection, on the OPERATION symbol.
+      This is the only place it can live: no connector-action component declares
+      its connection (``.codex/plans/issue-140-live-captures.md`` FINDING 1), so
+      the operation->connection edge is a fact of the component plan that the
+      compiler *receives* as resolution context (ADR-001 §6) rather than one a
+      caller authors.
+    * ``input_profile_ref``/``output_profile_ref`` — the request/response profiles
+      an operation declares, and the source/target profiles a ``transform.map``
+      declares. Profile data is schema metadata, not document content, and these
+      are opaque refs like every other reference here.
+
+    There is deliberately NO companion ``*_profile_type``: the *profile* symbol's
+    own ``component_type`` already IS the profile kind, and a second caller-supplied
+    copy would be exactly the duplicate authority ADR-001 §6 exists to remove — two
+    sources for one fact, with no principled winner when they disagree.
+
+    They stay emitter-SAFE: nothing added is configuration, credentials, headers,
+    or document content.
     """
 
     ref: str = Field(..., min_length=1)
@@ -146,12 +168,33 @@ class ComponentSymbolV1(_CompilerModel):
     component_type: str = Field(..., min_length=1)
     connector_type: Optional[str] = None
     action_type: Optional[str] = None
+    connection_ref: Optional[str] = None
+    input_profile_ref: Optional[str] = None
+    output_profile_ref: Optional[str] = None
 
     @field_validator("ref", "component_id", "component_type")
     @classmethod
     def _no_surrounding_whitespace(cls, value: str) -> str:
         if value != value.strip():
             raise ValueError("symbol fields must not carry surrounding whitespace")
+        return value
+
+    @field_validator(
+        "connection_ref", "input_profile_ref", "output_profile_ref"
+    )
+    @classmethod
+    def _optional_ref_shape(cls, value: Optional[str]) -> Optional[str]:
+        # Same discipline as the required fields above: a ref that only differs
+        # by surrounding whitespace would resolve against nothing and read as a
+        # missing symbol rather than a malformed one. An empty string is not a
+        # reference — it is the absence of one, and ``None`` already says that.
+        if value is None:
+            return None
+        if not value or value != value.strip():
+            raise ValueError(
+                "optional symbol references must be non-empty and carry no "
+                "surrounding whitespace"
+            )
         return value
 
 
@@ -315,6 +358,28 @@ class ConnectorSemanticV1(_CompilerModel):
     label: Optional[str] = None
 
 
+class ConnectorCallSemanticV1(_CompilerModel):
+    """A first-class connector call (#140).
+
+    ``role`` is DERIVED by lowering from the call's authored position — the entry
+    call becomes the ``connectoraction_source`` shape and every later call a
+    ``connectoraction_target``, which is the same source/target split
+    ``ConnectorSemanticV1`` already carries and the reason no new emitter key is
+    needed. A caller cannot author it (ADR-001 §6).
+
+    ``connection_ref`` is deliberately ABSENT here: it is not an authored fact and
+    not a CFG fact either, it is resolved per-node from the operation symbol at
+    emitter-input time. Snapshotting it onto the CFG would create a second copy
+    of a symbol-table fact that could drift from the one the emitter uses.
+    """
+
+    semantic_kind: Literal["connector_call"] = "connector_call"
+    role: Literal["entry", "downstream"]
+    operation_ref: str
+    action_intent: Optional[str] = None
+    label: Optional[str] = None
+
+
 class MessageSemanticV1(_CompilerModel):
     semantic_kind: Literal["message"] = "message"
     text: str
@@ -419,6 +484,7 @@ class ReturnDocumentsSemanticV1(_CompilerModel):
 CfgSemanticV1 = Annotated[
     Union[
         ConnectorSemanticV1,
+        ConnectorCallSemanticV1,
         MessageSemanticV1,
         MapSemanticV1,
         FlowControlSemanticV1,

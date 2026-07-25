@@ -113,6 +113,29 @@ LEGACY_ADAPTER_AUTHORITY_CONFLICT = "LEGACY_ADAPTER_AUTHORITY_CONFLICT"
 LEGACY_ADAPTER_SEMANTIC_LOSS = "LEGACY_ADAPTER_SEMANTIC_LOSS"
 LEGACY_ADAPTER_OUTPUT_PARITY_FAILED = "LEGACY_ADAPTER_OUTPUT_PARITY_FAILED"
 
+# --- ProcessIR first-class ConnectorCall (M12.5 / issue #140; ADR-001 §7) ------
+# #140 ADDS to four families that already exist (REFERENCE_*, CAPABILITY_*,
+# SEMANTIC_*, COMPILE_*) — it introduces no eleventh family and re-registers no
+# existing code. ``ERROR_TAXONOMY`` is a dict comprehension keyed on ``spec.code``,
+# so a duplicate entry would silently overwrite the earlier owner's; every code
+# below is new.
+#
+# The split follows ADR-001 §7 exactly: REFERENCE_*/CAPABILITY_* are resolution
+# failures against the symbol table, SEMANTIC_* blames the authored flow, and the
+# single COMPILE_* code blames the compiler and can only be reached through a
+# defect (a caller cannot author a binding at all).
+PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND = "PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND"
+PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND = "PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND"
+PROCESS_IR_REFERENCE_CONNECTION_MISMATCH = "PROCESS_IR_REFERENCE_CONNECTION_MISMATCH"
+PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED = (
+    "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED"
+)
+PROCESS_IR_SEMANTIC_PROFILE_MISMATCH = "PROCESS_IR_SEMANTIC_PROFILE_MISMATCH"
+PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH = "PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH"
+PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID = (
+    "PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID"
+)
+
 
 @dataclass(frozen=True)
 class ErrorCodeSpec:
@@ -512,6 +535,78 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "config failed after successful legacy validation."
             ),
             owner="#139",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A connector_call's operation reference resolves to no symbol, or to a "
+                "symbol that is not a connector-action component."
+            ),
+            owner="#140",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "The resolved operation declares no connection, or its connection "
+                "reference resolves to no symbol."
+            ),
+            owner="#140",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_REFERENCE_CONNECTION_MISMATCH,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "The resolved connection is not a connector-settings component, or its "
+                "connector family disagrees with the operation's."
+            ),
+            owner="#140",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "The connector family/action pair is not in the verified connector-call "
+                "capability registry, or an authored action asserts a different action "
+                "than the operation's."
+            ),
+            owner="#140",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A map_ref's source/target profile does not match the profile of the "
+                "connector call on that side of it."
+            ),
+            owner="#140",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A connector call's document cardinality is impossible at its position: "
+                "a document consumer with no producer before it, or a step after a call "
+                "that produces no documents."
+            ),
+            owner="#140",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A connector-call binding is missing, stale, or self-contradictory at "
+                "emission time — a compiler defect, not authored input."
+            ),
+            owner="#140",
         ),
     )
 }

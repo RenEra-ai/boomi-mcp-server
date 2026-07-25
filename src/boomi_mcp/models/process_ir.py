@@ -40,6 +40,7 @@ from pydantic import (
     StrictBool,
     StrictInt,
     ValidationError,
+    field_validator,
     model_validator,
 )
 from pydantic_core import PydanticCustomError
@@ -417,6 +418,42 @@ class TargetEndpointV1(_ProcessIRBase):
     label: Optional[str] = None
 
 
+class ConnectorCallNodeV1(_ProcessIRBase):
+    """A first-class connector call (issue #140, M12.5).
+
+    Unlike ``SourceEndpointV1``/``TargetEndpointV1`` — which are position-bound
+    placeholders carrying BOTH ids — a ConnectorCall authors only the *operation*
+    symbol. The connection is derived by the compiler from its symbol-table
+    resolution context, never authored (ADR-001 §6). That is not a stylistic
+    choice: no connector-action component declares its connection (live capture,
+    ``.codex/plans/issue-140-live-captures.md`` FINDING 1; the repo's own
+    operation builders document "Boomi binds the connection at the process
+    connector step, not in the operation XML"), so the operation->connection edge
+    is a fact of the component plan, and letting a caller author it would
+    recreate exactly the duplicate-authority split ADR-001 exists to remove.
+
+    ``action`` is an OPTIONAL ASSERTION of caller intent. It never supplies
+    emitter metadata: the family and action that reach the wire always come from
+    the resolved operation symbol. A supplied value that disagrees with the
+    authoritative one is an error, never an override.
+    """
+
+    kind: Literal["connector_call"]
+    operation_ref: ComponentRefV1
+    action: Optional[str] = None
+    label: Optional[str] = None
+
+    @field_validator("action")
+    @classmethod
+    def _action_non_blank(cls, value: Optional[str]) -> Optional[str]:
+        # Absent is fine (the symbol is authoritative); present-but-blank is not
+        # an assertion at all, and silently ignoring it would let a typo read as
+        # agreement.
+        if value is not None and not value.strip():
+            raise _cardinality_error("action, when supplied, must be a non-blank string")
+        return value
+
+
 class FlowControlNodeV1(_ProcessIRBase):
     kind: Literal["flow_control"]
     for_each_count: StrictInt = Field(..., gt=0)
@@ -705,6 +742,7 @@ ProcessNodeV1 = Annotated[
     Union[
         SourceEndpointV1,
         TargetEndpointV1,
+        ConnectorCallNodeV1,
         FlowControlNodeV1,
         MessageNodeV1,
         MapRefNodeV1,
@@ -784,6 +822,44 @@ class SequenceNodeV1(_ProcessIRBase):
                 )
             return self
 
+        # Connector-call flow (#140). Checked BEFORE the source/target branch so
+        # the two legacy branches above and the legacy branch below keep their
+        # exact behaviour on every payload that contains no connector_call.
+        if "connector_call" in kinds:
+            if "source" in kinds or "target" in kinds:
+                raise _capability_error(
+                    "a connector_call sequence may not also author the legacy source/target "
+                    "endpoint placeholders — author every call as a connector_call"
+                )
+            if kinds[0] != "connector_call":
+                raise _cardinality_error(
+                    "a connector_call sequence must start with a connector_call"
+                )
+            if kinds[-1] not in ("stop", "return_documents"):
+                raise _cardinality_error(
+                    "a connector_call sequence must end in a stop or return_documents terminal"
+                )
+            body = kinds[:-1]
+            for kind in body:
+                if kind not in ("connector_call", "map_ref"):
+                    raise _capability_error(
+                        "a connector_call sequence may contain only connector_call and "
+                        "map_ref steps before its terminal"
+                    )
+            # Every map must be BRACKETED by calls. A trailing or doubled map has
+            # no following call, so the map's destination profile could not be
+            # checked against anything — and an unbounded-on-one-side map is
+            # exactly the profile-continuity hole this node kind exists to close.
+            for i, kind in enumerate(body):
+                if kind != "map_ref":
+                    continue
+                if i + 1 >= len(body) or body[i + 1] != "connector_call":
+                    raise _cardinality_error(
+                        "a map_ref in a connector_call sequence must be immediately "
+                        "followed by a connector_call"
+                    )
+            return self
+
         # Connector flow: source first.
         if kinds[0] != "source":
             raise _cardinality_error(
@@ -844,8 +920,14 @@ class ProcessIRV1(_ProcessIRBase):
 
 PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
     {
-        "generalized_connector_call": "gated",  # #140
-        "mixed_connector_execution": "gated",  # #140
+        # #140 M12.5: ConnectorCall ships, so multiple connector calls in one
+        # linear sequence are supported. ``mixed_connector_execution`` stays
+        # gated on purpose — in THIS codebase it names one specific construct,
+        # the only place it is referenced from code: mixing ``process_call``
+        # steps with connector execution in one sequence. #140 delivers neither
+        # that nor connector calls inside Branch/Decision bodies (#141).
+        "generalized_connector_call": "supported",  # #140
+        "mixed_connector_execution": "gated",  # process_call x connector mixing
         "continuation_after_branch_or_decision": "gated",  # #141
         "rich_branch_decision_bodies": "gated",  # #141
         "scoped_try_catch": "gated",  # #142
@@ -876,6 +958,7 @@ _DISCRIMINATOR_TAGS = frozenset(
         "sequence",
         "source",
         "target",
+        "connector_call",
         "flow_control",
         "message",
         "map_ref",

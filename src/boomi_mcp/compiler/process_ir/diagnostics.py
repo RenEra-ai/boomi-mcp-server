@@ -22,7 +22,9 @@ from typing import Iterable, List, Literal, Optional, Sequence, Tuple
 from pydantic import BaseModel, ConfigDict, Field
 
 from ...errors import (
+    PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
+    PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID,
     PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
     PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID,
     PROCESS_IR_COMPILE_EMITTER_MISSING,
@@ -31,8 +33,13 @@ from ...errors import (
     PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED,
     PROCESS_IR_COMPILE_VERIFIER_FAILED,
     PROCESS_IR_COMPILE_XML_INVALID,
+    PROCESS_IR_REFERENCE_CONNECTION_MISMATCH,
+    PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND,
+    PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND,
     PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+    PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
     PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
+    PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
     PROCESS_IR_SEMANTIC_UNREACHABLE,
 )
 
@@ -115,6 +122,36 @@ _REMEDIATION = {
         "The process graph verifier rejected the emitted XML; this is a compiler "
         "defect — please report it with the authored path."
     ),
+    # --- issue #140, first-class ConnectorCall --------------------------------
+    PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND: (
+        "Provide a connector-action component symbol for this call's operation_ref."
+    ),
+    PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND: (
+        "Give the operation symbol the connection it is bound to in the component "
+        "plan, and provide a symbol for that connection. A connector-action "
+        "component does not declare its own connection, so it cannot be inferred."
+    ),
+    PROCESS_IR_REFERENCE_CONNECTION_MISMATCH: (
+        "Bind the operation to a connector-settings component of the SAME connector "
+        "family as the operation."
+    ),
+    PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED: (
+        "Use a connector family/action pair from the verified connector-call "
+        "capability matrix, and either omit the authored action or set it to the "
+        "operation's own action; see docs/architecture/PROCESS_IR_COMPILER_V1.md."
+    ),
+    PROCESS_IR_SEMANTIC_PROFILE_MISMATCH: (
+        "Make the map's source profile the preceding call's output profile and its "
+        "target profile the following call's input profile."
+    ),
+    PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH: (
+        "Order the calls so every document consumer follows a call that produces "
+        "documents, and place a call that produces none last, before the terminal."
+    ),
+    PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID: (
+        "This is a compiler defect: a connector-call binding was missing or "
+        "inconsistent at emission time — please report it with the authored path."
+    ),
 }
 
 _MESSAGES = {
@@ -132,6 +169,29 @@ _MESSAGES = {
     PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED: "a required component symbol is unresolved",
     PROCESS_IR_COMPILE_XML_INVALID: "emitted process XML is invalid",
     PROCESS_IR_COMPILE_VERIFIER_FAILED: "the process graph verifier reported errors",
+    PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND: (
+        "the connector call's operation reference does not resolve to a "
+        "connector-action symbol"
+    ),
+    PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND: (
+        "the operation's connection is unknown or does not resolve to a symbol"
+    ),
+    PROCESS_IR_REFERENCE_CONNECTION_MISMATCH: (
+        "the resolved connection is not a connector-settings symbol of the "
+        "operation's connector family"
+    ),
+    PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED: (
+        "the connector family/action pair is not a verified connector-call capability"
+    ),
+    PROCESS_IR_SEMANTIC_PROFILE_MISMATCH: (
+        "a map's profile does not match the connector call adjacent to it"
+    ),
+    PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH: (
+        "a connector call's document cardinality is impossible at its position"
+    ),
+    PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID: (
+        "a connector-call binding is missing or inconsistent"
+    ),
 }
 
 

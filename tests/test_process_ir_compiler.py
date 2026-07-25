@@ -1187,3 +1187,161 @@ def test_listener_aliases_are_all_rejected(connector_type):
     with pytest.raises(ProcessIRCompileError) as excinfo:
         lower_cfg_to_emission_plan(cfg, symbols)
     assert excinfo.value.diagnostics[0].code == PROCESS_IR_CAPABILITY_UNSUPPORTED
+
+
+# ---------------------------------------------------------------------------
+# ConnectorCall lowering (issue #140, M12.5)
+# ---------------------------------------------------------------------------
+
+
+def _connector_call_symbols():
+    """Two calls, both REST, sharing one connection."""
+    return SymbolTableV1(
+        symbols=(
+            ComponentSymbolV1(
+                ref="conn",
+                component_id="id_conn",
+                component_type="connector-settings",
+                connector_type="rest",
+            ),
+            ComponentSymbolV1(
+                ref="prof_out", component_id="id_prof_out", component_type="profile.json"
+            ),
+            ComponentSymbolV1(
+                ref="op_get",
+                component_id="id_op_get",
+                component_type="connector-action",
+                connector_type="rest",
+                action_type="GET",
+                connection_ref="conn",
+                output_profile_ref="prof_out",
+            ),
+            ComponentSymbolV1(
+                ref="op_patch",
+                component_id="id_op_patch",
+                component_type="connector-action",
+                connector_type="rest",
+                action_type="PATCH",
+                connection_ref="conn",
+                input_profile_ref="prof_out",
+                output_profile_ref="prof_out",
+            ),
+        )
+    )
+
+
+_CONNECTOR_CALL_DOC = {
+    "version": "1",
+    "body": {
+        "kind": "sequence",
+        "steps": [
+            {"kind": "connector_call", "operation_ref": "op_get", "label": "read"},
+            {"kind": "connector_call", "operation_ref": "op_patch"},
+            {"kind": "stop"},
+        ],
+    },
+}
+
+
+def test_connector_call_lowers_to_a_positional_entry_and_downstream_role():
+    """``role`` is DERIVED from position — a caller authors no role at all
+    (ADR-001 §6), and it is what selects between the two existing emitter keys."""
+    cfg = lower_process_ir_to_cfg(parse_process_ir_v1(_CONNECTOR_CALL_DOC))
+    roles = [
+        (node.semantic.semantic_kind, getattr(node.semantic, "role", None))
+        for node in cfg.nodes
+    ]
+    assert roles == [
+        ("connector_call", "entry"),
+        ("connector_call", "downstream"),
+        ("stop", None),
+    ]
+
+
+def test_connector_call_cfg_carries_no_connection_or_derived_metadata():
+    """The CFG snapshots the node's OWN facts. Copying the symbol table's
+    connection/family onto it would create a second copy that could drift from
+    the one the emitter actually resolves."""
+    cfg = lower_process_ir_to_cfg(parse_process_ir_v1(_CONNECTOR_CALL_DOC))
+    semantic = cfg.nodes[0].semantic
+    for absent in ("connection_ref", "connector_type", "action_type", "connection_id"):
+        assert not hasattr(semantic, absent), absent
+    assert semantic.operation_ref == "op_get"
+    assert semantic.action_intent is None
+
+
+def test_connector_call_emitter_inputs_reuse_the_two_existing_connector_keys():
+    cfg = lower_process_ir_to_cfg(parse_process_ir_v1(_CONNECTOR_CALL_DOC))
+    plan = lower_cfg_to_emission_plan(cfg, _connector_call_symbols())
+    assert [node.emitter_input.emitter_kind for node in plan.nodes] == [
+        "start_noaction",
+        "connectoraction_source",
+        "connectoraction_target",
+        "stop",
+    ]
+
+
+def test_connector_call_label_reaches_the_emitter_input_as_userlabel():
+    cfg = lower_process_ir_to_cfg(parse_process_ir_v1(_CONNECTOR_CALL_DOC))
+    plan = lower_cfg_to_emission_plan(cfg, _connector_call_symbols())
+    assert plan.nodes[1].emitter_input.userlabel == "read"
+    assert plan.nodes[2].emitter_input.userlabel == ""
+
+
+def test_connector_call_lowering_is_deterministic_under_symbol_order():
+    cfg = lower_process_ir_to_cfg(parse_process_ir_v1(_CONNECTOR_CALL_DOC))
+    table = _connector_call_symbols()
+    shuffled = SymbolTableV1(symbols=tuple(reversed(table.symbols)))
+    assert lower_cfg_to_emission_plan(cfg, table) == lower_cfg_to_emission_plan(
+        cfg, shuffled
+    )
+
+
+def test_a_connector_call_plan_passes_the_emission_plan_invariants():
+    """The invariant checker RECOMPUTES every emitter input and compares exactly,
+    so this also proves the recomputation path handles the new node kind."""
+    cfg = lower_process_ir_to_cfg(parse_process_ir_v1(_CONNECTOR_CALL_DOC))
+    table = _connector_call_symbols()
+    plan = lower_cfg_to_emission_plan(cfg, table)
+    check_cfg_invariants(cfg)
+    check_emission_plan_invariants(plan, cfg, table)
+
+
+def test_a_connector_call_may_never_be_a_terminal_node():
+    """A connector shape is not a terminal shape type, so a call carrying an exit
+    role would be planned with no outgoing wire and silently truncate the path."""
+    cfg = lower_process_ir_to_cfg(parse_process_ir_v1(_CONNECTOR_CALL_DOC))
+    assert [node.exit_role for node in cfg.nodes] == [None, None, "stop"]
+
+
+def test_connector_call_missing_binding_at_emission_is_a_compiler_defect():
+    """Reaching ``_emitter_input_for`` with an unresolvable binding is only
+    possible by BYPASSING the pipeline's resolution phase, so it is reported as a
+    compiler defect rather than as a caller reference error."""
+    from boomi_mcp.errors import PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID
+
+    cfg = lower_process_ir_to_cfg(parse_process_ir_v1(_CONNECTOR_CALL_DOC))
+    stripped = SymbolTableV1(
+        symbols=tuple(
+            symbol.model_copy(update={"connection_ref": None})
+            if symbol.ref.startswith("op_")
+            else symbol
+            for symbol in _connector_call_symbols().symbols
+        )
+    )
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        lower_cfg_to_emission_plan(cfg, stripped)
+    assert excinfo.value.diagnostics[0].code == (
+        PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID
+    )
+    assert excinfo.value.diagnostics[0].phase == "emission_planning"
+
+
+def test_legacy_source_target_lowering_is_unchanged_by_140():
+    """The legacy endpoint nodes keep their own semantic type and roles."""
+    cfg = lower_process_ir_to_cfg(parse_process_ir_v1(GOLDEN_DOCS["linear_flow"]))
+    connectors = [
+        node.semantic for node in cfg.nodes if node.semantic.semantic_kind == "connector"
+    ]
+    assert [item.role for item in connectors] == ["source", "target"]
+    assert all(hasattr(item, "connection_ref") for item in connectors)

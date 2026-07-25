@@ -353,7 +353,11 @@ how a caller ends up "fixing" correct input.
   `start_noaction` + `connectoraction` pair — so a listener source would be silently mis-shaped.
   Note the guard lives in reference resolution, **not** IR lowering: `ProcessIRV1` has no listener
   node kind at all, so such an entry can only arrive through the symbol table's `connector_type`.
-  #140 owns the alternate entry policy; no WSS cutover may happen before it lands.
+  **#140 settled the alternate entry policy: listener entry stays UNSUPPORTED.** It is now gated in
+  two independent places — the pre-existing `LISTENER_CONNECTOR_TYPES` guard for the legacy
+  `source`/`target` dialect, and, for a `connector_call`, by simple absence from the closed capability
+  allowlist (§10a). No `start_listen` emitter key exists, so there is nothing to cut over to; the WSS
+  arm of `sync_pipeline` stays on the legacy renderer until an issue ships that emitter.
 - **`return_documents` with a control terminal is unrepresentable** — rejected by both
   `_validate_flow_sequence_config:4733` and the #136 codec, so the compiler has no branch for it.
 - The six #137 codes are the **first** codes of the `PROCESS_IR_SEMANTIC_*` and
@@ -364,12 +368,144 @@ how a caller ends up "fixing" correct input.
 
 ## 9. Ownership boundaries
 
+**#140** owns the `connector_call` node, its resolution/capability registry, and the mixed linear flow
+(§10a) — it adds no emitter key and no MCP surface.
 **#137** (this document) owns the internal CFG, the emission plan, and the lowering contracts.
 **#138** owns the verified emitter registry that turns an `EmissionPlanV1` into XML — every XML
 tag, attribute order, escaping rule, and image name is its boundary, not this one's. **#139** owns
 the production legacy adapters. **#141/#142** own the gated control-flow and error-handling
 capabilities (continuation after Branch/Decision, scoped Try/Catch — the reserved `catch` edge
 kind). **#143** owns CFG-aware semantic validation built on these types.
+
+## 10a. #140 M12.5 — first-class ConnectorCall (shipped dark)
+
+`ConnectorCallNodeV1` (see [PROCESS_IR_V1 §3a](PROCESS_IR_V1.md)) lets one linear sequence contain
+many connector calls across several families. It adds **no** emitter key, **no** MCP surface, and no
+new pipeline: it lands entirely on the canonical `IR → CFG → plan → emit` chain #139 already made
+production.
+
+### Symbol authority — who owns which fact
+
+| Fact | Authority | Why |
+|---|---|---|
+| operation component id/type, connector family, action | the **operation** symbol | it is what the connector shape emits (`operationId`, `connectorType`, `actionType`) |
+| the operation→connection edge | the **operation symbol's `connection_ref`**, populated from the **component plan** | no connector-action component declares its connection (capture FINDING 1), so this cannot be read off the operation component and must not be authored in IR |
+| connection component id | the **connection** symbol | |
+| request/response profiles of an operation; source/target profiles of a map | the **profile refs on those symbols** | schema metadata, opaque refs |
+| entry-vs-downstream placement | **derived from authored position** | a caller cannot author a role (ADR-001 §6) |
+
+`ComponentSymbolV1` therefore gained exactly three optional fields — `connection_ref`,
+`input_profile_ref`, `output_profile_ref` — all defaulted, so every symbol every pre-#140 caller
+builds is byte-identical.
+
+There is deliberately **no** companion `*_profile_type`: the *profile* symbol's own `component_type`
+already is the profile kind (`connector_resolution._profile_identity` reads it from there), and a
+second caller-supplied copy would be exactly the duplicate authority ADR-001 §6 exists to remove —
+two sources for one fact, with no principled winner when they disagree.
+
+### Where it runs, and in what order
+
+`pipeline.compile_process_ir_v1` gains one stage between the CFG invariant check and plan lowering:
+
+```
+lower IR -> CFG  ->  check CFG invariants  ->  validate_connector_calls  ->  lower plan  ->  check plan invariants
+```
+
+So every rejection below happens **before an emission plan exists**, hence before any emitter and any
+component mutation. A CFG with no `connector_call` node returns immediately — no pre-#140 dialect is
+touched.
+
+Within `connector_resolution`, per call, in this order:
+
+1. `operation_ref` resolves to a `connector-action` symbol → else `PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND`.
+2. the symbol carries a family and action, and the **canonical** `(family, action)` pair is in the
+   capability registry → else `PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED`.
+3. an authored `action` agrees case-insensitively with the authoritative one → else the same code, at
+   `/…/action`.
+4. `operation.connection_ref` resolves → else `PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND`.
+5. that symbol is a `connector-settings` component whose declared family (if it declares one) agrees
+   canonically → else `PROCESS_IR_REFERENCE_CONNECTION_MISMATCH`.
+
+**The capability gate is settled before the connection on purpose.** It is the coarser question: if
+the family/action is not supported at all, complaining about the connection would send the reader to
+fix something that was never the problem. Within a *supported* family, the connection failure is what
+surfaces.
+
+### The capability matrix (`connector_capabilities.py`)
+
+A closed **allowlist**. Anything not a row — an OEM connector subtype, Database V2, WSS `LISTEN`, an
+unverified REST verb, a dynamic-path binding — is rejected by **absence**, so no gated-row table is
+load-bearing and a family nobody thought to list still fails closed.
+
+| family | action | accepts input | produces documents | side effect |
+|---|---|---|---|---|
+| `officialboomi-X3979C-rest-prod` | `GET` | none or documents | yes | read |
+| `officialboomi-X3979C-rest-prod` | `PATCH` | documents required | yes | write |
+| `wssoapclientsdk` | `EXECUTE` | none or documents | yes | read |
+| `database` | `Get` | none or documents | yes | read |
+| `database` | `Send` | documents required | **no** | write |
+
+`none or documents` is the checkout-verified fact that each producer is used both as a `sync_pipeline`
+source stage and mid-flow (a live process runs a database `Get` off a `catcherrors` leg). Lookup
+case-folds the **action** only; the family is an opaque account-scoped string, and the **emitted**
+action spelling always stays the authoritative one (`Get`/`Send` stay mixed-case for the database
+family — `SEND` would be a different wire value).
+
+### Flow semantics
+
+- **Cardinality** (`PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH`): a `documents required` call may not be
+  the entry call, must follow a producing call, and **nothing may follow a call that produces no
+  documents**.
+- **Profile continuity** (`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH`): around every `map_ref`, the map's
+  source profile must be the preceding call's output profile and its target profile the following
+  call's input profile. Compared by **resolved component id** plus normalized profile type, so two
+  refs naming one component (#139B's occurrence-scoped aliases) agree. An **absent** profile on either
+  side is a mismatch: a map's profiles are hard component requirements, and "not declared" cannot
+  satisfy one.
+
+### Two evidence-forced decisions
+
+**`Send` is terminal.** Official Boomi documentation states a `Send` action "sends data to a given
+destination but **does not return any data to the process for further processing**", and Database
+(Legacy) declares no response profile at all — only a Write profile, which the profile documentation
+describes as the *destination* profile in a map. The checkout agrees: every legacy emission path ends
+a connector target as `[target, stop]`, and the one live `database/Send` step captured goes straight
+to a `stop`. So the issue's literal step order (`… → DB Send → REST PATCH → terminal`) is **rejected**
+with a stable cardinality code rather than emitted as a shape that could never run, and the shipped
+representative flow places the Send last:
+
+```
+REST GET → MapRef → SOAP EXECUTE → REST PATCH → Database Send → Stop
+```
+
+**Profile continuity is enforced around a map, not between adjacent calls.** The official REST Client
+operation page says of a Response Profile: "Selecting a profile does not validate or guarantee that
+output will follow the provided format." The platform does not enforce call-to-call profile equality,
+so the compiler does not invent it — it *derives* an effective profile across the flow but
+equality-gates only the map boundaries, which are real component requirements. Consistency check: the
+issue's own flow goes `SOAP EXECUTE → DB Send` with no intervening map, so a strict call-to-call rule
+would have made the issue's own representative flow unbuildable for a second, unrelated reason.
+
+### Why there is no binding table in the emission plan
+
+`check_emission_plan_invariants` **recomputes** every emitter input through
+`lowering._emitter_input_for(node, symbol_index)` and compares exactly — that recomputation is what
+makes the plan check total. A connector call's emitter input is fully derivable from the CFG node plus
+the symbol index (the entry/downstream role rides on the CFG semantic, exactly as
+`ConnectorSemanticV1.role` already does), so no signature changed and nothing downstream carries a
+second copy of the same facts. Carrying one would give the checker something to compare against itself
+instead of against the symbol table — strictly weaker. `PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID`
+is consequently reachable only by bypassing the pipeline's resolution phase, which is why it is a
+`COMPILE_*` (compiler-defect) code and not a caller-facing one.
+
+### Goldens and their oracle
+
+The legacy builder cannot express a multi-connector flow, so there is **no legacy parity oracle** for
+`tests/fixtures/process_ir/emitter_parity/connector_call_mixed.process.xml`. Four independent checks
+stand in for one, each asserted in `tests/test_connector_call_mixed_flow.py`: the `connectoraction`
+attribute set is identical to the shipped, live-QA-verified `sync_pipeline_*` goldens (same unmodified
+renderer); `verify_process_graph` accepts the emitted XML; the emission-plan invariants hold; and the
+bytes are stable across repeated compiles and shuffled symbol order.
 
 ## 10. #138 M12.3 — the test-only emitter registry (shipped)
 

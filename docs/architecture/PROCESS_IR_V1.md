@@ -68,6 +68,7 @@ Root sequence (`SequenceNodeV1.steps`, discriminated on `kind`):
 |---|---|---|
 | `source` | `SourceEndpointV1` | `connection_ref`, `operation_ref`, optional `label`; first step of a connector flow |
 | `target` | `TargetEndpointV1` | same fields; success terminal position only |
+| `connector_call` | `ConnectorCallNodeV1` | **#140**: `operation_ref` + optional `action` assertion + optional `label`. No `connection_ref` — see below |
 | `flow_control` | `FlowControlNodeV1` | `for_each_count` strict int > 0 |
 | `message` | `MessageNodeV1` | `text` non-empty |
 | `map_ref` | `MapRefNodeV1` | `map_ref` component reference |
@@ -100,6 +101,34 @@ Sequence rules (local/structural — the CFG-aware checks are #137/#143):
   as the leg's staging **terminal**, and a decision false-arm may end its steps with
   `cache_put` only before a `stop` terminal (all legacy consume-guard parity).
 - Branch/Decision **terminalize** their sequence (no continuation after them — gated for #141).
+- A **connector-call flow** (#140) is a third, mutually exclusive sequence mode: it starts with a
+  `connector_call`, contains only `connector_call` and `map_ref` steps, and ends in `stop` or
+  `return_documents`. Every `map_ref` must be immediately followed by a `connector_call` (so each map
+  is *bracketed* by calls, which is what makes the compiler's profile-continuity check total). Mixing
+  it with `source`/`target` or `process_call` is rejected. Legacy `source`/`target` and `process_call`
+  sequences take exactly the paths they did before #140.
+
+### 3a. `connector_call` — the #140 node
+
+```json
+{"kind": "connector_call", "operation_ref": "$ref:op_rest_get", "action": "GET", "label": "Read orders"}
+```
+
+- **`operation_ref` is the only reference authored.** `connection_ref` is deliberately absent: no
+  connector-action component declares its own connection (live capture, `.codex/plans/issue-140-live-captures.md`
+  FINDING 1; the repo's own operation builders state "Boomi binds the connection at the process
+  connector step, not in the operation XML"), so the operation→connection edge is a fact of the
+  **component plan**. The compiler receives it as resolution context on
+  `ComponentSymbolV1.connection_ref` (ADR-001 §6). Authoring it in IR would recreate the
+  duplicate-authority split ADR-001 exists to remove — and `extra="forbid"` rejects the attempt.
+- **`action` is an assertion, never an override.** The family and action that reach the wire always
+  come from the resolved operation symbol. A supplied `action` is compared case-insensitively against
+  the authoritative one and can only ever *reject*; omitting it is fully supported.
+- Multiple calls may appear anywhere in the sequence, in any supported family. Which call becomes the
+  `connectoraction_source` shape and which become `connectoraction_target` shapes is **derived from
+  position**, never authored.
+- Everything else stays forbidden by the existing strictness: no config dict, XML, layout, shape id,
+  CFG edge, connector family, profile, credential, or header.
 
 ## 4. Alias normalization (private codec)
 
@@ -148,7 +177,7 @@ sorted by `(path, code)`:
 | `PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED` | missing/unsupported `version` |
 | `PROCESS_IR_SCHEMA_INVALID` | any other strict-schema mismatch |
 | `PROCESS_IR_REFERENCE_INVALID_FORMAT` | malformed opaque reference |
-| `PROCESS_IR_CAPABILITY_UNSUPPORTED` | gated/unsupported construct (keyed cache, `definedparameter`, secret carriage, process-call mixing) |
+| `PROCESS_IR_CAPABILITY_UNSUPPORTED` | gated/unsupported construct (keyed cache, `definedparameter`, secret carriage, process-call mixing, a `connector_call` sequence that also authors `source`/`target` or a non-`map_ref` linear step) |
 
 Every diagnostic carries a stable code, an RFC 6901 JSON pointer into the **authored** payload,
 and static remediation text. Raw Pydantic `input`/`ctx` values are never propagated; messages
@@ -169,7 +198,8 @@ Published as the immutable `PROCESS_IR_V1_CAPABILITIES` manifest (not an authore
 
 | Capability | State | Owner |
 |---|---|---|
-| generalized ConnectorCall, mixed connector execution | gated | #140 |
+| `generalized_connector_call` — the `connector_call` node and multiple calls per linear path | **supported** | #140 (shipped) |
+| `mixed_connector_execution` — mixing `process_call` steps with connector execution in one sequence | gated | the ONE construct the code references this name for; #140 ships neither it nor calls inside Branch/Decision bodies |
 | continuation after Branch/Decision, rich bodies | gated | #141 |
 | scoped Try/Catch | gated | #142 |
 | keyed cache (`doc_cache_index`/`cache_key_values`/keyed `load_all_documents`) | gated | no live-captured wire shape (#119) |
