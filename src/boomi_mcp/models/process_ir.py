@@ -1174,24 +1174,46 @@ def _control_depth(node: Any) -> int:
     return 0
 
 
-def _uses_process_call(node: Any) -> bool:
-    """True when any control body under ``node`` authors a ``process_call`` step."""
+#: Node kinds that execute a connector. A ``process_call`` may not share a
+#: root-to-leaf path with any of them while ``process_call_connector_mixing`` is
+#: gated.
+_CONNECTOR_KINDS = frozenset({"source", "target", "connector_call"})
+
+
+def _check_process_call_mixing(node: Any, connector_above: bool) -> None:
+    """Walk one control subtree carrying whether a connector runs UPSTREAM.
+
+    A binary "is the root control-only?" test is not enough, because a connector
+    can sit in an OUTER control body while the ``process_call`` sits in a nested
+    one — e.g. ``branch(steps=[connector_call], terminal=decision(true=[process_call]))``,
+    where both are on one root-to-leaf path under a control-only root. The rule
+    is about the PATH, so the check has to walk the path.
+    """
     kind = getattr(node, "kind", None)
     if kind == "branch":
-        for leg in node.legs:
-            if any(step.kind == "process_call" for step in leg.steps):
-                return True
-            if _uses_process_call(leg.terminal):
-                return True
-        return False
-    if kind == "decision":
-        for arm in (node.true_arm, node.false_arm):
-            if any(step.kind == "process_call" for step in arm.steps):
-                return True
-            if _uses_process_call(arm.terminal):
-                return True
-        return False
-    return False
+        bodies = [(leg.steps, leg.terminal) for leg in node.legs]
+    elif kind == "decision":
+        bodies = [
+            (node.true_arm.steps, node.true_arm.terminal),
+            (node.false_arm.steps, node.false_arm.terminal),
+        ]
+    else:
+        return
+
+    for steps, terminal in bodies:
+        kinds = [step.kind for step in steps]
+        if "process_call" in kinds and connector_above:
+            raise _body_kind_error(
+                "a process_call may not share a root-to-leaf path with a connector "
+                "step — a connector runs upstream of this body "
+                "(process_call_connector_mixing is gated)"
+            )
+        # Path mode already guarantees a ProcessCall body holds nothing else, so
+        # only a NON-ProcessCall body can add a connector for anything below it.
+        connector_here = connector_above or any(k in _CONNECTOR_KINDS for k in kinds) or (
+            getattr(terminal, "kind", None) in _CONNECTOR_KINDS
+        )
+        _check_process_call_mixing(terminal, connector_here)
 
 
 class ProcessIRV1(_ProcessIRBase):
@@ -1201,29 +1223,19 @@ class ProcessIRV1(_ProcessIRBase):
     body: SequenceNodeV1
 
     @model_validator(mode="after")
-    def _process_call_root_rule(self) -> "ProcessIRV1":
-        """A ProcessCall control body requires a CONTROL-ONLY root.
+    def _process_call_mixing_rule(self) -> "ProcessIRV1":
+        """No ``process_call`` may share a root-to-leaf path with a connector.
 
-        ``_check_process_call_path_mode`` keeps a ProcessCall body free of
-        connector nodes, but a body cannot see its ancestors — and the root is on
-        every one of its root-to-leaf paths. Without this rule
-        ``[connector_call(GET), branch(process_call -> stop)]`` parses, which is
-        precisely the ``process_call_connector_mixing`` the capability manifest
-        still reports as GATED. Enforced on the whole document, where the root
-        and the bodies are both visible.
+        ``_check_process_call_path_mode`` keeps each BODY connector-free, but a
+        body cannot see its ancestors — and every ancestor is on its path. This
+        walks the whole document carrying that context, which is what makes
+        ``process_call_connector_mixing`` honestly gated rather than gated only
+        at the shallowest depth.
         """
-        kinds = [step.kind for step in self.body.steps]
-        control_only_root = len(kinds) == 1 and kinds[0] in ("branch", "decision")
-        if control_only_root:
-            return self
+        root_kinds = [step.kind for step in self.body.steps]
+        connector_at_root = any(k in _CONNECTOR_KINDS for k in root_kinds)
         for step in self.body.steps:
-            if _uses_process_call(step):
-                raise _body_kind_error(
-                    "a control body may use process_call only under a control-only root "
-                    "(a root that is exactly one branch or decision) — otherwise the root's "
-                    "connector sits on the same root-to-leaf path "
-                    "(process_call_connector_mixing is gated)"
-                )
+            _check_process_call_mixing(step, connector_at_root)
         return self
 
     @model_validator(mode="after")

@@ -574,6 +574,13 @@ def _check_every_control_path_terminates(nodes, by_id, outbound) -> None:
     so the diagnostic names the offending leg rather than the whole graph.
     """
     for node in nodes:
+        # Only a REAL control node's edges are control paths. A malformed CFG can
+        # hang a ``branch_leg`` edge off a linear node; judging that as an
+        # unterminated control path would pre-empt the per-node successor rule
+        # that correctly calls it an invalid successor, and this pre-pass runs
+        # first precisely so it must not steal diagnostics it does not own.
+        if node.semantic.semantic_kind not in _CONTROL_KINDS:
+            continue
         control_edges = [
             edge
             for edge in outbound[node.node_id]

@@ -162,12 +162,12 @@ Deliberate exclusions, all fail-closed on absent evidence: **`branch` as a Branc
 (attested on TRUE outcomes only), and `return_documents` anywhere in a body.
 
 **ProcessCall path mode.** A body that uses `process_call` may contain nothing else and must end in
-`stop`, **and it is admitted only under a control-only root**. Both halves are required: the
-body-local rule keeps the body connector-free, but a body cannot see its ancestors, and the root sits
-on every one of its root-to-leaf paths — so without the root rule
-`[connector_call(GET), branch(process_call → stop)]` would parse and be exactly the mixing the
-manifest reports as gated. With both, `process_call_connector_mixing` stays **honestly gated per
-root-to-leaf path**; sibling legs are independent paths, not a mix.
+`stop`, **and no connector may run anywhere upstream on its root-to-leaf path**. Both halves are
+required: the body-local rule keeps the body connector-free, but a body cannot see its ancestors.
+Checking only the ROOT is not enough either — a connector can sit in an outer control body while the
+`process_call` sits in a nested one, both on one path — so the document is walked carrying whether a
+connector has run above. That is what makes `process_call_connector_mixing` honestly gated at every
+depth rather than only the shallowest; sibling legs are independent paths, not a mix.
 
 **Bare Stop.** A Decision FALSE arm may be a bare `stop` with no steps. #141 removed the old "reject
 path is never a bare Stop" rule: it was legacy *builder* parity, and a real production Decision

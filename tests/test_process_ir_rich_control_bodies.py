@@ -39,6 +39,7 @@ from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
 from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
 from boomi_mcp.errors import (
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+    PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
@@ -887,3 +888,78 @@ def test_an_unterminated_control_leg_reports_its_own_code():
         check_cfg_invariants(cfg)
     assert excinfo.value.diagnostics[0].code == PROCESS_IR_SEMANTIC_UNTERMINATED_PATH
     assert excinfo.value.diagnostics[0].path == B + "/legs/0"
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 2
+# ---------------------------------------------------------------------------
+
+
+def _dec(true_body, false_body):
+    return {"kind": "decision", "comparison": "equals",
+            "left": {"value_type": "static", "static_value": "a"},
+            "right": {"value_type": "static", "static_value": "b"},
+            "true_arm": true_body, "false_arm": false_body}
+
+
+def test_process_call_mixing_is_checked_along_the_whole_path_not_just_the_root():
+    """R2/F1: the first fix asked "is the root control-only?" and returned early.
+
+    A connector can sit in an OUTER control body while the process_call sits in a
+    NESTED one — both on one root-to-leaf path, under a control-only root. The
+    rule is about the PATH, so it has to walk the path.
+    """
+    PC = {"kind": "process_call", "process_ref": "child_process"}
+    MSG = {"kind": "message", "text": "m"}
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "legs": [
+            {"steps": [call("op_rest_get", action="GET")],
+             "terminal": _dec({"steps": [PC], "terminal": {"kind": "stop"}},
+                              {"steps": [], "terminal": {"kind": "stop"}})},
+            {"steps": [MSG], "terminal": {"kind": "stop"}},
+        ]},
+    ]}}
+    with pytest.raises(ProcessIRValidationError) as excinfo:
+        parse_process_ir_v1(doc)
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+
+    # The same nesting WITHOUT a connector upstream stays legal — the rule bans
+    # the mix, not the depth.
+    ok = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "legs": [
+            {"steps": [MSG],
+             "terminal": _dec({"steps": [PC], "terminal": {"kind": "stop"}},
+                              {"steps": [], "terminal": {"kind": "stop"}})},
+            {"steps": [MSG], "terminal": {"kind": "stop"}},
+        ]},
+    ]}}
+    compile_doc(ok)
+
+
+def test_the_termination_prepass_does_not_steal_non_control_diagnostics():
+    """R2/F2: moving the check earlier let it judge edges it does not own.
+
+    A malformed CFG can hang a ``branch_leg`` edge off a LINEAR node. That is an
+    invalid successor, not an unterminated control path, and the per-node rule
+    that says so must still be the one that fires.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import (
+        CfgEdgeV1, CfgNodeV1, MessageSemanticV1, SemanticCfgV1,
+    )
+    from boomi_mcp.compiler.process_ir.invariants import check_cfg_invariants
+
+    def node(o, p):
+        return CfgNodeV1(node_id="n%d" % o, ordinal=o, source_path=p,
+                         semantic=MessageSemanticV1(text="x"))
+
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(node(1, "/body/steps/0"), node(2, "/body/steps/1")),
+        edges=(CfgEdgeV1(edge_id="e1", ordinal=1, source_node_id="n1", target_node_id="n2",
+                         kind="branch_leg", local_ordinal=1,
+                         provenance_path="/body/steps/0", leg_ordinal=1),),
+        exit_node_ids=(),
+    )
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        check_cfg_invariants(cfg)
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
