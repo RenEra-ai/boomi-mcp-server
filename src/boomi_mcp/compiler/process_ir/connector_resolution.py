@@ -52,6 +52,20 @@ CONNECTOR_ACTION_COMPONENT_TYPE = "connector-action"
 CONNECTOR_SETTINGS_COMPONENT_TYPE = "connector-settings"
 MAP_COMPONENT_TYPE = "transform.map"
 
+#: Boomi's profile component types. A profile REFERENCE must resolve to one of
+#: these or it is not a profile identity at all — without this, two refs both
+#: pointing at (say) a connection component would compare equal and the map
+#: continuity check would "pass" having verified nothing.
+#:
+#: A closed set rather than a ``profile.`` prefix test: fail-closed is the rule
+#: everywhere else in this module, and a new profile kind should be a deliberate
+#: addition. All five documented kinds are listed, not just the three the emitter
+#: registry validates for Data Process steps — a map may legitimately read an EDI
+#: or flat-file profile, and narrowing here would falsely reject a valid flow.
+PROFILE_COMPONENT_TYPES = frozenset(
+    {"profile.db", "profile.edi", "profile.flatfile", "profile.json", "profile.xml"}
+)
+
 
 class ConnectorCallBindingV1(_CompilerModel):
     """One fully-resolved connector call. Compiler-internal; never serialized out."""
@@ -222,11 +236,20 @@ def _profile_identity(
     Compares by resolved COMPONENT ID, not by ref token: two different refs may
     legitimately name one component (that is exactly what #139B's
     occurrence-scoped aliases do), and rejecting that would be wrong.
+
+    ``None`` for anything that is not a real profile component. Returning an
+    identity for an arbitrary component type would make the continuity check
+    self-fulfilling: two refs both pointing at the same *connection* (or map, or
+    process) would compare equal and the map would "match" while neither side is
+    a profile at all.
     """
     symbol = _symbol(index, ref)
     if symbol is None:
         return None
-    return (symbol.component_id, _canonical_type(symbol))
+    component_type = _canonical_type(symbol)
+    if component_type not in PROFILE_COMPONENT_TYPES:
+        return None
+    return (symbol.component_id, component_type)
 
 
 def validate_connector_call_semantics(
@@ -254,6 +277,16 @@ def validate_connector_call_semantics(
         for node in cfg.nodes
         if node.semantic.semantic_kind in ("connector_call", "map")
     ]
+
+    # The terminal is NOT in ``steps`` (it is neither a call nor a map), so the
+    # "nothing may follow a non-producing call" rule below cannot see it. It has
+    # to be judged separately, because the two terminals differ in exactly the
+    # property that rule is about: ``stop`` consumes nothing and merely ends the
+    # path (the legacy ``[target, stop]`` shape), while ``return_documents``
+    # RETURNS THE CURRENT DOCUMENT STREAM to the caller. Placing the latter after
+    # a call that produces no documents emits a Return Documents shape that can
+    # never return anything.
+    terminal = next((node for node in cfg.nodes if node.exit_role), None)
 
     previous_producer: Optional[ConnectorCallBindingV1] = None
     for position, node in enumerate(steps):
@@ -283,6 +316,22 @@ def validate_connector_call_semantics(
                 "semantic_lowering",
                 "{0}/operation_ref".format(binding.source_path),
                 internal_node_id=binding.node_id,
+            )
+
+        # ...and the same rule at the terminal. Only a non-consuming ``stop`` may
+        # follow a non-producing call; ``return_documents`` would return an empty
+        # stream it was never given.
+        if (
+            not capability.produces_output
+            and position == len(steps) - 1
+            and terminal is not None
+            and terminal.exit_role == "return_documents"
+        ):
+            raise raise_compile_error(
+                PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
+                "semantic_lowering",
+                terminal.source_path,
+                internal_node_id=terminal.node_id,
             )
 
         previous_producer = binding if capability.produces_output else None

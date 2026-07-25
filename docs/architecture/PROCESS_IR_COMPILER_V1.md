@@ -454,14 +454,21 @@ family — `SEND` would be a different wire value).
 ### Flow semantics
 
 - **Cardinality** (`PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH`): a `documents required` call may not be
-  the entry call, must follow a producing call, and **nothing may follow a call that produces no
-  documents**.
+  the entry call, must follow a producing call, and **nothing that consumes documents may follow a
+  call that produces none**. That last rule reaches the **terminal** too, and the two terminals are
+  not interchangeable: `stop` consumes nothing and merely ends the path (the legacy `[target, stop]`
+  shape), while `return_documents` returns the current document stream to the caller — so
+  `… → Database Send → return_documents` is rejected, because it would emit a Return Documents shape
+  that can never return anything.
 - **Profile continuity** (`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH`): around every `map_ref`, the map's
   source profile must be the preceding call's output profile and its target profile the following
   call's input profile. Compared by **resolved component id** plus normalized profile type, so two
-  refs naming one component (#139B's occurrence-scoped aliases) agree. An **absent** profile on either
-  side is a mismatch: a map's profiles are hard component requirements, and "not declared" cannot
-  satisfy one.
+  refs naming one component (#139B's occurrence-scoped aliases) agree. Two guards keep the comparison
+  from being vacuous: an **absent** profile on either side is a mismatch (a map's profiles are hard
+  component requirements, and "not declared" cannot satisfy one), and a ref must resolve to an actual
+  profile component — one of the five `profile.*` types — or it has no profile identity at all.
+  Without the type check the test would be self-fulfilling: two refs both naming the same *connection*
+  would compare equal and the map would "match" with neither side a profile.
 
 ### Two evidence-forced decisions
 

@@ -419,6 +419,49 @@ def test_a_producer_only_flow_is_fine_without_any_consumer():
     assert len(plan.nodes) == 3
 
 
+def test_return_documents_may_not_follow_a_non_producing_call():
+    """``stop`` and ``return_documents`` are NOT interchangeable here. ``stop``
+    consumes nothing and merely ends the path; ``return_documents`` returns the
+    current document stream to the caller, so after a Send — which returns no
+    documents to the process — it would emit a shape that can never return
+    anything."""
+    doc = {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                {"kind": "connector_call", "operation_ref": "op_rest_get"},
+                {"kind": "connector_call", "operation_ref": "op_db_send"},
+                {"kind": "return_documents"},
+            ],
+        },
+    }
+    assert codes_for(doc) == [
+        (
+            PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
+            "/body/steps/2",
+            "semantic_lowering",
+        )
+    ]
+
+
+def test_return_documents_after_a_producing_call_is_accepted():
+    """Guard the guard: the rule above must key on the CALL's output, not simply
+    ban ``return_documents`` from connector-call flows."""
+    doc = {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                {"kind": "connector_call", "operation_ref": "op_rest_get"},
+                {"kind": "return_documents"},
+            ],
+        },
+    }
+    _cfg, plan = compile_process_ir_v1(parse_process_ir_v1(doc), mixed_symbols())
+    assert plan.nodes[-1].emitter_input.emitter_kind == "returndocuments"
+
+
 def test_a_terminal_send_preceded_by_a_producer_is_accepted():
     """The whole point of the gate is that Send LAST is fine."""
     doc = {
@@ -493,6 +536,40 @@ def test_an_absent_profile_on_either_side_of_a_map_is_a_mismatch():
         )
     )
     assert codes_for(MIXED_DOC, table)[0][0] == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
+
+
+def test_profile_refs_must_resolve_to_actual_profile_components():
+    """Without a type check the continuity test is self-fulfilling: point BOTH
+    sides of a map boundary at the same non-profile component and the identities
+    compare equal, so an invalid map "matches" while neither side is a profile."""
+    base = mixed_symbols().symbols
+    table = SymbolTableV1(
+        symbols=tuple(
+            symbol.model_copy(update={"output_profile_ref": "conn_rest"})
+            if symbol.ref == "op_rest_get"
+            else symbol.model_copy(update={"input_profile_ref": "conn_rest"})
+            if symbol.ref == "map_get_to_soap"
+            else symbol
+            for symbol in base
+        )
+    )
+    assert codes_for(MIXED_DOC, table) == [
+        (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/1/map_ref", "semantic_lowering")
+    ]
+
+
+@pytest.mark.parametrize(
+    "profile_type", ["profile.db", "profile.edi", "profile.flatfile", "profile.json", "profile.xml"]
+)
+def test_every_real_boomi_profile_kind_is_accepted_as_a_profile(profile_type):
+    """The type check must not narrow to the three kinds the Data Process emitter
+    validates — a map may legitimately read an EDI or flat-file profile, and
+    rejecting one would be a false failure."""
+    from boomi_mcp.compiler.process_ir.connector_resolution import (
+        PROFILE_COMPONENT_TYPES,
+    )
+
+    assert profile_type in PROFILE_COMPONENT_TYPES
 
 
 def test_two_refs_pointing_at_one_profile_component_agree():
