@@ -185,3 +185,15 @@ The new fixture `tests/fixtures/process_ir/emitter_parity/connector_call_mixed.p
 first golden with **no legacy oracle** (the legacy builder cannot express a multi-connector flow); the
 four checks that stand in for one are listed in
 [PROCESS_IR_COMPILER_V1 §10a](PROCESS_IR_COMPILER_V1.md).
+
+## #141 M12.6 — rich control bodies need no new emitter
+
+Branch and Decision keep their existing registrations (`BRANCH` arity, `EXACT_TWO` arity) and their
+existing renderers. A rich body changes only which CFG node each control transition targets, and the
+emission plan already carries that. `numBranches` is derived from the authored leg count and must
+equal the wired transition count; a mismatch — like every other control-wiring defect — now raises
+`PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID` rather than the generic emission-plan code.
+
+The graph verifier's bare-Stop finding stays a **warning**, not an error: a Decision routing its
+false outcome straight to a Stop is live-attested production shape, so treating intentional document
+dropping as a failure would reject valid processes.

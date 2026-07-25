@@ -19,6 +19,7 @@ from ...models.process_ir import (
     ProcessIRValidationError,
     parse_process_ir_v1,
 )
+from .body_capabilities import validate_body_capabilities
 from .connector_resolution import validate_connector_calls
 from .contracts import EmissionPlanV1, SemanticCfgV1, SymbolTableV1
 from .diagnostics import (
@@ -60,6 +61,12 @@ def compile_process_ir_v1(
     # attributed to the stage it actually happened in — reporting a CFG-lowering
     # crash as "emission_planning" sends a reader to the wrong half of the
     # compiler.
+    # #141: control-body slots and the control-depth bound are checked FIRST, on
+    # the authored document, before a CFG exists. Two reasons it leads: a body
+    # defect names an authored JSON pointer that is meaningless once flattened
+    # into CFG nodes, and every semantic error must precede any mutation. A
+    # document with no branch/decision walks nothing and returns immediately.
+    _guarded("semantic_lowering", validate_body_capabilities, ir)
     cfg = _guarded("semantic_lowering", lower_process_ir_to_cfg, ir)
     _guarded("semantic_lowering", check_cfg_invariants, cfg)
     # #140: resolve and validate connector calls BEFORE any emission plan exists,

@@ -563,3 +563,63 @@ builder invokes it) until #139's production cutover. Contract, the 17-key manife
 diagnostic mapping (the five new `PROCESS_IR_COMPILE_*` codes + the reused
 `PROCESS_IR_COMPILE_INTERNAL`, plus the `xml_emission`/`post_emission_verification` phases), and the
 byte-parity evidence: **`docs/architecture/PROCESS_EMITTER_REGISTRY_V1.md`**.
+
+## 11. #141 M12.6 — rich Branch/Decision bodies (shipped dark)
+
+Branch legs and Decision arms may now hold `connector_call`, `process_call` and nested `decision`
+nodes (the exact matrix and its live evidence: [PROCESS_IR_V1 §3b](PROCESS_IR_V1.md)). Three compiler
+changes carry it; the emitter registry is untouched.
+
+### Per-path document dataflow (replaces the flat spine)
+
+`connector_resolution.validate_connector_call_semantics` used to walk ONE flattened list of every
+`connector_call` and `map` in CFG order. That is correct only while the flow is linear — with calls
+inside Branch legs the list interleaves independent paths, so leg 2's first call would be judged
+against leg 1's last one. It is now a depth-first walk of the CFG (a tree by this point, since
+`check_cfg_invariants` has already rejected joins and cycles) carrying a `_PathState` that is
+**copied, never shared, across every control edge**. That copy is the sibling isolation.
+
+State carried per path: whether anything upstream yields documents, the upstream *binding*
+specifically (kept apart, because a legacy `source` endpoint produces documents but carries no
+profile refs — treating it as a map's upstream would compare against nothing), a non-producing call
+that nothing may follow, and a map awaiting its downstream call.
+
+Two ordering rules are load-bearing and were both found by test:
+
+* the **Send gate is checked before** the `documents_required` rule, because a non-producing
+  predecessor also leaves the producer slot empty — checking the other order blames the follower for
+  a defect that belongs to the Send;
+* the gate **blames the Send**, not its follower. #140 shipped that pointer and it is the actionable
+  one: the Send is the node whose position is wrong (it must be last on its path), whereas the
+  follower may be a perfectly good call that simply cannot be reached.
+
+A map's profiles are compared only when it sits between two connector **calls**. A map whose upstream
+is a legacy endpoint or a cache read is left unchecked exactly as before #141 — claiming to have
+"verified profiles" there would be a claim about something never compared.
+
+### CFG invariants
+
+* The ConnectorCall entry-role rule is restated: exactly the node that IS the control-flow entry may
+  carry `role="entry"`, and nothing else. The old "if any call exists, exactly one is the entry" form
+  was correct only while calls lived on the root spine; under a control-only root the entry is the
+  control node and no call is the entry at all.
+* Every Branch leg / Decision outcome must independently reach an exit
+  (`PROCESS_IR_SEMANTIC_UNTERMINATED_PATH`). This is strictly stronger than the existing "no path
+  ends on a non-terminal" rule, which only inspects leaves: one leg can route into a subtree whose
+  leaves are all valid exits while a *sibling* reaches none.
+* A second predecessor is `PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED`.
+* Control depth is re-derived from the lowered graph, deliberately a different representation from
+  the authored-tree checks, so a lowering defect that flattened nesting cannot slip past a rule that
+  only ever looked at the authored form.
+* Branch/Decision wiring defects (count, order, labels, target row) now raise
+  `PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID`.
+
+### What did NOT change
+
+`contracts.py`, `connector_capabilities.py`, `emitter_registry.py`, both XML emitters,
+`process_flow_builder.py`, `process_graph_verifier.py`, `_process_ir_compat.py` and both legacy
+adapters are untouched. The CFG contracts were already sufficient — `branch_leg`/`decision_outcome`
+edges, `leg_ordinal`, typed outcome and the existing exit roles carry rich bodies unchanged — and a
+control-only root needed **no** lowering or plan change at all (verified by probe before any edit:
+the synthetic Start wires straight to a control entry, legs number correctly, and the plan invariants
+pass).

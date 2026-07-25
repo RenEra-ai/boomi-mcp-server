@@ -469,7 +469,11 @@ def _lower_terminal(
         _lower_branch_children(builder, terminal, node_id, path)
         return
 
-    if kind == "decision":  # pragma: no cover - schema forbids nested decisions
+    # #141: reachable now. A nested Decision may terminate a Branch leg or either
+    # Decision arm (both live-attested), so this is an ordinary recursion — the
+    # depth bound is enforced upstream by ``body_capabilities`` and re-derived
+    # downstream by ``check_cfg_invariants``.
+    if kind == "decision":
         node_id = builder.add_node(_semantic_for(terminal), path)
         if predecessor is not None:
             builder.add_edge(predecessor, node_id, "ordering", 1, path)

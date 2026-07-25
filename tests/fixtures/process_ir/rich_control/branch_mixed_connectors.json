@@ -1,0 +1,51 @@
+{
+  "version": "1",
+  "body": {
+    "kind": "sequence",
+    "steps": [
+      {
+        "kind": "connector_call",
+        "operation_ref": "op_rest_get",
+        "action": "GET",
+        "label": "Read orders"
+      },
+      {
+        "kind": "branch",
+        "legs": [
+          {
+            "steps": [
+              {
+                "kind": "map_ref",
+                "map_ref": "map_rest_to_soap"
+              },
+              {
+                "kind": "connector_call",
+                "operation_ref": "op_soap_execute",
+                "action": "EXECUTE"
+              }
+            ],
+            "terminal": {
+              "kind": "stop"
+            }
+          },
+          {
+            "steps": [
+              {
+                "kind": "map_ref",
+                "map_ref": "map_rest_to_patch"
+              },
+              {
+                "kind": "connector_call",
+                "operation_ref": "op_rest_patch",
+                "action": "PATCH"
+              }
+            ],
+            "terminal": {
+              "kind": "stop"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

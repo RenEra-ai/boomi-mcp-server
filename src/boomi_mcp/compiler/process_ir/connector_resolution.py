@@ -290,25 +290,6 @@ def validate_connector_call_semantics(
     index = symbols.build_index()
     binding_by_node = {binding.node_id: binding for binding in bindings}
 
-    # The ordered linear spine. A connector-call sequence is linear by
-    # construction (the model rejects branch/decision in it), so CFG node order
-    # is authored order.
-    steps = [
-        node
-        for node in cfg.nodes
-        if node.semantic.semantic_kind in ("connector_call", "map")
-    ]
-
-    # The terminal is NOT in ``steps`` (it is neither a call nor a map), so the
-    # "nothing may follow a non-producing call" rule below cannot see it. It has
-    # to be judged separately, because the two terminals differ in exactly the
-    # property that rule is about: ``stop`` consumes nothing and merely ends the
-    # path (the legacy ``[target, stop]`` shape), while ``return_documents``
-    # RETURNS THE CURRENT DOCUMENT STREAM to the caller. Placing the latter after
-    # a call that produces no documents emits a Return Documents shape that can
-    # never return anything.
-    terminal = next((node for node in cfg.nodes if node.exit_role), None)
-
     # Every DECLARED profile reference must resolve to a real profile component,
     # on every call — not only on the two calls that happen to sit beside a map.
     # This is distinct from profile EQUALITY, which stays MapRef-only because the
@@ -334,108 +315,215 @@ def validate_connector_call_semantics(
                     internal_node_id=binding.node_id,
                 )
 
-    previous_producer: Optional[ConnectorCallBindingV1] = None
-    for position, node in enumerate(steps):
-        binding = binding_by_node.get(node.node_id)
-        if binding is None:
-            continue  # a map — handled by the profile pass below
+    _walk_paths(cfg, index, binding_by_node)
 
-        capability = binding.capability
-        if capability.accepts_input == "documents_required" and previous_producer is None:
-            # Nothing upstream produces documents, so this call would receive
-            # none and never execute.
-            raise raise_compile_error(
-                PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
-                "semantic_lowering",
-                "{0}/operation_ref".format(binding.source_path),
-                internal_node_id=binding.node_id,
-            )
 
-        if not capability.produces_output and position != len(steps) - 1:
-            # A call that returns no documents to the process cannot be followed
-            # by anything that consumes them. This is the Send gate: official
-            # Boomi documentation states a Send action "does not return any data
-            # to the process for further processing", so emitting a step after
-            # one would produce a shape that can never run.
-            raise raise_compile_error(
-                PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
-                "semantic_lowering",
-                "{0}/operation_ref".format(binding.source_path),
-                internal_node_id=binding.node_id,
-            )
+# ---------------------------------------------------------------------------
+# Per-path dataflow (#141 M12.6)
+# ---------------------------------------------------------------------------
 
-        # ...and the same rule at the terminal. Only a non-consuming ``stop`` may
-        # follow a non-producing call; ``return_documents`` would return an empty
-        # stream it was never given.
-        if (
-            not capability.produces_output
-            and position == len(steps) - 1
-            and terminal is not None
-            and terminal.exit_role == "return_documents"
-        ):
-            raise raise_compile_error(
-                PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
-                "semantic_lowering",
-                terminal.source_path,
-                internal_node_id=terminal.node_id,
-            )
+#: Nodes that REPLACE the document stream, so a call downstream of one has
+#: documents regardless of what came before.
+_STREAM_PRODUCING_KINDS = frozenset({"cache_get", "document_cache_retrieve"})
 
-        previous_producer = binding if capability.produces_output else None
 
-    # Profile continuity around every map. The model already guarantees each map
-    # is bracketed by calls, so both neighbours exist.
-    for position, node in enumerate(steps):
-        if node.semantic.semantic_kind == "connector_call":
-            continue
-        map_path = "{0}/map_ref".format(node.source_path)
-        map_symbol = _symbol(index, getattr(node.semantic, "map_ref", None))
-        if map_symbol is None or _canonical_type(map_symbol) != MAP_COMPONENT_TYPE:
-            raise raise_compile_error(
-                PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
-                "semantic_lowering",
-                map_path,
-                internal_node_id=node.node_id,
-            )
+class _PathState:
+    """Document state carried down ONE root-to-leaf path.
 
-        before = binding_by_node.get(steps[position - 1].node_id) if position else None
-        after = (
-            binding_by_node.get(steps[position + 1].node_id)
-            if position + 1 < len(steps)
-            else None
+    Copied — never shared — across a control edge. That copy IS the sibling
+    isolation: before #141 the checker walked a single flattened list of every
+    call and map in CFG order, which is only correct while the flow is linear.
+    With calls inside Branch legs that list interleaves independent paths, so leg
+    2's first call would be judged against leg 1's last one.
+    """
+
+    __slots__ = ("producer", "producer_binding", "blocked_by", "pending_map", "map_upstream")
+
+    def __init__(
+        self,
+        producer=None,
+        producer_binding=None,
+        blocked_by=None,
+        pending_map=None,
+        map_upstream=None,
+    ):
+        #: truthy when SOMETHING upstream on this path yields documents — a
+        #: producing connector_call, a legacy source endpoint, or a cache read.
+        #: Used only for the documents_required check, which does not care which.
+        self.producer = producer
+        #: the upstream producer WHEN it is a connector-call binding. Kept apart
+        #: from ``producer`` because only a binding carries profile refs: a legacy
+        #: source endpoint produces documents but has no ``output_profile_ref``,
+        #: and treating it as a map's upstream would crash the profile compare.
+        self.producer_binding = producer_binding
+        #: a non-producing call seen on this path, which nothing may follow
+        self.blocked_by = blocked_by
+        #: a map awaiting its downstream call, so its profiles can be compared
+        self.pending_map = pending_map
+        #: the call binding immediately upstream of ``pending_map``
+        self.map_upstream = map_upstream
+
+    def copy(self) -> "_PathState":
+        return _PathState(
+            self.producer,
+            self.producer_binding,
+            self.blocked_by,
+            self.pending_map,
+            self.map_upstream,
         )
-        if before is None or after is None:
-            # Unreachable through the model's bracketing rule; a compiler defect
-            # would be the only way here, and rejecting is the safe direction.
-            raise raise_compile_error(
-                PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
-                "semantic_lowering",
-                map_path,
-                internal_node_id=node.node_id,
-            )
 
-        upstream = _profile_identity(index, before.output_profile_ref)
-        map_source = _profile_identity(index, map_symbol.input_profile_ref)
-        map_target = _profile_identity(index, map_symbol.output_profile_ref)
-        downstream = _profile_identity(index, after.input_profile_ref)
 
-        # A map's source/destination profiles are hard component requirements
-        # (unlike connector request/response profiles, which the platform
-        # documents as non-validating), so an ABSENT profile on either side is a
-        # mismatch too — there is nothing to satisfy the requirement with.
-        if map_source is None or map_target is None or upstream is None or downstream is None:
-            raise raise_compile_error(
-                PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
-                "semantic_lowering",
-                map_path,
-                internal_node_id=node.node_id,
-            )
-        if map_source != upstream or map_target != downstream:
-            raise raise_compile_error(
-                PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
-                "semantic_lowering",
-                map_path,
-                internal_node_id=node.node_id,
-            )
+def _cardinality_failure(path: str, node_id: str):
+    raise raise_compile_error(
+        PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
+        "semantic_lowering",
+        path,
+        internal_node_id=node_id,
+    )
+
+
+def _profile_failure(path: str, node_id: str):
+    raise raise_compile_error(
+        PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
+        "semantic_lowering",
+        path,
+        internal_node_id=node_id,
+    )
+
+
+def _check_map_pair(index, map_node, before, after) -> None:
+    """Profile continuity across one map, between two connector calls."""
+    map_path = "{0}/map_ref".format(map_node.source_path)
+    map_symbol = _symbol(index, getattr(map_node.semantic, "map_ref", None))
+    if map_symbol is None or _canonical_type(map_symbol) != MAP_COMPONENT_TYPE:
+        _profile_failure(map_path, map_node.node_id)
+
+    upstream = _profile_identity(index, before.output_profile_ref)
+    map_source = _profile_identity(index, map_symbol.input_profile_ref)
+    map_target = _profile_identity(index, map_symbol.output_profile_ref)
+    downstream = _profile_identity(index, after.input_profile_ref)
+
+    # A map's source/destination profiles are hard component requirements
+    # (unlike connector request/response profiles, which the platform documents
+    # as non-validating), so an ABSENT profile on either side is a mismatch too —
+    # there is nothing to satisfy the requirement with.
+    if map_source is None or map_target is None or upstream is None or downstream is None:
+        _profile_failure(map_path, map_node.node_id)
+    if map_source != upstream or map_target != downstream:
+        _profile_failure(map_path, map_node.node_id)
+
+
+def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
+    """Depth-first walk of the CFG, carrying independent state down each path.
+
+    The CFG is a tree here (``check_cfg_invariants`` has already rejected joins
+    and cycles), so a plain DFS visits every root-to-leaf path exactly once and
+    cannot loop.
+    """
+    by_id = {node.node_id: node for node in cfg.nodes}
+    outgoing: dict = {}
+    for edge in cfg.edges:
+        outgoing.setdefault(edge.source_node_id, []).append(edge)
+
+    stack = [(cfg.entry_node_id, _PathState())]
+    while stack:
+        node_id, state = stack.pop()
+        node = by_id[node_id]
+        kind = node.semantic.semantic_kind
+
+        if kind == "connector_call":
+            binding = binding_by_node[node_id]
+            capability = binding.capability
+            call_path = "{0}/operation_ref".format(binding.source_path)
+
+            # ORDER MATTERS, and it is the reverse of the obvious one. The Send
+            # gate is checked FIRST because a non-producing predecessor also
+            # leaves ``producer`` empty — so the documents_required rule below
+            # would fire on the same payload and blame this follower for a defect
+            # that belongs to the Send. Root cause before symptom.
+            #
+            # The gate itself: official Boomi documentation states a Send action
+            # "does not return any data to the process for further processing",
+            # so a step after one on the SAME path could never run. Sibling legs
+            # are different paths and are unaffected.
+            #
+            # Blame the SEND, not this follower — #140 shipped that pointer and it
+            # is the actionable one: the Send is the node whose position is wrong
+            # (it must be last on its path), whereas the follower may be a
+            # perfectly good call that simply cannot be reached.
+            if state.blocked_by is not None:
+                _cardinality_failure(
+                    "{0}/operation_ref".format(state.blocked_by.source_path),
+                    state.blocked_by.node_id,
+                )
+
+            # Nothing on THIS path produced documents, so the call would receive
+            # none and never execute.
+            if capability.accepts_input == "documents_required" and state.producer is None:
+                _cardinality_failure(call_path, binding.node_id)
+
+            if state.pending_map is not None:
+                _check_map_pair(index, state.pending_map, state.map_upstream, binding)
+                state.pending_map = None
+                state.map_upstream = None
+
+            state.producer = binding if capability.produces_output else None
+            state.producer_binding = binding if capability.produces_output else None
+            state.blocked_by = None if capability.produces_output else binding
+
+        elif kind == "map":
+            # Same blame rule as a following call: the Send is the misplaced node.
+            if state.blocked_by is not None:
+                _cardinality_failure(
+                    "{0}/operation_ref".format(state.blocked_by.source_path),
+                    state.blocked_by.node_id,
+                )
+            # Only a map BETWEEN two connector CALLS can have its profiles
+            # verified: the equality contract compares the upstream call's
+            # response profile with the map's source, and the map's target with
+            # the downstream call's request profile. A map whose upstream is a
+            # legacy source endpoint (or a cache read) carries no such pair — it
+            # is left unchecked exactly as it was before #141, because claiming
+            # to have "verified profiles" there would be a claim about something
+            # that was never compared.
+            if state.producer_binding is not None:
+                state.pending_map = node
+                state.map_upstream = state.producer_binding
+
+        elif kind == "connector":
+            # A legacy source endpoint genuinely produces documents, so a
+            # ``documents_required`` call inside a control body downstream of one
+            # is legitimate. Reachable only through #141's new shapes (a root
+            # ``[source, branch]`` whose leg holds a call), because a pure legacy
+            # flow yields no bindings and returns before this walk.
+            if node.semantic.role == "source":
+                state.producer = node
+                state.producer_binding = None
+                state.blocked_by = None
+
+        elif kind in _STREAM_PRODUCING_KINDS:
+            state.producer = node
+            state.producer_binding = None
+            state.blocked_by = None
+        elif kind == "cache_put":
+            # Add to Cache consumes the stream. The model already requires a
+            # stream-replacing read immediately after it within the same body.
+            state.producer = None
+            state.producer_binding = None
+
+        if node.exit_role == "return_documents" and state.blocked_by is not None:
+            # ``stop`` merely ends the path, but Return Documents RETURNS the
+            # current stream — after a call that produces none it can only ever
+            # return nothing.
+            _cardinality_failure(node.source_path, node.node_id)
+
+        successors = outgoing.get(node_id, ())
+        for position, edge in enumerate(successors):
+            # The LAST successor may reuse this state; every earlier one gets its
+            # own copy. Sharing it would let leg 1's producer/blocked flags leak
+            # into leg 2.
+            child = state if position == len(successors) - 1 else state.copy()
+            stack.append((edge.target_node_id, child))
 
 
 def validate_connector_calls(cfg: SemanticCfgV1, symbols: SymbolTableV1) -> None:

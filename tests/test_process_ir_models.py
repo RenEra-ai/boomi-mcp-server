@@ -19,13 +19,17 @@ if _src not in sys.path:
 
 import boomi_mcp.models as models
 from boomi_mcp.errors import (
+    PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_REFERENCE_INVALID_FORMAT,
+    PROCESS_IR_SCHEMA_BRANCH_CARDINALITY,
     PROCESS_IR_SCHEMA_INVALID,
     PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
     PROCESS_IR_SCHEMA_UNKNOWN_FIELD,
     PROCESS_IR_SCHEMA_UNKNOWN_NODE,
     PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED,
+    PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
+    PROCESS_IR_SEMANTIC_NESTING_LIMIT,
 )
 from boomi_mcp.models import (
     PROCESS_IR_V1_CAPABILITIES,
@@ -402,9 +406,24 @@ def test_empty_root_steps_is_cardinality():
 
 @pytest.mark.parametrize("leg_count", [1, 26])
 def test_branch_leg_bounds(leg_count):
+    """#141: the 2-25 Branch bound gets its OWN code.
+
+    It is the platform's documented bound on Branch paths, not an arbitrary list
+    length, so it is worth distinguishing from every other cardinality failure —
+    ``test_non_branch_list_bounds_keep_the_generic_cardinality_code`` pins that
+    nothing else moved with it.
+    """
     legs = [{"steps": [], "terminal": target()} for _ in range(leg_count)]
     err = parse_error(doc(source(), branch(legs=legs)))
-    assert (PROCESS_IR_SCHEMA_INVALID_CARDINALITY, "/body/steps/1/legs") in codes_of(err)
+    assert (PROCESS_IR_SCHEMA_BRANCH_CARDINALITY, "/body/steps/1/legs") in codes_of(err)
+
+
+def test_non_branch_list_bounds_keep_the_generic_cardinality_code():
+    """The #141 re-point is keyed on a trailing ``legs`` token ONLY."""
+    err = parse_error({"version": "1", "body": {"kind": "sequence", "steps": []}})
+    assert codes_of(err) == [(PROCESS_IR_SCHEMA_INVALID_CARDINALITY, "/body/steps")]
+    err = parse_error(linear_doc({"kind": "data_process", "steps": []}))
+    assert codes_of(err) == [(PROCESS_IR_SCHEMA_INVALID_CARDINALITY, "/body/steps/1/steps")]
 
 
 def test_branch_25_legs_accepted():
@@ -426,9 +445,39 @@ def test_empty_data_process_steps_is_cardinality():
     assert codes_of(err) == [(PROCESS_IR_SCHEMA_INVALID_CARDINALITY, "/body/steps/1/steps")]
 
 
-def test_false_arm_bare_stop_is_cardinality():
-    bad = decision(false_arm={"steps": [], "terminal": {"kind": "stop"}})
-    err = parse_error(doc(source(), bad))
+def test_false_arm_bare_stop_is_accepted():
+    """#141 REMOVED the "reject path is never a bare Stop" rule.
+
+    It was legacy BUILDER parity, never a platform rule: a real production
+    Decision routes its false outcome straight to a Stop with zero intervening
+    steps (`.codex/plans/issue-141-live-captures.md` §2.1). The legacy
+    ``flow_sequence`` surface still rejects it — see
+    ``test_legacy_flow_sequence_still_rejects_a_bare_false_stop``.
+    """
+    ok = decision(false_arm={"steps": [], "terminal": {"kind": "stop"}})
+    ir = parse_process_ir_v1(doc(source(), ok))
+    assert ir.body.steps[-1].false_arm.terminal.kind == "stop"
+    assert ir.body.steps[-1].false_arm.steps == []
+
+
+def test_branch_leg_and_true_arm_still_reject_a_bare_stop():
+    """The bare-Stop relaxation is FALSE-ARM ONLY.
+
+    A Branch leg or Decision TRUE arm that only stops does no work, and the
+    capture records the empty-leg question as explicitly UNPROVEN (§2.4), so V1
+    stays fail-closed there.
+    """
+    bad_leg = branch(
+        legs=[
+            {"steps": [], "terminal": {"kind": "stop"}},
+            {"steps": [], "terminal": target()},
+        ]
+    )
+    err = parse_error(doc(source(), bad_leg))
+    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY
+
+    bad_arm = decision(true_arm={"steps": [], "terminal": {"kind": "stop"}})
+    err = parse_error(doc(source(), bad_arm))
     assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY
 
 
@@ -448,8 +497,13 @@ def test_false_arm_bare_stop_is_cardinality():
         ([source(), target(), message()], PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
         # bare trailing target
         ([source(), message(), target()], PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
-        # control mid-sequence
-        ([source(), decision(), message(), target(), {"kind": "stop"}], PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
+        # control mid-sequence — #141 gives continuation its own capability code:
+        # the caller has not miscounted a list, they have asked for a feature
+        # ProcessIR v1 deliberately does not emit.
+        (
+            [source(), decision(), message(), target(), {"kind": "stop"}],
+            PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
+        ),
         # stop without preceding target
         ([source(), message(), {"kind": "stop"}], PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
         # cache_put feeding the target
@@ -500,17 +554,88 @@ def test_false_arm_trailing_cache_put_allowed_only_before_stop():
     assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY
 
 
-def test_nested_decision_is_impossible_by_schema():
-    bad = decision(true_arm={"steps": [], "terminal": decision()})
+def test_nested_decision_is_supported(): # #141
+    """Decision-in-Decision is the single most common real shape in the reference
+    account (`.codex/plans/issue-141-live-captures.md` §2.1) and #136 could not
+    express it at all. It is admitted on BOTH outcomes, bounded by the depth cap."""
+    ok = decision(true_arm={"steps": [message()], "terminal": decision()})
+    ir = parse_process_ir_v1(doc(source(), ok))
+    assert ir.body.steps[-1].true_arm.terminal.kind == "decision"
+
+    ok_false = decision(false_arm={"steps": [], "terminal": decision()})
+    ir = parse_process_ir_v1(doc(source(), ok_false))
+    assert ir.body.steps[-1].false_arm.terminal.kind == "decision"
+
+
+def test_nested_decision_in_a_branch_leg_is_supported():  # #141
+    """Branch-leg -> Decision is live-attested (capture §2.1)."""
+    ok = branch(
+        legs=[
+            {"steps": [message()], "terminal": decision()},
+            {"steps": [], "terminal": target()},
+        ]
+    )
+    ir = parse_process_ir_v1(doc(source(), ok))
+    assert ir.body.steps[-1].legs[0].terminal.kind == "decision"
+
+
+def test_nested_branch_in_a_branch_leg_stays_gated():  # #141
+    """Branch-leg -> Branch appears NOWHERE in the capture. Unproven stays closed."""
+    bad = branch(
+        legs=[
+            {"steps": [message()], "terminal": branch(
+                legs=[{"steps": [], "terminal": target()}, {"steps": [], "terminal": target()}]
+            )},
+            {"steps": [], "terminal": target()},
+        ]
+    )
     err = parse_error(doc(source(), bad))
     assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_UNKNOWN_NODE
 
 
-def test_process_call_not_allowed_in_branch_leg():
-    bad = branch(legs=[
-        {"steps": [{"kind": "process_call", "process_ref": "x"}], "terminal": target()},
-        {"steps": [], "terminal": target()},
-    ])
+def test_process_call_allowed_in_a_branch_leg_only_in_path_mode():  # #141
+    """ProcessCall inside a Branch leg is live-attested (capture §2.2), but
+    ``process_call_connector_mixing`` stays gated PER PATH: a leg that uses
+    ProcessCall may contain nothing else and must end in a stop."""
+    ok = {
+        "kind": "branch",
+        "legs": [
+            {"steps": [{"kind": "process_call", "process_ref": "x"}], "terminal": {"kind": "stop"}},
+            {"steps": [message()], "terminal": {"kind": "stop"}},
+        ],
+    }
+    ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [ok]}})
+    assert ir.body.steps[0].legs[0].steps[0].kind == "process_call"
+
+    mixed = {
+        "kind": "branch",
+        "legs": [
+            {
+                "steps": [{"kind": "process_call", "process_ref": "x"}, message()],
+                "terminal": {"kind": "stop"},
+            },
+            {"steps": [message()], "terminal": {"kind": "stop"}},
+        ],
+    }
+    err = parse_error({"version": "1", "body": {"kind": "sequence", "steps": [mixed]}})
+    assert err.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+
+    not_stop = {
+        "kind": "branch",
+        "legs": [
+            {"steps": [{"kind": "process_call", "process_ref": "x"}], "terminal": target()},
+            {"steps": [message()], "terminal": {"kind": "stop"}},
+        ],
+    }
+    err = parse_error({"version": "1", "body": {"kind": "sequence", "steps": [not_stop]}})
+    assert err.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+
+
+def test_process_call_stays_out_of_the_decision_false_arm():  # #141
+    """The capture attests ProcessCall on TRUE outcomes only."""
+    bad = decision(
+        false_arm={"steps": [{"kind": "process_call", "process_ref": "x"}], "terminal": {"kind": "stop"}}
+    )
     err = parse_error(doc(source(), bad))
     assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_UNKNOWN_NODE
 
@@ -577,11 +702,6 @@ def test_connector_call_return_documents_terminal_is_allowed():
         ([call(), message(), call(), {"kind": "stop"}], PROCESS_IR_CAPABILITY_UNSUPPORTED),
         ([call(), {"kind": "cache_put", "cache_ref": "$ref:c"}, call(), {"kind": "stop"}],
          PROCESS_IR_CAPABILITY_UNSUPPORTED),
-        # A control terminal is #141's. The TERMINAL rule is checked before the
-        # body-composition rule, so this reports the terminal requirement — the
-        # actionable half, since stop/return_documents is what the caller must
-        # write to make the sequence legal today.
-        ([call(), decision()], PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
     ],
 )
 def test_connector_call_sequence_rules(steps, expect_code):
@@ -589,15 +709,77 @@ def test_connector_call_sequence_rules(steps, expect_code):
     assert err.diagnostics[0].code == expect_code, codes_of(err)
 
 
-def test_connector_call_is_root_only_and_not_authorable_in_a_branch_leg():
-    """Branch/Decision bodies are #141's. A connector_call inside one is not a
-    cardinality error — the union does not contain it at all."""
-    bad = branch(legs=[
+@pytest.mark.parametrize("control", ["branch", "decision"])
+def test_a_connector_call_sequence_may_terminate_in_a_control(control):
+    """#141 widened this terminal set.
+
+    The legacy connector flow has ALWAYS admitted a terminal control, and without
+    the same allowance a connector-call flow could not fan out at all — the
+    issue's divergent-fixture criterion (sibling legs running different connector
+    families off ONE shared entry call) would be unbuildable, since the only
+    alternative is duplicating the entry call into every leg, which is a
+    different process.
+    """
+    node = (
+        branch(legs=[
+            {"steps": [message()], "terminal": {"kind": "stop"}},
+            {"steps": [message()], "terminal": {"kind": "stop"}},
+        ])
+        if control == "branch"
+        else decision(
+            true_arm={"steps": [message()], "terminal": {"kind": "stop"}},
+            false_arm={"steps": [], "terminal": {"kind": "stop"}},
+        )
+    )
+    ir = parse_process_ir_v1(doc(call(), node))
+    assert ir.body.steps[-1].kind == control
+
+
+def test_a_connector_call_sequence_still_rejects_an_exception_terminal():
+    """``exception`` is a legacy terminal control with no #141 construct behind
+    it, so the widening deliberately stops short of it."""
+    err = parse_error(doc(call(), exception()))
+    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY
+
+
+def test_a_map_may_not_directly_precede_a_control_terminal():
+    """#140's bracketing guarantee survives the widening.
+
+    A map immediately before the control has no downstream call in the ROOT body
+    to check its target profile against — the exact continuity hole map
+    bracketing exists to close — so it stays rejected.
+    """
+    err = parse_error(
+        doc(
+            call(),
+            {"kind": "map_ref", "map_ref": "$ref:m"},
+            branch(legs=[
+                {"steps": [message()], "terminal": {"kind": "stop"}},
+                {"steps": [message()], "terminal": {"kind": "stop"}},
+            ]),
+        )
+    )
+    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY
+
+
+def test_connector_call_is_authorable_in_control_bodies():  # #141
+    """``connector_call_in_control_body`` is SUPPORTED as of #141: a call may sit
+    in a Branch leg and in either Decision arm. The ROOT sequence rules are
+    unchanged — a connector_call root still may not mix with source/target."""
+    ok = branch(legs=[
         {"steps": [call()], "terminal": target()},
         {"steps": [], "terminal": target()},
     ])
-    err = parse_error(doc(source(), bad))
-    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_UNKNOWN_NODE
+    ir = parse_process_ir_v1(doc(source(), ok))
+    assert ir.body.steps[-1].legs[0].steps[0].kind == "connector_call"
+
+    ok_true = decision(true_arm={"steps": [call()], "terminal": target()})
+    ir = parse_process_ir_v1(doc(source(), ok_true))
+    assert ir.body.steps[-1].true_arm.steps[0].kind == "connector_call"
+
+    ok_false = decision(false_arm={"steps": [call()], "terminal": {"kind": "stop"}})
+    ir = parse_process_ir_v1(doc(source(), ok_false))
+    assert ir.body.steps[-1].false_arm.steps[0].kind == "connector_call"
 
 
 @pytest.mark.parametrize(
@@ -965,8 +1147,18 @@ def test_capability_manifest_immutable_and_complete():
     assert PROCESS_IR_V1_CAPABILITIES["mixed_connector_execution"] == "supported"
     # ...and the two constructs #140 does NOT ship each have their own name now.
     assert PROCESS_IR_V1_CAPABILITIES["process_call_connector_mixing"] == "gated"
-    assert PROCESS_IR_V1_CAPABILITIES["connector_call_in_control_body"] == "gated"
-    assert PROCESS_IR_V1_CAPABILITIES["rich_branch_decision_bodies"] == "gated"
+    # #141 M12.6 flipped exactly two flags. ``process_call_connector_mixing``
+    # deliberately stays GATED even though ProcessCall is now authorable in a
+    # control body: PATH MODE means no root-to-leaf path ever carries both a
+    # ProcessCall and connector execution, and sibling legs are independent paths
+    # rather than a mix.
+    assert PROCESS_IR_V1_CAPABILITIES["connector_call_in_control_body"] == "supported"
+    assert PROCESS_IR_V1_CAPABILITIES["rich_branch_decision_bodies"] == "supported"
+    # Continuation is the one #141 names and does NOT ship — terminal fan-out only.
+    assert PROCESS_IR_V1_CAPABILITIES["continuation_after_branch_or_decision"] == "gated"
+    assert PROCESS_IR_V1_CAPABILITIES["joins"] == "gated"
+    assert PROCESS_IR_V1_CAPABILITIES["loops"] == "gated"
+    assert PROCESS_IR_V1_CAPABILITIES["scoped_try_catch"] == "gated"
     assert set(PROCESS_IR_V1_CAPABILITIES.values()) <= {
         "supported",
         "gated",
@@ -976,4 +1168,9 @@ def test_capability_manifest_immutable_and_complete():
         name
         for name, state in PROCESS_IR_V1_CAPABILITIES.items()
         if state == "supported"
-    ) == ["generalized_connector_call", "mixed_connector_execution"]
+    ) == [
+        "connector_call_in_control_body",
+        "generalized_connector_call",
+        "mixed_connector_execution",
+        "rich_branch_decision_bodies",
+    ]

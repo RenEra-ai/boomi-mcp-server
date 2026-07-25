@@ -1,0 +1,35 @@
+{
+  "version": "1",
+  "body": {
+    "kind": "sequence",
+    "steps": [
+      {
+        "kind": "branch",
+        "legs": [
+          {
+            "steps": [
+              {
+                "kind": "process_call",
+                "process_ref": "child_process"
+              }
+            ],
+            "terminal": {
+              "kind": "stop"
+            }
+          },
+          {
+            "steps": [
+              {
+                "kind": "process_call",
+                "process_ref": "child_process"
+              }
+            ],
+            "terminal": {
+              "kind": "stop"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

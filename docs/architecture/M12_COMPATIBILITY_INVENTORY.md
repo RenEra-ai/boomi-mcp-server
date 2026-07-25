@@ -1054,3 +1054,27 @@ needs canonical `start_listen` / dynamic-path / `catcherrors` / `notify` emissio
 listener entry policy** (unsupported — there is no emitter to cut over to) but ships no `start_listen`
 emitter, so that row stays **pending-capability** and the WSS arm of `sync_pipeline` stays on the
 legacy renderer.
+
+## #141 M12.6 ledger — rich Branch/Decision bodies are DIRECT-IR ONLY
+
+Rich control bodies extend the **new IR surface only**. The legacy `flow_sequence` dialect is
+unchanged in every observable way, and the asymmetry is deliberate:
+
+| Construct | Direct ProcessIR (#141) | Legacy `flow_sequence` |
+|---|---|---|
+| `connector_call` / `process_call` in a Branch leg or Decision arm | accepted (matrix + path mode) | not expressible |
+| nested `decision` (in a leg or either arm) | accepted, depth ≤ 2 | still rejected |
+| bare `stop` on a Decision FALSE arm | accepted | still rejected |
+| control-only root (`[branch]` / `[decision]`) | accepted | not expressible |
+| `branch`/`decision` terminating a `connector_call` flow | accepted | n/a |
+
+The legacy codec (`_process_ir_compat`) and both adapters emit only the pre-#141 `steps + terminal`
+shapes, so no legacy config can reach a new form and none of the accepted-set, diagnostics or
+emitted bytes move. Pinned by the unchanged adapter/codec suites plus byte-identical
+`branch_fanout.xml`, `decision_conditional.xml`, `flow_sequence_decision_branch_map.xml` and
+`process_ir/emitter_parity/control_flow.process.xml`.
+
+`tests/fixtures/process_ir/process_ir_v1.schema.json` was regenerated (a **reviewed** regeneration,
+per §5 of PROCESS_IR_V1): the diff adds and removes no `$defs`, touching only `BranchLegV1`,
+`DecisionTrueArmV1`, `DecisionFalseArmV1` and `SequenceNodeV1`. The three golden *documents* in
+`process_ir_v1.json` are byte-identical, which is the backward-compatibility signal.

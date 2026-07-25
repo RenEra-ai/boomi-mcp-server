@@ -29,13 +29,18 @@ import re
 from typing import Dict, List, Optional, Set
 
 from ...errors import (
+    PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID,
     PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
     PROCESS_IR_COMPILE_INTERNAL,
     PROCESS_IR_COMPILE_NONDETERMINISTIC,
     PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+    PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
+    PROCESS_IR_SEMANTIC_NESTING_LIMIT,
     PROCESS_IR_SEMANTIC_UNREACHABLE,
+    PROCESS_IR_SEMANTIC_UNTERMINATED_PATH,
 )
+from ...models.process_ir import PROCESS_IR_V1_MAX_CONTROL_DEPTH
 from .contracts import (
     BRANCH_MAX_LEGS,
     BRANCH_MIN_LEGS,
@@ -249,11 +254,16 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
         )
     for node_id, count in inbound.items():
         if count > 1:
+            # #141 gives convergence its own code. Two live production processes
+            # (71 shapes) contain NOT ONE node with a second inbound edge, and the
+            # docs describe no merge step for integration processes — but that is
+            # negative evidence: it proves ProcessIR v1 should not EMIT a join, not
+            # that Boomi would reject one. The message says exactly that.
             raise _fail(
-                PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+                PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED,
                 _SEMANTIC_PHASE,
                 by_id[node_id].source_path,
-                "joins are not representable: a node has more than one predecessor",
+                "ProcessIR v1 emits no join: a node has more than one predecessor",
                 node_id,
             )
 
@@ -354,20 +364,33 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
     # no other check here looks at it, because the role is not an exit role and
     # not an edge. Exactly one connector call may be the entry, and it must BE
     # the CFG entry node.
+    # #141 RESTATED. The pre-#141 rule was "if any connector_call exists, exactly
+    # one carries role=entry" — correct while calls could only live on the root
+    # linear spine. A call may now sit inside a Branch leg or Decision arm, where
+    # the CFG entry is the CONTROL node and no call is the entry at all, so the
+    # old rule would reject every rich body outright.
+    #
+    # The invariant that actually matters is unchanged in spirit: the ``entry``
+    # role selects the ``connectoraction_source`` emitter key, so it must be
+    # carried by exactly the node that IS the control-flow entry, and by nothing
+    # else. Stated that way it covers both shapes.
     calls = [
         node for node in nodes if node.semantic.semantic_kind == "connector_call"
     ]
     if calls:
         entries = [node for node in calls if node.semantic.role == "entry"]
-        if len(entries) != 1:
+        entry_node = by_id[cfg.entry_node_id]
+        entry_is_call = entry_node.semantic.semantic_kind == "connector_call"
+        expected = 1 if entry_is_call else 0
+        if len(entries) != expected:
             raise _fail(
                 PROCESS_IR_COMPILE_INTERNAL,
                 _SEMANTIC_PHASE,
-                calls[0].source_path,
-                "a connector-call flow must have exactly one entry call",
-                calls[0].node_id,
+                (entries[0] if entries else calls[0]).source_path,
+                "exactly the control-flow entry node may carry the entry call role",
+                (entries[0] if entries else calls[0]).node_id,
             )
-        if entries[0].node_id != cfg.entry_node_id:
+        if entry_is_call and entries[0].node_id != cfg.entry_node_id:
             raise _fail(
                 PROCESS_IR_COMPILE_INTERNAL,
                 _SEMANTIC_PHASE,
@@ -528,6 +551,79 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                 "path ends on a node that is not a valid terminal",
                 node.node_id,
             )
+
+    # --- #141: every divergent path terminates, and nesting stays bounded ------
+    _check_every_control_path_terminates(nodes, by_id, outbound)
+    _check_control_depth(nodes, by_id, outbound, cfg.entry_node_id)
+
+
+def _check_every_control_path_terminates(nodes, by_id, outbound) -> None:
+    """Each Branch leg / Decision outcome must independently reach an exit (#141).
+
+    Distinct from the global "no path ends on a non-terminal" rule above, which
+    only inspects LEAVES. A leg could route into a subtree whose every leaf is a
+    valid exit while some *other* leg reaches none — and a leg that reaches no
+    exit is precisely an unterminated divergent path. Checked per control edge,
+    so the diagnostic names the offending leg rather than the whole graph.
+    """
+    for node in nodes:
+        control_edges = [
+            edge
+            for edge in outbound[node.node_id]
+            if edge.kind in ("branch_leg", "decision_outcome")
+        ]
+        for edge in control_edges:
+            seen = set()
+            stack = [edge.target_node_id]
+            reached_exit = False
+            while stack:
+                current = stack.pop()
+                if current in seen:
+                    continue
+                seen.add(current)
+                if by_id[current].exit_role:
+                    reached_exit = True
+                    break
+                for out in outbound[current]:
+                    stack.append(out.target_node_id)
+            if not reached_exit:
+                raise _fail(
+                    PROCESS_IR_SEMANTIC_UNTERMINATED_PATH,
+                    _SEMANTIC_PHASE,
+                    edge.provenance_path,
+                    "a branch leg or decision outcome reaches no terminal",
+                    node.node_id,
+                )
+
+
+def _check_control_depth(nodes, by_id, outbound, entry_node_id: str) -> None:
+    """Re-derive the control-depth bound from the CFG (#141).
+
+    ``models.process_ir`` already rejects a too-deep AUTHORED document and
+    ``body_capabilities`` rejects it again on the parsed model. This third check
+    is deliberately computed from a DIFFERENT representation — the lowered graph
+    — so a lowering defect that flattened or duplicated nesting cannot slip a
+    document past a rule that only ever looked at the authored tree.
+    """
+    depth = {entry_node_id: 0}
+    stack = [entry_node_id]
+    while stack:
+        current = stack.pop()
+        node = by_id[current]
+        here = depth[current]
+        if node.semantic.semantic_kind in _CONTROL_KINDS:
+            here += 1
+            if here > PROCESS_IR_V1_MAX_CONTROL_DEPTH:
+                raise _fail(
+                    PROCESS_IR_SEMANTIC_NESTING_LIMIT,
+                    _SEMANTIC_PHASE,
+                    node.source_path,
+                    "control nesting exceeds the ProcessIR v1 depth bound",
+                    node.node_id,
+                )
+        for edge in outbound[current]:
+            depth[edge.target_node_id] = here
+            stack.append(edge.target_node_id)
 
 
 def check_emission_plan_invariants(
@@ -962,12 +1058,17 @@ def check_emission_plan_invariants(
                 )
 
         kind = node.emitter_input.emitter_kind
+        # #141: control WIRING defects get their own code. Every failure below is
+        # about compiler-derived branch/decision wiring — count, order, labels,
+        # target row — which is a strictly narrower claim than "the plan is
+        # invalid", and the one a reader needs to localise the defect. Non-control
+        # plan defects keep PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID.
         if kind == "decision":
             if [item.identifier for item in transitions] != ["true", "false"] or [
                 item.text for item in transitions
             ] != ["True", "False"]:
                 raise _fail(
-                    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                    PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID,
                     _PLAN_PHASE,
                     path,
                     "decision dragpoint labels must be true/True then false/False",
@@ -977,7 +1078,7 @@ def check_emission_plan_invariants(
                 DECISION_FALSE_DRAGPOINT_Y,
             ]:
                 raise _fail(
-                    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                    PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID,
                     _PLAN_PHASE,
                     path,
                     "decision dragpoint rows do not match parity geometry",
@@ -988,14 +1089,14 @@ def check_emission_plan_invariants(
                 item.text for item in transitions
             ] != expected:
                 raise _fail(
-                    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                    PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID,
                     _PLAN_PHASE,
                     path,
                     "branch dragpoint labels must be the 1-based leg numbers",
                 )
             if node.emitter_input.num_branches != len(transitions):
                 raise _fail(
-                    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                    PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID,
                     _PLAN_PHASE,
                     path,
                     "branch numBranches does not match its wired leg count",
@@ -1004,7 +1105,7 @@ def check_emission_plan_invariants(
             # unlike Decision, a Branch has no second row (builder :4368).
             if any(item.y != DRAGPOINT_Y for item in transitions):
                 raise _fail(
-                    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                    PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID,
                     _PLAN_PHASE,
                     path,
                     "branch dragpoint row does not match parity geometry",

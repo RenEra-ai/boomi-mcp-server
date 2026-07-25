@@ -136,6 +136,31 @@ PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID = (
     "PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID"
 )
 
+# --- ProcessIR rich Branch/Decision bodies (M12.6 / issue #141; ADR-001 §7) ----
+# #141 ADDS to three families that already exist (SCHEMA_*, SEMANTIC_*,
+# CAPABILITY_*/COMPILE_*) — no new family, no rename, no re-scope.
+#
+# Several of these are deliberately MORE SPECIFIC than an existing family member
+# that would also have described the condition (e.g. BRANCH_CARDINALITY vs
+# SCHEMA_INVALID_CARDINALITY, JOIN_UNSUPPORTED vs SEMANTIC_AMBIGUOUS_FLOW). That
+# is the precedent #140 set one slice earlier — it registered
+# PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH alongside the older
+# PROCESS_IR_SCHEMA_INVALID_CARDINALITY, and PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID
+# alongside PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID — and it is what ADR-001 §7's
+# "later introducers ADD codes" rule exists to permit. The older codes keep every
+# raise site they already had; only #141's NEW validation paths use these.
+PROCESS_IR_SCHEMA_BRANCH_CARDINALITY = "PROCESS_IR_SCHEMA_BRANCH_CARDINALITY"
+PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED = (
+    "PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED"
+)
+PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED = "PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED"
+PROCESS_IR_SEMANTIC_NESTING_LIMIT = "PROCESS_IR_SEMANTIC_NESTING_LIMIT"
+PROCESS_IR_SEMANTIC_UNTERMINATED_PATH = "PROCESS_IR_SEMANTIC_UNTERMINATED_PATH"
+PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY = (
+    "PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY"
+)
+PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID = "PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID"
+
 
 @dataclass(frozen=True)
 class ErrorCodeSpec:
@@ -607,6 +632,76 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "emission time — a compiler defect, not authored input."
             ),
             owner="#140",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SCHEMA_BRANCH_CARDINALITY,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A Branch declares fewer than 2 or more than 25 legs — the platform's "
+                "own documented bound on Branch paths."
+            ),
+            owner="#141",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A node was authored after a Branch or Decision. Control nodes are "
+                "terminal fan-out in ProcessIR v1; continuation after them is gated."
+            ),
+            owner="#141",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "Two paths converge on one node. ProcessIR v1 emits no join/merge, so a "
+                "node may have at most one predecessor."
+            ),
+            owner="#141",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_NESTING_LIMIT,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "Branch/Decision nesting exceeds the ProcessIR v1 control-depth bound. "
+                "This is a compiler bound, not a Boomi platform limit."
+            ),
+            owner="#141",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_UNTERMINATED_PATH,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A Branch leg or Decision outcome does not reach a terminal. Every "
+                "divergent path must terminate independently."
+            ),
+            owner="#141",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A known node kind was authored in a Branch leg or Decision arm slot "
+                "whose capability registry does not admit it."
+            ),
+            owner="#141",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "Compiler-derived Branch/Decision wiring is wrong (count, order, labels, "
+                "target, or cross-wiring) — a compiler defect, not authored input."
+            ),
+            owner="#141",
         ),
     )
 }

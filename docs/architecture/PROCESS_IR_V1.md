@@ -79,8 +79,8 @@ Root sequence (`SequenceNodeV1.steps`, discriminated on `kind`):
 | `cache_remove` | `CacheRemoveNodeV1` | `remove_all_documents=True` |
 | `set_ddp` / `set_dpp` | `SetDdpNodeV1` / `SetDppNodeV1` | bare `name` (no wire prefix, no whitespace), ordered `source_values` (static/current/profile/ddp/dpp); DPP adds `persist=False` |
 | `process_call` | `ProcessCallNodeV1` | `process_ref`, `wait=True`, `abort_on_error=False`, optional `label` (wrapper parity) |
-| `branch` | `BranchNodeV1` | 2–25 `BranchLegV1` legs: linear `steps` + terminal `target` or target-less staging `cache_put` |
-| `decision` | `DecisionNodeV1` | 7 comparisons; `track`/`static` operands; typed `true_arm` (terminal target/branch/exception) and `false_arm` (terminal stop/branch/exception); nested decision is impossible by schema |
+| `branch` | `BranchNodeV1` | 2–25 `BranchLegV1` legs; **#141** rich bodies — see §3b |
+| `decision` | `DecisionNodeV1` | 7 comparisons; `track`/`static` operands; typed `true_arm`/`false_arm`; **#141** rich bodies incl. nested decision — see §3b |
 | `exception` | `ExceptionNodeV1` | `message_template` (needs `{1}` unless `parameter_source="none"`), optional `title`, `stop_single_document=False`, `parameter_source="caught_error"`; **no `label`** (legacy parity) |
 | `stop` | `StopNodeV1` | no fields (continue semantics are emitter-owned) |
 | `return_documents` | `ReturnDocumentsNodeV1` | optional `label` |
@@ -101,7 +101,16 @@ Sequence rules (local/structural — the CFG-aware checks are #137/#143):
   (`cache_get`/`document_cache_retrieve`); a trailing `cache_put` in a branch leg is expressed
   as the leg's staging **terminal**, and a decision false-arm may end its steps with
   `cache_put` only before a `stop` terminal (all legacy consume-guard parity).
-- Branch/Decision **terminalize** their sequence (no continuation after them — gated for #141).
+- Branch/Decision **terminalize** their sequence. A node authored after one fails with
+  `PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED` (#141);
+  `continuation_after_branch_or_decision` stays gated.
+- A **control-only** root (#141) is exactly one `branch`/`decision` and nothing else. It models the
+  live `start -> branch` shape, and it is what makes a ProcessCall-only path's root-to-leaf path
+  genuinely connector-free.
+- A **connector-call flow** may now also terminate in `branch`/`decision` (#141), not only
+  `stop`/`return_documents`. `exception` is deliberately not admitted there. A `map_ref` still may
+  not directly precede the control — its target profile would have nothing in the root body to be
+  checked against, which is the continuity hole map bracketing exists to close.
 - A **connector-call flow** (#140) is a third, mutually exclusive sequence mode: it starts with a
   `connector_call`, contains only `connector_call` and `map_ref` steps, and ends in `stop` or
   `return_documents`. Every `map_ref` must be immediately followed by a `connector_call` (so each map
@@ -130,6 +139,52 @@ Sequence rules (local/structural — the CFG-aware checks are #137/#143):
   position**, never authored.
 - Everything else stays forbidden by the existing strictness: no config dict, XML, layout, shape id,
   CFG edge, connector family, profile, credential, or header.
+
+### 3b. Rich Branch/Decision bodies — the #141 body matrix
+
+A Branch leg / Decision arm is `steps` + one `terminal`. Which node kinds each slot admits is a
+**closed allowlist**, published as data in `compiler/process_ir/body_capabilities.py` and pinned
+against the model unions in both directions. **Absence is denial** — there is no wildcard and no
+"known kind" fallback, so every future node kind is rejected until a row is deliberately added.
+
+| Slot | Admitted kinds |
+|---|---|
+| `branch_leg.step` | the linear set, `connector_call`, `process_call` |
+| `branch_leg.terminal` | `target`, `cache_put`, `stop`, `decision` |
+| `decision_true_arm.step` | the linear set, `connector_call`, `process_call` |
+| `decision_true_arm.terminal` | `target`, `stop`, `exception`, `branch`, `decision` |
+| `decision_false_arm.step` | the linear set, `connector_call` |
+| `decision_false_arm.terminal` | `stop`, `exception`, `branch`, `decision` |
+
+Every admitted placement is live-attested in `.codex/plans/issue-141-live-captures.md`.
+Deliberate exclusions, all fail-closed on absent evidence: **`branch` as a Branch-leg terminal**
+(nested control in a leg is attested only as a *Decision*), **`process_call` on a FALSE arm**
+(attested on TRUE outcomes only), and `return_documents` anywhere in a body.
+
+**ProcessCall path mode.** A body that uses `process_call` may contain nothing else and must end in
+`stop`. `process_call_connector_mixing` therefore stays **gated per root-to-leaf path** — sibling
+legs are independent paths, not a mix.
+
+**Bare Stop.** A Decision FALSE arm may be a bare `stop` with no steps. #141 removed the old "reject
+path is never a bare Stop" rule: it was legacy *builder* parity, and a real production Decision
+routes its false outcome straight to a Stop (capture §2.1). The legacy `flow_sequence` surface still
+rejects it — only the direct IR accepts it. A Branch leg / TRUE arm still requires at least one step
+before a `stop` terminal, because the empty-leg question is explicitly UNPROVEN (capture §2.4).
+
+**Nesting.** `PROCESS_IR_V1_MAX_CONTROL_DEPTH = 2` counts only `branch`/`decision` on one
+root-to-leaf path. This is a **ProcessIR v1 compiler bound chosen on test cost, NOT a Boomi platform
+limit** — the platform imposes no observed cap and real production processes exceed it (capture §2.1
+records a Decision chain six deep inside one Branch leg). It is enforced three times from two
+different representations: on the authored tree at parse, again on the parsed model in
+`body_capabilities`, and re-derived from the lowered graph in `check_cfg_invariants`.
+
+**No convergence.** Every leg/outcome terminates independently. There is no join, merge, or
+post-control continuation: a second predecessor fails with `PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED`
+and a leg reaching no terminal with `PROCESS_IR_SEMANTIC_UNTERMINATED_PATH`. The evidence is
+*negative* — no shape in either captured production process (71 shapes) has two inbound edges, and
+the KB documents no merge step for integration processes — so the diagnostics say only that
+ProcessIR v1 **does not emit** these, never that Boomi would reject them. Examples in this document
+must not visually imply convergence.
 
 ## 4. Alias normalization (private codec)
 
@@ -179,6 +234,19 @@ sorted by `(path, code)`:
 | `PROCESS_IR_SCHEMA_INVALID` | any other strict-schema mismatch |
 | `PROCESS_IR_REFERENCE_INVALID_FORMAT` | malformed opaque reference |
 | `PROCESS_IR_CAPABILITY_UNSUPPORTED` | gated/unsupported construct (keyed cache, `definedparameter`, secret carriage, process-call mixing, a `connector_call` sequence that also authors `source`/`target` or a non-`map_ref` linear step) |
+| `PROCESS_IR_SCHEMA_BRANCH_CARDINALITY` | **#141** — a Branch outside the documented 2–25 bound |
+| `PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED` | **#141** — a node authored after a Branch/Decision |
+| `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` | **#141** — a known kind in a body slot the matrix does not admit |
+| `PROCESS_IR_SEMANTIC_NESTING_LIMIT` | **#141** — control nesting past the compiler depth bound |
+| `PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED` | **#141** — two paths converge on one node |
+| `PROCESS_IR_SEMANTIC_UNTERMINATED_PATH` | **#141** — a leg/outcome reaches no terminal |
+| `PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID` | **#141** — compiler-derived control wiring is wrong (a compiler defect) |
+
+All seven are **new distinct codes**, not aliases. #140 set that precedent one slice earlier by
+registering `PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH` alongside the older
+`PROCESS_IR_SCHEMA_INVALID_CARDINALITY` and `PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID` alongside
+`PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID`; ADR-001 §7's "later introducers ADD codes" rule is what
+permits it. Every pre-existing code keeps every raise site it already had.
 
 Every diagnostic carries a stable code, an RFC 6901 JSON pointer into the **authored** payload,
 and static remediation text. Raw Pydantic `input`/`ctx` values are never propagated; messages
@@ -201,9 +269,10 @@ Published as the immutable `PROCESS_IR_V1_CAPABILITIES` manifest (not an authore
 |---|---|---|
 | `generalized_connector_call` — the `connector_call` node | **supported** | #140 (shipped) |
 | `mixed_connector_execution` — multiple connector calls, several families, in one linear path | **supported** | #140 (shipped) |
-| `process_call_connector_mixing` — mixing `process_call` steps with connector execution | gated | not #140 |
-| `connector_call_in_control_body` — a `connector_call` inside a Branch leg or Decision arm | gated | #141 |
-| continuation after Branch/Decision, rich bodies | gated | #141 |
+| `process_call_connector_mixing` — mixing `process_call` steps with connector execution **on one root-to-leaf path** | gated | still gated after #141 (path mode; see §3b) |
+| `connector_call_in_control_body` — a `connector_call` inside a Branch leg or Decision arm | **supported** | #141 (shipped) |
+| `rich_branch_decision_bodies` — the §3b body matrix, nested Decision, bare false Stop | **supported** | #141 (shipped) |
+| `continuation_after_branch_or_decision` | gated | #141 — terminal fan-out only |
 | scoped Try/Catch | gated | #142 |
 | keyed cache (`doc_cache_index`/`cache_key_values`/keyed `load_all_documents`) | gated | no live-captured wire shape (#119) |
 | `definedparameter` property source | gated | no verified wire shape |

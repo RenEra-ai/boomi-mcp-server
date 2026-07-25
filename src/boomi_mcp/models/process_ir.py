@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import json
 from types import MappingProxyType
-from typing import Any, List, Literal, Mapping, Optional, Tuple, Union
+from typing import Any, List, Literal, Mapping, Optional, Tuple, Union, get_args
 
 from pydantic import (
     AfterValidator,
@@ -47,13 +47,17 @@ from pydantic_core import PydanticCustomError
 from typing_extensions import Annotated
 
 from ..errors import (
+    PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_REFERENCE_INVALID_FORMAT,
+    PROCESS_IR_SCHEMA_BRANCH_CARDINALITY,
     PROCESS_IR_SCHEMA_INVALID,
     PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
     PROCESS_IR_SCHEMA_UNKNOWN_FIELD,
     PROCESS_IR_SCHEMA_UNKNOWN_NODE,
     PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED,
+    PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
+    PROCESS_IR_SEMANTIC_NESTING_LIMIT,
 )
 
 PROCESS_IR_VERSION = "1"
@@ -215,6 +219,25 @@ def _cardinality_error(message: str) -> PydanticCustomError:
 
 def _capability_error(message: str) -> PydanticCustomError:
     return PydanticCustomError("process_ir_capability_unsupported", message)  # noqa: EM101
+
+
+def _continuation_error(message: str) -> PydanticCustomError:
+    """#141: a node authored after a Branch/Decision."""
+    return PydanticCustomError(  # noqa: EM101
+        "process_ir_semantic_control_continuation_unsupported", message
+    )
+
+
+def _body_kind_error(message: str) -> PydanticCustomError:
+    """#141: a known node kind in a control-body slot that does not admit it."""
+    return PydanticCustomError(  # noqa: EM101
+        "process_ir_capability_node_not_allowed_in_body", message
+    )
+
+
+def _nesting_error(message: str) -> PydanticCustomError:
+    """#141: control nesting deeper than ``PROCESS_IR_V1_MAX_CONTROL_DEPTH``."""
+    return PydanticCustomError("process_ir_semantic_nesting_limit", message)  # noqa: EM101
 
 
 def _keyed_cache_true_only(value: bool) -> bool:
@@ -609,9 +632,10 @@ class ExceptionNodeV1(_ProcessIRBase):
         return self
 
 
-# The linear vocabulary usable inside branch legs and decision arms. NO
-# process_call (wrapper-only today) and NO nested control — recursion is
-# excluded by schema, not by a runtime check.
+# The ROOT/legacy linear vocabulary. Deliberately UNCHANGED by #141: it is what a
+# root ``SequenceNodeV1`` admits between its endpoints, and widening it would
+# change legacy sequences. The richer control-body vocabularies below are
+# separate unions (#141, M12.6).
 LinearNodeV1 = Annotated[
     Union[
         FlowControlNodeV1,
@@ -624,6 +648,79 @@ LinearNodeV1 = Annotated[
         CacheRemoveNodeV1,
         SetDdpNodeV1,
         SetDppNodeV1,
+    ],
+    Field(discriminator="kind"),
+]
+
+
+# A MODEL DOCSTRING IS PUBLISHED. Pydantic serializes it into the generated JSON
+# Schema as the model's ``description``, so a docstring is part of the exported
+# surface, not an internal note. It must therefore never name emitter/wire
+# vocabulary (dragpoints, coordinates, shape ids/types) — the same prohibition
+# the schema itself is under, pinned by
+# ``test_schema_carries_no_layout_cfg_or_open_config_vocabulary``. Cite live
+# evidence by capture SECTION, never by wire attribute or shape name. Module-level
+# comments like this one are not serialized and are the right home for the detail.
+def _kinds_of(union_alias: Any) -> Tuple[str, ...]:
+    """The ``kind`` discriminator literals of an ``Annotated[Union[...]]`` alias.
+
+    DERIVED, never hand-listed: ``body_capabilities`` keys its registry off these
+    sets, and a hand-maintained copy would drift the moment a node kind is added
+    to a union — which is exactly the duplicate-authority failure ADR-001 §6
+    exists to remove. A coverage test pins union membership against the registry
+    in both directions.
+    """
+    members = get_args(get_args(union_alias)[0])
+    return tuple(get_args(member.model_fields["kind"].annotation)[0] for member in members)
+
+
+#: The exact kind set of :data:`LinearNodeV1`, shared by every control body.
+LINEAR_BODY_KINDS: Tuple[str, ...] = _kinds_of(LinearNodeV1)
+
+# #141 M12.6. The step vocabularies inside a control body. Both admit the linear
+# set plus ``connector_call`` (capability ``connector_call_in_control_body``);
+# only a Branch leg and a Decision TRUE arm additionally admit ``process_call``,
+# and only under the ProcessCall PATH MODE enforced below — both placements are
+# live-attested (`.codex/plans/issue-141-live-captures.md` §2.1/§2.2).
+#
+# Nested control is a TERMINAL, never a step: a step is by definition followed by
+# something on the same path, and a control node terminalizes its path.
+BranchLegStepV1 = Annotated[
+    Union[
+        FlowControlNodeV1,
+        MessageNodeV1,
+        MapRefNodeV1,
+        DataProcessNodeV1,
+        CachePutNodeV1,
+        DocumentCacheRetrieveNodeV1,
+        CacheGetNodeV1,
+        CacheRemoveNodeV1,
+        SetDdpNodeV1,
+        SetDppNodeV1,
+        ConnectorCallNodeV1,
+        ProcessCallNodeV1,
+    ],
+    Field(discriminator="kind"),
+]
+
+# The TRUE arm shares the Branch leg's step vocabulary (ProcessCall included —
+# live-attested twice at capture §2.2 as ``decision ->true-> processcall``); the
+# FALSE arm is the reject route and admits no ProcessCall.
+DecisionTrueArmStepV1 = BranchLegStepV1
+
+DecisionFalseArmStepV1 = Annotated[
+    Union[
+        FlowControlNodeV1,
+        MessageNodeV1,
+        MapRefNodeV1,
+        DataProcessNodeV1,
+        CachePutNodeV1,
+        DocumentCacheRetrieveNodeV1,
+        CacheGetNodeV1,
+        CacheRemoveNodeV1,
+        SetDdpNodeV1,
+        SetDppNodeV1,
+        ConnectorCallNodeV1,
     ],
     Field(discriminator="kind"),
 ]
@@ -643,13 +740,66 @@ def _check_cache_put_followed_by_read(steps: List[Any], *, context: str) -> None
                 )
 
 
-class BranchLegV1(_ProcessIRBase):
-    """One Branch leg: linear steps plus a terminal — a target endpoint, or a
-    target-less staging cache_put (the live staging pattern)."""
+def _check_process_call_path_mode(steps: List[Any], terminal: Any, *, context: str) -> None:
+    """ProcessCall PATH MODE (#141).
 
-    steps: List[LinearNodeV1] = Field(default_factory=list)
+    ``process_call_connector_mixing`` stays gated PER ROOT-TO-LEAF PATH, so a body
+    that uses ProcessCall must use nothing else: every step is a ``process_call``
+    and the body ends on a plain ``stop``. Sibling legs are independent paths and
+    are unaffected — the check is deliberately body-local.
+
+    A ProcessCall body is reachable only under a CONTROL-ONLY root (a root that is
+    exactly one Branch/Decision), because any other root that can hold a control
+    starts with a ``source`` connector, which would sit on the same root-to-leaf
+    path. That root mode is what makes this rule satisfiable rather than vacuous.
+    """
+    if not any(getattr(step, "kind", None) == "process_call" for step in steps):
+        return
+    for step in steps:
+        if step.kind != "process_call":
+            raise _body_kind_error(
+                "a {0} that uses process_call may contain only process_call steps "
+                "(process_call_connector_mixing is gated per path)".format(context)
+            )
+    if getattr(terminal, "kind", None) != "stop":
+        raise _body_kind_error(
+            "a process_call {0} must end in a stop terminal".format(context)
+        )
+
+
+def _check_stop_terminal_has_work(steps: List[Any], terminal: Any, *, context: str) -> None:
+    """A leg/arm that ONLY stops does nothing at all.
+
+    Fail-closed: a control connector wired straight to a Stop with no intervening
+    work is not live-attested for a Branch leg or a Decision TRUE arm (the capture
+    records the empty-leg question as UNPROVEN), so V1 requires at least one step.
+    The Decision FALSE arm is the documented exception — capture §2.1 shows
+    ``shape16 ->false-> shape38 stop`` with zero intervening steps — and is checked
+    by its own arm rules, not here.
+    """
+    if getattr(terminal, "kind", None) == "stop" and not steps:
+        raise _cardinality_error(
+            "a {0} whose terminal is a stop must contain at least one step".format(context)
+        )
+
+
+class BranchLegV1(_ProcessIRBase):
+    """One Branch leg (#141: rich bodies).
+
+    Steps are the linear vocabulary plus ``connector_call`` and ``process_call``;
+    the terminal is a routed target endpoint, a target-less staging ``cache_put``
+    (the live staging pattern), a plain ``stop``, or a nested ``decision``.
+
+    A nested ``branch`` is deliberately ABSENT: the live capture proves Branch-leg
+    -> Decision (`.codex/plans/issue-141-live-captures.md` §2.1) but records no
+    Branch-leg -> Branch anywhere, and fail-closed is the rule for an unproven
+    placement.
+    """
+
+    steps: List[BranchLegStepV1] = Field(default_factory=list)
     terminal: Annotated[
-        Union[TargetEndpointV1, CachePutNodeV1], Field(discriminator="kind")
+        Union[TargetEndpointV1, CachePutNodeV1, StopNodeV1, "DecisionNodeV1"],
+        Field(discriminator="kind"),
     ]
 
     @model_validator(mode="after")
@@ -659,6 +809,8 @@ class BranchLegV1(_ProcessIRBase):
             raise _cardinality_error(
                 "a trailing cache_put belongs in the leg terminal (target-less staging leg), not in steps"
             )
+        _check_process_call_path_mode(self.steps, self.terminal, context="branch leg")
+        _check_stop_terminal_has_work(self.steps, self.terminal, context="branch leg")
         return self
 
 
@@ -669,11 +821,23 @@ class BranchNodeV1(_ProcessIRBase):
 
 
 class DecisionTrueArmV1(_ProcessIRBase):
-    """TRUE (success) arm: linear steps, then target / nested branch / exception."""
+    """TRUE (success) arm (#141: rich bodies).
 
-    steps: List[LinearNodeV1] = Field(default_factory=list)
+    Steps are the linear vocabulary plus ``connector_call`` and ``process_call``;
+    the terminal is a routed target, a plain ``stop``, an ``exception``, or a
+    nested ``branch``/``decision``. Decision-in-Decision is live-attested
+    (`.codex/plans/issue-141-live-captures.md` §2.1).
+    """
+
+    steps: List[DecisionTrueArmStepV1] = Field(default_factory=list)
     terminal: Annotated[
-        Union[TargetEndpointV1, BranchNodeV1, ExceptionNodeV1],
+        Union[
+            TargetEndpointV1,
+            StopNodeV1,
+            ExceptionNodeV1,
+            BranchNodeV1,
+            "DecisionNodeV1",
+        ],
         Field(discriminator="kind"),
     ]
 
@@ -684,27 +848,38 @@ class DecisionTrueArmV1(_ProcessIRBase):
             raise _cardinality_error(
                 "decision true-arm steps must not end in cache_put — the arm terminal would receive an empty stream"
             )
+        _check_process_call_path_mode(
+            self.steps, self.terminal, context="decision true-arm"
+        )
+        _check_stop_terminal_has_work(
+            self.steps, self.terminal, context="decision true-arm"
+        )
         return self
 
 
 class DecisionFalseArmV1(_ProcessIRBase):
-    """FALSE (reject) arm: linear steps, then stop / nested branch / exception.
-    Legacy parity: the reject path is never a bare Stop, so an empty-steps arm
-    with a stop terminal is rejected."""
+    """FALSE (reject) arm (#141: rich bodies).
 
-    steps: List[LinearNodeV1] = Field(default_factory=list)
+    Steps are the linear vocabulary plus ``connector_call`` — no ``process_call``
+    (the live capture attests ProcessCall only on TRUE arms). The terminal is a
+    ``stop``, an ``exception``, or a nested ``branch``/``decision``.
+
+    #141 REMOVED the "reject path is never a bare Stop" rule. That was legacy
+    BUILDER parity, not a platform rule: a real production Decision routes its
+    false outcome straight to a Stop with zero intervening steps (live evidence,
+    `.codex/plans/issue-141-live-captures.md` §2.1). The legacy ``flow_sequence``
+    surface keeps rejecting it — only the direct IR accepts it.
+    """
+
+    steps: List[DecisionFalseArmStepV1] = Field(default_factory=list)
     terminal: Annotated[
-        Union[StopNodeV1, BranchNodeV1, ExceptionNodeV1],
+        Union[StopNodeV1, ExceptionNodeV1, BranchNodeV1, "DecisionNodeV1"],
         Field(discriminator="kind"),
     ]
 
     @model_validator(mode="after")
     def _arm_rules(self) -> "DecisionFalseArmV1":
         _check_cache_put_followed_by_read(self.steps, context="decision false-arm steps")
-        if not self.steps and self.terminal.kind == "stop":
-            raise _cardinality_error(
-                "decision false-arm steps must be non-empty when the terminal is a stop (reject path is never a bare Stop)"
-            )
         if (
             self.steps
             and self.steps[-1].kind == "cache_put"
@@ -732,6 +907,39 @@ class DecisionNodeV1(_ProcessIRBase):
     true_arm: DecisionTrueArmV1
     false_arm: DecisionFalseArmV1
     label: Optional[str] = None
+
+
+# Resolve the #141 recursion. ``BranchLegV1`` and both Decision arms name
+# ``DecisionNodeV1`` as a forward reference because a nested Decision may appear
+# in a Branch leg and in either arm, while ``DecisionNodeV1`` is itself built out
+# of those arms — a genuine cycle that cannot be broken by reordering. Every
+# model in the cycle is rebuilt here, once, at import time; a failure to resolve
+# raises now rather than at first validation.
+for _model in (
+    BranchLegV1,
+    BranchNodeV1,
+    DecisionTrueArmV1,
+    DecisionFalseArmV1,
+    DecisionNodeV1,
+):
+    _model.model_rebuild()
+del _model
+
+
+#: The ProcessIR v1 control-nesting bound (#141).
+#:
+#: Depth counts ONLY ``branch``/``decision`` nodes on one authored root-to-leaf
+#: path: the outermost control is depth 1, a control used as its body terminal is
+#: depth 2, and a third is rejected. Linear nodes, ConnectorCall, ProcessCall,
+#: Stop, Target, CachePut and Exception do not increment it.
+#:
+#: This is a COMPILER bound chosen on test cost, NOT a Boomi platform limit — the
+#: platform imposes no observed cap and real production processes exceed this one
+#: (`.codex/plans/issue-141-live-captures.md` §2.1 records a Decision chain six
+#: deep inside a single Branch leg). Raising it multiplies the arm/leg x
+#: connector-dataflow x cache x terminal test matrix with no demonstrated
+#: authoring need; a later issue may raise it deliberately.
+PROCESS_IR_V1_MAX_CONTROL_DEPTH = 2
 
 
 # ---------------------------------------------------------------------------
@@ -790,6 +998,8 @@ class SequenceNodeV1(_ProcessIRBase):
     - a process-call flow contains only ``process_call`` steps plus a
       ``stop``/``return_documents`` terminal (mixed connector execution is
       capability-gated);
+    - a CONTROL-ONLY root (#141) is exactly one ``branch``/``decision`` and
+      nothing else;
     - ``cache_put`` must be immediately followed by a stream-replacing cache
       read (never by the target/terminal).
     """
@@ -801,9 +1011,32 @@ class SequenceNodeV1(_ProcessIRBase):
     def _sequence_rules(self) -> "SequenceNodeV1":
         kinds = [step.kind for step in self.steps]
 
+        # CONTROL-ONLY root (#141), checked FIRST and matched EXACTLY so no
+        # existing payload can reach it: every pre-#141 root either starts with
+        # `source`/`connector_call`/`process_call` or has more than one step, and
+        # a lone `[branch]`/`[decision]` was rejected outright before. It models
+        # the live `start -> branch` shape (capture §2.2), which ProcessIR could
+        # not represent at all, and it is what makes a ProcessCall-only leg's
+        # root-to-leaf path genuinely connector-free — so
+        # `process_call_connector_mixing` stays honestly gated.
+        if len(kinds) == 1 and kinds[0] in ("branch", "decision"):
+            return self
+
         for i, kind in enumerate(kinds):
             if kind == "source" and i != 0:
                 raise _cardinality_error("source may appear only as the first step")
+
+        # A control node anywhere but the final position is a CONTINUATION
+        # request (#141). Reported with its own capability code rather than the
+        # generic cardinality one: the caller has not miscounted a list, they
+        # have asked for a feature ProcessIR v1 deliberately does not emit.
+        for i, kind in enumerate(kinds[:-1]):
+            if kind in ("branch", "decision"):
+                raise _continuation_error(
+                    "no step may follow a branch or decision — control nodes are "
+                    "terminal fan-out in ProcessIR v1 "
+                    "(continuation_after_branch_or_decision is gated)"
+                )
 
         if "process_call" in kinds:
             for i, kind in enumerate(kinds[:-1]):
@@ -836,9 +1069,22 @@ class SequenceNodeV1(_ProcessIRBase):
                 raise _cardinality_error(
                     "a connector_call sequence must start with a connector_call"
                 )
-            if kinds[-1] not in ("stop", "return_documents"):
+            # #141 widened this terminal set with ``branch``/``decision``. The
+            # legacy connector flow below has ALWAYS admitted a terminal control,
+            # and without the same allowance here the issue's own acceptance
+            # criterion is unbuildable: a divergent fixture whose sibling legs run
+            # different connector families needs one shared entry call and then a
+            # fan-out, which is exactly the live shape (capture §2.1 — one entry,
+            # then a Branch whose legs differ). The alternative is duplicating the
+            # entry call into every leg, which is not the same process.
+            #
+            # ``exception`` is deliberately NOT added: it is a legacy terminal
+            # control with no #141 construct behind it, and widening it here would
+            # be scope this issue has no evidence for.
+            if kinds[-1] not in ("stop", "return_documents", "branch", "decision"):
                 raise _cardinality_error(
-                    "a connector_call sequence must end in a stop or return_documents terminal"
+                    "a connector_call sequence must end in a stop, return_documents, "
+                    "branch, or decision terminal"
                 )
             body = kinds[:-1]
             for kind in body:
@@ -908,11 +1154,49 @@ class SequenceNodeV1(_ProcessIRBase):
         return self
 
 
+def _control_depth(node: Any) -> int:
+    """Deepest chain of ``branch``/``decision`` nodes rooted at ``node``.
+
+    Counts control nodes only; every other kind contributes 0. Recursion follows
+    the two authored body shapes — a Branch's legs and a Decision's two arms —
+    and looks at the ``terminal`` slot only, because a control node can never be
+    a ``step`` (a step is followed by something on its own path, and a control
+    terminalizes its path).
+    """
+    kind = getattr(node, "kind", None)
+    if kind == "branch":
+        return 1 + max((_control_depth(leg.terminal) for leg in node.legs), default=0)
+    if kind == "decision":
+        return 1 + max(
+            _control_depth(node.true_arm.terminal),
+            _control_depth(node.false_arm.terminal),
+        )
+    return 0
+
+
 class ProcessIRV1(_ProcessIRBase):
     """The semantic root: exactly one per authored process (ADR-001 §3)."""
 
     version: Literal["1"]
     body: SequenceNodeV1
+
+    @model_validator(mode="after")
+    def _depth_rules(self) -> "ProcessIRV1":
+        # #141: enforced HERE, at parse time, so a too-deep document is rejected
+        # before a CFG exists — and therefore long before any component mutation.
+        # ``invariants.check_cfg_invariants`` re-derives the same bound from CFG
+        # provenance paths; the two are independent computations of one rule, so
+        # a lowering defect that flattened nesting cannot smuggle a document past
+        # both.
+        for step in self.body.steps:
+            if _control_depth(step) > PROCESS_IR_V1_MAX_CONTROL_DEPTH:
+                raise _nesting_error(
+                    "branch/decision nesting exceeds the ProcessIR v1 maximum control "
+                    "depth of {0} (a compiler bound, not a Boomi platform limit)".format(
+                        PROCESS_IR_V1_MAX_CONTROL_DEPTH
+                    )
+                )
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -930,10 +1214,15 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         # have two names.
         "generalized_connector_call": "supported",  # #140
         "mixed_connector_execution": "supported",  # #140 — many calls per path
+        # Still GATED after #141: ProcessCall and connector execution may not share
+        # one root-to-leaf path. #141 admits ProcessCall in a Branch leg / Decision
+        # TRUE arm only in PATH MODE (that body is ProcessCall-only and ends in a
+        # stop), reachable only under a control-only root — so no path ever mixes
+        # the two. Sibling legs are independent paths, not a mix.
         "process_call_connector_mixing": "gated",  # process_call x connector
-        "connector_call_in_control_body": "gated",  # #141
-        "continuation_after_branch_or_decision": "gated",  # #141
-        "rich_branch_decision_bodies": "gated",  # #141
+        "connector_call_in_control_body": "supported",  # #141
+        "continuation_after_branch_or_decision": "gated",  # #141 — terminal fan-out only
+        "rich_branch_decision_bodies": "supported",  # #141
         "scoped_try_catch": "gated",  # #142
         "keyed_cache": "gated",  # no live-captured wire shape (#119 census)
         "definedparameter_property_source": "gated",  # no verified wire shape
@@ -1016,12 +1305,36 @@ _REMEDIATION = {
         "The referenced construct is capability-gated or unsupported in ProcessIR v1; "
         "see the PROCESS_IR_V1_CAPABILITIES manifest."
     ),
+    PROCESS_IR_SCHEMA_BRANCH_CARDINALITY: (
+        "A Branch must declare between 2 and 25 legs (the platform's documented bound)."
+    ),
+    PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED: (
+        "Move the steps that followed the branch/decision into every leg or arm — "
+        "ProcessIR v1 emits no continuation after a control node."
+    ),
+    PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY: (
+        "Use a node kind this body slot admits; see the body capability matrix in "
+        "docs/architecture/PROCESS_IR_V1.md."
+    ),
+    PROCESS_IR_SEMANTIC_NESTING_LIMIT: (
+        "Reduce Branch/Decision nesting to at most "
+        "PROCESS_IR_V1_MAX_CONTROL_DEPTH levels, or move the deeper routing into a "
+        "subprocess. This is a ProcessIR v1 compiler bound, not a Boomi platform limit."
+    ),
 }
 
 _CUSTOM_ERROR_CODES = {
     "process_ir_reference_invalid_format": PROCESS_IR_REFERENCE_INVALID_FORMAT,
     "process_ir_capability_unsupported": PROCESS_IR_CAPABILITY_UNSUPPORTED,
     "process_ir_schema_invalid_cardinality": PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
+    # #141
+    "process_ir_semantic_control_continuation_unsupported": (
+        PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED
+    ),
+    "process_ir_capability_node_not_allowed_in_body": (
+        PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+    ),
+    "process_ir_semantic_nesting_limit": PROCESS_IR_SEMANTIC_NESTING_LIMIT,
 }
 
 _MESSAGES = {
@@ -1032,6 +1345,14 @@ _MESSAGES = {
     PROCESS_IR_SCHEMA_INVALID: "value does not match the strict ProcessIRV1 schema",
     PROCESS_IR_REFERENCE_INVALID_FORMAT: "malformed opaque component reference",
     PROCESS_IR_CAPABILITY_UNSUPPORTED: "capability-gated or unsupported construct requested",
+    PROCESS_IR_SCHEMA_BRANCH_CARDINALITY: "branch leg count is outside the 2-25 bound",
+    PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED: (
+        "continuation after a branch or decision is not supported"
+    ),
+    PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY: (
+        "this node kind is not admitted in this control-body slot"
+    ),
+    PROCESS_IR_SEMANTIC_NESTING_LIMIT: "control nesting exceeds the ProcessIR v1 depth bound",
 }
 
 
@@ -1115,6 +1436,12 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
         return _diagnostic(PROCESS_IR_SCHEMA_UNKNOWN_NODE, path)
 
     if err_type in ("too_short", "too_long"):
+        # #141: a Branch's 2-25 leg bound gets its own code. Keyed on the LAST
+        # authored token being ``legs`` so only the Branch bound is re-pointed —
+        # every other list bound (``steps``, ``source_values``, ...) keeps
+        # PROCESS_IR_SCHEMA_INVALID_CARDINALITY exactly as before.
+        if last == "legs":
+            return _diagnostic(PROCESS_IR_SCHEMA_BRANCH_CARDINALITY, path)
         return _diagnostic(PROCESS_IR_SCHEMA_INVALID_CARDINALITY, path)
 
     return _diagnostic(PROCESS_IR_SCHEMA_INVALID, path)

@@ -53,12 +53,16 @@ from boomi_mcp.compiler.process_ir.contracts import (
     dragpoint_x,
 )
 from boomi_mcp.errors import (
+    PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID,
     PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
     PROCESS_IR_COMPILE_INTERNAL,
     PROCESS_IR_COMPILE_NONDETERMINISTIC,
     PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+    PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
+    PROCESS_IR_SEMANTIC_NESTING_LIMIT,
     PROCESS_IR_SEMANTIC_UNREACHABLE,
+    PROCESS_IR_SEMANTIC_UNTERMINATED_PATH,
 )
 
 SENTINEL = "SENTINEL-SECRET-VALUE-DO-NOT-LEAK"
@@ -401,7 +405,14 @@ def test_multiple_entries_is_ambiguous_flow():
     assert _raises(check_cfg_invariants, cfg).code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
 
 
-def test_join_is_ambiguous_flow():
+def test_join_has_its_own_code():
+    """#141: two legs converging on one Stop is a JOIN, not generic ambiguity.
+
+    The message must claim only that ProcessIR v1 does not EMIT a join — two live
+    production processes (71 shapes) contain no node with a second inbound edge
+    and the docs describe no merge step, but that is negative evidence and does
+    NOT establish that Boomi would reject one.
+    """
     cfg = SemanticCfgV1(
         entry_node_id="n1",
         nodes=(
@@ -416,7 +427,11 @@ def test_join_is_ambiguous_flow():
         ),
         exit_node_ids=("n3",),
     )
-    assert _raises(check_cfg_invariants, cfg).code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+    diagnostic = _raises(check_cfg_invariants, cfg)
+    assert diagnostic.code == PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED
+    assert "emits no join" in diagnostic.message
+    # Never overclaim on the platform's behalf.
+    assert "boomi" not in diagnostic.message.lower()
 
 
 def test_flow_past_a_terminal_is_ambiguous_flow():
@@ -938,7 +953,9 @@ def test_branch_dragpoint_row_is_checked():
         ),
         terminal_shape_ids=("shape3", "shape4"),
     )
-    assert _check_plan(plan, cfg).code == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+    # #141: control wiring defects carry their own code — a strictly narrower
+    # claim than "the plan is invalid", and the one that localises the defect.
+    assert _check_plan(plan, cfg).code == PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID
 
 
 def test_synthetic_stop_must_follow_its_routed_target():
@@ -1963,7 +1980,7 @@ def test_terminal_free_cyclic_plan_is_rejected():
                 ),
                 exit_node_ids=("n3",),
             ),
-            PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+            PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED,  # #141: its own code
         ),
         # A dangling edge source.
         (
