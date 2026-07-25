@@ -298,4 +298,41 @@ def adapt_sync_pipeline(config: Dict[str, Any]) -> LegacyAdapterResultV1:
     )
 
 
-__all__ = ["adapt_sync_pipeline"]
+def adapt_sync_pipeline_config(config: Dict[str, Any]) -> LegacyAdapterResultV1:
+    """Registry entry point: a RAW validated ``sync_pipeline`` config -> IR.
+
+    Every adapter in the registry takes the raw, already-validated config for ITS
+    OWN dialect (`adapt_wrapper_subprocess` takes one carrying ``process_calls``,
+    `adapt_flow_sequence` one carrying ``flow_sequence``). ``adapt_sync_pipeline``
+    deliberately takes the *lowered* core instead — the shape the builder already
+    holds by the time it reaches the cut-over, and the shape #140 will promote to
+    the ordinary ``database_to_api_sync`` dialect — so registering it directly
+    would break that contract: a caller handing `adapter_for("sync_pipeline")` a
+    real sync_pipeline config would get ``LEGACY_ADAPTER_UNSUPPORTED_KIND`` at
+    ``/pipeline`` for every input.
+
+    So the registry gets this wrapper and the builder keeps calling
+    ``adapt_sync_pipeline`` with the core it already lowered (no double lowering).
+
+    ``lower_config`` is the dialect's own normalizer and cannot raise on input that
+    passed ``validate_config`` — which runs it internally. On UNVALIDATED input it
+    raises its ``SYNC_PIPELINE_*`` ``BuilderValidationError``, and that is allowed
+    to propagate deliberately: it is the dialect's existing legacy error contract
+    (ADR-001 asks adapters to preserve it), and it names the real defect far better
+    than a re-wrapped adapter diagnostic could.
+
+    A WSS listener config raises ``LEGACY_ADAPTER_UNSUPPORTED_KIND`` here rather
+    than returning anything. That is correct and not a gap: an adapter returns IR
+    or fails, so it *cannot* express "use the legacy renderer" — choosing the
+    renderer is the builder's job (`_sync_pipeline_is_canonical`). This mirrors the
+    registry entry's documented meaning: the dialect is cut over, not every one of
+    its configs.
+    """
+    from ....categories.components.builders.process_flow_builder import (
+        SyncPipelineBuilder,
+    )
+
+    return adapt_sync_pipeline(SyncPipelineBuilder.lower_config(config))
+
+
+__all__ = ["adapt_sync_pipeline", "adapt_sync_pipeline_config"]

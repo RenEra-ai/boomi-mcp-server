@@ -19,9 +19,15 @@ from typing import Callable, Mapping, Optional
 
 from .contracts import LegacyAdapterResultV1
 from .flow_sequence import adapt_flow_sequence
-from .sync_pipeline import adapt_sync_pipeline
+from .sync_pipeline import adapt_sync_pipeline_config
 from .wrapper_subprocess import adapt_wrapper_subprocess
 
+#: Every registered adapter takes the RAW, already-validated config for its own
+#: dialect — the same dict the dialect's ``validate_config`` accepts — and returns
+#: IR. A dialect whose production adapter consumes some other shape (a lowered
+#: core, say) must register a wrapper that adapts from the raw config, never the
+#: inner function. ``test_every_migrated_adapter_accepts_its_raw_dialect_config``
+#: pins this.
 LegacyAdapter = Callable[[dict], LegacyAdapterResultV1]
 
 # Qualified dialect key for the composed flow_sequence sub-dialect of
@@ -51,8 +57,11 @@ _MIGRATED: Mapping[str, LegacyAdapter] = MappingProxyType(
         # #139C: migrated for its 6 non-listener stage chains. The 4 WSS listener
         # chains stay on the legacy renderer behind an explicit routing gate
         # (#140), so this entry means "the dialect is cut over", not "every one of
-        # its configs is".
-        SYNC_PIPELINE_DIALECT: adapt_sync_pipeline,
+        # its configs is" — a listener config fails closed here rather than
+        # returning, because an adapter cannot express "use the other renderer".
+        # NOTE the `_config` suffix: the production adapter takes the LOWERED core,
+        # so the registry gets the raw-config wrapper to honour the contract above.
+        SYNC_PIPELINE_DIALECT: adapt_sync_pipeline_config,
     }
 )
 

@@ -31,6 +31,7 @@ from boomi_mcp.compiler.process_ir.legacy_adapters import (
     migrated_dialects,
 )
 from boomi_mcp.compiler.process_ir.legacy_adapters.contracts import (
+    LegacyAdapterError,
     LegacyAdapterResultV1,
 )
 from boomi_mcp.compiler.process_ir.legacy_adapters.flow_sequence import (
@@ -111,6 +112,85 @@ def test_registry_reports_only_migrated_dialects():
         FLOW_SEQUENCE_DIALECT,
         SYNC_PIPELINE_DIALECT,
     }
+
+
+def test_every_migrated_adapter_accepts_its_raw_dialect_config():
+    """The registry's actual contract: raw validated dialect config -> IR.
+
+    `adapter_for(d)` is the seam that exists so a caller can adapt a dialect
+    WITHOUT knowing which internal function does it. That only works if every
+    entry accepts the same thing the dialect's own `validate_config` accepts.
+
+    #139C broke this on its first attempt by registering the production
+    `adapt_sync_pipeline`, which takes the LOWERED core rather than the raw config
+    — so every call through the registry failed at `/pipeline`. Nothing caught it,
+    because the registry has no production caller. Parametrizing over
+    `migrated_dialects()` means a future dialect cannot be registered wrong: it
+    fails here the moment it is added, with no new test to remember to write.
+    """
+    raw_by_dialect = {
+        WRAPPER_SUBPROCESS_DIALECT: {
+            "process_kind": "wrapper_subprocess",
+            "process_calls": [{"process_id": "P1"}],
+        },
+        FLOW_SEQUENCE_DIALECT: {
+            "process_kind": "database_to_api_sync",
+            "source": {"connector_type": "database", "action_type": "Get",
+                       "connection_id": "C", "operation_id": "O"},
+            "transform": {"mode": "passthrough"},
+            "target": {"connector_type": "rest_client", "action_type": "POST",
+                       "connection_id": "TC", "operation_id": "TO"},
+            "flow_sequence": [{"kind": "map_ref", "map_ref": "M1"}],
+        },
+        SYNC_PIPELINE_DIALECT: {
+            "process_kind": "sync_pipeline",
+            "pipeline": {
+                "stages": [
+                    {"key": "s", "kind": "read", "config": {
+                        "primitive": "db_read", "connection_id": "C", "operation_id": "O"}},
+                    {"key": "t", "kind": "send", "config": {
+                        "primitive": "rest_send", "action_type": "POST",
+                        "connection_id": "TC", "operation_id": "TO"}},
+                ],
+                "dependencies": [{"from_stage": "s", "to_stage": "t"}],
+            },
+        },
+    }
+    # Every migrated dialect must have a sample here — that is what makes this
+    # test fail loudly for a newly registered dialect instead of skipping it.
+    assert set(raw_by_dialect) == migrated_dialects()
+
+    for dialect, raw in sorted(raw_by_dialect.items()):
+        result = adapter_for(dialect)(raw)
+        assert isinstance(result, LegacyAdapterResultV1), dialect
+        assert result.process_ir is not None, dialect
+
+
+def test_registry_sync_pipeline_entry_fails_closed_on_a_listener_config():
+    """A listener config through the registry RAISES rather than returning.
+
+    An adapter returns IR or fails; it cannot express "use the legacy renderer",
+    which is why routing lives in the builder. So the registry entry's meaning is
+    "this dialect is cut over", not "every config of it is" — and the listener
+    arm's deferral to #140 must surface as a fail-closed diagnostic here.
+    """
+    listener_cfg = {
+        "process_kind": "sync_pipeline",
+        "pipeline": {
+            "stages": [
+                {"key": "l", "kind": "listener", "config": {
+                    "primitive": "wss_listen", "operation_id": "WSSOP-1"}},
+                {"key": "t", "kind": "send", "config": {
+                    "primitive": "rest_send", "action_type": "POST",
+                    "connection_id": "TC", "operation_id": "TO"}},
+            ],
+            "dependencies": [{"from_stage": "l", "to_stage": "t"}],
+        },
+    }
+    with pytest.raises(LegacyAdapterError) as exc:
+        adapter_for(SYNC_PIPELINE_DIALECT)(listener_cfg)
+    assert exc.value.diagnostics[0].code == "LEGACY_ADAPTER_UNSUPPORTED_KIND"
+    assert exc.value.diagnostics[0].legacy_source_path == "/source/connector_type"
 
 
 def test_registry_reserved_dialects_are_not_migrated():
