@@ -161,9 +161,16 @@ def test_listener_chains_still_match_the_legacy_renderer(chain):
 def test_db_write_target_keeps_its_mixed_case_send_verb():
     """The whole reason #139C had to correct the compiler's canonicalizer.
 
-    Boomi's DB connectoraction emits ``actionType="Send"`` (mirroring the DB
-    source's ``Get``); upper-casing it to ``SEND`` produces an undeployable
-    process. Before #139C the compiler upper-cased every target verb.
+    The legacy builder emits a DB write target's verb VERBATIM as the mixed-case
+    ``Send`` (mirroring the DB source's ``Get``); before #139C the compiler
+    upper-cased every target verb regardless of family, so the canonical chain
+    emitted ``SEND``.
+
+    The justification is byte-parity with the legacy renderer, and nothing more.
+    Live QA established that a ``SEND`` build does still package, deploy and
+    execute successfully against a 26.07 atom -- so do NOT restate this as "SEND
+    is undeployable". Divergence from the renderer we are replacing is the whole
+    contract of this migration; it needs no further consequence to matter.
     """
     xml = SyncPipelineBuilder.build(
         _pipeline([_rest_fetch(), _map(), _db_write()]), name="P"
@@ -282,7 +289,19 @@ def test_routing_gate_matches_the_legacy_listener_predicate(connector_type, cano
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("connector_type", ["wss", "WSS", "web_services", "web_services_server"])
+@pytest.mark.parametrize(
+    "connector_type",
+    [
+        "wss", "WSS", "  wss  ", "web_services", "web_services_server",
+        # The routing gate mirrors the LEGACY selector, which does not resolve
+        # these two; the refusal gate mirrors the COMPILER's set, which does. No
+        # reachable config can tell them apart (lower_config admits only the wss
+        # aliases), but refusing here turns a deep PROCESS_IR_CAPABILITY_UNSUPPORTED
+        # into a precise adapter pointer -- and #140 promotes this adapter to a
+        # dialect whose input is not pre-filtered.
+        "wssserver", "listener",
+    ],
+)
 def test_adapter_refuses_a_listener_source(connector_type):
     """The independent backstop: a caller must not be able to route a listener
     past the builder's gate and get a silently mis-shaped start_noaction pair."""
@@ -462,6 +481,22 @@ def test_blank_name_still_raises_the_name_error_first():
     assert exc.value.field == "name"
 
 
+def test_lowering_errors_still_outrank_the_reproduced_name_guard():
+    """The other half of the precedence contract, and the easier half to break.
+
+    The reproduced name guard sits AFTER ``lower_config``, exactly where
+    ProcessFlowBuilder's sits relative to it. Hoisting it above ``lower_config`` --
+    a natural-looking simplification -- would silently promote the name error over
+    every ``SYNC_PIPELINE_*`` code whenever a caller gets both wrong at once. The
+    test above uses a VALID pipeline and so cannot catch that.
+    """
+    both_wrong = _pipeline([_db_read(), _map(), _map("m2"), _rest_send()])
+    with pytest.raises(BuilderValidationError) as exc:
+        SyncPipelineBuilder.build(both_wrong, name="   ")
+    assert exc.value.error_code.startswith("SYNC_PIPELINE")
+    assert exc.value.field != "name"
+
+
 # ---------------------------------------------------------------------------
 # 8. Secret hygiene -- diagnostics are value-free
 # ---------------------------------------------------------------------------
@@ -524,12 +559,21 @@ def test_envelope_description_folder_and_process_overrides_survive():
 def test_canonical_arm_uses_the_scheduled_process_options():
     """A listener process carries the 6-attribute listener option set; the
     canonical arm is non-listener by construction, so it must carry the
-    7-attribute scheduled default including stopProcessingIfZeroDocuments."""
+    7-attribute scheduled default including stopProcessingIfZeroDocuments.
+
+    NOTE, because this reads as a contradiction against a live account: these are
+    the bytes we EMIT. Boomi fills in its own default for the omitted attribute on
+    save, so reading the persisted component back through the platform API shows
+    ``stopProcessingIfZeroDocuments`` present on a listener too. Both are true --
+    the listener option set is distinguished on the wire by ``allowSimultaneous``
+    and ``updateRunDates``, which is what the assertions below pin.
+    """
     canonical = SyncPipelineBuilder.build(_pipeline([_db_read(), _rest_send()]), name="P")
     listener = SyncPipelineBuilder.build(_pipeline([_listen(), _rest_send()]), name="P")
     assert "stopProcessingIfZeroDocuments" in canonical
     assert "stopProcessingIfZeroDocuments" not in listener
-    assert 'allowSimultaneous="true"' in listener
+    assert 'allowSimultaneous="false"' in canonical and 'updateRunDates="true"' in canonical
+    assert 'allowSimultaneous="true"' in listener and 'updateRunDates="false"' in listener
 
 
 # ---------------------------------------------------------------------------

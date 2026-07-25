@@ -1018,6 +1018,39 @@ def test_synthetic_stop_must_follow_its_routed_target():
         == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
     )
 
+    # POSITIVE CONTROL (#139C) -- the same plan with the interloper removed, i.e.
+    # the adjacent arrangement this invariant says must be ACCEPTED. Without it,
+    # the rejection above is only known to be an adjacency rejection by
+    # inspection: any unrelated defect in the fixture (a stale action_type, say)
+    # raises the same code and the test passes for the wrong reason. This test
+    # HAS gone vacuous that way before. Asserting acceptance here means the
+    # rejection above can only be the adjacency violation.
+    adjacent = EmissionPlanV1(
+        entry_shape_id="shape1",
+        nodes=(
+            _plan_node(
+                1, StartNoActionInputV1(), role="start",
+                out=[_wire(1, 1, 2, provenance="synthetic")],
+            ),
+            _plan_node(
+                2,
+                ConnectorActionInputV1(
+                    emitter_kind="connectoraction_target",
+                    connector_type="database",
+                    action_type="Send",
+                    connection_id="cid",
+                    operation_id="oid",
+                ),
+                cfg_node="n1",
+                path="/body/steps/0/legs/0/terminal",
+                out=[_wire(2, 1, 3, provenance="synthetic")],
+            ),
+            _plan_node(3, StopInputV1(), role="terminal_stop"),
+        ),
+        terminal_shape_ids=("shape3",),
+    )
+    check_emission_plan_invariants(adjacent, cfg, symbols)
+
 
 def test_swapped_decision_transitions_are_rejected():
     """Swapping BOTH cfg_edge_id and to_shape_id leaves each wire self-consistent.

@@ -6046,9 +6046,13 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
             return ProcessFlowBuilder.build(lowered, name=name, folder_name=folder_name)
 
         description = str(lowered.get("description") or "")
-        # Same treatment as both other cut-overs: extract BEFORE emission so
-        # PROCESS_EXTENSIONS_INVALID keeps its precedence, and so an absent block
-        # yields the byte-identical empty <bns:processOverrides/>.
+        # Extract BEFORE emission, matching WrapperSubprocessBuilder.build (the
+        # composed flow_sequence cut-over extracts after, so the two existing sites
+        # differ here). Ordering it first keeps PROCESS_EXTENSIONS_INVALID ahead of
+        # an emission defect, and an absent block still yields the byte-identical
+        # empty <bns:processOverrides/>. The two orderings are indistinguishable for
+        # this dialect anyway: `lowered` is built by lower_config from a literal
+        # dict, so a config malformed in both ways at once cannot occur.
         process_overrides_xml = ""
         connections = _extract_process_extension_connections(lowered)
         if connections:

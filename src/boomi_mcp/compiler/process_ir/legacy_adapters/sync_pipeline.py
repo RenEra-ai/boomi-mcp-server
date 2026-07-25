@@ -110,17 +110,29 @@ def _check_binding(binding: Dict[str, Any], pointer: str) -> None:
 
 
 def _is_listener(binding: Dict[str, Any]) -> bool:
-    """The SAME predicate the legacy body uses to select the fused start shape.
+    """Would the canonical compiler REFUSE this source as a listener entry?
 
-    Imported lazily so the legacy resolver stays the single source of truth (a
-    duplicated alias table would drift) without charging every compiler import for
-    the builder module — the ``lowering.py`` precedent.
+    Deliberately the compiler's own ``LISTENER_CONNECTOR_TYPES``, NOT the builder's
+    ``_resolve_wss_connector_type``. The two gates mirror different things on
+    purpose: the builder's ROUTING gate must agree with the LEGACY selector (it
+    decides which renderer runs, so disagreeing there would mis-shape a real
+    listener), while this REFUSAL gate must agree with what the canonical chain can
+    represent. The compiler's set is a strict superset — it also holds ``wssserver``
+    and ``listener`` — so refusing on it converts a deep
+    ``PROCESS_IR_CAPABILITY_UNSUPPORTED`` raised during lowering into a precise
+    adapter diagnostic pointing at ``/source/connector_type``.
+
+    No reachable config can tell the two apart: ``_check_source_connector_family``
+    admits only the ``wss`` aliases, and the adapter is reached only through
+    ``lower_config``. The distinction matters for #140, which promotes this adapter
+    to a dialect whose input is not pre-filtered that way.
     """
-    from ....categories.components.builders.process_flow_builder import (
-        _resolve_wss_connector_type,
-    )
+    from ..contracts import LISTENER_CONNECTOR_TYPES
 
-    return _resolve_wss_connector_type(binding.get("connector_type")) is not None
+    connector_type = binding.get("connector_type")
+    if not isinstance(connector_type, str):
+        return False
+    return connector_type.strip().lower() in LISTENER_CONNECTOR_TYPES
 
 
 def _binding_slots(

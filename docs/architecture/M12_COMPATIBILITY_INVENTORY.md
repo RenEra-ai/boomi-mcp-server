@@ -388,10 +388,10 @@ contract**; nothing validates fragment keys at the boundary.
 
 Golden directory: `tests/fixtures/golden_xml/` (the only golden dir). Each fixture below is
 labeled by the **measured comparison mode of its comparing test**. Since #138 (M12.3) the
-process-emitter goldens are UNIFORMLY byte-locked: all **31** committed `golden_xml/*.xml` fixtures
+process-emitter goldens are UNIFORMLY byte-locked: all **34** committed `golden_xml/*.xml` fixtures
 are raw-byte, **0 are canonicalized** (the 8 formerly-canonicalized fixtures in §3.2 were converted
-to raw `==` and 5 new byte anchors were added — §3.2/§3.4 and the §138 note). The M8 JSON examples
-remain structural round-trips.
+to raw `==` and 5 new byte anchors were added — §3.2/§3.4 and the §138 note; #139C then added the
+3 sync_pipeline anchors in §3.4, taking 31 → 34). The M8 JSON examples remain structural round-trips.
 
 ### 3.1 Raw-byte equality (`emitted == golden.read_text()`)
 
