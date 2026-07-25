@@ -39,6 +39,36 @@ from ..kb.account_governance import (
 # Contact Fields (shared across trading partners and organizations)
 # ============================================================================
 
+# Issue #139D (ADR-001 §5/§9) — the two IntegrationSpecV1 authoring surfaces.
+# Published so a caller can discover the strict surface without reading the ADR:
+# ADR-001 §9 lets the strict surface ship precisely because it withdraws no V1
+# acceptance, so V1 is NOT deprecated and emits no warning.
+_AUTHORITY_VERSIONS = {
+    "default": "1.0",
+    "strict": "1.1",
+    "selector_path": "config.integration_spec.version",
+    "strict_input_form": "integration_spec",
+    "legacy_only_input_forms": ["source_description", "bare_top_level"],
+    "v1_deprecated": False,
+    "strict_behavior": (
+        "On version='1.1' an authored top-level integration_spec.pipeline is "
+        "validated against the single authored process's normalized semantics. A "
+        "disagreement — or an ambiguous spec that authors two or more processes — "
+        "is rejected at plan time with LEGACY_ADAPTER_AUTHORITY_CONFLICT, before "
+        "collision resolution and before any mutation. The view is withheld "
+        "(echoed as null) when the authored process resolves to reuse of an "
+        "existing component. version='1.1' NEVER makes the top-level pipeline "
+        "executable; the process component's own config remains the only "
+        "executable authority."
+    ),
+    "legacy_behavior": (
+        "On version='1.0' (the default, and the value every archetype emits) an "
+        "authored top-level pipeline is accepted and preserved as an inert echo "
+        "that drives nothing, exactly as before — including when it contradicts "
+        "the authored process."
+    ),
+}
+
 _CONTACT_FIELDS = {
     "contact_name": "John Doe",
     "contact_email": "john@acme.com",
@@ -6651,6 +6681,7 @@ def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
             "_success": True,
             "schema_name": "IntegrationSpecV1",
             "json_schema": IntegrationSpecV1.model_json_schema(),
+            "authority_versions": _AUTHORITY_VERSIONS,
             "raw_xml_exposed": False,
             "boomi_mutation": False,
             "tool": "build_integration (action='plan' | 'apply')",
@@ -9907,10 +9938,16 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "action": "str (required) — plan | apply | verify",
                 "config": "JSON str (optional) — IntegrationSpecV1 payload and execution options",
             },
+            "authority_versions": _AUTHORITY_VERSIONS,
             "examples": [
                 'build_integration(profile="prod", action="plan", config=\'{"name":"Order Sync","mode":"lift_shift","components":[{"key":"p1","type":"process","action":"create","name":"Order Process","config":{"process_kind":"wrapper_subprocess","process_calls":[{"process_id":"<existing-process-uuid>"}]}}]}\')',
                 'build_integration(profile="prod", action="apply", config=\'{"dry_run":false,"conflict_policy":"reuse","integration_spec":{"name":"Order Sync","mode":"lift_shift","components":[...]}}\')',
                 'build_integration(profile="prod", action="verify", config=\'{"build_id":"<uuid>"}\')',
+                '# Strict authority surface (#139D): opt in with version="1.1" on the EXPLICIT integration_spec form.',
+                '# A top-level "pipeline" that disagrees with the single authored process is then rejected at plan',
+                '# time with LEGACY_ADAPTER_AUTHORITY_CONFLICT instead of being silently ignored. version="1.0" is',
+                '# unchanged and is NOT deprecated.',
+                'build_integration(profile="prod", action="plan", config=\'{"integration_spec":{"version":"1.1","name":"Order Sync","pipeline":{"stages":[...],"dependencies":[...]},"components":[{"key":"main_process","type":"process","action":"create","name":"Order Process","config":{"process_kind":"sync_pipeline","pipeline":{"stages":[...],"dependencies":[...]}}}]}}\')',
                 '# After apply returns build_id: orchestrate_deploy(profile="prod", build_id="<uuid-from-apply>", environment_id="env-1", runtime_id="atom-1", dry_run=true)',
             ],
         },

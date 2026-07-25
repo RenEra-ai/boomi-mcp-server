@@ -97,6 +97,16 @@ PROCESS_IR_COMPILE_VERIFIER_FAILED = "PROCESS_IR_COMPILE_VERIFIER_FAILED"
 # (normally PROCESS_XML_VALIDATION_FAILED) before it reaches a caller. Later
 # adapter slices (#139 sync/database/recipe/authority work) ADD codes here,
 # never rename or re-scope these.
+#
+# ONE deliberate exception (#139D): LEGACY_ADAPTER_AUTHORITY_CONFLICT surfaces
+# PUBLICLY and untranslated. It is not an adapter defect on already-validated
+# input — it is a plan-time rejection of the caller's own payload on a NEW
+# opt-in surface (version="1.1"), so there is no legacy external contract to
+# preserve for it, and ADR-001 §5 requires it to be a "stable, tested error"
+# the caller can key on. LEGACY_ADAPTER_PIPELINE_DRAFT_ONLY remains reserved and
+# unraised: reserved/unlowered PipelineSpec kinds already fail before mutation
+# with their exact SYNC_PIPELINE_* code/field pairs, which the #135
+# characterization suite freezes.
 LEGACY_ADAPTER_UNSUPPORTED_KIND = "LEGACY_ADAPTER_UNSUPPORTED_KIND"
 LEGACY_ADAPTER_PIPELINE_DRAFT_ONLY = "LEGACY_ADAPTER_PIPELINE_DRAFT_ONLY"
 LEGACY_ADAPTER_AUTHORITY_CONFLICT = "LEGACY_ADAPTER_AUTHORITY_CONFLICT"
@@ -474,8 +484,12 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             category="process_ir",
             retryable=False,
             summary=(
-                "A top-level pipeline view disagrees with the normalized single "
-                "authored process on the strict/opt-in surface."
+                "On the strict/opt-in surface (IntegrationSpecV1 version='1.1'), "
+                "an authored top-level pipeline view either disagrees with the "
+                "normalized semantics of the single authored process, or is "
+                "ambiguous because the spec authors two or more processes. "
+                "Rejected at plan time, before collision resolution and before "
+                "any mutation (#139D / ADR-001 §5)."
             ),
             owner="#139",
         ),

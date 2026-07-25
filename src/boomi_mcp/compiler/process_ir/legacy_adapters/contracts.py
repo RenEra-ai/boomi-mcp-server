@@ -86,9 +86,19 @@ class LegacySymbolRequirementV1(_AdapterModel):
 class LegacyAdapterResultV1(_AdapterModel):
     """The normalized output of one legacy adapter.
 
-    ``pipeline_view`` / ``pipeline_view_status`` are the strict-authority (#139
-    ``version="1.1"``) hooks; that selector is DESIGNED-not-activated in this
-    slice, so migrated dialects report ``not_representable`` with a ``None`` view.
+    ``pipeline_view`` / ``pipeline_view_status`` are reserved strict-authority
+    hooks and remain UNUSED. The ``version="1.1"`` selector they were reserved for
+    shipped in #139D, but it deliberately does **not** use them: the strict
+    surface *validates and preserves* the authored view rather than re-deriving
+    one, so no adapter has to produce a view. Deriving would require a
+    config-to-PipelineSpec direction that exists nowhere in the tree (lowering
+    runs PipelineSpec -> block config), i.e. a second semantic compiler, which
+    ADR-001 §6 forbids. The comparison instead normalizes BOTH surfaces through
+    the existing lowering — see ``legacy_adapters/authority.py``.
+
+    Migrated dialects therefore still report ``not_representable`` with a ``None``
+    view, and these two fields stay reserved for a future slice that genuinely
+    needs a per-adapter derived view.
     """
 
     process_ir: ProcessIRV1

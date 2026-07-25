@@ -49,7 +49,7 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Fixtures / tests | The 4 pattern e2e tests above; #135 freeze suite `tests/test_issue_135_compatibility_freeze.py` |
 | Assertion strength | Structural (dict/None comparisons); no XML coverage possible (emits nothing) |
 | Adapter issue | #139 (M12.4 legacy adapters and golden parity) — must become a compiler-derived summary **for a single-process spec** (authored values checked by derived equality, or — on the strict surface / after announced V1 deprecation — rejected with `LEGACY_ADAPTER_AUTHORITY_CONFLICT`, never precedence; V1 preserves a disagreeing value inert until then); a **zero-process** spec's authored pipeline is preserved as a frozen inert value and a **multi-process** one is rejected as ambiguous on the strict surface (V1 preserves it inert until an announced §9 deprecation — ADR §5) |
-| Migration gate | Today the executable nested pipeline **wins silently** when the two disagree (nothing reconciles them — §2.5); the strict `version="1.1"` authority selector that resolves this is **designed, not activated** in #139A (see the ledger below) — the freeze test still pins the silent-precedence baseline. **#139A DID close the ADR-001 §11 secret gap:** a plaintext secret in the top-level `spec.pipeline` stage config is now rejected with `PLAINTEXT_SECRET_REJECTED` (value-free path) in `_build_plan` before any echo/mutation — the two former known-gap freeze tests are flipped to the rejection behavior |
+| Migration gate | Today the executable nested pipeline **wins silently** when the two disagree (nothing reconciles them — §2.5); the strict `version="1.1"` authority selector that resolves this is **ACTIVE as of #139D** (see the #139D section) — on V1 the freeze test still pins the silent-precedence baseline, unchanged. **#139A DID close the ADR-001 §11 secret gap:** a plaintext secret in the top-level `spec.pipeline` stage config is now rejected with `PLAINTEXT_SECRET_REJECTED` (value-free path) in `_build_plan` before any echo/mutation — the two former known-gap freeze tests are flipped to the rejection behavior |
 
 ### 1.2 `main_process.config.pipeline` (process-config dict `"pipeline"` key)
 
@@ -642,7 +642,7 @@ mistyped. The `wrapper_subprocess` adapter builds its IR directly (resolved-ref 
 | `sync_pipeline` + 4 sync archetypes | `sync_pipeline.py` (#139C) | the 6 NON-listener stage chains: `read\|fetch(rest_fetch\|soap_fetch)` → `[map]` → `send(rest_send\|soap_send)\|write(db_write)`. The 4 WSS **listener** chains stay on the legacy renderer behind an explicit routing gate (`_sync_pipeline_is_canonical`) — #140 owns the fused `start_listen` entry | adapter/compile/emit defect → `PROCESS_XML_VALIDATION_FAILED`; `SYNC_PIPELINE_*` codes unchanged and keep precedence (`lower_config` runs first) | `sync_pipeline_db_read_map_rest_send.xml`, `sync_pipeline_fetch_map_db_write.xml`, `sync_pipeline_fetch_rest_send_no_map.xml`, `sync_pipeline_soap_fetch_soap_send.xml` (+ `listener_wss_start.xml` on the legacy arm) | inside `emit_process` | required | **canonical** (listener arm pending #140) |
 | ordinary `database_to_api_sync` (single/linear, Try-Catch, dynamic path, listener) | reserved | — | unchanged | existing goldens | n/a | n/a | **pending-capability** (needs canonical start_listen / dynamic-path / catcherrors / notify emission). #139C's adapter is a *linear single-shape core* adapter deliberately shaped to be promoted here once those four close |
 | `emit_fragment` primitives | — | — | unchanged | — | n/a | n/a | **n/a** (never canonical) |
-| top-level `spec.pipeline` | secret scan only | — | `PLAINTEXT_SECRET_REJECTED` (value-free path) | — | n/a | required | **V1-inert; §11 secret gap CLOSED; strict `version="1.1"` selector designed-not-activated** |
+| top-level `spec.pipeline` | secret scan only | — | `PLAINTEXT_SECRET_REJECTED` (value-free path) | — | n/a | required | **V1-inert; §11 secret gap CLOSED; strict `version="1.1"` selector ACTIVE (#139D) — V1 unchanged** |
 
 ### Deletions / no duplicate emitter path
 
@@ -655,22 +655,33 @@ Try/Catch emitters) stay — they still serve the non-migrated ordinary `databas
 `tests/test_legacy_adapter_cutover.py` pins their absence and that the migrated builds drive
 `emit_process`/`compile_process_ir_v1`.
 
-### Locked-but-not-activated strict authority selector
+### ~~Locked-but-not-activated strict authority selector~~ — ACTIVATED in #139D
 
-`config.integration_spec.version="1.1"` (design fixed in [ADR-001](ADR-001-process-ir-authority.md) §5
-and `.codex/plans/issue-139.md`) is NOT activated in #139A — activation waits until every executable
-dialect (sync/ordinary/listener) has a faithful normalization path so a derived `PipelineSpec` view
-can be computed. Until then V1 preserves a disagreeing top-level pipeline inert (freeze suite), and
-`LEGACY_ADAPTER_AUTHORITY_CONFLICT` / `LEGACY_ADAPTER_PIPELINE_DRAFT_ONLY` are reserved codes.
+`config.integration_spec.version="1.1"` (design fixed in [ADR-001](ADR-001-process-ir-authority.md) §5)
+is **ACTIVE as of #139D** — see the #139D section at the end of this document.
+
+The #139A note here previously said activation had to wait "until every executable dialect
+(sync/ordinary/listener) has a faithful normalization path so a derived `PipelineSpec` view can be
+computed." **That premise was wrong, and dropping it is what unblocked the slice.** The strict surface
+does not derive a view at all: it *validates and preserves* the authored one. Deriving would need a
+config→`PipelineSpec` direction that exists nowhere in the tree (the only normalizer,
+`SyncPipelineBuilder.lower_config`, runs `PipelineSpec` → block config), i.e. a second semantic
+compiler — which ADR-001 §6 forbids. Comparing **both** surfaces through that one existing normalizer
+needs no new derivation and no dialect coverage, so activation never depended on #140/#142 at all.
+
+`LEGACY_ADAPTER_PIPELINE_DRAFT_ONLY` remains a reserved, unraised code (see #139D below).
 
 ### Deferred (issue stays OPEN)
 
-~~sync_pipeline golden-baseline + adapter~~ (**DONE in #139C**, see below), ordinary
-database_to_api_sync (needs canonical listener / dynamic-path / catcherrors / notify emission —
-currently owned by #140/#142), the recipe/archetype named adapters (#145), authority activation, and
-the final cutover that removes the remaining legacy XML dispatch. Full-#139 DOD requires either an
+~~sync_pipeline golden-baseline + adapter~~ (**DONE in #139C**), ~~authority activation~~ (**DONE in
+#139D**), ordinary database_to_api_sync (needs canonical listener / dynamic-path / catcherrors /
+notify emission — currently owned by #140/#142), the recipe/archetype named adapters (#145), and the
+final cutover that removes the remaining legacy XML dispatch. Full-#139 DOD requires either an
 ownership adjustment allowing parity-only support for those already-shipped capabilities or a
 milestone dependency change; the shipped slices do not fake completion around that gap.
+
+**After #139D, every remaining #139 item is blocked on another issue** (#140 / #142 / #145) — none is
+work #139 can do on its own merits.
 
 **Deferred faithfulness items (do NOT affect any valid/deployable config):**
 
@@ -771,3 +782,140 @@ builds through `ProcessFlowBuilder`, never `SyncPipelineBuilder.build`, and so s
 renderer (pinned by a test). Rollback is one boolean: making `_sync_pipeline_is_canonical` return
 `False` restores the legacy renderer for every chain with all goldens still passing, because they are
 legacy bytes by construction.
+
+### #139D landed — the strict pipeline-authority selector (2026-07-25)
+
+Closes the #139 acceptance criterion *"Top-level/component pipeline disagreement has a deterministic
+tested conflict error on the strict/opt-in surface, and a tested preserved-inert (non-precedence) echo
+on V1"* (ADR-001 §5 transition, §9 gate). **Zero emitted-XML impact** — this slice is plan-time
+validation only; all 34 `golden_xml` fixtures and the 3 emitter-parity fixtures are byte-identical, and
+no emitter, builder, adapter, archetype, or fixture was touched.
+
+**The selector.** `IntegrationSpecV1.version` becomes `Literal["1.0", "1.1"]`, default `"1.0"`.
+
+ADR-001 §5 requires a selector *"a pre-#139 server cannot silently drop"*. The code decides which
+mechanism qualifies: `IntegrationSpecV1` declares no `model_config`, so pydantic's default
+`extra="ignore"` applies (pinned by `test_spec_envelope_ignores_unknown_fields`) — an ordinary optional
+flag would be **silently discarded** and the request would degrade to legacy precedence, the exact
+failure the ADR names. A new `version` literal cannot degrade: the old contract rejects it outright.
+
+Reachability is **explicit-form only**. `_normalize_to_spec` passes caller keys through verbatim for
+`integration_spec`, but the `source_description` and bare top-level forms rebuild the spec from a fixed
+key allowlist that carries no `version` — so they always normalize to `1.0`. That is fail-*safe*
+(degrades to frozen legacy), and it is contractual, not incidental.
+
+**Nothing is dragged onto the strict surface.** All six archetype spec constructors hard-pin
+`version="1.0"`; the four that also author a top-level `pipeline` (`api_to_database_sync`,
+`api_to_api_sync`, `http_listener_to_db`, `http_listener_to_rest`) therefore stay on V1 unchanged.
+
+**Dispositions** (evaluated in `_build_plan` immediately after `_normalize_to_spec`, i.e. before
+wrapper synthesis, before collision resolution, before any live lookup, and before any mutation):
+
+| declared authoring processes | submitted semantics | outcome |
+|---|---|---|
+| 0 | — | accept; preserve the inert view |
+| 1 | unavailable (bad/missing `process_kind`, invalid config) | **no disposition** — that payload's own error surfaces untouched (clean-plan gate) |
+| 1 | valid, comparable, equal | accept; keep the view |
+| 1 | valid but not representable by a singular linear view | **reject** — `LEGACY_ADAPTER_AUTHORITY_CONFLICT` |
+| 1 | valid, comparable, unequal | **reject** — same code |
+| ≥2 | anything, including unavailable | **reject** as ambiguous — same code, decided first |
+
+Ambiguity is counted over *declared* authoring actions before collision resolution: an `update` always
+authors (it re-emits XML from its config) even when flagged `reference_only`, which the planner honours
+only for `create`; only a `reference_only` **create** is excluded. Ambiguity therefore outranks the
+clean-plan gate — the choice ADR-001 §5 explicitly leaves to #139.
+
+**The comparison, and why it needed no new derivation.** The only normalizer in the tree,
+`SyncPipelineBuilder.lower_config`, runs **`PipelineSpec` → `database_to_api_sync` block config**. There
+is no config→`PipelineSpec` direction anywhere. Rather than build one (a second semantic compiler,
+forbidden by ADR-001 §6), #139D normalizes **both** surfaces through that same existing lowering and
+compares the projected `{process_kind, source, transform, target}` core.
+
+That fixes the comparison's domain exactly: **the normal form is the image of `lower_config`**, so a
+submitted process carrying anything lowering could never emit is *valid but not representable* — a
+disagreement, never agreement-by-omission (ADR-001 §5: "the absence of a nested `config.pipeline` is
+not agreement"). This is **fail-closed and load-bearing**: `ProcessFlowBuilder.validate_config` accepts
+unknown root keys, so a shipped Try/Catch or Notify block — or any feature block added after this slice
+— would otherwise read as *agreement*. It is mutation-tested (dropping the containment check fails four
+tests).
+
+Two equality traps the tests pin: the typed top-level dump expands every default while a nested config
+pipeline stays byte-compact (so a raw `==` between them **always** differs on identical semantics — the
+comparison must run on the lowered form), and `map_ref`/`map_id` are one selector on **both** sides
+(`ProcessFlowBuilder` accepts `{"mode": "map_ref", "map_id": ...}`). Action verbs are compared
+case-**sensitively** on purpose: post-#139C the emitted `actionType` is family-conditional, so `Send`
+and `SEND` are genuinely different output.
+
+**View-faithfulness.** On the strict surface an authored view may only describe a process the request
+actually authors *and* materializes. When the single authored process resolves to reuse, the submitted
+config is discarded and the reused component's own definition executes, so the view is **withheld**
+(`pipeline: null`) — and the bearer is never rejected for it. The predicate mirrors the *apply-time*
+branch (a declared `create` carrying an `existing_component_id` under `conflict_policy="reuse"`), not
+`planned_action`: an explicit `component_id` keeps `planned_action="create"` at plan time while apply
+still reuses, and reading `planned_action` alone would echo a view of a component the request never
+authored. This touches only the inert view — accept-vs-reject was settled structurally beforehand, so
+live account contents can never move a payload across the reject boundary (ADR-001 §5 determinism note).
+
+**Three rejections, one code, three remediations.** Ambiguity, ordinary disagreement, and
+*not-representable* share the stable `LEGACY_ADAPTER_AUTHORITY_CONFLICT` code (callers key on it) but
+carry different messages. The third exists because of a live-QA finding: a process that is valid yet
+has no linear representation (a `wrapper_subprocess`, a `flow_sequence`, a **wired** Try/Catch + DLQ
+path) can never be matched by ANY authored view, so the ordinary "make the view semantically identical"
+remediation is literally unsatisfiable there. That case says the view has no representation and points
+at the workaround (author the same linear integration as `process_kind="sync_pipeline"`). This is a
+*diagnostics* split only — all three were, and remain, rejections.
+
+**Not-representable is a property of the PROCESS only.** A second QA round caught the first fix
+overreaching: when the process *does* have a linear view and only the **authored view** fails to lower
+(a `branch` / `decision` / `listener` / `write` stage kind, an empty stage list), blaming the process is
+false, and "author it as `sync_pipeline`" is advice the caller has often already followed. That is an
+ordinary disagreement — the view is wrong, and correcting it is an achievable remedy. This matters
+because a mis-written view is the *likeliest* authoring mistake, so mis-classifying it would have moved
+the ambiguity rather than removed it.
+
+**One measured inertness exception.** A `reliability` block that emits no Try/Catch changes no emitted
+byte — and `{retry_count: 0, dlq: {mode: "disabled"}}` is the `database_to_api_sync` archetype's own
+DEFAULT shape, so treating its mere presence as a feature locked the flagship archetype's output out of
+the strict surface for no semantic reason (QA proved the two variants emit byte-identical XML). The
+exception is decided by the **builder's own** `_reliability_requests_try_catch` predicate — the same one
+the Branch v1 composition guard uses — so the two can never drift, and it is sound only because it runs
+*after* `validate_config`, which rejects the gated shapes that predicate also reports as False.
+
+Be precise about how far that exception reaches, because the obvious stronger claim is **false**.
+Unknown keys are fail-closed only at the **top level** of the process config: a new sibling block
+(`unknown_future_block`, a future `flow_control`) is non-representable automatically, which is the
+property the containment check exists for. *Inside* `reliability` the rule is not "unknown keys fail
+closed" but **"inert iff no Try/Catch is emitted"** — so `reliability: {"bogus_key": 1}` is accepted
+(measured). That outcome is correct, since such a block emits nothing and the view still describes the
+emitted XML faithfully, but it means a future *catch-emitting* `reliability` key would need
+`_reliability_requests_try_catch` taught about it. Sharing that one predicate with the emitter and the
+Branch guard is exactly what keeps this safe: the key cannot start emitting a Try/Catch without the
+predicate that gates this check learning about it at the same time.
+
+**Error contract.** `LEGACY_ADAPTER_AUTHORITY_CONFLICT` surfaces **publicly and untranslated** — the one
+deliberate exception to the adapter-family translation rule, because it is not an adapter defect on
+already-validated input but a plan-time rejection of the caller's own payload on a surface with no
+legacy external contract to preserve. The payload is exactly
+`{_success, error_code, error, field, hint}` with `field="integration_spec.pipeline"` — deliberately
+value-free (no component keys, names, ids, config, or normalized form), pinned by a leak test.
+
+**`LEGACY_ADAPTER_PIPELINE_DRAFT_ONLY` stays reserved and unraised.** Reserved/unlowered `PipelineSpec`
+kinds already fail *before mutation* with their exact `SYNC_PIPELINE_*` code/field pairs, which the #135
+characterization suite freezes; re-coding them would break those pins for no behavioural gain. The #139
+criterion "every reserved/unlowered PipelineSpec kind fails as draft-only before mutation" is therefore
+satisfied behaviourally, by the existing codes.
+
+**Reserved adapter hooks stay unused.** `pipeline_view` / `pipeline_view_status` on
+`LegacyAdapterResultV1` remain `None` / `"not_representable"`: validating-and-preserving needs no
+per-adapter derived view. They stay reserved for a future slice that genuinely needs one.
+
+**Compatibility budget: zero.** Every authority-baseline freeze test constructs a `version="1.0"`
+payload, so all 37 pass unchanged. That suite is the selector-leak detector — if any of it moves, the
+strict surface has leaked into V1.
+
+**Publication.** `get_schema_template(schema_name="IntegrationSpecV1")` and the `build_integration`
+entry of `list_capabilities` both carry an `authority_versions` record (default/strict, selector path,
+strict-only input form, `v1_deprecated: false`); the generated JSON schema independently shows
+`enum: ["1.0","1.1"]` with `default: "1.0"`. `docs/MCP_TOOL_DESIGN.md` carries the full outcome table.
+**V1 is not deprecated and emits no warning** — ADR-001 §9 permits this slice precisely because it
+withdraws no V1 acceptance.

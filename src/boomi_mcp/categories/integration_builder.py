@@ -221,6 +221,7 @@ from .components.builders.transform_function_wrapper_builder import (
     get_transform_function_wrapper_builder,
 )
 from .components.component_update_preservation import merge_for_update
+from ..errors import LEGACY_ADAPTER_AUTHORITY_CONFLICT
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
 from .components.trading_partners import create_trading_partner, update_trading_partner
@@ -5123,6 +5124,37 @@ def _scan_top_level_pipeline_secrets(
     )
 
 
+def _authored_step_will_reuse(
+    steps: List[Dict[str, Any]],
+    authored_key: Optional[str],
+    conflict_policy: str,
+) -> bool:
+    """Will the single authored process step reuse an existing component at apply?
+
+    Issue #139D. Keyed on the APPLY-time predicate (``_apply_plan``: a declared
+    ``create`` carrying an ``existing_component_id`` reuses under
+    ``conflict_policy="reuse"``), NOT on ``planned_action``. An explicit
+    ``component_id`` skips candidate resolution, so such a step keeps
+    ``planned_action="create"`` at plan time while apply still reuses it — reading
+    ``planned_action`` alone would miss exactly that corner and echo a view of a
+    component the request never authored.
+
+    A ``reference_only`` create also reuses at apply, but it is excluded from the
+    declared-authoring count, so ``authored_key`` can never name one.
+    """
+    if not authored_key:
+        return False
+    for step in steps:
+        if step.get("key") != authored_key:
+            continue
+        if step.get("declared_action") != "create":
+            return False
+        if not step.get("existing_component_id"):
+            return False
+        return conflict_policy == "reuse"
+    return False
+
+
 def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # Issue #139 M12.4 (ADR-001 §11): reject a plaintext secret in the top-level
     # integration_spec.pipeline BEFORE normalization (so a malformed stage cannot
@@ -5136,6 +5168,65 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             "error": str(pipeline_secret_err),
         }
     spec = _normalize_to_spec(config)
+    # Issue #139D M12.4 (ADR-001 §5): strict-surface pipeline authority. Runs on
+    # the AUTHORED payload only — before wrapper synthesis, before collision
+    # resolution, before any live lookup, and before any mutation — so the
+    # accept-vs-reject outcome can never depend on live account contents. It is a
+    # no-op unless the caller explicitly opted in with version="1.1" AND authored
+    # a top-level pipeline; version="1.0" keeps its frozen inert-echo behaviour.
+    #
+    # Imported lazily on purpose: a module-level import would pull the ProcessIR
+    # compiler package into the server's import graph, breaking the M12
+    # dark-shipping invariant that `import server` never imports the compiler
+    # (tests/test_process_ir_compiler_surface.py).
+    from ..compiler.process_ir.legacy_adapters.authority import (
+        AGREE as AUTHORITY_AGREE,
+        AMBIGUOUS as AUTHORITY_AMBIGUOUS,
+        DISAGREE as AUTHORITY_DISAGREE,
+        NOT_REPRESENTABLE as AUTHORITY_NOT_REPRESENTABLE,
+        evaluate_pipeline_authority,
+    )
+
+    authority = evaluate_pipeline_authority(spec)
+    # Each rejection gets its OWN remediation. They share a stable code (callers
+    # key on that), but "make the view match" is unsatisfiable advice for a
+    # valid-yet-unrepresentable process — no value of the authored pipeline would
+    # ever match it — so that case must say so instead.
+    _AUTHORITY_REJECTIONS = {
+        AUTHORITY_AMBIGUOUS: (
+            "Strict pipeline authority is ambiguous because the spec declares "
+            "multiple authored process components.",
+            "Remove integration_spec.pipeline, or submit exactly one authored "
+            "process for a singular pipeline view.",
+        ),
+        AUTHORITY_DISAGREE: (
+            "Strict pipeline authority conflicts with the normalized submitted "
+            "process configuration.",
+            "Remove integration_spec.pipeline, or make it semantically identical "
+            "to the single authored process; no authored pipeline copy takes "
+            "precedence.",
+        ),
+        AUTHORITY_NOT_REPRESENTABLE: (
+            "Strict pipeline authority cannot describe the single authored "
+            "process: it is valid, but has no representation as a singular linear "
+            "pipeline view.",
+            "Remove integration_spec.pipeline. No value of it can match this "
+            "process — a singular linear view describes only a "
+            "source -> [map] -> target chain, so a wrapper_subprocess, a "
+            "flow_sequence, or any richer block (Try/Catch, DLQ, Notify, flow "
+            "control) has no such view. Authoring the same linear integration as "
+            "process_kind='sync_pipeline' makes the view expressible.",
+        ),
+    }
+    if authority.disposition in _AUTHORITY_REJECTIONS:
+        message, hint = _AUTHORITY_REJECTIONS[authority.disposition]
+        return {
+            "_success": False,
+            "error_code": LEGACY_ADAPTER_AUTHORITY_CONFLICT,
+            "error": message,
+            "field": "integration_spec.pipeline",
+            "hint": hint,
+        }
     # Issue #41 r3: inject transform.function wrappers between any
     # transform.map (map_type='script') and the script.mapping it
     # references. Live Boomi requires the indirection — see
@@ -6543,9 +6634,26 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # steps / planned_action / validation_error / unresolvable_steps.
     warnings.extend(_lint_script_bodies(spec))
 
+    spec_dump = spec.model_dump()
+    # Issue #139D (ADR-001 §5, view-faithfulness). On the STRICT surface an
+    # authored top-level pipeline may only be presented as a view of a process
+    # this request actually authors AND materializes. When the single authored
+    # process resolves to reuse of an existing component, the submitted config is
+    # discarded and the reused component's own definition executes — so keeping
+    # the authored summary would present discarded intent as a description of a
+    # component it never built. Withhold the view instead.
+    #
+    # This touches ONLY the inert view. Accept-vs-reject was settled structurally
+    # above, before any account lookup, so live account contents can move the
+    # echoed view between the normalized pipeline and null but can NEVER move a
+    # payload across the reject boundary (ADR-001 §5 determinism note).
+    if authority.disposition == AUTHORITY_AGREE and _authored_step_will_reuse(
+        steps, authority.authored_key, conflict_policy
+    ):
+        spec_dump["pipeline"] = None
     result = {
         "_success": True,
-        "integration_spec": spec.model_dump(),
+        "integration_spec": spec_dump,
         "conflict_policy": conflict_policy,
         "execution_order": execution_order,
         "steps": steps,

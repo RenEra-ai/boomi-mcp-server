@@ -46,7 +46,26 @@ class IntegrationComponentSpec(BaseModel):
 class IntegrationSpecV1(BaseModel):
     """Canonical JSON contract for integration planning and execution."""
 
-    version: Literal["1.0"] = "1.0"
+    version: Literal["1.0", "1.1"] = Field(
+        default="1.0",
+        description=(
+            "Authoring surface selector (issue #139D / ADR-001 §5, §9). "
+            "'1.0' (the default, and the value every archetype emits) is the "
+            "frozen legacy surface: an authored top-level 'pipeline' is accepted "
+            "and preserved as an INERT echo that drives nothing, exactly as "
+            "today. '1.1' opts in to the STRICT surface, on which a top-level "
+            "'pipeline' that disagrees with the single authored process — or is "
+            "ambiguous because the spec authors two or more processes — is "
+            "rejected at plan time with LEGACY_ADAPTER_AUTHORITY_CONFLICT, "
+            "before collision resolution and before any mutation. '1.1' NEVER "
+            "makes 'pipeline' executable; the process component's own config is "
+            "still the only executable authority. Selecting the strict surface "
+            "requires the explicit 'integration_spec' input form — the "
+            "'source_description' and bare top-level forms rebuild the spec from "
+            "a fixed key allowlist that carries no 'version', so they always "
+            "normalize to '1.0'. V1 is NOT deprecated and emits no warning."
+        ),
+    )
     name: str = Field(..., description="Integration name")
     mode: Literal["lift_shift", "redesign"] = Field(default="lift_shift")
     components: List[IntegrationComponentSpec] = Field(default_factory=list)
@@ -92,7 +111,15 @@ class IntegrationSpecV1(BaseModel):
         description=(
             "Optional semantic stage graph (M5 sync-pipeline contract). When "
             "present, describes the stage graph; no Boomi XML is emitted from "
-            "this field alone — wiring to process-flow builders is M5.2+."
+            "this field alone — it is an inspectable/analysis view, never an "
+            "executable input (ADR-001 §4). On version='1.0' it is preserved as "
+            "an inert echo even when it contradicts the authored process. On "
+            "version='1.1' it is validated against the single authored process's "
+            "normalized semantics and a disagreement is rejected with "
+            "LEGACY_ADAPTER_AUTHORITY_CONFLICT; it is additionally withheld "
+            "(echoed as null) when that process resolves to reuse of an existing "
+            "component, because the request then authors no process for the view "
+            "to describe (ADR-001 §5 view-faithfulness)."
         ),
     )
 
