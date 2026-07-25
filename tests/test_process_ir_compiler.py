@@ -521,6 +521,14 @@ def test_connector_canonicalization_matches_the_legacy_builder():
     The compiler reuses ``_canonical_connector_type`` lazily rather than
     duplicating the alias table; this fails loudly if that reuse is ever
     replaced by a local copy that drifts.
+
+    Issue #139C re-anchored the target expectations on the **LINEAR** builder
+    (the ordinary source/transform/target emission path) rather than on the
+    deleted composed-flow target emitter. The composed helper was
+    REST-target-only by construction, so its unconditional ``.upper()`` was
+    harmless there; the linear path is family-conditional, and it is the path
+    ``sync_pipeline`` and ordinary ``database_to_api_sync`` delegate to. A DB
+    write target's mixed-case ``Send`` must survive.
     """
     from boomi_mcp.categories.components.builders.process_flow_builder import (
         _canonical_connector_type,
@@ -529,21 +537,92 @@ def test_connector_canonicalization_matches_the_legacy_builder():
 
     for alias in ("rest_client", "rest", "database", "soap_client", "wssoapclientsdk"):
         canonical = _canonical_connector_type(alias)
+        is_rest = alias in ("rest_client", "rest")
+
         target_type, target_action = _canonical_connector_metadata(
             "target", alias, " send "
         )
-        assert target_type == canonical
-        assert target_action == "SEND"
+        if is_rest:
+            assert target_type == canonical
+            assert target_action == "SEND"
+        else:
+            assert target_type == canonical.lower()
+            assert target_action == "send"
 
         source_type, source_action = _canonical_connector_metadata(
             "source", alias, " Get "
         )
-        if alias in ("rest_client", "rest"):
+        if is_rest:
             assert source_type == canonical
             assert source_action == "GET"
         else:
             assert source_type == canonical.lower()
             assert source_action == "Get"
+
+
+def test_connector_canonicalization_agrees_with_the_linear_builder_block():
+    """Recompute the linear builder's own canonicalization and require agreement.
+
+    The test above pins the *rule*; this pins the rule against the actual legacy
+    code it must mirror, for every reachable (family, role, verb) triple. It is
+    the direct guard that made lifting the #139B ``lowering.py`` boundary safe:
+    if either side is edited independently, this fails.
+
+    The oracle below is a transcription of the builder's two canonicalization
+    blocks -- the source branch and the LINEAR target branch -- which differ from
+    each other only in which verb they read.
+    """
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        _resolve_rest_connector_type,
+    )
+    from boomi_mcp.categories.components.builders.process_flow_builder import (
+        _canonical_connector_type,
+    )
+    from boomi_mcp.compiler.process_ir.lowering import _canonical_connector_metadata
+
+    def legacy_linear(connector_type, action_type):
+        canonical = _canonical_connector_type(connector_type)
+        raw = str(action_type or "").strip()
+        if _resolve_rest_connector_type(connector_type) is not None:
+            return canonical, raw.upper()
+        return canonical.lower(), raw
+
+    families = (
+        "database",
+        "DATABASE",
+        "rest",
+        "rest_client",
+        "officialboomi-X3979C-rest-prod",
+        "soap_client",
+        "wssoapclientsdk",
+    )
+    verbs = ("Get", "Send", " Send ", "POST", "post", "EXECUTE", "execute", "", None)
+    for family in families:
+        for role in ("source", "target"):
+            for verb in verbs:
+                assert _canonical_connector_metadata(role, family, verb) == legacy_linear(
+                    family, verb
+                ), (family, role, verb)
+
+    # The three triples #139C repaired, spelled out so a regression names itself.
+    assert _canonical_connector_metadata("target", "database", "Send") == (
+        "database",
+        "Send",
+    )
+    assert _canonical_connector_metadata("target", "DATABASE", "Send") == (
+        "database",
+        "Send",
+    )
+    assert _canonical_connector_metadata("target", "soap_client", "execute") == (
+        "wssoapclientsdk",
+        "execute",
+    )
+    # ...and the REST target arm, which is unchanged and is what every already
+    # migrated flow_sequence target takes.
+    assert _canonical_connector_metadata("target", "rest_client", "post") == (
+        "officialboomi-X3979C-rest-prod",
+        "POST",
+    )
 
 
 def test_padded_property_name_is_stripped_like_the_legacy_emitter():

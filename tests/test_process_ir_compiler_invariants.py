@@ -974,10 +974,19 @@ def test_synthetic_stop_must_follow_its_routed_target():
             ),
             _plan_node(
                 2,
+                # #139C: this MUST stay in sync with the symbol's ``Send`` below.
+                # Before #139C the canonicalizer upper-cased every target verb, so
+                # ``SEND`` here was the recomputed value and the plan checker's
+                # recomputation step passed -- letting the ADJACENCY invariant this
+                # test is named for be the thing that raised. Carrying a stale
+                # ``SEND`` after the fix would still raise the same code, but from
+                # the recomputation mismatch instead, and this test would go
+                # silently VACUOUS: it would pass even with the adjacency check
+                # deleted. It did not fail on the fix -- it had to be found.
                 ConnectorActionInputV1(
                     emitter_kind="connectoraction_target",
                     connector_type="database",
-                    action_type="SEND",
+                    action_type="Send",
                     connection_id="cid",
                     operation_id="oid",
                 ),
@@ -1145,7 +1154,9 @@ def test_synthetic_stop_may_not_carry_outgoing_flow():
     connector = ConnectorActionInputV1(
         emitter_kind="connectoraction_target",
         connector_type="database",
-        action_type="SEND",
+        # #139C: a DB target's verb is emitted verbatim (mixed-case ``Send``), so
+        # this must match what the paired symbol recomputes to.
+        action_type="Send",
         connection_id="cid",
         operation_id="oid",
     )
@@ -1589,7 +1600,9 @@ def test_synthetic_stop_with_flipped_continue_is_rejected():
     connector = ConnectorActionInputV1(
         emitter_kind="connectoraction_target",
         connector_type="database",
-        action_type="SEND",
+        # #139C: a DB target's verb is emitted verbatim (mixed-case ``Send``), so
+        # this must match what the paired symbol recomputes to.
+        action_type="Send",
         connection_id="cid",
         operation_id="oid",
     )

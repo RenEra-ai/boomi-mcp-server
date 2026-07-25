@@ -99,24 +99,49 @@ _EXIT_KINDS = {
 
 
 def _canonical_connector_metadata(role: str, connector_type: str, action_type: str):
-    """Normalise connector metadata exactly as the legacy composed path does.
+    """Normalise connector metadata exactly as the legacy LINEAR builder does.
 
     The legacy builder does NOT emit a symbol's connector family verbatim: it
     resolves aliases to the canonical subtype (``rest_client`` ->
     ``officialboomi-X3979C-rest-prod``, ``soap_client`` -> ``wssoapclientsdk``)
-    and normalises action case, with rules that differ by role (the source vs
-    target rules the pre-#139 composed emitter applied; that path now routes
-    through this compiler, so this helper is the single canonicaliser):
+    and normalises the action case. The rule is **family-conditional and
+    role-independent** — the source and linear-target rules coincide:
 
-    * source, REST family -> canonical subtype, action upper-cased
-    * source, other       -> canonical subtype LOWER-cased, action left raw
-    * target, any family  -> canonical subtype, action upper-cased
+    * REST family (either role) -> canonical subtype, action UPPER-cased
+    * any other family          -> canonical subtype LOWER-cased, action VERBATIM
+
+    Issue #139C corrected this. It previously upper-cased the action for
+    ``role == "target"`` regardless of family, reproducing the *deleted composed*
+    flow target emitter (pre-#139 ``_target_terminal_entries``). That helper was
+    REST-target-only by construction, so its unconditional ``.upper()`` and its
+    missing ``.lower()`` were harmless there — but the ordinary/linear target path
+    this compiler must match is family-conditional and carries an explicit warning
+    against exactly this corruption: a DATABASE write target emits the mixed-case
+    verb ``Send`` (mirroring the DB source's ``Get``), and an unconditional
+    ``.upper()`` would corrupt it to ``SEND``. The same bug lower-cased nothing,
+    so an authored ``connector_type="DATABASE"`` emitted ``connectorType="DATABASE"``
+    instead of ``database``, and a SOAP target's authored ``execute`` became
+    ``EXECUTE``. No already-migrated dialect could reach any of those triples:
+    ``flow_sequence`` validates its bindings with ``allow_db_target=False`` and
+    ``allow_soap_target=False``, so every flow_sequence target is REST, and
+    ``wrapper_subprocess`` has no connectors at all.
+
+    Deliberately NOT reproduced: the decision/branch leg-target sites, which
+    upper-case unconditionally. Those are REST-only-reachable through
+    ``validate_config`` (their ``_validate_target_binding`` calls also default
+    ``allow_db_target``/``allow_soap_target`` to ``False``), so this rule agrees
+    with them on every reachable input; the divergence is a pre-existing, latent
+    legacy inconsistency owned by no issue.
+
+    ``role`` is retained: it is part of the ``_emitter_input_for`` call shape and
+    documents a real domain distinction that is currently degenerate (#140's
+    listener entry policy re-splits on it).
 
     Passing a symbol's raw alias straight through would hand #138 an input that
     serialises non-parity connector XML. The legacy helpers are imported lazily
     so they stay the single source of truth (a duplicated alias table would
     drift) without charging every ``import boomi_mcp.compiler`` for the 7.5k-line
-    builder module. ``test_compiler_connector_canonicalization_matches_builder``
+    builder module. ``test_connector_canonicalization_matches_the_legacy_builder``
     pins the agreement.
     """
     from ...categories.components.builders.process_flow_builder import (
@@ -126,8 +151,6 @@ def _canonical_connector_metadata(role: str, connector_type: str, action_type: s
 
     canonical = _canonical_connector_type(connector_type)
     action = str(action_type or "").strip()
-    if role == "target":
-        return canonical, action.upper()
     if _resolve_rest_connector_type(connector_type) is not None:
         return canonical, action.upper()
     return canonical.lower(), action
