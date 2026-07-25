@@ -634,6 +634,39 @@ def test_missing_connection_id_surfaces_as_the_builder_error_not_a_raw_validatio
     assert not str(exc.value).startswith("SYNC_PIPELINE")
 
 
+@pytest.mark.parametrize("source", [_db_read, _rest_fetch, _soap_fetch])
+@pytest.mark.parametrize("target", [_rest_send, _db_write, _soap_send])
+@pytest.mark.parametrize(
+    "map_config",
+    [None, {}, {"map_ref": "M"}, {"map_id": "M"},
+     {"map_ref": "M", "label": "L"}, {"map_id": "M", "label": "L"}],
+)
+def test_transform_allow_list_covers_everything_lowering_can_emit(source, target, map_config):
+    """Tie the hand-maintained allow-list to what `lower_config` actually emits.
+
+    This guard is the one change in #139C that can make a previously-ACCEPTED
+    config FAIL rather than merely changing a diagnostic, so its safety rests
+    entirely on the two staying in agreement. They are separate literals in
+    separate modules with nothing linking them: add a fifth key to `_lower_map_stage`
+    and the guard silently converts it into a hard rejection on the LIVE path.
+    Enumerate the agreement instead of asserting it in a comment.
+    """
+    from boomi_mcp.compiler.process_ir.legacy_adapters.sync_pipeline import _TRANSFORM_KEYS
+
+    stages = [source("s")]
+    if map_config is not None:
+        stages.append(_stage("m", "map", {"primitive": "map"}, map_config))
+    stages.append(target("t"))
+    try:
+        lowered = SyncPipelineBuilder.lower_config(_pipeline(stages))
+    except BuilderValidationError:
+        # Chain rejected upstream (e.g. db_read -> db_write has no archetype);
+        # nothing reaches the adapter, so there is no agreement to check.
+        return
+    emitted = set(lowered.get("transform") or {})
+    assert emitted <= _TRANSFORM_KEYS, sorted(emitted - _TRANSFORM_KEYS)
+
+
 def test_process_extensions_error_outranks_an_adapter_defect():
     """A config CAN be malformed in two ways at once, so the order is observable.
 
