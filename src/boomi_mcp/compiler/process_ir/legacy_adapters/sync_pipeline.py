@@ -1,0 +1,289 @@
+"""Production ``sync_pipeline`` -> ProcessIR adapter (issue #139 M12.4, slice C).
+
+Normalizes the **lowered** linear core a ``sync_pipeline`` config produces
+(``{process_kind, source, transform, target}`` plus envelope keys) into a
+:class:`ProcessIRV1` plus the component-symbol requirements the canonical
+compiler/emitter needs.
+
+**It consumes the LOWERED core, not the raw pipeline graph.**
+``SyncPipelineBuilder.lower_config`` is the only sync_pipeline-exclusive code in
+the repo and stays the single source of truth for the dialect's semantics — the
+accepted stage chains, the connector-family agreement guards, and the default
+verb per stage kind all live there. Re-deriving any of that here would create
+exactly the second semantic compiler ADR-001 exists to prevent. A useful
+consequence: this adapter is a *linear single-shape core* adapter, so #140 can
+promote it to the ordinary ``database_to_api_sync`` dialect unchanged once that
+dialect's four capability gaps (start_listen, dynamic_path, catcherrors, notify)
+close.
+
+Envelope data (``description``, ``folder_name``, ``process_extensions``) is NOT
+represented here — the component assembler owns it, exactly as the legacy path
+does. Per ADR-001 §6 the IR carries no XML, layout, shape ids, CFG edges,
+credentials, or raw legacy config, and every diagnostic is value-free.
+
+**Listener chains are NOT handled here (#140).** A WSS listener source is not
+representable in ProcessIR v1 at three independent layers: there is no
+``start_listen`` emitter key, the compiler fails closed for a listener source,
+and ``SourceEndpointV1.connection_ref`` is required while a lowered listener
+binding carries no ``connection_id`` at all. The builder routes those chains to
+the legacy renderer *before* calling this adapter; the guard below is the second,
+independent gate so a future caller cannot route one in past the first.
+
+Refs are **occurrence-scoped aliases** (#139B): every id slot becomes
+``$ref:legacy.adapter:<RFC 6901 pointer>`` and the requirement carries the real
+id as its ``legacy_selector``. Distinct aliases may resolve to the same component
+id, so a config that reuses one id across incompatible roles (say
+``map_ref == source.connection_id``) still round-trips byte-faithfully instead of
+collapsing into one incompatible symbol.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional, Tuple
+
+from ....errors import LEGACY_ADAPTER_SEMANTIC_LOSS, LEGACY_ADAPTER_UNSUPPORTED_KIND
+from ....models.process_ir import parse_process_ir_v1
+from .contracts import (
+    LEGACY_ADAPTER_ALIAS_PREFIX,
+    LegacyAdapterResultV1,
+    LegacySymbolRequirementV1,
+    adapter_diagnostic,
+)
+
+# Every root key `lower_config` can emit. Unlike the wrapper adapter (whose legacy
+# path accepted-and-ignored unknown root keys, so they are recorded as no-ops),
+# this dialect is strictly fail-closed: `lower_config` builds its result from a
+# literal dict, so an unknown root key can only reach here through a direct
+# `build()` bypass carrying a hand-crafted core — where it would be one of
+# `flow_sequence` / `reliability` / `branch` / `decision` / `flow_control` /
+# `return_documents`, every one of which CHANGES the emitted XML. Silently
+# dropping any of them is the mis-shaping this boundary exists to prevent.
+_KNOWN_ROOT_KEYS = frozenset(
+    {"process_kind", "source", "transform", "target", "description", "process_extensions"}
+)
+# Consumed by the component assembler, outside the IR. Stripped, and deliberately
+# NOT recorded as no-op paths (the #139A `_ENVELOPE_ROOT_KEYS` precedent): a key
+# the envelope honours was never dropped.
+_ENVELOPE_ROOT_KEYS = frozenset({"description", "process_extensions"})
+_BINDING_KEYS = frozenset(
+    {"connector_type", "action_type", "connection_id", "operation_id", "label"}
+)
+_SUPPORTED_TRANSFORM_MODES = frozenset({"passthrough", "map_ref"})
+
+
+def _require_dict(value: Any, pointer: str, what: str) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        raise adapter_diagnostic(
+            LEGACY_ADAPTER_SEMANTIC_LOSS, pointer, f"{what} must be a JSON object"
+        )
+    return value
+
+
+def _coerce_id(value: Any) -> str:
+    """The legacy id idiom: ``str(x or "").strip()`` (pfb linear params block)."""
+    return str(value or "").strip()
+
+
+def _label_field(block: Dict[str, Any]) -> Dict[str, str]:
+    """The legacy label idiom: present only when authored, coerced with ``str(x or "")``.
+
+    Reproduced exactly so a validated non-string label (e.g. ``7``) survives strict
+    ProcessIR parsing byte-identically, and a falsy ``0``/``False`` maps to ``""``.
+    An absent label yields no key at all, which the emitter renders as ``userlabel=""`` —
+    the same bytes as legacy's unconditional ``str(x or "")`` over a missing key.
+    """
+    return {"label": str(block.get("label") or "")} if block.get("label") is not None else {}
+
+
+def _check_binding(binding: Dict[str, Any], pointer: str) -> None:
+    extra = sorted(set(binding) - _BINDING_KEYS)
+    if extra:
+        # `dynamic_path` is the one that matters in practice: it inserts a Set
+        # Properties shape BEFORE the connector and shifts every downstream index,
+        # and ProcessIR v1 cannot express it (#139/#140). Reject rather than emit a
+        # silently different flow.
+        raise adapter_diagnostic(
+            LEGACY_ADAPTER_UNSUPPORTED_KIND,
+            f"{pointer}/{extra[0]}",
+            "connector binding key is not representable in ProcessIR v1",
+        )
+
+
+def _is_listener(binding: Dict[str, Any]) -> bool:
+    """The SAME predicate the legacy body uses to select the fused start shape.
+
+    Imported lazily so the legacy resolver stays the single source of truth (a
+    duplicated alias table would drift) without charging every compiler import for
+    the builder module — the ``lowering.py`` precedent.
+    """
+    from ....categories.components.builders.process_flow_builder import (
+        _resolve_wss_connector_type,
+    )
+
+    return _resolve_wss_connector_type(binding.get("connector_type")) is not None
+
+
+def _binding_slots(
+    binding: Dict[str, Any], base: str, kind: str
+) -> Tuple[Dict[str, Any], List[LegacySymbolRequirementV1]]:
+    """Build one ``source``/``target`` IR node plus its two symbol requirements."""
+    emitter_kind = f"connectoraction_{kind}"
+    node = {"kind": kind, **_label_field(binding)}
+    requirements: List[LegacySymbolRequirementV1] = []
+    for field, ref_key, component_type in (
+        ("connection_id", "connection_ref", "connector-settings"),
+        ("operation_id", "operation_ref", "connector-action"),
+    ):
+        pointer = f"{base}/{field}"
+        selector = _coerce_id(binding.get(field))
+        if not selector:
+            # Without this the empty selector fails LegacySymbolRequirementV1's
+            # min_length as a RAW pydantic ValidationError, which is not in the
+            # cut-over's caught tuple and would escape to a public caller.
+            raise adapter_diagnostic(
+                LEGACY_ADAPTER_SEMANTIC_LOSS,
+                pointer,
+                "connector binding is missing a resolved component id",
+            )
+        node[ref_key] = LEGACY_ADAPTER_ALIAS_PREFIX + pointer
+        is_operation = component_type == "connector-action"
+        requirements.append(
+            LegacySymbolRequirementV1(
+                role=f"{emitter_kind}.{'operation' if is_operation else 'connection'}",
+                ir_ref=LEGACY_ADAPTER_ALIAS_PREFIX + pointer,
+                legacy_selector=selector,
+                source_pointer=pointer,
+                expected_component_type=component_type,
+                # Connector metadata rides ONLY on the operation requirement, so
+                # lowering canonicalizes the operation's family — mirroring the
+                # flow_sequence adapter and the #136 codec's `_resolve_binding`.
+                connector_type=binding.get("connector_type") if is_operation else None,
+                action_type=binding.get("action_type") if is_operation else None,
+            )
+        )
+    return node, requirements
+
+
+def _map_slot(
+    transform: Dict[str, Any],
+) -> Tuple[Optional[Dict[str, Any]], List[LegacySymbolRequirementV1]]:
+    """Build the optional ``map_ref`` node. ``passthrough`` appends NOTHING."""
+    mode = str(transform.get("mode") or "passthrough").strip().lower()
+    if mode not in _SUPPORTED_TRANSFORM_MODES:
+        raise adapter_diagnostic(
+            LEGACY_ADAPTER_UNSUPPORTED_KIND,
+            "/transform/mode",
+            "transform mode is not representable for this dialect",
+        )
+    if mode == "passthrough":
+        # Matches the legacy transform ladder, whose default arm appends no shape.
+        return None, []
+    # `_lower_map_stage` always writes `map_ref`; `map_id` is the legacy sibling
+    # spelling, kept for totality on a direct build() bypass. Value resolution
+    # mirrors the legacy ladder (`map_ref or map_id`, truthiness), and the pointer
+    # names whichever key actually SUPPLIED it — falling back, when neither carries
+    # a usable value, to the key the caller actually wrote, so an empty authored
+    # `map_ref` is reported at `/transform/map_ref` and not at a key that was never
+    # written (wrapper `selector_key` precedent).
+    if transform.get("map_ref"):
+        key = "map_ref"
+    elif transform.get("map_id"):
+        key = "map_id"
+    else:
+        key = "map_id" if "map_id" in transform and "map_ref" not in transform else "map_ref"
+    pointer = f"/transform/{key}"
+    selector = _coerce_id(transform.get("map_ref") or transform.get("map_id"))
+    if not selector:
+        raise adapter_diagnostic(
+            LEGACY_ADAPTER_SEMANTIC_LOSS,
+            pointer,
+            "map transform is missing a resolved map component id",
+        )
+    node = {
+        "kind": "map_ref",
+        "map_ref": LEGACY_ADAPTER_ALIAS_PREFIX + pointer,
+        **_label_field(transform),
+    }
+    return node, [
+        LegacySymbolRequirementV1(
+            role="map",
+            ir_ref=LEGACY_ADAPTER_ALIAS_PREFIX + pointer,
+            legacy_selector=selector,
+            source_pointer=pointer,
+            expected_component_type="transform.map",
+        )
+    ]
+
+
+def adapt_sync_pipeline(config: Dict[str, Any]) -> LegacyAdapterResultV1:
+    """Normalize a lowered sync_pipeline linear core into IR + requirements.
+
+    ``config`` is the output of ``SyncPipelineBuilder.lower_config`` — already
+    validated, with every ``SYNC_PIPELINE_*`` structural error raised before this
+    is reached. Every failure here is therefore an internal parity defect, raised
+    as a value-free :class:`LegacyAdapterError` for the caller to translate into
+    its existing external error family.
+    """
+    _require_dict(config, "/", "lowered sync_pipeline config")
+    unknown = sorted(set(config) - _KNOWN_ROOT_KEYS)
+    if unknown:
+        raise adapter_diagnostic(
+            LEGACY_ADAPTER_UNSUPPORTED_KIND,
+            f"/{unknown[0]}",
+            "root key is not representable in ProcessIR v1 for this dialect",
+        )
+
+    source = _require_dict(config.get("source") or {}, "/source", "source binding")
+    target = _require_dict(config.get("target") or {}, "/target", "target binding")
+    transform = _require_dict(
+        config.get("transform") or {"mode": "passthrough"}, "/transform", "transform"
+    )
+
+    if _is_listener(source):
+        # Gate 2. The builder routes listener chains to the legacy renderer before
+        # reaching here (Gate 1); this is the independent backstop, so a listener
+        # can never be silently mis-shaped as a start_noaction + connectoraction
+        # pair instead of the fused start_listen shape.
+        raise adapter_diagnostic(
+            LEGACY_ADAPTER_UNSUPPORTED_KIND,
+            "/source/connector_type",
+            "listener entry is not representable in ProcessIR v1 — the legacy path "
+            "fuses the start and connector shapes (#140)",
+        )
+
+    _check_binding(source, "/source")
+    _check_binding(target, "/target")
+
+    source_node, requirements = _binding_slots(source, "/source", "source")
+    steps: List[Dict[str, Any]] = [source_node]
+
+    map_node, map_requirements = _map_slot(transform)
+    if map_node is not None:
+        steps.append(map_node)
+        requirements.extend(map_requirements)
+
+    target_node, target_requirements = _binding_slots(target, "/target", "target")
+    steps.append(target_node)
+    requirements.extend(target_requirements)
+
+    # Always a Stop: `return_documents` is gated off for this dialect, so the
+    # legacy terminal selector always resolves to stop(continue_=True).
+    steps.append({"kind": "stop"})
+
+    ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": steps}})
+    return LegacyAdapterResultV1(
+        process_ir=ir,
+        symbol_requirements=tuple(requirements),
+        # Always empty, by construction: the dialect's config gate is a strict
+        # allow-list at every level (root, PipelineSpec/StageSpec/PipelineEdgeSpec
+        # are all `extra="forbid"`, and the per-stage key sets are allow-lists), so
+        # there is no accepted-and-ignored key to record. Envelope keys are stripped
+        # rather than dropped. A failure of the test pinning this means someone
+        # loosened the config gate.
+        compatibility_noop_paths=(),
+        pipeline_view=None,
+        pipeline_view_status="not_representable",
+    )
+
+
+__all__ = ["adapt_sync_pipeline"]

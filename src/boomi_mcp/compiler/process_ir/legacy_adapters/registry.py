@@ -19,6 +19,7 @@ from typing import Callable, Mapping, Optional
 
 from .contracts import LegacyAdapterResultV1
 from .flow_sequence import adapt_flow_sequence
+from .sync_pipeline import adapt_sync_pipeline
 from .wrapper_subprocess import adapt_wrapper_subprocess
 
 LegacyAdapter = Callable[[dict], LegacyAdapterResultV1]
@@ -28,13 +29,18 @@ LegacyAdapter = Callable[[dict], LegacyAdapterResultV1]
 # (reserved, unmigrated) identity.
 FLOW_SEQUENCE_DIALECT = "database_to_api_sync/flow_sequence"
 WRAPPER_SUBPROCESS_DIALECT = "wrapper_subprocess"
+SYNC_PIPELINE_DIALECT = "sync_pipeline"
 
 # Reserved-but-unmigrated: named so a caller can tell "known, pending" from
 # "unknown", but deliberately absent from the migrated registry.
 RESERVED_DIALECTS = frozenset(
     {
-        "database_to_api_sync",  # ordinary single/linear form (pending-capability)
-        "sync_pipeline",  # verified-linear PipelineSpec lowering (pending)
+        # Ordinary single/linear form. Still pending-capability for FOUR reasons a
+        # sync_pipeline config can never trigger (they are all rejected at that
+        # dialect's config gate): the fused start_listen entry and connector
+        # dynamic_path (#140), and catcherrors / notify (#142). #139C's adapter is
+        # deliberately shaped to be promoted here once those close.
+        "database_to_api_sync",
     }
 )
 
@@ -42,6 +48,11 @@ _MIGRATED: Mapping[str, LegacyAdapter] = MappingProxyType(
     {
         WRAPPER_SUBPROCESS_DIALECT: adapt_wrapper_subprocess,
         FLOW_SEQUENCE_DIALECT: adapt_flow_sequence,
+        # #139C: migrated for its 6 non-listener stage chains. The 4 WSS listener
+        # chains stay on the legacy renderer behind an explicit routing gate
+        # (#140), so this entry means "the dialect is cut over", not "every one of
+        # its configs is".
+        SYNC_PIPELINE_DIALECT: adapt_sync_pipeline,
     }
 )
 
@@ -65,6 +76,7 @@ def migrated_dialects() -> frozenset:
 
 __all__ = [
     "FLOW_SEQUENCE_DIALECT",
+    "SYNC_PIPELINE_DIALECT",
     "WRAPPER_SUBPROCESS_DIALECT",
     "RESERVED_DIALECTS",
     "adapter_for",

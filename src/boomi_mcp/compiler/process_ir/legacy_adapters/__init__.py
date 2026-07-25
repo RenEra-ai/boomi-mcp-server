@@ -13,6 +13,7 @@ tool or JSON Schema constructs or consumes these types.
 """
 
 from .contracts import (
+    LEGACY_ADAPTER_ALIAS_PREFIX,
     LegacyAdapterDiagnosticV1,
     LegacyAdapterError,
     LegacyAdapterResultV1,
@@ -21,6 +22,7 @@ from .contracts import (
 from .registry import (
     FLOW_SEQUENCE_DIALECT,
     RESERVED_DIALECTS,
+    SYNC_PIPELINE_DIALECT,
     WRAPPER_SUBPROCESS_DIALECT,
     adapter_for,
     is_migrated,
@@ -28,12 +30,14 @@ from .registry import (
 )
 
 __all__ = [
+    "LEGACY_ADAPTER_ALIAS_PREFIX",
     "LegacyAdapterDiagnosticV1",
     "LegacyAdapterError",
     "LegacyAdapterResultV1",
     "LegacySymbolRequirementV1",
     "FLOW_SEQUENCE_DIALECT",
     "RESERVED_DIALECTS",
+    "SYNC_PIPELINE_DIALECT",
     "WRAPPER_SUBPROCESS_DIALECT",
     "adapter_for",
     "is_migrated",

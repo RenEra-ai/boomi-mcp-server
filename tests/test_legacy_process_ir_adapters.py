@@ -24,6 +24,7 @@ for _p in (str(_ROOT), str(_ROOT / "src")):
 from boomi_mcp.compiler.process_ir.legacy_adapters import (
     FLOW_SEQUENCE_DIALECT,
     RESERVED_DIALECTS,
+    SYNC_PIPELINE_DIALECT,
     WRAPPER_SUBPROCESS_DIALECT,
     adapter_for,
     is_migrated,
@@ -103,12 +104,20 @@ def _flow_cfg(**over):
 def test_registry_reports_only_migrated_dialects():
     assert is_migrated(WRAPPER_SUBPROCESS_DIALECT)
     assert is_migrated(FLOW_SEQUENCE_DIALECT)
-    assert migrated_dialects() == {WRAPPER_SUBPROCESS_DIALECT, FLOW_SEQUENCE_DIALECT}
+    # #139C moved sync_pipeline from reserved to migrated.
+    assert is_migrated(SYNC_PIPELINE_DIALECT)
+    assert migrated_dialects() == {
+        WRAPPER_SUBPROCESS_DIALECT,
+        FLOW_SEQUENCE_DIALECT,
+        SYNC_PIPELINE_DIALECT,
+    }
 
 
 def test_registry_reserved_dialects_are_not_migrated():
     # Reserved-but-pending dialects resolve to None so the legacy renderer stays
     # authoritative — they must not masquerade as migrated.
+    assert RESERVED_DIALECTS, "the reserved set must stay meaningful, not empty"
+    assert not (RESERVED_DIALECTS & migrated_dialects())
     for dialect in RESERVED_DIALECTS:
         assert adapter_for(dialect) is None
         assert not is_migrated(dialect)

@@ -5194,8 +5194,26 @@ _SYNC_PIPELINE_STAGE_ALT_PRIMITIVE: Dict[str, str] = {
     "send": "soap_send",
 }
 
-# The SOAP primitive that lowers each fetch/send stage to a SOAP Client binding.
-_SYNC_PIPELINE_SOAP_PRIMITIVES = frozenset({"soap_fetch", "soap_send"})
+def _sync_pipeline_is_canonical(lowered: Dict[str, Any]) -> bool:
+    """Does this lowered sync_pipeline core route to the canonical chain (#139C)?
+
+    Exactly ONE named capability gap keeps a chain on the legacy renderer: a WSS
+    listener source, whose legacy entry FUSES the start and source shapes into a
+    single ``start_listen`` that ProcessIR v1 cannot express (#140 owns the entry
+    policy; the compiler fails closed on a listener source, and
+    ``SourceEndpointV1.connection_ref`` is required while a lowered listener
+    binding carries no ``connection_id`` at all).
+
+    This is an ALLOW decision on a named gap, never a catch-all fallback: any
+    other chain the adapter cannot represent must FAIL, not silently render
+    through a second path. It uses the SAME resolver the legacy body uses to
+    select ``start_listen``, so the two can never disagree about what a listener is.
+    """
+    source = lowered.get("source") or {}
+    if not isinstance(source, dict):
+        return True
+    return _resolve_wss_connector_type(source.get("connector_type")) is None
+
 
 # Hints for reserved stage *kinds* (rejected by the kind gate).
 _SYNC_PIPELINE_RESERVED_KIND_HINTS: Dict[str, str] = {
@@ -5987,14 +6005,93 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         name: str,
         folder_name: Optional[str] = None,
     ) -> str:
-        """Lower the pipeline and delegate XML emission to ProcessFlowBuilder.
+        """Lower the pipeline, then emit through the canonical chain.
 
         lower_config raises on any structural defect, so a direct build() that
         bypasses validate_config still fails cleanly instead of emitting a
         malformed process.
+
+        Issue #139 M12.4 (slice C): the lowered linear core is now compiled by the
+        ONE canonical chain (legacy config -> ProcessIRV1 -> compile_process_ir_v1
+        -> emit_process) instead of ProcessFlowBuilder's own renderer. The
+        component envelope, description, folder and processOverrides are unchanged,
+        so the emitted XML stays byte-identical — pinned by the four sync_pipeline
+        goldens plus a differential oracle against ``ProcessFlowBuilder.build`` on
+        the same lowered config (which remains the untouched legacy renderer,
+        because this intercepts BEFORE delegating).
+
+        WSS listener chains stay on the legacy renderer: their entry FUSES the
+        start and connector shapes into one ``start_listen``, which ProcessIR v1
+        cannot express (#140 owns the entry policy). That is an ALLOW decision on
+        one named capability gap, never a catch-all fallback — a chain that passes
+        the gate but that the adapter cannot represent RAISES, and is never
+        re-routed.
         """
         lowered = cls.lower_config(config)
-        return ProcessFlowBuilder.build(lowered, name=name, folder_name=folder_name)
+
+        # Reproduce ProcessFlowBuilder.build's own first guard. The two existing
+        # #139 cut-overs are reached from INSIDE that method, which already ran it;
+        # this one intercepts before delegating, so without it a blank name would
+        # surface as an adapter/compile error instead of the name error.
+        name = str(name) if name is not None else ""
+        if not name or not name.strip():
+            raise BuilderValidationError(
+                "Process component name is required.",
+                error_code="PROCESS_XML_VALIDATION_FAILED",
+                field="name",
+                hint="Pass a non-empty name via the IntegrationComponentSpec.name field.",
+            )
+
+        if not _sync_pipeline_is_canonical(lowered):
+            return ProcessFlowBuilder.build(lowered, name=name, folder_name=folder_name)
+
+        description = str(lowered.get("description") or "")
+        # Same treatment as both other cut-overs: extract BEFORE emission so
+        # PROCESS_EXTENSIONS_INVALID keeps its precedence, and so an absent block
+        # yields the byte-identical empty <bns:processOverrides/>.
+        process_overrides_xml = ""
+        connections = _extract_process_extension_connections(lowered)
+        if connections:
+            process_overrides_xml = _emit_process_overrides(connections)
+
+        from ....compiler.process_ir.diagnostics import ProcessIRCompileError
+        from ....compiler.process_ir.legacy_adapters.contracts import (
+            LegacyAdapterError,
+        )
+        from ....compiler.process_ir.legacy_adapters.emission import (
+            emit_legacy_result,
+        )
+        from ....compiler.process_ir.legacy_adapters.sync_pipeline import (
+            adapt_sync_pipeline,
+        )
+        from ....models.process_ir import ProcessIRValidationError
+
+        try:
+            result = adapt_sync_pipeline(lowered)
+            shape_xml_parts = list(emit_legacy_result(result).shape_xml_parts)
+        except (
+            LegacyAdapterError,
+            ProcessIRCompileError,
+            ProcessIRValidationError,
+        ) as exc:
+            raise BuilderValidationError(
+                "sync_pipeline process could not be lowered to the canonical "
+                "process IR.",
+                error_code="PROCESS_XML_VALIDATION_FAILED",
+                field="config",
+                hint="Internal builder/compiler parity defect — please report.",
+            ) from exc
+        return _assemble_process_component_xml(
+            shape_xml_parts,
+            name=name,
+            description=description,
+            folder_name=folder_name,
+            process_overrides_xml=process_overrides_xml,
+            # process_options is deliberately omitted (the 7-attribute scheduled
+            # default). The 6-attribute _LISTENER_PROCESS_OPTIONS set applies only
+            # to a listener source, and the gate above makes this arm non-listener
+            # by construction.
+        )
 
 
 # ----------------------------------------------------------------------
