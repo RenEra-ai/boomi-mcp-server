@@ -681,12 +681,21 @@ def test_a_non_profile_on_the_call_side_is_caught_before_the_map_pass():
 def test_every_real_boomi_profile_kind_is_accepted_as_a_profile(profile_type):
     """The type check must not narrow to the three kinds the Data Process emitter
     validates — a map may legitimately read an EDI or flat-file profile, and
-    rejecting one would be a false failure."""
-    from boomi_mcp.compiler.process_ir.connector_resolution import (
-        PROFILE_COMPONENT_TYPES,
-    )
+    rejecting one would be a false failure.
 
-    assert profile_type in PROFILE_COMPONENT_TYPES
+    Asserted by COMPILING, not by set membership: a membership check could never
+    fail for the reason this docstring gives, since it would be testing the very
+    constant the behaviour is derived from."""
+    table = SymbolTableV1(
+        symbols=tuple(
+            symbol.model_copy(update={"component_type": profile_type})
+            if symbol.ref in ("prof_get_response", "prof_soap_request")
+            else symbol
+            for symbol in mixed_symbols().symbols
+        )
+    )
+    _cfg, plan = compile_process_ir_v1(parse_process_ir_v1(MIXED_DOC), table)
+    assert len(plan.nodes) == 7
 
 
 def test_two_refs_pointing_at_one_profile_component_agree():

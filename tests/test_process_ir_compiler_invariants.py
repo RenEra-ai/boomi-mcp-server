@@ -1996,3 +1996,65 @@ def test_plan_checker_rejects_a_malformed_cfg_standalone(name, cfg_factory, expe
         _raises(check_emission_plan_invariants, plan, cfg, SymbolTableV1(symbols=())).code
         == expected
     ), name
+
+
+# ---------------------------------------------------------------------------
+# ConnectorCall entry role (issue #140)
+# ---------------------------------------------------------------------------
+
+
+def _call(role="entry"):
+    from boomi_mcp.compiler.process_ir.contracts import ConnectorCallSemanticV1
+
+    return ConnectorCallSemanticV1(role=role, operation_ref="op")
+
+
+def _connector_call_cfg(roles):
+    """``roles`` calls followed by a stop. Hand-built so a COMPILER defect —
+    which is the only way these shapes arise — can be exercised directly."""
+    nodes = tuple(
+        _node(index + 1, _call(role)) for index, role in enumerate(roles)
+    ) + (_node(len(roles) + 1, StopSemanticV1(), exit_role="stop"),)
+    edges = tuple(
+        _edge(
+            i + 1,
+            i + 1,
+            i + 2,
+            kind="terminal" if i + 2 == len(roles) + 1 else "ordering",
+        )
+        for i in range(len(roles))
+    )
+    return SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=nodes,
+        edges=edges,
+        exit_node_ids=("n{0}".format(len(roles) + 1),),
+    )
+
+
+def test_a_well_formed_connector_call_cfg_passes():
+    check_cfg_invariants(_connector_call_cfg(["entry", "downstream", "downstream"]))
+
+
+def test_two_entry_calls_are_a_compiler_defect():
+    """``role`` selects between the two connector emitter keys, so a second entry
+    would plan a second ``connectoraction_source``. Nothing else in this checker
+    inspects the role — it is neither an exit role nor an edge."""
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        check_cfg_invariants(_connector_call_cfg(["entry", "entry"]))
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_INTERNAL
+
+
+def test_no_entry_call_is_a_compiler_defect():
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        check_cfg_invariants(_connector_call_cfg(["downstream", "downstream"]))
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_INTERNAL
+
+
+def test_the_entry_call_must_be_the_control_flow_entry_node():
+    """A CFG whose entry call is not the entry NODE would emit the source shape
+    somewhere in the middle of the flow."""
+    cfg = _connector_call_cfg(["downstream", "entry"])
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        check_cfg_invariants(cfg)
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_INTERNAL

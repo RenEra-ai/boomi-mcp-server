@@ -347,6 +347,35 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                 node.node_id,
             )
 
+    # --- connector-call entry role (#140) ----------------------------------
+    # ``role`` is compiler-DERIVED from authored position and selects between the
+    # two connector emitter keys, so a lowering defect that produced two entries
+    # (or none) would silently plan two ``connectoraction_source`` shapes — and
+    # no other check here looks at it, because the role is not an exit role and
+    # not an edge. Exactly one connector call may be the entry, and it must BE
+    # the CFG entry node.
+    calls = [
+        node for node in nodes if node.semantic.semantic_kind == "connector_call"
+    ]
+    if calls:
+        entries = [node for node in calls if node.semantic.role == "entry"]
+        if len(entries) != 1:
+            raise _fail(
+                PROCESS_IR_COMPILE_INTERNAL,
+                _SEMANTIC_PHASE,
+                calls[0].source_path,
+                "a connector-call flow must have exactly one entry call",
+                calls[0].node_id,
+            )
+        if entries[0].node_id != cfg.entry_node_id:
+            raise _fail(
+                PROCESS_IR_COMPILE_INTERNAL,
+                _SEMANTIC_PHASE,
+                entries[0].source_path,
+                "the entry connector call is not the control-flow entry node",
+                entries[0].node_id,
+            )
+
     # --- per-node successor rules -----------------------------------------
     for node in nodes:
         successors = outbound[node.node_id]

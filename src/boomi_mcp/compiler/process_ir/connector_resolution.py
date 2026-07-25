@@ -41,6 +41,7 @@ from ...errors import (
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
 )
 from .connector_capabilities import (
+    CONNECTOR_CALL_CAPABILITIES_V1,
     ConnectorCapabilityV1,
     canonicalize_connector_metadata,
     lookup_capability,
@@ -150,14 +151,20 @@ def resolve_connector_call_bindings(
 
         capability = lookup_capability(family, action)
         if capability is None:
+            # Point at the field the caller can actually act on. Blaming
+            # ``/action`` merely because one was authored is misleading when the
+            # FAMILY is the unsupported half — the action may be perfectly valid
+            # and the caller would "fix" a correct field. Only claim the action
+            # when the same family supports some OTHER action; otherwise the
+            # operation reference (i.e. the whole connector) is the problem.
+            family_has_any_action = any(
+                key_family == family for key_family, _ in CONNECTOR_CALL_CAPABILITIES_V1
+            )
+            blame_action = semantic.action_intent is not None and family_has_any_action
             raise raise_compile_error(
                 PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED,
                 "reference_resolution",
-                (
-                    "{0}/action".format(path)
-                    if semantic.action_intent is not None
-                    else operation_path
-                ),
+                "{0}/action".format(path) if blame_action else operation_path,
                 internal_node_id=node.node_id,
             )
 

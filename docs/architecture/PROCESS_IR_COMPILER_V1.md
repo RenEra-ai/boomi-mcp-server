@@ -403,6 +403,15 @@ already is the profile kind (`connector_resolution._profile_identity` reads it f
 second caller-supplied copy would be exactly the duplicate authority ADR-001 §6 exists to remove —
 two sources for one fact, with no principled winner when they disagree.
 
+The design plan additionally proposed `dependency_refs` and `binding_variant`; neither shipped, for
+the same reason. `binding_variant` (`simple`/`dynamic_path`/`listener`) would have been a second
+encoding of a fact the **capability allowlist** already carries — dynamic-path and listener are
+rejected by *absence* from it, so a variant field could only ever agree or contradict.
+`dependency_refs` was to cross-check that the connection and profile refs appear among the
+operation's declared dependencies, but nothing in this tree populates such a field, so it would have
+been an always-empty check that reads as verification while verifying nothing. Both remain available
+to a later issue that has a real producer for them.
+
 ### Where it runs, and in what order
 
 `pipeline.compile_process_ir_v1` gains one stage between the CFG invariant check and plan lowering:
@@ -514,8 +523,10 @@ REST GET → MapRef → SOAP EXECUTE → REST PATCH → Database Send → Stop
 **Profile continuity is enforced around a map, not between adjacent calls.** The official REST Client
 operation page says of a Response Profile: "Selecting a profile does not validate or guarantee that
 output will follow the provided format." The platform does not enforce call-to-call profile equality,
-so the compiler does not invent it — it *derives* an effective profile across the flow but
-equality-gates only the map boundaries, which are real component requirements. Consistency check: the
+so the compiler does not invent it — it equality-gates only the map boundaries, which are real
+component requirements. It tracks whether the preceding call **produced documents at all** (for the
+cardinality rule); it deliberately does **not** carry a running "effective profile", because doing so
+would mean asserting, at each step, an identity the platform does not guarantee. Consistency check: the
 issue's own flow goes `SOAP EXECUTE → DB Send` with no intervening map, so a strict call-to-call rule
 would have made the issue's own representative flow unbuildable for a second, unrelated reason.
 

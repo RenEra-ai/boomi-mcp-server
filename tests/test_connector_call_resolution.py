@@ -470,6 +470,23 @@ def test_the_unsupported_path_points_at_the_authored_action_when_there_is_one():
     )
 
 
+def test_an_unsupported_FAMILY_blames_the_operation_even_with_an_authored_action():
+    """When the FAMILY is the unsupported half, the authored action may be
+    perfectly valid — blaming ``/action`` would send the caller to "fix" a
+    correct field. The whole connector is the problem, so the operation
+    reference is."""
+    table = rest_get_symbols(connector_type="database_v2", action_type="Send")
+    assert compile_codes(one_call_doc(action="Send"), table)[0][1] == (
+        "/body/steps/0/operation_ref"
+    )
+    # ...while an unsupported ACTION within a SUPPORTED family still blames the
+    # action, so this did not simply disable the action path.
+    supported_family = rest_get_symbols(connector_type="rest", action_type="DELETE")
+    assert compile_codes(one_call_doc(action="DELETE"), supported_family)[0][1] == (
+        "/body/steps/0/action"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Security — ADR-001 §11
 # ---------------------------------------------------------------------------
