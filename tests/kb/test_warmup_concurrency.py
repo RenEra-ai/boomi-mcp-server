@@ -40,6 +40,30 @@ def _wait_for_admitted(w, expected, timeout=5.0):
     raise AssertionError(f"never reached {expected} admitted waiters")
 
 
+def _wait_for_all_decided(w, expected, timeout=5.0):
+    """Block until ``expected`` callers have been admitted OR overflowed.
+
+    ``_wait_for_admitted`` alone is not enough before releasing a build: it only
+    proves the CAP was reached, not that every worker thread has arrived. A
+    straggler that reaches ``resolve()`` after the build has already FAILED takes
+    the FAILED fast-path and returns ``kb_unavailable`` instead of overflowing to
+    ``warming_up``, which silently changes the outcome split the test asserts.
+
+    The sibling ``test_admits_at_most_max_waiters_and_overflows_fast`` already
+    guards this by waiting for its overflow returns; this is the same discipline
+    expressed on the counters, so a test that names an exact split gets one.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with w._lock:
+            if w._admitted_total + w._overflow_total >= expected:
+                return
+        time.sleep(0.005)
+    with w._lock:
+        decided = w._admitted_total + w._overflow_total
+    raise AssertionError(f"only {decided} of {expected} callers reached a decision")
+
+
 def test_admits_at_most_max_waiters_and_overflows_fast():
     gate = threading.Event()
     result = object()
@@ -181,6 +205,10 @@ def test_burst_admitted_callers_wake_on_failure():
     threads = _run_threads(6, worker)
     try:
         _wait_for_admitted(w, 4)
+        # ...and every remaining caller must have overflowed BEFORE the build is
+        # released, or a straggler would arrive to a FAILED state and return
+        # kb_unavailable instead of warming_up, making the split below flaky.
+        _wait_for_all_decided(w, 6)
         start = time.monotonic()
         gate.set()
         for t in threads:

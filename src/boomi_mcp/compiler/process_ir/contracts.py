@@ -137,8 +137,19 @@ class ComponentSymbolV1(_CompilerModel):
     """One authored reference resolved to an emitter-safe component fact.
 
     Carries ONLY what the emitter needs. Connector metadata is DERIVED here and
-    is never authored in IR (ADR-001 §6) — it rides on the *operation* symbol,
-    mirroring the #136 codec's ``_resolve_binding``.
+    is never authored in IR (ADR-001 §6).
+
+    **Where connector metadata is required depends on the dialect.** For the
+    legacy ``source``/``target`` endpoints it rides on the *operation* symbol
+    alone, mirroring the #136 codec's ``_resolve_binding`` — that is all the
+    emitter needs, and a connection symbol may leave ``connector_type`` unset.
+    A #140 ``connector_call`` additionally requires the *connection* symbol to
+    declare ``connector_type``, because its binding is **verified**, not merely
+    resolved: the emitted shape carries the operation's family beside this
+    connection's id, so an unverifiable pairing would serialise a REST
+    ``connectorType`` pointing at a database connection with nothing objecting
+    (``connector_resolution.resolve_connector_call_bindings``). A producer of
+    symbols for connector calls must therefore populate it on BOTH sides.
 
     #140 adds three optional resolution facts, all defaulted so every symbol every
     pre-#140 caller builds is unchanged:

@@ -548,7 +548,10 @@ def test_every_symbol_in_the_fixture_is_actually_referenced():
     that was never wired, and it is how a fixture quietly stops demonstrating the
     thing it claims to."""
     symbols = mixed_symbols().symbols
-    referenced = {"conn_rest", "conn_soap", "conn_db"}
+    # Start EMPTY. Pre-seeding the connections would exempt exactly the symbols
+    # whose only inbound edge is an operation's ``connection_ref`` — so an unused
+    # connection could never be detected, which is the case most likely to rot.
+    referenced = set()
     for symbol in symbols:
         for field in ("connection_ref", "input_profile_ref", "output_profile_ref"):
             value = getattr(symbol, field, None)

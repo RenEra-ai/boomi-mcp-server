@@ -203,17 +203,17 @@ Published as the immutable `PROCESS_IR_V1_CAPABILITIES` manifest (not an authore
 | `mixed_connector_execution` — multiple connector calls, several families, in one linear path | **supported** | #140 (shipped) |
 | `process_call_connector_mixing` — mixing `process_call` steps with connector execution | gated | not #140 |
 | `connector_call_in_control_body` — a `connector_call` inside a Branch leg or Decision arm | gated | #141 |
-
-`mixed_connector_execution` was **overloaded** before #140: ADR-001 §8 lists it as "multiple
-connector calls per path" (which #140 ships), while this document's sequence rules used the same name
-for `process_call` × connector mixing (which #140 does not). #140 split the two constructs into two
-names rather than pick one meaning and silently redefine the flag.
 | continuation after Branch/Decision, rich bodies | gated | #141 |
 | scoped Try/Catch | gated | #142 |
 | keyed cache (`doc_cache_index`/`cache_key_values`/keyed `load_all_documents`) | gated | no live-captured wire shape (#119) |
 | `definedparameter` property source | gated | no verified wire shape |
 | joins, loops | gated | ADR-001 §8 |
 | caller-authored CFG edges, XML/layout/shape ids, secret values | unsupported (permanent) | ADR-001 §12 |
+
+`mixed_connector_execution` was **overloaded** before #140: ADR-001 §8 lists it as "multiple
+connector calls per path" (which #140 ships), while this document's sequence rules used the same name
+for `process_call` × connector mixing (which #140 does not). #140 split the two constructs into two
+names rather than pick one meaning and silently redefine the flag.
 
 ## 9. Ownership boundaries (#137–#143)
 
