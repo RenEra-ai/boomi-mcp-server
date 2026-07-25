@@ -472,6 +472,41 @@ def test_builder_entry_pointers_stay_relative_to_the_lowered_core():
     }
 
 
+@pytest.mark.parametrize(
+    "map_config,expected_key",
+    [
+        ({"map_ref": "MAP-1"}, "map_ref"),
+        # `lower_config` canonicalizes BOTH spellings to `transform.map_ref`, so the
+        # lowered core cannot tell them apart and the raw key must be carried over.
+        ({"map_id": "MAP-1"}, "map_id"),
+        # The nastiest of the three: an empty `map_ref` alongside a real `map_id`.
+        # Naming `map_ref` here does not merely fail to resolve -- it RESOLVES, to
+        # the empty string, silently reporting the wrong field.
+        ({"map_ref": "", "map_id": "MAP-1"}, "map_id"),
+    ],
+)
+def test_map_pointer_names_the_spelling_the_author_actually_used(map_config, expected_key):
+    from boomi_mcp.compiler.process_ir.legacy_adapters import (
+        SYNC_PIPELINE_DIALECT,
+        adapter_for,
+    )
+
+    raw = _pipeline(
+        [_db_read("s"), _stage("m", "map", {"primitive": "map"}, map_config), _rest_send("t")]
+    )
+    reqs = adapter_for(SYNC_PIPELINE_DIALECT)(raw).symbol_requirements
+    map_req = next(r for r in reqs if r.role == "map")
+    assert map_req.source_pointer == f"/pipeline/stages/1/config/{expected_key}"
+    # Resolvable is not enough -- it must hold THIS requirement's value.
+    assert _rfc6901(raw, map_req.source_pointer) == map_req.legacy_selector
+    # And the emitted XML is identical whichever spelling was authored.
+    assert SyncPipelineBuilder.build(raw, name="P", folder_name="F") == (
+        ProcessFlowBuilder.build(
+            SyncPipelineBuilder.lower_config(raw), name="P", folder_name="F"
+        )
+    )
+
+
 def test_registry_listener_diagnostic_points_at_the_primitive_not_connector_type():
     """A raw listener stage is identified by its PRIMITIVE. `connector_type` is
     accepted there but wholly inert -- every value emits identical XML and none of

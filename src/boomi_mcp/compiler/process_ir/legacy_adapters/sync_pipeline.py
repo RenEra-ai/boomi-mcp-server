@@ -90,6 +90,12 @@ class _PointerBases(NamedTuple):
     target: str
     #: The exact field that identifies an entry as a listener.
     listener: str
+    #: Which spelling the CALLER used for the map selector (``map_ref``/``map_id``).
+    #: ``lower_config`` canonicalizes both to ``map_ref``, so the lowered core can no
+    #: longer tell them apart — the raw key has to be carried over rather than
+    #: re-derived downstream. ``None`` means "derive it from the document itself",
+    #: which is correct for the core entry point, where the core IS the document.
+    map_key: Optional[str] = None
 
 
 _CORE_BASES = _PointerBases(
@@ -102,6 +108,21 @@ _CORE_BASES = _PointerBases(
 # Which stage kinds fill which slot of the lowered linear core.
 _SOURCE_STAGE_KINDS = frozenset({"read", "fetch", "listener"})
 _TARGET_STAGE_KINDS = frozenset({"send", "write"})
+
+
+def _raw_map_key(block: Dict[str, Any]) -> str:
+    """Which selector spelling a map block actually used.
+
+    Shared by both entry points so the raw stage and the lowered transform are
+    read with identical precedence -- ``map_ref or map_id``, matching the legacy
+    ladder. When neither carries a usable value, name the key the author actually
+    wrote, so a diagnostic points at a real field rather than one never written.
+    """
+    if block.get("map_ref"):
+        return "map_ref"
+    if block.get("map_id"):
+        return "map_id"
+    return "map_id" if "map_id" in block and "map_ref" not in block else "map_ref"
 
 
 def _raw_pointer_bases(config: Dict[str, Any]) -> _PointerBases:
@@ -118,6 +139,7 @@ def _raw_pointer_bases(config: Dict[str, Any]) -> _PointerBases:
     """
     stages = (config.get("pipeline") or {}).get("stages") or []
     index: Dict[str, int] = {}
+    map_stage: Dict[str, Any] = {}
     for i, stage in enumerate(stages):
         if not isinstance(stage, dict):
             continue
@@ -125,7 +147,10 @@ def _raw_pointer_bases(config: Dict[str, Any]) -> _PointerBases:
         if kind in _SOURCE_STAGE_KINDS:
             index.setdefault("source", i)
         elif kind == "map":
-            index.setdefault("transform", i)
+            if "transform" not in index:
+                index["transform"] = i
+                stage_config = stage.get("config")
+                map_stage = stage_config if isinstance(stage_config, dict) else {}
         elif kind in _TARGET_STAGE_KINDS:
             index.setdefault("target", i)
 
@@ -138,6 +163,13 @@ def _raw_pointer_bases(config: Dict[str, Any]) -> _PointerBases:
         source=source,
         transform=base("transform", _CORE_BASES.transform),
         target=base("target", _CORE_BASES.target),
+        # `lower_config` writes the selector to `transform.map_ref` whichever
+        # spelling was authored, so the lowered core cannot tell `map_id` from
+        # `map_ref`. Resolve it here, from the raw stage, mirroring the lowering's
+        # own `map_ref or map_id` precedence. Without this an authored `map_id`
+        # yields `/config/map_ref`, which either does not resolve or -- with an
+        # empty `map_ref` ALSO present -- resolves to the WRONG field.
+        map_key=_raw_map_key(map_stage) if "transform" in index else None,
         # A raw listener stage is identified by its PRIMITIVE (``wss_listen``).
         # `connector_type` is accepted on a listener stage but wholly inert -- it
         # does not select the listener path and every value emits identical XML --
@@ -254,7 +286,7 @@ def _binding_slots(
 
 
 def _map_slot(
-    transform: Dict[str, Any], base: str
+    transform: Dict[str, Any], base: str, map_key: Optional[str] = None
 ) -> Tuple[Optional[Dict[str, Any]], List[LegacySymbolRequirementV1]]:
     """Build the optional ``map_ref`` node. ``passthrough`` appends NOTHING."""
     mode = str(transform.get("mode") or "passthrough").strip().lower()
@@ -267,19 +299,12 @@ def _map_slot(
     if mode == "passthrough":
         # Matches the legacy transform ladder, whose default arm appends no shape.
         return None, []
-    # `_lower_map_stage` always writes `map_ref`; `map_id` is the legacy sibling
-    # spelling, kept for totality on a direct build() bypass. Value resolution
-    # mirrors the legacy ladder (`map_ref or map_id`, truthiness), and the pointer
-    # names whichever key actually SUPPLIED it — falling back, when neither carries
-    # a usable value, to the key the caller actually wrote, so an empty authored
-    # `map_ref` is reported at `/transform/map_ref` and not at a key that was never
-    # written (wrapper `selector_key` precedent).
-    if transform.get("map_ref"):
-        key = "map_ref"
-    elif transform.get("map_id"):
-        key = "map_id"
-    else:
-        key = "map_id" if "map_id" in transform and "map_ref" not in transform else "map_ref"
+    # The pointer must name the spelling the CALLER used. `_lower_map_stage`
+    # canonicalizes both spellings to `map_ref`, so when the caller's document is
+    # the raw config the key cannot be recovered from `transform` here — it is
+    # carried in `map_key` instead. Absent that, the document IS this block, so
+    # read the key straight off it.
+    key = map_key or _raw_map_key(transform)
     pointer = f"{base}/{key}"
     selector = _coerce_id(transform.get("map_ref") or transform.get("map_id"))
     if not selector:
@@ -359,7 +384,9 @@ def adapt_sync_pipeline(
     source_node, requirements = _binding_slots(source, pointer_bases.source, "source")
     steps: List[Dict[str, Any]] = [source_node]
 
-    map_node, map_requirements = _map_slot(transform, pointer_bases.transform)
+    map_node, map_requirements = _map_slot(
+        transform, pointer_bases.transform, pointer_bases.map_key
+    )
     if map_node is not None:
         steps.append(map_node)
         requirements.extend(map_requirements)
