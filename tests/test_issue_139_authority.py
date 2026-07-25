@@ -514,25 +514,6 @@ def test_passthrough_versus_mapped_is_a_disagreement():
     assert evaluate_pipeline_authority(spec).disposition == DISAGREE
 
 
-def test_action_verb_casing_is_a_real_disagreement():
-    """Post-#139C the emitted actionType is family-conditional, so 'Send' and
-    'SEND' are genuinely different emitted output. Folding case here would bless
-    two surfaces that really do disagree."""
-    config = _agreeing()
-    top = config["integration_spec"]["pipeline"]
-    changed = False
-    for stage in top["stages"]:
-        action = stage["config"].get("action_type")
-        if isinstance(action, str) and action:
-            stage["config"]["action_type"] = action.swapcase()
-            changed = True
-    if not changed:
-        pytest.skip("fixture pipeline declares no explicit action_type")
-    assert (
-        evaluate_pipeline_authority(_normalize_to_spec(config)).disposition == DISAGREE
-    )
-
-
 def test_a_changed_connection_binding_is_a_disagreement():
     config = _agreeing()
     top = config["integration_spec"]["pipeline"]
@@ -1192,3 +1173,129 @@ def test_the_inertness_exception_is_scoped_to_emission_not_to_unknown_keys():
             ).disposition
             == AGREE
         ), inert
+
+
+# ---------------------------------------------------------------------------
+# 12. Codex review round 1 — alias bypass (P1) and emission-faithful casing (P2)
+# ---------------------------------------------------------------------------
+
+
+def test_the_process_type_alias_cannot_bypass_the_strict_surface():
+    """P1. Every other layer resolves `process_kind or process_type` — the
+    plan-time gate and each builder's validate_config/build. Reading only
+    `process_kind` here let a caller opt in to the strict surface, author a
+    contradictory view, spell the kind `process_type`, and fall through to
+    UNDECIDABLE while the process still built: a silent bypass of the guarantee.
+    """
+    config = _agreeing(STRICT_VERSION)
+    proc = config["integration_spec"]["components"][0]["config"]
+    proc["process_type"] = proc.pop("process_kind")
+    # Control: spelled this way the payload still agrees, so it is accepted...
+    assert (
+        evaluate_pipeline_authority(_normalize_to_spec(config)).disposition == AGREE
+    )
+
+    # ...and a CONTRADICTORY payload spelled the same way is still rejected.
+    contradictory = _contradictory(STRICT_VERSION)
+    cproc = contradictory["integration_spec"]["components"][0]["config"]
+    cproc["process_type"] = cproc.pop("process_kind")
+    plan = _plan(contradictory)
+    assert plan["_success"] is False
+    assert plan["error_code"] == _AUTHORITY_CODE
+
+
+def test_the_alias_is_resolved_for_block_configs_too():
+    spec = _ref_spec()
+    spec.components[0].config["process_type"] = spec.components[0].config.pop(
+        "process_kind"
+    )
+    assert evaluate_pipeline_authority(spec).disposition == AGREE
+
+
+@pytest.mark.parametrize(
+    "block,key,value,expected",
+    [
+        # The renderer UPPER-cases a REST verb, so these emit identical XML.
+        pytest.param("target", "action_type", "post", AGREE, id="rest-verb-case"),
+        # ...and LOWER-cases a non-REST connector type.
+        pytest.param(
+            "source", "connector_type", "Database", AGREE, id="db-connector-case"
+        ),
+    ],
+)
+def test_casing_follows_emission_not_raw_spelling(block, key, value, expected):
+    """P2. Canonicalization is family-conditional: comparing raw stripped
+    spellings manufactured false conflicts in two directions at once.
+
+    Each row is anchored on what `ProcessFlowBuilder.build` actually emits, so the
+    comparison cannot drift from emission.
+    """
+    from src.boomi_mcp.categories.components.builders import ProcessFlowBuilder
+
+    baseline_config = copy.deepcopy(_LINEAR_DB_TO_API)
+    variant_config = copy.deepcopy(_LINEAR_DB_TO_API)
+    variant_config[block][key] = value
+
+    baseline_xml = ProcessFlowBuilder.build(copy.deepcopy(baseline_config), name="X")
+    variant_xml = ProcessFlowBuilder.build(copy.deepcopy(variant_config), name="X")
+    # Precondition: this row's premise about emission is measured, not assumed.
+    assert (baseline_xml == variant_xml) is (expected is AGREE)
+
+    spec = _db_to_api_spec()
+    spec.components[0].config[block][key] = value
+    assert evaluate_pipeline_authority(spec).disposition == expected
+
+
+def test_rest_connector_aliases_still_collapse():
+    spec = _db_to_api_spec()
+    spec.components[0].config["target"]["connector_type"] = "rest_client"
+    assert evaluate_pipeline_authority(spec).disposition == AGREE
+
+
+def test_database_verb_spelling_is_pinned_by_validation():
+    """Why the comparison never sees a varying DATABASE verb.
+
+    The canonicalizer preserves a non-REST verb (`Send` must not become `SEND` —
+    that was #139C's latent defect). One might therefore expect `Get` vs `get` to
+    be a reachable disagreement here. It is not: validation pins a DB source to
+    exactly `Get`, so a differing spelling never produces two comparable configs —
+    it is the clean-plan gate, and its own error surfaces.
+    """
+    from src.boomi_mcp.categories.components.builders import ProcessFlowBuilder
+
+    for spelling in ("get", "GET"):
+        config = copy.deepcopy(_LINEAR_DB_TO_API)
+        config["source"]["action_type"] = spelling
+        err = ProcessFlowBuilder.validate_config(config, depends_on=[])
+        assert err is not None
+        assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+
+        spec = _db_to_api_spec()
+        spec.components[0].config["source"]["action_type"] = spelling
+        assert evaluate_pipeline_authority(spec).disposition == UNDECIDABLE
+
+
+def test_the_comparison_inherits_the_family_conditional_rule():
+    """The rule itself, pinned where it is defined.
+
+    The comparison must not re-implement casing: it delegates to #139C's
+    `_canonical_connector_metadata`, which is itself pinned against the legacy
+    linear builder. REST upper-cases the verb; every other family preserves it and
+    lower-cases the connector type. Folding all verbs would bless a real
+    `Send`/`SEND` divergence; folding none manufactures false REST conflicts.
+    """
+    from src.boomi_mcp.compiler.process_ir.lowering import (
+        _canonical_connector_metadata,
+    )
+
+    _, rest_action = _canonical_connector_metadata("source", "rest", "post")
+    assert rest_action == "POST"
+
+    db_connector, db_action = _canonical_connector_metadata(
+        "target", "Database", "Send"
+    )
+    assert db_connector == "database"
+    assert db_action == "Send"
+
+    _, soap_action = _canonical_connector_metadata("source", "soap_client", "execute")
+    assert soap_action == "execute"

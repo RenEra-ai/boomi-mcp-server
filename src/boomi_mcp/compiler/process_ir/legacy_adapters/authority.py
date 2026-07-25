@@ -117,6 +117,10 @@ _CORE_KEYS = ("process_kind", "source", "transform", "target")
 # process_extensions through verbatim, and the integration builder injects
 # name/component metadata into the build payload. None of it changes the flow, so
 # it is ignored rather than treated as an unrepresentable feature.
+# ``process_type`` is listed here because it is a KIND SELECTOR, not a flow
+# feature: :func:`_resolve_process_kind` reads it, and the resolved kind is what
+# lands in the normal form. It must never be silently ignored the way the rest of
+# these genuinely inert keys are -- see that function.
 _INERT_TOP_LEVEL_KEYS = frozenset(
     {
         "description",
@@ -157,17 +161,23 @@ def _canonical_binding(binding: Any) -> Optional[Dict[str, Any]]:
         return None
     if set(binding) - _BINDING_KEYS:
         return None
-    from ....categories.components.builders.process_flow_builder import (
-        _canonical_connector_type,
-    )
+    # Canonicalize connector_type/action_type through the COMPILER'S OWN
+    # family-conditional rule rather than a local one, so the comparison agrees
+    # with what is actually emitted by construction. The rule is not uniform:
+    # the legacy linear builder UPPER-cases a REST verb (so `post` and `POST`
+    # emit identical XML) but preserves a database verb (so `Get` and `get` do
+    # NOT), and it LOWER-cases a non-REST connector type (so `Database` and
+    # `database` emit identically). Comparing raw stripped spellings therefore
+    # manufactured false conflicts in two directions at once; #139C's helper
+    # already encodes exactly this rule and is pinned against the legacy builder.
+    from ..lowering import _canonical_connector_metadata
 
+    connector, action = _canonical_connector_metadata(
+        "source", binding.get("connector_type") or "", binding.get("action_type") or ""
+    )
     return {
-        "connector_type": _canonical_connector_type(binding.get("connector_type")),
-        # Action verbs are compared case-SENSITIVELY on purpose. Post-#139C the
-        # emitted actionType is family-conditional, so 'Send' and 'SEND' are
-        # genuinely different emitted output -- folding them together here would
-        # bless a payload whose two surfaces really do disagree.
-        "action_type": _norm_text(binding.get("action_type")),
+        "connector_type": connector,
+        "action_type": action,
         "connection_id": _norm_text(binding.get("connection_id")),
         "operation_id": _norm_text(binding.get("operation_id")),
         "label": _norm_text(binding.get("label")),
@@ -193,6 +203,20 @@ def _canonical_transform(transform: Any) -> Optional[Dict[str, Any]]:
     return {"mode": mode, "map_ref": map_ref, "label": _norm_text(transform.get("label"))}
 
 
+def _resolve_process_kind(config: Dict[str, Any]) -> str:
+    """Resolve the process kind, honouring the supported ``process_type`` alias.
+
+    Every other layer resolves ``process_kind or process_type`` — the plan-time
+    gate (``integration_builder._build_plan``) and each process builder's
+    ``validate_config``/``build``. Reading only ``process_kind`` here would let a
+    caller opt in to the strict surface, author a contradictory top-level
+    pipeline, spell the kind ``process_type``, and have this check fall through to
+    ``UNDECIDABLE`` while the process still built normally — a silent bypass of
+    the whole guarantee.
+    """
+    return _norm_text(config.get("process_kind") or config.get("process_type"))
+
+
 def _canonical_core(lowered: Dict[str, Any]) -> Any:
     """Project a lowered block config onto the comparison normal form."""
     source = _canonical_binding(lowered.get("source"))
@@ -201,7 +225,9 @@ def _canonical_core(lowered: Dict[str, Any]) -> Any:
     if source is None or target is None or transform is None:
         return _UNREPRESENTABLE_CORE
     return {
-        "process_kind": _norm_text(lowered.get("process_kind")),
+        # The RESOLVED kind, so a config spelling it `process_type` compares equal
+        # to the authored view's lowered `process_kind` instead of reading as "".
+        "process_kind": _resolve_process_kind(lowered),
         "source": source,
         "transform": transform,
         "target": target,
@@ -245,7 +271,7 @@ def _core_from_submitted_config(config: Any, depends_on: Any) -> Any:
 
     if not isinstance(config, dict):
         return _UNDECIDABLE_CORE
-    kind = _norm_text(config.get("process_kind"))
+    kind = _resolve_process_kind(config)
 
     if kind == SyncPipelineBuilder.PROCESS_KIND:
         # An invalid sync_pipeline has no clean semantics AND owns a real error

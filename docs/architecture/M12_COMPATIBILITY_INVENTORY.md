@@ -839,12 +839,29 @@ unknown root keys, so a shipped Try/Catch or Notify block — or any feature blo
 — would otherwise read as *agreement*. It is mutation-tested (dropping the containment check fails four
 tests).
 
-Two equality traps the tests pin: the typed top-level dump expands every default while a nested config
-pipeline stays byte-compact (so a raw `==` between them **always** differs on identical semantics — the
-comparison must run on the lowered form), and `map_ref`/`map_id` are one selector on **both** sides
-(`ProcessFlowBuilder` accepts `{"mode": "map_ref", "map_id": ...}`). Action verbs are compared
-case-**sensitively** on purpose: post-#139C the emitted `actionType` is family-conditional, so `Send`
-and `SEND` are genuinely different output.
+**The kind is RESOLVED, not read.** Every other layer resolves `process_kind or process_type` — the
+plan-time gate and each builder's `validate_config`/`build`. A Codex review caught this check reading
+only `process_kind`, which let a caller opt in to the strict surface, author a contradictory view, spell
+the kind `process_type`, and fall through to *undecidable* while the process still built: a silent
+bypass of the entire guarantee. The resolved kind is also what lands in the normal form, so the alias
+spelling cannot manufacture a conflict either.
+
+Equality traps the tests pin:
+
+- The typed top-level dump expands every default while a nested config pipeline stays byte-compact, so a
+  raw `==` between them **always** differs on identical semantics — the comparison must run on the
+  lowered form.
+- `map_ref`/`map_id` are one selector on **both** sides (`ProcessFlowBuilder` accepts
+  `{"mode": "map_ref", "map_id": ...}`).
+- **Casing is family-conditional, and delegated.** The same Codex review caught the comparison using raw
+  stripped spellings, which manufactured false conflicts in two directions at once: the legacy renderer
+  UPPER-cases a REST verb (`post` and `POST` emit identical XML) and LOWER-cases a non-REST connector
+  type (`Database` and `database` emit identically), while PRESERVING a non-REST verb (`Send` must never
+  become `SEND` — #139C's latent defect). The comparison now delegates to #139C's own
+  `_canonical_connector_metadata`, which is already pinned against the legacy builder, so it agrees with
+  emission by construction rather than by a re-derived table. A varying *database* verb turns out to be
+  unreachable anyway: validation pins a DB source to exactly `Get`, so `get`/`GET` are the clean-plan
+  gate, not a comparison.
 
 **View-faithfulness.** On the strict surface an authored view may only describe a process the request
 actually authors *and* materializes. When the single authored process resolves to reuse, the submitted
