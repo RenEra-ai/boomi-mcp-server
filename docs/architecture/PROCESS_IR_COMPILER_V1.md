@@ -623,3 +623,28 @@ edges, `leg_ordinal`, typed outcome and the existing exit roles carry rich bodie
 control-only root needed **no** lowering or plan change at all (verified by probe before any edit:
 the synthetic Start wires straight to a control entry, legs number correctly, and the plan invariants
 pass).
+
+### Round-1 review corrections (#141)
+
+Four holes the first cut of the per-path walk left open, all specific to rich bodies — before
+#141 none of these shapes were expressible, which is why the pre-existing rules were complete
+for what they covered and incomplete for what #141 added:
+
+* **The Send gate now covers every downstream node**, not just a following call or map. A root
+  `connector_call` sequence admits only calls and maps, so those two kinds *were* the whole story;
+  a Branch leg may put a `message`, a routed `target`, a nested control or a property step after a
+  Send, none of which can execute. Only a plain `stop` (consumes nothing) or a stream-replacing
+  cache read (supplies its own documents) may follow. The one asymmetry preserved from #140: a
+  `return_documents` terminal is still blamed on the terminal, every other follower on the Send.
+* **Every map is validated or rejected.** A second map used to overwrite the first `pending_map`,
+  and a map reaching a path exit was dropped — so the compiler could claim to have verified
+  profiles for a map it never compared. A pending map must now be answered by the very next node
+  being a `connector_call`. This restates in the walk what #140 states in the MODEL for root
+  sequences, because inside a body a map is an ordinary linear step the model cannot constrain.
+  A map whose upstream is a legacy endpoint still carries no call-to-call pair and stays unchecked.
+* **ProcessCall bodies require a control-only root** — see PROCESS_IR_V1 §3b.
+* **`_check_every_control_path_terminates` runs BEFORE the generic successor/leaf rules.** In a
+  finite acyclic join-free CFG a leg that reaches no exit always ends on a non-terminal leaf, so
+  the generic check fired first and `PROCESS_IR_SEMANTIC_UNTERMINATED_PATH` was unreachable. A code
+  with no reachable path is not a check; it shipped that way because the first cut added the code
+  without a test that exercised it.

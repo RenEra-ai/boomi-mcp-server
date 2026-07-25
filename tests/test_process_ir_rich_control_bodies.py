@@ -42,6 +42,7 @@ from boomi_mcp.errors import (
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
+    PROCESS_IR_SEMANTIC_UNTERMINATED_PATH,
 )
 from boomi_mcp.models import process_ir as ir_module
 from boomi_mcp.models.process_ir import (
@@ -683,3 +684,206 @@ def test_fixtures_carry_only_opaque_sentinel_references(name):
     text = (_FIXTURES / name).read_text().lower()
     for forbidden in ("password", "secret", "token", "http://", "https://", "@"):
         assert forbidden not in text
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 1 — regressions for four real holes in the first cut
+# ---------------------------------------------------------------------------
+
+
+def test_process_call_body_requires_a_control_only_root():
+    """R1/F1: path mode is body-local, so it could not see a connector ANCESTOR.
+
+    `[connector_call(GET), branch(process_call -> stop)]` used to compile, which
+    is exactly the `process_call_connector_mixing` the manifest still reports as
+    gated — the root's connector sits on that leg's root-to-leaf path.
+    """
+    doc = {
+        "version": "1",
+        "body": {"kind": "sequence", "steps": [
+            call("op_rest_get", action="GET"),
+            {"kind": "branch", "legs": [
+                {"steps": [{"kind": "process_call", "process_ref": "child_process"}],
+                 "terminal": {"kind": "stop"}},
+                {"steps": [{"kind": "message", "text": "m"}], "terminal": {"kind": "stop"}},
+            ]},
+        ]},
+    }
+    with pytest.raises(ProcessIRValidationError) as excinfo:
+        parse_process_ir_v1(doc)
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+    # ...and the legitimate shape is untouched.
+    compile_doc(PROCESS_CALL_BRANCH_DOC)
+
+
+@pytest.mark.parametrize(
+    "follower,label",
+    [
+        ({"kind": "message", "text": "after"}, "message"),
+        ({"kind": "set_ddp", "name": "X", "source_values": [{"value_type": "static", "value": "v"}]}, "set_ddp"),
+        ({"kind": "flow_control", "for_each_count": 1}, "flow_control"),
+        # `cache_put` is deliberately absent: an existing model rule already
+        # rejects a trailing cache_put in a leg's steps (it belongs in the leg
+        # terminal), so the Send gate never sees that shape.
+    ],
+)
+def test_the_send_gate_covers_every_downstream_node(follower, label):
+    """R1/F2: the gate only rejected a following call or map.
+
+    Before #141 nothing else COULD follow a call (a root connector_call sequence
+    admits only calls and maps), so those two kinds were the whole story. Rich
+    bodies broke that: a leg may put any linear node after a Send, and none of
+    them can ever run.
+    """
+    doc = {
+        "version": "1",
+        "body": {"kind": "sequence", "steps": [
+            call("op_rest_get", action="GET"),
+            {"kind": "branch", "legs": [
+                {"steps": [call("op_db_send", action="Send"), follower],
+                 "terminal": {"kind": "stop"}},
+                {"steps": [{"kind": "message", "text": "m"}], "terminal": {"kind": "stop"}},
+            ]},
+        ]},
+    }
+    codes = codes_for(doc)
+    assert codes[0][0] == PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH, label
+    # Blames the SEND, not the follower — the Send is what is mispositioned.
+    assert codes[0][1] == "/body/steps/1/legs/0/steps/0/operation_ref"
+
+
+def test_a_send_may_still_be_followed_by_a_stop():
+    """The gate must not reject the one legal follower."""
+    doc = {
+        "version": "1",
+        "body": {"kind": "sequence", "steps": [
+            call("op_rest_get", action="GET"),
+            {"kind": "branch", "legs": [
+                {"steps": [call("op_db_send", action="Send")], "terminal": {"kind": "stop"}},
+                {"steps": [{"kind": "message", "text": "m"}], "terminal": {"kind": "stop"}},
+            ]},
+        ]},
+    }
+    compile_doc(doc)
+
+
+def test_a_send_may_be_followed_by_a_stream_replacing_cache_read():
+    """A cache read supplies its own documents, so it genuinely restarts the stream."""
+    doc = {
+        "version": "1",
+        "body": {"kind": "sequence", "steps": [
+            call("op_rest_get", action="GET"),
+            {"kind": "branch", "legs": [
+                {"steps": [call("op_db_send", action="Send"),
+                           {"kind": "cache_get", "cache_ref": "child_process"}],
+                 "terminal": {"kind": "stop"}},
+                {"steps": [{"kind": "message", "text": "m"}], "terminal": {"kind": "stop"}},
+            ]},
+        ]},
+    }
+    compile_doc(doc)
+
+
+def test_every_map_in_a_body_is_validated_or_rejected():
+    """R1/F3: a second map silently overwrote the first, and a map before a
+    terminal was dropped — either way the compiler claimed to have "verified
+    profiles" for a map it never compared.
+
+    #140 states this rule in the MODEL for a root connector_call sequence ("a
+    map_ref must be immediately followed by a connector_call"); inside a control
+    body a map is an ordinary linear step, so the walk has to state it.
+    """
+    def leg_steps(steps):
+        return {
+            "version": "1",
+            "body": {"kind": "sequence", "steps": [
+                call("op_rest_get", action="GET"),
+                {"kind": "branch", "legs": [
+                    {"steps": steps, "terminal": {"kind": "stop"}},
+                    {"steps": [{"kind": "message", "text": "m"}], "terminal": {"kind": "stop"}},
+                ]},
+            ]},
+        }
+
+    # two maps in a row: the first has no call to be checked against
+    codes = codes_for(leg_steps([
+        {"kind": "map_ref", "map_ref": "map_rest_to_soap"},
+        {"kind": "map_ref", "map_ref": "map_rest_to_patch"},
+        call("op_rest_patch", action="PATCH"),
+    ]))
+    assert codes[0][0] == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
+
+    # a map whose successor is the terminal, never a call
+    codes = codes_for(leg_steps([{"kind": "map_ref", "map_ref": "map_rest_to_soap"}]))
+    assert codes[0][0] == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
+
+    # a map whose successor is some other linear node
+    codes = codes_for(leg_steps([
+        {"kind": "map_ref", "map_ref": "map_rest_to_soap"},
+        {"kind": "message", "text": "m"},
+        call("op_soap_execute", action="EXECUTE"),
+    ]))
+    assert codes[0][0] == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
+
+
+def test_a_legacy_map_beside_non_call_neighbours_stays_unchecked():
+    """The bracketing rule applies only where an upstream CALL exists.
+
+    A map whose upstream is a legacy `source` endpoint carries no call-to-call
+    profile pair, so it is left alone exactly as before #141 — tightening it
+    would reject the existing branch-leg shape (`steps:[map_ref]` + target).
+    """
+    doc = {
+        "version": "1",
+        "body": {"kind": "sequence", "steps": [
+            {"kind": "source", "connection_ref": "conn_rest", "operation_ref": "op_rest_get"},
+            {"kind": "branch", "legs": [
+                {"steps": [{"kind": "map_ref", "map_ref": "map_rest_to_soap"}],
+                 "terminal": {"kind": "target", "connection_ref": "conn_rest",
+                              "operation_ref": "op_rest_patch"}},
+                {"steps": [{"kind": "message", "text": "m"}], "terminal": {"kind": "stop"}},
+            ]},
+        ]},
+    }
+    compile_doc(doc)
+
+
+def test_an_unterminated_control_leg_reports_its_own_code():
+    """R1/F4: the diagnostic existed but could never fire.
+
+    In a finite acyclic join-free CFG a leg that reaches no exit ALWAYS ends on a
+    non-terminal leaf, so the generic leaf check ran first and reported
+    PROCESS_IR_SEMANTIC_MISSING_TERMINAL. The specific check now runs before it.
+    A code with no reachable path is not a check — and the reason this shipped is
+    that the first cut added the code without a test that exercised it.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import (
+        BranchSemanticV1, CfgEdgeV1, CfgNodeV1, MessageSemanticV1,
+        SemanticCfgV1, StopSemanticV1,
+    )
+    from boomi_mcp.compiler.process_ir.invariants import check_cfg_invariants
+
+    def node(o, s, p, e=None):
+        return CfgNodeV1(node_id="n%d" % o, ordinal=o, source_path=p, semantic=s, exit_role=e)
+
+    def edge(o, a, b, k, l, p, leg=None):
+        return CfgEdgeV1(edge_id="e%d" % o, ordinal=o, source_node_id="n%d" % a,
+                         target_node_id="n%d" % b, kind=k, local_ordinal=l,
+                         provenance_path=p, leg_ordinal=leg)
+
+    B = "/body/steps/0"
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(node(1, BranchSemanticV1(leg_count=2), B),
+               node(2, MessageSemanticV1(text="x"), B + "/legs/0/steps/0"),   # leg 1 reaches no exit
+               node(3, MessageSemanticV1(text="y"), B + "/legs/1/steps/0"),
+               node(4, StopSemanticV1(), B + "/legs/1/terminal", e="stop")),
+        edges=(edge(1, 1, 2, "branch_leg", 1, B + "/legs/0", 1),
+               edge(2, 1, 3, "branch_leg", 2, B + "/legs/1", 2),
+               edge(3, 3, 4, "terminal", 1, B + "/legs/1/terminal")),
+        exit_node_ids=("n4",),
+    )
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        check_cfg_invariants(cfg)
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_SEMANTIC_UNTERMINATED_PATH
+    assert excinfo.value.diagnostics[0].path == B + "/legs/0"

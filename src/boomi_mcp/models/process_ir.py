@@ -748,10 +748,10 @@ def _check_process_call_path_mode(steps: List[Any], terminal: Any, *, context: s
     and the body ends on a plain ``stop``. Sibling legs are independent paths and
     are unaffected — the check is deliberately body-local.
 
-    A ProcessCall body is reachable only under a CONTROL-ONLY root (a root that is
-    exactly one Branch/Decision), because any other root that can hold a control
-    starts with a ``source`` connector, which would sit on the same root-to-leaf
-    path. That root mode is what makes this rule satisfiable rather than vacuous.
+    This check is BODY-LOCAL and therefore not sufficient on its own: a body
+    cannot see its ancestors. ``_check_process_call_root`` on the document root
+    enforces the other half — that a ProcessCall body hangs off a CONTROL-ONLY
+    root, so no connector sits upstream on the same root-to-leaf path.
     """
     if not any(getattr(step, "kind", None) == "process_call" for step in steps):
         return
@@ -1174,11 +1174,57 @@ def _control_depth(node: Any) -> int:
     return 0
 
 
+def _uses_process_call(node: Any) -> bool:
+    """True when any control body under ``node`` authors a ``process_call`` step."""
+    kind = getattr(node, "kind", None)
+    if kind == "branch":
+        for leg in node.legs:
+            if any(step.kind == "process_call" for step in leg.steps):
+                return True
+            if _uses_process_call(leg.terminal):
+                return True
+        return False
+    if kind == "decision":
+        for arm in (node.true_arm, node.false_arm):
+            if any(step.kind == "process_call" for step in arm.steps):
+                return True
+            if _uses_process_call(arm.terminal):
+                return True
+        return False
+    return False
+
+
 class ProcessIRV1(_ProcessIRBase):
     """The semantic root: exactly one per authored process (ADR-001 §3)."""
 
     version: Literal["1"]
     body: SequenceNodeV1
+
+    @model_validator(mode="after")
+    def _process_call_root_rule(self) -> "ProcessIRV1":
+        """A ProcessCall control body requires a CONTROL-ONLY root.
+
+        ``_check_process_call_path_mode`` keeps a ProcessCall body free of
+        connector nodes, but a body cannot see its ancestors — and the root is on
+        every one of its root-to-leaf paths. Without this rule
+        ``[connector_call(GET), branch(process_call -> stop)]`` parses, which is
+        precisely the ``process_call_connector_mixing`` the capability manifest
+        still reports as GATED. Enforced on the whole document, where the root
+        and the bodies are both visible.
+        """
+        kinds = [step.kind for step in self.body.steps]
+        control_only_root = len(kinds) == 1 and kinds[0] in ("branch", "decision")
+        if control_only_root:
+            return self
+        for step in self.body.steps:
+            if _uses_process_call(step):
+                raise _body_kind_error(
+                    "a control body may use process_call only under a control-only root "
+                    "(a root that is exactly one branch or decision) — otherwise the root's "
+                    "connector sits on the same root-to-leaf path "
+                    "(process_call_connector_mixing is gated)"
+                )
+        return self
 
     @model_validator(mode="after")
     def _depth_rules(self) -> "ProcessIRV1":

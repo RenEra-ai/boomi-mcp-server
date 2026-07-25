@@ -326,6 +326,12 @@ def validate_connector_call_semantics(
 #: documents regardless of what came before.
 _STREAM_PRODUCING_KINDS = frozenset({"cache_get", "document_cache_retrieve"})
 
+#: The only kinds that may follow a call which produces no documents: a plain
+#: ``stop`` (consumes nothing, just ends the path) and a stream-replacing read
+#: (supplies its own documents). Everything else would be emitted downstream of a
+#: shape that hands it nothing.
+_MAY_FOLLOW_NON_PRODUCER = frozenset({"stop"}) | _STREAM_PRODUCING_KINDS
+
 
 class _PathState:
     """Document state carried down ONE root-to-leaf path.
@@ -431,32 +437,57 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
         node = by_id[node_id]
         kind = node.semantic.semantic_kind
 
+        # --- the Send gate, applied to EVERY downstream node ------------------
+        # A non-producing call returns no documents to the process, so nothing
+        # downstream on this path can run. Before #141 only a call or a map could
+        # follow one (the root connector_call sequence admits nothing else), so
+        # checking those two kinds was complete. Rich bodies broke that: a leg may
+        # now put a message, a routed target, a nested control or a cache write
+        # after a Send, none of which could ever execute.
+        #
+        # Only two things may legally follow: a plain ``stop`` (it consumes
+        # nothing and merely ends the path — the legacy [target, stop] shape), and
+        # a stream-replacing cache read, which supplies its own documents and so
+        # genuinely restarts the stream.
+        if state.blocked_by is not None and kind not in _MAY_FOLLOW_NON_PRODUCER:
+            # Blame the SEND — the node whose position is wrong, since it must be
+            # last on its path — EXCEPT for a Return Documents terminal, where
+            # #140 shipped the pointer on the terminal itself. That asymmetry is
+            # #140's, and #141 has no reason to move a pointer callers already
+            # key on; the generalization changes which nodes are caught, never
+            # where an already-caught one is reported.
+            if node.exit_role == "return_documents":
+                _cardinality_failure(node.source_path, node.node_id)
+            _cardinality_failure(
+                "{0}/operation_ref".format(state.blocked_by.source_path),
+                state.blocked_by.node_id,
+            )
+
+        # --- a pending map must be answered by the very next call -------------
+        # #140 enforces "a map_ref is immediately followed by a connector_call" in
+        # the MODEL, but only for a root connector_call sequence. Inside a control
+        # body a map is an ordinary linear step, so the model cannot state it and
+        # this walk must: without it `[call, mapA, mapB, call]` silently overwrote
+        # mapA and validated only mapB, and a map followed by a terminal was
+        # dropped unchecked. Either way the compiler would have claimed to verify
+        # profiles it never compared.
+        if state.pending_map is not None and kind != "connector_call":
+            _profile_failure(
+                "{0}/map_ref".format(state.pending_map.source_path),
+                state.pending_map.node_id,
+            )
+
         if kind == "connector_call":
             binding = binding_by_node[node_id]
             capability = binding.capability
             call_path = "{0}/operation_ref".format(binding.source_path)
 
-            # ORDER MATTERS, and it is the reverse of the obvious one. The Send
-            # gate is checked FIRST because a non-producing predecessor also
-            # leaves ``producer`` empty — so the documents_required rule below
-            # would fire on the same payload and blame this follower for a defect
-            # that belongs to the Send. Root cause before symptom.
+            # The Send gate already fired above for this node if it was blocked,
+            # and it fires BEFORE this rule deliberately: a non-producing
+            # predecessor also leaves ``producer`` empty, so checking the other
+            # order would blame this follower for a defect that belongs to the
+            # Send. Root cause before symptom.
             #
-            # The gate itself: official Boomi documentation states a Send action
-            # "does not return any data to the process for further processing",
-            # so a step after one on the SAME path could never run. Sibling legs
-            # are different paths and are unaffected.
-            #
-            # Blame the SEND, not this follower — #140 shipped that pointer and it
-            # is the actionable one: the Send is the node whose position is wrong
-            # (it must be last on its path), whereas the follower may be a
-            # perfectly good call that simply cannot be reached.
-            if state.blocked_by is not None:
-                _cardinality_failure(
-                    "{0}/operation_ref".format(state.blocked_by.source_path),
-                    state.blocked_by.node_id,
-                )
-
             # Nothing on THIS path produced documents, so the call would receive
             # none and never execute.
             if capability.accepts_input == "documents_required" and state.producer is None:
@@ -472,12 +503,6 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
             state.blocked_by = None if capability.produces_output else binding
 
         elif kind == "map":
-            # Same blame rule as a following call: the Send is the misplaced node.
-            if state.blocked_by is not None:
-                _cardinality_failure(
-                    "{0}/operation_ref".format(state.blocked_by.source_path),
-                    state.blocked_by.node_id,
-                )
             # Only a map BETWEEN two connector CALLS can have its profiles
             # verified: the equality contract compares the upstream call's
             # response profile with the map's source, and the map's target with

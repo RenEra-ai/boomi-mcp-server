@@ -399,6 +399,17 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                 entries[0].node_id,
             )
 
+    # --- #141: every divergent path terminates, and nesting stays bounded ---
+    # Ordered BEFORE the generic successor/leaf rules deliberately. In a finite
+    # acyclic join-free CFG a leg that reaches no exit ALWAYS ends on a
+    # non-terminal leaf, so the generic check below would fire first and
+    # PROCESS_IR_SEMANTIC_UNTERMINATED_PATH could never be reached — a code that
+    # cannot fire is not a check. Running it here means a malformed control leg
+    # reports the specific diagnostic, and the generic one keeps every
+    # non-control path it already owned.
+    _check_every_control_path_terminates(nodes, by_id, outbound)
+    _check_control_depth(nodes, by_id, outbound, cfg.entry_node_id)
+
     # --- per-node successor rules -----------------------------------------
     for node in nodes:
         successors = outbound[node.node_id]
@@ -551,10 +562,6 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                 "path ends on a node that is not a valid terminal",
                 node.node_id,
             )
-
-    # --- #141: every divergent path terminates, and nesting stays bounded ------
-    _check_every_control_path_terminates(nodes, by_id, outbound)
-    _check_control_depth(nodes, by_id, outbound, cfg.entry_node_id)
 
 
 def _check_every_control_path_terminates(nodes, by_id, outbound) -> None:
