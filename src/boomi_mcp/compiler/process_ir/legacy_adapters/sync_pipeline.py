@@ -39,7 +39,7 @@ collapsing into one incompatible symbol.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from ....errors import LEGACY_ADAPTER_SEMANTIC_LOSS, LEGACY_ADAPTER_UNSUPPORTED_KIND
 from ....models.process_ir import parse_process_ir_v1
@@ -69,6 +69,83 @@ _BINDING_KEYS = frozenset(
     {"connector_type", "action_type", "connection_id", "operation_id", "label"}
 )
 _SUPPORTED_TRANSFORM_MODES = frozenset({"passthrough", "map_ref"})
+
+
+class _PointerBases(NamedTuple):
+    """Where in the CALLER'S config each slot's fields actually live.
+
+    ``source_pointer`` is contractually the EXACT RFC 6901 pointer to the legacy
+    field a reference came from, and the alias embeds that same pointer. Both are
+    therefore relative to whatever document the caller handed in — which differs by
+    entry point: the builder passes the lowered core (``/source/...``), while the
+    registry entry passes the raw dialect config, where the very same values live
+    under ``/pipeline/stages/<index>/config/...``.
+
+    Injecting the bases (rather than rewriting pointers afterwards) keeps one table
+    feeding aliases, requirements AND diagnostics, so the three can never disagree.
+    """
+
+    source: str
+    transform: str
+    target: str
+    #: The exact field that identifies an entry as a listener.
+    listener: str
+
+
+_CORE_BASES = _PointerBases(
+    source="/source",
+    transform="/transform",
+    target="/target",
+    listener="/source/connector_type",
+)
+
+# Which stage kinds fill which slot of the lowered linear core.
+_SOURCE_STAGE_KINDS = frozenset({"read", "fetch", "listener"})
+_TARGET_STAGE_KINDS = frozenset({"send", "write"})
+
+
+def _raw_pointer_bases(config: Dict[str, Any]) -> _PointerBases:
+    """Locate each slot's originating stage in a RAW sync_pipeline config.
+
+    Stages are matched by KIND, never by position: the ``stages`` list is authored
+    in arbitrary order and the flow order comes from ``dependencies``, so using a
+    flow index would yield pointers that RESOLVE but name the wrong stage — a
+    strictly worse failure than not resolving at all.
+
+    Only ever called on a config ``lower_config`` already accepted, which
+    guarantees exactly one source, at most one map and one target; the per-slot
+    fallback keeps it total anyway.
+    """
+    stages = (config.get("pipeline") or {}).get("stages") or []
+    index: Dict[str, int] = {}
+    for i, stage in enumerate(stages):
+        if not isinstance(stage, dict):
+            continue
+        kind = str(stage.get("kind") or "").strip().lower()
+        if kind in _SOURCE_STAGE_KINDS:
+            index.setdefault("source", i)
+        elif kind == "map":
+            index.setdefault("transform", i)
+        elif kind in _TARGET_STAGE_KINDS:
+            index.setdefault("target", i)
+
+    def base(slot: str, fallback: str) -> str:
+        i = index.get(slot)
+        return f"/pipeline/stages/{i}/config" if i is not None else fallback
+
+    source = base("source", _CORE_BASES.source)
+    return _PointerBases(
+        source=source,
+        transform=base("transform", _CORE_BASES.transform),
+        target=base("target", _CORE_BASES.target),
+        # A raw listener stage is identified by its PRIMITIVE (``wss_listen``).
+        # `connector_type` is accepted on a listener stage but wholly inert -- it
+        # does not select the listener path and every value emits identical XML --
+        # so pointing a diagnostic at it would misdirect the reader.
+        listener=(
+            f"{source}/primitive" if "source" in index else _CORE_BASES.listener
+        ),
+    )
 
 
 def _require_dict(value: Any, pointer: str, what: str) -> Dict[str, Any]:
@@ -177,14 +254,14 @@ def _binding_slots(
 
 
 def _map_slot(
-    transform: Dict[str, Any],
+    transform: Dict[str, Any], base: str
 ) -> Tuple[Optional[Dict[str, Any]], List[LegacySymbolRequirementV1]]:
     """Build the optional ``map_ref`` node. ``passthrough`` appends NOTHING."""
     mode = str(transform.get("mode") or "passthrough").strip().lower()
     if mode not in _SUPPORTED_TRANSFORM_MODES:
         raise adapter_diagnostic(
             LEGACY_ADAPTER_UNSUPPORTED_KIND,
-            "/transform/mode",
+            f"{base}/mode",
             "transform mode is not representable for this dialect",
         )
     if mode == "passthrough":
@@ -203,7 +280,7 @@ def _map_slot(
         key = "map_id"
     else:
         key = "map_id" if "map_id" in transform and "map_ref" not in transform else "map_ref"
-    pointer = f"/transform/{key}"
+    pointer = f"{base}/{key}"
     selector = _coerce_id(transform.get("map_ref") or transform.get("map_id"))
     if not selector:
         raise adapter_diagnostic(
@@ -227,7 +304,9 @@ def _map_slot(
     ]
 
 
-def adapt_sync_pipeline(config: Dict[str, Any]) -> LegacyAdapterResultV1:
+def adapt_sync_pipeline(
+    config: Dict[str, Any], *, pointer_bases: _PointerBases = _CORE_BASES
+) -> LegacyAdapterResultV1:
     """Normalize a lowered sync_pipeline linear core into IR + requirements.
 
     ``config`` is the output of ``SyncPipelineBuilder.lower_config`` — already
@@ -235,6 +314,11 @@ def adapt_sync_pipeline(config: Dict[str, Any]) -> LegacyAdapterResultV1:
     is reached. Every failure here is therefore an internal parity defect, raised
     as a value-free :class:`LegacyAdapterError` for the caller to translate into
     its existing external error family.
+
+    ``pointer_bases`` says where the caller's own document keeps these fields, so
+    aliases, ``source_pointer`` values and diagnostics all name a field that really
+    exists in what the caller passed. It defaults to the lowered core's own layout;
+    :func:`adapt_sync_pipeline_config` supplies raw-config bases instead.
     """
     _require_dict(config, "/", "lowered sync_pipeline config")
     unknown = sorted(set(config) - _KNOWN_ROOT_KEYS)
@@ -245,10 +329,16 @@ def adapt_sync_pipeline(config: Dict[str, Any]) -> LegacyAdapterResultV1:
             "root key is not representable in ProcessIR v1 for this dialect",
         )
 
-    source = _require_dict(config.get("source") or {}, "/source", "source binding")
-    target = _require_dict(config.get("target") or {}, "/target", "target binding")
+    source = _require_dict(
+        config.get("source") or {}, pointer_bases.source, "source binding"
+    )
+    target = _require_dict(
+        config.get("target") or {}, pointer_bases.target, "target binding"
+    )
     transform = _require_dict(
-        config.get("transform") or {"mode": "passthrough"}, "/transform", "transform"
+        config.get("transform") or {"mode": "passthrough"},
+        pointer_bases.transform,
+        "transform",
     )
 
     if _is_listener(source):
@@ -258,23 +348,25 @@ def adapt_sync_pipeline(config: Dict[str, Any]) -> LegacyAdapterResultV1:
         # pair instead of the fused start_listen shape.
         raise adapter_diagnostic(
             LEGACY_ADAPTER_UNSUPPORTED_KIND,
-            "/source/connector_type",
+            pointer_bases.listener,
             "listener entry is not representable in ProcessIR v1 — the legacy path "
             "fuses the start and connector shapes (#140)",
         )
 
-    _check_binding(source, "/source")
-    _check_binding(target, "/target")
+    _check_binding(source, pointer_bases.source)
+    _check_binding(target, pointer_bases.target)
 
-    source_node, requirements = _binding_slots(source, "/source", "source")
+    source_node, requirements = _binding_slots(source, pointer_bases.source, "source")
     steps: List[Dict[str, Any]] = [source_node]
 
-    map_node, map_requirements = _map_slot(transform)
+    map_node, map_requirements = _map_slot(transform, pointer_bases.transform)
     if map_node is not None:
         steps.append(map_node)
         requirements.extend(map_requirements)
 
-    target_node, target_requirements = _binding_slots(target, "/target", "target")
+    target_node, target_requirements = _binding_slots(
+        target, pointer_bases.target, "target"
+    )
     steps.append(target_node)
     requirements.extend(target_requirements)
 
@@ -327,12 +419,21 @@ def adapt_sync_pipeline_config(config: Dict[str, Any]) -> LegacyAdapterResultV1:
     renderer is the builder's job (`_sync_pipeline_is_canonical`). This mirrors the
     registry entry's documented meaning: the dialect is cut over, not every one of
     its configs.
+
+    Pointers are rebased onto the raw config, because ``source_pointer`` and the
+    aliases that embed it are contractually the EXACT location a reference came
+    from — in the document the CALLER handed over. Returning the lowered core's
+    ``/source/...`` pointers here would name fields that do not exist in a raw
+    sync_pipeline config at all.
     """
     from ....categories.components.builders.process_flow_builder import (
         SyncPipelineBuilder,
     )
 
-    return adapt_sync_pipeline(SyncPipelineBuilder.lower_config(config))
+    return adapt_sync_pipeline(
+        SyncPipelineBuilder.lower_config(config),
+        pointer_bases=_raw_pointer_bases(config),
+    )
 
 
 __all__ = ["adapt_sync_pipeline", "adapt_sync_pipeline_config"]

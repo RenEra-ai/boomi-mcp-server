@@ -389,6 +389,106 @@ def test_adapter_carries_no_envelope_data_into_the_ir():
 
 
 # ---------------------------------------------------------------------------
+# 6b. source_pointer is EXACT for whichever document the caller passed
+# ---------------------------------------------------------------------------
+
+
+def _rfc6901(doc, pointer):
+    """Minimal RFC 6901 resolver -- deliberately not the production one, so this
+    tests the pointers rather than agreeing with the code that built them."""
+    cur = doc
+    for token in pointer.lstrip("/").split("/"):
+        token = token.replace("~1", "/").replace("~0", "~")
+        if isinstance(cur, list):
+            try:
+                cur = cur[int(token)]
+            except (ValueError, IndexError):
+                return _MISSING
+        elif isinstance(cur, dict):
+            if token not in cur:
+                return _MISSING
+            cur = cur[token]
+        else:
+            return _MISSING
+    return cur
+
+
+_MISSING = object()
+
+
+def _out_of_flow_order_config():
+    """Stages listed target, source, map -- flow order is source -> map -> target.
+
+    `stages` is an unordered set whose sequence comes from `dependencies`, so raw
+    LIST INDEX and FLOW POSITION disagree here. A remapping that used flow position
+    would produce pointers that still RESOLVE but name the WRONG stage, which is
+    worse than not resolving; this ordering is what makes that failure visible.
+    """
+    return {
+        "process_kind": "sync_pipeline",
+        "pipeline": {
+            "stages": [_rest_send("t"), _db_read("s"), _map("m")],
+            "dependencies": [
+                {"from_stage": "s", "to_stage": "m"},
+                {"from_stage": "m", "to_stage": "t"},
+            ],
+        },
+    }
+
+
+def test_registry_entry_pointers_resolve_against_the_raw_config():
+    """`source_pointer` is contractually the EXACT pointer to the originating
+    field, so it must resolve -- in the document the CALLER handed over."""
+    from boomi_mcp.compiler.process_ir.legacy_adapters import (
+        SYNC_PIPELINE_DIALECT,
+        adapter_for,
+    )
+
+    raw = _out_of_flow_order_config()
+    reqs = adapter_for(SYNC_PIPELINE_DIALECT)(raw).symbol_requirements
+    assert reqs, "expected requirements to pin"
+    for req in reqs:
+        resolved = _rfc6901(raw, req.source_pointer)
+        assert resolved is not _MISSING, f"{req.source_pointer} does not resolve"
+        # Not merely resolvable -- it must name the field holding THIS value, which
+        # is what catches a right-shape/wrong-stage remap.
+        assert resolved == req.legacy_selector, req.source_pointer
+    # And each alias embeds the same raw pointer, so the two cannot drift.
+    for req in reqs:
+        assert req.ir_ref == LEGACY_ADAPTER_ALIAS_PREFIX + req.source_pointer
+    assert all(r.source_pointer.startswith("/pipeline/stages/") for r in reqs)
+
+
+def test_builder_entry_pointers_stay_relative_to_the_lowered_core():
+    """The other entry point passes the lowered core, so its pointers are rooted
+    there. Both are exact -- for different documents."""
+    core = SyncPipelineBuilder.lower_config(_out_of_flow_order_config())
+    reqs = adapt_sync_pipeline(core).symbol_requirements
+    for req in reqs:
+        assert _rfc6901(core, req.source_pointer) == req.legacy_selector
+    assert {r.source_pointer for r in reqs} == {
+        "/source/connection_id", "/source/operation_id", "/transform/map_ref",
+        "/target/connection_id", "/target/operation_id",
+    }
+
+
+def test_registry_listener_diagnostic_points_at_the_primitive_not_connector_type():
+    """A raw listener stage is identified by its PRIMITIVE. `connector_type` is
+    accepted there but wholly inert -- every value emits identical XML and none of
+    them selects the listener path -- so a diagnostic aimed at it would misdirect."""
+    from boomi_mcp.compiler.process_ir.legacy_adapters import (
+        SYNC_PIPELINE_DIALECT,
+        adapter_for,
+    )
+
+    raw = _pipeline([_listen(), _rest_send()])
+    with pytest.raises(LegacyAdapterError) as exc:
+        adapter_for(SYNC_PIPELINE_DIALECT)(raw)
+    pointer = exc.value.diagnostics[0].legacy_source_path
+    assert _rfc6901(raw, pointer) == "wss_listen"
+
+
+# ---------------------------------------------------------------------------
 # 7. Fail-closed guards
 # ---------------------------------------------------------------------------
 

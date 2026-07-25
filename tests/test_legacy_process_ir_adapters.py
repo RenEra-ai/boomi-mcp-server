@@ -190,7 +190,14 @@ def test_registry_sync_pipeline_entry_fails_closed_on_a_listener_config():
     with pytest.raises(LegacyAdapterError) as exc:
         adapter_for(SYNC_PIPELINE_DIALECT)(listener_cfg)
     assert exc.value.diagnostics[0].code == "LEGACY_ADAPTER_UNSUPPORTED_KIND"
-    assert exc.value.diagnostics[0].legacy_source_path == "/source/connector_type"
+    # Rooted in the RAW config the registry entry accepts, and aimed at the field
+    # that actually identifies a listener (the primitive), not at `connector_type`
+    # -- which a listener stage accepts but ignores entirely. The core-relative
+    # `/source/connector_type` is what the BUILDER entry point reports.
+    assert (
+        exc.value.diagnostics[0].legacy_source_path
+        == "/pipeline/stages/0/config/primitive"
+    )
 
 
 def test_registry_reserved_dialects_are_not_migrated():
