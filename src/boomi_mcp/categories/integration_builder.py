@@ -5176,32 +5176,89 @@ def _authority_rejection(disposition: str) -> Dict[str, Any]:
     }
 
 
-def _authored_step_has_validation_error(
-    steps: List[Dict[str, Any]], authored_key: Optional[str]
-) -> bool:
-    """Did the single authored process fail its own validation?
+def _authored_process_validation_error(
+    spec: IntegrationSpecV1, authored_key: Optional[str]
+):
+    """The authored process's validation error, computed ACCOUNT-INDEPENDENTLY.
 
-    Issue #139D — the CLASS-CLOSING half of ADR-001 §5's clean-plan gate. The
-    authority comparison can only pre-run so many of the plan's validation passes
-    before it starts re-implementing them, and this codebase validates in several
-    (structural lowering, ``validate_config``, then ``$ref`` type-checking, plus
-    lints). Enumerating them here closed three instances of one bug in a row.
+    Issue #139D — ADR-001 §5's clean-plan gate. An authority conflict must never
+    MASK the actionable error the process itself would produce, and this repo
+    validates a process in several passes (structural lowering, ``validate_config``,
+    ``$ref`` type-checking, cache/property lineage).
 
-    So the conflict disposition instead YIELDS to whatever error the plan itself
-    produced for that process: if the authored process has any validation error,
-    that error is what the caller needs, and an authority conflict must not mask
-    it. Any future validation pass is covered automatically.
+    Why this re-runs the passes instead of reading the planned step's
+    ``validation_error``: the plan gates those passes on
+    ``will_invoke_process_flow_builder``, which depends on ``planned_action`` and
+    therefore on **live collision resolution**. Reading the step made the strict
+    verdict account-DEPENDENT — the same payload was accepted with a
+    ``PROCESS_REF_TYPE_MISMATCH`` when no same-name component existed, and
+    rejected as an authority conflict when one did, because reuse skipped the
+    validator. ADR-001 §5 forbids exactly that ("collision-reuse never dissolves
+    ... so the same payload can never flip between reject and accept on live
+    account contents"), and explicitly rejects deferring the disposition
+    post-collision for this reason.
 
-    Scoped to the AUTHORED process's own step on purpose — an unrelated
-    component's failure leaves this process's semantics perfectly comparable, so
-    it must not suppress a genuine authority conflict.
+    The boundary is therefore principled rather than arbitrary: this gate may
+    contain **only** account-independent passes, because an account-DEPENDENT one
+    could not participate without breaking the invariant. Every pass below is a
+    pure function of the authored payload. It calls the plan's OWN helpers, never
+    copies of them, and ``test_the_gate_agrees_with_the_plans_own_verdict``
+    differentially pins the result against what the plan itself computes for a
+    non-colliding create — so a future pass added to the plan and missed here is
+    caught by that test rather than by a user.
+
+    Returns the ``BuilderValidationError`` or ``None``.
     """
     if not authored_key:
-        return False
-    for step in steps:
-        if step.get("key") == authored_key:
-            return bool(step.get("validation_error"))
-    return False
+        return None
+    comp = next((c for c in spec.components if c.key == authored_key), None)
+    if comp is None:
+        return None
+    raw_config = comp.config if isinstance(comp.config, dict) else {}
+    process_kind = (
+        str(raw_config.get("process_kind") or raw_config.get("process_type") or "")
+        .strip()
+        .lower()
+    )
+    builder_cls = get_process_flow_builder(process_kind)
+    if builder_cls is None:
+        return None
+    components_by_key = {c.key: c for c in spec.components}
+
+    if builder_cls is ProcessFlowBuilder:
+        err = _check_process_flow_ref_types(comp, raw_config, components_by_key)
+        if err is not None:
+            return err
+        legacy_transform = raw_config.get("transform")
+        legacy_map_ref = (
+            isinstance(legacy_transform, dict)
+            and str(legacy_transform.get("mode") or "").strip() == "map_ref"
+        )
+        flow_sequence = raw_config.get("flow_sequence")
+        if (isinstance(flow_sequence, list) and flow_sequence) or legacy_map_ref:
+            return validate_config_lineage(raw_config, components_by_key)
+        return None
+
+    if builder_cls is WrapperSubprocessBuilder:
+        return _check_wrapper_subprocess_ref_types(comp, raw_config, components_by_key)
+
+    if builder_cls is SyncPipelineBuilder:
+        try:
+            lowered_config = SyncPipelineBuilder.lower_config(raw_config)
+        except BuilderValidationError as exc:
+            return exc
+        err = _check_process_flow_ref_types(comp, lowered_config, components_by_key)
+        if err is not None:
+            return err
+        lowered_transform = lowered_config.get("transform")
+        if (
+            isinstance(lowered_transform, dict)
+            and str(lowered_transform.get("mode") or "").strip() == "map_ref"
+        ):
+            return validate_config_lineage(lowered_config, components_by_key)
+        return None
+
+    return None
 
 
 def _authored_step_will_reuse(
@@ -5280,6 +5337,16 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # move a payload across the accept/reject boundary.
     if authority.disposition == AUTHORITY_AMBIGUOUS:
         return _authority_rejection(authority.disposition)
+    # The conflict dispositions additionally honour the clean-plan gate: if the
+    # authored process would fail its own validation, THAT error is what the
+    # caller needs and an authority conflict must not mask it. Computed
+    # account-independently (see _authored_process_validation_error), so this
+    # whole decision still lands before collision resolution, before any live
+    # lookup, and before any mutation — and no unrelated later plan exit can
+    # suppress an already-computed conflict.
+    if authority.disposition in (AUTHORITY_DISAGREE, AUTHORITY_NOT_REPRESENTABLE):
+        if _authored_process_validation_error(spec, authority.authored_key) is None:
+            return _authority_rejection(authority.disposition)
     # Issue #41 r3: inject transform.function wrappers between any
     # transform.map (map_type='script') and the script.mapping it
     # references. Live Boomi requires the indirection — see
@@ -6686,17 +6753,6 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # over-long inline scripts. Purely additive to ``warnings``; never touches
     # steps / planned_action / validation_error / unresolvable_steps.
     warnings.extend(_lint_script_bodies(spec))
-
-    # Issue #139D (ADR-001 §5 clean-plan gate). The conflict dispositions are
-    # reported HERE, after the plan's own validation has run, so that a process
-    # which failed its own validation surfaces THAT error rather than an authority
-    # conflict masking it. The disposition was computed before any account lookup;
-    # only its reporting waits.
-    if authority.disposition in (
-        AUTHORITY_DISAGREE,
-        AUTHORITY_NOT_REPRESENTABLE,
-    ) and not _authored_step_has_validation_error(steps, authority.authored_key):
-        return _authority_rejection(authority.disposition)
 
     spec_dump = spec.model_dump()
     # Issue #139D (ADR-001 §5, view-faithfulness). On the STRICT surface an

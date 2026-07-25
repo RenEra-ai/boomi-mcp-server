@@ -846,17 +846,31 @@ inside the comparison closed three instances of one bug in a row (lower-time, th
 via an undeclared `$ref`/unsupported REST verb, then `$ref`-type-time), each found by a separate review
 or QA round. Enumerating passes was the wrong shape of fix.
 
-So the two **conflict** dispositions now *yield*: they are decided early, from the authored payload
-alone, but **reported at the end of the plan**, and only when the authored process carries no validation
-error of its own. Any future validation pass is covered without being named. The gate is scoped to the
-*authored process's own* step — an unrelated component's failure leaves this process's semantics
-perfectly comparable and must not suppress a genuine conflict.
+The **first attempt at closing it was worse than the bug.** Deferring the conflict dispositions to the
+end of the plan, so they could yield to whatever error the plan produced, made the strict verdict
+**account-DEPENDENT**: the plan gates `$ref` type-checking on `will_invoke_process_flow_builder`, which
+depends on `planned_action`, so an identical payload was *accepted* (with `PROCESS_REF_TYPE_MISMATCH`)
+when no same-name component existed and *rejected* as an authority conflict when one did, because reuse
+skipped that validator. ADR-001 §5 forbids exactly this, and explicitly rejects deferring the
+disposition post-collision for this reason. A third Codex round caught it; the QA account-independence
+sweep had missed it because every payload in that sweep had a *clean* authored process.
 
-**Ambiguity is exempt and still rejects immediately**, before any live lookup: ADR-001 §5 counts
-declared authoring actions, so it needs no process semantics and "stands even when a process's semantics
-are unavailable". Deferring the conflict dispositions changes only *when they are reported*, never
-*whether* — the decision is still computed before collision resolution, so account contents still cannot
-move a payload across the accept/reject boundary.
+The gate therefore **re-runs the account-independent validation passes itself**, before collision
+resolution — so the whole decision still lands before any live lookup, and no unrelated later plan exit
+(a topological-order failure, an invalid `conflict_policy`) can suppress an already-computed conflict.
+
+Enumerating passes is unavoidable here, but the boundary is **principled rather than arbitrary**: this
+gate may contain *only* account-independent passes, because an account-dependent one could not
+participate without breaking the invariant. Two things keep it from drifting as passes are added: it
+calls the plan's **own** helpers rather than copies, and a **differential oracle**
+(`test_the_gate_agrees_with_the_plans_own_verdict`, plus a separate `sync_pipeline` arm, which reaches
+`$ref` checking only after lowering) pins the gate's verdict against what the plan itself computes for a
+non-colliding create. A future pass added to the plan and missed here fails that test rather than
+reaching a user as a masked error. The oracle compares against the **V1 twin** on purpose: on the strict
+surface a clean gate verdict short-circuits the plan, so comparing there would be circular.
+
+**Ambiguity is exempt** and rejects with no live lookup at all: ADR-001 §5 counts declared authoring
+actions, so it needs no process semantics and "stands even when a process's semantics are unavailable".
 
 **The kind is RESOLVED, not read.** Every other layer resolves `process_kind or process_type` — the
 plan-time gate and each builder's `validate_config`/`build`. A Codex review caught this check reading

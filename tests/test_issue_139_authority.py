@@ -1530,46 +1530,116 @@ def test_a_ref_type_mismatch_outranks_the_authority_verdict(agreeing):
     assert _AUTHORITY_CODE not in json.dumps(plan)
 
 
-def test_the_gate_is_scoped_to_the_authored_process_step():
-    """An UNRELATED component's failure must not suppress a genuine conflict — the
-    authored process's semantics are still perfectly comparable.
+def test_the_gate_is_computed_account_independently():
+    """ADR-001 §5's hardest invariant, and the one the first attempt at this gate
+    broke: the same payload must not flip verdict on live account contents.
 
-    Pinned on the predicate directly. An end-to-end version would be vacuous: in
-    practice non-process components almost never carry a `validation_error`, so a
-    "broken helper" fixture silently proves nothing (measured — four different
-    malformed helpers all planned without one).
+    The plan gates its `$ref` type-checking on `will_invoke_process_flow_builder`,
+    which depends on `planned_action` and therefore on collision resolution. A gate
+    that read the planned step's `validation_error` was accepted (with
+    PROCESS_REF_TYPE_MISMATCH) when no same-name component existed, and REJECTED as
+    an authority conflict when one did, because reuse skipped the validator.
+    """
+    spec = _ref_typemismatch_spec()
+    spec.pipeline.stages[0].config["connection_id"] = "a-different-connection"
+    config = {"dry_run": True, "integration_spec": json.loads(spec.model_dump_json())}
+
+    stub = _collision_stub()
+    stub["name"] = "Sentinel Ref Process"
+
+    without_collision = _plan(config)
+    with_collision = _plan(config, existing=[stub])
+
+    for plan in (without_collision, with_collision):
+        assert _AUTHORITY_CODE not in json.dumps(plan)
+
+
+def test_an_unrelated_plan_exit_cannot_suppress_a_conflict():
+    """The conflict is decided and reported before collision resolution, so a
+    later, unrelated plan exit cannot swallow it."""
+    unknown_dep = _contradictory(STRICT_VERSION)
+    unknown_dep["integration_spec"]["components"].append(
+        {
+            "key": "helper",
+            "type": "connector-settings",
+            "action": "create",
+            "name": "Sentinel Helper",
+            "config": {"connector_type": "database"},
+            "depends_on": ["does_not_exist"],
+        }
+    )
+    bad_policy = _contradictory(STRICT_VERSION)
+    bad_policy["conflict_policy"] = "nonsense"
+
+    for config in (unknown_dep, bad_policy):
+        plan = _plan(config)
+        assert plan["_success"] is False
+        assert plan["error_code"] == _AUTHORITY_CODE
+
+
+@pytest.mark.parametrize(
+    "mutate,expect_error",
+    [
+        pytest.param(lambda c: None, False, id="clean"),
+        pytest.param(
+            lambda c: c["source"].update({"connection_id": "$ref:the_map"}),
+            True,
+            id="ref-type-mismatch",
+        ),
+        pytest.param(
+            lambda c: c["source"].update({"operation_id": "$ref:the_map"}),
+            True,
+            id="ref-type-mismatch-operation",
+        ),
+        pytest.param(
+            lambda c: c["transform"].update({"map_ref": "$ref:db_conn"}),
+            # NOT an error: `map_ref` positions are not $ref-type-checked today
+            # (only connection_id / operation_id are). That is a pre-existing gap
+            # identical on V1, and the oracle's job is to pin gate==plan, not to
+            # assert the plan is right.
+            False,
+            id="unchecked-map-ref-position",
+        ),
+    ],
+)
+def test_the_gate_agrees_with_the_plans_own_verdict(mutate, expect_error):
+    """DIFFERENTIAL ORACLE against the plan itself.
+
+    The gate must re-run the account-independent validation passes rather than
+    read the collision-gated step, which risks it drifting out of sync with the
+    plan as passes are added. This pins the two together: for a NON-colliding
+    create (where the plan runs every pass), the gate's verdict must equal whether
+    the plan reported a validation error on that step.
+
+    A future pass added to the plan but missed by the gate fails here rather than
+    reaching a user as a masked error.
     """
     from src.boomi_mcp.categories.integration_builder import (
-        _authored_step_has_validation_error,
+        _authored_process_validation_error,
     )
 
-    clean = {"key": "main_process", "planned_action": "create"}
-    broken_other = {
-        "key": "other",
-        "planned_action": "error_process_validation",
-        "validation_error": {"error_code": "SOMETHING_ELSE"},
-    }
-    broken_authored = {
-        "key": "main_process",
-        "planned_action": "error_process_validation",
-        "validation_error": {"error_code": "PROCESS_REF_TYPE_MISMATCH"},
-    }
+    spec = _ref_spec()
+    mutate(spec.components[0].config)
 
-    # Another component's failure is not this process's failure.
-    assert _authored_step_has_validation_error([clean, broken_other], "main_process") is False
-    # The authored process's own failure is.
-    assert _authored_step_has_validation_error([broken_authored, clean], "main_process") is True
-    # An empty validation_error is not a failure (the plan writes {} for clean steps).
-    assert (
-        _authored_step_has_validation_error(
-            [{"key": "main_process", "validation_error": {}}], "main_process"
-        )
-        is False
+    gate_error = _authored_process_validation_error(spec, "main_process")
+
+    # Compare against the V1 TWIN: on the strict surface a clean gate verdict
+    # short-circuits the plan with the authority rejection, so it would produce no
+    # steps and the oracle would be circular. V1 never runs authority, so it always
+    # plans the component and reports whatever its own passes found.
+    legacy = json.loads(spec.model_dump_json())
+    legacy["version"] = "1.0"
+    plan = _plan({"dry_run": True, "integration_spec": legacy})
+    step = _main_step(plan)
+    plan_error = step.get("validation_error") or None
+    assert step["planned_action"] != "reuse", "control: the plan must run every pass"
+
+    assert (gate_error is not None) is expect_error
+    assert (gate_error is not None) == (plan_error is not None), (
+        f"gate and plan disagree: gate={gate_error!r} plan={plan_error!r}"
     )
-    # No authored key (ambiguous/zero-authored) never suppresses anything.
-    assert _authored_step_has_validation_error([broken_authored], None) is False
-    # A missing step does not silently suppress the conflict either.
-    assert _authored_step_has_validation_error([broken_other], "main_process") is False
+    if gate_error is not None:
+        assert gate_error.error_code == plan_error["error_code"]
 
 
 def test_a_clean_authored_process_still_reports_the_conflict():
@@ -1585,3 +1655,90 @@ def _main_step_or_none(plan):
         if step.get("key") == "main_process":
             return step.get("validation_error")
     return None
+
+
+def _sync_ref_spec(mutate=None):
+    """A `sync_pipeline` process bound through `$ref` tokens, for the oracle.
+
+    The base-builder path and the sync_pipeline path reach `$ref` type-checking
+    differently (the latter must lower first), so both need pinning.
+    """
+    stages = [
+        {
+            "key": "r",
+            "kind": "read",
+            "config": {
+                "primitive": "db_read",
+                "connector_type": "database",
+                "action_type": "Get",
+                "connection_id": "$ref:db_conn",
+                "operation_id": "$ref:db_op",
+            },
+        },
+        {
+            "key": "s",
+            "kind": "send",
+            "config": {
+                "primitive": "rest_send",
+                "connector_type": "rest",
+                "action_type": "POST",
+                "connection_id": "$ref:rest_conn",
+                "operation_id": "$ref:rest_op",
+            },
+        },
+    ]
+    config = {
+        "process_kind": "sync_pipeline",
+        "pipeline": {
+            "stages": stages,
+            "dependencies": [{"from_stage": "r", "to_stage": "s"}],
+        },
+    }
+    if mutate:
+        mutate(config)
+    spec = _ref_spec()
+    spec.components[0].config.clear()
+    spec.components[0].config.update(config)
+    return spec
+
+
+@pytest.mark.parametrize(
+    "mutate,expect_error",
+    [
+        pytest.param(None, False, id="clean"),
+        pytest.param(
+            lambda c: c["pipeline"]["stages"][0]["config"].update(
+                {"connection_id": "$ref:the_map"}
+            ),
+            True,
+            id="ref-type-mismatch",
+        ),
+    ],
+)
+def test_the_gate_agrees_with_the_plan_for_sync_pipeline_too(mutate, expect_error):
+    """The sync_pipeline branch of the oracle.
+
+    It reaches `$ref` type-checking only after lowering, so it is a genuinely
+    separate path from the base builder's — a mutation that disabled it left the
+    base-builder oracle green, which is how this gap was found.
+    """
+    from src.boomi_mcp.categories.integration_builder import (
+        _authored_process_validation_error,
+    )
+
+    spec = _sync_ref_spec(mutate)
+    gate_error = _authored_process_validation_error(spec, "main_process")
+
+    legacy = json.loads(spec.model_dump_json())
+    legacy["version"] = "1.0"
+    plan = _plan({"dry_run": True, "integration_spec": legacy})
+    step = _main_step(plan)
+    plan_error = step.get("validation_error") or None
+    assert step["planned_action"] != "reuse", "control: the plan must run every pass"
+
+    assert (gate_error is not None) is expect_error
+    assert (gate_error is not None) == (plan_error is not None), (
+        f"gate and plan disagree: gate={gate_error!r} plan={plan_error!r}"
+    )
+    if gate_error is not None:
+        assert gate_error.error_code == plan_error["error_code"]
