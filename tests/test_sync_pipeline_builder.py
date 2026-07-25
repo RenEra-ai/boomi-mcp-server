@@ -218,6 +218,78 @@ def test_sync_pipeline_matches_golden_fixture():
     assert verify_process_graph(emitted)["errors"] == []
 
 
+# ---------------------------------------------------------------------------
+# Byte goldens for the previously un-anchored variants (#139C)
+# ---------------------------------------------------------------------------
+# Before #139C only read->map->send (above) and listener->map->send
+# (test_process_flow_builder_listener.py) were byte-anchored, so a single-byte
+# change to a fetch / write / SOAP chain broke NO test at all. These three
+# fixtures close that gap BEFORE the adapter cut-over: they were generated
+# through ProcessFlowBuilder on the lowered config -- the legacy renderer -- so
+# they pin pre-cut-over bytes and cannot be self-confirming.
+
+
+def _golden_chain(stages, keys):
+    return _sync_config(
+        stages, [{"from_stage": a, "to_stage": b} for a, b in zip(keys, keys[1:])]
+    )
+
+
+def _assert_matches_golden(config, *, name, fixture_name):
+    from pathlib import Path
+
+    from boomi_mcp.categories.components.process_graph_verifier import verify_process_graph
+
+    fixture = Path(__file__).resolve().parent / "fixtures" / "golden_xml" / fixture_name
+    emitted = SyncPipelineBuilder.build(config, name=name, folder_name="Golden/Fixtures")
+    assert emitted == fixture.read_text()
+    assert verify_process_graph(emitted)["errors"] == []
+    return emitted
+
+
+def test_fetch_map_db_write_matches_golden_fixture():
+    """First byte anchor anywhere for a ``database``/``Send`` target (#139C).
+
+    The api_to_database_sync family (fetch -> [map] -> write) had no golden at
+    all, so nothing pinned the mixed-case ``Send`` verb the legacy LINEAR target
+    path emits (``_DB_TARGET_ACTION_TYPES``; an unconditional ``.upper()`` would
+    corrupt it to ``SEND`` -- see the warning above the target canonicalization
+    block).
+    """
+    xml = _assert_matches_golden(
+        _golden_chain(
+            [_fetch_stage("s"), _map_stage("m"), _write_stage("t")], ["s", "m", "t"]
+        ),
+        name="Sync Fetch Map DB Write Golden",
+        fixture_name="sync_pipeline_fetch_map_db_write.xml",
+    )
+    assert 'connectorType="database"' in xml
+    assert 'actionType="Send"' in xml
+    assert 'actionType="SEND"' not in xml
+
+
+def test_fetch_rest_send_no_map_matches_golden_fixture():
+    """Byte anchor for a REST *source* and for the map-less passthrough chain."""
+    xml = _assert_matches_golden(
+        _golden_chain([_fetch_stage("s"), _send_stage("t")], ["s", "t"]),
+        name="Sync Fetch REST Send No Map Golden",
+        fixture_name="sync_pipeline_fetch_rest_send_no_map.xml",
+    )
+    assert 'shapetype="map"' not in xml
+    assert xml.count('shapetype="connectoraction"') == 2
+
+
+def test_soap_fetch_soap_send_matches_golden_fixture():
+    """Byte anchor for the SOAP Client family end to end (#126 primitives)."""
+    xml = _assert_matches_golden(
+        _golden_chain([_soap_fetch_stage("s"), _soap_send_stage("t")], ["s", "t"]),
+        name="Sync SOAP Fetch SOAP Send Golden",
+        fixture_name="sync_pipeline_soap_fetch_soap_send.xml",
+    )
+    assert xml.count('connectorType="wssoapclientsdk"') == 2
+    assert xml.count('actionType="EXECUTE"') == 2
+
+
 def test_build_xml_equals_process_flow_builder_passthrough():
     no_map = _linear_no_map(method="PATCH")
     lowered = SyncPipelineBuilder.lower_config(no_map)
