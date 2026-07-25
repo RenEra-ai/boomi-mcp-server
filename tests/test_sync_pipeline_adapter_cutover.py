@@ -271,14 +271,24 @@ def test_archetype_style_direct_process_flow_build_does_not_reach_the_adapter(ad
     assert adapter_spy == []
 
 
-def test_the_real_database_to_api_sync_archetype_does_not_reach_the_adapter(adapter_spy):
-    """Drive the ACTUAL archetype, not a hand-rolled imitation of its call shape.
+def test_the_real_archetype_pre_lowers_so_it_can_never_reach_this_dialect(adapter_spy):
+    """Pin the MECHANISM that keeps the archetype off the adapter, not just the effect.
 
-    The test above pins the interception point but would not notice if the
-    archetype itself were changed to call ``SyncPipelineBuilder.build``. That
-    archetype reattaches ``reliability`` and ``target.dynamic_path`` AFTER lowering
-    — neither of which this dialect can represent — so routing it into the adapter
-    would turn a working build into ``PROCESS_XML_VALIDATION_FAILED``.
+    ``build_from_archetype`` performs no XML build at all -- it emits a component
+    spec, and emission happens later inside ``build_integration``, dispatched on
+    ``process_kind``. So asserting the adapter was not called is nearly vacuous
+    here: nothing that could call it runs. (Measured: lower_config 1,
+    SyncPipelineBuilder.build 0, ProcessFlowBuilder.build 0, adapt_sync_pipeline 0.)
+
+    What actually makes the archetype safe is that ``_build_main_process``
+    PRE-LOWERS: it emits ``process_kind="database_to_api_sync"`` with no
+    ``pipeline`` key, so later dispatch can never route it to
+    ``SyncPipelineBuilder.build``. That is the property worth pinning -- if the
+    archetype were changed to emit ``process_kind="sync_pipeline"`` with the graph
+    intact (as the other four sync archetypes do), its post-lowering ``reliability``
+    block would be rejected by this dialect's gate and the archetype would break.
+    The spy assertion is kept because it DOES still catch an inline
+    ``SyncPipelineBuilder.build`` added inside ``_build_main_process`` itself.
     """
     # Reuse the archetype payload an existing wrapper test already maintains, so
     # this cannot drift from the real archetype's accepted shape.
@@ -286,6 +296,16 @@ def test_the_real_database_to_api_sync_archetype_does_not_reach_the_adapter(adap
 
     result = server.build_from_archetype("database_to_api_sync", _MINIMAL_PAYLOAD)
     assert result["_success"] is True, result
+
+    process_configs = [
+        component.get("config") or {}
+        for component in (result["integration_spec"].get("components") or [])
+        if (component.get("config") or {}).get("process_kind")
+    ]
+    assert process_configs, "expected the archetype to emit a process component"
+    for config in process_configs:
+        assert config["process_kind"] == "database_to_api_sync"
+        assert "pipeline" not in config
     assert adapter_spy == []
 
 
@@ -579,6 +599,16 @@ def _core(**over):
          "LEGACY_ADAPTER_UNSUPPORTED_KIND", "/transform/document_cache_id"),
         (lambda c: c["transform"].__setitem__("message", "hello"),
          "LEGACY_ADAPTER_UNSUPPORTED_KIND", "/transform/message"),
+        # A REALISTIC unsupported transform arrives with mode AND siblings together.
+        # The mode is the root cause and must win; checking keys first would report
+        # `/transform/steps` and bury it. The rows above vary only one axis each and
+        # so cannot see this -- these combine them.
+        (lambda c: c.__setitem__("transform", {"mode": "dataprocess", "steps": [{"op": "s"}]}),
+         "LEGACY_ADAPTER_UNSUPPORTED_KIND", "/transform/mode"),
+        (lambda c: c.__setitem__("transform", {"mode": "doccacheretrieve", "document_cache_id": "DC"}),
+         "LEGACY_ADAPTER_UNSUPPORTED_KIND", "/transform/mode"),
+        (lambda c: c.__setitem__("transform", {"mode": "message", "message": "hi"}),
+         "LEGACY_ADAPTER_UNSUPPORTED_KIND", "/transform/mode"),
         (lambda c: c["source"].__setitem__("connection_id", ""),
          "LEGACY_ADAPTER_SEMANTIC_LOSS", "/source/connection_id"),
         (lambda c: c["source"].__setitem__("connection_id", None),
@@ -659,10 +689,13 @@ def test_transform_allow_list_covers_everything_lowering_can_emit(source, target
     stages.append(target("t"))
     try:
         lowered = SyncPipelineBuilder.lower_config(_pipeline(stages))
-    except BuilderValidationError:
+    except BuilderValidationError as exc:
         # Chain rejected upstream (e.g. db_read -> db_write has no archetype);
-        # nothing reaches the adapter, so there is no agreement to check.
-        return
+        # nothing reaches the adapter, so there is no agreement to check. SKIP
+        # rather than return: a silent pass would let coverage erode invisibly if
+        # `lower_config` ever started rejecting more broadly, while this test kept
+        # reporting every row green.
+        pytest.skip(f"chain rejected upstream: {exc.error_code}")
     emitted = set(lowered.get("transform") or {})
     assert emitted <= _TRANSFORM_KEYS, sorted(emitted - _TRANSFORM_KEYS)
 

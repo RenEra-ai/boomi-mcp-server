@@ -296,19 +296,25 @@ def _map_slot(
     transform: Dict[str, Any], base: str, map_key: Optional[str] = None
 ) -> Tuple[Optional[Dict[str, Any]], List[LegacySymbolRequirementV1]]:
     """Build the optional ``map_ref`` node. ``passthrough`` appends NOTHING."""
-    extra = sorted(set(transform) - _TRANSFORM_KEYS)
-    if extra:
-        raise adapter_diagnostic(
-            LEGACY_ADAPTER_UNSUPPORTED_KIND,
-            f"{base}/{extra[0]}",
-            "transform key is not representable in ProcessIR v1 for this dialect",
-        )
+    # MODE FIRST, then the sibling keys. A real `dataprocess` / `doccacheretrieve`
+    # / `message` transform always arrives WITH its sibling keys, so checking keys
+    # first would report `/transform/steps` for every realistic case and surface the
+    # root cause (`/transform/mode`) only for the synthetic one where the mode is
+    # flipped but the siblings left behind. The mode IS the root cause; the extra
+    # keys are its symptom.
     mode = str(transform.get("mode") or "passthrough").strip().lower()
     if mode not in _SUPPORTED_TRANSFORM_MODES:
         raise adapter_diagnostic(
             LEGACY_ADAPTER_UNSUPPORTED_KIND,
             f"{base}/mode",
             "transform mode is not representable for this dialect",
+        )
+    extra = sorted(set(transform) - _TRANSFORM_KEYS)
+    if extra:
+        raise adapter_diagnostic(
+            LEGACY_ADAPTER_UNSUPPORTED_KIND,
+            f"{base}/{extra[0]}",
+            "transform key is not representable in ProcessIR v1 for this dialect",
         )
     if mode == "passthrough":
         # Matches the legacy transform ladder, whose default arm appends no shape.
