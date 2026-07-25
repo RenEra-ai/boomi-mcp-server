@@ -68,6 +68,13 @@ _ENVELOPE_ROOT_KEYS = frozenset({"description", "process_extensions"})
 _BINDING_KEYS = frozenset(
     {"connector_type", "action_type", "connection_id", "operation_id", "label"}
 )
+# Everything `_lower_map_stage` can emit. Guarded for the same reason the binding
+# keys are: the sibling keys of a `transform` block are precisely what select a
+# DIFFERENT legacy shape under a different mode (`steps` -> dataprocess,
+# `document_cache_id` -> doccacheretrieve/remove, `message` -> message). Accepting
+# and dropping one would emit a quietly different flow AND make this dialect's
+# `compatibility_noop_paths == ()` claim untrue for that input.
+_TRANSFORM_KEYS = frozenset({"mode", "map_ref", "map_id", "label"})
 _SUPPORTED_TRANSFORM_MODES = frozenset({"passthrough", "map_ref"})
 
 
@@ -289,6 +296,13 @@ def _map_slot(
     transform: Dict[str, Any], base: str, map_key: Optional[str] = None
 ) -> Tuple[Optional[Dict[str, Any]], List[LegacySymbolRequirementV1]]:
     """Build the optional ``map_ref`` node. ``passthrough`` appends NOTHING."""
+    extra = sorted(set(transform) - _TRANSFORM_KEYS)
+    if extra:
+        raise adapter_diagnostic(
+            LEGACY_ADAPTER_UNSUPPORTED_KIND,
+            f"{base}/{extra[0]}",
+            "transform key is not representable in ProcessIR v1 for this dialect",
+        )
     mode = str(transform.get("mode") or "passthrough").strip().lower()
     if mode not in _SUPPORTED_TRANSFORM_MODES:
         raise adapter_diagnostic(

@@ -6048,11 +6048,16 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         description = str(lowered.get("description") or "")
         # Extract BEFORE emission, matching WrapperSubprocessBuilder.build (the
         # composed flow_sequence cut-over extracts after, so the two existing sites
-        # differ here). Ordering it first keeps PROCESS_EXTENSIONS_INVALID ahead of
-        # an emission defect, and an absent block still yields the byte-identical
-        # empty <bns:processOverrides/>. The two orderings are indistinguishable for
-        # this dialect anyway: `lowered` is built by lower_config from a literal
-        # dict, so a config malformed in both ways at once cannot occur.
+        # differ and this one follows the wrapper). The ordering is OBSERVABLE, not
+        # academic: `lower_config` neither requires `connection_id` on a binding nor
+        # validates `process_extensions`, so a config CAN be malformed in both ways
+        # at once, and then this order decides which error wins. Extracting first
+        # keeps PROCESS_EXTENSIONS_INVALID ahead of the adapter's parity diagnostic
+        # — which is exactly what the legacy renderer reports for the same input, so
+        # the cut-over preserves the observable error rather than changing it.
+        # `test_process_extensions_error_outranks_an_adapter_defect` pins it.
+        # An absent block still yields the byte-identical empty
+        # <bns:processOverrides/>.
         process_overrides_xml = ""
         connections = _extract_process_extension_connections(lowered)
         if connections:

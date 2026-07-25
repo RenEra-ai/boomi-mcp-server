@@ -271,6 +271,24 @@ def test_archetype_style_direct_process_flow_build_does_not_reach_the_adapter(ad
     assert adapter_spy == []
 
 
+def test_the_real_database_to_api_sync_archetype_does_not_reach_the_adapter(adapter_spy):
+    """Drive the ACTUAL archetype, not a hand-rolled imitation of its call shape.
+
+    The test above pins the interception point but would not notice if the
+    archetype itself were changed to call ``SyncPipelineBuilder.build``. That
+    archetype reattaches ``reliability`` and ``target.dynamic_path`` AFTER lowering
+    — neither of which this dialect can represent — so routing it into the adapter
+    would turn a working build into ``PROCESS_XML_VALIDATION_FAILED``.
+    """
+    # Reuse the archetype payload an existing wrapper test already maintains, so
+    # this cannot drift from the real archetype's accepted shape.
+    from test_build_integration_wrapper import _MINIMAL_PAYLOAD, server
+
+    result = server.build_from_archetype("database_to_api_sync", _MINIMAL_PAYLOAD)
+    assert result["_success"] is True, result
+    assert adapter_spy == []
+
+
 @pytest.mark.parametrize(
     "connector_type,canonical",
     [
@@ -552,6 +570,15 @@ def _core(**over):
          "LEGACY_ADAPTER_UNSUPPORTED_KIND", "/target/dynamic_path"),
         (lambda c: c["transform"].__setitem__("mode", "dataprocess"),
          "LEGACY_ADAPTER_UNSUPPORTED_KIND", "/transform/mode"),
+        # A transform's SIBLING keys are what select a different legacy shape under
+        # a different mode, so accepting-and-dropping one would emit a quietly
+        # different flow -- and would make `compatibility_noop_paths == ()` a lie.
+        (lambda c: c["transform"].__setitem__("steps", [{"op": "split"}]),
+         "LEGACY_ADAPTER_UNSUPPORTED_KIND", "/transform/steps"),
+        (lambda c: c["transform"].__setitem__("document_cache_id", "DC1"),
+         "LEGACY_ADAPTER_UNSUPPORTED_KIND", "/transform/document_cache_id"),
+        (lambda c: c["transform"].__setitem__("message", "hello"),
+         "LEGACY_ADAPTER_UNSUPPORTED_KIND", "/transform/message"),
         (lambda c: c["source"].__setitem__("connection_id", ""),
          "LEGACY_ADAPTER_SEMANTIC_LOSS", "/source/connection_id"),
         (lambda c: c["source"].__setitem__("connection_id", None),
@@ -605,6 +632,31 @@ def test_missing_connection_id_surfaces_as_the_builder_error_not_a_raw_validatio
     # The internal adapter diagnostic is chained, never surfaced.
     assert isinstance(exc.value.__cause__, LegacyAdapterError)
     assert not str(exc.value).startswith("SYNC_PIPELINE")
+
+
+def test_process_extensions_error_outranks_an_adapter_defect():
+    """A config CAN be malformed in two ways at once, so the order is observable.
+
+    `lower_config` neither requires `connection_id` on a binding nor validates
+    `process_extensions`, so both defects can coexist. The cut-over extracts the
+    extension overrides BEFORE running the adapter, which keeps
+    PROCESS_EXTENSIONS_INVALID winning -- the same code the legacy renderer
+    reports for this input. Reordering the two would silently change an observable
+    error, so pin it against the legacy renderer rather than against a constant.
+    """
+    cfg = _pipeline(
+        [
+            {"key": "s", "kind": "read", "config": {"primitive": "db_read", "operation_id": "O"}},
+            _rest_send(),
+        ],
+        process_extensions={"connection": []},  # malformed: expects "connections"
+    )
+    with pytest.raises(BuilderValidationError) as canonical:
+        SyncPipelineBuilder.build(cfg, name="P")
+    with pytest.raises(BuilderValidationError) as legacy:
+        ProcessFlowBuilder.build(SyncPipelineBuilder.lower_config(cfg), name="P")
+    assert canonical.value.error_code == "PROCESS_EXTENSIONS_INVALID"
+    assert canonical.value.error_code == legacy.value.error_code
 
 
 def test_blank_name_still_raises_the_name_error_first():

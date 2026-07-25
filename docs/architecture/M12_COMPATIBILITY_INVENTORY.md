@@ -386,7 +386,11 @@ contract**; nothing validates fragment keys at the boundary.
 
 ## 3. Fixture ledger
 
-Golden directory: `tests/fixtures/golden_xml/` (the only golden dir). Each fixture below is
+Golden directory: `tests/fixtures/golden_xml/` — the only one this section enumerates. There is a
+SECOND golden dir it deliberately does not cover: `tests/fixtures/process_ir/emitter_parity/`
+(3 `*.process.xml` files), owned by the #138 emitter-parity oracle rather than by a builder fixture
+ledger. Statements elsewhere in this document about "31 golden_xml + 3 emitter_parity fixtures" count
+both; this section counts only the first. Each fixture below is
 labeled by the **measured comparison mode of its comparing test**. Since #138 (M12.3) the
 process-emitter goldens are UNIFORMLY byte-locked: all **34** committed `golden_xml/*.xml` fixtures
 are raw-byte, **0 are canonicalized** (the 8 formerly-canonicalized fixtures in §3.2 were converted
@@ -468,7 +472,7 @@ carrying a non-uppercase `execute` verb — is covered differentially instead
 (`tests/test_sync_pipeline_adapter_cutover.py`), which is stronger than a byte file because it
 compares against the live legacy renderer.
 
-Both compare the complete `SyncPipelineBuilder.build` output byte-for-byte against a committed file.
+All five compare the complete `SyncPipelineBuilder.build` output byte-for-byte against a committed file.
 This matters because the differential `xml_sync == xml_core` check compares two callers through the
 ONE shared renderer, so it cannot catch a drift in that shared template; the committed fixtures pin
 the actual bytes. The remaining sync_pipeline XML coverage still rides on:
