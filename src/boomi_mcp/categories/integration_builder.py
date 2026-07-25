@@ -5178,36 +5178,25 @@ def _authority_rejection(disposition: str) -> Dict[str, Any]:
 
 def _authored_process_validation_error(
     spec: IntegrationSpecV1, authored_key: Optional[str]
-):
+) -> Optional[BuilderValidationError]:
     """The authored process's validation error, computed ACCOUNT-INDEPENDENTLY.
 
     Issue #139D — ADR-001 §5's clean-plan gate. An authority conflict must never
-    MASK the actionable error the process itself would produce, and this repo
-    validates a process in several passes (structural lowering, ``validate_config``,
-    ``$ref`` type-checking, cache/property lineage).
+    MASK the actionable error the process itself would produce.
 
-    Why this re-runs the passes instead of reading the planned step's
-    ``validation_error``: the plan gates those passes on
-    ``will_invoke_process_flow_builder``, which depends on ``planned_action`` and
-    therefore on **live collision resolution**. Reading the step made the strict
-    verdict account-DEPENDENT — the same payload was accepted with a
-    ``PROCESS_REF_TYPE_MISMATCH`` when no same-name component existed, and
-    rejected as an authority conflict when one did, because reuse skipped the
-    validator. ADR-001 §5 forbids exactly that ("collision-reuse never dissolves
-    ... so the same payload can never flip between reject and accept on live
-    account contents"), and explicitly rejects deferring the disposition
-    post-collision for this reason.
+    This delegates to :func:`_process_component_preflight`, the planner's OWN
+    validation, rather than re-checking anything here. Four successive defects
+    came from the gate knowing a *subset* of the planner's passes — lower-time,
+    then ``validate_config``-time, then ``$ref``-type-time, then the name/xml
+    preflights — each fix closing one instance and missing the next. Sharing one
+    implementation is what ends that: a pass added to the planner is in the gate
+    the moment it is written.
 
-    The boundary is therefore principled rather than arbitrary: this gate may
-    contain **only** account-independent passes, because an account-DEPENDENT one
-    could not participate without breaking the invariant. Every pass below is a
-    pure function of the authored payload. It calls the plan's OWN helpers, never
-    copies of them, and ``test_the_gate_agrees_with_the_plans_own_verdict``
-    differentially pins the result against what the plan itself computes for a
-    non-colliding create — so a future pass added to the plan and missed here is
-    caught by that test rather than by a user.
-
-    Returns the ``BuilderValidationError`` or ``None``.
+    It asks the question for a fresh ``"create"``. That is the no-collision case,
+    so the answer is a pure function of the authored payload — which is required,
+    because reading the planned step instead made the strict verdict flip on live
+    account contents (the plan gates some passes on ``planned_action``, so reuse
+    skipped them). ADR-001 §5 forbids exactly that.
     """
     if not authored_key:
         return None
@@ -5220,45 +5209,15 @@ def _authored_process_validation_error(
         .strip()
         .lower()
     )
-    builder_cls = get_process_flow_builder(process_kind)
-    if builder_cls is None:
-        return None
-    components_by_key = {c.key: c for c in spec.components}
-
-    if builder_cls is ProcessFlowBuilder:
-        err = _check_process_flow_ref_types(comp, raw_config, components_by_key)
-        if err is not None:
-            return err
-        legacy_transform = raw_config.get("transform")
-        legacy_map_ref = (
-            isinstance(legacy_transform, dict)
-            and str(legacy_transform.get("mode") or "").strip() == "map_ref"
-        )
-        flow_sequence = raw_config.get("flow_sequence")
-        if (isinstance(flow_sequence, list) and flow_sequence) or legacy_map_ref:
-            return validate_config_lineage(raw_config, components_by_key)
-        return None
-
-    if builder_cls is WrapperSubprocessBuilder:
-        return _check_wrapper_subprocess_ref_types(comp, raw_config, components_by_key)
-
-    if builder_cls is SyncPipelineBuilder:
-        try:
-            lowered_config = SyncPipelineBuilder.lower_config(raw_config)
-        except BuilderValidationError as exc:
-            return exc
-        err = _check_process_flow_ref_types(comp, lowered_config, components_by_key)
-        if err is not None:
-            return err
-        lowered_transform = lowered_config.get("transform")
-        if (
-            isinstance(lowered_transform, dict)
-            and str(lowered_transform.get("mode") or "").strip() == "map_ref"
-        ):
-            return validate_config_lineage(lowered_config, components_by_key)
-        return None
-
-    return None
+    # A defensive copy: the planner's preflight redacts secrets in place on some
+    # paths, and this gate must never mutate the caller's payload.
+    return _process_component_preflight(
+        comp,
+        copy.deepcopy(raw_config),
+        process_kind,
+        "create",
+        {c.key: c for c in spec.components},
+    )
 
 
 def _authored_step_will_reuse(
@@ -5290,6 +5249,285 @@ def _authored_step_will_reuse(
             return False
         return conflict_policy == "reuse"
     return False
+
+
+def _process_component_preflight(
+    comp: IntegrationComponentSpec,
+    raw_config: Dict[str, Any],
+    process_kind: str,
+    planned_action: str,
+    components_by_key: Dict[str, IntegrationComponentSpec],
+    db_err=None,
+    rest_err=None,
+) -> Optional[BuilderValidationError]:
+    """Every ACCOUNT-INDEPENDENT validation the planner runs for one process.
+
+    Extracted verbatim from ``_build_plan``'s component loop so it has exactly ONE
+    implementation. Issue #139D needs to ask "would this process validate?" from
+    the strict-authority clean-plan gate, and answering that with a second copy of
+    these checks is what produced four successive masked-error defects (lower-time,
+    ``validate_config``-time, ``$ref``-type-time, then the name/xml preflights):
+    each fix closed one instance and missed the next.
+
+    Pure: a function of the authored payload alone. ``planned_action`` is a
+    parameter rather than a closure read, which is what makes the gate's use
+    account-INDEPENDENT — it asks the question for a fresh ``"create"``, the
+    no-collision case, so live account contents cannot change the answer. The
+    loop passes its real ``planned_action`` instead, so plan behaviour is
+    unchanged (in particular ``validate_config`` still does not run for a reuse
+    step, which would otherwise newly reject payloads that plan clean today).
+    """
+    process_flow_err: Optional[BuilderValidationError] = None
+    # Legacy freeform process JSON authoring has been removed: a process
+    # component that will be AUTHORED (create/create_clone/update emits or
+    # rebuilds process XML) must declare a structured process_kind. Reject
+    # the untyped authoring case before any mutation, routing the caller to
+    # the typed path. Non-authoring actions (reuse / error_* / pure
+    # reference of an existing process) do not emit XML, so they do not
+    # require process_kind — mirrors how every other builder gates its
+    # validation on the authoring actions.
+    if comp.type == "process" and not process_kind:
+        # Scan the untyped config for plaintext secrets FIRST, regardless
+        # of planned_action: the plan echoes comp.config via
+        # spec.model_dump(), so a secret must never leak even on the
+        # reuse / reference / rejection paths. A forbidden secret returns
+        # PLAINTEXT_SECRET_REJECTED (redacted at the block tail below);
+        # otherwise an authoring action is rejected for the missing
+        # process_kind. Mirrors the process_kind block's secret discipline.
+        process_flow_err = ProcessFlowBuilder.scan_forbidden_secret_fields(raw_config)
+        if process_flow_err is None and planned_action in (
+            "create",
+            "create_clone",
+            "update",
+        ):
+            process_flow_err = BuilderValidationError(
+                "Process components must set config.process_kind; legacy "
+                "freeform process JSON authoring has been removed.",
+                error_code="PROCESS_KIND_REQUIRED",
+                field="config.process_kind",
+                hint=(
+                    "Use list_integration_archetypes()/build_from_archetype(), "
+                    "or set process_kind to one of "
+                    f"{sorted(PROCESS_FLOW_BUILDERS)}. Use "
+                    "manage_component with raw XML only as an explicit escape hatch."
+                ),
+            )
+    if (
+        comp.type == "process"
+        and process_kind
+        and db_err is None
+        and rest_err is None
+    ):
+        # Run the secret scan unconditionally. The xml-conflict check
+        # below short-circuits early, so without scanning first a
+        # process config like {process_kind, xml, password} would
+        # surface PROCESS_KIND_XML_CONFLICT while leaving the
+        # plaintext password in raw_config (== comp.config), which
+        # then echoes through spec.model_dump(). Codex review r2 Q3.
+        process_flow_err = ProcessFlowBuilder.scan_forbidden_secret_fields(raw_config)
+        # Codex review r6 P2.1: require an explicit name. Without
+        # this, _execute_component used to fall back to comp.key as
+        # the emitted XML name attribute, which on update silently
+        # renamed the existing process to its internal dependency
+        # key (e.g. "main_process"). Reject at plan-time so the
+        # caller must supply a real display name.
+        if process_flow_err is None:
+            config_name = raw_config.get("name")
+            comp_name_clean = (
+                comp.name.strip()
+                if isinstance(comp.name, str) else ""
+            )
+            config_name_clean = (
+                config_name.strip()
+                if isinstance(config_name, str) else ""
+            )
+            effective_name = comp_name_clean or config_name_clean
+            if not effective_name:
+                process_flow_err = BuilderValidationError(
+                    "process component name is required for structured "
+                    "process_kind components; without one the emitted "
+                    "XML would carry the internal dependency key as "
+                    "the display name (silent rename on update).",
+                    error_code="PROCESS_NAME_REQUIRED",
+                    field="name",
+                    hint=(
+                        "Set IntegrationComponentSpec.name or "
+                        "config.name to the human-readable display "
+                        "name the process should carry in Boomi."
+                    ),
+                )
+            # Codex review r8 F1: when BOTH surfaces are set and
+            # they differ, plan-time collision lookup uses comp.name
+            # but _execute_component's build() call prefers
+            # payload["name"] (the r3 clone-suffix precedence).
+            # That mismatch creates a duplicate on create / silently
+            # renames on update because Boomi gets a different name
+            # than the metadata search resolved. Reject the conflict
+            # explicitly. (Apply-time _apply_clone_suffix intentionally
+            # introduces a "-clone" difference; that path mutates
+            # config["name"] AFTER plan, so this plan-time check
+            # never sees it.)
+            elif (
+                comp_name_clean
+                and config_name_clean
+                and comp_name_clean != config_name_clean
+            ):
+                process_flow_err = BuilderValidationError(
+                    f"top-level name {comp_name_clean!r} and "
+                    f"config.name {config_name_clean!r} disagree; "
+                    f"collision lookup uses the top-level name but "
+                    f"the emitted XML would use config.name.",
+                    error_code="PROCESS_NAME_CONFLICT",
+                    field="name",
+                    hint=(
+                        "Either drop config.name or make it match "
+                        "the top-level IntegrationComponentSpec.name. "
+                        "Pick one surface so plan-time collision "
+                        "detection and apply-time XML emission agree."
+                    ),
+                )
+        xml_override = bool(raw_config.get("xml"))
+        # Codex review C4: process_kind + raw xml is ambiguous —
+        # _execute_component cannot honor both. Reject the conflict
+        # explicitly so callers must pick one. (A process component
+        # carrying config.xml without process_kind is separately rejected
+        # with PROCESS_KIND_REQUIRED, so raw process XML now lives only on
+        # the manage_component / type="component" escape hatch.)
+        if process_flow_err is None and xml_override:
+            process_flow_err = BuilderValidationError(
+                "process_kind and config.xml are mutually exclusive.",
+                error_code="PROCESS_KIND_XML_CONFLICT",
+                field="config.xml",
+                hint=(
+                    "Choose one: set process_kind for the structured "
+                    "process-flow builder, OR drop the process_kind and "
+                    "author raw process XML through manage_component "
+                    '(type="component", config.xml) instead.'
+                ),
+            )
+        # Codex review r9: enum-membership check is a contract
+        # assertion about the spec, not about the apply step. Run it
+        # unconditionally so a typo like process_kind="bad" surfaces
+        # even when conflict_policy=reuse finds an existing match
+        # (planned_action="reuse" used to skip the whole block).
+        builder_cls: Optional[type] = None
+        if process_flow_err is None:
+            builder_cls = get_process_flow_builder(process_kind)
+            if builder_cls is None:
+                process_flow_err = BuilderValidationError(
+                    f"process_kind {process_kind!r} is not supported.",
+                    error_code="PROCESS_KIND_UNSUPPORTED",
+                    field="process_kind",
+                    hint=(
+                        f"Supported process_kind values: "
+                        f"{sorted(PROCESS_FLOW_BUILDERS)}."
+                    ),
+                )
+
+        # Codex review C2: process update also re-invokes the builder
+        # (_execute_component → update_component({"xml": built_xml})),
+        # unlike DB/REST whose update paths bypass the builder. So
+        # full config validation runs on every mutating action; for
+        # reuse / error_* the enum check above is enough — we won't
+        # emit XML so source/target bindings don't matter.
+        will_invoke_process_flow_builder = (
+            process_flow_err is None
+            and builder_cls is not None
+            and planned_action in ("create", "create_clone", "update")
+        )
+        if will_invoke_process_flow_builder:
+            process_flow_err = builder_cls.validate_config(
+                raw_config,
+                depends_on=comp.depends_on,
+            )
+            # Issue #49: after the local structural validator passes,
+            # type-check every in-spec $ref:KEY against components_by_key.
+            # Gated on builder_cls is ProcessFlowBuilder because the
+            # source/target shape this helper reads is specific to the
+            # database_to_api_sync structured process; future process_kind
+            # builders will add their own ref-type helpers when they land.
+            if process_flow_err is None and builder_cls is ProcessFlowBuilder:
+                process_flow_err = _check_process_flow_ref_types(
+                    comp, raw_config, components_by_key
+                )
+            # Issue #90: the wrapper_subprocess parent has its own ref-type
+            # helper (processcall subprocess_ref → in-spec process child).
+            # WrapperSubprocessBuilder is a ProcessFlowBuilder subclass, so
+            # the identity check above is False for it — branch explicitly.
+            elif process_flow_err is None and builder_cls is WrapperSubprocessBuilder:
+                process_flow_err = _check_wrapper_subprocess_ref_types(
+                    comp, raw_config, components_by_key
+                )
+            # Issue #70 M5.2: a sync_pipeline config carries a `pipeline` stage
+            # graph, not the source/target/transform blocks _check_process_flow_ref_types
+            # reads. SyncPipelineBuilder is a ProcessFlowBuilder subclass (so the
+            # identity check above is False for it too) — lower the pipeline to the
+            # equivalent database_to_api_sync config first, then run the SAME
+            # ref-type check on the lowered config so every $ref protection (source
+            # DB connection/action, map, target REST connection/action, REST method)
+            # applies unchanged. validate_config already lowered+passed, so this
+            # re-derivation cannot newly fail in practice; the try/except keeps it total.
+            elif process_flow_err is None and builder_cls is SyncPipelineBuilder:
+                try:
+                    lowered_config = SyncPipelineBuilder.lower_config(raw_config)
+                except BuilderValidationError as exc:
+                    process_flow_err = exc
+                else:
+                    process_flow_err = _check_process_flow_ref_types(
+                        comp, lowered_config, components_by_key
+                    )
+                    # Scoped re-review P2: a sync_pipeline map stage lowers
+                    # to the legacy transform.mode='map_ref' — run the
+                    # context lineage pass on the LOWERED config (like the
+                    # ref-type check above) so an in-spec joined map cannot
+                    # plan clean against a never-written cache.
+                    if process_flow_err is None:
+                        lowered_transform = lowered_config.get("transform")
+                        if (
+                            isinstance(lowered_transform, dict)
+                            and str(lowered_transform.get("mode") or "").strip()
+                            == "map_ref"
+                        ):
+                            process_flow_err = validate_config_lineage(
+                                lowered_config, components_by_key
+                            )
+
+            # Companion review P2 (#123 follow-up) + QA Bug #145: re-run
+            # the lineage pass WITH component context on composed configs
+            # AND on legacy configs whose transform slot references a map
+            # — an in-spec map's document_cache_joins are cache READS,
+            # which the process-local pass (no components_by_key) cannot
+            # see. On the legacy surface no in-process writer is even
+            # possible (transform excludes flow_sequence in v1), so a
+            # joined cache there must declare external_writer: true.
+            # Gated to the base builder (#125 review): transform /
+            # flow_sequence are executed fields only on
+            # database_to_api_sync — wrapper_subprocess ignores them in
+            # validate_config and build, so lineage-checking a stray copy
+            # there rejects a plan whose emitted XML never runs the map;
+            # sync_pipeline is covered by the lowered-config pass above
+            # (its validate_config rejects these keys at top level).
+            legacy_transform = raw_config.get("transform")
+            legacy_map_ref = (
+                isinstance(legacy_transform, dict)
+                and str(legacy_transform.get("mode") or "").strip() == "map_ref"
+            )
+            if (
+                process_flow_err is None
+                and builder_cls is ProcessFlowBuilder
+                and (
+                    (
+                        isinstance(raw_config.get("flow_sequence"), list)
+                        and raw_config.get("flow_sequence")
+                    )
+                    or legacy_map_ref
+                )
+            ):
+                process_flow_err = validate_config_lineage(
+                    raw_config, components_by_key
+                )
+
+    return process_flow_err
 
 
 def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -5979,256 +6217,15 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         #       no raw-XML override). Unknown process_kind always fails
         #       so a typo cannot silently fall through to the legacy
         #       linear path.
-        process_flow_err: Optional[BuilderValidationError] = None
-        # Legacy freeform process JSON authoring has been removed: a process
-        # component that will be AUTHORED (create/create_clone/update emits or
-        # rebuilds process XML) must declare a structured process_kind. Reject
-        # the untyped authoring case before any mutation, routing the caller to
-        # the typed path. Non-authoring actions (reuse / error_* / pure
-        # reference of an existing process) do not emit XML, so they do not
-        # require process_kind — mirrors how every other builder gates its
-        # validation on the authoring actions.
-        if comp.type == "process" and not process_kind:
-            # Scan the untyped config for plaintext secrets FIRST, regardless
-            # of planned_action: the plan echoes comp.config via
-            # spec.model_dump(), so a secret must never leak even on the
-            # reuse / reference / rejection paths. A forbidden secret returns
-            # PLAINTEXT_SECRET_REJECTED (redacted at the block tail below);
-            # otherwise an authoring action is rejected for the missing
-            # process_kind. Mirrors the process_kind block's secret discipline.
-            process_flow_err = ProcessFlowBuilder.scan_forbidden_secret_fields(raw_config)
-            if process_flow_err is None and planned_action in (
-                "create",
-                "create_clone",
-                "update",
-            ):
-                process_flow_err = BuilderValidationError(
-                    "Process components must set config.process_kind; legacy "
-                    "freeform process JSON authoring has been removed.",
-                    error_code="PROCESS_KIND_REQUIRED",
-                    field="config.process_kind",
-                    hint=(
-                        "Use list_integration_archetypes()/build_from_archetype(), "
-                        "or set process_kind to one of "
-                        f"{sorted(PROCESS_FLOW_BUILDERS)}. Use "
-                        "manage_component with raw XML only as an explicit escape hatch."
-                    ),
-                )
-        if (
-            comp.type == "process"
-            and process_kind
-            and db_err is None
-            and rest_err is None
-        ):
-            # Run the secret scan unconditionally. The xml-conflict check
-            # below short-circuits early, so without scanning first a
-            # process config like {process_kind, xml, password} would
-            # surface PROCESS_KIND_XML_CONFLICT while leaving the
-            # plaintext password in raw_config (== comp.config), which
-            # then echoes through spec.model_dump(). Codex review r2 Q3.
-            process_flow_err = ProcessFlowBuilder.scan_forbidden_secret_fields(raw_config)
-            # Codex review r6 P2.1: require an explicit name. Without
-            # this, _execute_component used to fall back to comp.key as
-            # the emitted XML name attribute, which on update silently
-            # renamed the existing process to its internal dependency
-            # key (e.g. "main_process"). Reject at plan-time so the
-            # caller must supply a real display name.
-            if process_flow_err is None:
-                config_name = raw_config.get("name")
-                comp_name_clean = (
-                    comp.name.strip()
-                    if isinstance(comp.name, str) else ""
-                )
-                config_name_clean = (
-                    config_name.strip()
-                    if isinstance(config_name, str) else ""
-                )
-                effective_name = comp_name_clean or config_name_clean
-                if not effective_name:
-                    process_flow_err = BuilderValidationError(
-                        "process component name is required for structured "
-                        "process_kind components; without one the emitted "
-                        "XML would carry the internal dependency key as "
-                        "the display name (silent rename on update).",
-                        error_code="PROCESS_NAME_REQUIRED",
-                        field="name",
-                        hint=(
-                            "Set IntegrationComponentSpec.name or "
-                            "config.name to the human-readable display "
-                            "name the process should carry in Boomi."
-                        ),
-                    )
-                # Codex review r8 F1: when BOTH surfaces are set and
-                # they differ, plan-time collision lookup uses comp.name
-                # but _execute_component's build() call prefers
-                # payload["name"] (the r3 clone-suffix precedence).
-                # That mismatch creates a duplicate on create / silently
-                # renames on update because Boomi gets a different name
-                # than the metadata search resolved. Reject the conflict
-                # explicitly. (Apply-time _apply_clone_suffix intentionally
-                # introduces a "-clone" difference; that path mutates
-                # config["name"] AFTER plan, so this plan-time check
-                # never sees it.)
-                elif (
-                    comp_name_clean
-                    and config_name_clean
-                    and comp_name_clean != config_name_clean
-                ):
-                    process_flow_err = BuilderValidationError(
-                        f"top-level name {comp_name_clean!r} and "
-                        f"config.name {config_name_clean!r} disagree; "
-                        f"collision lookup uses the top-level name but "
-                        f"the emitted XML would use config.name.",
-                        error_code="PROCESS_NAME_CONFLICT",
-                        field="name",
-                        hint=(
-                            "Either drop config.name or make it match "
-                            "the top-level IntegrationComponentSpec.name. "
-                            "Pick one surface so plan-time collision "
-                            "detection and apply-time XML emission agree."
-                        ),
-                    )
-            xml_override = bool(raw_config.get("xml"))
-            # Codex review C4: process_kind + raw xml is ambiguous —
-            # _execute_component cannot honor both. Reject the conflict
-            # explicitly so callers must pick one. (A process component
-            # carrying config.xml without process_kind is separately rejected
-            # with PROCESS_KIND_REQUIRED, so raw process XML now lives only on
-            # the manage_component / type="component" escape hatch.)
-            if process_flow_err is None and xml_override:
-                process_flow_err = BuilderValidationError(
-                    "process_kind and config.xml are mutually exclusive.",
-                    error_code="PROCESS_KIND_XML_CONFLICT",
-                    field="config.xml",
-                    hint=(
-                        "Choose one: set process_kind for the structured "
-                        "process-flow builder, OR drop the process_kind and "
-                        "author raw process XML through manage_component "
-                        '(type="component", config.xml) instead.'
-                    ),
-                )
-            # Codex review r9: enum-membership check is a contract
-            # assertion about the spec, not about the apply step. Run it
-            # unconditionally so a typo like process_kind="bad" surfaces
-            # even when conflict_policy=reuse finds an existing match
-            # (planned_action="reuse" used to skip the whole block).
-            builder_cls: Optional[type] = None
-            if process_flow_err is None:
-                builder_cls = get_process_flow_builder(process_kind)
-                if builder_cls is None:
-                    process_flow_err = BuilderValidationError(
-                        f"process_kind {process_kind!r} is not supported.",
-                        error_code="PROCESS_KIND_UNSUPPORTED",
-                        field="process_kind",
-                        hint=(
-                            f"Supported process_kind values: "
-                            f"{sorted(PROCESS_FLOW_BUILDERS)}."
-                        ),
-                    )
-
-            # Codex review C2: process update also re-invokes the builder
-            # (_execute_component → update_component({"xml": built_xml})),
-            # unlike DB/REST whose update paths bypass the builder. So
-            # full config validation runs on every mutating action; for
-            # reuse / error_* the enum check above is enough — we won't
-            # emit XML so source/target bindings don't matter.
-            will_invoke_process_flow_builder = (
-                process_flow_err is None
-                and builder_cls is not None
-                and planned_action in ("create", "create_clone", "update")
-            )
-            if will_invoke_process_flow_builder:
-                process_flow_err = builder_cls.validate_config(
-                    raw_config,
-                    depends_on=comp.depends_on,
-                )
-                # Issue #49: after the local structural validator passes,
-                # type-check every in-spec $ref:KEY against components_by_key.
-                # Gated on builder_cls is ProcessFlowBuilder because the
-                # source/target shape this helper reads is specific to the
-                # database_to_api_sync structured process; future process_kind
-                # builders will add their own ref-type helpers when they land.
-                if process_flow_err is None and builder_cls is ProcessFlowBuilder:
-                    process_flow_err = _check_process_flow_ref_types(
-                        comp, raw_config, components_by_key
-                    )
-                # Issue #90: the wrapper_subprocess parent has its own ref-type
-                # helper (processcall subprocess_ref → in-spec process child).
-                # WrapperSubprocessBuilder is a ProcessFlowBuilder subclass, so
-                # the identity check above is False for it — branch explicitly.
-                elif process_flow_err is None and builder_cls is WrapperSubprocessBuilder:
-                    process_flow_err = _check_wrapper_subprocess_ref_types(
-                        comp, raw_config, components_by_key
-                    )
-                # Issue #70 M5.2: a sync_pipeline config carries a `pipeline` stage
-                # graph, not the source/target/transform blocks _check_process_flow_ref_types
-                # reads. SyncPipelineBuilder is a ProcessFlowBuilder subclass (so the
-                # identity check above is False for it too) — lower the pipeline to the
-                # equivalent database_to_api_sync config first, then run the SAME
-                # ref-type check on the lowered config so every $ref protection (source
-                # DB connection/action, map, target REST connection/action, REST method)
-                # applies unchanged. validate_config already lowered+passed, so this
-                # re-derivation cannot newly fail in practice; the try/except keeps it total.
-                elif process_flow_err is None and builder_cls is SyncPipelineBuilder:
-                    try:
-                        lowered_config = SyncPipelineBuilder.lower_config(raw_config)
-                    except BuilderValidationError as exc:
-                        process_flow_err = exc
-                    else:
-                        process_flow_err = _check_process_flow_ref_types(
-                            comp, lowered_config, components_by_key
-                        )
-                        # Scoped re-review P2: a sync_pipeline map stage lowers
-                        # to the legacy transform.mode='map_ref' — run the
-                        # context lineage pass on the LOWERED config (like the
-                        # ref-type check above) so an in-spec joined map cannot
-                        # plan clean against a never-written cache.
-                        if process_flow_err is None:
-                            lowered_transform = lowered_config.get("transform")
-                            if (
-                                isinstance(lowered_transform, dict)
-                                and str(lowered_transform.get("mode") or "").strip()
-                                == "map_ref"
-                            ):
-                                process_flow_err = validate_config_lineage(
-                                    lowered_config, components_by_key
-                                )
-
-                # Companion review P2 (#123 follow-up) + QA Bug #145: re-run
-                # the lineage pass WITH component context on composed configs
-                # AND on legacy configs whose transform slot references a map
-                # — an in-spec map's document_cache_joins are cache READS,
-                # which the process-local pass (no components_by_key) cannot
-                # see. On the legacy surface no in-process writer is even
-                # possible (transform excludes flow_sequence in v1), so a
-                # joined cache there must declare external_writer: true.
-                # Gated to the base builder (#125 review): transform /
-                # flow_sequence are executed fields only on
-                # database_to_api_sync — wrapper_subprocess ignores them in
-                # validate_config and build, so lineage-checking a stray copy
-                # there rejects a plan whose emitted XML never runs the map;
-                # sync_pipeline is covered by the lowered-config pass above
-                # (its validate_config rejects these keys at top level).
-                legacy_transform = raw_config.get("transform")
-                legacy_map_ref = (
-                    isinstance(legacy_transform, dict)
-                    and str(legacy_transform.get("mode") or "").strip() == "map_ref"
-                )
-                if (
-                    process_flow_err is None
-                    and builder_cls is ProcessFlowBuilder
-                    and (
-                        (
-                            isinstance(raw_config.get("flow_sequence"), list)
-                            and raw_config.get("flow_sequence")
-                        )
-                        or legacy_map_ref
-                    )
-                ):
-                    process_flow_err = validate_config_lineage(
-                        raw_config, components_by_key
-                    )
-
+        process_flow_err = _process_component_preflight(
+            comp,
+            raw_config,
+            process_kind,
+            planned_action,
+            components_by_key,
+            db_err=db_err,
+            rest_err=rest_err,
+        )
         if process_flow_err is not None:
             planned_action = "error_process_validation"
             validation_error = {

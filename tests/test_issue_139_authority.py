@@ -1742,3 +1742,176 @@ def test_the_gate_agrees_with_the_plan_for_sync_pipeline_too(mutate, expect_erro
     )
     if gate_error is not None:
         assert gate_error.error_code == plan_error["error_code"]
+
+
+# ---------------------------------------------------------------------------
+# 15. Codex review round 4 — the gate shares the planner's preflight
+# ---------------------------------------------------------------------------
+
+
+def _drop_names(spec):
+    spec.components[0].name = None
+    spec.components[0].config.pop("name", None)
+
+
+_PREFLIGHT_CASES = [
+    pytest.param(lambda s: None, None, id="clean"),
+    pytest.param(_drop_names, "PROCESS_NAME_REQUIRED", id="no-name"),
+    pytest.param(
+        lambda s: s.components[0].config.update({"xml": "<x/>"}),
+        "PROCESS_KIND_XML_CONFLICT",
+        id="xml-conflict",
+    ),
+    pytest.param(
+        lambda s: s.components[0].config.update({"name": "A Different Name"}),
+        "PROCESS_NAME_CONFLICT",
+        id="name-conflict",
+    ),
+    pytest.param(
+        lambda s: s.components[0].config.pop("process_kind", None),
+        "PROCESS_KIND_REQUIRED",
+        id="no-kind",
+    ),
+    pytest.param(
+        lambda s: s.components[0].config.update({"process_kind": "bogus_kind"}),
+        "PROCESS_KIND_UNSUPPORTED",
+        id="bad-kind",
+    ),
+    pytest.param(
+        lambda s: s.components[0].config["source"].update(
+            {"connection_id": "$ref:the_map"}
+        ),
+        "PROCESS_REF_TYPE_MISMATCH",
+        id="ref-type-mismatch",
+    ),
+    pytest.param(
+        lambda s: s.components[0].config["target"].update({"action_type": "FROBNICATE"}),
+        "PROCESS_CONNECTOR_BINDING_INVALID",
+        id="bad-verb",
+    ),
+    pytest.param(
+        lambda s: s.components[0].__dict__.__setitem__("depends_on", []),
+        "MISSING_PROCESS_DEPENDENCY",
+        id="undeclared-refs",
+    ),
+]
+
+
+@pytest.mark.parametrize("mutate,expected_code", _PREFLIGHT_CASES)
+def test_the_gate_shares_the_planners_preflight(mutate, expected_code):
+    """The differential oracle, BROADENED.
+
+    Round 4 found the gate missing `PROCESS_NAME_REQUIRED`,
+    `PROCESS_KIND_XML_CONFLICT` and name governance — the fourth instance of one
+    class. The oracle that was supposed to catch that already existed; its input
+    set was simply too narrow (only `$ref` mutations). So this sweeps the
+    planner's preflight surface instead of a couple of shapes.
+
+    The gate now DELEGATES to the planner's own preflight, so agreement is
+    structural rather than maintained by hand — but this still pins it, because
+    the delegation could regress.
+    """
+    from src.boomi_mcp.categories.integration_builder import (
+        _authored_process_validation_error,
+    )
+
+    spec = _ref_spec()
+    mutate(spec)
+
+    gate_error = _authored_process_validation_error(spec, "main_process")
+
+    legacy = json.loads(spec.model_dump_json())
+    legacy["version"] = "1.0"
+    plan = _plan({"dry_run": True, "integration_spec": legacy})
+    step = _main_step(plan)
+    plan_error = step.get("validation_error") or None
+    assert step["planned_action"] != "reuse", "control: the plan must run every pass"
+
+    assert (gate_error is not None) == (plan_error is not None), (
+        f"gate and plan disagree: gate={gate_error!r} plan={plan_error!r}"
+    )
+    if expected_code is None:
+        assert gate_error is None
+    else:
+        assert gate_error is not None
+        assert gate_error.error_code == expected_code
+        assert plan_error["error_code"] == expected_code
+
+
+@pytest.mark.parametrize("mutate,expected_code", _PREFLIGHT_CASES)
+def test_a_failing_preflight_is_never_masked_by_an_authority_conflict(
+    mutate, expected_code
+):
+    """End-to-end: with a DISAGREEING view, the process's own error must win."""
+    spec = _ref_spec()
+    spec.pipeline.stages[0].config["connection_id"] = "a-different-connection"
+    mutate(spec)
+
+    plan = _plan(
+        {"dry_run": True, "integration_spec": json.loads(spec.model_dump_json())}
+    )
+    if expected_code is None:
+        # Nothing wrong with the process — the conflict is the right answer.
+        assert plan["_success"] is False
+        assert plan["error_code"] == _AUTHORITY_CODE
+    else:
+        assert _AUTHORITY_CODE not in json.dumps(plan)
+        assert _main_step(plan)["validation_error"]["error_code"] == expected_code
+
+
+def test_a_plaintext_secret_in_the_process_is_not_masked_by_a_conflict():
+    """A secret in the authored process config makes it invalid, so the clean-plan
+    gate yields and PLAINTEXT_SECRET_REJECTED surfaces instead of the conflict.
+
+    Also asserts the gate leaves the caller's spec untouched. That isolation is
+    currently DEFENSIVE rather than exercised: the planner redacts in the caller,
+    after the shared preflight returns, so nothing on this path mutates today
+    (measured). It is kept because the preflight is now shared code and redaction
+    could reasonably move inside it — but the defensive copy is deliberately not
+    claimed as tested, and no mutation test asserts it.
+    """
+    spec = _ref_spec()
+    spec.pipeline.stages[0].config["connection_id"] = "a-different-connection"
+    spec.components[0].config["password"] = "SENTINEL-NOT-A-REAL-SECRET"
+    before = spec.model_dump()
+
+    plan = _plan(
+        {"dry_run": True, "integration_spec": json.loads(spec.model_dump_json())}
+    )
+    assert _AUTHORITY_CODE not in json.dumps(plan)
+    assert _main_step(plan)["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+    assert "SENTINEL-NOT-A-REAL-SECRET" not in json.dumps(plan)
+    assert spec.model_dump() == before
+
+
+def test_name_governance_is_deliberately_outside_the_clean_plan_gate():
+    """A DELIBERATE scope boundary, pinned so it cannot drift by accident.
+
+    ADR-001 §5 scopes the clean-plan gate to an "authored-semantics-unavailable"
+    failure — `PROCESS_KIND_REQUIRED`, a schema-parse error, an invalid config.
+    Name governance (#93/#102) is a *policy* lint, not a semantic one: a process
+    named "New Map" has perfectly well-defined semantics, and an authored view
+    that contradicts it genuinely does conflict. Reporting the conflict there is
+    therefore correct, not masking — the payload is simply wrong in two ways, and
+    the V1 surface still reports the governance error as it always did.
+
+    Folding it in would also reintroduce account-dependence: the governance lint
+    only flags create/create_clone steps, so a collision-driven reuse would skip
+    it and flip the strict verdict on live account contents — the exact defect
+    ADR-001 §5 forbids and that an earlier revision of this gate had.
+    """
+    spec = _ref_spec()
+    spec.pipeline.stages[0].config["connection_id"] = "a-different-connection"
+    spec.components[0].name = "New Map"  # a platform default name
+    payload = json.loads(spec.model_dump_json())
+
+    strict = _plan({"dry_run": True, "integration_spec": copy.deepcopy(payload)})
+    assert strict["_success"] is False
+    assert strict["error_code"] == _AUTHORITY_CODE
+
+    # V1 is untouched: it still reports the governance error.
+    legacy = copy.deepcopy(payload)
+    legacy["version"] = "1.0"
+    v1 = _plan({"dry_run": True, "integration_spec": legacy})
+    assert _AUTHORITY_CODE not in json.dumps(v1)
+    assert _main_step(v1)["validation_error"]["error_code"] == "COMPONENT_NAME_BOOMI_DEFAULT"

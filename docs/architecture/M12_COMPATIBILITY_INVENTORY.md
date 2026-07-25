@@ -859,15 +859,31 @@ The gate therefore **re-runs the account-independent validation passes itself**,
 resolution — so the whole decision still lands before any live lookup, and no unrelated later plan exit
 (a topological-order failure, an invalid `conflict_policy`) can suppress an already-computed conflict.
 
-Enumerating passes is unavoidable here, but the boundary is **principled rather than arbitrary**: this
-gate may contain *only* account-independent passes, because an account-dependent one could not
-participate without breaking the invariant. Two things keep it from drifting as passes are added: it
-calls the plan's **own** helpers rather than copies, and a **differential oracle**
-(`test_the_gate_agrees_with_the_plans_own_verdict`, plus a separate `sync_pipeline` arm, which reaches
-`$ref` checking only after lowering) pins the gate's verdict against what the plan itself computes for a
-non-colliding create. A future pass added to the plan and missed here fails that test rather than
-reaching a user as a masked error. The oracle compares against the **V1 twin** on purpose: on the strict
+**Enumerating the passes failed four times, so the gate does not enumerate them.** Each fix closed one
+instance and missed the next — lower-time, then `validate_config`-time, then `$ref`-type-time, then the
+name/xml preflights. The planner's account-independent process validation is therefore **extracted into
+one function**, `_process_component_preflight`, which the component loop and the gate both call. A pass
+added to the planner is in the gate the moment it is written; there is no second copy to drift.
+
+`planned_action` is a parameter rather than a closure read, and that is what makes the gate
+account-independent: it asks the question for a fresh `"create"` — the no-collision case — so live
+account contents cannot change the answer. The loop passes its real `planned_action`, so plan behaviour
+is unchanged (in particular `validate_config` still does not run for a reuse step, which would otherwise
+newly reject payloads that plan clean today).
+
+A **differential oracle** still pins gate-vs-plan agreement across the preflight surface (nine mutation
+shapes, plus a separate `sync_pipeline` arm, which reaches `$ref` checking only after lowering). Note
+the oracle already existed when instance four landed — its input set was simply too narrow, which is the
+more useful lesson than the fix itself. It compares against the **V1 twin** on purpose: on the strict
 surface a clean gate verdict short-circuits the plan, so comparing there would be circular.
+
+**One deliberate exclusion.** Name governance (#93/#102) is *not* in the gate. ADR-001 §5 scopes the
+clean-plan gate to an "authored-semantics-unavailable" failure, and a process named `New Map` has
+perfectly well-defined semantics — an authored view that contradicts it genuinely does conflict, so
+reporting the conflict is correct rather than masking. Folding it in would also reintroduce
+account-dependence, since the governance lint only flags create/create_clone steps and a reuse would
+skip it. Pinned by `test_name_governance_is_deliberately_outside_the_clean_plan_gate` so the boundary
+cannot drift silently.
 
 **Ambiguity is exempt** and rejects with no live lookup at all: ADR-001 §5 counts declared authoring
 actions, so it needs no process semantics and "stands even when a process's semantics are unavailable".
