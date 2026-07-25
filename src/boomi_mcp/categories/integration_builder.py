@@ -5124,6 +5124,86 @@ def _scan_top_level_pipeline_secrets(
     )
 
 
+def _authority_rejection(disposition: str) -> Dict[str, Any]:
+    """Build the value-free rejection envelope for one authority disposition.
+
+    Issue #139D. All three share the stable ``LEGACY_ADAPTER_AUTHORITY_CONFLICT``
+    code — callers key on that — but each gets its OWN remediation, because
+    "make the view match" is unsatisfiable advice for a process that has no
+    linear representation at all, and misleading for a merely ambiguous spec.
+    Deliberately value-free: a stable code, the authored JSON path, a safe
+    remediation, and no payload values (ADR-001 §7).
+    """
+    from ..compiler.process_ir.legacy_adapters.authority import (
+        AMBIGUOUS,
+        DISAGREE,
+        NOT_REPRESENTABLE,
+    )
+
+    table = {
+        AMBIGUOUS: (
+            "Strict pipeline authority is ambiguous because the spec declares "
+            "multiple authored process components.",
+            "Remove integration_spec.pipeline, or submit exactly one authored "
+            "process for a singular pipeline view.",
+        ),
+        DISAGREE: (
+            "Strict pipeline authority conflicts with the normalized submitted "
+            "process configuration.",
+            "Remove integration_spec.pipeline, or make it semantically identical "
+            "to the single authored process; no authored pipeline copy takes "
+            "precedence.",
+        ),
+        NOT_REPRESENTABLE: (
+            "Strict pipeline authority cannot describe the single authored "
+            "process: it is valid, but has no representation as a singular linear "
+            "pipeline view.",
+            "Remove integration_spec.pipeline. No value of it can match this "
+            "process — a singular linear view describes only a "
+            "source -> [map] -> target chain, so a wrapper_subprocess, a "
+            "flow_sequence, or any richer block (Try/Catch, DLQ, Notify, flow "
+            "control) has no such view. Authoring the same linear integration as "
+            "process_kind='sync_pipeline' makes the view expressible.",
+        ),
+    }
+    message, hint = table[disposition]
+    return {
+        "_success": False,
+        "error_code": LEGACY_ADAPTER_AUTHORITY_CONFLICT,
+        "error": message,
+        "field": "integration_spec.pipeline",
+        "hint": hint,
+    }
+
+
+def _authored_step_has_validation_error(
+    steps: List[Dict[str, Any]], authored_key: Optional[str]
+) -> bool:
+    """Did the single authored process fail its own validation?
+
+    Issue #139D — the CLASS-CLOSING half of ADR-001 §5's clean-plan gate. The
+    authority comparison can only pre-run so many of the plan's validation passes
+    before it starts re-implementing them, and this codebase validates in several
+    (structural lowering, ``validate_config``, then ``$ref`` type-checking, plus
+    lints). Enumerating them here closed three instances of one bug in a row.
+
+    So the conflict disposition instead YIELDS to whatever error the plan itself
+    produced for that process: if the authored process has any validation error,
+    that error is what the caller needs, and an authority conflict must not mask
+    it. Any future validation pass is covered automatically.
+
+    Scoped to the AUTHORED process's own step on purpose — an unrelated
+    component's failure leaves this process's semantics perfectly comparable, so
+    it must not suppress a genuine authority conflict.
+    """
+    if not authored_key:
+        return False
+    for step in steps:
+        if step.get("key") == authored_key:
+            return bool(step.get("validation_error"))
+    return False
+
+
 def _authored_step_will_reuse(
     steps: List[Dict[str, Any]],
     authored_key: Optional[str],
@@ -5188,45 +5268,18 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     authority = evaluate_pipeline_authority(spec)
-    # Each rejection gets its OWN remediation. They share a stable code (callers
-    # key on that), but "make the view match" is unsatisfiable advice for a
-    # valid-yet-unrepresentable process — no value of the authored pipeline would
-    # ever match it — so that case must say so instead.
-    _AUTHORITY_REJECTIONS = {
-        AUTHORITY_AMBIGUOUS: (
-            "Strict pipeline authority is ambiguous because the spec declares "
-            "multiple authored process components.",
-            "Remove integration_spec.pipeline, or submit exactly one authored "
-            "process for a singular pipeline view.",
-        ),
-        AUTHORITY_DISAGREE: (
-            "Strict pipeline authority conflicts with the normalized submitted "
-            "process configuration.",
-            "Remove integration_spec.pipeline, or make it semantically identical "
-            "to the single authored process; no authored pipeline copy takes "
-            "precedence.",
-        ),
-        AUTHORITY_NOT_REPRESENTABLE: (
-            "Strict pipeline authority cannot describe the single authored "
-            "process: it is valid, but has no representation as a singular linear "
-            "pipeline view.",
-            "Remove integration_spec.pipeline. No value of it can match this "
-            "process — a singular linear view describes only a "
-            "source -> [map] -> target chain, so a wrapper_subprocess, a "
-            "flow_sequence, or any richer block (Try/Catch, DLQ, Notify, flow "
-            "control) has no such view. Authoring the same linear integration as "
-            "process_kind='sync_pipeline' makes the view expressible.",
-        ),
-    }
-    if authority.disposition in _AUTHORITY_REJECTIONS:
-        message, hint = _AUTHORITY_REJECTIONS[authority.disposition]
-        return {
-            "_success": False,
-            "error_code": LEGACY_ADAPTER_AUTHORITY_CONFLICT,
-            "error": message,
-            "field": "integration_spec.pipeline",
-            "hint": hint,
-        }
+    # AMBIGUITY is structural: ADR-001 §5 counts declared authoring actions, so it
+    # needs no process semantics and "stands even when a process's semantics are
+    # unavailable". It can therefore reject right here, before any live lookup.
+    #
+    # The CONFLICT dispositions are different — they need the process's semantics,
+    # so they are subject to the clean-plan gate and are decided at the end of the
+    # plan instead (see _authored_step_has_validation_error). The decision itself
+    # is already computed, here, from the authored payload alone, so deferring
+    # only WHEN it is reported — never WHETHER — and account contents still cannot
+    # move a payload across the accept/reject boundary.
+    if authority.disposition == AUTHORITY_AMBIGUOUS:
+        return _authority_rejection(authority.disposition)
     # Issue #41 r3: inject transform.function wrappers between any
     # transform.map (map_type='script') and the script.mapping it
     # references. Live Boomi requires the indirection — see
@@ -6633,6 +6686,17 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # over-long inline scripts. Purely additive to ``warnings``; never touches
     # steps / planned_action / validation_error / unresolvable_steps.
     warnings.extend(_lint_script_bodies(spec))
+
+    # Issue #139D (ADR-001 §5 clean-plan gate). The conflict dispositions are
+    # reported HERE, after the plan's own validation has run, so that a process
+    # which failed its own validation surfaces THAT error rather than an authority
+    # conflict masking it. The disposition was computed before any account lookup;
+    # only its reporting waits.
+    if authority.disposition in (
+        AUTHORITY_DISAGREE,
+        AUTHORITY_NOT_REPRESENTABLE,
+    ) and not _authored_step_has_validation_error(steps, authority.authored_key):
+        return _authority_rejection(authority.disposition)
 
     spec_dump = spec.model_dump()
     # Issue #139D (ADR-001 §5, view-faithfulness). On the STRICT surface an

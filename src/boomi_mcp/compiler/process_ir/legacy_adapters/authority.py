@@ -275,8 +275,21 @@ def _core_from_submitted_config(config: Any, depends_on: Any) -> Any:
 
     if kind == SyncPipelineBuilder.PROCESS_KIND:
         # An invalid sync_pipeline has no clean semantics AND owns a real error
-        # (SYNC_PIPELINE_*) that must reach the caller unchanged, so it is the
-        # clean-plan gate rather than a conflict.
+        # that must reach the caller unchanged, so it is the clean-plan gate
+        # rather than a conflict.
+        #
+        # validate_config, NOT just lower_config. Lowering catches only structural
+        # defects; a config can lower cleanly and still be rejected afterwards --
+        # an undeclared `$ref` (MISSING_PROCESS_DEPENDENCY) or an unsupported REST
+        # verb (PROCESS_CONNECTOR_BINDING_INVALID) both lower fine. Comparing such
+        # a config would let an authority conflict MASK the actionable validation
+        # error the caller actually needs. Mirrors the database_to_api_sync branch
+        # below: validate first, normalize second.
+        if (
+            SyncPipelineBuilder.validate_config(config, depends_on=depends_on)
+            is not None
+        ):
+            return _UNDECIDABLE_CORE
         try:
             lowered = SyncPipelineBuilder.lower_config(config)
         except BuilderValidationError:

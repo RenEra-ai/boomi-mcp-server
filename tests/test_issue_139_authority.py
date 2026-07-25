@@ -754,15 +754,38 @@ def test_rejection_never_depends_on_live_account_contents(existing):
     assert plan["error_code"] == _AUTHORITY_CODE
 
 
-def test_the_authority_check_runs_before_any_account_lookup():
-    """It must reject before collision resolution — so no live call is made."""
+def test_ambiguity_rejects_before_any_account_lookup():
+    """Ambiguity is STRUCTURAL — ADR-001 §5 counts declared authoring actions, so
+    it needs no process semantics and "stands even when a process's semantics are
+    unavailable". It can therefore reject before collision resolution, with no
+    live call at all."""
+    config = _agreeing(STRICT_VERSION)
+    second = copy.deepcopy(config["integration_spec"]["components"][0])
+    second["key"] = "second_process"
+    second["name"] = "Second Sentinel Process"
+    config["integration_spec"]["components"].append(second)
     with patch(
         "src.boomi_mcp.categories.integration_builder.paginate_metadata"
     ) as mock_pag:
         mock_pag.return_value = []
-        plan = _build_plan(MagicMock(), _contradictory(STRICT_VERSION))
+        plan = _build_plan(MagicMock(), config)
     assert plan["_success"] is False
+    assert plan["error_code"] == _AUTHORITY_CODE
     assert mock_pag.call_count == 0
+
+
+def test_a_conflict_is_decided_early_but_reported_after_validation():
+    """The conflict dispositions DO need the process's semantics, so they are
+    subject to the clean-plan gate and are reported at the end of the plan.
+
+    The decision itself is still computed from the authored payload before any
+    lookup — only its reporting waits — which is why account contents still cannot
+    move a payload across the accept/reject boundary (pinned separately by
+    test_rejection_never_depends_on_live_account_contents).
+    """
+    plan = _plan(_contradictory(STRICT_VERSION))
+    assert plan["_success"] is False
+    assert plan["error_code"] == _AUTHORITY_CODE
 
 
 def test_authority_errors_are_value_free():
@@ -918,6 +941,17 @@ _REF_VIEW = {
 
 _REF_DEPS = ["db_conn", "db_op", "the_map", "rest_conn", "rest_op"]
 
+# Real component types, so `$ref` type-checking (PROCESS_REF_TYPE_MISMATCH) passes.
+# Getting these wrong makes the process itself invalid, which the clean-plan gate
+# then correctly reports INSTEAD of any authority verdict.
+_REF_DEP_TYPES = {
+    "db_conn": ("connector-settings", {"connector_type": "database"}),
+    "db_op": ("connector-action", {"connector_type": "database", "action_type": "Get"}),
+    "the_map": ("transform.map", {}),
+    "rest_conn": ("connector-settings", {"connector_type": "rest"}),
+    "rest_op": ("connector-action", {"connector_type": "rest", "action_type": "POST"}),
+}
+
 
 def _ref_spec(extra=None, depends_on=None):
     config = dict(copy.deepcopy(_REF_BLOCK))
@@ -935,7 +969,24 @@ def _ref_spec(extra=None, depends_on=None):
                 "name": "Sentinel Ref Process",
                 "config": config,
                 "depends_on": list(_REF_DEPS if depends_on is None else depends_on),
-            }
+            },
+            # The components those $ref tokens point at. Reference-only creates
+            # carrying an explicit component_id, so they resolve without a live
+            # lookup and are excluded from the declared-authoring count.
+            *(
+                {
+                    "key": dep,
+                    "type": _REF_DEP_TYPES[dep][0],
+                    "action": "create",
+                    "name": f"Sentinel {dep}",
+                    "config": {
+                        "reference_only": True,
+                        "component_id": f"0000000{i}-0000-0000-0000-00000000000{i}",
+                        **_REF_DEP_TYPES[dep][1],
+                    },
+                }
+                for i, dep in enumerate(_REF_DEPS)
+            ),
         ],
     )
 
@@ -1299,3 +1350,238 @@ def test_the_comparison_inherits_the_family_conditional_rule():
 
     _, soap_action = _canonical_connector_metadata("source", "soap_client", "execute")
     assert soap_action == "execute"
+
+
+# ---------------------------------------------------------------------------
+# 13. Codex review round 2 — lower-time vs validate-time failures
+# ---------------------------------------------------------------------------
+
+
+def _sync_pipeline_spec(send_verb="POST", connection_id="conn-rest", depends_on=None):
+    """A strict spec whose process is a sync_pipeline, with a DISAGREEING view.
+
+    The view disagrees on purpose: only then can an authority conflict MASK the
+    process's own validation error, which is exactly the precedence being pinned.
+    """
+    return IntegrationSpecV1(
+        name="Sentinel Sync",
+        version=STRICT_VERSION,
+        pipeline={
+            "stages": [
+                {
+                    "key": "other",
+                    "kind": "read",
+                    "config": {
+                        "primitive": "db_read",
+                        "connector_type": "database",
+                        "action_type": "Get",
+                        "connection_id": "a-different-connection",
+                        "operation_id": "a-different-operation",
+                    },
+                }
+            ],
+            "dependencies": [],
+        },
+        components=[
+            {
+                "key": "main_process",
+                "type": "process",
+                "action": "create",
+                "name": "Sentinel Sync Process",
+                "depends_on": list(depends_on or []),
+                "config": {
+                    "process_kind": "sync_pipeline",
+                    "pipeline": {
+                        "stages": [
+                            {
+                                "key": "r",
+                                "kind": "read",
+                                "config": {
+                                    "primitive": "db_read",
+                                    "connector_type": "database",
+                                    "action_type": "Get",
+                                    "connection_id": "db-1",
+                                    "operation_id": "op-1",
+                                },
+                            },
+                            {
+                                "key": "s",
+                                "kind": "send",
+                                "config": {
+                                    "primitive": "rest_send",
+                                    "connector_type": "rest",
+                                    "action_type": send_verb,
+                                    "connection_id": connection_id,
+                                    "operation_id": "op-2",
+                                },
+                            },
+                        ],
+                        "dependencies": [{"from_stage": "r", "to_stage": "s"}],
+                    },
+                },
+            }
+        ],
+    )
+
+
+@pytest.mark.parametrize("kind_key", ["process_kind", "process_type"])
+@pytest.mark.parametrize(
+    "kwargs,expected_code",
+    [
+        pytest.param(
+            {"connection_id": "$ref:rest_conn"},
+            "MISSING_PROCESS_DEPENDENCY",
+            id="undeclared-ref",
+        ),
+        pytest.param(
+            {"send_verb": "FROBNICATE"},
+            "PROCESS_CONNECTOR_BINDING_INVALID",
+            id="unsupported-rest-verb",
+        ),
+    ],
+)
+def test_a_config_that_lowers_but_fails_validation_is_the_clean_plan_gate(
+    kind_key, kwargs, expected_code
+):
+    """Lowering catches only STRUCTURAL defects. A sync_pipeline can lower cleanly
+    and still be rejected afterwards, and comparing such a config would let an
+    authority conflict MASK the actionable error the caller needs.
+
+    Parametrized over both kind spellings: the alias must not be a second path
+    with different precedence.
+    """
+    from src.boomi_mcp.categories.components.builders import (
+        BuilderValidationError,
+        SyncPipelineBuilder,
+    )
+
+    spec = _sync_pipeline_spec(**kwargs)
+    config = spec.components[0].config
+    if kind_key == "process_type":
+        config["process_type"] = config.pop("process_kind")
+
+    # Precondition: it really does lower, and really does fail validation.
+    SyncPipelineBuilder.lower_config(copy.deepcopy(config))
+    err = SyncPipelineBuilder.validate_config(
+        copy.deepcopy(config), depends_on=spec.components[0].depends_on
+    )
+    assert err is not None and err.error_code == expected_code
+
+    # The view disagrees, so without this precedence it would be reported as a
+    # conflict instead of the validation error.
+    assert evaluate_pipeline_authority(spec).disposition == UNDECIDABLE
+
+    plan = _plan(
+        {"dry_run": True, "integration_spec": json.loads(spec.model_dump_json())}
+    )
+    assert _AUTHORITY_CODE not in json.dumps(plan)
+
+
+@pytest.mark.parametrize("kind_key", ["process_kind", "process_type"])
+def test_a_valid_sync_pipeline_still_compares(kind_key):
+    """The control: the precedence fix must not swallow VALID configs."""
+    spec = _sync_pipeline_spec(connection_id="$ref:rest_conn", depends_on=["rest_conn"])
+    config = spec.components[0].config
+    if kind_key == "process_type":
+        config["process_type"] = config.pop("process_kind")
+    assert evaluate_pipeline_authority(spec).disposition == DISAGREE
+
+
+# ---------------------------------------------------------------------------
+# 14. QA bug #172 — the clean-plan gate closes the CLASS, not one pass
+# ---------------------------------------------------------------------------
+
+
+def _ref_typemismatch_spec():
+    """A spec whose process passes `validate_config` but fails `$ref` TYPE-checking.
+
+    `connection_id` points at the map component. That is a further validation pass
+    (PROCESS_REF_TYPE_MISMATCH), after both lowering and `validate_config` — the
+    third distinct pass in this class.
+    """
+    spec = _ref_spec()
+    spec.components[0].config["source"]["connection_id"] = "$ref:the_map"
+    return spec
+
+
+@pytest.mark.parametrize("agreeing", [True, False], ids=["agreeing-view", "disagreeing-view"])
+def test_a_ref_type_mismatch_outranks_the_authority_verdict(agreeing):
+    """QA bug #172, and the reason this is fixed as a CLASS.
+
+    Enumerating validation passes inside the comparison closed three instances of
+    one bug in a row (lower-time, then validate_config-time, then $ref-type-time).
+    The conflict disposition now YIELDS to whatever error the plan itself produced
+    for the authored process, so a fourth pass is covered without being named.
+
+    The agreeing case is the sharper one: there the caller would otherwise be told
+    their view conflicts when the real defect is a broken $ref, and the hint's
+    remedy would be actively wrong advice.
+    """
+    spec = _ref_typemismatch_spec()
+    if not agreeing:
+        spec.pipeline.stages[0].config["connection_id"] = "a-different-connection"
+
+    plan = _plan(
+        {"dry_run": True, "integration_spec": json.loads(spec.model_dump_json())}
+    )
+    assert plan["_success"] is True
+    step = _main_step(plan)
+    assert step["validation_error"]["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+    assert _AUTHORITY_CODE not in json.dumps(plan)
+
+
+def test_the_gate_is_scoped_to_the_authored_process_step():
+    """An UNRELATED component's failure must not suppress a genuine conflict — the
+    authored process's semantics are still perfectly comparable.
+
+    Pinned on the predicate directly. An end-to-end version would be vacuous: in
+    practice non-process components almost never carry a `validation_error`, so a
+    "broken helper" fixture silently proves nothing (measured — four different
+    malformed helpers all planned without one).
+    """
+    from src.boomi_mcp.categories.integration_builder import (
+        _authored_step_has_validation_error,
+    )
+
+    clean = {"key": "main_process", "planned_action": "create"}
+    broken_other = {
+        "key": "other",
+        "planned_action": "error_process_validation",
+        "validation_error": {"error_code": "SOMETHING_ELSE"},
+    }
+    broken_authored = {
+        "key": "main_process",
+        "planned_action": "error_process_validation",
+        "validation_error": {"error_code": "PROCESS_REF_TYPE_MISMATCH"},
+    }
+
+    # Another component's failure is not this process's failure.
+    assert _authored_step_has_validation_error([clean, broken_other], "main_process") is False
+    # The authored process's own failure is.
+    assert _authored_step_has_validation_error([broken_authored, clean], "main_process") is True
+    # An empty validation_error is not a failure (the plan writes {} for clean steps).
+    assert (
+        _authored_step_has_validation_error(
+            [{"key": "main_process", "validation_error": {}}], "main_process"
+        )
+        is False
+    )
+    # No authored key (ambiguous/zero-authored) never suppresses anything.
+    assert _authored_step_has_validation_error([broken_authored], None) is False
+    # A missing step does not silently suppress the conflict either.
+    assert _authored_step_has_validation_error([broken_other], "main_process") is False
+
+
+def test_a_clean_authored_process_still_reports_the_conflict():
+    """The control for the whole gate: yielding must not swallow real conflicts."""
+    plan = _plan(_contradictory(STRICT_VERSION))
+    assert plan["_success"] is False
+    assert plan["error_code"] == _AUTHORITY_CODE
+    assert not _main_step_or_none(plan)
+
+
+def _main_step_or_none(plan):
+    for step in plan.get("steps", []) or []:
+        if step.get("key") == "main_process":
+            return step.get("validation_error")
+    return None

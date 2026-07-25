@@ -839,6 +839,25 @@ unknown root keys, so a shipped Try/Catch or Notify block — or any feature blo
 — would otherwise read as *agreement*. It is mutation-tested (dropping the containment check fails four
 tests).
 
+**The clean-plan gate closes a CLASS, not a list of passes.** This repo validates a process in several
+passes — structural lowering, then `validate_config`, then `$ref` type-checking, then lints — and an
+authority conflict must never **mask** the actionable error any of them produces. Pre-running them
+inside the comparison closed three instances of one bug in a row (lower-time, then `validate_config`-time
+via an undeclared `$ref`/unsupported REST verb, then `$ref`-type-time), each found by a separate review
+or QA round. Enumerating passes was the wrong shape of fix.
+
+So the two **conflict** dispositions now *yield*: they are decided early, from the authored payload
+alone, but **reported at the end of the plan**, and only when the authored process carries no validation
+error of its own. Any future validation pass is covered without being named. The gate is scoped to the
+*authored process's own* step — an unrelated component's failure leaves this process's semantics
+perfectly comparable and must not suppress a genuine conflict.
+
+**Ambiguity is exempt and still rejects immediately**, before any live lookup: ADR-001 §5 counts
+declared authoring actions, so it needs no process semantics and "stands even when a process's semantics
+are unavailable". Deferring the conflict dispositions changes only *when they are reported*, never
+*whether* — the decision is still computed before collision resolution, so account contents still cannot
+move a payload across the accept/reject boundary.
+
 **The kind is RESOLVED, not read.** Every other layer resolves `process_kind or process_type` — the
 plan-time gate and each builder's `validate_config`/`build`. A Codex review caught this check reading
 only `process_kind`, which let a caller opt in to the strict surface, author a contradictory view, spell
