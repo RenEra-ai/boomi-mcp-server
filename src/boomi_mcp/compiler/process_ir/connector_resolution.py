@@ -193,21 +193,35 @@ def resolve_connector_call_bindings(
                 operation_path,
                 internal_node_id=node.node_id,
             )
-        # A connection symbol MAY omit its family (nothing in the emitter needs
-        # it); when it declares one it must agree, canonically, with the
-        # operation's — a REST operation bound to a database connection emits
-        # XML that names one family and points at a connection of another.
-        if connection.connector_type:
-            connection_family, _ = canonicalize_connector_metadata(
-                connection.connector_type, ""
+        # The connection MUST declare its family, and it must agree canonically
+        # with the operation's. Treating an omitted family as "nothing to check"
+        # would be fail-OPEN: the emitted shape carries the OPERATION's family
+        # next to this connection's id, so a mis-wired plan would serialise
+        # `connectorType="<rest>"` pointing at a database connection and nothing
+        # would have objected. The emitter does not need the connection's family,
+        # but this verification does, and #140's contract is that the binding is
+        # *verified* — not merely resolved.
+        #
+        # This tightens nothing that exists: #139's adapters put connector
+        # metadata only on the OPERATION requirement, and their symbols carry no
+        # `connection_ref`, so no pre-#140 symbol reaches this path at all.
+        if not connection.connector_type:
+            raise raise_compile_error(
+                PROCESS_IR_REFERENCE_CONNECTION_MISMATCH,
+                "reference_resolution",
+                operation_path,
+                internal_node_id=node.node_id,
             )
-            if connection_family != family:
-                raise raise_compile_error(
-                    PROCESS_IR_REFERENCE_CONNECTION_MISMATCH,
-                    "reference_resolution",
-                    operation_path,
-                    internal_node_id=node.node_id,
-                )
+        connection_family, _ = canonicalize_connector_metadata(
+            connection.connector_type, ""
+        )
+        if connection_family != family:
+            raise raise_compile_error(
+                PROCESS_IR_REFERENCE_CONNECTION_MISMATCH,
+                "reference_resolution",
+                operation_path,
+                internal_node_id=node.node_id,
+            )
 
         bindings.append(
             ConnectorCallBindingV1(
@@ -287,6 +301,31 @@ def validate_connector_call_semantics(
     # a call that produces no documents emits a Return Documents shape that can
     # never return anything.
     terminal = next((node for node in cfg.nodes if node.exit_role), None)
+
+    # Every DECLARED profile reference must resolve to a real profile component,
+    # on every call — not only on the two calls that happen to sit beside a map.
+    # This is distinct from profile EQUALITY, which stays MapRef-only because the
+    # platform documents connector profiles as non-validating: a ref that names a
+    # connection or a map is not a weaker match, it is not a profile at all, and
+    # accepting it would let the compiler claim it "verified profiles" (an
+    # acceptance criterion) having verified nothing.
+    #
+    # An ABSENT ref is deliberately NOT an error here: official documentation
+    # describes connector profiles as optional ("Request Profile … when
+    # provided"), and per-family/action required-vs-optional evidence does not
+    # exist in this checkout. Where a profile IS required — the two sides of a
+    # map boundary — absence is already a mismatch in the map pass below.
+    for binding in bindings:
+        for ref in (binding.input_profile_ref, binding.output_profile_ref):
+            if ref is None:
+                continue
+            if _profile_identity(index, ref) is None:
+                raise raise_compile_error(
+                    PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
+                    "semantic_lowering",
+                    "{0}/operation_ref".format(binding.source_path),
+                    internal_node_id=binding.node_id,
+                )
 
     previous_producer: Optional[ConnectorCallBindingV1] = None
     for position, node in enumerate(steps):

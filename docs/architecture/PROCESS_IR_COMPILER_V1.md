@@ -423,8 +423,14 @@ Within `connector_resolution`, per call, in this order:
 3. an authored `action` agrees case-insensitively with the authoritative one → else the same code, at
    `/…/action`.
 4. `operation.connection_ref` resolves → else `PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND`.
-5. that symbol is a `connector-settings` component whose declared family (if it declares one) agrees
-   canonically → else `PROCESS_IR_REFERENCE_CONNECTION_MISMATCH`.
+5. that symbol is a `connector-settings` component, it **declares** a connector family, and that
+   family agrees canonically with the operation's → else `PROCESS_IR_REFERENCE_CONNECTION_MISMATCH`.
+   The family is required, not optional: the emitter does not need it, but this verification does —
+   the emitted shape carries the *operation's* family next to *this connection's* id, so an
+   unverifiable binding would serialise a REST `connectorType` pointing at a database connection with
+   nothing objecting. "Nothing to compare" is not "compares equal". This tightens nothing that
+   exists: #139's adapters attach connector metadata only to the *operation* requirement and their
+   symbols carry no `connection_ref`, so no pre-#140 symbol reaches this path.
 
 **The capability gate is settled before the connection on purpose.** It is the coarser question: if
 the family/action is not supported at all, complaining about the connection would send the reader to
@@ -445,11 +451,22 @@ load-bearing and a family nobody thought to list still fails closed.
 | `database` | `Get` | none or documents | yes | read |
 | `database` | `Send` | documents required | **no** | write |
 
-`none or documents` is the checkout-verified fact that each producer is used both as a `sync_pipeline`
-source stage and mid-flow (a live process runs a database `Get` off a `catcherrors` leg). Lookup
-case-folds the **action** only; the family is an opaque account-scoped string, and the **emitted**
-action spelling always stays the authoritative one (`Get`/`Send` stay mixed-case for the database
-family — `SEND` would be a different wire value).
+`accepts_input` **is** the placement statement, which is why placement is not a third key dimension:
+`none or documents` means entry *and* downstream are both supported, `documents required` means
+downstream only. Keying on `(family, action, placement)` as well would encode one fact twice.
+
+Both placements are separately evidenced for every `none or documents` row, recorded per row in
+`connector_capabilities.py` so the claim is auditable rather than assumed:
+
+| row | entry evidence | downstream evidence |
+|---|---|---|
+| REST `GET` | `fetch(rest_fetch)` is a verified `sync_pipeline` source stage | official *Get versus Send*: "Documents retrieved by 'Get' connectors used **mid-process** or within another process step (as a look-up, for example)" |
+| SOAP `EXECUTE` | `fetch(soap_fetch)` source stage (byte golden `sync_pipeline_soap_fetch_soap_send.xml`) | `send(soap_send)` target stage of the same shipped chain |
+| Database `Get` | `read(db_read)` source stage | live capture FINDING 5 — a real process runs a database `Get` mid-flow off a `catcherrors` leg |
+
+Lookup case-folds the **action** only; the family is an opaque account-scoped string, and the
+**emitted** action spelling always stays the authoritative one (`Get`/`Send` stay mixed-case for the
+database family — `SEND` would be a different wire value).
 
 ### Flow semantics
 
@@ -460,6 +477,15 @@ family — `SEND` would be a different wire value).
   shape), while `return_documents` returns the current document stream to the caller — so
   `… → Database Send → return_documents` is rejected, because it would emit a Return Documents shape
   that can never return anything.
+- **Profile well-formedness** (`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH`): on **every** call, a
+  *declared* profile reference must resolve to a real profile component — one of the five `profile.*`
+  types — not only on the two calls that happen to sit beside a map. This is distinct from profile
+  *equality* below: a ref naming a connection or a map is not a weaker match, it is not a profile at
+  all, and accepting it would let the compiler claim it "verified profiles" having verified nothing.
+  An **absent** ref is deliberately not an error here — official documentation describes connector
+  profiles as optional ("Request Profile … when provided") and this checkout has no per-family
+  required-vs-optional evidence; where a profile *is* required (both sides of a map) absence is
+  already a mismatch below.
 - **Profile continuity** (`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH`): around every `map_ref`, the map's
   source profile must be the preceding call's output profile and its target profile the following
   call's input profile. Compared by **resolved component id** plus normalized profile type, so two

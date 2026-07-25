@@ -38,12 +38,17 @@ DATABASE_FAMILY = "database"
 class ConnectorCapabilityV1(_CompilerModel):
     """What the compiler may assume about one (family, action) pair's documents.
 
-    ``accepts_input``:
+    ``accepts_input`` IS the placement statement — which is why placement is not
+    a third key dimension. ``none_or_documents`` says "entry AND downstream are
+    both supported", ``documents_required`` says "downstream only". Keying on
+    ``(family, action, placement)`` as well would encode the same fact twice, and
+    two encodings of one fact is the duplicate authority ADR-001 §6 removes.
+
+    Both placements are separately evidenced for every ``none_or_documents`` row
+    (recorded per row below, so the claim is auditable rather than assumed):
 
     * ``none_or_documents`` — runs as the entry call (no inbound documents) AND
-      mid-flow. Checkout-verified: each such action is a ``sync_pipeline`` source
-      stage (``read``/``fetch``), and a live process uses a database ``Get``
-      mid-flow off a ``catcherrors`` leg (capture FINDING 5).
+      mid-flow.
     * ``documents_required`` — consumes inbound documents, so it can never be the
       entry call.
 
@@ -78,8 +83,12 @@ def _rows(*specs: ConnectorCapabilityV1) -> Mapping[Tuple[str, str], ConnectorCa
 #: ``Send`` stay mixed-case for the database family, ``EXECUTE`` for SOAP, and
 #: the REST family is upper-cased by the shared canonicalizer).
 CONNECTOR_CALL_CAPABILITIES_V1 = _rows(
-    # REST Client GET — the `rest_fetch` source primitive; the operation declares
-    # a Response Profile, so it produces documents.
+    # REST Client GET. Produces: the operation declares a Response Profile.
+    #   entry      <- `fetch(rest_fetch)` is a verified sync_pipeline SOURCE stage
+    #                 (inventory #139C ledger, live-QA'd, byte golden).
+    #   downstream <- official "Connector actions: Get versus Send": "Documents
+    #                 retrieved by 'Get' connectors used MID-PROCESS or within
+    #                 another process step (as a look-up, for example)".
     ConnectorCapabilityV1(
         family=REST_FAMILY,
         action="GET",
@@ -97,9 +106,12 @@ CONNECTOR_CALL_CAPABILITIES_V1 = _rows(
         produces_output=True,
         side_effect="write",
     ),
-    # SOAP Client EXECUTE — the single action of `wssoapclientsdk` (#126), used
-    # by BOTH the `soap_fetch` source and `soap_send` target primitives, and
-    # declaring request AND response XML profiles.
+    # SOAP Client EXECUTE — the single action of `wssoapclientsdk` (#126),
+    # declaring request AND response XML profiles, so it produces.
+    #   entry      <- `fetch(soap_fetch)` is a verified sync_pipeline SOURCE stage
+    #                 (byte golden `sync_pipeline_soap_fetch_soap_send.xml`).
+    #   downstream <- `send(soap_send)` is the verified TARGET stage of the same
+    #                 shipped chain.
     ConnectorCapabilityV1(
         family=SOAP_FAMILY,
         action="EXECUTE",
@@ -107,9 +119,11 @@ CONNECTOR_CALL_CAPABILITIES_V1 = _rows(
         produces_output=True,
         side_effect="read",
     ),
-    # Database (Legacy) Get — the `db_get` source primitive; its ReadProfile is
-    # the output ("in a map, the Read profile is referenced as the source
-    # profile").
+    # Database (Legacy) Get. Produces: its ReadProfile is the output ("in a map,
+    # the Read profile is referenced as the source profile").
+    #   entry      <- `read(db_read)` is a verified sync_pipeline SOURCE stage.
+    #   downstream <- live capture FINDING 5: a real process runs a database
+    #                 `Get` mid-flow, reached from a `catcherrors` leg.
     ConnectorCapabilityV1(
         family=DATABASE_FAMILY,
         action="Get",

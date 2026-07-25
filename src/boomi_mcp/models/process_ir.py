@@ -810,7 +810,8 @@ class SequenceNodeV1(_ProcessIRBase):
                 if kind != "process_call":
                     raise _capability_error(
                         "a process-call sequence may mix only process_call steps with a "
-                        "stop/return_documents terminal (mixed connector execution is gated)"
+                        "stop/return_documents terminal "
+                        "(process_call_connector_mixing is gated)"
                     )
             if kinds[-1] not in ("stop", "return_documents"):
                 if kinds[-1] != "process_call":
@@ -920,14 +921,17 @@ class ProcessIRV1(_ProcessIRBase):
 
 PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
     {
-        # #140 M12.5: ConnectorCall ships, so multiple connector calls in one
-        # linear sequence are supported. ``mixed_connector_execution`` stays
-        # gated on purpose — in THIS codebase it names one specific construct,
-        # the only place it is referenced from code: mixing ``process_call``
-        # steps with connector execution in one sequence. #140 delivers neither
-        # that nor connector calls inside Branch/Decision bodies (#141).
+        # #140 M12.5. ``mixed_connector_execution`` was OVERLOADED across two
+        # documents: ADR-001 §8 lists it as "multiple connector calls per path"
+        # (which #140 ships), while PROCESS_IR_V1 §3's sequence rules used the
+        # same name for mixing ``process_call`` steps with connector execution
+        # (which #140 does NOT ship). Rather than silently redefine the flag to
+        # whichever meaning happened to still be gated, the two constructs now
+        # have two names.
         "generalized_connector_call": "supported",  # #140
-        "mixed_connector_execution": "gated",  # process_call x connector mixing
+        "mixed_connector_execution": "supported",  # #140 — many calls per path
+        "process_call_connector_mixing": "gated",  # process_call x connector
+        "connector_call_in_control_body": "gated",  # #141
         "continuation_after_branch_or_decision": "gated",  # #141
         "rich_branch_decision_bodies": "gated",  # #141
         "scoped_try_catch": "gated",  # #142

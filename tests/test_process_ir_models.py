@@ -955,20 +955,25 @@ def test_capability_manifest_immutable_and_complete():
     assert PROCESS_IR_V1_CAPABILITIES["caller_authored_cfg_edges"] == "unsupported"
     assert PROCESS_IR_V1_CAPABILITIES["secret_values"] == "unsupported"
     assert PROCESS_IR_V1_CAPABILITIES["keyed_cache"] == "gated"
-    # #140 shipped ConnectorCall, so this is now the ONE supported row. The
-    # neighbouring gates must stay shut: ``mixed_connector_execution`` names
-    # process_call x connector mixing (the only construct the code references it
-    # for), and Branch/Decision bodies remain #141's.
+    # #140 shipped ConnectorCall AND many calls per linear path — both of the
+    # things ADR-001 §8 lists under its ownership. The name
+    # ``mixed_connector_execution`` used to be overloaded (ADR-001 §8 read it as
+    # "multiple connector calls per path"; PROCESS_IR_V1 §3's sequence rules read
+    # it as process_call x connector mixing), so #140 SPLIT it rather than pick
+    # one meaning and silently redefine the flag.
     assert PROCESS_IR_V1_CAPABILITIES["generalized_connector_call"] == "supported"
-    assert PROCESS_IR_V1_CAPABILITIES["mixed_connector_execution"] == "gated"
+    assert PROCESS_IR_V1_CAPABILITIES["mixed_connector_execution"] == "supported"
+    # ...and the two constructs #140 does NOT ship each have their own name now.
+    assert PROCESS_IR_V1_CAPABILITIES["process_call_connector_mixing"] == "gated"
+    assert PROCESS_IR_V1_CAPABILITIES["connector_call_in_control_body"] == "gated"
     assert PROCESS_IR_V1_CAPABILITIES["rich_branch_decision_bodies"] == "gated"
     assert set(PROCESS_IR_V1_CAPABILITIES.values()) <= {
         "supported",
         "gated",
         "unsupported",
     }
-    assert [
+    assert sorted(
         name
         for name, state in PROCESS_IR_V1_CAPABILITIES.items()
         if state == "supported"
-    ] == ["generalized_connector_call"]
+    ) == ["generalized_connector_call", "mixed_connector_execution"]

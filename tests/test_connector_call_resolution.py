@@ -362,9 +362,12 @@ def test_connection_of_a_different_connector_family():
     )
 
 
-def test_a_connection_may_omit_its_family():
-    """Nothing in the emitter needs the connection's family, so an omitted one is
-    not an error — only a DISAGREEING one is."""
+def test_a_connection_that_omits_its_family_is_rejected():
+    """FAIL-CLOSED. The emitter does not need the connection's family, but the
+    VERIFICATION does: the emitted shape carries the OPERATION's family next to
+    this connection's id, so an unverifiable binding would serialise a REST
+    `connectorType` pointing at a database connection with nothing objecting.
+    "Nothing to compare" is not the same as "compares equal"."""
     table = symbols(
         ComponentSymbolV1(
             ref="conn", component_id="id_conn", component_type="connector-settings"
@@ -380,8 +383,24 @@ def test_a_connection_may_omit_its_family():
             output_profile_ref="prof",
         ),
     )
-    cfg = lower_process_ir_to_cfg(parse_process_ir_v1(one_call_doc()))
-    assert len(resolve_connector_call_bindings(cfg, table)) == 1
+    assert compile_codes(one_call_doc(), table) == [
+        (
+            PROCESS_IR_REFERENCE_CONNECTION_MISMATCH,
+            "/body/steps/0/operation_ref",
+            "reference_resolution",
+        )
+    ]
+
+
+def test_no_pre_140_symbol_can_reach_the_connection_family_requirement():
+    """The requirement above tightens nothing that exists: #139's adapters put
+    connector metadata only on the OPERATION requirement, and their symbols carry
+    no ``connection_ref`` at all — so a legacy symbol never reaches this path."""
+    from boomi_mcp.compiler.process_ir.legacy_adapters.contracts import (
+        LegacySymbolRequirementV1,
+    )
+
+    assert "connection_ref" not in LegacySymbolRequirementV1.model_fields
 
 
 @pytest.mark.parametrize(

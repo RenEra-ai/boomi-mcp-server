@@ -117,7 +117,12 @@ def mixed_symbols():
                 connector_type="database",
                 action_type="Send",
                 connection_ref="conn_db",
-                input_profile_ref="prof_patch_response",
+                # The DB Send's input profile is its own WriteProfile — a
+                # database profile, not the upstream REST response. That is what
+                # a real Database (Legacy) Send declares, and it is exactly the
+                # case D2 covers: call-to-call profiles need not match, because
+                # the platform does not enforce that; only a MAP boundary does.
+                input_profile_ref="prof_db_write",
             ),
         )
     )
@@ -538,23 +543,132 @@ def test_an_absent_profile_on_either_side_of_a_map_is_a_mismatch():
     assert codes_for(MIXED_DOC, table)[0][0] == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
 
 
-def test_profile_refs_must_resolve_to_actual_profile_components():
-    """Without a type check the continuity test is self-fulfilling: point BOTH
-    sides of a map boundary at the same non-profile component and the identities
-    compare equal, so an invalid map "matches" while neither side is a profile."""
-    base = mixed_symbols().symbols
+def test_every_symbol_in_the_fixture_is_actually_referenced():
+    """No dangling fixture symbols. A declared-but-unused profile reads as intent
+    that was never wired, and it is how a fixture quietly stops demonstrating the
+    thing it claims to."""
+    symbols = mixed_symbols().symbols
+    referenced = {"conn_rest", "conn_soap", "conn_db"}
+    for symbol in symbols:
+        for field in ("connection_ref", "input_profile_ref", "output_profile_ref"):
+            value = getattr(symbol, field, None)
+            if value:
+                referenced.add(value)
+    authored = {
+        step["operation_ref"] if "operation_ref" in step else step.get("map_ref")
+        for step in MIXED_DOC["body"]["steps"]
+        if step["kind"] in ("connector_call", "map_ref")
+    }
+    unused = {s.ref for s in symbols} - referenced - authored
+    assert unused == set(), unused
+
+
+@pytest.mark.parametrize("field", ["input_profile_ref", "output_profile_ref"])
+def test_a_declared_profile_ref_must_resolve_on_every_call_not_only_beside_a_map(field):
+    """Profile EQUALITY is MapRef-only (the platform does not enforce
+    call-to-call agreement), but a declared ref still has to BE a profile. The
+    call mutated here — the terminal Send — has no map beside it, so before this
+    check nothing looked at its profile at all."""
     table = SymbolTableV1(
         symbols=tuple(
-            symbol.model_copy(update={"output_profile_ref": "conn_rest"})
-            if symbol.ref == "op_rest_get"
-            else symbol.model_copy(update={"input_profile_ref": "conn_rest"})
+            symbol.model_copy(update={field: "conn_db"})  # a connection, not a profile
+            if symbol.ref == "op_db_send"
+            else symbol
+            for symbol in mixed_symbols().symbols
+        )
+    )
+    assert codes_for(MIXED_DOC, table) == [
+        (
+            PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
+            "/body/steps/4/operation_ref",
+            "semantic_lowering",
+        )
+    ]
+
+
+def test_an_unresolvable_profile_ref_is_rejected_on_a_map_less_call():
+    table = SymbolTableV1(
+        symbols=tuple(
+            symbol.model_copy(update={"input_profile_ref": "no_such_profile"})
+            if symbol.ref == "op_db_send"
+            else symbol
+            for symbol in mixed_symbols().symbols
+        )
+    )
+    assert codes_for(MIXED_DOC, table)[0][0] == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
+
+
+def test_an_absent_profile_ref_on_a_map_less_call_is_still_allowed():
+    """Deliberately NOT an error: official docs describe connector profiles as
+    optional ("Request Profile … when provided"), and this checkout has no
+    per-family required-vs-optional evidence. Where a profile IS required — the
+    two sides of a map — absence is already a mismatch."""
+    table = SymbolTableV1(
+        symbols=tuple(
+            symbol.model_copy(update={"input_profile_ref": None})
+            if symbol.ref == "op_db_send"
+            else symbol
+            for symbol in mixed_symbols().symbols
+        )
+    )
+    _cfg, plan = compile_process_ir_v1(parse_process_ir_v1(MIXED_DOC), table)
+    assert len(plan.nodes) == 7
+
+
+def test_a_connection_symbol_must_declare_its_family():
+    """Fail-closed. The emitted shape carries the OPERATION's family next to this
+    connection's id, so an unverifiable binding would serialise a REST
+    connectorType pointing at a database connection with nothing objecting."""
+    table = SymbolTableV1(
+        symbols=tuple(
+            symbol.model_copy(update={"connector_type": None})
+            if symbol.ref == "conn_db"
+            else symbol
+            for symbol in mixed_symbols().symbols
+        )
+    )
+    codes = codes_for(MIXED_DOC, table)
+    assert codes[0][0] == "PROCESS_IR_REFERENCE_CONNECTION_MISMATCH"
+    assert codes[0][2] == "reference_resolution"
+
+
+def test_a_maps_own_profile_ref_must_be_a_profile_component():
+    """Without a type check the continuity test is self-fulfilling: point both
+    sides of a map boundary at the same non-profile component and the identities
+    compare equal, so an invalid map "matches" while neither side is a profile.
+    Mutating only the MAP's side isolates this to the map pass — the calls'
+    own refs stay valid, so the general per-call check above cannot fire first."""
+    table = SymbolTableV1(
+        symbols=tuple(
+            symbol.model_copy(update={"input_profile_ref": "conn_rest"})
             if symbol.ref == "map_get_to_soap"
             else symbol
-            for symbol in base
+            for symbol in mixed_symbols().symbols
         )
     )
     assert codes_for(MIXED_DOC, table) == [
         (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/1/map_ref", "semantic_lowering")
+    ]
+
+
+def test_a_non_profile_on_the_call_side_is_caught_before_the_map_pass():
+    """The same corruption on the CALL's side is caught by the general per-call
+    check, which names the call rather than the map — the more actionable path,
+    since that is the symbol that is wrong."""
+    table = SymbolTableV1(
+        symbols=tuple(
+            symbol.model_copy(update={"output_profile_ref": "conn_rest"})
+            if symbol.ref == "op_rest_get"
+            else symbol
+            for symbol in mixed_symbols().symbols
+        )
+    )
+    assert codes_for(MIXED_DOC, table) == [
+        (
+            PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
+            "/body/steps/0/operation_ref",
+            "semantic_lowering",
+        )
     ]
 
 
