@@ -23,6 +23,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ....models.process_ir import ProcessIRV1
 
+#: Reserved internal alias namespace for occurrence-scoped IR references (#139B).
+#: An alias embeds the RFC 6901 pointer to the legacy field and NO authored value;
+#: it is a valid ``$ref:`` :class:`ComponentRefV1` token (whitespace-free key) that
+#: the symbol table resolves to a real component id before emission, so it never
+#: appears in emitted XML.
+#:
+#: It lives here, in the frozen-contracts module, because the namespace IS a
+#: contract shared by every adapter: two independent spellings of it would drift
+#: exactly the way a duplicated alias table would.
+LEGACY_ADAPTER_ALIAS_PREFIX = "$ref:legacy.adapter:"
+
 
 class _AdapterModel(BaseModel):
     """Frozen, strict base for every adapter contract.
@@ -125,6 +136,7 @@ def adapter_diagnostic(
 
 
 __all__ = [
+    "LEGACY_ADAPTER_ALIAS_PREFIX",
     "LegacySymbolRequirementV1",
     "LegacyAdapterResultV1",
     "LegacyAdapterDiagnosticV1",

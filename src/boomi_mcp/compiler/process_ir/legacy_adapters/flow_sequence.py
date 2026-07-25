@@ -38,6 +38,7 @@ from ....models.process_ir import ProcessIRV1
 from ..contracts import ComponentSymbolV1, SymbolTableV1
 from ..lowering import lower_cfg_to_emission_plan, lower_process_ir_to_cfg
 from .contracts import (
+    LEGACY_ADAPTER_ALIAS_PREFIX,
     LegacyAdapterResultV1,
     LegacySymbolRequirementV1,
     adapter_diagnostic,
@@ -92,12 +93,10 @@ _TEXT_KEYS = frozenset(
         "property_id",
     }
 )
-# Reserved internal alias namespace for occurrence-scoped IR references (#139B).
-# The alias embeds the RFC 6901 pointer to the legacy field and NO authored value;
-# it is a valid ``$ref:`` ComponentRefV1 token (whitespace-free key) that resolves
-# to a real component id through the symbol table before emission — it never
-# appears in emitted XML.
-_ALIAS_PREFIX = "$ref:legacy.adapter:"
+# The shared alias namespace (#139B), owned by `.contracts` since #139C so every
+# adapter spells it exactly once. Kept under the local private name so the rest of
+# this module is untouched.
+_ALIAS_PREFIX = LEGACY_ADAPTER_ALIAS_PREFIX
 
 
 def _rfc6901(token: str) -> str:
