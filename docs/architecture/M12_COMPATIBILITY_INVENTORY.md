@@ -1363,10 +1363,18 @@ The ledger contains 44 existing registered codes plus 17 new #143 additions. No 
 
 | Exemption | Covers | Adapters | Owner | Removal gate |
 |---|---|---|---|---|
-| `LEGACY_ADAPTER_EXEMPTION_OPAQUE_STATE_WRITER` | `…LINEAGE_PROPERTY_READ_BEFORE_WRITE` | `flow_sequence`, `sync_pipeline` | epic #134 | the dialect declares typed map/script effect contracts |
-| `LEGACY_ADAPTER_EXEMPTION_DECISION_PROPERTY_READ` | `…LINEAGE_EFFECT_UNKNOWN` | `flow_sequence` | epic #134 | as above |
-| `LEGACY_ADAPTER_EXEMPTION_STANDALONE_CACHE_READ` | `…LINEAGE_CACHE_WRITER_MISSING` | `flow_sequence` | epic #134 | the dialect declares `external_writer` or an in-process writer |
-| `LEGACY_ADAPTER_EXEMPTION_SUBPROCESS_SUMMARY` | `…SIDE_EFFECT_ORDERING_UNKNOWN` | `wrapper_subprocess` | epic #134 | the dialect declares typed child effect summaries |
+| `LEGACY_ADAPTER_EXEMPTION_OPAQUE_STATE_WRITER` (**live**) | `…LINEAGE_PROPERTY_READ_BEFORE_WRITE` | `flow_sequence`, `sync_pipeline` | epic #134 | the dialect declares typed map/script effect contracts |
+| `LEGACY_ADAPTER_EXEMPTION_DECISION_PROPERTY_READ` (**inert**) | `…LINEAGE_EFFECT_UNKNOWN` | `flow_sequence` | epic #134 | as above — currently never fires: the target ships as a WARNING and `apply_policy` reclassifies only errors |
+| `LEGACY_ADAPTER_EXEMPTION_STANDALONE_CACHE_READ` (**live**) | `…LINEAGE_CACHE_WRITER_MISSING` | `flow_sequence` | epic #134 | the dialect declares `external_writer` or an in-process writer |
+| `LEGACY_ADAPTER_EXEMPTION_SUBPROCESS_SUMMARY` (**inert**) | `…SIDE_EFFECT_ORDERING_UNKNOWN` | `wrapper_subprocess` | epic #134 | as above — currently never fires: the target ships as a WARNING |
 
 An exemption RECLASSIFIES an error as an advisory carrying the original code as evidence — it never
 deletes the finding, so this ledger stays falsifiable.
+
+**Live-census note (2026-07-26, #143 QA).** Over 5933 authorable configs, 6 of #143's 17 codes were
+not producible from any of them, and 2 of the 4 exemption rows are inert because their target codes
+ship as warnings. Both facts are enumerated in
+[PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md) §10. The wiring is
+correct in every case — forcing the condition in a synthetic report makes it fire — so these are
+statements of current reachability, not defects, and not regressions (the baseline had no such
+checks at all).

@@ -128,8 +128,20 @@ an opt-in.
 
 | Site | Slice | What it gates | Policy |
 |---|---|---|---|
-| `integration_builder._process_component_preflight` | 8 | plan/apply, for `create`/`create_clone`/`update` on process components | strict |
+| `integration_builder._process_component_preflight` | 8 | plan/apply, for `create`/`update` on process components | the config's dialect exemptions (`legacy_bridge.py`) |
 | `legacy_adapters.emission.emit_legacy_result` | 9 | the canonical `compile → emit` chain | the named dialect's registered exemptions |
+
+**Both gates apply the same policy.** An earlier draft of this table said the plan gate was
+"strict"; that was wrong, and the two-row contrast wrongly implied a payload could survive plan and
+die at emission. No payload can: `legacy_bridge.validate_legacy_process_config` resolves the adapter
+from the config and applies its registered policy exactly as the emission gate does.
+
+The shipped behavior is the one the feature needs. A genuinely strict plan gate would reject every
+legacy `flow_sequence` standalone cache read at plan time, and
+`LEGACY_ADAPTER_EXEMPTION_STANDALONE_CACHE_READ` could never be observed at all.
+
+`create_clone` is listed in the code's guard but is **unreachable** from `build_integration`: spec
+validation rejects it earlier ("Use create or update").
 
 Both run **after** every existing legacy check. That ordering is load-bearing: existing public error
 codes keep winning, so a payload that fails a legacy check still reports the code it always did.
@@ -163,12 +175,12 @@ An exemption **reclassifies** an error as an advisory carrying the original code
 it never deletes the finding. An exemption that hid its finding would make the migration ledger
 unfalsifiable.
 
-| Exemption | Covers | Adapters |
-|---|---|---|
-| `LEGACY_ADAPTER_EXEMPTION_OPAQUE_STATE_WRITER` | `…LINEAGE_PROPERTY_READ_BEFORE_WRITE` | `flow_sequence`, `sync_pipeline` |
-| `LEGACY_ADAPTER_EXEMPTION_DECISION_PROPERTY_READ` | `…LINEAGE_EFFECT_UNKNOWN` | `flow_sequence` |
-| `LEGACY_ADAPTER_EXEMPTION_STANDALONE_CACHE_READ` | `…LINEAGE_CACHE_WRITER_MISSING` | `flow_sequence` |
-| `LEGACY_ADAPTER_EXEMPTION_SUBPROCESS_SUMMARY` | `…SIDE_EFFECT_ORDERING_UNKNOWN` | `wrapper_subprocess` |
+| Exemption | Covers | Adapters | Status |
+|---|---|---|---|
+| `LEGACY_ADAPTER_EXEMPTION_OPAQUE_STATE_WRITER` | `…LINEAGE_PROPERTY_READ_BEFORE_WRITE` | `flow_sequence`, `sync_pipeline` | **live** — observed firing on a real build |
+| `LEGACY_ADAPTER_EXEMPTION_DECISION_PROPERTY_READ` | `…LINEAGE_EFFECT_UNKNOWN` | `flow_sequence` | **inert** — target ships as a warning (see §10) |
+| `LEGACY_ADAPTER_EXEMPTION_STANDALONE_CACHE_READ` | `…LINEAGE_CACHE_WRITER_MISSING` | `flow_sequence` | **live** — observed firing on a real build |
+| `LEGACY_ADAPTER_EXEMPTION_SUBPROCESS_SUMMARY` | `…SIDE_EFFECT_ORDERING_UNKNOWN` | `wrapper_subprocess` | **inert** — target ships as a warning (see §10) |
 
 **Removal gate:** each exemption retires when its adapter's dialect declares typed effect contracts
 for the constructs it covers. Owner: the M12 epic (#134); the retiring issue is the one that migrates
@@ -184,14 +196,34 @@ the dialect off the legacy surface.
   authored semantics, and a verifier failure is classified as a compiler/emitter defect, never a user
   semantic error.
 
-### Known reachability gap
+### Known reachability gaps — what is PRE-POSITIONED rather than live
 
-`PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE` is implemented and tested against a hand-built CFG,
-but is **not reachable from the authored surface** in v1: a `process_call` may appear only in a pure
-process-call sequence (`process_call_connector_mixing` is gated) and is rejected inside a
-Branch/Decision body, so no property read can follow a non-waiting call in any authorable document.
-Both facts were measured, not assumed. The rule is pre-positioned rather than dropped so it is in
-place the day the mixing gate lifts.
+Measured by a live census over 5933 authorable configs (issue #143 QA, 2026-07-26). Every rule below
+is implemented and unit-tested, and every registry row below is wired correctly — forcing the
+condition in a synthetic report makes it fire. They are simply **not producible from any config the
+v1 authored surface accepts**, so they are pre-positioned for the gates that currently exclude them,
+not evidence of live coverage.
+
+**Codes not producible from an authorable config (6 of 17):**
+
+| Code | Why it cannot fire yet |
+|---|---|
+| `…SIDE_EFFECT_ORDERING_UNSAFE` | needs a property read downstream of a non-waiting `process_call`; a `process_call` may live only in a pure process-call sequence (`process_call_connector_mixing` is gated) and is rejected inside a Branch/Decision body |
+| `PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND` | the legacy adapter's symbol table carries only refs it declared, so an undeclared ref never reaches the collector |
+| `PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH` | same — a literal wrong-type id (a `map_ref` bound to a `profile.json` id, or an unresolvable UUID) still reports `is_valid: true` |
+| `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` | no production caller supplies typed effect contracts yet |
+| `…LINEAGE_AMBIGUOUS_LAST_WRITE` | requires a converging-path shape the v1 body rules do not admit |
+| `…RETRY_EFFECT_UNSAFE` | requires a non-connector replay hazard inside a positive-retry region, which the retry placements v1 allows do not produce |
+
+This is **not a regression** — the baseline had no such checks at all. It is a statement of how much
+of the new surface is currently exercised.
+
+**Exemption rows that are inert (2 of 4):** `LEGACY_ADAPTER_EXEMPTION_DECISION_PROPERTY_READ` and
+`LEGACY_ADAPTER_EXEMPTION_SUBPROCESS_SUMMARY` cover codes that ship as **warnings**
+(`…LINEAGE_EFFECT_UNKNOWN`, `…SIDE_EFFECT_ORDERING_UNKNOWN`), and `apply_policy` reclassifies only
+ERRORS — a warning never blocked, so exempting one would merely hide it. They therefore never fire
+in practice. The other two (`…OPAQUE_STATE_WRITER`, `…STANDALONE_CACHE_READ`) are live and were
+observed firing on real builds.
 
 ## 11. Failure taxonomy (#143's 17 codes)
 
