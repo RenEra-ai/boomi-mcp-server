@@ -202,7 +202,7 @@ Measured by a live census over 5933 authorable configs plus a 606-config gate di
 #143 QA, 2026-07-26). Two DIFFERENT situations are separated below, because collapsing them is
 exactly how a taxonomy entry gets mistaken for a shipped rule.
 
-**A. Implemented, unit-tested, wired — but not producible from an authorable config (5 of 17).**
+**A. Implemented, unit-tested, wired — but not producible from an authorable config (4 of 17).**
 Forcing the condition makes each of these fire; the v1 authored surface simply cannot produce the
 shape.
 
@@ -211,12 +211,21 @@ shape.
 | `…SIDE_EFFECT_ORDERING_UNSAFE` | needs a property read downstream of a non-waiting `process_call`; a `process_call` may live only in a pure process-call sequence (`process_call_connector_mixing` is gated) and is rejected inside a Branch/Decision body |
 | `PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND` | the legacy adapter's symbol table carries only refs it declared, so an undeclared ref never reaches the collector |
 | `PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH` | same — a literal wrong-type id (a `map_ref` bound to a `profile.json` id, or an unresolvable UUID) still reports `is_valid: true` |
-| `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` | no production caller supplies typed effect contracts yet |
 | `…RETRY_EFFECT_UNSAFE` | **no legacy dialect can project a Try/Catch region at all**, so `derive_error_regions` returns an empty tuple on every legacy-projected CFG and `collect_retry_effect_findings` never has a region to examine. The blocker is one layer earlier than "the hazard never lands inside a retried region" |
 
-**B. Registered in the taxonomy with NO rule behind it (1 of 17).**
+**B. Registered in the taxonomy with NO rule behind it (2 of 17).**
 
-`PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` is **declared but never emitted**. It exists as a
+TWO codes are declared with no collector emitting them. Group A's defining test — forcing the
+condition makes it fire — does **not** hold for either: `finding()` accepts any registered code, so a
+synthetic report proves registration, not wiring.
+
+`PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` is the first. No collector references it. An earlier
+draft filed it under A with the reason "no production caller supplies typed effect contracts yet",
+which describes a reachability gap and so implies a rule a caller could reach. There is none: the
+capability contracts are validated structurally by pydantic at construction, and nothing re-checks
+them against the IR.
+
+`PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` is the second. It exists as a
 constant, a taxonomy row, and a message/remediation entry — no collector references it, and it has no
 unit test. A synthetic report can carry it only because `finding()` accepts any registered code.
 
@@ -228,8 +237,14 @@ implementing a check for a construct the IR does not have. The code stays regist
 stable when control continuation lands; the rule arrives with it.
 
 The equivalent LEGACY check is real and unaffected: `cache_property_lineage` emits
-`PROCESS_LINEAGE_AMBIGUOUS_LAST_WRITE` (a different, legacy-family code) on its own surface, and the
-migration matrix classifies that row `adapter-only-compat`.
+`PROCESS_LINEAGE_AMBIGUOUS_LAST_WRITE` (a different, legacy-family code) from
+`validate_cache_property_lineage`, which the migration matrix classifies **`refine-with-typed-facts`**
+(not `adapter-only-compat` — that is the neighbouring `validate_config_lineage` row).
+
+The shared name is misleading and worth the caveat: the legacy check fires when *the only writer sits
+on a mutually exclusive decision path* — an exclusive-path condition, not a merge. So the two
+same-named checks are not the same rule, which strengthens rather than weakens the "different family"
+point.
 
 Nothing here is a **regression** — the baseline had no such checks at all. This section states how
 much of the new surface is currently exercised, and by what.
@@ -251,12 +266,12 @@ carry one.
 |---|---|---|
 | `PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND` | error | a non-connector component ref does not resolve |
 | `PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH` | error | a resolved symbol is the wrong type for its role |
-| `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` | error | a typed effect contract is malformed or misbound |
+| `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` | error | **taxonomy-only — no collector emits it** (see §10 B) |
 | `PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE` | error | a strict read has no establishing write on its path |
 | `PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID` | error | a DDP is read outside the document copy that wrote it |
 | `PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID` | error | a leg depends on state written by a LATER leg |
 | `PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING` | error | a cache is read with no preceding write |
-| `PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` | error | converging paths leave the last writer undetermined |
+| `PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` | error | **taxonomy-only — no collector emits it** (see §10 B) |
 | `PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN` | warning | a map/script has no typed effect contract |
 | `PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED` | warning | state is assumed to come from a declared external writer |
 | `PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE` | error | a demonstrated unordered dependency (see §10 gap) |

@@ -331,3 +331,124 @@ def test_this_module_emits_no_connector_retry_codes():
         "PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING",
     ):
         assert owned_by_142 not in source, owned_by_142
+
+
+# ---------------------------------------------------------------------------
+# the retry rule FIRES — added after QA Bug #181
+#
+# The rule was implemented (effects.py) and its classifier was unit-tested, but
+# nothing asserted the collector actually emits the code. "Implemented" and
+# "proven to fire" are different claims, and the docs were making the second on
+# the strength of the first. A synthetic CFG is required because no legacy
+# dialect can project a Try/Catch region at all (QA Bug #176), so
+# derive_error_regions returns empty on every legacy-projected graph.
+# ---------------------------------------------------------------------------
+
+
+def _try_catch_cfg(*, retry_count, hazard_kind="cache_put"):
+    from boomi_mcp.compiler.process_ir.contracts import (
+        CfgEdgeV1,
+        CfgNodeV1,
+        SemanticCfgV1,
+    )
+    from boomi_mcp.compiler.process_ir.semantic_validation.context import (
+        PreparedProcessValidationV1,
+        _edge_index,
+    )
+
+    if hazard_kind == "cache_put":
+        hazard = {"semantic_kind": "cache_put", "cache_ref": "$ref:c"}
+    else:
+        hazard = {
+            "semantic_kind": "set_property",
+            "scope": "dpp",
+            "name": "P",
+            "persist": hazard_kind == "persisted",
+            "source_values": [{"value_type": "static", "value": "v"}],
+        }
+
+    nodes = [
+        CfgNodeV1(
+            node_id="n1",
+            ordinal=1,
+            source_path="/body/steps/0",
+            semantic={
+                "semantic_kind": "try_catch",
+                "scope": "process",
+                "retry_count": retry_count,
+            },
+        ),
+        CfgNodeV1(
+            node_id="n2", ordinal=2, source_path="/body/steps/1", semantic=hazard
+        ),
+        CfgNodeV1(
+            node_id="n3",
+            ordinal=3,
+            source_path="/body/steps/2",
+            semantic={"semantic_kind": "stop"},
+            exit_role="stop",
+        ),
+        CfgNodeV1(
+            node_id="n4",
+            ordinal=4,
+            source_path="/body/catch_body/terminal",
+            semantic={"semantic_kind": "stop"},
+            exit_role="stop",
+        ),
+    ]
+    edges = [
+        CfgEdgeV1(
+            edge_id="e1", ordinal=1, source_node_id="n1", target_node_id="n2",
+            kind="ordering", local_ordinal=1, provenance_path="/body/steps/0",
+        ),
+        CfgEdgeV1(
+            edge_id="e2", ordinal=2, source_node_id="n2", target_node_id="n3",
+            kind="ordering", local_ordinal=1, provenance_path="/body/steps/1",
+        ),
+        CfgEdgeV1(
+            edge_id="e3", ordinal=3, source_node_id="n1", target_node_id="n4",
+            kind="catch", local_ordinal=2, provenance_path="/body/steps/0",
+        ),
+    ]
+    cfg = SemanticCfgV1(
+        entry_node_id="n1", nodes=tuple(nodes), edges=tuple(edges), exit_node_ids=()
+    )
+    return PreparedProcessValidationV1(
+        ir=parse_process_ir_v1(GOLDEN_DOCS["linear_flow"]),
+        cfg=cfg,
+        symbols=SymbolTableV1(symbols=()),
+        node_by_id={n.node_id: n for n in cfg.nodes},
+        outgoing=_edge_index(cfg.edges, "source_node_id"),
+        incoming=_edge_index(cfg.edges, "target_node_id"),
+        symbol_by_ref={},
+    )
+
+
+def test_a_cache_write_inside_a_retried_region_fires_retry_effect_unsafe():
+    findings = collect_retry_effect_findings(_try_catch_cfg(retry_count=3))
+    assert [f.code for f in findings] == [PROCESS_IR_SEMANTIC_RETRY_EFFECT_UNSAFE]
+    assert findings[0].severity == "error"
+    evidence = {e.key: e.value for e in findings[0].evidence}
+    assert evidence == {"effect_kind": "cache_write", "retry_count": 3}
+
+
+def test_a_persisted_property_write_inside_a_retried_region_also_fires():
+    findings = collect_retry_effect_findings(
+        _try_catch_cfg(retry_count=1, hazard_kind="persisted")
+    )
+    assert [f.code for f in findings] == [PROCESS_IR_SEMANTIC_RETRY_EFFECT_UNSAFE]
+    evidence = {e.key: e.value for e in findings[0].evidence}
+    assert evidence["effect_kind"] == "persisted_property"
+
+
+def test_a_zero_retry_region_does_not_fire():
+    """Retry count zero is not a replay hazard — the region simply never repeats."""
+    assert collect_retry_effect_findings(_try_catch_cfg(retry_count=0)) == ()
+
+
+def test_a_non_persisted_write_inside_a_retried_region_does_not_fire():
+    """It dies with the execution, so replaying it changes nothing."""
+    findings = collect_retry_effect_findings(
+        _try_catch_cfg(retry_count=3, hazard_kind="transient")
+    )
+    assert findings == ()
