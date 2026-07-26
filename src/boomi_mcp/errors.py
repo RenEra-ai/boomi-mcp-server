@@ -189,6 +189,78 @@ PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING = (
 PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED = "PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED"
 PROCESS_IR_COMPILE_ERROR_REGION_INVALID = "PROCESS_IR_COMPILE_ERROR_REGION_INVALID"
 
+# --- ProcessIR unified semantic validation (M12.8 / issue #143; ADR-001 §7) ---
+# #143 ADDS to four families it is a declared introducer for — REFERENCE_*,
+# CAPABILITY_*, SEMANTIC_* and the LEGACY_ADAPTER_EXEMPTION_* subfamily. It is
+# deliberately NOT an introducer for COMPILE_*: that family blames the compiler,
+# whereas every code below blames the authored payload, and a ValidationReportV1
+# cannot carry a compile-family code at all (an unexpected internal defect
+# escapes to the compiler's own ``_guarded`` boundary instead).
+#
+# ``ERROR_TAXONOMY`` is a dict comprehension keyed on ``spec.code``, so a
+# duplicate entry would silently overwrite the earlier owner's spec AND shrink
+# the dict by one key. Every code below is new; the guard tests in
+# tests/test_error_taxonomy.py pin both facts.
+
+# Generic component resolution. The specialized #140 operation/connection codes
+# keep their own conditions; these two cover every OTHER component role.
+PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND = "PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND"
+PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH = (
+    "PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH"
+)
+PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID = (
+    "PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID"
+)
+
+# State lineage: document-scoped (DDP) vs execution-scoped (DPP/cache).
+PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE = (
+    "PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE"
+)
+PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID = (
+    "PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID"
+)
+PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID = (
+    "PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID"
+)
+PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING = (
+    "PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING"
+)
+PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE = (
+    "PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE"
+)
+PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN = (
+    "PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN"
+)
+PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED = (
+    "PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED"
+)
+
+# Side effects and replay. These cover NON-connector hazards only; every #140
+# and #142 connector retry/idempotency code keeps its existing condition.
+PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE = (
+    "PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE"
+)
+PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNKNOWN = (
+    "PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNKNOWN"
+)
+PROCESS_IR_SEMANTIC_RETRY_EFFECT_UNSAFE = "PROCESS_IR_SEMANTIC_RETRY_EFFECT_UNSAFE"
+
+# Named legacy exemptions. These are ADVISORY and registry-owned: a policy is
+# selected by an immutable adapter registration, never by authored input, so no
+# caller can suppress a fatal rule by asking.
+LEGACY_ADAPTER_EXEMPTION_OPAQUE_STATE_WRITER = (
+    "LEGACY_ADAPTER_EXEMPTION_OPAQUE_STATE_WRITER"
+)
+LEGACY_ADAPTER_EXEMPTION_DECISION_PROPERTY_READ = (
+    "LEGACY_ADAPTER_EXEMPTION_DECISION_PROPERTY_READ"
+)
+LEGACY_ADAPTER_EXEMPTION_STANDALONE_CACHE_READ = (
+    "LEGACY_ADAPTER_EXEMPTION_STANDALONE_CACHE_READ"
+)
+LEGACY_ADAPTER_EXEMPTION_SUBPROCESS_SUMMARY = (
+    "LEGACY_ADAPTER_EXEMPTION_SUBPROCESS_SUMMARY"
+)
+
 
 @dataclass(frozen=True)
 class ErrorCodeSpec:
@@ -800,6 +872,187 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "(edges, ordinals, or containment) — a compiler defect, not authored input."
             ),
             owner="#142",
+        ),
+        # --- #143 M12.8: unified semantic validation ----------------------
+        ErrorCodeSpec(
+            code=PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "An authored component reference does not resolve to a symbol. "
+                "Applies to component roles other than a connector operation or "
+                "connection, which keep their own specialized codes."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A resolved component symbol is of the wrong component type for "
+                "the role it is referenced in."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A typed map/script/subprocess effect contract is malformed, "
+                "bound to the wrong component, or its script digest does not "
+                "match the source it claims to describe."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A process/document property or cache key is read on a path "
+                "where no prior write establishes it."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A dynamic DOCUMENT property is read outside the document copy "
+                "that wrote it — DDP is document-scoped, so a sibling Branch "
+                "leg's write cannot establish it."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A Branch leg depends on state written by a LATER leg. Branch "
+                "legs execute sequentially, so only an earlier leg's write is "
+                "visible."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A document cache is read on a path with no preceding write to "
+                "that cache."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "Converging paths establish a property or cache key with "
+                "different last writers, so its value at the merge is not "
+                "determined."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A map or script has no typed effect contract, so its reads and "
+                "writes are unknown. Unknown effects never establish state; "
+                "supply a contract or write the state explicitly."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "State is assumed to be established by a declared external "
+                "writer rather than by this process. Non-fatal, but the "
+                "assumption is recorded."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "Two side effects are ordered in a way the flow demonstrably "
+                "cannot guarantee — for example a read that depends on a write "
+                "performed by a non-waiting subprocess call."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNKNOWN,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "An asynchronous or shared-state ordering cannot be proven "
+                "either safe or unsafe from the declared facts."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_RETRY_EFFECT_UNSAFE,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A retried region replays a NON-connector effect that has no "
+                "established replay safety. Connector retry hazards keep their "
+                "own #142 codes."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=LEGACY_ADAPTER_EXEMPTION_OPAQUE_STATE_WRITER,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "Advisory: a named legacy adapter policy accepts an opaque "
+                "map/script state writer that strict ProcessIR validation would "
+                "not treat as proof."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=LEGACY_ADAPTER_EXEMPTION_DECISION_PROPERTY_READ,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "Advisory: a named legacy adapter policy accepts a Decision-arm "
+                "property read that is not established on every outcome."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=LEGACY_ADAPTER_EXEMPTION_STANDALONE_CACHE_READ,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "Advisory: a named legacy adapter policy accepts a cache read "
+                "with no in-process writer, as the legacy walker did."
+            ),
+            owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=LEGACY_ADAPTER_EXEMPTION_SUBPROCESS_SUMMARY,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "Advisory: a named legacy adapter policy accepts a Process Call "
+                "with no typed child effect summary."
+            ),
+            owner="#143",
         ),
     )
 }
