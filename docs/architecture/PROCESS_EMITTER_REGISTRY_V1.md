@@ -77,6 +77,7 @@ model classes yield 18 discriminator keys because `ConnectorActionInputV1` accep
 | `processcall` | `ProcessCallInputV1` | `processcall` | 1 | process=`process` |
 | `branch` | `BranchInputV1` | `branch` | `num_branches` | — |
 | `decision` | `DecisionInputV1` | `decision` | 2 | — |
+| `catcherrors` | `CatchErrorsInputV1` | `catcherrors` | 2 (Try then Catch) | — |
 | `exception` | `ExceptionInputV1` | `exception` | 0 | — |
 | `stop` | `StopInputV1` | `stop` | 0 | — |
 | `returndocuments` | `ReturnDocumentsInputV1` | `returndocuments` | 0 | — |
@@ -148,7 +149,9 @@ Byte parity is the hard gate. Two layers of oracle:
   `sync_pipeline_db_read_map_rest_send.xml` — a direct byte anchor for a non-listener SyncPipeline
   build). No existing golden's committed bytes changed.
 - **`tests/test_process_emitter_parity.py`**: for the three golden IR documents (`process_ir_v1.json`
-  — `control_flow`, `linear_flow`, `wrapper_flow`, which together exercise **all 17** emitter kinds),
+  — `control_flow`, `linear_flow`, `wrapper_flow`, which together exercise **all 17 pre-#142**
+  emitter kinds; the three #142 anchors in `tests/fixtures/golden_xml/scoped_try_catch_*.xml` cover
+  `catcherrors`, key 18),
   the registry's `emit_process` shapes equal the UNCHANGED legacy builder's `<shapes>` byte-for-byte,
   equal a committed pre-extraction fixture (`tests/fixtures/process_ir/emitter_parity/*.process.xml`),
   and produce a verifier summary matching `verify_process_graph` on the legacy XML.

@@ -404,6 +404,7 @@ names rather than pick one meaning and silently redefine the flag.
 PRODUCTION consumer too (the wrapper + flow_sequence legacy adapters drive it via
 `legacy_adapters/emission.py`). It reuses the byte-proven shape
 serializers extracted into `process_emitters/` and emits XML byte-identical to the legacy builder for
-all 17 emitter kinds. There is still **no MCP/runtime adapter** — the registry is imported directly,
+all 17 pre-#142 emitter kinds (`catcherrors`, key 18, is covered by #142's own anchors — see §3c).
+There is still **no MCP/runtime adapter** — the registry is imported directly,
 never exported, and invoked by no tool or production builder; #139 owns the production cutover. See
 `docs/architecture/PROCESS_EMITTER_REGISTRY_V1.md`.
