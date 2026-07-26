@@ -332,6 +332,11 @@ _STREAM_PRODUCING_KINDS = frozenset({"cache_get", "document_cache_retrieve"})
 #: shape that hands it nothing.
 _MAY_FOLLOW_NON_PRODUCER = frozenset({"stop"}) | _STREAM_PRODUCING_KINDS
 
+#: Kinds that do NOT break a map's pairing with its upstream call. A connector
+#: call sets the pairing; Branch/Decision merely route the documents onward
+#: without altering them, so they carry it through into each body.
+_MAP_PAIRING_TRANSPARENT = frozenset({"connector_call", "branch", "decision"})
+
 
 class _PathState:
     """Document state carried down ONE root-to-leaf path.
@@ -343,7 +348,9 @@ class _PathState:
     2's first call would be judged against leg 1's last one.
     """
 
-    __slots__ = ("producer", "producer_binding", "blocked_by", "pending_map", "map_upstream")
+    __slots__ = (
+        "producer", "producer_binding", "blocked_by", "pending_map", "map_upstream", "saw_call",
+    )
 
     def __init__(
         self,
@@ -352,6 +359,7 @@ class _PathState:
         blocked_by=None,
         pending_map=None,
         map_upstream=None,
+        saw_call=False,
     ):
         #: truthy when SOMETHING upstream on this path yields documents — a
         #: producing connector_call, a legacy source endpoint, or a cache read.
@@ -368,6 +376,11 @@ class _PathState:
         self.pending_map = pending_map
         #: the call binding immediately upstream of ``pending_map``
         self.map_upstream = map_upstream
+        #: whether ANY connector call has run on this path. Distinguishes a
+        #: connector flow (where an unbracketed map is a real continuity hole)
+        #: from a pure legacy source/target flow (where a map never had a
+        #: call-to-call profile pair to check and never did before #141).
+        self.saw_call = saw_call
 
     def copy(self) -> "_PathState":
         return _PathState(
@@ -376,6 +389,7 @@ class _PathState:
             self.blocked_by,
             self.pending_map,
             self.map_upstream,
+            self.saw_call,
         )
 
 
@@ -498,11 +512,18 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
                 state.pending_map = None
                 state.map_upstream = None
 
+            state.saw_call = True
             state.producer = binding if capability.produces_output else None
             state.producer_binding = binding if capability.produces_output else None
             state.blocked_by = None if capability.produces_output else binding
 
         elif kind == "map":
+            # ``producer_binding`` is cleared below by every non-call node, so
+            # reaching here with one set means the map's IMMEDIATE predecessor was
+            # a producing call. That immediacy is the contract: without it
+            # `call -> message -> map -> call` would be treated as bracketed and
+            # the map's source profile compared against a call that no longer
+            # feeds it.
             # Only a map BETWEEN two connector CALLS can have its profiles
             # verified: the equality contract compares the upstream call's
             # response profile with the map's source, and the map's target with
@@ -514,6 +535,16 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
             if state.producer_binding is not None:
                 state.pending_map = node
                 state.map_upstream = state.producer_binding
+            elif state.saw_call:
+                # A connector call ran upstream but is no longer this map's
+                # immediate predecessor, so nothing can be compared against its
+                # source profile — the exact continuity hole map bracketing
+                # exists to close, and #140 states it in the model for root
+                # sequences. A map in a PURE legacy flow (no call anywhere on the
+                # path) stays unchecked, as it was before #141.
+                _profile_failure(
+                    "{0}/map_ref".format(node.source_path), node.node_id
+                )
 
         elif kind == "connector":
             # A legacy source endpoint genuinely produces documents, so a
@@ -541,6 +572,18 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
             # current stream — after a call that produces none it can only ever
             # return nothing.
             _cardinality_failure(node.source_path, node.node_id)
+
+        if kind not in _MAP_PAIRING_TRANSPARENT:
+            # A map's upstream must be the call that actually still feeds it.
+            # Any node that touches the stream (a Message REPLACES the document,
+            # a Data Process rewrites it, a cache write consumes it) breaks the
+            # pairing, so `call -> message -> map -> call` is NOT bracketed.
+            # Branch/Decision are pure control flow — they route documents
+            # without altering them — so they stay transparent; otherwise the
+            # ordinary `call -> branch -> [map, call]` shape could never be
+            # profile-checked at all. ``producer`` ("do documents exist on this
+            # path") is a different question and deliberately survives more.
+            state.producer_binding = None
 
         successors = outgoing.get(node_id, ())
         for position, edge in enumerate(successors):

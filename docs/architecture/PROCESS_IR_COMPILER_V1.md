@@ -648,3 +648,30 @@ for what they covered and incomplete for what #141 added:
   the generic check fired first and `PROCESS_IR_SEMANTIC_UNTERMINATED_PATH` was unreachable. A code
   with no reachable path is not a check; it shipped that way because the first cut added the code
   without a test that exercised it.
+
+### Architect impl-review corrections (#141)
+
+* **A map must follow its call IMMEDIATELY.** Carrying the last producing call across
+  intervening nodes let `call → message → map → call` read as bracketed, comparing the map's source
+  against a call that no longer feeds it (a Message *replaces* the document). Branch/Decision stay
+  transparent — they route documents without altering them — so `call → branch → [map, call]` is
+  still checked. A map with a call upstream but not immediately before it is now rejected; a map in
+  a **pure legacy** flow (no call anywhere on the path) stays unchecked exactly as before #141.
+* **Whole-region provenance.** The per-node rule bound only a control edge's FIRST target to its
+  leg/arm; the whole reachable region is now checked, so a subtree escaping into a sibling region
+  one node later is caught too.
+* **Control-wiring precedence.** A control node's transition/edge mismatch raises
+  `PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID` rather than losing the race to the generic
+  plan-invalid code, which previously left the specific code reporting only label/geometry defects.
+* **Every #141 code has its own remediation** in the compiler diagnostic table; a generic fallback
+  is not a contract.
+* **Whole-document rules name the offending node.** Depth and ProcessCall-mixing moved out of
+  `ProcessIRV1` model validators (which can only ever attach to the document root) into a
+  post-parse walk carrying the authored path.
+* **A known kind in a disallowed body slot** reports
+  `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY`, not `PROCESS_IR_SCHEMA_UNKNOWN_NODE` — calling a
+  documented kind "unknown" sends the caller to fix the wrong thing. A genuinely unknown tag keeps
+  the unknown-node code.
+* **A Decision arm admits at most ONE `process_call`**; the capture attests exactly one
+  `decision →true→ processcall`, and a chain is unproven. The Branch-leg rule stays plural, as the
+  reconciliation states it.

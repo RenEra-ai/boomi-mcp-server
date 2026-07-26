@@ -740,7 +740,9 @@ def _check_cache_put_followed_by_read(steps: List[Any], *, context: str) -> None
                 )
 
 
-def _check_process_call_path_mode(steps: List[Any], terminal: Any, *, context: str) -> None:
+def _check_process_call_path_mode(
+    steps: List[Any], terminal: Any, *, context: str, max_calls: Optional[int] = None
+) -> None:
     """ProcessCall PATH MODE (#141).
 
     ``process_call_connector_mixing`` stays gated PER ROOT-TO-LEAF PATH, so a body
@@ -764,6 +766,17 @@ def _check_process_call_path_mode(steps: List[Any], terminal: Any, *, context: s
     if getattr(terminal, "kind", None) != "stop":
         raise _body_kind_error(
             "a process_call {0} must end in a stop terminal".format(context)
+        )
+    # A Decision arm passes ``max_calls=1``. The capture attests exactly one
+    # ``decision ->true-> processcall`` (twice); a CHAIN of process calls on an
+    # arm is unproven, and the reconciliation asked for the single-call shape.
+    # A Branch leg passes no bound, because the reconciliation states that rule
+    # as "every step in that leg must be process_call" — plural by construction.
+    if max_calls is not None and len(steps) > max_calls:
+        raise _body_kind_error(
+            "a process_call {0} may contain at most {1} process_call step".format(
+                context, max_calls
+            )
         )
 
 
@@ -849,7 +862,7 @@ class DecisionTrueArmV1(_ProcessIRBase):
                 "decision true-arm steps must not end in cache_put — the arm terminal would receive an empty stream"
             )
         _check_process_call_path_mode(
-            self.steps, self.terminal, context="decision true-arm"
+            self.steps, self.terminal, context="decision true-arm", max_calls=1
         )
         _check_stop_terminal_has_work(
             self.steps, self.terminal, context="decision true-arm"
@@ -1180,82 +1193,11 @@ def _control_depth(node: Any) -> int:
 _CONNECTOR_KINDS = frozenset({"source", "target", "connector_call"})
 
 
-def _check_process_call_mixing(node: Any, connector_above: bool) -> None:
-    """Walk one control subtree carrying whether a connector runs UPSTREAM.
-
-    A binary "is the root control-only?" test is not enough, because a connector
-    can sit in an OUTER control body while the ``process_call`` sits in a nested
-    one — e.g. ``branch(steps=[connector_call], terminal=decision(true=[process_call]))``,
-    where both are on one root-to-leaf path under a control-only root. The rule
-    is about the PATH, so the check has to walk the path.
-    """
-    kind = getattr(node, "kind", None)
-    if kind == "branch":
-        bodies = [(leg.steps, leg.terminal) for leg in node.legs]
-    elif kind == "decision":
-        bodies = [
-            (node.true_arm.steps, node.true_arm.terminal),
-            (node.false_arm.steps, node.false_arm.terminal),
-        ]
-    else:
-        return
-
-    for steps, terminal in bodies:
-        kinds = [step.kind for step in steps]
-        if "process_call" in kinds and connector_above:
-            raise _body_kind_error(
-                "a process_call may not share a root-to-leaf path with a connector "
-                "step — a connector runs upstream of this body "
-                "(process_call_connector_mixing is gated)"
-            )
-        # Path mode already guarantees a ProcessCall body holds nothing else, so
-        # only a NON-ProcessCall body can add a connector for anything below it.
-        connector_here = connector_above or any(k in _CONNECTOR_KINDS for k in kinds) or (
-            getattr(terminal, "kind", None) in _CONNECTOR_KINDS
-        )
-        _check_process_call_mixing(terminal, connector_here)
-
-
 class ProcessIRV1(_ProcessIRBase):
     """The semantic root: exactly one per authored process (ADR-001 §3)."""
 
     version: Literal["1"]
     body: SequenceNodeV1
-
-    @model_validator(mode="after")
-    def _process_call_mixing_rule(self) -> "ProcessIRV1":
-        """No ``process_call`` may share a root-to-leaf path with a connector.
-
-        ``_check_process_call_path_mode`` keeps each BODY connector-free, but a
-        body cannot see its ancestors — and every ancestor is on its path. This
-        walks the whole document carrying that context, which is what makes
-        ``process_call_connector_mixing`` honestly gated rather than gated only
-        at the shallowest depth.
-        """
-        root_kinds = [step.kind for step in self.body.steps]
-        connector_at_root = any(k in _CONNECTOR_KINDS for k in root_kinds)
-        for step in self.body.steps:
-            _check_process_call_mixing(step, connector_at_root)
-        return self
-
-    @model_validator(mode="after")
-    def _depth_rules(self) -> "ProcessIRV1":
-        # #141: enforced HERE, at parse time, so a too-deep document is rejected
-        # before a CFG exists — and therefore long before any component mutation.
-        # ``invariants.check_cfg_invariants`` re-derives the same bound from CFG
-        # provenance paths; the two are independent computations of one rule, so
-        # a lowering defect that flattened nesting cannot smuggle a document past
-        # both.
-        for step in self.body.steps:
-            if _control_depth(step) > PROCESS_IR_V1_MAX_CONTROL_DEPTH:
-                raise _nesting_error(
-                    "branch/decision nesting exceeds the ProcessIR v1 maximum control "
-                    "depth of {0} (a compiler bound, not a Boomi platform limit)".format(
-                        PROCESS_IR_V1_MAX_CONTROL_DEPTH
-                    )
-                )
-        return self
-
 
 # ---------------------------------------------------------------------------
 # Capability manifest (published, immutable — not an authored field)
@@ -1301,6 +1243,15 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
 # unknown-field (mirrors the legacy cache_get keyed-retrieval gate).
 _GATED_EXTRA_KEYS = frozenset({"doc_cache_index", "cache_key_values", "load_all_documents"})
 _GATED_UNION_TAGS = frozenset({"definedparameter"})
+
+# #141: authored loc segments that mean "inside a control body". Used to tell a
+# known kind in the WRONG SLOT (a body capability failure) from a genuinely
+# unknown discriminator.
+_BODY_LOC_SEGMENTS = frozenset({"legs", "true_arm", "false_arm"})
+
+#: Every globally valid node ``kind``, DERIVED from the root union so it cannot
+#: drift from the vocabulary it is meant to describe.
+_NODE_KIND_TAGS = frozenset(_kinds_of(ProcessNodeV1))
 
 # Discriminator tag values that pydantic injects into error locs for tagged
 # unions; stripped so pointers address the AUTHORED JSON.
@@ -1491,6 +1442,17 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
                 path,
                 message="the requested discriminator tag is capability-gated in ProcessIR v1",
             )
+        # #141: a KNOWN node kind rejected inside a control body is a body-slot
+        # capability failure, not an unknown node. Telling a caller that
+        # ``process_call`` is an "unknown node kind" when it is a documented kind
+        # they used in the wrong slot sends them to fix the wrong thing. A
+        # genuinely unknown tag keeps the unknown-node code.
+        if tag in _NODE_KIND_TAGS and any(part in _BODY_LOC_SEGMENTS for part in loc):
+            return _diagnostic(
+                PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+                path,
+                message="this node kind is not admitted in this control-body slot",
+            )
         return _diagnostic(PROCESS_IR_SCHEMA_UNKNOWN_NODE, path)
 
     if err_type in ("too_short", "too_long"):
@@ -1503,6 +1465,73 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
         return _diagnostic(PROCESS_IR_SCHEMA_INVALID_CARDINALITY, path)
 
     return _diagnostic(PROCESS_IR_SCHEMA_INVALID, path)
+
+
+def _walk_controls(node: Any, path: Tuple[Any, ...], depth: int, connector_above: bool) -> None:
+    """One walk enforcing both whole-document control rules, with exact paths.
+
+    * control depth <= ``PROCESS_IR_V1_MAX_CONTROL_DEPTH`` on any root-to-leaf path;
+    * no ``process_call`` sharing a path with a connector.
+
+    Both are PATH properties, so both need the walk; doing them together keeps a
+    single traversal and one definition of "on this path".
+    """
+    kind = getattr(node, "kind", None)
+    if kind not in ("branch", "decision"):
+        return
+    depth += 1
+    if depth > PROCESS_IR_V1_MAX_CONTROL_DEPTH:
+        raise ProcessIRValidationError([
+            _diagnostic(
+                PROCESS_IR_SEMANTIC_NESTING_LIMIT,
+                path,
+                message=(
+                    "branch/decision nesting exceeds the ProcessIR v1 maximum control "
+                    "depth of {0} (a compiler bound, not a Boomi platform limit)".format(
+                        PROCESS_IR_V1_MAX_CONTROL_DEPTH
+                    )
+                ),
+            )
+        ])
+
+    if kind == "branch":
+        bodies = [
+            (leg.steps, leg.terminal, path + ("legs", index))
+            for index, leg in enumerate(node.legs)
+        ]
+    else:
+        bodies = [
+            (node.true_arm.steps, node.true_arm.terminal, path + ("true_arm",)),
+            (node.false_arm.steps, node.false_arm.terminal, path + ("false_arm",)),
+        ]
+
+    for steps, terminal, body_path in bodies:
+        kinds = [step.kind for step in steps]
+        if "process_call" in kinds and connector_above:
+            raise ProcessIRValidationError([
+                _diagnostic(
+                    PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+                    body_path + ("steps", kinds.index("process_call")),
+                    message=(
+                        "a process_call may not share a root-to-leaf path with a "
+                        "connector step — a connector runs upstream of this body "
+                        "(process_call_connector_mixing is gated)"
+                    ),
+                )
+            ])
+        connector_here = (
+            connector_above
+            or any(k in _CONNECTOR_KINDS for k in kinds)
+            or getattr(terminal, "kind", None) in _CONNECTOR_KINDS
+        )
+        _walk_controls(terminal, body_path + ("terminal",), depth, connector_here)
+
+
+def _check_whole_document_rules(ir: "ProcessIRV1") -> None:
+    root_kinds = [step.kind for step in ir.body.steps]
+    connector_at_root = any(k in _CONNECTOR_KINDS for k in root_kinds)
+    for index, step in enumerate(ir.body.steps):
+        _walk_controls(step, ("body", "steps", index), 0, connector_at_root)
 
 
 def parse_process_ir_v1(payload: Any) -> ProcessIRV1:
@@ -1535,10 +1564,18 @@ def parse_process_ir_v1(payload: Any) -> ProcessIRV1:
         )
 
     try:
-        return ProcessIRV1.model_validate(payload)
+        ir = ProcessIRV1.model_validate(payload)
     except ValidationError as exc:
         diagnostics = [_translate_pydantic_error(err) for err in exc.errors()]
         raise ProcessIRValidationError(diagnostics) from None
+
+    # #141: whole-document rules that a per-model validator cannot state with a
+    # useful pointer. A pydantic ``model_validator`` on ``ProcessIRV1`` attaches
+    # its error to the MODEL, so a nesting or mixing failure anywhere in the tree
+    # reported the document ROOT — true, and useless for finding the offending
+    # node. Run here instead, walking with the authored path in hand.
+    _check_whole_document_rules(ir)
+    return ir
 
 
 # ---------------------------------------------------------------------------

@@ -673,7 +673,9 @@ def test_unlabelled_branch_dragpoints_are_rejected():
         ),
         terminal_shape_ids=("shape3", "shape4"),
     )
-    assert _check_plan(plan, cfg).code == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+    # #141: a control node's own wiring defect (labels, order, target)
+    # carries the specific control-wiring code, not the generic one.
+    assert _check_plan(plan, cfg).code == PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID
 
 
 def test_decision_dragpoint_labels_must_be_true_True_then_false_False():
@@ -704,7 +706,9 @@ def test_decision_dragpoint_labels_must_be_true_True_then_false_False():
         ),
         terminal_shape_ids=("shape3", "shape4"),
     )
-    assert _check_plan(plan, cfg).code == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+    # #141: a control node's own wiring defect (labels, order, target)
+    # carries the specific control-wiring code, not the generic one.
+    assert _check_plan(plan, cfg).code == PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID
 
 
 # ---------------------------------------------------------------------------
@@ -1112,9 +1116,11 @@ def test_swapped_decision_transitions_are_rejected():
     check_emission_plan_invariants(
         _plan("e1", 3, "e2", 4), cfg, SymbolTableV1(symbols=())
     )
-    # Coherently swapped wiring must NOT.
+    # Coherently swapped wiring must NOT. #141: this is the control-wiring code
+    # — swapping BOTH the edge id and the target is exactly "wrong control
+    # wiring", and the generic plan-invalid code used to hide that.
     swapped = _plan("e2", 4, "e1", 3)
-    assert _check_plan(swapped, cfg).code == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+    assert _check_plan(swapped, cfg).code == PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID
 
 
 def test_ordinary_transition_cannot_hide_behind_synthetic_provenance():

@@ -1,0 +1,69 @@
+{
+  "version": "1",
+  "body": {
+    "kind": "sequence",
+    "steps": [
+      {
+        "kind": "connector_call",
+        "operation_ref": "op_rest_get",
+        "action": "GET"
+      },
+      {
+        "kind": "decision",
+        "comparison": "equals",
+        "left": {
+          "value_type": "static",
+          "static_value": "a"
+        },
+        "right": {
+          "value_type": "static",
+          "static_value": "b"
+        },
+        "true_arm": {
+          "steps": [
+            {
+              "kind": "message",
+              "text": "t"
+            }
+          ],
+          "terminal": {
+            "kind": "decision",
+            "comparison": "equals",
+            "left": {
+              "value_type": "static",
+              "static_value": "a"
+            },
+            "right": {
+              "value_type": "static",
+              "static_value": "b"
+            },
+            "true_arm": {
+              "steps": [
+                {
+                  "kind": "message",
+                  "text": "t"
+                }
+              ],
+              "terminal": {
+                "kind": "exception",
+                "message_template": "failed: {1}"
+              }
+            },
+            "false_arm": {
+              "steps": [],
+              "terminal": {
+                "kind": "stop"
+              }
+            }
+          }
+        },
+        "false_arm": {
+          "steps": [],
+          "terminal": {
+            "kind": "stop"
+          }
+        }
+      }
+    ]
+  }
+}

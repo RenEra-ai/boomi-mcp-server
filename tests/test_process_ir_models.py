@@ -590,7 +590,10 @@ def test_nested_branch_in_a_branch_leg_stays_gated():  # #141
         ]
     )
     err = parse_error(doc(source(), bad))
-    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_UNKNOWN_NODE
+    # #141 r1 (architect review): a KNOWN kind rejected in a control body is a
+    # body-slot capability failure, not an unknown node. Calling `branch` an
+    # "unknown node kind" would send the caller to fix a documented kind.
+    assert err.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
 
 
 def test_process_call_allowed_in_a_branch_leg_only_in_path_mode():  # #141
@@ -636,6 +639,18 @@ def test_process_call_stays_out_of_the_decision_false_arm():  # #141
     bad = decision(
         false_arm={"steps": [{"kind": "process_call", "process_ref": "x"}], "terminal": {"kind": "stop"}}
     )
+    err = parse_error(doc(source(), bad))
+    assert err.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+    # ...and it names the exact authored slot, not the document root.
+    assert err.diagnostics[0].path == "/body/steps/1/false_arm/steps/0"
+
+
+def test_an_unknown_discriminator_is_still_an_unknown_node():
+    """The body-slot translation must not swallow a genuinely unknown tag."""
+    bad = branch(legs=[
+        {"steps": [{"kind": "no_such_kind"}], "terminal": target()},
+        {"steps": [], "terminal": target()},
+    ])
     err = parse_error(doc(source(), bad))
     assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_UNKNOWN_NODE
 

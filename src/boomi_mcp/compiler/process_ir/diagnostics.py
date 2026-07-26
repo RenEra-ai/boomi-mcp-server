@@ -22,6 +22,13 @@ from typing import Iterable, List, Literal, Optional, Sequence, Tuple
 from pydantic import BaseModel, ConfigDict, Field
 
 from ...errors import (
+    PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+    PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID,
+    PROCESS_IR_SCHEMA_BRANCH_CARDINALITY,
+    PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
+    PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED,
+    PROCESS_IR_SEMANTIC_NESTING_LIMIT,
+    PROCESS_IR_SEMANTIC_UNTERMINATED_PATH,
     PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID,
@@ -74,6 +81,36 @@ _NODE_LIST_SEGMENTS = frozenset({"steps", "legs"})
 _NODE_LEAF_SEGMENTS = frozenset({"terminal"})
 
 _REMEDIATION = {
+    # --- #141 M12.6 -------------------------------------------------------
+    PROCESS_IR_SCHEMA_BRANCH_CARDINALITY: (
+        "A Branch must declare between 2 and 25 legs — the platform's own "
+        "documented bound on Branch paths."
+    ),
+    PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED: (
+        "Move the steps that followed the branch/decision into every leg or arm. "
+        "Control nodes are terminal fan-out in ProcessIR v1; nothing may follow one."
+    ),
+    PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED: (
+        "Give each divergent path its own terminal. ProcessIR v1 emits no join or "
+        "merge, so a node may have at most one predecessor."
+    ),
+    PROCESS_IR_SEMANTIC_NESTING_LIMIT: (
+        "Reduce Branch/Decision nesting to at most the documented control depth, or "
+        "move the deeper routing into a subprocess. This is a ProcessIR v1 compiler "
+        "bound, not a Boomi platform limit."
+    ),
+    PROCESS_IR_SEMANTIC_UNTERMINATED_PATH: (
+        "End every Branch leg and Decision outcome in its own terminal; each "
+        "divergent path must terminate independently."
+    ),
+    PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY: (
+        "Use a node kind this body slot admits; see the body capability matrix in "
+        "docs/architecture/PROCESS_IR_V1.md."
+    ),
+    PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID: (
+        "This is a compiler defect: derived branch/decision wiring (count, order, "
+        "labels, or target) is wrong. Please report it with the authored path."
+    ),
     PROCESS_IR_SEMANTIC_UNREACHABLE: (
         "Remove the unreachable node, or connect it to the flow: every node must be "
         "reachable from the single entry."

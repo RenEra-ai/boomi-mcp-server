@@ -476,6 +476,7 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                         "a branch leg targets a node outside its own leg",
                         node.node_id,
                     )
+                _check_region_containment(edge, prefix, by_id, outbound, node)
             continue
 
         if kind == "decision":
@@ -513,6 +514,7 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                         "a decision outcome targets a node outside its own arm",
                         node.node_id,
                     )
+                _check_region_containment(edge, prefix, by_id, outbound, node)
             continue
 
         if len(successors) != 1:
@@ -562,6 +564,33 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                 "path ends on a node that is not a valid terminal",
                 node.node_id,
             )
+
+
+def _check_region_containment(edge, prefix, by_id, outbound, node) -> None:
+    """Every node reached through a control edge must live UNDER its leg/arm.
+
+    The per-node rules already bind an edge's FIRST target to its own region.
+    That catches a swapped leg but not a subtree that escapes into a sibling
+    region one node later — the same cross-wiring defect, just deeper. Walking
+    the whole reachable region is what makes the check total.
+    """
+    seen = set()
+    stack = [edge.target_node_id]
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        if not by_id[current].source_path.startswith(prefix):
+            raise _fail(
+                PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+                _SEMANTIC_PHASE,
+                node.source_path,
+                "a control path escapes its own leg/arm provenance region",
+                node.node_id,
+            )
+        for out in outbound[current]:
+            stack.append(out.target_node_id)
 
 
 def _check_every_control_path_terminates(nodes, by_id, outbound) -> None:
@@ -974,8 +1003,17 @@ def check_emission_plan_invariants(
                 if [item.cfg_edge_id for item in transitions] != [
                     edge.edge_id for edge in cfg_out
                 ]:
+                    # #141: when the node IS a control, a transition/edge
+                    # mismatch is precisely wrong control wiring (order or
+                    # target), so it carries the specific code rather than the
+                    # generic plan-invalid one. Otherwise the generic code
+                    # would always win the race and the control-wiring code
+                    # would only ever report label/geometry defects.
                     raise _fail(
-                        PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                        PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID
+                        if cfg_by_id[node.cfg_node_id].semantic.semantic_kind
+                        in _CONTROL_KINDS
+                        else PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
                         _PLAN_PHASE,
                         path,
                         "plan transitions do not match the node's ordered CFG edges",

@@ -963,3 +963,190 @@ def test_the_termination_prepass_does_not_steal_non_control_diagnostics():
     with pytest.raises(ProcessIRCompileError) as excinfo:
         check_cfg_invariants(cfg)
     assert excinfo.value.diagnostics[0].code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+
+
+# ---------------------------------------------------------------------------
+# Architect impl-review round 1 — completed gates
+# ---------------------------------------------------------------------------
+
+
+def test_a_decision_arm_admits_at_most_one_process_call():
+    """The capture attests exactly one `decision ->true-> processcall` (twice).
+
+    A CHAIN of process calls on an arm is unproven, so it stays closed even
+    though the Branch-leg rule is deliberately plural.
+    """
+    PC = {"kind": "process_call", "process_ref": "child_process"}
+    MSG = {"kind": "message", "text": "m"}
+    ok = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "legs": [
+            {"steps": [MSG], "terminal": _dec({"steps": [PC], "terminal": {"kind": "stop"}},
+                                              {"steps": [], "terminal": {"kind": "stop"}})},
+            {"steps": [MSG], "terminal": {"kind": "stop"}},
+        ]},
+    ]}}
+    compile_doc(ok)
+
+    too_many = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "legs": [
+            {"steps": [MSG], "terminal": _dec({"steps": [PC, PC], "terminal": {"kind": "stop"}},
+                                              {"steps": [], "terminal": {"kind": "stop"}})},
+            {"steps": [MSG], "terminal": {"kind": "stop"}},
+        ]},
+    ]}}
+    with pytest.raises(ProcessIRValidationError) as excinfo:
+        parse_process_ir_v1(too_many)
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+
+
+def test_a_map_must_follow_its_call_immediately():
+    """`call -> message -> map -> call` is NOT bracketed.
+
+    A Message REPLACES the document, so the upstream call's response profile is
+    no longer what feeds the map. Branch/Decision stay transparent — they route
+    documents without altering them.
+    """
+    MSG = {"kind": "message", "text": "m"}
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        call("op_rest_get", action="GET"),
+        {"kind": "branch", "legs": [
+            {"steps": [MSG, {"kind": "map_ref", "map_ref": "map_rest_to_patch"},
+                       call("op_rest_patch", action="PATCH")],
+             "terminal": {"kind": "stop"}},
+            {"steps": [MSG], "terminal": {"kind": "stop"}},
+        ]},
+    ]}}
+    assert codes_for(doc)[0][0] == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
+    # ...while the branch itself remains transparent (the mixed fixture relies on
+    # the root call still pairing with each leg's map).
+    compile_doc(BRANCH_MIXED_DOC)
+
+
+def test_whole_document_diagnostics_name_the_offending_node():
+    """Depth and mixing are PATH properties; a model validator could only ever
+    report the document root, which is true and useless."""
+    MSG = {"kind": "message", "text": "m"}
+    deep = {"version": "1", "body": {"kind": "sequence", "steps": [
+        _dec({"steps": [MSG], "terminal": _dec(
+            {"steps": [MSG], "terminal": _dec({"steps": [MSG], "terminal": {"kind": "stop"}},
+                                              {"steps": [], "terminal": {"kind": "stop"}})},
+            {"steps": [], "terminal": {"kind": "stop"}})},
+             {"steps": [], "terminal": {"kind": "stop"}}),
+    ]}}
+    with pytest.raises(ProcessIRValidationError) as excinfo:
+        parse_process_ir_v1(deep)
+    d = excinfo.value.diagnostics[0]
+    assert d.code == PROCESS_IR_SEMANTIC_NESTING_LIMIT
+    assert d.path == "/body/steps/0/true_arm/terminal/true_arm/terminal"
+
+
+def test_a_control_subtree_may_not_escape_its_own_region():
+    """The per-node rule binds only an edge's FIRST target. A subtree that
+    escapes into a sibling region one node later is the same cross-wiring
+    defect, just deeper."""
+    from boomi_mcp.compiler.process_ir.contracts import (
+        BranchSemanticV1, CfgEdgeV1, CfgNodeV1, MessageSemanticV1,
+        SemanticCfgV1, StopSemanticV1,
+    )
+    from boomi_mcp.compiler.process_ir.invariants import check_cfg_invariants
+
+    B = "/body/steps/0"
+    def n(o, s, p, e=None):
+        return CfgNodeV1(node_id="n%d" % o, ordinal=o, source_path=p, semantic=s, exit_role=e)
+    def e(o, a, b, k, l, p, leg=None):
+        return CfgEdgeV1(edge_id="e%d" % o, ordinal=o, source_node_id="n%d" % a,
+                         target_node_id="n%d" % b, kind=k, local_ordinal=l,
+                         provenance_path=p, leg_ordinal=leg)
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(n(1, BranchSemanticV1(leg_count=2), B),
+               n(2, MessageSemanticV1(text="a"), B + "/legs/0/steps/0"),
+               # leg 1's own step routes into LEG 2's region
+               n(3, StopSemanticV1(), B + "/legs/1/terminal", e="stop"),
+               n(4, MessageSemanticV1(text="b"), B + "/legs/1/steps/0"),
+               n(5, StopSemanticV1(), B + "/legs/1/steps/1", e="stop")),
+        edges=(e(1, 1, 2, "branch_leg", 1, B + "/legs/0", 1),
+               e(2, 1, 4, "branch_leg", 2, B + "/legs/1", 2),
+               e(3, 2, 3, "terminal", 1, B + "/legs/0/terminal"),
+               e(4, 4, 5, "terminal", 1, B + "/legs/1/steps/1")),
+        exit_node_ids=("n3", "n5"),
+    )
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        check_cfg_invariants(cfg)
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+    assert "escapes its own" in excinfo.value.diagnostics[0].message
+
+
+def test_twenty_five_legs_compile_with_order_preserved_end_to_end():
+    """The upper Branch bound, exercised through CFG, plan and XML — not just
+    the schema bound."""
+    legs = [{"steps": [{"kind": "message", "text": "leg%d" % i}],
+             "terminal": {"kind": "stop"}} for i in range(25)]
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "legs": legs},
+    ]}}
+    (cfg, plan), table = compile_doc(doc)
+    branch_cfg = next(n for n in cfg.nodes if n.semantic.semantic_kind == "branch")
+    edges = [e for e in cfg.edges if e.source_node_id == branch_cfg.node_id]
+    assert [e.leg_ordinal for e in edges] == list(range(1, 26))
+    plan_branch = next(n for n in plan.nodes if n.emitter_input.emitter_kind == "branch")
+    assert [t.identifier for t in plan_branch.outgoing] == [str(i) for i in range(1, 26)]
+    assert plan_branch.emitter_input.num_branches == 25
+    artifact = emit_process(plan, table)
+    assert 'numBranches="25"' in artifact.process_xml
+    assert not verify_process_graph(artifact.process_xml).get("errors")
+
+
+def test_terminal_registry_rows_match_the_model_terminal_unions():
+    """Bidirectional, like the step rows — a terminal union that gains a kind
+    without a deliberate registry change must fail the build."""
+    import typing
+    def terminal_kinds(model):
+        ann = model.model_fields["terminal"].annotation
+        args = typing.get_args(ann)
+        members = typing.get_args(args[0]) if args and typing.get_args(args[0]) else args
+        return {typing.get_args(m.model_fields["kind"].annotation)[0] for m in members}
+
+    assert bodycaps.BODY_CAPABILITIES_V1[(bodycaps.BRANCH_LEG, bodycaps.TERMINAL_SLOT)] == \
+        terminal_kinds(ir_module.BranchLegV1)
+    assert bodycaps.BODY_CAPABILITIES_V1[(bodycaps.DECISION_TRUE_ARM, bodycaps.TERMINAL_SLOT)] == \
+        terminal_kinds(ir_module.DecisionTrueArmV1)
+    assert bodycaps.BODY_CAPABILITIES_V1[(bodycaps.DECISION_FALSE_ARM, bodycaps.TERMINAL_SLOT)] == \
+        terminal_kinds(ir_module.DecisionFalseArmV1)
+
+
+def test_a_bare_false_stop_is_a_verifier_WARNING_not_an_error():
+    """Intentional document dropping is operationally notable but legal — the
+    graph verifier must not treat it as a failure."""
+    (_cfg, plan), table = compile_doc(DECISION_NESTED_DOC)
+    report = verify_process_graph(emit_process(plan, table).process_xml)
+    assert not report.get("errors"), report
+
+
+_GOLDEN_XML = _ROOT / "tests" / "fixtures" / "golden_xml"
+
+
+@pytest.mark.parametrize(
+    "doc,golden",
+    [
+        (BRANCH_MIXED_DOC, "process_ir_rich_branch_mixed_connectors.xml"),
+        (DECISION_NESTED_DOC, "process_ir_rich_decision_nested_bare_false_stop.xml"),
+        (PROCESS_CALL_BRANCH_DOC, "process_ir_rich_branch_process_call.xml"),
+    ],
+)
+def test_rich_fixtures_match_their_frozen_xml_golden(doc, golden):
+    """A FROZEN golden, not two fresh emissions compared with each other.
+
+    Comparing one emission against another proves determinism but not that the
+    bytes are the intended ones — any change would move both sides together.
+    These files are the byte contract; a diff here is a deliberate review item.
+    """
+    (_cfg, plan), table = compile_doc(doc)
+    assert emit_process(plan, table).process_xml == (_GOLDEN_XML / golden).read_text()
+
+
+def test_the_committed_decision_fixture_matches_the_compiled_document():
+    import json
+    assert json.loads(
+        (_FIXTURES / "decision_nested_bare_false_stop.json").read_text()
+    ) == DECISION_NESTED_DOC
