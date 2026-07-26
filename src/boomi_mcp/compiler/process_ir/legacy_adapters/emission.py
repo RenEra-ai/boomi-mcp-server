@@ -56,18 +56,26 @@ def _enforce_semantic_report(result: LegacyAdapterResultV1, symbols: SymbolTable
     WHY HERE, and not inside ``compile_process_ir_v1``
     --------------------------------------------------
     The architect plan placed this gate in the compiler. Implementing it there
-    breaks 26 tests across the legacy parity suites, and the reason is
-    structural rather than incidental: canonical ProcessIR validation is
-    deliberately STRICTER than the legacy surface (an undeclared map no longer
-    proves state, a cache read wants an in-process writer), and the legacy
-    surface keeps its behaviour through named, registry-owned exemptions keyed
-    on ADAPTER IDENTITY. ``compile_process_ir_v1(ir, symbols)`` does not know
-    which adapter — if any — produced its IR, so it cannot look a policy up. A
-    gate there is therefore unconditionally stricter than the surface it serves,
-    and would reject shapes the legacy path has always emitted: the observed
-    failures were exactly ``…LINEAGE_CACHE_WRITER_MISSING`` (23) and
-    ``…LINEAGE_PROPERTY_READ_BEFORE_WRITE`` (7) — precisely the two codes the
-    exemptions cover.
+    breaks tests across the legacy parity suites for TWO independent reasons, and the
+    first is structural: canonical ProcessIR validation is deliberately STRICTER
+    than the legacy surface (an undeclared map no longer proves state, a cache
+    read wants an in-process writer), and the legacy surface keeps its behaviour
+    through named, registry-owned exemptions keyed on ADAPTER IDENTITY.
+    ``compile_process_ir_v1(ir, symbols)`` does not know which adapter — if any —
+    produced its IR, so it cannot look a policy up. A gate there is therefore
+    unconditionally stricter than the surface it serves.
+
+    The SECOND reason is independent and no exemption addresses it: the
+    compiler's own fixtures use placeholder component types (``component_type="t"``),
+    so the reference phase reports
+    ``PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH`` on them. A faithful
+    reproduction at ``ba0d51c`` measures 20 failing tests —
+    ``…LINEAGE_CACHE_WRITER_MISSING`` (17), ``…LINEAGE_PROPERTY_READ_BEFORE_WRITE``
+    (7, with 7 tests carrying both), and ``…REFERENCE_COMPONENT_TYPE_MISMATCH``
+    (3, exempted by nothing). An earlier version of this note said the failures
+    were "exactly" the two exemption-covered codes; that was wrong, and the third
+    code makes the case stronger rather than weaker — even a policy-aware
+    compiler gate would still reject those three.
 
     ``emit_legacy_result`` is the single production entry into the canonical
     ``compile -> emit`` chain AND it knows its dialect, so the policy applies

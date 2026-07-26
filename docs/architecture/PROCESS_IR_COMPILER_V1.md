@@ -835,12 +835,14 @@ Migration matrix: [M12 Compatibility Inventory](./M12_COMPATIBILITY_INVENTORY.md
 ### 13.1 Where the gate runs — and where it deliberately does NOT
 
 `compile_process_ir_v1` is **unchanged**. The plan placed the gate inside it; that was implemented
-and measured, and it breaks 26 tests across the legacy parity suites for a structural reason:
-canonical validation is deliberately stricter than the legacy surface, the legacy surface keeps its
-behaviour through exemptions keyed on ADAPTER IDENTITY, and `compile_process_ir_v1(ir, symbols)` does
-not know which adapter produced its IR. The measured failures were exactly
-`…LINEAGE_CACHE_WRITER_MISSING` (23) and `…LINEAGE_PROPERTY_READ_BEFORE_WRITE` (7) — precisely the
-codes the exemptions cover.
+and measured, and it breaks the legacy parity suites for TWO independent reasons.
+First, structurally: canonical validation is deliberately stricter than the legacy surface, the
+legacy surface keeps its behaviour through exemptions keyed on ADAPTER IDENTITY, and
+`compile_process_ir_v1(ir, symbols)` does not know which adapter produced its IR. Second, and
+covered by no exemption: the compiler's own fixtures use placeholder component types, which the
+reference phase reports as `…REFERENCE_COMPONENT_TYPE_MISMATCH`. A faithful reproduction measures
+**20 failing tests** — 17 / 7 / 3 across those three codes (7 tests carry two). An earlier version
+said "exactly" the two exemption-covered codes; that was wrong.
 
 The gate therefore runs at the two places that know their context:
 

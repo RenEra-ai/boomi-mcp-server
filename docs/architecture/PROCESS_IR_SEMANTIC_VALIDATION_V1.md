@@ -140,8 +140,11 @@ The shipped behavior is the one the feature needs. A genuinely strict plan gate 
 legacy `flow_sequence` standalone cache read at plan time, and
 `LEGACY_ADAPTER_EXEMPTION_STANDALONE_CACHE_READ` could never be observed at all.
 
-`create_clone` is listed in the code's guard but is **unreachable** from `build_integration`: spec
-validation rejects it earlier ("Use create or update").
+`create_clone` is in the guard and is **reachable**, though not by authoring it: `IntegrationComponentSpec.action`
+is `Literal["create", "update"]`, so no caller can supply it — but `_build_plan` DERIVES
+`planned_action = "create_clone"` itself when `action: "create"` meets a name collision under
+`conflict_policy: "clone"`. The guard tests the derived action, so that arm is live. An earlier
+version of this section called it unreachable, conflating the authored action with the derived one.
 
 Both run **after** every existing legacy check. That ordering is load-bearing: existing public error
 codes keep winning, so a payload that fails a legacy check still reports the code it always did.
@@ -153,12 +156,21 @@ A fatal report at the plan gate sets `planned_action = "error_process_validation
 ### Deviation from the architect plan, and why
 
 The plan placed the compiler gate inside `compile_process_ir_v1`. That was implemented and measured:
-it breaks **26 tests** across the legacy parity suites. The cause is structural — canonical
-validation is deliberately stricter than the legacy surface, the legacy surface keeps its behavior
-through exemptions keyed on ADAPTER IDENTITY, and `compile_process_ir_v1(ir, symbols)` does not know
-which adapter produced its IR, so it cannot look a policy up. The measured failures were exactly
-`…LINEAGE_CACHE_WRITER_MISSING` (23) and `…LINEAGE_PROPERTY_READ_BEFORE_WRITE` (7) — precisely the
-two codes the exemptions cover.
+it breaks the legacy parity suites for TWO independent reasons.
+
+The first is structural: canonical validation is deliberately stricter than the legacy surface, the
+legacy surface keeps its behavior through exemptions keyed on ADAPTER IDENTITY, and
+`compile_process_ir_v1(ir, symbols)` does not know which adapter produced its IR, so it cannot look a
+policy up.
+
+The second is independent and no exemption addresses it: the compiler's own fixtures use placeholder
+component types (`component_type="t"`), which the reference phase reports as
+`…REFERENCE_COMPONENT_TYPE_MISMATCH`. A faithful reproduction at `ba0d51c` measures **20 failing
+tests** — `…LINEAGE_CACHE_WRITER_MISSING` (17), `…LINEAGE_PROPERTY_READ_BEFORE_WRITE` (7, with 7
+tests carrying both), and `…REFERENCE_COMPONENT_TYPE_MISMATCH` (3, exempted by nothing). An earlier
+version of this section said the failures were "exactly" the two exemption-covered codes; that was
+wrong. The third code strengthens the case — even a policy-aware compiler gate would still reject
+those three.
 
 `emit_legacy_result` is the single production entry into the canonical chain **and** knows its
 dialect, so the gate lives there. With policies applied, all 40 raw-byte XML goldens and every parity
