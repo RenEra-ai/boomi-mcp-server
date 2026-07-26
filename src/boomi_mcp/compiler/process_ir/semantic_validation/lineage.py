@@ -47,7 +47,12 @@ from ....errors import (
     PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED,
     PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,
 )
-from .contracts import ValidationDiagnosticV1
+from .contracts import (
+    DEFAULT_VALIDATION_CAPABILITIES,
+    ProcessIRValidationCapabilitiesV1,
+    StateEffectV1,
+    ValidationDiagnosticV1,
+)
 from .context import PreparedProcessValidationV1
 from .findings import finding
 
@@ -111,14 +116,43 @@ class _State:
         )
 
 
-def _reads_of(semantic) -> Tuple[Tuple[StateKey, bool], ...]:
-    """``((scope, name), has_default)`` pairs a node reads.
+#: Wire prefixes that identify a tracked property's SCOPE. A Decision operand
+#: carries a fully-qualified ``property_id`` rather than a bare name plus a
+#: scope field, so the scope has to be read off the prefix. Assuming DPP here
+#: would misclassify every ``dynamicdocument.*`` operand and produce confident,
+#: wrong DDP diagnostics.
+_DDP_PROPERTY_PREFIX = "dynamicdocument."
+_DPP_PROPERTY_PREFIX = "process."
 
-    ``has_default`` matters: a read with a default value cannot fail, because
-    the default establishes it. Treating a defaulted read as a hard dependency
-    is how a validator rejects a payload that runs perfectly well.
+
+def _tracked_property_key(property_id: str, fallback_name) -> StateKey:
+    if property_id.startswith(_DDP_PROPERTY_PREFIX):
+        return (DDP, property_id[len(_DDP_PROPERTY_PREFIX) :])
+    if property_id.startswith(_DPP_PROPERTY_PREFIX):
+        return (DPP, property_id[len(_DPP_PROPERTY_PREFIX) :])
+    return (DPP, fallback_name or property_id)
+
+
+def _reads_of(semantic) -> Tuple[Tuple[StateKey, bool, bool], ...]:
+    """``((scope, name), has_default, strict)`` triples a node reads.
+
+    ``has_default`` — a read with a default cannot fail, because the default
+    establishes the value. Treating a defaulted read as a hard dependency is how
+    a validator rejects a payload that runs perfectly well.
+
+    ``strict`` — whether MERE ABSENCE of a writer is a defect. Decision operands
+    are deliberately NON-strict, and this is not a concession: they emit
+    ``defaultValue=""`` on the wire, so an unwritten property is a well-defined
+    empty string at runtime, not an error. The legacy walker encodes the same
+    rule (``cache_property_lineage.LineageEvent.strict``), and the shipped
+    ``control_flow`` golden depends on it — its router reads
+    ``dynamicdocument.DDP_S`` that nothing writes.
+
+    A non-strict read still fails when a writer EXISTS but is provably invisible
+    (wrong document copy, later Branch leg). That case is a real authoring
+    mistake: the author clearly intended the value to come from that write.
     """
-    reads: List[Tuple[StateKey, bool]] = []
+    reads: List[Tuple[StateKey, bool, bool]] = []
     kind = semantic.semantic_kind
 
     if kind == "set_property":
@@ -129,20 +163,20 @@ def _reads_of(semantic) -> Tuple[Tuple[StateKey, bool], ...]:
                     (
                         (value_type, source.property_name),
                         getattr(source, "default_value", None) is not None,
+                        True,
                     )
                 )
     elif kind == "decision":
         for operand in (semantic.left, semantic.right):
             if getattr(operand, "value_type", None) == "track":
-                name = getattr(operand, "property_name", None) or operand.property_id
+                key = _tracked_property_key(
+                    operand.property_id, getattr(operand, "property_name", None)
+                )
                 reads.append(
-                    (
-                        (DPP, name),
-                        getattr(operand, "default_value", None) is not None,
-                    )
+                    (key, getattr(operand, "default_value", None) is not None, False)
                 )
     elif kind in ("cache_get", "document_cache_retrieve"):
-        reads.append(((CACHE, semantic.cache_ref), False))
+        reads.append(((CACHE, semantic.cache_ref), False, True))
 
     return tuple(reads)
 
@@ -157,25 +191,56 @@ def _writes_of(semantic) -> Tuple[StateKey, ...]:
     return ()
 
 
-def _opaque_reason(semantic) -> Optional[str]:
+def _trusted_effects(
+    semantic, capabilities: ProcessIRValidationCapabilitiesV1
+) -> Tuple[StateEffectV1, ...]:
+    """Typed contracts covering this node, if the caller supplied any."""
+    kind = semantic.semantic_kind
+    found: List[StateEffectV1] = []
+    if kind == "map":
+        effect = capabilities.map_effect(semantic.map_ref)
+        if effect is not None:
+            found.append(effect)
+    elif kind == "process_call":
+        effect = capabilities.subprocess_effect(semantic.process_ref)
+        if effect is not None:
+            found.append(effect)
+    elif kind == "data_process":
+        for step in semantic.steps:
+            if getattr(step, "operation", None) != "custom_scripting":
+                continue
+            effect = capabilities.script_effect(step.language, step.script)
+            if effect is not None:
+                found.append(effect)
+    return tuple(found)
+
+
+def _opaque_reason(
+    semantic, capabilities: ProcessIRValidationCapabilitiesV1
+) -> Optional[str]:
     """Why a node's state effects are unknown, if they are.
 
-    Returned as a closed evidence token, never as the map ref or script text.
+    A node covered by a typed contract is NOT opaque — that is the entire point
+    of the contract. Returned as a closed evidence token, never as the map ref
+    or the script text.
     """
     kind = semantic.semantic_kind
     if kind == "map":
-        return "map"
+        return None if capabilities.map_effect(semantic.map_ref) else "map"
     if kind == "process_call":
-        return "subprocess"
+        return None if capabilities.subprocess_effect(semantic.process_ref) else "subprocess"
     if kind == "data_process":
         for step in semantic.steps:
-            if getattr(step, "operation", None) == "custom_scripting":
+            if getattr(step, "operation", None) != "custom_scripting":
+                continue
+            if capabilities.script_effect(step.language, step.script) is None:
                 return "script"
     return None
 
 
 def collect_lineage_findings(
     prepared: PreparedProcessValidationV1,
+    capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
 ) -> Tuple[ValidationDiagnosticV1, ...]:
     """Walk the CFG, tracking established state, and report unproven reads.
 
@@ -214,10 +279,14 @@ def collect_lineage_findings(
         semantic = node.semantic
 
         # --- reads, checked against what is established HERE ----------------
-        for key, has_default in _reads_of(semantic):
+        for key, has_default, strict in _reads_of(semantic):
             if has_default or state.establishes(key):
                 continue
             scope, _name = key
+            # A non-strict reader tolerates ABSENCE (the wire carries a defined
+            # empty default) but not a writer that exists somewhere unreachable.
+            if not strict and not _written_anywhere(prepared, key):
+                continue
             if scope != DDP and _written_in_a_later_leg(leg_writes, leg, key):
                 # The write exists, in a LATER leg of the same Branch. Legs run
                 # in order, so it has not happened yet. Saying "read before
@@ -264,7 +333,7 @@ def collect_lineage_findings(
                 )
 
         # --- opaque effects contribute uncertainty, never proof -------------
-        opaque = _opaque_reason(semantic)
+        opaque = _opaque_reason(semantic, capabilities)
         if opaque is not None:
             _report(
                 PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN,
@@ -276,6 +345,12 @@ def collect_lineage_findings(
         # --- writes ---------------------------------------------------------
         for key in _writes_of(semantic):
             state = state.with_write(key)
+        # A trusted contract contributes EXACT writes. An untrusted node
+        # contributes none — that inversion of the legacy wildcard default is
+        # the whole point of the typed contract.
+        for effect in _trusted_effects(semantic, capabilities):
+            for key in effect.writes:
+                state = state.with_write((key[0], key[1]))
 
         # --- successors -----------------------------------------------------
         edges = prepared.successors(node_id)

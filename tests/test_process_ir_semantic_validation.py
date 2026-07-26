@@ -336,10 +336,16 @@ def test_an_empty_report_is_valid_and_serializes():
 # --------------------------------------------------------------------------
 
 
-def test_the_package_exports_only_the_contract_surface():
+def test_the_package_exports_only_its_public_surface():
     from boomi_mcp.compiler.process_ir import semantic_validation
 
     assert set(semantic_validation.__all__) == {
+        "DEFAULT_VALIDATION_CAPABILITIES",
+        "MapEffectContractV1",
+        "ProcessIRValidationCapabilitiesV1",
+        "ScriptEffectContractV1",
+        "StateEffectV1",
+        "SubprocessSummaryV1",
         "VALIDATION_PHASE_ORDER",
         "VALIDATION_SEVERITY_ORDER",
         "ValidationDiagnosticV1",
@@ -349,4 +355,8 @@ def test_the_package_exports_only_the_contract_surface():
         "ValidationSeverityV1",
         "build_validation_report",
         "canonical_report_json",
+        "validate_process_ir",
     }
+    # collectors, prepared contexts and policy hooks stay PRIVATE
+    for private in ("context", "flow", "lineage", "effects", "references"):
+        assert private not in semantic_validation.__all__

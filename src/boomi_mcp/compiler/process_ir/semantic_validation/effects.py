@@ -64,7 +64,11 @@ from ....errors import (
     PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE,
 )
 from ..error_handling import derive_error_regions
-from .contracts import ValidationDiagnosticV1
+from .contracts import (
+    DEFAULT_VALIDATION_CAPABILITIES,
+    ProcessIRValidationCapabilitiesV1,
+    ValidationDiagnosticV1,
+)
 from .context import PreparedProcessValidationV1
 from .findings import finding
 from .lineage import CACHE, DDP, DPP, StateKey, _reads_of, _writes_of
@@ -125,6 +129,7 @@ def collect_retry_effect_findings(
 
 def collect_ordering_findings(
     prepared: PreparedProcessValidationV1,
+    capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
 ) -> Tuple[ValidationDiagnosticV1, ...]:
     """Ordering hazards created by a non-waiting subprocess call."""
     findings: List[ValidationDiagnosticV1] = []
@@ -149,26 +154,42 @@ def collect_ordering_findings(
 
     for call in non_waiting:
         downstream = _downstream_nodes(prepared, call.node_id)
+        summary = capabilities.subprocess_effect(call.semantic.process_ref)
 
-        findings.append(
-            finding(
-                PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNKNOWN,
-                "warning",
-                _SIDE_EFFECT_PHASE,
-                call.source_path,
-                evidence=(("wait", False), ("effect_kind", "subprocess")),
-                internal_node_id=call.node_id,
+        if summary is None:
+            # No typed summary: the child's effects are undeclared, so the
+            # ordering is unproven rather than wrong.
+            findings.append(
+                finding(
+                    PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNKNOWN,
+                    "warning",
+                    _SIDE_EFFECT_PHASE,
+                    call.source_path,
+                    evidence=(("wait", False), ("effect_kind", "subprocess")),
+                    internal_node_id=call.node_id,
+                )
             )
+
+        # A declared summary makes the hazard SHARPER, not softer: now we know
+        # exactly which keys the child writes, and a downstream read of one of
+        # them behind wait=False is demonstrably unordered.
+        declared = (
+            frozenset((k[0], k[1]) for k in summary.writes) if summary else frozenset()
         )
 
         for node_id in downstream:
             node = prepared.node(node_id)
             if node is None:
                 continue
-            for key, has_default in _reads_of(node.semantic):
+            for key, has_default, strict in _reads_of(node.semantic):
                 if has_default or key[0] == DDP:
                     continue
-                if key in in_process_writes:
+                # A non-strict reader (a Decision operand) carries a defined
+                # empty default on the wire, so an unordered write cannot make
+                # it fail — same rule the lineage phase applies.
+                if not strict:
+                    continue
+                if key in in_process_writes and key not in declared:
                     continue
                 findings.append(
                     finding(
@@ -204,8 +225,11 @@ def _downstream_nodes(
 
 def collect_effect_findings(
     prepared: PreparedProcessValidationV1,
+    capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
 ) -> Tuple[ValidationDiagnosticV1, ...]:
-    return collect_retry_effect_findings(prepared) + collect_ordering_findings(prepared)
+    return collect_retry_effect_findings(prepared) + collect_ordering_findings(
+        prepared, capabilities
+    )
 
 
 __all__ = [

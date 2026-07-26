@@ -437,3 +437,94 @@ def test_one_finding_per_code_per_node_even_on_a_diamond():
     findings = _findings(doc)
     seen = [(f.code, f.internal_node_id) for f in findings]
     assert len(seen) == len(set(seen))
+
+
+# ---------------------------------------------------------------------------
+# regressions found by validating the SHIPPED goldens
+#
+# Both of these were real defects in the collector, caught only because the
+# control_flow golden was run through it. A rule proven solely against
+# purpose-built fixtures agrees with whatever the fixture author assumed.
+# ---------------------------------------------------------------------------
+
+
+def test_a_decision_operand_scope_comes_from_its_property_id_prefix():
+    """``dynamicdocument.X`` is a DDP, ``process.X`` is a DPP.
+
+    A Decision operand carries a fully-qualified ``property_id`` instead of a
+    bare name plus a scope field. Assuming DPP misclassifies every document
+    property and yields confident, wrong diagnostics.
+    """
+    from boomi_mcp.compiler.process_ir.semantic_validation.lineage import (
+        _tracked_property_key,
+    )
+
+    assert _tracked_property_key("dynamicdocument.DDP_S", None) == (DDP, "DDP_S")
+    assert _tracked_property_key("process.PROP", None) == (DPP, "PROP")
+    # unprefixed ids keep the historical DPP reading
+    assert _tracked_property_key("BARE", None) == (DPP, "BARE")
+
+
+def test_a_decision_operand_tolerates_a_property_nothing_writes():
+    """Decision operands are NON-strict: they emit ``defaultValue=""`` on the
+    wire, so an unwritten property is a defined empty string, not an error.
+
+    The legacy walker encodes the same rule
+    (``cache_property_lineage.LineageEvent.strict``), and the shipped
+    ``control_flow`` golden depends on it — its router reads a DDP that nothing
+    in the process writes.
+    """
+    _FIX = _ROOT / "tests" / "fixtures" / "process_ir" / "process_ir_v1.json"
+    docs = json.loads(_FIX.read_text())
+    prepared = prepare_validation_context(
+        parse_process_ir_v1(docs["control_flow"]), SymbolTableV1(symbols=())
+    )
+    codes = {f.code for f in collect_lineage_findings(prepared)}
+    assert PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE not in codes
+
+
+def test_a_non_strict_read_still_fails_when_the_writer_exists_but_is_invisible():
+    """Non-strict tolerates ABSENCE, not a misplaced write. If the author wrote
+    the property into a sibling leg, they plainly meant it to be read here."""
+    # A decision is a TERMINAL control, never a leg step.
+    doc = {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                {
+                    "kind": "branch",
+                    "legs": [
+                        {
+                            "steps": [_set_prop("ddp", "A")],
+                            "terminal": {"kind": "stop"},
+                        },
+                        {
+                            "steps": [{"kind": "message", "text": "x"}],
+                            "terminal": {
+                                "kind": "decision",
+                                "comparison": "equals",
+                                "left": {
+                                    "value_type": "track",
+                                    "property_id": "dynamicdocument.A",
+                                },
+                                "right": {
+                                    "value_type": "static",
+                                    "static_value": "x",
+                                },
+                                "true_arm": {
+                                    "steps": [{"kind": "message", "text": "t"}],
+                                    "terminal": {"kind": "stop"},
+                                },
+                                "false_arm": {
+                                    "steps": [{"kind": "message", "text": "f"}],
+                                    "terminal": {"kind": "stop"},
+                                },
+                            },
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    assert PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID in _codes(doc)

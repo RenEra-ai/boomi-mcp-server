@@ -49,11 +49,12 @@ neither a log line nor a traceback can carry authored text.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any, Dict, FrozenSet, Iterable, List, Literal, Optional, Tuple, Union
 
-from pydantic import BaseModel, ConfigDict, computed_field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 # --------------------------------------------------------------------------
 # vocabularies
@@ -278,6 +279,92 @@ class ValidationReportV1(_ValidationModel):
 
 
 # --------------------------------------------------------------------------
+# typed capability / effect contracts
+#
+# These are COMPILER CONTEXT, never authored IR fields (ADR-001 §6). There is no
+# ``trusted=True``, no policy id, and no free-form assertion: presence in this
+# typed set IS the verification boundary. That is the whole reason the issue
+# forbids a "trust me" flag — a flag can be set by whoever wrote the payload,
+# whereas this set is assembled by the caller that already resolved the
+# components.
+# --------------------------------------------------------------------------
+
+
+class StateEffectV1(_ValidationModel):
+    """Exact state a trusted effect reads and writes.
+
+    Names ride here because this is INPUT, not output. They are matched against
+    the IR and then discarded; no name reaches a diagnostic.
+    """
+
+    reads: Tuple[Tuple[str, str], ...] = ()
+    writes: Tuple[Tuple[str, str], ...] = ()
+    replay_safe: bool = False
+
+
+class MapEffectContractV1(_ValidationModel):
+    """Effects of one map, bound to the MAP COMPONENT it describes."""
+
+    map_ref: str
+    effect: StateEffectV1
+
+
+class ScriptEffectContractV1(_ValidationModel):
+    """Effects of one script, bound to language + digest of its exact source.
+
+    Binding to the digest rather than to a node position is what makes the
+    contract non-transferable: editing the script invalidates it automatically
+    instead of silently continuing to vouch for code that no longer exists.
+    """
+
+    language: str
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    effect: StateEffectV1
+
+
+class SubprocessSummaryV1(_ValidationModel):
+    """Declared effects of a child process, bound to its ``process_ref``."""
+
+    process_ref: str
+    effect: StateEffectV1
+
+
+class ProcessIRValidationCapabilitiesV1(_ValidationModel):
+    """The trusted context a validation run is given.
+
+    Empty by default, and an empty set is the STRICT case: with no contracts,
+    every map and script is opaque and therefore establishes nothing.
+    """
+
+    map_effects: Tuple[MapEffectContractV1, ...] = ()
+    script_effects: Tuple[ScriptEffectContractV1, ...] = ()
+    subprocess_summaries: Tuple[SubprocessSummaryV1, ...] = ()
+
+    def map_effect(self, map_ref: str) -> Optional[StateEffectV1]:
+        for item in self.map_effects:
+            if item.map_ref == map_ref:
+                return item.effect
+        return None
+
+    def script_effect(self, language: str, source: str) -> Optional[StateEffectV1]:
+        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        for item in self.script_effects:
+            if item.language == language and item.source_sha256 == digest:
+                return item.effect
+        return None
+
+    def subprocess_effect(self, process_ref: str) -> Optional[StateEffectV1]:
+        for item in self.subprocess_summaries:
+            if item.process_ref == process_ref:
+                return item.effect
+        return None
+
+
+#: The shipped default: no trusted contracts, so everything opaque is opaque.
+DEFAULT_VALIDATION_CAPABILITIES = ProcessIRValidationCapabilitiesV1()
+
+
+# --------------------------------------------------------------------------
 # assembly helpers
 # --------------------------------------------------------------------------
 
@@ -330,6 +417,12 @@ def canonical_report_json(report: ValidationReportV1) -> str:
 
 
 __all__: List[str] = [
+    "DEFAULT_VALIDATION_CAPABILITIES",
+    "MapEffectContractV1",
+    "ProcessIRValidationCapabilitiesV1",
+    "ScriptEffectContractV1",
+    "StateEffectV1",
+    "SubprocessSummaryV1",
     "VALIDATION_PHASE_ORDER",
     "VALIDATION_SEVERITY_ORDER",
     "ValidationDiagnosticV1",
