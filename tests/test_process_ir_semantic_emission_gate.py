@@ -4,22 +4,28 @@ DELIBERATE DEVIATION from the architect plan, recorded here because a reader
 comparing plan to code deserves the reason rather than a surprise.
 
 The plan placed this gate inside ``compile_process_ir_v1``. That was implemented
-and measured: it breaks 26 tests across the legacy parity suites. The cause is
-structural, not a bug in the placement's execution —
+and measured, and it breaks the legacy parity suites for TWO independent reasons.
 
-* canonical ProcessIR validation is deliberately STRICTER than the legacy
-  surface (an undeclared map no longer proves state; a cache read wants an
-  in-process writer);
-* the legacy surface keeps its behaviour through named, registry-owned
-  exemptions keyed on ADAPTER IDENTITY;
-* ``compile_process_ir_v1(ir, symbols)`` does not know which adapter — if any —
-  produced its IR, so it cannot look up a policy.
+``emission.py``'s own docstring is AUTHORITATIVE for this rationale — it sits with
+the code it explains. Summarised here only so a reader of this suite knows why it
+tests the boundary it does:
 
-A gate there is therefore unconditionally stricter than the surface it serves.
-The measured failures were exactly ``…LINEAGE_CACHE_WRITER_MISSING`` (23) and
-``…LINEAGE_PROPERTY_READ_BEFORE_WRITE`` (7) — precisely the two codes the
-exemptions cover, which is what identifies the cause rather than merely
-correlating with it.
+1. Canonical validation is deliberately stricter than the legacy surface, which
+   keeps its behaviour through exemptions keyed on ADAPTER IDENTITY.
+   ``compile_process_ir_v1(ir, symbols)`` does not know which adapter produced
+   its IR, so it cannot look a policy up.
+2. Covered by NO exemption: the compiler's own fixtures use placeholder component
+   types (``component_type="t"``), which the reference phase reports as
+   ``…REFERENCE_COMPONENT_TYPE_MISMATCH``.
+
+A faithful reproduction measures 20 failing tests — 17 / 7 / 3 across
+``…LINEAGE_CACHE_WRITER_MISSING``, ``…LINEAGE_PROPERTY_READ_BEFORE_WRITE`` (7
+tests carry both) and ``…REFERENCE_COMPONENT_TYPE_MISMATCH``.
+
+An earlier version of this docstring said the failures were "exactly" the two
+exemption-covered codes, and added that this "identifies the cause rather than
+merely correlating with it". Both were wrong: the third code is exempted by
+nothing, so a policy-aware compiler gate would still reject those three.
 
 ``emit_legacy_result`` is the single production entry into the canonical
 ``compile -> emit`` chain and it DOES know its dialect, so the gate lives there.

@@ -328,3 +328,77 @@ def test_the_blocking_action_is_in_apply_plans_fail_fast_set():
     # and the set is acted on before execution
     tail = source.split(marker)[1][:2000]
     assert "if unresolvable_steps:" in tail
+
+
+# ---------------------------------------------------------------------------
+# the DERIVED create_clone action reaches the gate (QA Bug #190)
+#
+# The docs claimed this arm was unreachable, reasoning from the AUTHORED action:
+# `IntegrationComponentSpec.action` is Literal["create","update"], so nobody can
+# supply "create_clone". But the guard tests the DERIVED planned_action, and
+# _build_plan sets it to "create_clone" itself when action="create" meets a name
+# collision under conflict_policy="clone".
+#
+# That made it a behavioural question, not a wording one: if the clone arm could
+# reach a mutation ungated, the acceptance criterion "no build/apply API is
+# called when validation has a fatal error" would be false on that path. It
+# does not — the gate runs — and this pins it so a future edit to the guard
+# tuple cannot silently drop the arm.
+# ---------------------------------------------------------------------------
+
+
+def test_the_derived_create_clone_action_reaches_the_semantic_gate():
+    seen = []
+    original = integration_builder._process_component_preflight
+    original_resolve = integration_builder._resolve_existing_components
+
+    def _spy(comp, raw_config, process_kind, planned_action, *a, **k):
+        seen.append((comp.type, comp.action, planned_action))
+        return original(comp, raw_config, process_kind, planned_action, *a, **k)
+
+    integration_builder._process_component_preflight = _spy
+    # two same-named components force conflict_policy="clone" to derive the arm
+    integration_builder._resolve_existing_components = lambda client, comp: [
+        {"component_id": "dup-1", "name": comp.name},
+        {"component_id": "dup-2", "name": comp.name},
+    ]
+    try:
+        integration_builder._build_plan(
+            None,
+            {
+                "conflict_policy": "clone",
+                "integration_spec": {
+                    "name": "clone-probe",
+                    "mode": "lift_shift",
+                    "components": [
+                        {
+                            "key": "p",
+                            "type": "process",
+                            "name": "ClashingName",
+                            "action": "create",
+                            "config": {
+                                "process_kind": "database_to_api_sync",
+                                "flow_sequence": [{"kind": "stop"}],
+                            },
+                        }
+                    ],
+                },
+            },
+        )
+    except Exception:  # noqa: BLE001 — the plan's outcome is not what is asserted
+        pass
+    finally:
+        integration_builder._process_component_preflight = original
+        integration_builder._resolve_existing_components = original_resolve
+
+    assert seen, "the preflight was never reached"
+    assert "create_clone" in {planned for _t, _a, planned in seen}
+
+
+def test_the_guard_tuple_still_covers_every_authoring_action():
+    """Including the derived one. Dropping `create_clone` here would silently
+    ungate every clone-policy collision."""
+    source = Path(integration_builder.__file__).read_text()
+    marker = "process_flow_err = _process_ir_semantic_error(process_kind, raw_config)"
+    guard = source.split(marker)[0][-600:]
+    assert 'planned_action in ("create", "create_clone", "update")' in guard
