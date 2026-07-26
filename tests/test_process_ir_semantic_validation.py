@@ -360,3 +360,197 @@ def test_the_package_exports_only_its_public_surface():
     # collectors, prepared contexts and policy hooks stay PRIVATE
     for private in ("context", "flow", "lineage", "effects", "references"):
         assert private not in semantic_validation.__all__
+
+
+# ---------------------------------------------------------------------------
+# Model-validator parity — added after QA Bug #183
+#
+# The §7.1 migration matrix cites these seven tests as the regression evidence
+# discharging "each existing validator is accounted for ... with regression
+# evidence". Six rows concede in their own "Sound?/Complete?" cell that a
+# dedicated negative was missing and name a NEW test as the answer; that "New "
+# prefix is a promise about this issue's own deliverable. The tests were cited
+# and never written. These are them.
+#
+# Each asserts the validator REJECTS its blank/invalid case — the parity claim
+# is that #143 left these model validators untouched (`port-unchanged`), so the
+# behavior they pin is the pre-existing one.
+# ---------------------------------------------------------------------------
+
+from boomi_mcp.models.process_ir import (  # noqa: E402
+    ProcessIRValidationError,
+    parse_process_ir_v1,
+)
+
+_PARITY_SOURCE = {"kind": "source", "connection_ref": "$ref:c", "operation_ref": "$ref:o"}
+_PARITY_TARGET = {"kind": "target", "connection_ref": "$ref:tc", "operation_ref": "$ref:to"}
+
+
+def _parity_doc(steps):
+    return {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [_PARITY_SOURCE] + list(steps) + [_PARITY_TARGET, {"kind": "stop"}],
+        },
+    }
+
+
+def _rejects(doc):
+    with pytest.raises(ProcessIRValidationError) as excinfo:
+        parse_process_ir_v1(doc)
+    return excinfo.value
+
+
+def test_model_validator_parity_for_blank_dpp_source():
+    """``DppPropertySourceV1._non_blank`` — a whitespace-only property name."""
+    doc = _parity_doc(
+        [
+            {
+                "kind": "set_dpp",
+                "name": "OUT",
+                "source_values": [{"value_type": "dpp", "property_name": "   "}],
+            }
+        ]
+    )
+    assert _rejects(doc).diagnostics
+
+
+def test_model_validator_parity_for_blank_script():
+    """``CustomScriptingOpV1._script_non_blank`` — a whitespace-only script."""
+    doc = _parity_doc(
+        [
+            {
+                "kind": "data_process",
+                "steps": [
+                    {
+                        "operation": "custom_scripting",
+                        "script": "   ",
+                        "language": "groovy2",
+                        "use_cache": True,
+                    }
+                ],
+            }
+        ]
+    )
+    assert _rejects(doc).diagnostics
+
+
+def test_model_validator_parity_for_blank_split_identifier():
+    """``SplitDocumentsOpV1._non_blank`` — blank link element key/name."""
+    doc = _parity_doc(
+        [
+            {
+                "kind": "data_process",
+                "steps": [
+                    {
+                        "operation": "split_documents",
+                        "profile_type": "json",
+                        "profile_ref": "$ref:p",
+                        "link_element_key": "  ",
+                        "link_element_name": "n",
+                    }
+                ],
+            }
+        ]
+    )
+    assert _rejects(doc).diagnostics
+
+
+def test_model_validator_parity_for_blank_track_id():
+    """``TrackOperandV1._property_id_non_blank`` — blank decision operand id."""
+    doc = {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                _PARITY_SOURCE,
+                {
+                    "kind": "decision",
+                    "comparison": "equals",
+                    "left": {"value_type": "track", "property_id": "   "},
+                    "right": {"value_type": "static", "static_value": "x"},
+                    "true_arm": {
+                        "steps": [{"kind": "message", "text": "t"}],
+                        "terminal": {"kind": "stop"},
+                    },
+                    "false_arm": {
+                        "steps": [{"kind": "message", "text": "f"}],
+                        "terminal": {"kind": "stop"},
+                    },
+                },
+            ],
+        },
+    }
+    assert _rejects(doc).diagnostics
+
+
+def test_model_validator_parity_for_set_dpp_name():
+    """``SetDppNodeV1._name_rules`` — a name carrying whitespace.
+
+    The rule is not merely non-blank: a property name must be whitespace-free,
+    because the wire form is a prefix concatenation and an embedded space would
+    silently produce a different property.
+    """
+    doc = _parity_doc(
+        [
+            {
+                "kind": "set_dpp",
+                "name": "HAS SPACE",
+                "source_values": [{"value_type": "static", "value": "v"}],
+            }
+        ]
+    )
+    assert _rejects(doc).diagnostics
+
+
+def test_model_validator_parity_for_try_trailing_cache_put():
+    """``TryCatchTryBodyV1._try_body_rules`` — a try body ending on a cache_put.
+
+    A ``cache_put`` must be followed by a stream-replacing read, so it may not
+    be the last thing in the protected body.
+    """
+    doc = {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                {
+                    "kind": "try_catch",
+                    "scope": "process",
+                    "retry_count": 0,
+                    "try_body": {
+                        "steps": [{"kind": "cache_put", "cache_ref": "$ref:c"}],
+                        "terminal": {"kind": "stop"},
+                    },
+                    "catch_body": {
+                        "steps": [{"kind": "message", "text": "c"}],
+                        "terminal": {"kind": "stop"},
+                    },
+                }
+            ],
+        },
+    }
+    assert _rejects(doc).diagnostics
+
+
+def test_unexpected_phase_failure_is_redacted():
+    """``pipeline._guarded`` — an unexpected stage crash never leaks its text.
+
+    The exception's message and type are deliberately discarded: an internal
+    message can echo authored values, and diagnostics are logged.
+    """
+    from boomi_mcp.compiler.process_ir import pipeline as compiler_pipeline
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+
+    def _boom(*_args):
+        raise RuntimeError("SENTINEL_AUTHORED_VALUE_IN_EXCEPTION")
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        compiler_pipeline._guarded("semantic_lowering", _boom, None)
+
+    error = excinfo.value
+    assert [d.code for d in error.diagnostics] == ["PROCESS_IR_COMPILE_INTERNAL"]
+    blob = "{0}{1}{2}".format(error, repr(error), [d.message for d in error.diagnostics])
+    assert "SENTINEL_AUTHORED_VALUE_IN_EXCEPTION" not in blob
+    assert "RuntimeError" not in blob
