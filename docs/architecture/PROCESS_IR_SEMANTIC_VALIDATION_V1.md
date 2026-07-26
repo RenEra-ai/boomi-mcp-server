@@ -198,13 +198,13 @@ the dialect off the legacy surface.
 
 ### Known reachability gaps — what is PRE-POSITIONED rather than live
 
-Measured by a live census over 5933 authorable configs (issue #143 QA, 2026-07-26). Every rule below
-is implemented and unit-tested, and every registry row below is wired correctly — forcing the
-condition in a synthetic report makes it fire. They are simply **not producible from any config the
-v1 authored surface accepts**, so they are pre-positioned for the gates that currently exclude them,
-not evidence of live coverage.
+Measured by a live census over 5933 authorable configs plus a 606-config gate differential (issue
+#143 QA, 2026-07-26). Two DIFFERENT situations are separated below, because collapsing them is
+exactly how a taxonomy entry gets mistaken for a shipped rule.
 
-**Codes not producible from an authorable config (6 of 17):**
+**A. Implemented, unit-tested, wired — but not producible from an authorable config (5 of 17).**
+Forcing the condition makes each of these fire; the v1 authored surface simply cannot produce the
+shape.
 
 | Code | Why it cannot fire yet |
 |---|---|
@@ -212,11 +212,27 @@ not evidence of live coverage.
 | `PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND` | the legacy adapter's symbol table carries only refs it declared, so an undeclared ref never reaches the collector |
 | `PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH` | same — a literal wrong-type id (a `map_ref` bound to a `profile.json` id, or an unresolvable UUID) still reports `is_valid: true` |
 | `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` | no production caller supplies typed effect contracts yet |
-| `…LINEAGE_AMBIGUOUS_LAST_WRITE` | requires a converging-path shape the v1 body rules do not admit |
-| `…RETRY_EFFECT_UNSAFE` | requires a non-connector replay hazard inside a positive-retry region, which the retry placements v1 allows do not produce |
+| `…RETRY_EFFECT_UNSAFE` | **no legacy dialect can project a Try/Catch region at all**, so `derive_error_regions` returns an empty tuple on every legacy-projected CFG and `collect_retry_effect_findings` never has a region to examine. The blocker is one layer earlier than "the hazard never lands inside a retried region" |
 
-This is **not a regression** — the baseline had no such checks at all. It is a statement of how much
-of the new surface is currently exercised.
+**B. Registered in the taxonomy with NO rule behind it (1 of 17).**
+
+`PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` is **declared but never emitted**. It exists as a
+constant, a taxonomy row, and a message/remediation entry — no collector references it, and it has no
+unit test. A synthetic report can carry it only because `finding()` accepts any registered code.
+
+This is deliberate rather than an oversight, and the reason is structural: ProcessIR v1 has **no
+merge point**. Control nodes are terminal fan-out — nothing may follow a Branch or Decision
+(`PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED`) — so converging paths with disagreeing last
+writers cannot exist by construction, not merely for want of input. Writing a merge rule now would be
+implementing a check for a construct the IR does not have. The code stays registered so the family is
+stable when control continuation lands; the rule arrives with it.
+
+The equivalent LEGACY check is real and unaffected: `cache_property_lineage` emits
+`PROCESS_LINEAGE_AMBIGUOUS_LAST_WRITE` (a different, legacy-family code) on its own surface, and the
+migration matrix classifies that row `adapter-only-compat`.
+
+Nothing here is a **regression** — the baseline had no such checks at all. This section states how
+much of the new surface is currently exercised, and by what.
 
 **Exemption rows that are inert (2 of 4):** `LEGACY_ADAPTER_EXEMPTION_DECISION_PROPERTY_READ` and
 `LEGACY_ADAPTER_EXEMPTION_SUBPROCESS_SUMMARY` cover codes that ship as **warnings**

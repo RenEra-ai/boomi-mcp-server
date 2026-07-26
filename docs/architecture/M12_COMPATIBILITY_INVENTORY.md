@@ -1372,8 +1372,11 @@ An exemption RECLASSIFIES an error as an advisory carrying the original code as 
 deletes the finding, so this ledger stays falsifiable.
 
 **Live-census note (2026-07-26, #143 QA).** Over 5933 authorable configs, 6 of #143's 17 codes were
-not producible from any of them, and 2 of the 4 exemption rows are inert because their target codes
-ship as warnings. Both facts are enumerated in
+not producible from any of them — 5 are implemented and wired but unreachable from the v1 authored
+surface, and 1 (`PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE`) is registered in the taxonomy
+with NO collector behind it, because ProcessIR v1 has no merge point for converging paths to
+disagree at. A further 2 of the 4 exemption rows are inert because their target codes ship as
+warnings and `apply_policy` reclassifies only errors. All of this is enumerated in
 [PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md) §10. The wiring is
 correct in every case — forcing the condition in a synthetic report makes it fire — so these are
 statements of current reachability, not defects, and not regressions (the baseline had no such
