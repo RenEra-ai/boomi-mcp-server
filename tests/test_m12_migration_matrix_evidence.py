@@ -92,3 +92,70 @@ def test_every_cited_regression_test_resolves():
     assert missing == [], (
         "migration-matrix rows cite tests that do not exist: {0}".format(missing)
     )
+
+
+# ---------------------------------------------------------------------------
+# The §7.2 verdict tally is DERIVED from the table, not asserted in prose.
+#
+# Added after QA Bug #188 — the ninth consecutive round to find the same class
+# of defect: a hand-maintained claim about the tree that was true when written
+# and quietly falsified by a later edit. Bugs #182, #186, #187 and #188 were all
+# that shape, and each was found one round after the change that broke it.
+#
+# The fix that worked for Bug #183 was to stop asserting and start deriving, so
+# the same treatment applies here: the vocabulary table states a row count per
+# verdict, and this test re-counts the actual column. A future edit that adds a
+# row without updating the tally fails here rather than at the next review.
+# ---------------------------------------------------------------------------
+
+_LEDGER_START = "### 7.2 Error-code ledger"
+_LEDGER_END = "### 7.3"
+
+
+def _ledger_rows() -> list:
+    text = _INVENTORY.read_text()
+    body = text.split(_LEDGER_START, 1)[1].split(_LEDGER_END, 1)[0]
+    rows = []
+    for line in body.split("\n"):
+        line = line.strip()
+        # a ledger row starts with a code cell and ends with its verdict
+        if not line.startswith("| `") or not line.endswith(" |"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split(" | ")]
+        if len(cells) < 5:
+            continue
+        rows.append(cells)
+    return rows
+
+
+def _declared_counts() -> dict:
+    """The per-verdict counts the vocabulary table claims."""
+    text = _INVENTORY.read_text()
+    body = text.split(_LEDGER_START, 1)[1].split(_LEDGER_END, 1)[0]
+    declared = {}
+    for line in body.split("\n"):
+        m = re.match(r"^\|\s*`([a-z-]+)`\s*\|\s*(\d+)\s*\|", line.strip())
+        if m:
+            declared[m.group(1)] = int(m.group(2))
+    return declared
+
+
+def test_the_ledger_verdict_tally_matches_the_table():
+    rows = _ledger_rows()
+    actual = {}
+    for cells in rows:
+        actual[cells[-1]] = actual.get(cells[-1], 0) + 1
+    declared = _declared_counts()
+    assert declared, "the §7.2 vocabulary table declares no counts"
+    assert declared == actual, (
+        "§7.2 vocabulary claims {0} but the column contains {1}".format(declared, actual)
+    )
+
+
+def test_every_ledger_verdict_is_from_the_declared_vocabulary():
+    """A verdict value absent from the vocabulary table is undefined for a
+    reader — which is precisely how `delegated` shipped in a header that still
+    read '(no / re-homed / new)'."""
+    declared = set(_declared_counts())
+    used = {cells[-1] for cells in _ledger_rows()}
+    assert used <= declared, sorted(used - declared)

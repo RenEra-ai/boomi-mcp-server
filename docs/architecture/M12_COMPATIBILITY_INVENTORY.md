@@ -1289,17 +1289,29 @@ The implementation must preserve the matrix’s existing positive evidence and a
 
 ### 7.2 Error-code ledger
 
-The `changed?` column takes exactly three values, and the distinction is load-bearing — an earlier
-draft used `re-homed` for all twenty rows in this group, which made it impossible to tell a code
-whose construction genuinely moved from one that never moved at all:
+The `Changed?` column takes **four** values across its **61** rows. The `re-homed`/`delegated`
+distinction is load-bearing — an earlier draft used `re-homed` for all twenty rows in one group,
+which made it impossible to tell a code whose construction genuinely moved from one that never moved
+at all:
 
-| Verdict | Means |
-|---|---|
-| `re-homed` | a unified collector in `semantic_validation/` now CONSTRUCTS the finding |
-| `delegated` | `connector_resolution` / `error_handling` still raises it and `flow.py` translates it into the report — one implementation, re-presented |
-| `no` | raised exactly where it always was, by a model validator or compiler oracle the semantic pass never calls |
+| Verdict | Rows | Means |
+|---|---|---|
+| `no` | 32 | raised exactly where it always was, by a site the semantic pass never calls |
+| `new` | 17 | introduced by #143 |
+| `delegated` | 9 | `connector_resolution` / `error_handling` still raises it and `flow.py` translates it into the report — one implementation, re-presented |
+| `re-homed` | 3 | a unified collector in `semantic_validation/` now CONSTRUCTS the finding |
 
-Measured against the tree: **3 re-homed, 9 delegated, 8 unchanged.** The `no` rows matter most:
+**Of the twenty rows this change reclassified** (all of which previously read `re-homed`): 3 are
+genuinely re-homed, 9 are delegated, and 8 are unchanged. Those counts are scoped to those twenty
+rows — the column-wide totals are the table above.
+
+Note the `no` definition says "a site", not "a model validator or compiler oracle": five `no` rows
+are `LEGACY_ADAPTER_*` codes raised from the tool layer or the adapters themselves.
+`LEGACY_ADAPTER_OUTPUT_PARITY_FAILED` is the sharpest — `emit_legacy_result` is the function that
+*calls* the #143 gate, so "the semantic pass never calls it" holds only because the direction is the
+reverse of what a narrower wording would imply.
+
+The 8 reclassified `no` rows matter most:
 several are raised by `parse_process_ir_v1`, so the payload is rejected before `validate_process_ir`
 ever runs. There is no body collector and no capability collector — `semantic_validation/` defines
 nine `collect_*` functions and the pipeline runs four (references, flow, lineage, effects).
@@ -1311,7 +1323,7 @@ map-bracketing and the non-producing-connector rule keep ONE implementation.
 
 “Re-homed” means canonical diagnostic construction moves to the unified collector while the existing code meaning, family, and compatibility facade remain unchanged.
 
-| Code | Family | Raised by (file:symbol) | After #143, still raised from where | Changed? (no / re-homed / new) |
+| Code | Family | Raised by (file:symbol) | After #143, still raised from where | Changed? (no / new / delegated / re-homed) |
 |---|---|---|---|---|
 | `PROCESS_IR_SCHEMA_UNKNOWN_NODE` | `PROCESS_IR_SCHEMA_*` | `models/process_ir.py:_translate_pydantic_error`, `parse_process_ir_v1` | Same model/parse boundary; unified report preserves it | no |
 | `PROCESS_IR_SCHEMA_UNKNOWN_FIELD` | `PROCESS_IR_SCHEMA_*` | Same symbols | Same model/parse boundary | no |
@@ -1319,7 +1331,7 @@ map-bracketing and the non-producing-connector rule keep ONE implementation.
 | `PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED` | `PROCESS_IR_SCHEMA_*` | `parse_process_ir_v1` | Same version gate | no |
 | `PROCESS_IR_SCHEMA_INVALID` | `PROCESS_IR_SCHEMA_*` | `_translate_pydantic_error`, `parse_process_ir_v1`; `_process_ir_compat.py` codec | Same model/private-codec boundaries | no |
 | `PROCESS_IR_REFERENCE_INVALID_FORMAT` | `PROCESS_IR_REFERENCE_*` | `_validate_component_ref`, `_validate_contract_ref`, parse translation | Same syntax gate | no |
-| `PROCESS_IR_CAPABILITY_UNSUPPORTED` | `PROCESS_IR_CAPABILITY_*` | Model capability helpers/translation; compatibility codec; `lowering.py:_emitter_input_for` | Unchanged — `parse_process_ir_v1` / `body_capabilities`; the semantic pass never calls either | no |
+| `PROCESS_IR_CAPABILITY_UNSUPPORTED` | `PROCESS_IR_CAPABILITY_*` | Model capability helpers/translation; compatibility codec; `lowering.py:_emitter_input_for` | Unchanged — `models/process_ir.py` (parse/translation), the `_process_ir_compat` codec, and `lowering.py:_emitter_input_for`; the semantic pass calls none of them | no |
 | `PROCESS_IR_SEMANTIC_UNREACHABLE` | `PROCESS_IR_SEMANTIC_*` | `invariants.py:check_cfg_invariants` | `semantic_validation/flow.py` constructs it; invariant facade remains | re-homed |
 | `PROCESS_IR_SEMANTIC_MISSING_TERMINAL` | `PROCESS_IR_SEMANTIC_*` | `check_cfg_invariants`, `check_emission_plan_invariants` | `semantic_validation/flow.py` constructs it; invariant facade remains | re-homed |
 | `PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW` | `PROCESS_IR_SEMANTIC_*` | `check_cfg_invariants`, `_check_region_containment`, `check_emission_plan_invariants` | Unchanged — `invariants.check_cfg_invariants`, a compiler oracle the semantic pass never calls | no |
