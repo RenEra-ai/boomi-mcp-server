@@ -1339,12 +1339,12 @@ The implementation must preserve the matrix’s existing positive evidence and a
 | `PROCESS_IR_COMPILE_ERROR_REGION_INVALID` | `PROCESS_IR_COMPILE_*` | `error_handling.py` region helpers; CFG invariants | Same structural oracle; never a user semantic finding | no |
 | `PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND` | `PROCESS_IR_REFERENCE_*` | Not currently registered | Unified resolver for non-specialized component refs | new |
 | `PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH` | `PROCESS_IR_REFERENCE_*` | Not currently registered | Unified resolver for non-specialized component roles | new |
-| `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` | `PROCESS_IR_CAPABILITY_*` | Not currently registered | Trusted effect/capability contract validation | new |
+| `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` | `PROCESS_IR_CAPABILITY_*` | Not currently registered | Registered, intentionally unraised — no collector emits it (see §10 B) | new |
 | `PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE` | `PROCESS_IR_SEMANTIC_*` | Not currently registered | Unified lineage collector | new |
 | `PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID` | `PROCESS_IR_SEMANTIC_*` | Not currently registered | Document-copy scope validation | new |
 | `PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID` | `PROCESS_IR_SEMANTIC_*` | Not currently registered | Sequential-leg order validation | new |
 | `PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING` | `PROCESS_IR_SEMANTIC_*` | Not currently registered | Cache lineage collector | new |
-| `PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` | `PROCESS_IR_SEMANTIC_*` | Not currently registered | Path-merge lineage collector | new |
+| `PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` | `PROCESS_IR_SEMANTIC_*` | Not currently registered | Registered, intentionally unraised — no collector emits it (see §10 B) | new |
 | `PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN` | `PROCESS_IR_SEMANTIC_*` | Not currently registered | Missing opaque-effect metadata diagnostic | new |
 | `PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED` | `PROCESS_IR_SEMANTIC_*` | Not currently registered | Nonfatal typed external-writer assumption | new |
 | `PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE` | `PROCESS_IR_SEMANTIC_*` | Not currently registered | Demonstrated unsafe ordering collector | new |
@@ -1377,7 +1377,12 @@ surface, and 2 (`PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE`,
 `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID`) are registered in the taxonomy with NO collector
 behind them at all. A further 2 of the 4 exemption rows are inert because their target codes ship as
 warnings and `apply_policy` reclassifies only errors. All of this is enumerated in
-[PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md) §10. The wiring is
-correct in every case — forcing the condition in a synthetic report makes it fire — so these are
-statements of current reachability, not defects, and not regressions (the baseline had no such
-checks at all).
+[PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md) §10.
+
+The 4 implemented codes and the 2 inert exemption rows ARE wired correctly — forcing the condition
+makes each fire. That argument does **not** extend to the 2 group-B codes: `finding()` accepts any
+registered code, so building a synthetic report carrying one proves REGISTRATION, not wiring. Those
+two have no rule behind them at all.
+
+None of this is a regression — the baseline had no such checks. It is a statement of how much of the
+new surface is currently exercised, and by what.
