@@ -1,0 +1,439 @@
+"""State lineage lattice (issue #143, M12.8) — slice 4. Still DARK.
+
+The three rules that are easiest to get subtly wrong each get their own test,
+because they are not variations of one rule — they follow from two DIFFERENT
+scoping facts:
+
+1. pre-Branch DDP is visible in every leg      (documents are copied FROM it)
+2. leg-local DDP does NOT satisfy a sibling    (each leg has its own copies)
+3. an earlier leg's DPP/cache write DOES reach a later leg  (legs run in order)
+
+A model that got 1 and 2 right by treating legs as isolated would get 3 wrong,
+which is why 3 is asserted separately and in both directions.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+_ROOT = Path(__file__).resolve().parent.parent
+for _p in (str(_ROOT), str(_ROOT / "src")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+from boomi_mcp.compiler.process_ir.semantic_validation.context import (
+    prepare_validation_context,
+)
+from boomi_mcp.compiler.process_ir.semantic_validation.lineage import (
+    DDP,
+    DPP,
+    _State,
+    collect_lineage_findings,
+)
+from boomi_mcp.errors import (
+    PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID,
+    PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING,
+    PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID,
+    PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN,
+    PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED,
+    PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,
+)
+from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+
+def _set_prop(scope, name, sources=None):
+    return {
+        "kind": "set_ddp" if scope == "ddp" else "set_dpp",
+        "name": name,
+        "source_values": sources or [{"value_type": "static", "value": "x"}],
+    }
+
+
+def _read_prop(scope, name, target="OUT", default=None):
+    source = {"value_type": scope, "property_name": name}
+    if default is not None:
+        source["default_value"] = default
+    return {
+        "kind": "set_dpp",
+        "name": target,
+        "source_values": [source],
+    }
+
+
+_SOURCE = {"kind": "source", "connection_ref": "$ref:conn", "operation_ref": "$ref:op"}
+_TARGET = {"kind": "target", "connection_ref": "$ref:tconn", "operation_ref": "$ref:top"}
+
+
+def _doc(steps):
+    """A valid ROOT connector-flow sequence wrapping ``steps``.
+
+    The root sequence rules are strict: it must start with the source endpoint
+    and end in target+stop. A bare list of property steps is not a legal
+    document, so the linear steps under test are bracketed rather than authored
+    at the root. Neither endpoint reads or writes process state, so they are
+    inert for lineage purposes.
+    """
+    return {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [_SOURCE] + list(steps) + [_TARGET, {"kind": "stop"}],
+        },
+    }
+
+
+def _branch_doc(legs):
+    return {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                {
+                    "kind": "branch",
+                    "legs": [
+                        {"steps": leg, "terminal": {"kind": "stop"}} for leg in legs
+                    ],
+                }
+            ],
+        },
+    }
+
+
+def _findings(doc):
+    prepared = prepare_validation_context(
+        parse_process_ir_v1(doc), SymbolTableV1(symbols=())
+    )
+    return collect_lineage_findings(prepared)
+
+
+def _codes(doc):
+    return {f.code for f in _findings(doc)}
+
+
+# ---------------------------------------------------------------------------
+# the lattice itself
+# ---------------------------------------------------------------------------
+
+
+def test_the_merge_is_an_intersection_not_a_union():
+    """Union here would be the single easiest way to make the module unsound:
+    a property written on ONE Decision arm would count as established after the
+    merge, on a path where it does not exist."""
+    left = _State(document=frozenset({(DDP, "A")}), execution=frozenset({(DPP, "X")}))
+    right = _State(document=frozenset(), execution=frozenset({(DPP, "X"), (DPP, "Y")}))
+    merged = left.merged_with(right)
+    assert merged.execution == frozenset({(DPP, "X")})
+    assert merged.document == frozenset()
+
+
+def test_a_ddp_write_lands_in_document_scope_and_a_dpp_write_in_execution():
+    state = _State().with_write((DDP, "A")).with_write((DPP, "B"))
+    assert state.establishes((DDP, "A"))
+    assert state.establishes((DPP, "B"))
+    assert not state.establishes((DPP, "A"))
+
+
+# ---------------------------------------------------------------------------
+# straight-line reads
+# ---------------------------------------------------------------------------
+
+
+def test_a_write_then_read_is_clean():
+    assert _codes(_doc([_set_prop("dpp", "A"), _read_prop("dpp", "A")])) == set()
+
+
+def test_a_read_with_no_write_anywhere_is_read_before_write():
+    codes = _codes(_doc([_read_prop("dpp", "A")]))
+    assert PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE in codes
+
+
+def test_a_defaulted_read_cannot_fail():
+    """A default establishes the value, so treating it as a hard dependency
+    would reject a payload that runs perfectly well."""
+    assert _codes(_doc([_read_prop("dpp", "A", default="fallback")])) == set()
+
+
+def test_read_before_write_is_ordered_not_merely_present():
+    """The write exists but comes AFTER the read — order is the whole point."""
+    codes = _codes(_doc([_read_prop("dpp", "A"), _set_prop("dpp", "A")]))
+    assert PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE in codes
+
+
+# ---------------------------------------------------------------------------
+# Branch: the three rules
+# ---------------------------------------------------------------------------
+
+
+def test_rule_1_pre_branch_ddp_is_visible_in_every_leg():
+    doc = {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                _SOURCE,
+                _set_prop("ddp", "A"),
+                {
+                    "kind": "branch",
+                    "legs": [
+                        {
+                            "steps": [_read_prop("ddp", "A")],
+                            "terminal": {"kind": "stop"},
+                        },
+                        {
+                            "steps": [_read_prop("ddp", "A")],
+                            "terminal": {"kind": "stop"},
+                        },
+                    ],
+                },
+            ],
+        },
+    }
+    assert _codes(doc) == set()
+
+
+def test_rule_2_leg_local_ddp_does_not_satisfy_a_sibling_leg():
+    """Each leg gets its OWN document copies, so leg 0's DDP write is not on
+    leg 1's documents. Reported as a scope error, not read-before-write,
+    because the property IS written — just onto a different copy."""
+    codes = _codes(
+        _branch_doc(
+            [
+                [_set_prop("ddp", "A")],
+                [_read_prop("ddp", "A")],
+            ]
+        )
+    )
+    assert PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID in codes
+
+
+def test_rule_3_an_earlier_legs_dpp_write_does_reach_a_later_leg():
+    """Legs run SEQUENTIALLY. A model that treated them as isolated would
+    wrongly reject this, and a model that treated them as parallel would too."""
+    assert (
+        _codes(
+            _branch_doc(
+                [
+                    [_set_prop("dpp", "A")],
+                    [_read_prop("dpp", "A")],
+                ]
+            )
+        )
+        == set()
+    )
+
+
+def test_rule_3_inverse_a_later_legs_write_does_not_reach_an_earlier_leg():
+    """The other direction must still fail, or rule 3 is just 'anything goes'.
+
+    It reports BRANCH_ORDER_INVALID specifically, not the generic
+    read-before-write: the write is right there in the payload, so telling the
+    author it is missing would send them hunting for something that exists. The
+    defect is its POSITION.
+    """
+    codes = _codes(
+        _branch_doc(
+            [
+                [_read_prop("dpp", "A")],
+                [_set_prop("dpp", "A")],
+            ]
+        )
+    )
+    assert PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID in codes
+    assert PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE not in codes
+
+
+def test_branch_order_invalid_carries_the_offending_leg_ordinal():
+    findings = _findings(
+        _branch_doc([[_read_prop("dpp", "A")], [_set_prop("dpp", "A")]])
+    )
+    order = [
+        f
+        for f in findings
+        if f.code == PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID
+    ]
+    assert order
+    keys = {e.key for e in order[0].evidence}
+    assert keys == {"state_scope", "leg_ordinal"}
+
+
+def test_a_missing_write_outside_any_branch_is_still_read_before_write():
+    """The order diagnostic must not swallow the plain case."""
+    codes = _codes(_doc([_read_prop("dpp", "A")]))
+    assert PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE in codes
+    assert PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID not in codes
+
+
+def test_an_earlier_leg_cache_write_reaches_a_later_leg():
+    """Cache is execution-scoped like DPP, so leg 0's write reaches leg 1.
+
+    Leg 0 reads its own cache immediately after writing it because the schema
+    requires a cache_put to be followed by a stream-replacing read — it may not
+    feed a terminal directly. That extra read is a schema obligation, not part
+    of what this test is asserting.
+    """
+    _get = {
+        "kind": "cache_get",
+        "cache_ref": "$ref:c",
+        "empty_cache_behavior": "stopprocess",
+        "external_writer": False,
+    }
+    doc = _branch_doc(
+        [
+            [{"kind": "cache_put", "cache_ref": "$ref:c"}, dict(_get)],
+            [dict(_get)],
+        ]
+    )
+    assert PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING not in _codes(doc)
+
+
+# ---------------------------------------------------------------------------
+# cache
+# ---------------------------------------------------------------------------
+
+
+def test_a_cache_read_with_no_writer_is_reported():
+    doc = _doc(
+        [
+            {
+                "kind": "cache_get",
+                "cache_ref": "$ref:c",
+                "empty_cache_behavior": "stopprocess",
+                "external_writer": False,
+            }
+        ]
+    )
+    assert PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING in _codes(doc)
+
+
+def test_a_declared_external_writer_downgrades_to_a_warning():
+    doc = _doc(
+        [
+            {
+                "kind": "cache_get",
+                "cache_ref": "$ref:c",
+                "empty_cache_behavior": "stopprocess",
+                "external_writer": True,
+            }
+        ]
+    )
+    findings = _findings(doc)
+    assumed = [
+        f
+        for f in findings
+        if f.code == PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED
+    ]
+    assert assumed, "external writer should be recorded"
+    assert assumed[0].severity == "warning"
+    assert PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING not in {
+        f.code for f in findings
+    }
+
+
+# ---------------------------------------------------------------------------
+# opaque effects — uncertainty, never proof
+# ---------------------------------------------------------------------------
+
+
+def test_a_map_contributes_uncertainty_not_proof():
+    """The inversion of the legacy wildcard default: a map may NOT satisfy a
+    read it does not declare."""
+    doc = _doc([{"kind": "map_ref", "map_ref": "$ref:m"}, _read_prop("dpp", "A")])
+    codes = _codes(doc)
+    assert PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN in codes
+    assert PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE in codes
+
+
+def test_the_unknown_effect_finding_is_a_warning_not_an_error():
+    doc = _doc([{"kind": "map_ref", "map_ref": "$ref:m"}])
+    unknown = [
+        f for f in _findings(doc) if f.code == PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN
+    ]
+    assert unknown and unknown[0].severity == "warning"
+
+
+def test_the_unknown_effect_finding_names_the_effect_class_not_the_component():
+    doc = _doc([{"kind": "map_ref", "map_ref": "$ref:m"}])
+    unknown = [
+        f for f in _findings(doc) if f.code == PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN
+    ]
+    blob = unknown[0].model_dump_json()
+    assert "$ref:m" not in blob
+    assert [(e.key, e.value) for e in unknown[0].evidence] == [("effect_kind", "map")]
+
+
+def test_a_custom_script_step_is_opaque():
+    doc = _doc(
+        [
+            {
+                "kind": "data_process",
+                "steps": [
+                    {
+                        "operation": "custom_scripting",
+                        "script": "SENTINEL_SCRIPT_BODY",
+                        "language": "groovy2",
+                        # the schema pins this to True
+                        "use_cache": True,
+                    }
+                ],
+            }
+        ]
+    )
+    findings = _findings(doc)
+    assert PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN in {f.code for f in findings}
+    for item in findings:
+        assert "SENTINEL_SCRIPT_BODY" not in item.model_dump_json()
+
+
+# ---------------------------------------------------------------------------
+# redaction + robustness
+# ---------------------------------------------------------------------------
+
+
+def test_no_lineage_finding_carries_a_property_name():
+    doc = _doc([_read_prop("dpp", "SENTINEL_PROPERTY_NAME")])
+    findings = _findings(doc)
+    assert findings
+    for item in findings:
+        assert "SENTINEL_PROPERTY_NAME" not in item.model_dump_json()
+
+
+def test_the_walk_terminates_on_the_control_flow_golden():
+    _FIX = _ROOT / "tests" / "fixtures" / "process_ir" / "process_ir_v1.json"
+    docs = json.loads(_FIX.read_text())
+    prepared = prepare_validation_context(
+        parse_process_ir_v1(docs["control_flow"]), SymbolTableV1(symbols=())
+    )
+    collect_lineage_findings(prepared)  # must return, not hang
+
+
+def test_one_finding_per_code_per_node_even_on_a_diamond():
+    """A node reachable by two paths must not produce the same finding twice."""
+    doc = {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                {
+                    "kind": "branch",
+                    "legs": [
+                        {
+                            "steps": [_read_prop("dpp", "A")],
+                            "terminal": {"kind": "stop"},
+                        },
+                        {
+                            "steps": [_read_prop("dpp", "B")],
+                            "terminal": {"kind": "stop"},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    findings = _findings(doc)
+    seen = [(f.code, f.internal_node_id) for f in findings]
+    assert len(seen) == len(set(seen))
