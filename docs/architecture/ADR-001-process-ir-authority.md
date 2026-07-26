@@ -250,8 +250,9 @@ declared introducer for, and introduces no new family: two `PROCESS_IR_REFERENCE
 `…SIDE_EFFECT_ORDERING_*`, one `…RETRY_EFFECT_UNSAFE`), and four `LEGACY_ADAPTER_EXEMPTION_*` — all
 `category="process_ir"`, `retryable=False`, `owner="#143"`. It introduces **no**
 `PROCESS_IR_COMPILE_*` code: that family blames the compiler, whereas every #143 code blames the
-authored payload, and a `ValidationReportV1` cannot carry a compile-family code at all (an unexpected
-internal defect escapes to the compiler's own `_guarded` boundary instead). The specialized #140
+authored payload, and a `ValidationReportV1` cannot carry a compile-family code at all — that is
+ENFORCED by a field validator on `ValidationDiagnosticV1.code`, not left to convention (an
+unexpected internal defect escapes to the compiler's own `_guarded` boundary instead). The specialized #140
 operation/connection codes and the #142 connector retry/idempotency codes keep every raise site they
 had — the generic codes cover only the roles those do not. Semantic authority is `ProcessIRV1` plus
 TRUSTED CAPABILITY METADATA (compiler context, never authored fields — §6); the validation output is

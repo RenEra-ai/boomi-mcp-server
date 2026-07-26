@@ -396,9 +396,21 @@ def _parity_doc(steps):
     }
 
 
-def _rejects(doc):
+def _rejects(doc, expected_code="PROCESS_IR_SCHEMA_INVALID_CARDINALITY"):
+    """Assert the doc is rejected FOR THE CITED REASON, not merely rejected.
+
+    Added after QA Bug #184. The first version of these tests asserted only
+    ``.diagnostics`` was non-empty, which is satisfied by ANY defect — and one
+    fixture turned out to be invalid for three independent reasons, so it kept
+    passing with the validator it cited deleted. A test that survives the
+    deletion of the thing it tests is not evidence.
+
+    Asserting the exact code list converts that whole class of defect from
+    silent to loud: an incidentally-invalid fixture now fails on arrival.
+    """
     with pytest.raises(ProcessIRValidationError) as excinfo:
         parse_process_ir_v1(doc)
+    assert [d.code for d in excinfo.value.diagnostics] == [expected_code]
     return excinfo.value
 
 
@@ -413,7 +425,7 @@ def test_model_validator_parity_for_blank_dpp_source():
             }
         ]
     )
-    assert _rejects(doc).diagnostics
+    _rejects(doc)
 
 
 def test_model_validator_parity_for_blank_script():
@@ -433,7 +445,7 @@ def test_model_validator_parity_for_blank_script():
             }
         ]
     )
-    assert _rejects(doc).diagnostics
+    _rejects(doc)
 
 
 def test_model_validator_parity_for_blank_split_identifier():
@@ -454,7 +466,7 @@ def test_model_validator_parity_for_blank_split_identifier():
             }
         ]
     )
-    assert _rejects(doc).diagnostics
+    _rejects(doc)
 
 
 def test_model_validator_parity_for_blank_track_id():
@@ -482,7 +494,7 @@ def test_model_validator_parity_for_blank_track_id():
             ],
         },
     }
-    assert _rejects(doc).diagnostics
+    _rejects(doc)
 
 
 def test_model_validator_parity_for_set_dpp_name():
@@ -501,7 +513,7 @@ def test_model_validator_parity_for_set_dpp_name():
             }
         ]
     )
-    assert _rejects(doc).diagnostics
+    _rejects(doc)
 
 
 def test_model_validator_parity_for_try_trailing_cache_put():
@@ -509,6 +521,16 @@ def test_model_validator_parity_for_try_trailing_cache_put():
 
     A ``cache_put`` must be followed by a stream-replacing read, so it may not
     be the last thing in the protected body.
+
+    The fixture is deliberately valid in every OTHER respect, which took two
+    corrections to get right (QA Bug #184). ``retry_count`` is not an input
+    field at all — it is a derived read-only property, so authoring it raised
+    ``PROCESS_IR_SCHEMA_UNKNOWN_FIELD`` and masked the rule under test. And a
+    process-scoped try body must BEGIN with the connector call that produces the
+    flow's documents, so omitting it raised
+    ``PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED`` — a second, independent
+    mask waiting behind the first. With both removed the cited rule is the only
+    defect left, and the test fails if that validator is neutered.
     """
     doc = {
         "version": "1",
@@ -518,9 +540,11 @@ def test_model_validator_parity_for_try_trailing_cache_put():
                 {
                     "kind": "try_catch",
                     "scope": "process",
-                    "retry_count": 0,
                     "try_body": {
-                        "steps": [{"kind": "cache_put", "cache_ref": "$ref:c"}],
+                        "steps": [
+                            {"kind": "connector_call", "operation_ref": "$ref:GETOP"},
+                            {"kind": "cache_put", "cache_ref": "$ref:c"},
+                        ],
                         "terminal": {"kind": "stop"},
                     },
                     "catch_body": {
@@ -531,7 +555,7 @@ def test_model_validator_parity_for_try_trailing_cache_put():
             ],
         },
     }
-    assert _rejects(doc).diagnostics
+    _rejects(doc)
 
 
 def test_unexpected_phase_failure_is_redacted():
@@ -554,3 +578,45 @@ def test_unexpected_phase_failure_is_redacted():
     blob = "{0}{1}{2}".format(error, repr(error), [d.message for d in error.diagnostics])
     assert "SENTINEL_AUTHORED_VALUE_IN_EXCEPTION" not in blob
     assert "RuntimeError" not in blob
+
+
+# ---------------------------------------------------------------------------
+# the compile-family constraint is ENFORCED, not merely asserted in prose
+# (added after QA Bug #185)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "PROCESS_IR_COMPILE_INTERNAL",
+        "PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID",
+        "PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID",
+    ],
+)
+def test_a_report_cannot_carry_a_compile_family_code(code):
+    """ADR-001 §7 gives ``PROCESS_IR_COMPILE_*`` to the compiler.
+
+    The docs claimed a report "cannot carry" one; nothing enforced it, so the
+    claim was true only by convention. It is now a field validator: a report
+    that could carry a compiler-blame code would tell a caller to fix correct
+    input.
+    """
+    with pytest.raises(ValidationError):
+        _diag(code=code)
+
+
+def test_the_constraint_is_on_the_prefix_not_an_allowlist():
+    """A SEMANTIC code that merely mentions compilation is still fine — the rule
+    is about the family prefix, not about the word."""
+    assert _diag(code="PROCESS_IR_SEMANTIC_COMPILED_THING").code == (
+        "PROCESS_IR_SEMANTIC_COMPILED_THING"
+    )
+
+
+def test_the_finding_builder_also_refuses_a_compile_family_code():
+    """The constraint has to hold on the path collectors actually use."""
+    from boomi_mcp.compiler.process_ir.semantic_validation.findings import finding
+
+    with pytest.raises(ValidationError):
+        finding("PROCESS_IR_COMPILE_INTERNAL", "error", "lineage", "/a")

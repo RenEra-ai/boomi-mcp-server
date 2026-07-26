@@ -220,6 +220,29 @@ class ValidationDiagnosticV1(_ValidationModel):
 
     code: str
     severity: ValidationSeverityV1
+
+    @field_validator("code")
+    @classmethod
+    def _never_a_compile_family_code(cls, value: str) -> str:
+        """A report may not carry a code that blames the COMPILER.
+
+        ADR-001 §7 gives ``PROCESS_IR_COMPILE_*`` to the compiler: it means "this
+        is our bug, not yours". A validation report means the opposite — "your
+        payload is wrong" — so a compile-family code here would tell a caller to
+        fix correct input, which is exactly how someone ends up rewriting a
+        working payload to route around a compiler defect.
+
+        Enforced structurally rather than by convention because the docs already
+        claimed it and nothing checked: an unexpected internal defect is meant to
+        escape to the compiler's own ``_guarded`` boundary, and ``flow.py``
+        re-raises rather than translating such a diagnostic. This makes that
+        contract impossible to violate by accident instead of merely unlikely.
+        """
+        if value.startswith("PROCESS_IR_COMPILE_"):
+            raise ValueError(
+                "a validation report cannot carry a compile-family code"
+            )
+        return value
     phase: ValidationPhaseV1
     path: str
     node_identity: str
