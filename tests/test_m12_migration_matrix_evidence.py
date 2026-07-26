@@ -32,7 +32,11 @@ _ROOT = Path(__file__).resolve().parent.parent
 _INVENTORY = _ROOT / "docs" / "architecture" / "M12_COMPATIBILITY_INVENTORY.md"
 
 #: ``tests/<file>.py::<name>`` where <name> may be a test function OR a class.
-_CITATION = re.compile(r"tests/[A-Za-z0-9_/]+\.py::[A-Za-z0-9_]+")
+#: A citation may be ``file::test``, ``file::Class`` or ``file::Class::method``.
+#: Capturing only the FIRST ``::`` segment reproduces the exact trap this guard
+#: exists to close (QA Bug #196): a three-part citation would verify the CLASS
+#: exists and never check the method — and one such citation was broken.
+_CITATION = re.compile(r"tests/[A-Za-z0-9_/]+\.py(?:::[A-Za-z0-9_]+)+")
 
 
 def _cited_ids() -> list:
