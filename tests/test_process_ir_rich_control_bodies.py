@@ -1285,7 +1285,11 @@ def test_control_wiring_code_covers_transition_ROLE_corruption():
     i = next(i for i, n in enumerate(plan.nodes) if n.emitter_input.emitter_kind == "branch")
     branch = plan.nodes[i]
     wires = list(branch.outgoing)
-    wires[0] = wires[0].model_copy(update={"provenance": "synthetic", "cfg_edge_id": None})
+    # Corrupt ONLY provenance. Nulling cfg_edge_id as well would trip the
+    # earlier ordered-edge-id check, which ALREADY returned the control-wiring
+    # code — the test would then pass even with the role classification
+    # reverted, i.e. it would not test what it claims.
+    wires[0] = wires[0].model_copy(update={"provenance": "synthetic"})
     nodes = list(plan.nodes)
     nodes[i] = branch.model_copy(update={"outgoing": tuple(wires)})
     with pytest.raises(ProcessIRCompileError) as excinfo:
