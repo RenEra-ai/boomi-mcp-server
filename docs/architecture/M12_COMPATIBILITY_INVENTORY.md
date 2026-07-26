@@ -1289,6 +1289,26 @@ The implementation must preserve the matrix’s existing positive evidence and a
 
 ### 7.2 Error-code ledger
 
+The `changed?` column takes exactly three values, and the distinction is load-bearing — an earlier
+draft used `re-homed` for all twenty rows in this group, which made it impossible to tell a code
+whose construction genuinely moved from one that never moved at all:
+
+| Verdict | Means |
+|---|---|
+| `re-homed` | a unified collector in `semantic_validation/` now CONSTRUCTS the finding |
+| `delegated` | `connector_resolution` / `error_handling` still raises it and `flow.py` translates it into the report — one implementation, re-presented |
+| `no` | raised exactly where it always was, by a model validator or compiler oracle the semantic pass never calls |
+
+Measured against the tree: **3 re-homed, 9 delegated, 8 unchanged.** The `no` rows matter most:
+several are raised by `parse_process_ir_v1`, so the payload is rejected before `validate_process_ir`
+ever runs. There is no body collector and no capability collector — `semantic_validation/` defines
+nine `collect_*` functions and the pipeline runs four (references, flow, lineage, effects).
+
+This reflects the slice-9 delegation decision recorded in
+[PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md) §8: rather than re-derive
+#140/#142's rules into new collectors, the flow collector delegates to `validate_connector_calls`, so
+map-bracketing and the non-producing-connector rule keep ONE implementation.
+
 “Re-homed” means canonical diagnostic construction moves to the unified collector while the existing code meaning, family, and compatibility facade remain unchanged.
 
 | Code | Family | Raised by (file:symbol) | After #143, still raised from where | Changed? (no / re-homed / new) |
@@ -1299,11 +1319,11 @@ The implementation must preserve the matrix’s existing positive evidence and a
 | `PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED` | `PROCESS_IR_SCHEMA_*` | `parse_process_ir_v1` | Same version gate | no |
 | `PROCESS_IR_SCHEMA_INVALID` | `PROCESS_IR_SCHEMA_*` | `_translate_pydantic_error`, `parse_process_ir_v1`; `_process_ir_compat.py` codec | Same model/private-codec boundaries | no |
 | `PROCESS_IR_REFERENCE_INVALID_FORMAT` | `PROCESS_IR_REFERENCE_*` | `_validate_component_ref`, `_validate_contract_ref`, parse translation | Same syntax gate | no |
-| `PROCESS_IR_CAPABILITY_UNSUPPORTED` | `PROCESS_IR_CAPABILITY_*` | Model capability helpers/translation; compatibility codec; `lowering.py:_emitter_input_for` | Model gates remain; canonical capability checks move to unified collection; lowering stays fallback | re-homed |
-| `PROCESS_IR_SEMANTIC_UNREACHABLE` | `PROCESS_IR_SEMANTIC_*` | `invariants.py:check_cfg_invariants` | `semantic_validation/flow.py`; invariant facade remains | re-homed |
-| `PROCESS_IR_SEMANTIC_MISSING_TERMINAL` | `PROCESS_IR_SEMANTIC_*` | `check_cfg_invariants`, `check_emission_plan_invariants` | Unified flow collector; invariant oracles remain | re-homed |
-| `PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW` | `PROCESS_IR_SEMANTIC_*` | `check_cfg_invariants`, `_check_region_containment`, `check_emission_plan_invariants` | Unified flow collector; direct oracles remain | re-homed |
-| `PROCESS_IR_COMPILE_INTERNAL` | `PROCESS_IR_COMPILE_*` | `pipeline.py:_guarded`, parse/compile; invariants; emitter; `diagnostics.py:internal_defect` | Same compiler-defect boundary, including unexpected preparation/oracle disagreement | re-homed |
+| `PROCESS_IR_CAPABILITY_UNSUPPORTED` | `PROCESS_IR_CAPABILITY_*` | Model capability helpers/translation; compatibility codec; `lowering.py:_emitter_input_for` | Unchanged — `parse_process_ir_v1` / `body_capabilities`; the semantic pass never calls either | no |
+| `PROCESS_IR_SEMANTIC_UNREACHABLE` | `PROCESS_IR_SEMANTIC_*` | `invariants.py:check_cfg_invariants` | `semantic_validation/flow.py` constructs it; invariant facade remains | re-homed |
+| `PROCESS_IR_SEMANTIC_MISSING_TERMINAL` | `PROCESS_IR_SEMANTIC_*` | `check_cfg_invariants`, `check_emission_plan_invariants` | `semantic_validation/flow.py` constructs it; invariant facade remains | re-homed |
+| `PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW` | `PROCESS_IR_SEMANTIC_*` | `check_cfg_invariants`, `_check_region_containment`, `check_emission_plan_invariants` | Unchanged — `invariants.check_cfg_invariants`, a compiler oracle the semantic pass never calls | no |
+| `PROCESS_IR_COMPILE_INTERNAL` | `PROCESS_IR_COMPILE_*` | `pipeline.py:_guarded`, parse/compile; invariants; emitter; `diagnostics.py:internal_defect` | Unchanged — same compiler-defect boundary; nothing moved | no |
 | `PROCESS_IR_COMPILE_NONDETERMINISTIC` | `PROCESS_IR_COMPILE_*` | CFG/emission invariants | Same compiler oracles | no |
 | `PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID` | `PROCESS_IR_COMPILE_*` | `lowering.py:_resolve`, `_emitter_input_for`; emission invariants | Same lowering/oracle fallback | no |
 | `PROCESS_IR_COMPILE_EMITTER_MISSING` | `PROCESS_IR_COMPILE_*` | `emitter_registry.py:_preflight_node`, `emit_process` | Same emitter gate | no |
@@ -1316,26 +1336,26 @@ The implementation must preserve the matrix’s existing positive evidence and a
 | `LEGACY_ADAPTER_AUTHORITY_CONFLICT` | `LEGACY_ADAPTER_*` | `integration_builder.py:_authority_rejection` | Same authority gate | no |
 | `LEGACY_ADAPTER_SEMANTIC_LOSS` | `LEGACY_ADAPTER_*` | Flow/sync/wrapper adapter guards | Same normalization/loss checks | no |
 | `LEGACY_ADAPTER_OUTPUT_PARITY_FAILED` | `LEGACY_ADAPTER_*` | `legacy_adapters/emission.py:emit_legacy_result` | Same parity translation after semantic preflight | no |
-| `PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND` | `PROCESS_IR_REFERENCE_*` | `connector_resolution.py:resolve_connector_call_bindings` | Unified reference collector; facade remains | re-homed |
-| `PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND` | `PROCESS_IR_REFERENCE_*` | Same resolver | Unified reference collector; facade remains | re-homed |
-| `PROCESS_IR_REFERENCE_CONNECTION_MISMATCH` | `PROCESS_IR_REFERENCE_*` | Same resolver | Unified reference collector; facade remains | re-homed |
-| `PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED` | `PROCESS_IR_CAPABILITY_*` | Same resolver | Unified capability collector; facade remains | re-homed |
-| `PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` | `PROCESS_IR_SEMANTIC_*` | `validate_connector_call_semantics`, `_profile_failure`, `_check_map_pair`, `_walk_paths` | Unified flow collector; facade remains | re-homed |
-| `PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH` | `PROCESS_IR_SEMANTIC_*` | `_cardinality_failure`, `_walk_paths`, connector semantic facade | Unified flow collector; facade remains | re-homed |
+| `PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND` | `PROCESS_IR_REFERENCE_*` | `connector_resolution.py:resolve_connector_call_bindings` | `connector_resolution`/`error_handling` raises it; `flow.py` translates it into the report | delegated |
+| `PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND` | `PROCESS_IR_REFERENCE_*` | Same resolver | `connector_resolution`/`error_handling` raises it; `flow.py` translates it into the report | delegated |
+| `PROCESS_IR_REFERENCE_CONNECTION_MISMATCH` | `PROCESS_IR_REFERENCE_*` | Same resolver | `connector_resolution`/`error_handling` raises it; `flow.py` translates it into the report | delegated |
+| `PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED` | `PROCESS_IR_CAPABILITY_*` | Same resolver | `connector_resolution`/`error_handling` raises it; `flow.py` translates it into the report | delegated |
+| `PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` | `PROCESS_IR_SEMANTIC_*` | `validate_connector_call_semantics`, `_profile_failure`, `_check_map_pair`, `_walk_paths` | `connector_resolution`/`error_handling` raises it; `flow.py` translates it into the report | delegated |
+| `PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH` | `PROCESS_IR_SEMANTIC_*` | `_cardinality_failure`, `_walk_paths`, connector semantic facade | `connector_resolution`/`error_handling` raises it; `flow.py` translates it into the report | delegated |
 | `PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID` | `PROCESS_IR_COMPILE_*` | `lowering.py:_emitter_input_for` | Same lowering assertion/fallback | no |
 | `PROCESS_IR_SCHEMA_BRANCH_CARDINALITY` | `PROCESS_IR_SCHEMA_*` | Model parse translation | Same model boundary | no |
 | `PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED` | `PROCESS_IR_SEMANTIC_*` | Model continuation helper, `SequenceNodeV1._sequence_rules`, parse translation | Same local model rule | no |
-| `PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED` | `PROCESS_IR_SEMANTIC_*` | `invariants.py:check_cfg_invariants` | Unified flow collector; invariant facade remains | re-homed |
-| `PROCESS_IR_SEMANTIC_NESTING_LIMIT` | `PROCESS_IR_SEMANTIC_*` | Model whole-control walk; body walk; CFG depth check | Unified body/flow collector; existing facades remain | re-homed |
-| `PROCESS_IR_SEMANTIC_UNTERMINATED_PATH` | `PROCESS_IR_SEMANTIC_*` | `invariants.py:_check_every_control_path_terminates` | Unified flow collector; invariant helper remains | re-homed |
-| `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` | `PROCESS_IR_CAPABILITY_*` | Model/body slot validators | Accumulating body collector; model/raising facades remain | re-homed |
+| `PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED` | `PROCESS_IR_SEMANTIC_*` | `invariants.py:check_cfg_invariants` | Unchanged — `invariants.check_cfg_invariants` | no |
+| `PROCESS_IR_SEMANTIC_NESTING_LIMIT` | `PROCESS_IR_SEMANTIC_*` | Model whole-control walk; body walk; CFG depth check | Unchanged — model validators / `body_capabilities` / `invariants` | no |
+| `PROCESS_IR_SEMANTIC_UNTERMINATED_PATH` | `PROCESS_IR_SEMANTIC_*` | `invariants.py:_check_every_control_path_terminates` | `semantic_validation/flow.py` constructs it; invariant facade remains | re-homed |
+| `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` | `PROCESS_IR_CAPABILITY_*` | Model/body slot validators | Unchanged — raised by `parse_process_ir_v1`, so the payload never reaches the semantic pass | no |
 | `PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID` | `PROCESS_IR_COMPILE_*` | `invariants.py:_wiring_code`, emission-plan checks | Same plan oracle | no |
 | `PROCESS_IR_SCHEMA_RETRY_COUNT` | `PROCESS_IR_SCHEMA_*` | Model parse translation | Same model boundary | no |
-| `PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED` | `PROCESS_IR_CAPABILITY_*` | Model scope validators; body Try/Catch validators | Accumulating capability collector; facades remain | re-homed |
-| `PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION` | `PROCESS_IR_SEMANTIC_*` | `error_handling.py:validate_error_handling` | Unified effect/retry pass; facade remains | re-homed |
-| `PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE` | `PROCESS_IR_SEMANTIC_*` | Same retry validator | Same connector condition in unified retry pass | re-homed |
-| `PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING` | `PROCESS_IR_SEMANTIC_*` | `_evidence_missing`, `_require_resolvable`, retry facade | Unified retry pass; facade remains | re-homed |
-| `PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED` | `PROCESS_IR_SEMANTIC_*` | Model catch validator/translation; body walk | Unified body/terminal collector; facades remain | re-homed |
+| `PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED` | `PROCESS_IR_CAPABILITY_*` | Model scope validators; body Try/Catch validators | Unchanged — raised by `parse_process_ir_v1`, so the payload never reaches the semantic pass | no |
+| `PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION` | `PROCESS_IR_SEMANTIC_*` | `error_handling.py:validate_error_handling` | `connector_resolution`/`error_handling` raises it; `flow.py` translates it into the report | delegated |
+| `PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE` | `PROCESS_IR_SEMANTIC_*` | Same retry validator | `connector_resolution`/`error_handling` raises it; `flow.py` translates it into the report | delegated |
+| `PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING` | `PROCESS_IR_SEMANTIC_*` | `_evidence_missing`, `_require_resolvable`, retry facade | `connector_resolution`/`error_handling` raises it; `flow.py` translates it into the report | delegated |
+| `PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED` | `PROCESS_IR_SEMANTIC_*` | Model catch validator/translation; body walk | Unchanged — raised by `parse_process_ir_v1`, so the payload never reaches the semantic pass | no |
 | `PROCESS_IR_COMPILE_ERROR_REGION_INVALID` | `PROCESS_IR_COMPILE_*` | `error_handling.py` region helpers; CFG invariants | Same structural oracle; never a user semantic finding | no |
 | `PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND` | `PROCESS_IR_REFERENCE_*` | Not currently registered | Unified resolver for non-specialized component refs | new |
 | `PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH` | `PROCESS_IR_REFERENCE_*` | Not currently registered | Unified resolver for non-specialized component roles | new |
