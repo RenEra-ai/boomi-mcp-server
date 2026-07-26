@@ -128,7 +128,7 @@ an opt-in.
 
 | Site | Slice | What it gates | Policy |
 |---|---|---|---|
-| `integration_builder._process_component_preflight` | 8 | plan/apply, for `create`/`update` on process components | the config's dialect exemptions (`legacy_bridge.py`) |
+| `integration_builder._process_component_preflight` | 8 | plan/apply, for `create`/`create_clone`/`update` on process components | the config's dialect exemptions (`legacy_bridge.py`) |
 | `legacy_adapters.emission.emit_legacy_result` | 9 | the canonical `compile → emit` chain | the named dialect's registered exemptions |
 
 **Both gates apply the same policy.** An earlier draft of this table said the plan gate was

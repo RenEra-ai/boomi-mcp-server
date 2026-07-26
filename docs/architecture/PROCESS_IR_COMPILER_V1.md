@@ -845,11 +845,15 @@ reference phase reports as `…REFERENCE_COMPONENT_TYPE_MISMATCH`. A faithful re
 said "exactly" the two exemption-covered codes; that was wrong.
 
 The gate therefore runs at the two places that know their context:
+`integration_builder._process_component_preflight` (plan/apply) and
+`legacy_adapters.emission.emit_legacy_result` (the canonical `compile → emit` chain).
 
-| Site | Gates | Policy |
-|---|---|---|
-| `integration_builder._process_component_preflight` | plan/apply for authoring actions | strict |
-| `legacy_adapters.emission.emit_legacy_result` | the canonical `compile → emit` chain | the named dialect's exemptions |
+**The normative table lives in
+[PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md) §8 and is not duplicated
+here.** It was duplicated once, and the copy drifted: the sibling was corrected to say both gates
+apply the same dialect-exemption policy, while this copy went on saying the plan gate was `strict` —
+so the two documents stated opposite things about one row, and this one reproduced exactly the
+two-row contrast the sibling had been edited to remove. One authoritative table, referenced.
 
 `emit_legacy_result(result, *, resolver=None, dialect=None)` — with `dialect=None` the gate is
 SKIPPED, not run strictly. Running strictly with exemptions unavailable is the same mismatch that
