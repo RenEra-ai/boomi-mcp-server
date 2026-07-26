@@ -85,6 +85,22 @@ Show me my Boomi account information from the production profile
              └──────────────┘
 ```
 
+### Watch: one request, end to end
+
+The diagram above is the deployment topology. For the **code path** — what
+actually happens between an MCP client calling `query_components` and Boomi
+answering — this walkthrough follows a single request across the four
+boundaries, explaining the Python where the trace reaches it.
+
+[![Boomi MCP Server — One Request, End to End](.github/assets/video-cover.jpg)](https://youtu.be/swJC-PA5JnA)
+
+14 minutes. Covers the conditional import that gates tool registration,
+`@mcp.tool` running at import time, the synchronous wrapper on AnyIO's worker
+thread, `json.loads` at the trust boundary, credential resolution through
+`get_secret`, and `**params` into the action router.
+
+> Line numbers shown in the video refer to `main` at the time of recording.
+
 ---
 
 ## Available MCP Tools
