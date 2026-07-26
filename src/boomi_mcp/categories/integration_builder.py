@@ -5527,7 +5527,61 @@ def _process_component_preflight(
                     raw_config, components_by_key
                 )
 
+    # --- #143 M12.8: unified ProcessIR semantic validation ------------------
+    # Runs LAST, and only when every legacy check above passed. The ordering is
+    # load-bearing, not stylistic: existing public error codes must keep
+    # winning, so a payload that fails a legacy check still reports the legacy
+    # code it has always reported. This gate can only ADD a rejection the legacy
+    # path missed — it can never rename one the legacy path already made.
+    #
+    # Gated to the AUTHORING actions for the same reason validate_config is: a
+    # reuse / reference step emits no process XML, so validating it would newly
+    # reject payloads that plan clean today.
+    if (
+        process_flow_err is None
+        and comp.type == "process"
+        and planned_action in ("create", "create_clone", "update")
+    ):
+        process_flow_err = _process_ir_semantic_error(process_kind, raw_config)
+
     return process_flow_err
+
+
+def _process_ir_semantic_error(
+    process_kind: str, raw_config: Dict[str, Any]
+) -> Optional[BuilderValidationError]:
+    """The first blocking ProcessIR semantic finding, as a builder error.
+
+    Returns ``None`` for a dialect that is not migrated to ProcessIR, for a
+    config that cannot be projected, and for a report with no errors. Warnings
+    and advisories deliberately do not block — only ``report.errors`` does.
+
+    The message carries the stable CODE and the authored JSON pointer and
+    nothing else. Findings are value-free by construction (#143's redaction
+    boundary), so there is no authored text available to interpolate even if a
+    future edit wanted to.
+    """
+    from ..compiler.process_ir.semantic_validation.legacy_bridge import (
+        validate_legacy_process_config,
+    )
+
+    report = validate_legacy_process_config(process_kind, raw_config)
+    if report is None or not report.errors:
+        return None
+
+    first = report.errors[0]
+    return BuilderValidationError(
+        "ProcessIR semantic validation rejected this process at {0}.".format(
+            first.path or "<root>"
+        ),
+        error_code=first.code,
+        field="config",
+        hint=first.remediation,
+        details={
+            "codes": [item.code for item in report.errors],
+            "path": first.path,
+        },
+    )
 
 
 def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:

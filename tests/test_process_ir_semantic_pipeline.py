@@ -316,9 +316,13 @@ def test_a_sentinel_value_never_reaches_the_serialized_report():
 # ---------------------------------------------------------------------------
 
 
-def test_the_package_is_still_wired_to_nothing_in_production():
-    """Slice 6 must remain dark. Proven by searching the tree, because
-    'nothing imports it' is a claim no single assertion can support."""
+def test_the_package_is_wired_at_exactly_one_production_site():
+    """Slice 8 ends the darkness — deliberately, and at ONE place.
+
+    Kept as a search rather than deleted: the value was never "it is dark", it
+    was "we know every place it is reached from". A second call site appearing
+    silently is exactly what this now catches.
+    """
     result = subprocess.run(
         [
             "grep",
@@ -333,4 +337,7 @@ def test_the_package_is_still_wired_to_nothing_in_production():
         capture_output=True,
         text=True,
     )
-    assert result.stdout.strip() == "", result.stdout
+    reached = sorted(
+        Path(line).name for line in result.stdout.split() if line.strip()
+    )
+    assert reached == ["integration_builder.py"], reached
