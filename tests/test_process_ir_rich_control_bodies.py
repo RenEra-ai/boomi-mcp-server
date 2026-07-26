@@ -1207,3 +1207,45 @@ def test_control_wiring_code_does_not_depend_on_which_field_was_corrupted():
     with pytest.raises(ProcessIRCompileError) as excinfo:
         check_emission_plan_invariants(broken, cfg, table)
     assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID
+
+
+def test_the_compiler_gate_catches_a_connector_APPENDED_to_a_process_call_body():
+    """``ProcessIRV1`` is exported AND mutable.
+
+    A caller can validate a legal ProcessCall-only leg, append a connector call
+    to it, and hand the model to the compiler — so the compiler gate must look at
+    the CURRENT body, not only at ancestors. Trusting the model's own path-mode
+    invariant is what made the "independent enforcement point" not independent.
+    """
+    from boomi_mcp.compiler.process_ir.body_capabilities import validate_body_capabilities
+
+    ir = parse_process_ir_v1(PROCESS_CALL_BRANCH_DOC)          # legal when parsed
+    leg = ir.body.steps[0].legs[0]
+    leg.steps.append(ir_module.ConnectorCallNodeV1(            # ...then mutated
+        kind="connector_call", operation_ref="op_rest_get"
+    ))
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        validate_body_capabilities(ir)
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+
+
+def test_control_wiring_code_is_independent_of_the_corrupted_TARGET_value():
+    """Corrupting a control target to a NONEXISTENT shape must classify the same
+    as corrupting it to another real one — the code follows the node kind, not
+    the value that happened to be written."""
+    from boomi_mcp.compiler.process_ir.invariants import check_emission_plan_invariants
+    from boomi_mcp.errors import PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID
+
+    (cfg, plan), table = compile_doc(BRANCH_MIXED_DOC)
+    i = next(i for i, n in enumerate(plan.nodes) if n.emitter_input.emitter_kind == "branch")
+    branch = plan.nodes[i]
+    for bogus in ("shape999", plan.nodes[-1].shape_id):
+        wires = list(branch.outgoing)
+        wires[0] = wires[0].model_copy(update={"to_shape_id": bogus})
+        nodes = list(plan.nodes)
+        nodes[i] = branch.model_copy(update={"outgoing": tuple(wires)})
+        with pytest.raises(ProcessIRCompileError) as excinfo:
+            check_emission_plan_invariants(
+                plan.model_copy(update={"nodes": tuple(nodes)}), cfg, table
+            )
+        assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID, bogus

@@ -99,6 +99,19 @@ _RESOLVED_ID_FIELDS = (
 )
 
 
+def _wiring_code(node, cfg_by_id) -> str:
+    """The wiring code for a plan node: control-specific when the node IS a control.
+
+    Stated once. Repeating the ternary at each raise site is how the diagnostic
+    ends up depending on WHICH field happened to be corrupted rather than on what
+    kind of node it is.
+    """
+    if node.origin == "ir" and node.cfg_node_id in cfg_by_id:
+        if cfg_by_id[node.cfg_node_id].semantic.semantic_kind in _CONTROL_KINDS:
+            return PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID
+    return PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+
+
 def _fail(code: str, phase: str, path: str, message: str, node_id: Optional[str] = None):
     return raise_compile_error(
         code, phase, path, internal_node_id=node_id, message=message
@@ -1010,10 +1023,7 @@ def check_emission_plan_invariants(
                     # would always win the race and the control-wiring code
                     # would only ever report label/geometry defects.
                     raise _fail(
-                        PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID
-                        if cfg_by_id[node.cfg_node_id].semantic.semantic_kind
-                        in _CONTROL_KINDS
-                        else PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                        _wiring_code(node, cfg_by_id),
                         _PLAN_PHASE,
                         path,
                         "plan transitions do not match the node's ordered CFG edges",
@@ -1057,8 +1067,12 @@ def check_emission_plan_invariants(
                 )
         for transition in transitions:
             if transition.to_shape_id not in by_shape:
+                # Control-aware too: otherwise corrupting a control target to an
+                # EXISTING shape gave the control code while corrupting it to a
+                # nonexistent one gave the generic code — the diagnostic would
+                # depend on the corrupted value rather than the node kind.
                 raise _fail(
-                    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                    _wiring_code(node, cfg_by_id),
                     _PLAN_PHASE,
                     path,
                     "transition targets a shape that does not exist",
@@ -1101,11 +1115,7 @@ def check_emission_plan_invariants(
                     # above returned the control code, while corrupting only
                     # ``to_shape_id`` fell through to the generic one.
                     raise _fail(
-                        PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID
-                        if node.origin == "ir"
-                        and cfg_by_id[node.cfg_node_id].semantic.semantic_kind
-                        in _CONTROL_KINDS
-                        else PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                        _wiring_code(node, cfg_by_id),
                         _PLAN_PHASE,
                         path,
                         "transition target does not match its CFG edge target",

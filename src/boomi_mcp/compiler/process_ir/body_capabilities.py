@@ -129,7 +129,16 @@ def _walk_body(
     connector_above: bool,
 ) -> None:
     kinds = [getattr(step, "kind", None) for step in steps]
-    if "process_call" in kinds and connector_above:
+    # THIS body's own connectors count too, not just an ancestor's. The model
+    # path-mode rule already forbids a mixed body, but ``ProcessIRV1`` is exported
+    # AND mutable: a caller can validate a legal process-call leg, append a
+    # connector call, and hand the model straight to the compiler. An
+    # "independent enforcement point" that trusts the model's own invariant is
+    # not independent.
+    connector_in_body = any(k in _CONNECTOR_KINDS for k in kinds) or (
+        getattr(terminal, "kind", None) in _CONNECTOR_KINDS
+    )
+    if "process_call" in kinds and (connector_above or connector_in_body):
         # ``process_call_connector_mixing`` is gated PER ROOT-TO-LEAF PATH.
         # ``models.process_ir`` states this too, but only from
         # ``parse_process_ir_v1`` — and ``ProcessIRV1`` is EXPORTED, so a caller
@@ -149,12 +158,7 @@ def _walk_body(
         _check(context, STEP_SLOT, step, _join(path, "steps", index))
     terminal_path = _join(path, "terminal")
     _check(context, TERMINAL_SLOT, terminal, terminal_path)
-    connector_here = (
-        connector_above
-        or any(k in _CONNECTOR_KINDS for k in kinds)
-        or getattr(terminal, "kind", None) in _CONNECTOR_KINDS
-    )
-    _walk_control(terminal, terminal_path, depth, connector_here)
+    _walk_control(terminal, terminal_path, depth, connector_above or connector_in_body)
 
 
 def _walk_control(node: Any, path: str, depth: int, connector_above: bool = False) -> None:
