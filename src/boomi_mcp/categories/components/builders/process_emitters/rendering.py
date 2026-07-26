@@ -98,10 +98,13 @@ def _dragpoint_x(shape_index: int) -> float:
 class RenderTransition:
     """One outgoing wire (a ``<dragpoint>``), with its exact resolved fields.
 
-    ``identifier``/``text`` are set only for Branch and Decision (and the
-    legacy-only catcherrors), which label their dragpoints; ``None`` for a plain
-    linear edge. The legacy adapters compute these from the shape geometry; the
-    ProcessIR registry reads them verbatim from an ``EmissionTransitionV1``.
+    ``identifier``/``text`` are set only for Branch, Decision and catcherrors,
+    which label their dragpoints; ``None`` for a plain linear edge. All three are
+    driven by both callers since #142 — catcherrors stopped being legacy-only
+    when scoped Try/Catch became a compiled ProcessIR construct.
+
+    The legacy adapters compute these from the shape geometry; the ProcessIR
+    registry reads them verbatim from an ``EmissionTransitionV1``.
     """
 
     dragpoint_name: str

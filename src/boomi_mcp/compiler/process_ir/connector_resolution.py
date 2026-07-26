@@ -599,33 +599,41 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
             # into leg 2.
             child = state if position == len(successors) - 1 else state.copy()
             if edge.kind == "catch":
-                # #142. A recovery path forks from the state at SCOPE ENTRY, not
-                # from wherever the protected path got to. Two consequences, both
-                # required:
+                # #142. A recovery path forks from the state at SCOPE ENTRY —
+                # which is ALREADY what this child holds, and that is the whole
+                # reason nothing here clears the producer binding.
                 #
-                # * whatever the protected path did to the document is NOT
-                #   carried across. A Set Properties inside the try body has not
-                #   necessarily run — that is exactly the failure being caught —
-                #   so a catch body may not be validated as though it had. The
-                #   copy above already snapshots at push time; this clears the
-                #   parts that describe protected-path progress.
-                # * a caught document EXISTS on this path even when nothing
-                #   upstream produced one, because the platform hands the failed
-                #   document to the recovery path. Live evidence: a retried
-                #   process routed one error document to its catch leg
-                #   (docs/archive/2026-06-19-issue-91-capstone-recipe-evidence.md).
+                # The DFS pushes both children from the state at the ``try_catch``
+                # node itself; the protected path's own mutations happen while
+                # walking the TRY subtree, a separate branch of the search that
+                # this child never passes through. So a Set Properties inside the
+                # try body cannot leak here structurally, without being erased.
                 #
-                # ``saw_call`` stays TRUE so an UNBRACKETED map in a catch body
-                # fails closed through the existing "a call ran upstream but is
-                # not this map's immediate predecessor" rule, rather than being
-                # silently skipped as a pure-legacy map would be.
+                # Erasing it anyway would be actively wrong. For a CONNECTOR
+                # scope the upstream call's binding IS the scope-entry binding:
+                # the document handed to the recovery path is the one that
+                # entered the protected path, i.e. that call's output. Clearing
+                # it rejected a legitimate `upstream call -> catch map ->
+                # downstream call` flow whose profiles lined up exactly. Left
+                # alone, the graph answers correctly on its own: a connector
+                # scope keeps its upstream binding, and a PROCESS scope has no
+                # upstream producer, so a catch map there still fails closed with
+                # nothing to compare against — exactly the split the design asks
+                # for, with no scope check needed here.
+                #
+                # Only one fact must be ADDED: a caught document exists on this
+                # path even when nothing upstream produced one, because the
+                # platform hands the failed document to the recovery path (live
+                # evidence: a retried process routed one error document to its
+                # catch leg — docs/archive/2026-06-19-issue-91-capstone-recipe-evidence.md).
+                # ``saw_call`` additionally keeps an UNBRACKETED catch map failing
+                # closed through the existing "a call ran upstream but is not this
+                # map's immediate predecessor" rule, rather than being silently
+                # skipped the way a pure-legacy map is.
                 child = child.copy()
-                child.pending_map = None
-                child.map_upstream = None
-                child.producer_binding = None
-                child.blocked_by = None
-                child.producer = node
                 child.saw_call = True
+                if child.producer is None:
+                    child.producer = node
             stack.append((edge.target_node_id, child))
 
 

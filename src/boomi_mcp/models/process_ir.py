@@ -1862,11 +1862,19 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
         # `message` carrying a stray `backoff` has `try_catch` in its loc as an
         # ancestor, and would then be told to consult the capability manifest
         # about a field that is simply an unknown field on a Message.
+        #
+        # ``retry`` is an owner too, and NOT an afterthought: the natural way to
+        # ask for a backoff is ``retry: {"count": 1, "backoff": 10}``, whose
+        # owner is the retry policy object rather than the handler. Recognising
+        # only the handler would send the single most likely authoring attempt to
+        # the generic unknown-field code, which is precisely the path that most
+        # needs to name the capability gate. ``retry`` is unambiguous here — it
+        # exists only as a Try/Catch's policy object.
         if (
             isinstance(last, str)
             and last in _GATED_TRY_CATCH_EXTRA_KEYS
             and len(loc) >= 2
-            and loc[-2] in ("try_catch", "connector_call")
+            and loc[-2] in ("try_catch", "connector_call", "retry")
         ):
             return _diagnostic(
                 PROCESS_IR_CAPABILITY_UNSUPPORTED,

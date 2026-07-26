@@ -219,7 +219,11 @@ Both placements are re-checked independently of the parsed model in `body_capabi
 The asymmetry is deliberate: an `exception` raised inside a protected path would be caught by that
 same path's own handler and no evidence covers the loop, while a staging `cache_put` is a recovery
 shape rather than a success one. `catch_body` is **mandatory and must terminate** — a caught document
-that reaches no terminal is one the process silently drops.
+that reaches no terminal is one the process silently drops. For the same reason a catch body whose
+terminal is a bare `stop` must contain at least one step: a catch that only stops swallows the
+document, that shape is unattested, and the rule reuses the helper #141 applies to a Branch leg for
+the same fail-closed-on-unproven reason. A bare `exception` or staging `cache_put` terminal needs no
+steps — both do something on their own.
 
 **Retry.** `retry.count` is an integer `0..5`, and that bound is the platform's own: the Try/Catch
 step documents exactly that range together with a fixed wait schedule — `0` none, `1` immediate,

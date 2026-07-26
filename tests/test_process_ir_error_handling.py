@@ -48,7 +48,11 @@ from boomi_mcp.errors import (
     PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE,
     PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION,
 )
-from boomi_mcp.models.process_ir import ProcessIRValidationError, parse_process_ir_v1
+from boomi_mcp.models.process_ir import (
+    _GATED_TRY_CATCH_EXTRA_KEYS,
+    ProcessIRValidationError,
+    parse_process_ir_v1,
+)
 
 REST = CC.REST_FAMILY
 DB = CC.DATABASE_FAMILY
@@ -830,15 +834,36 @@ def test_a_catch_body_does_not_inherit_try_path_property_state():
     assert set_prop.node_id not in region.catch_node_ids
 
 
-def test_a_documents_required_call_is_allowed_on_the_catch_path():
+@pytest.mark.parametrize("builder", [_connector_scope, _process_scope])
+def test_a_documents_required_call_is_allowed_on_the_catch_path(builder):
     # The caught document is present on the recovery path even though nothing on
     # THAT path produced it (live evidence: a retried process routed one error
     # document to its catch leg).
-    doc = _connector_scope(
+    #
+    # PROCESS scope is the load-bearing case: it has no upstream producer at all,
+    # so the synthesized "a caught document exists" fact is the only thing making
+    # this compile. Covering only the connector scope would leave that fact
+    # untested, since there the upstream call already supplies a producer.
+    doc = builder(
         catch_steps=[{"kind": "connector_call", "operation_ref": "$ref:DBSEND"}],
         catch_terminal={"kind": "stop"},
     )
     _compile(doc)
+
+
+def test_work_after_a_non_producing_send_is_still_blocked_on_the_catch_path():
+    # The Send gate must survive the catch fork: a call that returns no documents
+    # is still terminal on the recovery path.
+    diag = _compile_error(
+        _connector_scope(
+            catch_steps=[
+                {"kind": "connector_call", "operation_ref": "$ref:DBSEND"},
+                {"kind": "message", "text": "after"},
+            ],
+            catch_terminal={"kind": "stop"},
+        )
+    )
+    assert diag.code == "PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH"
 
 
 # ---------------------------------------------------------------------------
@@ -1211,3 +1236,129 @@ def test_region_escape_reports_the_same_code_at_every_depth(fragment):
 # PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW on a real escaping Branch subtree. That is a
 # stronger guard than inspecting this function's default argument, so nothing is
 # re-asserted here.
+
+
+# ---------------------------------------------------------------------------
+# Architect review round 1 — plan-fidelity gaps
+# ---------------------------------------------------------------------------
+
+
+def _catch_map_symbols():
+    """Profiles that line up exactly across a connector-scoped catch map."""
+    return _symbols(
+        ComponentSymbolV1(
+            ref="$ref:MAP",
+            component_id="map-1",
+            component_type="transform.map",
+            input_profile_ref="$ref:P1",
+            output_profile_ref="$ref:P1D",
+        ),
+        ComponentSymbolV1(
+            ref="$ref:BADMAP",
+            component_id="map-2",
+            component_type="transform.map",
+            input_profile_ref="$ref:P2",
+            output_profile_ref="$ref:P1D",
+        ),
+        ComponentSymbolV1(ref="$ref:P1D", component_id="prof-1d", component_type="profile.db"),
+        ComponentSymbolV1(
+            ref="$ref:DBSEND2",
+            component_id="op-db-send2",
+            component_type="connector-action",
+            connector_type=DB,
+            action_type="Send",
+            connection_ref="$ref:DBCONN",
+            input_profile_ref="$ref:P1D",
+        ),
+    )
+
+
+def _catch_map_doc(map_ref, scope_builder):
+    return scope_builder(
+        catch_steps=[
+            {"kind": "map_ref", "map_ref": map_ref},
+            {"kind": "connector_call", "operation_ref": "$ref:DBSEND2"},
+        ],
+        catch_terminal={"kind": "stop"},
+    )
+
+
+def test_a_connector_scoped_catch_map_is_bracketed_against_the_scope_entry_call():
+    """The caught document IS the upstream call's output, so the map has a pair.
+
+    The first cut erased the producer binding on every catch edge, which rejected
+    this entirely-valid flow. The erasure was also unnecessary: the DFS pushes
+    both children from the state AT the handler, and the protected path's
+    mutations happen in a separate branch of the walk — so scope-entry state is
+    what this child already holds.
+    """
+    _compile(_catch_map_doc("$ref:MAP", _connector_scope), _catch_map_symbols())
+
+
+def test_a_connector_scoped_catch_map_with_wrong_profiles_is_still_rejected():
+    """The paired negative: preserving the binding must not disable the check."""
+    diag = _compile_error(
+        _catch_map_doc("$ref:BADMAP", _connector_scope), _catch_map_symbols()
+    )
+    assert diag.code == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
+
+
+def test_a_process_scoped_catch_map_still_fails_closed():
+    """A process scope has no upstream producer, so there is nothing to compare
+    the map against — and 'nothing to compare' must never read as 'compares
+    equal'. No scope check is needed for this: the graph answers on its own."""
+    diag = _compile_error(
+        _catch_map_doc("$ref:MAP", _process_scope), _catch_map_symbols()
+    )
+    assert diag.code == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
+
+
+@pytest.mark.parametrize("key", sorted(_GATED_TRY_CATCH_EXTRA_KEYS))
+def test_a_gated_key_on_the_retry_policy_reports_the_capability_gate(key):
+    """The NATURAL spelling of a backoff request — and every sibling key.
+
+    ``retry: {"count": 1, "backoff": 10}`` has ``retry`` as its immediate owner,
+    not the handler — so recognising only the handler sent the single most likely
+    authoring attempt to the generic unknown-field code, which is exactly the
+    path that most needs to name the gate.
+
+    Parametrized over the WHOLE gated set rather than just the two retry-shaped
+    names, because that is what the owner rule actually does: `retry` gates all
+    ten, exactly as `try_catch` and `connector_call` already do. Pinning only
+    `backoff`/`retry_backoff` would have described the intent while leaving the
+    real behaviour untested — and a test that under-describes what ships is how a
+    later reader concludes the other eight are unhandled.
+    """
+    codes = _parse_codes(_process_scope(retry={"count": 1, key: "x"}))
+    assert codes == [
+        (PROCESS_IR_CAPABILITY_UNSUPPORTED, "/body/steps/0/retry/{0}".format(key))
+    ]
+
+
+def test_an_ordinary_typo_on_the_retry_policy_is_still_an_unknown_field():
+    """The paired positive: adding ``retry`` as an owner must not turn every
+    stray key on the policy object into a capability diagnostic."""
+    codes = _parse_codes(_process_scope(retry={"count": 1, "wibble": 10}))
+    assert codes == [
+        ("PROCESS_IR_SCHEMA_UNKNOWN_FIELD", "/body/steps/0/retry/wibble")
+    ]
+
+
+def test_a_bare_stop_catch_is_refused_but_a_bare_exception_or_cache_sink_is_not():
+    """Deviation 9, pinned.
+
+    The architect plan says "Catch may be a bare terminal". That holds for the
+    two terminals that DO something on their own; only the do-nothing case is
+    refused, because a catch that merely stops swallows the caught document and
+    no capture attests that shape.
+    """
+    assert _parse_codes(
+        _connector_scope(catch_steps=[], catch_terminal={"kind": "stop"})
+    )
+    _compile(_connector_scope(catch_steps=[], catch_terminal=dict(EXCEPTION_TERMINAL)))
+    _compile(
+        _connector_scope(
+            catch_steps=[],
+            catch_terminal={"kind": "cache_put", "cache_ref": "$ref:CACHE"},
+        )
+    )
