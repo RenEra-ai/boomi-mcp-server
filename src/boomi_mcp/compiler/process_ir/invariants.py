@@ -1031,8 +1031,11 @@ def check_emission_plan_invariants(
                 # Otherwise a malformed plan could relabel an ordinary wire as
                 # synthetic and skip CFG correspondence entirely.
                 if any(item.provenance != "cfg_edge" for item in transitions):
+                    # Transition ROLE is a control-wiring defect too when the
+                    # node is a control — the plan lists role alongside count,
+                    # order and target.
                     raise _fail(
-                        PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                        _wiring_code(node, cfg_by_id),
                         _PLAN_PHASE,
                         path,
                         "only Start and routed-target wires may be synthetic",

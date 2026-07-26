@@ -127,6 +127,7 @@ def _walk_body(
     path: str,
     depth: int,
     connector_above: bool,
+    process_call_above: bool = False,
 ) -> None:
     kinds = [getattr(step, "kind", None) for step in steps]
     # THIS body's own connectors count too, not just an ancestor's. The model
@@ -138,6 +139,25 @@ def _walk_body(
     connector_in_body = any(k in _CONNECTOR_KINDS for k in kinds) or (
         getattr(terminal, "kind", None) in _CONNECTOR_KINDS
     )
+    # The rule is SYMMETRIC — "these two may not share a path" — so both
+    # directions must propagate. Carrying only the connector direction caught
+    # `connector -> ... -> process_call` but not `process_call -> ... ->
+    # connector`, which a mutable model can express just as easily.
+    connector_index = next(
+        (i for i, k in enumerate(kinds) if k in _CONNECTOR_KINDS), None
+    )
+    if process_call_above and (connector_index is not None or
+                               getattr(terminal, "kind", None) in _CONNECTOR_KINDS):
+        raise raise_compile_error(
+            PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+            _SEMANTIC_PHASE,
+            _join(path, "steps", connector_index) if connector_index is not None
+            else _join(path, "terminal"),
+            message=(
+                "a connector step may not share a root-to-leaf path with a process_call "
+                "(process_call_connector_mixing is gated)"
+            ),
+        )
     if "process_call" in kinds and (connector_above or connector_in_body):
         # ``process_call_connector_mixing`` is gated PER ROOT-TO-LEAF PATH.
         # ``models.process_ir`` states this too, but only from
@@ -158,10 +178,22 @@ def _walk_body(
         _check(context, STEP_SLOT, step, _join(path, "steps", index))
     terminal_path = _join(path, "terminal")
     _check(context, TERMINAL_SLOT, terminal, terminal_path)
-    _walk_control(terminal, terminal_path, depth, connector_above or connector_in_body)
+    _walk_control(
+        terminal,
+        terminal_path,
+        depth,
+        connector_above or connector_in_body,
+        process_call_above or "process_call" in kinds,
+    )
 
 
-def _walk_control(node: Any, path: str, depth: int, connector_above: bool = False) -> None:
+def _walk_control(
+    node: Any,
+    path: str,
+    depth: int,
+    connector_above: bool = False,
+    process_call_above: bool = False,
+) -> None:
     """Recurse into a control node, counting depth as we go.
 
     ``depth`` is the number of control nodes ALREADY entered on this root-to-leaf
@@ -191,6 +223,7 @@ def _walk_control(node: Any, path: str, depth: int, connector_above: bool = Fals
                 _join(path, "legs", leg_index),
                 depth,
                 connector_above,
+                process_call_above,
             )
         return
     _walk_body(
@@ -200,6 +233,7 @@ def _walk_control(node: Any, path: str, depth: int, connector_above: bool = Fals
         _join(path, "true_arm"),
         depth,
         connector_above,
+        process_call_above,
     )
     _walk_body(
         list(node.false_arm.steps),
@@ -208,6 +242,7 @@ def _walk_control(node: Any, path: str, depth: int, connector_above: bool = Fals
         _join(path, "false_arm"),
         depth,
         connector_above,
+        process_call_above,
     )
 
 
@@ -223,7 +258,13 @@ def validate_body_capabilities(ir: ProcessIRV1) -> None:
     root_kinds = [getattr(step, "kind", None) for step in ir.body.steps]
     connector_at_root = any(k in _CONNECTOR_KINDS for k in root_kinds)
     for index, step in enumerate(ir.body.steps):
-        _walk_control(step, _join("/body", "steps", index), 0, connector_at_root)
+        _walk_control(
+            step,
+            _join("/body", "steps", index),
+            0,
+            connector_at_root,
+            "process_call" in root_kinds,
+        )
 
 
 def registry_kinds() -> Dict[Tuple[str, str], FrozenSet[str]]:

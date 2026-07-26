@@ -1249,3 +1249,45 @@ def test_control_wiring_code_is_independent_of_the_corrupted_TARGET_value():
                 plan.model_copy(update={"nodes": tuple(nodes)}), cfg, table
             )
         assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID, bogus
+
+
+def test_the_mixing_gate_propagates_in_BOTH_directions():
+    """The rule is symmetric: "these two may not share a path".
+
+    Carrying only the connector direction caught `connector -> ... -> process_call`
+    but not `process_call -> ... -> connector`, which a mutable model expresses
+    just as easily.
+    """
+    from boomi_mcp.compiler.process_ir.body_capabilities import validate_body_capabilities
+
+    ir = parse_process_ir_v1(PROCESS_CALL_BRANCH_DOC)
+    leg = ir.body.steps[0].legs[0]
+    # process_call above -> nested decision -> connector_call below
+    leg.terminal = ir_module.DecisionNodeV1.model_validate({
+        "kind": "decision", "comparison": "equals",
+        "left": {"value_type": "static", "static_value": "a"},
+        "right": {"value_type": "static", "static_value": "b"},
+        "true_arm": {"steps": [{"kind": "connector_call", "operation_ref": "op_rest_get"}],
+                     "terminal": {"kind": "stop"}},
+        "false_arm": {"steps": [], "terminal": {"kind": "stop"}},
+    })
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        validate_body_capabilities(ir)
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+
+
+def test_control_wiring_code_covers_transition_ROLE_corruption():
+    """The plan lists role alongside count, order and target."""
+    from boomi_mcp.compiler.process_ir.invariants import check_emission_plan_invariants
+    from boomi_mcp.errors import PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID
+
+    (cfg, plan), table = compile_doc(BRANCH_MIXED_DOC)
+    i = next(i for i, n in enumerate(plan.nodes) if n.emitter_input.emitter_kind == "branch")
+    branch = plan.nodes[i]
+    wires = list(branch.outgoing)
+    wires[0] = wires[0].model_copy(update={"provenance": "synthetic", "cfg_edge_id": None})
+    nodes = list(plan.nodes)
+    nodes[i] = branch.model_copy(update={"outgoing": tuple(wires)})
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        check_emission_plan_invariants(plan.model_copy(update={"nodes": tuple(nodes)}), cfg, table)
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID
