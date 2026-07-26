@@ -1150,3 +1150,60 @@ def test_the_committed_decision_fixture_matches_the_compiled_document():
     assert json.loads(
         (_FIXTURES / "decision_nested_bare_false_stop.json").read_text()
     ) == DECISION_NESTED_DOC
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 4 (repo gate) — both public entry points, both fields
+# ---------------------------------------------------------------------------
+
+
+def test_the_mixing_gate_holds_on_the_COMPILER_entry_point_too():
+    """``ProcessIRV1`` is exported, so a caller can skip ``parse_process_ir_v1``.
+
+    Moving the check into the parser (for a precise pointer) left the compiler
+    path unguarded — a gate that only one of two public entry points enforces is
+    not a gate. Both now hold, from two independent walks.
+    """
+    from boomi_mcp.models.process_ir import ProcessIRV1
+
+    PC = {"kind": "process_call", "process_ref": "child_process"}
+    MSG = {"kind": "message", "text": "m"}
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "legs": [
+            {"steps": [call("op_rest_get", action="GET")],
+             "terminal": _dec({"steps": [PC], "terminal": {"kind": "stop"}},
+                              {"steps": [], "terminal": {"kind": "stop"}})},
+            {"steps": [MSG], "terminal": {"kind": "stop"}},
+        ]},
+    ]}}
+    # Bypass the parser entirely.
+    ir = ProcessIRV1.model_validate(doc)
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        compile_process_ir_v1(ir, rich_symbols())
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+    # ...and the parser still gives its precise diagnostic.
+    with pytest.raises(ProcessIRValidationError):
+        parse_process_ir_v1(doc)
+
+
+def test_control_wiring_code_does_not_depend_on_which_field_was_corrupted():
+    """Corrupting only ``to_shape_id`` used to fall through to the generic code."""
+    from boomi_mcp.compiler.process_ir.contracts import EmissionPlanV1
+    from boomi_mcp.compiler.process_ir.invariants import check_emission_plan_invariants
+    from boomi_mcp.errors import PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID
+
+    (cfg, plan), table = compile_doc(BRANCH_MIXED_DOC)
+    branch_index = next(
+        i for i, n in enumerate(plan.nodes) if n.emitter_input.emitter_kind == "branch"
+    )
+    branch = plan.nodes[branch_index]
+    # Keep the cfg_edge_id sequence intact; corrupt ONLY the target.
+    wires = list(branch.outgoing)
+    wires[0] = wires[0].model_copy(update={"to_shape_id": wires[1].to_shape_id})
+    nodes = list(plan.nodes)
+    nodes[branch_index] = branch.model_copy(update={"outgoing": tuple(wires)})
+    broken = plan.model_copy(update={"nodes": tuple(nodes)})
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        check_emission_plan_invariants(broken, cfg, table)
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID

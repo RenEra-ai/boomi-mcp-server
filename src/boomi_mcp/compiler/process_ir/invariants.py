@@ -1095,8 +1095,17 @@ def check_emission_plan_invariants(
                 if transition.to_shape_id != shape_for_cfg_node.get(
                     edge.target_node_id
                 ):
+                    # #141: a control node's mis-targeted transition is control
+                    # wiring too. Without this the promised diagnostic depended
+                    # on WHICH field was corrupted — the edge-id sequence check
+                    # above returned the control code, while corrupting only
+                    # ``to_shape_id`` fell through to the generic one.
                     raise _fail(
-                        PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                        PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID
+                        if node.origin == "ir"
+                        and cfg_by_id[node.cfg_node_id].semantic.semantic_kind
+                        in _CONTROL_KINDS
+                        else PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
                         _PLAN_PHASE,
                         path,
                         "transition target does not match its CFG edge target",

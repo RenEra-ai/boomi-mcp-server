@@ -39,6 +39,7 @@ from ...errors import (
     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
 )
 from ...models.process_ir import (
+    _CONNECTOR_KINDS,
     LINEAR_BODY_KINDS,
     PROCESS_IR_V1_MAX_CONTROL_DEPTH,
     ProcessIRV1,
@@ -119,15 +120,44 @@ def _join(base: str, *parts: Any) -> str:
     return out
 
 
-def _walk_body(steps: List[Any], terminal: Any, context: str, path: str, depth: int) -> None:
+def _walk_body(
+    steps: List[Any],
+    terminal: Any,
+    context: str,
+    path: str,
+    depth: int,
+    connector_above: bool,
+) -> None:
+    kinds = [getattr(step, "kind", None) for step in steps]
+    if "process_call" in kinds and connector_above:
+        # ``process_call_connector_mixing`` is gated PER ROOT-TO-LEAF PATH.
+        # ``models.process_ir`` states this too, but only from
+        # ``parse_process_ir_v1`` — and ``ProcessIRV1`` is EXPORTED, so a caller
+        # can build one with ``model_validate`` and hand it straight to the
+        # compiler. A gate that only one of two public entry points enforces is
+        # not a gate.
+        raise raise_compile_error(
+            PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+            _SEMANTIC_PHASE,
+            _join(path, "steps", kinds.index("process_call")),
+            message=(
+                "a process_call may not share a root-to-leaf path with a connector step "
+                "(process_call_connector_mixing is gated)"
+            ),
+        )
     for index, step in enumerate(steps):
         _check(context, STEP_SLOT, step, _join(path, "steps", index))
     terminal_path = _join(path, "terminal")
     _check(context, TERMINAL_SLOT, terminal, terminal_path)
-    _walk_control(terminal, terminal_path, depth)
+    connector_here = (
+        connector_above
+        or any(k in _CONNECTOR_KINDS for k in kinds)
+        or getattr(terminal, "kind", None) in _CONNECTOR_KINDS
+    )
+    _walk_control(terminal, terminal_path, depth, connector_here)
 
 
-def _walk_control(node: Any, path: str, depth: int) -> None:
+def _walk_control(node: Any, path: str, depth: int, connector_above: bool = False) -> None:
     """Recurse into a control node, counting depth as we go.
 
     ``depth`` is the number of control nodes ALREADY entered on this root-to-leaf
@@ -156,6 +186,7 @@ def _walk_control(node: Any, path: str, depth: int) -> None:
                 BRANCH_LEG,
                 _join(path, "legs", leg_index),
                 depth,
+                connector_above,
             )
         return
     _walk_body(
@@ -164,6 +195,7 @@ def _walk_control(node: Any, path: str, depth: int) -> None:
         DECISION_TRUE_ARM,
         _join(path, "true_arm"),
         depth,
+        connector_above,
     )
     _walk_body(
         list(node.false_arm.steps),
@@ -171,6 +203,7 @@ def _walk_control(node: Any, path: str, depth: int) -> None:
         DECISION_FALSE_ARM,
         _join(path, "false_arm"),
         depth,
+        connector_above,
     )
 
 
@@ -183,8 +216,10 @@ def validate_body_capabilities(ir: ProcessIRV1) -> None:
     A document with no control node walks zero bodies and returns immediately,
     so no pre-#141 dialect changes behaviour.
     """
+    root_kinds = [getattr(step, "kind", None) for step in ir.body.steps]
+    connector_at_root = any(k in _CONNECTOR_KINDS for k in root_kinds)
     for index, step in enumerate(ir.body.steps):
-        _walk_control(step, _join("/body", "steps", index), 0)
+        _walk_control(step, _join("/body", "steps", index), 0, connector_at_root)
 
 
 def registry_kinds() -> Dict[Tuple[str, str], FrozenSet[str]]:
