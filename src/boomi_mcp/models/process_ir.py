@@ -1855,10 +1855,18 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
             )
         # #142: a named construct this version does not author, on an error-scope
         # or connector-call node. Report the capability gate, not "unknown field".
+        #
+        # Matched against the IMMEDIATE OWNER — the discriminator tag directly
+        # preceding the offending key — not against the whole loc. A membership
+        # test would also fire for a node NESTED inside a try_catch: a catch-body
+        # `message` carrying a stray `backoff` has `try_catch` in its loc as an
+        # ancestor, and would then be told to consult the capability manifest
+        # about a field that is simply an unknown field on a Message.
         if (
             isinstance(last, str)
             and last in _GATED_TRY_CATCH_EXTRA_KEYS
-            and ("try_catch" in loc or "connector_call" in loc)
+            and len(loc) >= 2
+            and loc[-2] in ("try_catch", "connector_call")
         ):
             return _diagnostic(
                 PROCESS_IR_CAPABILITY_UNSUPPORTED,
@@ -1884,7 +1892,19 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
         # ``process_call`` is an "unknown node kind" when it is a documented kind
         # they used in the wrong slot sends them to fix the wrong thing. A
         # genuinely unknown tag keeps the unknown-node code.
-        if tag in _NODE_KIND_TAGS and any(part in _BODY_LOC_SEGMENTS for part in loc):
+        # #142: ``idempotency`` is a tagged union that is NOT a body slot, so a
+        # failure beneath it must be excluded here. Its tag vocabulary
+        # (``verified_action``/``key_reference``) is disjoint from the node kinds,
+        # but a caller who writes ``{"kind": "message"}`` there hits a tag that IS
+        # a node kind while sitting inside a try/catch body loc — and would be
+        # told "message is not admitted in this control-body slot", which is both
+        # the wrong diagnosis and, since Message IS admitted there, self-
+        # contradictory.
+        if (
+            tag in _NODE_KIND_TAGS
+            and "idempotency" not in loc
+            and any(part in _BODY_LOC_SEGMENTS for part in loc)
+        ):
             return _diagnostic(
                 PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
                 path,

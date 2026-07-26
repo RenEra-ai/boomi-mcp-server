@@ -1065,3 +1065,149 @@ def test_the_dlq_anchor_keeps_the_source_outside_the_retried_region():
     assert 'toShape="shape2"' not in xml.split('name="shape2"')[1]
     # No queue infrastructure is created or implied.
     assert "queue" not in xml.lower()
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 1 — three real diagnostic-precision defects
+# ---------------------------------------------------------------------------
+
+
+def test_a_gated_extra_key_is_matched_against_its_immediate_owner():
+    """A gated name on a NESTED node is an ordinary unknown field.
+
+    The first cut matched ``_GATED_TRY_CATCH_EXTRA_KEYS`` against the whole loc,
+    so a catch-body Message carrying a stray ``backoff`` inherited the ancestor
+    ``try_catch`` tag and was told to consult the capability manifest — sending
+    the caller to read about a gated feature when they had simply typo'd a field
+    on a Message.
+    """
+    doc = _process_scope()
+    doc["body"]["steps"][0]["catch_body"]["steps"][0]["backoff"] = 5
+    assert _parse_codes(doc) == [
+        ("PROCESS_IR_SCHEMA_UNKNOWN_FIELD", "/body/steps/0/catch_body/steps/0/backoff")
+    ]
+
+
+@pytest.mark.parametrize("owner_key", ["backoff", "queue_ref", "catch_all", "listener_retry"])
+def test_a_gated_extra_key_on_the_handler_itself_still_reports_the_gate(owner_key):
+    # The paired positive: the remapping must still fire where it belongs, or the
+    # fix above would have silently disabled the capability diagnostic entirely.
+    doc = _process_scope(**{owner_key: True})
+    codes = _parse_codes(doc)
+    assert codes == [
+        (PROCESS_IR_CAPABILITY_UNSUPPORTED, "/body/steps/0/{0}".format(owner_key))
+    ]
+
+
+def test_a_gated_extra_key_on_a_connector_call_still_reports_the_gate():
+    doc = _connector_scope()
+    doc["body"]["steps"][-1]["try_body"]["steps"][-1]["idempotency_key"] = "k"
+    codes = _parse_codes(doc)
+    assert codes[0][0] == PROCESS_IR_CAPABILITY_UNSUPPORTED
+    assert codes[0][1].endswith("/idempotency_key")
+
+
+def test_a_bad_idempotency_tag_is_not_reported_as_a_body_slot_failure():
+    """``idempotency`` is a tagged union, not a body slot.
+
+    ``{"kind": "message"}`` there hits a tag that IS a real node kind while
+    sitting inside a try-body loc. The first cut reported
+    NODE_NOT_ALLOWED_IN_BODY — self-contradictory, because Message *is* admitted
+    in that body; the actual failure is the idempotency discriminator.
+    """
+    doc = _connector_scope(idempotency={"kind": "message"})
+    codes = _parse_codes(doc)
+    assert codes == [
+        ("PROCESS_IR_SCHEMA_UNKNOWN_NODE", "/body/steps/1/try_body/steps/0/idempotency")
+    ]
+
+
+def test_a_genuinely_unknown_node_kind_in_a_try_body_is_still_a_body_failure():
+    # The paired positive: excluding `idempotency` must not disable the body-slot
+    # remapping for real body slots.
+    doc = _connector_scope()
+    doc["body"]["steps"][-1]["catch_body"]["steps"] = [
+        {"kind": "process_call", "process_ref": "$ref:SUB"}
+    ]
+    codes = _parse_codes(doc)
+    assert codes[0][0] == "PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY"
+
+
+def _corrupt_provenance(cfg, path_fragment):
+    """Relocate one node's provenance OUT of the body it belongs to.
+
+    The escape target is the opposite body, so the corruption genuinely leaves
+    the region under test — relocating a try-body node to another try-body path
+    would still satisfy the ``/try_body/`` prefix and prove nothing.
+    """
+    victim = next(n for n in cfg.nodes if path_fragment in n.source_path)
+    escaped = (
+        "/body/steps/1/catch_body/steps/99"
+        if "/try_body/" in victim.source_path
+        else "/body/steps/1/try_body/steps/99"
+    )
+    return cfg.model_copy(
+        update={
+            "nodes": tuple(
+                n.model_copy(update={"source_path": escaped}) if n is victim else n
+                for n in cfg.nodes
+            )
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        # depth 0 (the edge's own first target) and deeper, on BOTH sides. The
+        # try side needs its own depth>=1 cases: the first cut parametrized depth
+        # >=1 only on the catch side, so the try side's deeper escape was covered
+        # only indirectly by the shared walk.
+        "/catch_body/steps/0",
+        "/catch_body/steps/1",
+        "/try_body/steps/0",
+        "/try_body/steps/1",
+        "/try_body/steps/2",
+    ],
+)
+def test_region_escape_reports_the_same_code_at_every_depth(fragment):
+    """One defect class, one code — regardless of how deep the corruption sits.
+
+    The first cut used the compile-level region code for the edge's FIRST target
+    and inherited ``PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW`` from the shared
+    containment walk for every node below it. Same corruption, two codes, and the
+    deeper one blamed authored input for a compiler-derived defect.
+    """
+    cfg = lower_process_ir_to_cfg(
+        parse_process_ir_v1(
+            _connector_scope(
+                # Three try-body steps (two property preparations then the
+                # protected call) so the try side has real depth to corrupt.
+                try_prefix=[
+                    {
+                        "kind": "set_ddp",
+                        "name": "p{0}".format(i),
+                        "source_values": [{"value_type": "static", "value": "v"}],
+                    }
+                    for i in range(2)
+                ],
+                catch_steps=[
+                    {"kind": "message", "text": "a"},
+                    {"kind": "message", "text": "b"},
+                ],
+                catch_terminal={"kind": "stop"},
+            )
+        )
+    )
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        check_cfg_invariants(_corrupt_provenance(cfg, fragment))
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_ERROR_REGION_INVALID
+
+
+# The other direction — that #141's Branch/Decision callers did NOT move to the
+# new code — is pinned behaviourally by
+# ``test_a_control_subtree_may_not_escape_its_own_region`` in
+# tests/test_process_ir_rich_control_bodies.py, which asserts
+# PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW on a real escaping Branch subtree. That is a
+# stronger guard than inspecting this function's default argument, so nothing is
+# re-asserted here.

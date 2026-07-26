@@ -584,7 +584,15 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                         "a try_catch edge targets a node outside its own body",
                         node.node_id,
                     )
-                _check_region_containment(edge, prefix, by_id, outbound, node)
+                _check_region_containment(
+                    edge,
+                    prefix,
+                    by_id,
+                    outbound,
+                    node,
+                    PROCESS_IR_COMPILE_ERROR_REGION_INVALID,
+                    "a try_catch path escapes its own body provenance region",
+                )
             continue
 
         if len(successors) != 1:
@@ -636,13 +644,31 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
             )
 
 
-def _check_region_containment(edge, prefix, by_id, outbound, node) -> None:
+def _check_region_containment(
+    edge,
+    prefix,
+    by_id,
+    outbound,
+    node,
+    code: str = PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+    message: str = "a control path escapes its own leg/arm provenance region",
+) -> None:
     """Every node reached through a control edge must live UNDER its leg/arm.
 
     The per-node rules already bind an edge's FIRST target to its own region.
     That catches a swapped leg but not a subtree that escapes into a sibling
     region one node later — the same cross-wiring defect, just deeper. Walking
     the whole reachable region is what makes the check total.
+
+    ``code`` is a PARAMETER, not a constant, because the same escape means
+    different things in different regions. #141's Branch/Decision callers keep
+    ``PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW`` — the default, so their shipped
+    diagnostics do not move. #142's Try/Catch caller passes its own compile-level
+    code: without that, one class of defect reported a caller-blaming SEMANTIC_*
+    code at depth 1 and a compiler-blaming COMPILE_* code at depth 0, so the
+    diagnostic depended on how DEEP the corruption happened to sit rather than on
+    what kind of defect it was — the exact failure ``_wiring_code`` exists to
+    prevent one layer up.
     """
     seen = set()
     stack = [edge.target_node_id]
@@ -652,13 +678,7 @@ def _check_region_containment(edge, prefix, by_id, outbound, node) -> None:
             continue
         seen.add(current)
         if not by_id[current].source_path.startswith(prefix):
-            raise _fail(
-                PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
-                _SEMANTIC_PHASE,
-                node.source_path,
-                "a control path escapes its own leg/arm provenance region",
-                node.node_id,
-            )
+            raise _fail(code, _SEMANTIC_PHASE, node.source_path, message, node.node_id)
         for out in outbound[current]:
             stack.append(out.target_node_id)
 

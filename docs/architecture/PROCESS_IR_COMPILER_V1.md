@@ -801,3 +801,22 @@ enforces the connector gate but not the retry gate.
 
 Every code has at least one test that actually reaches it, and every rejection is paired with a
 positive case that compiles: a code tested only negatively can still be vacuous.
+
+**One defect class, one code, at every depth.** `_check_region_containment` takes its code as a
+*parameter* rather than hard-coding one. Branch/Decision callers keep
+`PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW` (the default, so #141's shipped diagnostics do not move); the
+Try/Catch caller passes `PROCESS_IR_COMPILE_ERROR_REGION_INVALID`. Without that, a node whose
+provenance escaped its own error body reported a compiler-blaming code when it was the edge's first
+target and a caller-blaming one when it sat a node deeper — the diagnostic would have depended on how
+deep the corruption happened to be rather than on what kind of defect it was.
+
+**Diagnostic precision at the parse layer.** Two remappings are deliberately narrow:
+
+- the gated-extra-key remapping matches the **immediate owner** (the discriminator tag directly
+  preceding the offending key), not the whole error location. A membership test would also fire for
+  a node *nested inside* a `try_catch` — a catch-body Message with a stray `backoff` would be sent to
+  the capability manifest to read about a gated feature when it simply has an unknown field;
+- the body-slot remapping **excludes** locations beneath `idempotency`, which is a tagged union but
+  not a body slot. `{"kind": "message"}` there hits a tag that is a real node kind inside a body
+  location, and would otherwise report "message is not admitted in this control-body slot" — wrong,
+  and self-contradictory, since Message *is* admitted there.
