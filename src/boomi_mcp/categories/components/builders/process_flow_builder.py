@@ -4444,7 +4444,9 @@ def _build_composed_process_flow(
 
     try:
         result = adapt_flow_sequence(config)
-        shape_xml_parts = list(emit_legacy_result(result).shape_xml_parts)
+        shape_xml_parts = list(
+                emit_legacy_result(result, dialect="flow_sequence").shape_xml_parts
+            )
     except (
         LegacyAdapterError,
         ProcessIRCompileError,
@@ -5136,7 +5138,9 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
 
         try:
             result = adapt_wrapper_subprocess(config)
-            shape_xml_parts = list(emit_legacy_result(result).shape_xml_parts)
+            shape_xml_parts = list(
+                emit_legacy_result(result, dialect="wrapper_subprocess").shape_xml_parts
+            )
         except (
             LegacyAdapterError,
             ProcessIRCompileError,
@@ -6077,7 +6081,9 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
 
         try:
             result = adapt_sync_pipeline(lowered)
-            shape_xml_parts = list(emit_legacy_result(result).shape_xml_parts)
+            shape_xml_parts = list(
+                emit_legacy_result(result, dialect="sync_pipeline").shape_xml_parts
+            )
         except (
             LegacyAdapterError,
             ProcessIRCompileError,

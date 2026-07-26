@@ -316,12 +316,16 @@ def test_a_sentinel_value_never_reaches_the_serialized_report():
 # ---------------------------------------------------------------------------
 
 
-def test_the_package_is_wired_at_exactly_one_production_site():
-    """Slice 8 ends the darkness — deliberately, and at ONE place.
+def test_the_package_is_wired_at_exactly_the_two_intended_sites():
+    """Slices 8 and 9 end the darkness — deliberately, at TWO named places.
 
     Kept as a search rather than deleted: the value was never "it is dark", it
-    was "we know every place it is reached from". A second call site appearing
-    silently is exactly what this now catches.
+    was "we know every place it is reached from". A THIRD call site appearing
+    silently is exactly what this catches.
+
+    * ``integration_builder.py`` — slice 8, the plan/apply mutation gate.
+    * ``emission.py``            — slice 9, the canonical emission boundary,
+      which is where the adapter identity (hence the exemption policy) is known.
     """
     result = subprocess.run(
         [
@@ -340,4 +344,4 @@ def test_the_package_is_wired_at_exactly_one_production_site():
     reached = sorted(
         Path(line).name for line in result.stdout.split() if line.strip()
     )
-    assert reached == ["integration_builder.py"], reached
+    assert reached == ["emission.py", "integration_builder.py"], reached

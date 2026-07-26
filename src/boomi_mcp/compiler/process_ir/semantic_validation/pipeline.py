@@ -63,6 +63,39 @@ def validate_process_ir(
     return _validate_prepared(prepared, capabilities)
 
 
+def validate_lowered_process_ir(
+    ir: ProcessIRV1,
+    cfg,
+    symbol_table: SymbolTableV1,
+    capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
+) -> ValidationReportV1:
+    """Validate against an ALREADY-lowered CFG, without lowering a second time.
+
+    The compiler has just built the CFG it is about to emit from; re-lowering
+    here would burn the work twice AND — worse — create two graphs that could in
+    principle disagree. The gate must judge exactly the graph that will be
+    emitted, not a fresh one that merely ought to be identical.
+
+    The IR snapshot guarantee is weaker on this path by construction: the caller
+    supplies the CFG, so the correspondence between ``ir`` and ``cfg`` is the
+    caller's to uphold. That is why this is used only from inside the compiler,
+    which lowered the pair itself one call earlier.
+    """
+    from .context import PreparedProcessValidationV1 as _Prepared
+    from .context import _edge_index
+
+    prepared = _Prepared(
+        ir=ir,
+        cfg=cfg,
+        symbols=symbol_table,
+        node_by_id={node.node_id: node for node in cfg.nodes},
+        outgoing=_edge_index(cfg.edges, "source_node_id"),
+        incoming=_edge_index(cfg.edges, "target_node_id"),
+        symbol_by_ref={symbol.ref: symbol for symbol in symbol_table.symbols},
+    )
+    return _validate_prepared(prepared, capabilities)
+
+
 def _validate_prepared(
     prepared: PreparedProcessValidationV1,
     capabilities: ProcessIRValidationCapabilitiesV1,
@@ -136,4 +169,4 @@ def _node_cache_ref_unresolved(item, prepared, reference_facts) -> bool:
     return cache_ref is not None and cache_ref in reference_facts.unresolved
 
 
-__all__ = ["validate_process_ir"]
+__all__ = ["validate_lowered_process_ir", "validate_process_ir"]
