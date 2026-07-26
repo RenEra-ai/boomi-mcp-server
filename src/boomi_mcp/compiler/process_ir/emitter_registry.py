@@ -56,6 +56,7 @@ from ...errors import (
 )
 from .contracts import (
     BranchInputV1,
+    CatchErrorsInputV1,
     ConnectorActionInputV1,
     DataProcessInputV1,
     DecisionInputV1,
@@ -396,6 +397,15 @@ def _emit_decision(inp, ctx):
     )
 
 
+def _emit_catcherrors(inp, ctx):
+    # #142. Calls the SHARED renderer directly — the same function the legacy
+    # adapters use — rather than importing or duplicating any private legacy
+    # emitter, so there is exactly one definition of this shape's bytes.
+    return rendering.render_catcherrors(
+        _shape_context(ctx.node), retry_count=inp.retry_count
+    )
+
+
 def _emit_exception(inp, ctx):
     return rendering.render_exception(
         _shape_context(ctx.node),
@@ -541,6 +551,16 @@ def _pre_decision(inp) -> Optional[str]:
     return None
 
 
+def _pre_catcherrors(inp) -> Optional[str]:
+    # ``CatchErrorsInputV1`` already bounds this, so a plan built through lowering
+    # can never fail here. The precondition exists for the OTHER caller: a
+    # hand-built plan handed straight to the registry, which the typed model never
+    # saw. Fail-closed at the last gate before bytes are produced.
+    if not 0 <= inp.retry_count <= 5:
+        return "try/catch retry count must be between 0 and 5"
+    return None
+
+
 def _pre_exception(inp) -> Optional[str]:
     # The resolved ``binding`` and the legacy ``parameter_source`` must agree — the
     # legacy emitter derives the exParameters form from parameter_source, so an
@@ -555,8 +575,8 @@ def _pre_exception(inp) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# Default registrations (17 discriminator keys; 16 model classes — the connector
-# source/target keys share one renderer).
+# Default registrations (18 discriminator keys; 17 model classes — the connector
+# source/target keys share one renderer). #142 added ``catcherrors``.
 # ---------------------------------------------------------------------------
 
 _REGISTRATIONS: Tuple[EmitterRegistration, ...] = (
@@ -574,6 +594,7 @@ _REGISTRATIONS: Tuple[EmitterRegistration, ...] = (
     EmitterRegistration("processcall", ProcessCallInputV1, "processcall", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_process, _emit_processcall),
     EmitterRegistration("branch", BranchInputV1, "branch", CAPABILITY_PROCESS_IR_V1, BRANCH, _no_requirements, _emit_branch),
     EmitterRegistration("decision", DecisionInputV1, "decision", CAPABILITY_PROCESS_IR_V1, EXACT_TWO, _no_requirements, _emit_decision, _pre_decision),
+    EmitterRegistration("catcherrors", CatchErrorsInputV1, "catcherrors", CAPABILITY_PROCESS_IR_V1, EXACT_TWO, _no_requirements, _emit_catcherrors, _pre_catcherrors),
     EmitterRegistration("exception", ExceptionInputV1, "exception", CAPABILITY_PROCESS_IR_V1, EXACT_ZERO, _no_requirements, _emit_exception, _pre_exception),
     EmitterRegistration("stop", StopInputV1, "stop", CAPABILITY_PROCESS_IR_V1, EXACT_ZERO, _no_requirements, _emit_stop),
     EmitterRegistration("returndocuments", ReturnDocumentsInputV1, "returndocuments", CAPABILITY_PROCESS_IR_V1, EXACT_ZERO, _no_requirements, _emit_returndocuments),

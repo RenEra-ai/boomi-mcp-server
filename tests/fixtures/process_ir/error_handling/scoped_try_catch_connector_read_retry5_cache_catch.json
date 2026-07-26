@@ -1,0 +1,42 @@
+{
+  "body": {
+    "kind": "sequence",
+    "steps": [
+      {
+        "kind": "connector_call",
+        "operation_ref": "$ref:GETOP"
+      },
+      {
+        "catch_body": {
+          "steps": [
+            {
+              "kind": "message",
+              "text": "staged for review"
+            }
+          ],
+          "terminal": {
+            "cache_ref": "$ref:CACHE",
+            "kind": "cache_put"
+          }
+        },
+        "kind": "try_catch",
+        "retry": {
+          "count": 5
+        },
+        "scope": "connector",
+        "try_body": {
+          "steps": [
+            {
+              "kind": "connector_call",
+              "operation_ref": "$ref:GETOP2"
+            }
+          ],
+          "terminal": {
+            "kind": "stop"
+          }
+        }
+      }
+    ]
+  },
+  "version": "1"
+}

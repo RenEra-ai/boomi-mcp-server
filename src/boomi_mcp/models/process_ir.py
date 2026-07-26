@@ -47,15 +47,18 @@ from pydantic_core import PydanticCustomError
 from typing_extensions import Annotated
 
 from ..errors import (
+    PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_REFERENCE_INVALID_FORMAT,
     PROCESS_IR_SCHEMA_BRANCH_CARDINALITY,
     PROCESS_IR_SCHEMA_INVALID,
     PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
+    PROCESS_IR_SCHEMA_RETRY_COUNT,
     PROCESS_IR_SCHEMA_UNKNOWN_FIELD,
     PROCESS_IR_SCHEMA_UNKNOWN_NODE,
     PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED,
+    PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
     PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
 )
@@ -213,6 +216,46 @@ ComponentRefV1 = Annotated[
 ]
 
 
+def _validate_contract_ref(value: str) -> str:
+    """#142: idempotency-contract reference — ``$ref:KEY`` token ONLY.
+
+    DELIBERATELY STRICTER than :data:`ComponentRefV1`, which also admits a literal
+    id. The issue's acceptance criterion is that idempotency evidence "is typed,
+    reference-based, and cannot be satisfied by an unverified free-form Boolean".
+    A literal-id escape hatch would reopen exactly that hole: any non-blank string
+    would parse, so ``"yes"`` / ``"idempotent"`` / a raw key value would all read
+    as evidence. Requiring the token form means the value can only ever NAME a
+    contract the symbol table has to resolve — and an unresolvable name is an
+    error, not a pass.
+    """
+    if value != value.strip() or not value:
+        raise PydanticCustomError(
+            "process_ir_reference_invalid_format",
+            "idempotency contract reference must be a non-blank string "
+            "without surrounding whitespace",
+        )
+    if not value.startswith(_REF_TOKEN_PREFIX):
+        raise PydanticCustomError(
+            "process_ir_reference_invalid_format",
+            "idempotency contract reference must be an exact '$ref:KEY' token — "
+            "a literal id or free-form assertion is not evidence",
+        )
+    key = value[len(_REF_TOKEN_PREFIX):]
+    if not key or any(ch.isspace() for ch in key):
+        raise PydanticCustomError(
+            "process_ir_reference_invalid_format",
+            "'$ref:' token must carry a non-empty, whitespace-free key",
+        )
+    return value
+
+
+IdempotencyContractRefV1 = Annotated[
+    str,
+    AfterValidator(_validate_contract_ref),
+    Field(description="Opaque idempotency-contract reference: exact '$ref:KEY' token"),
+]
+
+
 def _cardinality_error(message: str) -> PydanticCustomError:
     return PydanticCustomError("process_ir_schema_invalid_cardinality", message)  # noqa: EM101
 
@@ -238,6 +281,18 @@ def _body_kind_error(message: str) -> PydanticCustomError:
 def _nesting_error(message: str) -> PydanticCustomError:
     """#141: control nesting deeper than ``PROCESS_IR_V1_MAX_CONTROL_DEPTH``."""
     return PydanticCustomError("process_ir_semantic_nesting_limit", message)  # noqa: EM101
+
+
+def _error_scope_error(message: str) -> PydanticCustomError:
+    """#142: an unknown error scope, or a known scope in an unverified placement."""
+    return PydanticCustomError(  # noqa: EM101
+        "process_ir_capability_error_scope_unsupported", message
+    )
+
+
+def _catch_unterminated_error(message: str) -> PydanticCustomError:
+    """#142: a catch body that does not reach a terminal."""
+    return PydanticCustomError("process_ir_semantic_catch_unterminated", message)  # noqa: EM101
 
 
 def _keyed_cache_true_only(value: bool) -> bool:
@@ -441,6 +496,45 @@ class TargetEndpointV1(_ProcessIRBase):
     label: Optional[str] = None
 
 
+# #142 M12.7. Idempotency evidence for a RETRIED connector call.
+#
+# Evidence never AUTHORIZES a retry on its own — the connector registry's
+# ``retry_safety`` row decides what is replayable, and an ``unverified`` or
+# ``non_idempotent`` row rejects the retry no matter what evidence is attached
+# (see .codex/plans/issue-142-live-captures.md §G4: no authoritative source
+# classifies a stock write action as replay-safe, and the one on-point official
+# statement puts the burden on the caller). Evidence only discharges the extra
+# obligation a row that IS retry-safe imposes.
+class VerifiedActionIdempotencyV1(_ProcessIRBase):
+    """The action itself is idempotent, as classified by the connector registry.
+
+    Carries no payload: the claim is entirely about the resolved action, which the
+    compiler already knows. Authoring it is an acknowledgement, not an assertion
+    the compiler trusts.
+    """
+
+    kind: Literal["verified_action"]
+
+
+class KeyReferenceIdempotencyV1(_ProcessIRBase):
+    """An opaque, externally-defined idempotency contract, named by reference.
+
+    ``contract_ref`` names a contract the symbol table must resolve to the SAME
+    operation this call targets. It is a name, never key material: the key value
+    itself is never authored, never stored, and never reaches a diagnostic or the
+    emitted document.
+    """
+
+    kind: Literal["key_reference"]
+    contract_ref: IdempotencyContractRefV1
+
+
+IdempotencyEvidenceV1 = Annotated[
+    Union[VerifiedActionIdempotencyV1, KeyReferenceIdempotencyV1],
+    Field(discriminator="kind"),
+]
+
+
 class ConnectorCallNodeV1(_ProcessIRBase):
     """A first-class connector call (issue #140, M12.5).
 
@@ -464,6 +558,7 @@ class ConnectorCallNodeV1(_ProcessIRBase):
     kind: Literal["connector_call"]
     operation_ref: ComponentRefV1
     action: Optional[str] = None
+    idempotency: Optional[IdempotencyEvidenceV1] = None
     label: Optional[str] = None
 
     @field_validator("action")
@@ -939,6 +1034,188 @@ for _model in (
 del _model
 
 
+# ---------------------------------------------------------------------------
+# #142 M12.7 — scoped error handling
+# ---------------------------------------------------------------------------
+
+# The Try/Catch step vocabulary. Both bodies share ONE step union: a caught
+# document is an ordinary document, so anything legal on the protected path is
+# legal on the recovery path.
+#
+# ABSENT ON PURPOSE (fail-closed, each for its own reason):
+#   * ``branch``/``decision``/``process_call``/nested ``try_catch`` — composing
+#     two Try/Catch steps silently rewrites the OUTER step's effective error
+#     selection, and the rule differs depending on whether they are adjacent
+#     (capture §G6). A single deterministic semantic cannot be derived from the
+#     authored fields, so nesting stays out.
+#   * ``flow_control``/``data_process`` — no evidence for either placement inside
+#     a protected scope.
+#   * ``target``/``source``/``return_documents`` — legacy position-bound
+#     placeholders that have no meaning inside an error scope.
+TryCatchBodyStepV1 = Annotated[
+    Union[
+        MessageNodeV1,
+        MapRefNodeV1,
+        CachePutNodeV1,
+        DocumentCacheRetrieveNodeV1,
+        CacheGetNodeV1,
+        CacheRemoveNodeV1,
+        SetDdpNodeV1,
+        SetDppNodeV1,
+        ConnectorCallNodeV1,
+    ],
+    Field(discriminator="kind"),
+]
+
+#: The exact kind set of :data:`TryCatchBodyStepV1`, shared by both bodies.
+TRY_CATCH_BODY_KINDS: Tuple[str, ...] = _kinds_of(TryCatchBodyStepV1)
+
+
+class RetryPolicyV1(_ProcessIRBase):
+    """Bounded retry intent for a protected region.
+
+    ``count`` is the whole policy. The platform owns everything else: the wait
+    before each attempt is fixed and not authorable, and retries are skipped
+    entirely in test runs. Authoring a delay, a backoff curve, or a per-attempt
+    policy is therefore not a feature this version withholds — there is no field
+    on the wire to carry it.
+    """
+
+    count: StrictInt = Field(
+        ...,
+        ge=0,
+        le=5,
+        description="Retry attempts for a failed document (0-5); 0 means no retry",
+    )
+
+
+#: The verified error scopes.
+#:
+#: ``process`` protects the whole flow from its entry call onward; ``connector``
+#: protects one downstream call and its property preparation, leaving the
+#: upstream source outside. Both are emitter-verified placements — a third value
+#: would have no shape to compile to.
+ErrorScopeV1 = Literal["process", "connector"]
+
+
+class TryCatchTryBodyV1(_ProcessIRBase):
+    """The protected path.
+
+    Terminates on a plain ``stop`` only. An ``exception`` here would be caught by
+    this very scope's own recovery path, and no evidence covers that loop; a
+    staging ``cache_put`` terminal is a recovery-path shape, not a success one.
+    """
+
+    steps: List[TryCatchBodyStepV1] = Field(..., min_length=1)
+    terminal: Annotated[Union[StopNodeV1], Field(discriminator="kind")]
+
+    @model_validator(mode="after")
+    def _try_body_rules(self) -> "TryCatchTryBodyV1":
+        _check_cache_put_followed_by_read(self.steps, context="try body steps")
+        if self.steps and self.steps[-1].kind == "cache_put":
+            raise _cardinality_error(
+                "a trailing cache_put in a try body must be followed by a "
+                "stream-replacing cache read, not by the terminal"
+            )
+        return self
+
+
+class TryCatchCatchBodyV1(_ProcessIRBase):
+    """The recovery path for a caught document.
+
+    MANDATORY and MUST terminate: a caught document that reaches no terminal is
+    a document the process silently drops. The terminal set is the recovery
+    vocabulary — stop the document, raise it as an explicit failure, or stage it
+    for a downstream handler.
+
+    Steps may be empty (a bare terminal is a meaningful recovery), but a bare
+    ``stop`` with no work at all is rejected: it recovers nothing.
+    """
+
+    steps: List[TryCatchBodyStepV1] = Field(default_factory=list)
+    terminal: Annotated[
+        Union[StopNodeV1, ExceptionNodeV1, CachePutNodeV1],
+        Field(discriminator="kind"),
+    ]
+
+    @model_validator(mode="after")
+    def _catch_body_rules(self) -> "TryCatchCatchBodyV1":
+        _check_cache_put_followed_by_read(self.steps, context="catch body steps")
+        if self.steps and self.steps[-1].kind == "cache_put":
+            raise _cardinality_error(
+                "a trailing cache_put belongs in the catch terminal (staging sink), not in steps"
+            )
+        _check_stop_terminal_has_work(self.steps, self.terminal, context="catch body")
+        return self
+
+
+class TryCatchNodeV1(_ProcessIRBase):
+    """Scoped error handling with bounded retry (#142, M12.7).
+
+    Placement is part of the contract, because scope is not a free-form label —
+    each value names a placement the compiler has a verified shape for:
+
+    * ``process`` is the sole root step, and its protected path begins with the
+      call that produces the flow's documents;
+    * ``connector`` is the terminal step of a call sequence, and protects exactly
+      one downstream call plus the property steps that prepare it.
+
+    Nothing may follow a Try/Catch: both paths terminate independently and there
+    is no join.
+
+    Retry is bounded and additionally CONSTRAINED BY SAFETY, not just by range: a
+    positive count is rejected when the protected region would re-run the flow's
+    document source, and when a retried call writes without registry-backed
+    replay safety. Those checks run before anything is emitted.
+    """
+
+    kind: Literal["try_catch"]
+    scope: ErrorScopeV1
+    try_body: TryCatchTryBodyV1
+    catch_body: TryCatchCatchBodyV1
+    retry: Optional[RetryPolicyV1] = None
+    label: Optional[str] = None
+
+    @property
+    def retry_count(self) -> int:
+        """Absent retry is exactly retry 0 — one normalization, used everywhere.
+
+        Kept as a derived property rather than a defaulted field so the authored
+        document keeps the distinction (absent vs explicit 0) while every consumer
+        sees one value; the two forms compile to identical output.
+        """
+        return 0 if self.retry is None else self.retry.count
+
+    @model_validator(mode="after")
+    def _try_catch_rules(self) -> "TryCatchNodeV1":
+        steps = self.try_body.steps
+        kinds = [step.kind for step in steps]
+        if self.scope == "connector":
+            # The verified target-local topology: optional property preparation,
+            # then exactly the one call being protected.
+            if kinds[-1] != "connector_call":
+                raise _error_scope_error(
+                    "a connector-scoped try body must end with the connector_call it protects"
+                )
+            if kinds.count("connector_call") != 1:
+                raise _error_scope_error(
+                    "a connector-scoped try body protects exactly one connector_call"
+                )
+            for kind in kinds[:-1]:
+                if kind not in ("set_ddp", "set_dpp"):
+                    raise _error_scope_error(
+                        "a connector-scoped try body may contain only set_ddp/set_dpp "
+                        "steps before the connector_call it protects"
+                    )
+        else:  # "process"
+            if kinds[0] != "connector_call":
+                raise _error_scope_error(
+                    "a process-scoped try body must begin with the connector_call that "
+                    "produces the flow's documents"
+                )
+        return self
+
+
 #: The ProcessIR v1 control-nesting bound (#141).
 #:
 #: Depth counts ONLY ``branch``/``decision`` nodes on one authored root-to-leaf
@@ -977,6 +1254,7 @@ ProcessNodeV1 = Annotated[
         ProcessCallNodeV1,
         BranchNodeV1,
         DecisionNodeV1,
+        TryCatchNodeV1,
         ExceptionNodeV1,
         StopNodeV1,
         ReturnDocumentsNodeV1,
@@ -984,6 +1262,10 @@ ProcessNodeV1 = Annotated[
     Field(discriminator="kind"),
 ]
 
+# ``try_catch`` is deliberately ABSENT here: this set widens the LEGACY
+# source/target flow's terminal vocabulary, and #142 adds no legacy dialect. A
+# Try/Catch reaches the root only through the two placements its own rules
+# define (control-only root, or terminal of a connector_call sequence).
 _ROOT_CONTROL_TERMINAL_KINDS = frozenset({"branch", "decision", "exception"})
 _ROOT_LINEAR_KINDS = frozenset(
     {
@@ -1035,6 +1317,20 @@ class SequenceNodeV1(_ProcessIRBase):
         if len(kinds) == 1 and kinds[0] in ("branch", "decision"):
             return self
 
+        # CONTROL-ONLY try_catch root (#142). Same exact-match discipline: a lone
+        # `[try_catch]` was rejected outright before, so no existing payload can
+        # reach it. Only PROCESS scope may stand alone — a connector scope
+        # protects a DOWNSTREAM call, which by definition needs something
+        # upstream of it, and allowing it here would make the source-isolation
+        # rule vacuous rather than enforced.
+        if len(kinds) == 1 and kinds[0] == "try_catch":
+            if self.steps[0].scope != "process":
+                raise _error_scope_error(
+                    "only a process-scoped try_catch may be the sole root step — a "
+                    "connector scope protects a downstream call and must follow one"
+                )
+            return self
+
         for i, kind in enumerate(kinds):
             if kind == "source" and i != 0:
                 raise _cardinality_error("source may appear only as the first step")
@@ -1049,6 +1345,14 @@ class SequenceNodeV1(_ProcessIRBase):
                     "no step may follow a branch or decision — control nodes are "
                     "terminal fan-out in ProcessIR v1 "
                     "(continuation_after_branch_or_decision is gated)"
+                )
+            # #142: same rule, its own message. A Try/Catch forks into two
+            # independently-terminating paths and emits no join, so a step after
+            # it has no path to be on.
+            if kind == "try_catch":
+                raise _continuation_error(
+                    "no step may follow a try_catch — both its paths terminate "
+                    "independently and ProcessIR v1 emits no join"
                 )
 
         if "process_call" in kinds:
@@ -1094,10 +1398,29 @@ class SequenceNodeV1(_ProcessIRBase):
             # ``exception`` is deliberately NOT added: it is a legacy terminal
             # control with no #141 construct behind it, and widening it here would
             # be scope this issue has no evidence for.
-            if kinds[-1] not in ("stop", "return_documents", "branch", "decision"):
+            #
+            # #142 widened it again with ``try_catch``. This is the CONNECTOR
+            # SCOPE placement: one upstream call produces the documents, then the
+            # Try/Catch protects the downstream call. That upstream call is
+            # exactly what keeps the source OUTSIDE the retried region, so this
+            # placement is the one where a positive retry can be safe at all.
+            if kinds[-1] not in (
+                "stop",
+                "return_documents",
+                "branch",
+                "decision",
+                "try_catch",
+            ):
                 raise _cardinality_error(
                     "a connector_call sequence must end in a stop, return_documents, "
-                    "branch, or decision terminal"
+                    "branch, decision, or try_catch terminal"
+                )
+            # Only a CONNECTOR scope may terminate a call sequence; a process
+            # scope owns the whole flow and must be the sole root step.
+            if kinds[-1] == "try_catch" and self.steps[-1].scope != "connector":
+                raise _error_scope_error(
+                    "only a connector-scoped try_catch may terminate a connector_call "
+                    "sequence — a process scope must be the sole root step"
                 )
             body = kinds[:-1]
             for kind in body:
@@ -1223,7 +1546,37 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         "connector_call_in_control_body": "supported",  # #141
         "continuation_after_branch_or_decision": "gated",  # #141 — terminal fan-out only
         "rich_branch_decision_bodies": "supported",  # #141
-        "scoped_try_catch": "gated",  # #142
+        "scoped_try_catch": "supported",  # #142
+        "bounded_retry": "supported",  # #142 — 0-5, the platform's own bound
+        "typed_idempotency_evidence": "supported",  # #142
+        # #142 M12.7. Three UNSUPPORTED rows below mean "never", not "not yet" —
+        # the same sense as ``caller_authored_cfg_edges``. Marking them gated
+        # would promise research that cannot conclude:
+        #   * error-type/error-code lists have NO representation on the wire at
+        #     all — the emitted error-handling shape carries exactly two settings,
+        #     an all-errors flag and a retry count (capture §G2);
+        #   * the retry wait schedule is fixed by the platform and has no
+        #     authorable field (capture §G1);
+        #   * no queue component exists to model, and creating topology is
+        #     explicitly out of scope (capture §G5).
+        "catch_error_type_lists": "unsupported",  # #142
+        "retry_backoff_authoring": "unsupported",  # #142
+        "queue_topology": "unsupported",  # #142
+        # GATED (a real "not yet"), each blocked on a different missing thing:
+        #   * failure-trigger selection: semantics are FULLY known, but the shared
+        #     renderer fixes the all-errors form, and changing it would alter
+        #     already-shipped output (capture §G2/§G3). A deliberate V1 surface
+        #     omission, not an unknown.
+        #   * write retry safety: no authoritative classification exists for any
+        #     stock write action, so none ships as replay-safe (capture §G4).
+        #   * listener error scope: the fused listener start rejects reliability
+        #     composition today.
+        #   * nested try_catch: composition rewrites the outer step's effective
+        #     error selection, adjacency-dependently (capture §G6).
+        "catch_failure_trigger_selection": "gated",  # #142
+        "verified_write_retry_safety": "gated",  # #142
+        "listener_error_scope": "gated",  # #142
+        "nested_try_catch": "gated",  # #142
         "keyed_cache": "gated",  # no live-captured wire shape (#119 census)
         "definedparameter_property_source": "gated",  # no verified wire shape
         "joins": "gated",
@@ -1244,10 +1597,33 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
 _GATED_EXTRA_KEYS = frozenset({"doc_cache_index", "cache_key_values", "load_all_documents"})
 _GATED_UNION_TAGS = frozenset({"definedparameter"})
 
+# #142: extras on a try_catch / connector_call that name a REAL construct this
+# version does not author. Without this set they would all report as generic
+# unknown fields, which sends a caller to delete a typo rather than to the
+# manifest row that explains whether the thing is gated or impossible — and
+# "unsupported queue/topology requests return an explicit capability gap" is an
+# acceptance criterion, not a nicety.
+_GATED_TRY_CATCH_EXTRA_KEYS = frozenset(
+    {
+        "catch_all",
+        "failure_trigger",
+        "error_types",
+        "error_codes",
+        "backoff",
+        "retry_backoff",
+        "listener_retry",
+        "queue_ref",
+        "dlq_ref",
+        "idempotency_key",
+    }
+)
+
 # #141: authored loc segments that mean "inside a control body". Used to tell a
 # known kind in the WRONG SLOT (a body capability failure) from a genuinely
-# unknown discriminator.
-_BODY_LOC_SEGMENTS = frozenset({"legs", "true_arm", "false_arm"})
+# unknown discriminator. #142 adds the two Try/Catch body slots.
+_BODY_LOC_SEGMENTS = frozenset(
+    {"legs", "true_arm", "false_arm", "try_body", "catch_body"}
+)
 
 #: Every globally valid node ``kind``, DERIVED from the root union so it cannot
 #: drift from the vocabulary it is meant to describe.
@@ -1274,6 +1650,9 @@ _DISCRIMINATOR_TAGS = frozenset(
         "process_call",
         "branch",
         "decision",
+        "try_catch",
+        "verified_action",
+        "key_reference",
         "exception",
         "stop",
         "return_documents",
@@ -1330,6 +1709,19 @@ _REMEDIATION = {
         "PROCESS_IR_V1_MAX_CONTROL_DEPTH levels, or move the deeper routing into a "
         "subprocess. This is a ProcessIR v1 compiler bound, not a Boomi platform limit."
     ),
+    PROCESS_IR_SCHEMA_RETRY_COUNT: (
+        "Use an integer from 0 through 5 for the retry count (the platform's own "
+        "documented bound), or omit retry entirely for no retry."
+    ),
+    PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED: (
+        "Use a supported error scope in its verified placement: a process scope as "
+        "the sole root step, or a connector scope as the last step of a "
+        "connector-call sequence. See docs/architecture/PROCESS_IR_V1.md."
+    ),
+    PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED: (
+        "End the catch body with a stop, an exception, or a staging cache_put — "
+        "every caught document must reach a terminal."
+    ),
 }
 
 _CUSTOM_ERROR_CODES = {
@@ -1344,6 +1736,11 @@ _CUSTOM_ERROR_CODES = {
         PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
     ),
     "process_ir_semantic_nesting_limit": PROCESS_IR_SEMANTIC_NESTING_LIMIT,
+    # #142
+    "process_ir_capability_error_scope_unsupported": (
+        PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED
+    ),
+    "process_ir_semantic_catch_unterminated": PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
 }
 
 _MESSAGES = {
@@ -1362,6 +1759,11 @@ _MESSAGES = {
         "this node kind is not admitted in this control-body slot"
     ),
     PROCESS_IR_SEMANTIC_NESTING_LIMIT: "control nesting exceeds the ProcessIR v1 depth bound",
+    PROCESS_IR_SCHEMA_RETRY_COUNT: "retry count is outside the 0-5 bound or is not an integer",
+    PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED: (
+        "unsupported error scope or error-scope placement"
+    ),
+    PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED: "the catch body does not reach a terminal",
 }
 
 
@@ -1375,7 +1777,10 @@ def _diagnostic(code: str, path: Tuple[Any, ...], *, message: Optional[str] = No
 
 
 # The non-list union fields whose loc is followed by a discriminator tag.
-_UNION_FIELD_NAMES = frozenset({"left", "right", "terminal"})
+# ``idempotency`` (#142) is a non-list tagged union field, so its tag element is
+# stripped the same way — a diagnostic must point at ``/idempotency``, not at
+# ``/idempotency/key_reference``, which does not exist in the authored JSON.
+_UNION_FIELD_NAMES = frozenset({"left", "right", "terminal", "idempotency"})
 
 
 def _loc_to_path(loc: Tuple[Any, ...], *, keep_last: bool = False) -> Tuple[Any, ...]:
@@ -1420,6 +1825,23 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
         message = str(error.get("msg") or _MESSAGES[code])
         return _diagnostic(code, path, message=message)
 
+    # #142: the retry bound and the scope literal get their own codes, checked
+    # BEFORE the generic tails below so a range/type failure on `/retry/count`
+    # never falls through to the catch-all cardinality or invalid-value code.
+    # ``_pointer_endswith`` works on the AUTHORED pointer, so a discriminator tag
+    # in the raw loc cannot hide the match.
+    pointer = _json_pointer(path)
+    if pointer.endswith("/retry/count"):
+        # Covers ge/le violations, non-integer types, AND a `retry` object with no
+        # `count` at all (pydantic reports that as `missing` at .../retry/count).
+        return _diagnostic(PROCESS_IR_SCHEMA_RETRY_COUNT, path)
+    if err_type == "literal_error" and pointer.endswith("/scope"):
+        return _diagnostic(PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED, path)
+    if err_type == "missing" and (
+        pointer.endswith("/catch_body") or pointer.endswith("/catch_body/terminal")
+    ):
+        return _diagnostic(PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED, path)
+
     if err_type == "extra_forbidden":
         if (
             isinstance(last, str)
@@ -1430,6 +1852,21 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
                 PROCESS_IR_CAPABILITY_UNSUPPORTED,
                 path,
                 message="keyed/indexed cache retrieval is capability-gated in ProcessIR v1",
+            )
+        # #142: a named construct this version does not author, on an error-scope
+        # or connector-call node. Report the capability gate, not "unknown field".
+        if (
+            isinstance(last, str)
+            and last in _GATED_TRY_CATCH_EXTRA_KEYS
+            and ("try_catch" in loc or "connector_call" in loc)
+        ):
+            return _diagnostic(
+                PROCESS_IR_CAPABILITY_UNSUPPORTED,
+                path,
+                message=(
+                    "this error-handling construct is capability-gated or unsupported "
+                    "in ProcessIR v1; see the PROCESS_IR_V1_CAPABILITIES manifest"
+                ),
             )
         return _diagnostic(PROCESS_IR_SCHEMA_UNKNOWN_FIELD, path)
 
@@ -1477,6 +1914,11 @@ def _walk_controls(node: Any, path: Tuple[Any, ...], depth: int, connector_above
     single traversal and one definition of "on this path".
     """
     kind = getattr(node, "kind", None)
+    # ``try_catch`` (#142) is deliberately NOT walked here, and that is a
+    # consequence of its unions rather than an oversight: it admits no control
+    # node in either body and cannot nest, so it can neither deepen a control
+    # chain nor put a ProcessCall on a connector's path. Both invariants this
+    # walk enforces are therefore unreachable through it.
     if kind not in ("branch", "decision"):
         return
     depth += 1

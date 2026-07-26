@@ -22,7 +22,13 @@ from typing import Iterable, List, Literal, Optional, Sequence, Tuple
 from pydantic import BaseModel, ConfigDict, Field
 
 from ...errors import (
+    PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+    PROCESS_IR_COMPILE_ERROR_REGION_INVALID,
+    PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
+    PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING,
+    PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE,
+    PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION,
     PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID,
     PROCESS_IR_SCHEMA_BRANCH_CARDINALITY,
     PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
@@ -189,6 +195,34 @@ _REMEDIATION = {
         "This is a compiler defect: a connector-call binding was missing or "
         "inconsistent at emission time — please report it with the authored path."
     ),
+    # --- #142 M12.7 -------------------------------------------------------
+    PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED: (
+        "Use a supported error scope in its verified placement: a process scope as "
+        "the sole root step, or a connector scope as the last step of a "
+        "connector-call sequence."
+    ),
+    PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION: (
+        "Set the retry count to zero, or protect a call that runs downstream of the "
+        "one producing the documents. Retrying the producing call re-runs it, "
+        "duplicating everything it already emitted."
+    ),
+    PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE: (
+        "Set the retry count to zero, or move the call outside the protected scope. "
+        "This action has no established retry safety, so replaying it could "
+        "duplicate an external effect."
+    ),
+    PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING: (
+        "Supply the typed idempotency evidence this action requires, and make sure a "
+        "referenced contract resolves and names this same operation."
+    ),
+    PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED: (
+        "End the catch body with a stop, an exception, or a staging cache write. "
+        "Every caught document must reach a terminal."
+    ),
+    PROCESS_IR_COMPILE_ERROR_REGION_INVALID: (
+        "This is a compiler defect: a derived Try/Catch error region was "
+        "structurally invalid — please report it with the authored path."
+    ),
 }
 
 _MESSAGES = {
@@ -202,6 +236,22 @@ _MESSAGES = {
         "the payload requests a gated/unsupported ProcessIR capability"
     ),
     PROCESS_IR_COMPILE_EMITTER_MISSING: "no registered emitter for the node kind",
+    PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED: (
+        "unsupported error scope or error-scope placement"
+    ),
+    PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION: (
+        "a positive retry count would re-run the flow's document source"
+    ),
+    PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE: (
+        "a retried connector call has no established retry safety"
+    ),
+    PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING: (
+        "required typed idempotency evidence is absent, of the wrong kind, or unresolved"
+    ),
+    PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED: "the catch body does not reach a terminal",
+    PROCESS_IR_COMPILE_ERROR_REGION_INVALID: (
+        "a derived Try/Catch error region is structurally invalid"
+    ),
     PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID: "emitter input is invalid for the node kind",
     PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED: "a required component symbol is unresolved",
     PROCESS_IR_COMPILE_XML_INVALID: "emitted process XML is invalid",

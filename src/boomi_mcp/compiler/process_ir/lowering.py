@@ -27,6 +27,8 @@ from ...errors import (
 from ...models.process_ir import ProcessIRV1
 from .connector_capabilities import canonicalize_connector_metadata
 from .contracts import (
+    CATCH_DRAGPOINT_Y,
+    CATCH_SHAPE_Y,
     DECISION_FALSE_DRAGPOINT_Y,
     DRAGPOINT_Y,
     LISTENER_CONNECTOR_TYPES,
@@ -34,6 +36,7 @@ from .contracts import (
     START_SHAPE_X,
     START_SHAPE_Y,
     BranchInputV1,
+    CatchErrorsInputV1,
     BranchSemanticV1,
     CacheGetSemanticV1,
     CachePutSemanticV1,
@@ -58,6 +61,7 @@ from .contracts import (
     EmissionTransitionV1,
     ExceptionInputV1,
     ExceptionSemanticV1,
+    IdempotencyEvidenceSemanticV1,
     FlowControlInputV1,
     FlowControlSemanticV1,
     MapInputV1,
@@ -74,6 +78,7 @@ from .contracts import (
     StartNoActionInputV1,
     StopInputV1,
     StopSemanticV1,
+    TryCatchSemanticV1,
     SymbolTableV1,
     cfg_edge_id,
     cfg_node_id,
@@ -82,6 +87,7 @@ from .contracts import (
     shape_id,
     shape_x,
 )
+from .error_handling import catch_region_node_ids
 from .diagnostics import raise_compile_error
 
 # Default profile type the legacy property emitter falls back to
@@ -267,6 +273,7 @@ def _semantic_for(node: Any, *, routed: bool = False, entry: bool = False) -> An
             role="entry" if entry else "downstream",
             operation_ref=node.operation_ref,
             action_intent=node.action,
+            idempotency=_idempotency_semantic(getattr(node, "idempotency", None)),
             label=label,
         )
     if kind == "message":
@@ -322,6 +329,15 @@ def _semantic_for(node: Any, *, routed: bool = False, entry: bool = False) -> An
             process_ref=node.process_ref,
             wait=node.wait,
             abort_on_error=node.abort_on_error,
+            label=label,
+        )
+    if kind == "try_catch":
+        # ``retry_count`` is normalised HERE, once: an absent authored retry and an
+        # explicit zero both become 0, so every downstream layer sees one value
+        # and the two authored forms provably compile to identical output.
+        return TryCatchSemanticV1(
+            scope=node.scope,
+            retry_count=node.retry_count,
             label=label,
         )
     if kind == "branch":
@@ -496,6 +512,59 @@ def _lower_terminal(
         )
 
 
+def _idempotency_semantic(evidence: Any) -> Any:
+    """Snapshot authored idempotency evidence, or ``None`` (#142)."""
+    if evidence is None:
+        return None
+    return IdempotencyEvidenceSemanticV1(
+        kind=evidence.kind,
+        contract_ref=getattr(evidence, "contract_ref", None),
+    )
+
+
+def _lower_try_catch_children(
+    builder: _CfgBuilder, node: Any, tc_node_id: str, tc_path: str
+) -> None:
+    """Try subtree first, then Catch — the legacy allocation order (#142).
+
+    Both edges are registered BEFORE their subtree is walked, using the
+    next-ordinal trick ``_lower_branch_children`` already uses: the first node of
+    the run about to be lowered is predictable, so the edge can name it up front.
+    Allocating the whole Try run before the Catch run is what makes the emitted
+    shape ordinals match the shipped Try/Catch goldens, and it also keeps the
+    graph forward-only (the catch subtree is entirely later than the try one).
+    """
+    try_path = _join(tc_path, "try_body")
+    builder.add_edge(
+        tc_node_id,
+        cfg_node_id(len(builder.nodes) + 1),
+        "ordering",
+        1,
+        try_path,
+    )
+    last = _lower_linear_run(builder, node.try_body.steps, try_path, None)
+    _lower_terminal(
+        builder, node.try_body.terminal, _join(try_path, "terminal"), last, routed=False
+    )
+
+    catch_path = _join(tc_path, "catch_body")
+    builder.add_edge(
+        tc_node_id,
+        cfg_node_id(len(builder.nodes) + 1),
+        "catch",
+        2,
+        catch_path,
+    )
+    last = _lower_linear_run(builder, node.catch_body.steps, catch_path, None)
+    _lower_terminal(
+        builder,
+        node.catch_body.terminal,
+        _join(catch_path, "terminal"),
+        last,
+        routed=False,
+    )
+
+
 def _lower_branch_children(
     builder: _CfgBuilder, branch: Any, branch_node_id: str, branch_path: str
 ) -> None:
@@ -570,6 +639,14 @@ def lower_process_ir_to_cfg(ir: ProcessIRV1) -> SemanticCfgV1:
             if previous is not None:
                 builder.add_edge(previous, node_id, "ordering", 1, path)
             _lower_decision_children(builder, step, node_id, path)
+            previous = None
+            continue
+
+        if kind == "try_catch":
+            node_id = builder.add_node(_semantic_for(step), path)
+            if previous is not None:
+                builder.add_edge(previous, node_id, "ordering", 1, path)
+            _lower_try_catch_children(builder, step, node_id, path)
             previous = None
             continue
 
@@ -897,6 +974,11 @@ def _emitter_input_for(node: CfgNodeV1, symbols: Mapping[str, Any]) -> Any:
             abort=semantic.abort_on_error,
             userlabel=label,
         )
+    if kind == "try_catch":
+        # ``scope`` is deliberately NOT consulted: graph placement is the sole
+        # authority on what the region protects, and the shared renderer composes
+        # its own label, so retry count is the whole emitter input.
+        return CatchErrorsInputV1(retry_count=semantic.retry_count)
     if kind == "branch":
         return BranchInputV1(num_branches=semantic.leg_count, userlabel=label)
     if kind == "decision":
@@ -980,6 +1062,11 @@ def lower_cfg_to_emission_plan(
     # its compiler-owned Stop (builder ``fallthrough=[target, stop]``, :5690).
     # Built ONCE: resolving per node against a scan would be O(nodes x symbols).
     symbol_index = symbols.build_index()
+    # #142: which nodes sit on a recovery path. DERIVED from the graph, never
+    # stored on a node — ``check_emission_plan_invariants`` calls the same
+    # function again and compares, so the checker verifies geometry against the
+    # GRAPH rather than against a note lowering left for itself.
+    catch_ids = catch_region_node_ids(cfg)
     ordinal_for_cfg_node = {}
     synthetic_stop_for = {}
     next_ordinal = 2
@@ -1043,6 +1130,23 @@ def lower_cfg_to_emission_plan(
                             cfg_edge=edge.edge_id,
                         )
                     )
+                elif semantic_kind == "try_catch":
+                    # Fixed, legacy-identical labels: the protected path is the
+                    # "default" edge and the recovery path the "error" edge, one
+                    # row down. Same lowercase-identifier / title-case-text
+                    # asymmetry the Decision uses.
+                    is_try = edge.kind == "ordering"
+                    transitions.append(
+                        _transition(
+                            ordinal,
+                            local,
+                            to_shape,
+                            y=DRAGPOINT_Y if is_try else CATCH_DRAGPOINT_Y,
+                            identifier="default" if is_try else "error",
+                            text="Try" if is_try else "Catch",
+                            cfg_edge=edge.edge_id,
+                        )
+                    )
                 elif semantic_kind == "branch":
                     marker = str(edge.leg_ordinal)
                     transitions.append(
@@ -1057,7 +1161,17 @@ def lower_cfg_to_emission_plan(
                     )
                 else:
                     transitions.append(
-                        _transition(ordinal, local, to_shape, cfg_edge=edge.edge_id)
+                        _transition(
+                            ordinal,
+                            local,
+                            to_shape,
+                            y=(
+                                CATCH_DRAGPOINT_Y
+                                if node.node_id in catch_ids
+                                else DRAGPOINT_Y
+                            ),
+                            cfg_edge=edge.edge_id,
+                        )
                     )
 
         nodes.append(
@@ -1068,7 +1182,10 @@ def lower_cfg_to_emission_plan(
                 source_path=node.source_path,
                 origin="ir",
                 emitter_input=_emitter_input_for(node, symbol_index),
-                layout=EmissionLayoutV1(x=shape_x(ordinal), y=SHAPE_Y),
+                layout=EmissionLayoutV1(
+                    x=shape_x(ordinal),
+                    y=CATCH_SHAPE_Y if node.node_id in catch_ids else SHAPE_Y,
+                ),
                 outgoing=tuple(transitions),
             )
         )

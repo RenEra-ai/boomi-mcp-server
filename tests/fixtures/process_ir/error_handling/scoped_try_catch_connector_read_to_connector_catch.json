@@ -1,0 +1,41 @@
+{
+  "body": {
+    "kind": "sequence",
+    "steps": [
+      {
+        "kind": "connector_call",
+        "operation_ref": "$ref:GETOP"
+      },
+      {
+        "catch_body": {
+          "steps": [
+            {
+              "kind": "connector_call",
+              "operation_ref": "$ref:DBSEND"
+            }
+          ],
+          "terminal": {
+            "kind": "stop"
+          }
+        },
+        "kind": "try_catch",
+        "retry": {
+          "count": 3
+        },
+        "scope": "connector",
+        "try_body": {
+          "steps": [
+            {
+              "kind": "connector_call",
+              "operation_ref": "$ref:GETOP2"
+            }
+          ],
+          "terminal": {
+            "kind": "stop"
+          }
+        }
+      }
+    ]
+  },
+  "version": "1"
+}

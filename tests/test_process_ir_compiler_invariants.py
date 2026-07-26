@@ -55,6 +55,7 @@ from boomi_mcp.compiler.process_ir.contracts import (
 from boomi_mcp.errors import (
     PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID,
     PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+    PROCESS_IR_COMPILE_ERROR_REGION_INVALID,
     PROCESS_IR_COMPILE_INTERNAL,
     PROCESS_IR_COMPILE_NONDETERMINISTIC,
     PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
@@ -457,11 +458,18 @@ def test_missing_terminal_is_a_semantic_defect():
     assert _raises(check_cfg_invariants, cfg).code == PROCESS_IR_SEMANTIC_MISSING_TERMINAL
 
 
-def test_reserved_catch_edge_is_rejected():
+def test_catch_edge_out_of_a_non_try_catch_node_is_rejected():
+    # #142 LIFTED the blanket "catch edges are reserved" rejection and replaced it
+    # with the positive rule. This test kept its teeth and changed its claim: a
+    # catch edge out of a node that is NOT an error handler is still rejected,
+    # now as a region defect rather than as ambiguous flow.
     cfg = _linear_cfg().model_copy(
         update={"edges": (_edge(1, 1, 2, kind="catch"),)}
     )
-    assert _raises(check_cfg_invariants, cfg).code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+    assert (
+        _raises(check_cfg_invariants, cfg).code
+        == PROCESS_IR_COMPILE_ERROR_REGION_INVALID
+    )
 
 
 def test_decision_with_wrong_outcome_order_is_nondeterministic():

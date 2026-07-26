@@ -750,8 +750,22 @@ def render_decision(
 
 
 def render_catcherrors(ctx: ShapeRenderContext, *, retry_count: int = 0) -> str:
-    """Verified catcherrors Try/Catch shape (legacy-only). The Try/Catch labeled
-    dragpoints are the transitions in ``ctx``."""
+    """Verified catcherrors Try/Catch shape. The Try/Catch labeled dragpoints are
+    the transitions in ``ctx``.
+
+    SHARED since #142: driven by the legacy adapters AND by the ProcessIR emitter
+    registry. Its output is unchanged by that — this is the one definition of the
+    shape's bytes, which is what lets both callers produce identical XML.
+
+    Two settings are FIXED here rather than parameterised, and deliberately so.
+    The all-errors flag and the userlabel that describes it are locked together:
+    the flag has a second documented value (the platform's default catches only
+    document-level errors), but every shipped golden renders the all-errors form,
+    and making either caller-selectable would change bytes for processes already
+    emitted. ProcessIR records that as a deliberate surface omission with the
+    semantics known — see `.codex/plans/issue-142-live-captures.md` §G2/§G3 — not
+    as an unverified behaviour.
+    """
     retry_label = "no retry" if retry_count == 0 else f"retry {retry_count}"
     dragpoints = render_dragpoints(ctx.transitions)
     return (

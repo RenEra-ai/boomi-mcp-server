@@ -161,6 +161,34 @@ PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY = (
 )
 PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID = "PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID"
 
+# --- ProcessIR scoped error handling (M12.7 / issue #142; ADR-001 §7) ---------
+# #142 ADDS to the same four families #141 used; no new family, no rename.
+#
+# The retry bound (0..5) is not a compiler invention: the platform's own Try/Catch
+# step documents exactly that range, together with a fixed wait schedule
+# (0 none / 1 immediate / 2:10s / 3:30s / 4:60s / 5:120s) that the caller cannot
+# author. See .codex/plans/issue-142-live-captures.md §G1.
+#
+# SEMANTIC_RETRY_* blames the authored flow (a retry region that would re-run the
+# source, or a retried write with no registry-backed safety). The single COMPILE_*
+# code blames the compiler: a caller cannot author a CFG region at all, so
+# reaching it means the region derivation itself produced a malformed graph.
+PROCESS_IR_SCHEMA_RETRY_COUNT = "PROCESS_IR_SCHEMA_RETRY_COUNT"
+PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED = (
+    "PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED"
+)
+PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION = (
+    "PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION"
+)
+PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE = (
+    "PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE"
+)
+PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING = (
+    "PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING"
+)
+PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED = "PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED"
+PROCESS_IR_COMPILE_ERROR_REGION_INVALID = "PROCESS_IR_COMPILE_ERROR_REGION_INVALID"
+
 
 @dataclass(frozen=True)
 class ErrorCodeSpec:
@@ -702,6 +730,76 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "target, or cross-wiring) — a compiler defect, not authored input."
             ),
             owner="#141",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SCHEMA_RETRY_COUNT,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A Try/Catch retry count is not an integer from 0 through 5 — the "
+                "platform's own documented bound on the Retry Count field."
+            ),
+            owner="#142",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A Try/Catch declares an unknown error scope, or places a known scope "
+                "somewhere the compiler has no verified emitter shape for."
+            ),
+            owner="#142",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A positive retry count would re-run the flow's document source, "
+                "duplicating everything it already produced."
+            ),
+            owner="#142",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A retried connector call has no registry-backed retry safety, so "
+                "replaying it could duplicate an external effect."
+            ),
+            owner="#142",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A retried connector call needs typed idempotency evidence that is "
+                "absent, of the wrong kind, or does not resolve to its operation."
+            ),
+            owner="#142",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A Try/Catch catch body does not reach a terminal. Every caught "
+                "document must end on a terminal step."
+            ),
+            owner="#142",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_COMPILE_ERROR_REGION_INVALID,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A compiler-derived Try/Catch error region is structurally invalid "
+                "(edges, ordinals, or containment) — a compiler defect, not authored input."
+            ),
+            owner="#142",
         ),
     )
 }

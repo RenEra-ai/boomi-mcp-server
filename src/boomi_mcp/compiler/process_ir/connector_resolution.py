@@ -48,6 +48,7 @@ from .connector_capabilities import (
 )
 from .contracts import ComponentSymbolV1, SemanticCfgV1, SymbolTableV1, _CompilerModel
 from .diagnostics import raise_compile_error
+from .error_handling import validate_error_handling
 
 CONNECTOR_ACTION_COMPONENT_TYPE = "connector-action"
 CONNECTOR_SETTINGS_COMPONENT_TYPE = "connector-settings"
@@ -335,7 +336,13 @@ _MAY_FOLLOW_NON_PRODUCER = frozenset({"stop"}) | _STREAM_PRODUCING_KINDS
 #: Kinds that do NOT break a map's pairing with its upstream call. A connector
 #: call sets the pairing; Branch/Decision merely route the documents onward
 #: without altering them, so they carry it through into each body.
-_MAP_PAIRING_TRANSPARENT = frozenset({"connector_call", "branch", "decision"})
+#: #142 adds ``try_catch`` for the same reason: it routes documents down one of
+#: two paths without altering them, so a `call -> try_catch -> [map, call]` shape
+#: stays profile-checkable. The CATCH edge is handled separately below — it does
+#: not inherit the protected path's state.
+_MAP_PAIRING_TRANSPARENT = frozenset(
+    {"connector_call", "branch", "decision", "try_catch"}
+)
 
 
 class _PathState:
@@ -591,12 +598,56 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
             # own copy. Sharing it would let leg 1's producer/blocked flags leak
             # into leg 2.
             child = state if position == len(successors) - 1 else state.copy()
+            if edge.kind == "catch":
+                # #142. A recovery path forks from the state at SCOPE ENTRY, not
+                # from wherever the protected path got to. Two consequences, both
+                # required:
+                #
+                # * whatever the protected path did to the document is NOT
+                #   carried across. A Set Properties inside the try body has not
+                #   necessarily run — that is exactly the failure being caught —
+                #   so a catch body may not be validated as though it had. The
+                #   copy above already snapshots at push time; this clears the
+                #   parts that describe protected-path progress.
+                # * a caught document EXISTS on this path even when nothing
+                #   upstream produced one, because the platform hands the failed
+                #   document to the recovery path. Live evidence: a retried
+                #   process routed one error document to its catch leg
+                #   (docs/archive/2026-06-19-issue-91-capstone-recipe-evidence.md).
+                #
+                # ``saw_call`` stays TRUE so an UNBRACKETED map in a catch body
+                # fails closed through the existing "a call ran upstream but is
+                # not this map's immediate predecessor" rule, rather than being
+                # silently skipped as a pure-legacy map would be.
+                child = child.copy()
+                child.pending_map = None
+                child.map_upstream = None
+                child.producer_binding = None
+                child.blocked_by = None
+                child.producer = node
+                child.saw_call = True
             stack.append((edge.target_node_id, child))
 
 
 def validate_connector_calls(cfg: SemanticCfgV1, symbols: SymbolTableV1) -> None:
-    """Both passes, in order. The single entry point the pipeline calls."""
+    """Every pass, in order. The single entry point the pipeline calls.
+
+    #142's retry safety runs HERE, on the bindings resolved once above, rather
+    than as its own pipeline step. Two reasons, both structural:
+
+    * the retry check needs the resolved capability row for each call, and
+      resolving a second time would let the safety gate and the emitter disagree
+      about which action a reference names;
+    * a second public entry point that ran the connector gate but not the retry
+      gate would be exactly the "a gate only one of two entry points enforces is
+      not a gate" failure this module already guards against elsewhere.
+
+    Order matters: retry safety is checked BEFORE the ordinary flow semantics so
+    an unsafe retry is reported as an unsafe retry, rather than surfacing as
+    whichever cardinality/profile complaint the same payload happens to trip.
+    """
     bindings = resolve_connector_call_bindings(cfg, symbols)
+    validate_error_handling(cfg, bindings, symbols)
     validate_connector_call_semantics(cfg, bindings, symbols)
 
 

@@ -54,11 +54,11 @@ takes **only** a typed `EmitterInputV1` member and an `EmitterContext` (the plan
 it declared it needs) — never a raw `IntegrationSpecV1`/`PipelineSpec`/legacy builder config, and no
 facility to mutate anything (guarded by `test_process_emitter_registry.py`).
 
-## 3. The closed manifest — 17 keys, 16 model classes
+## 3. The closed manifest — 18 keys, 17 model classes
 
 Registry completeness is validated at import against
 `TypeAdapter(EmitterInputV1).json_schema()`'s discriminator mapping (`_validate_coverage`). The 16
-model classes yield 17 discriminator keys because `ConnectorActionInputV1` accepts both
+model classes yield 18 discriminator keys because `ConnectorActionInputV1` accepts both
 `connectoraction_source` and `connectoraction_target` — the two keys share one connector renderer.
 
 | Registry key | Input model | Boomi shape | Outgoing | Required symbols |
@@ -197,3 +197,35 @@ equal the wired transition count; a mismatch — like every other control-wiring
 The graph verifier's bare-Stop finding stays a **warning**, not an error: a Decision routing its
 false outcome straight to a Stop is live-attested production shape, so treating intentional document
 dropping as a failure would reject valid processes.
+
+
+## #142 M12.7 — `catcherrors` becomes registry key 18
+
+Scoped Try/Catch is now a compiled ProcessIR construct, so the shape has a registry key:
+
+| Field | Value |
+|---|---|
+| discriminator | `catcherrors` |
+| input model | `CatchErrorsInputV1` (one field: `retry_count`, bounded 0–5) |
+| produced shape type | `catcherrors` |
+| outgoing cardinality | `EXACT_TWO` — Try then Catch |
+| capability | `PROCESS_IR_V1` |
+
+`catcherrors` moves **out** of §6's legacy-only list. It was there because no compiled construct
+produced it; that is no longer true.
+
+**No byte moved.** The adapter calls the *shared* `rendering.render_catcherrors` — the same function
+the legacy adapters already used — rather than importing or duplicating a private legacy emitter, so
+there is exactly one definition of this shape's bytes and all pre-existing Try/Catch goldens are
+unchanged. `render_catcherrors`'s docstring lost its "(legacy-only)" note; its output did not change.
+
+Two settings stay fixed inside the renderer rather than becoming input fields: the all-errors flag
+and the userlabel that describes it. They are locked together, and both callers depend on the
+current text — see PROCESS_IR_V1 §3c for why that is recorded as a deliberate surface omission
+rather than an unknown.
+
+The precondition `_pre_catcherrors` re-checks the 0–5 bound. `CatchErrorsInputV1` already enforces
+it, so a plan built through lowering can never fail there; the precondition exists for the other
+caller — a hand-built plan handed straight to the registry, which the typed model never saw.
+
+Listener start, Notify, Route and `emit_fragment` remain absent.

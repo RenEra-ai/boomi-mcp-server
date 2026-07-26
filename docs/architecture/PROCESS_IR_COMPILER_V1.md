@@ -675,3 +675,129 @@ for what they covered and incomplete for what #141 added:
 * **A Decision arm admits at most ONE `process_call`**; the capture attests exactly one
   `decision →true→ processcall`, and a chain is unproven. The Branch-leg rule stays plural, as the
   reconciliation states it.
+
+## 12. #142 M12.7 — scoped error handling and retry safety (shipped dark)
+
+Adds `try_catch` to the compiler. The surface stays dark until #146; nothing in `build_integration`
+gained a ProcessIR field.
+
+### 12.1 Error regions are DERIVED, never stored
+
+`compiler/process_ir/error_handling.py` is the single authority. `derive_error_regions(cfg)` walks
+each `try_catch` node's two subtrees and returns them as node-id sets; `catch_region_node_ids(cfg)`
+is the union of the recovery ones.
+
+**Nothing carries a region id or an "is on the catch row" flag.** Lowering calls
+`catch_region_node_ids` to place shapes, and `check_emission_plan_invariants` calls it *again* to
+verify them. That is the point: a stored membership flag would make the checker compare lowering's
+answer against lowering's own note rather than against the graph — the duplicate-authority failure
+#140 removed for connection refs and #141 for control-branch membership.
+
+The walk runs **last** in `check_cfg_invariants`, after reachability, join-freedom, cycle and
+forward-only checks have proven the graph is a tree. Running it earlier would force it to defend
+against a cycle the checker directly above it already rejects.
+
+### 12.2 Source isolation is a graph property, not an authored one
+
+`PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION` fires when a positive retry's region would re-run
+whatever produced the documents. The question asked is **"is there a producing node strictly
+upstream of this handler?"** — walked over the CFG's unique predecessor chain, never read off the
+authored `scope`.
+
+That matters: `scope` is a string on a mutable model. A document whose scope says `connector` while
+its shape puts the handler at the root would pass a scope-based check and still re-run its source.
+Deriving the answer from the graph makes the two impossible to disagree.
+
+Consequence: **positive retry is in practice a connector-scope construct.** Every supported
+process-scope body begins with the producing call, so a positive count there is always rejected.
+
+### 12.3 Retry safety comes from the registry, never from the payload
+
+`ConnectorCapabilityV1` gained a **required, un-defaulted** `retry_safety` column
+(`read_only` | `idempotent_write` | `conditionally_idempotent` | `non_idempotent` | `unverified`).
+No default is the fail-closed mechanism: a new row cannot forget to classify itself, because
+omitting the field is an import-time error rather than a silent "safe".
+
+It is a **separate fact from `side_effect`** and must not be inferred from it. `side_effect` answers
+"does this change anything?"; `retry_safety` answers "may this run twice?". SOAP `EXECUTE` is the
+row that proves the distinction: it is `side_effect="read"` and `retry_safety="unverified"`, because
+one generic action covers every operation a service exposes.
+
+| Row | `retry_safety` | Obligation when retried |
+|---|---|---|
+| `read_only` | replaying re-reads | none |
+| `idempotent_write` | replay is safe | `{"kind": "verified_action"}` |
+| `conditionally_idempotent` | safe under a contract | `{"kind": "key_reference"}` resolving to the SAME operation |
+| `non_idempotent`, `unverified` | never retryable | — rejected regardless of evidence |
+
+**No production row ships as `idempotent_write` or `conditionally_idempotent`.** REST `PATCH`, SOAP
+`EXECUTE` and Database `Send` are all `unverified`: the knowledge base returns no authoritative
+retry-safety answer for any of them, and the one on-point official statement makes the *caller*
+responsible for ensuring retries are safe rather than promising the connector is
+(`.codex/plans/issue-142-live-captures.md` §G4). Those two branches are exercised by **synthetic
+rows in tests only** — which is honest about coverage rather than shipping an unbacked claim.
+
+Evidence **discharges an obligation; it never grants permission.** The `_NEVER_RETRYABLE` check runs
+*before* the evidence check precisely so an authored assertion cannot promote an unclassified write.
+
+### 12.4 The catch path forks from scope-entry state
+
+In `connector_resolution._walk_paths`, a child pushed on a `catch` edge gets a state that:
+
+- **drops** the protected path's progress (`pending_map`, `map_upstream`, `producer_binding`,
+  `blocked_by`). A Set Properties inside the try body has not necessarily run — that is the failure
+  being caught — so the recovery path must not be validated as though it had;
+- **marks a document present**, because the platform hands the failed document to the recovery path
+  even when nothing upstream produced one (live evidence: a retried process routed one error
+  document to its catch leg);
+- **keeps `saw_call` true**, so an unbracketed map in a catch body fails closed through the existing
+  "a call ran upstream but is not this map's immediate predecessor" rule rather than being silently
+  skipped the way a pure-legacy map is.
+
+`try_catch` joins `_MAP_PAIRING_TRANSPARENT`: like Branch/Decision it routes documents without
+altering them, so `call -> try_catch -> [map, call]` stays profile-checkable.
+
+### 12.5 Validation order
+
+`validate_connector_calls` remains the single entry point and now runs three passes:
+
+```
+resolve_connector_call_bindings   ->  validate_error_handling  ->  validate_connector_call_semantics
+```
+
+Retry safety is checked on the **bindings resolved once above**, not on a second resolution — the
+gate must see exactly what the emitter will see. It runs **before** ordinary flow semantics so an
+unsafe retry reports as an unsafe retry rather than as whichever cardinality complaint the same
+payload happens to trip. Keeping it inside the one entry point avoids a second public path that
+enforces the connector gate but not the retry gate.
+
+### 12.6 Lowering and geometry
+
+- Two edges per handler: Try = `ordering` local 1, Catch = `catch` local 2. The `catch` edge kind's
+  #137 reservation is **lifted**; the invariant checker now rejects it out of any node that is not a
+  `try_catch` (`PROCESS_IR_COMPILE_ERROR_REGION_INVALID`) instead of rejecting it everywhere.
+- The whole Try subtree is allocated before the Catch subtree, which keeps the graph forward-only
+  and reproduces the shipped Try/Catch shape ordinals.
+- Geometry, transcribed from the shared renderer's own constants: catch-row shapes at
+  `CATCH_SHAPE_Y = 456.0`, their transitions at `CATCH_DRAGPOINT_Y = 464.0`; the handler's own
+  dragpoints are `default`/"Try" on the normal row and `error`/"Catch" one row down.
+  `CATCH_DRAGPOINT_Y` and `DECISION_FALSE_DRAGPOINT_Y` hold the same number and stay two names —
+  two independent facts that happen to coincide.
+- `CatchErrorsInputV1` carries **only** `retry_count`. `scope` is absent because graph placement is
+  the authority; `userlabel` is absent because the renderer composes its own, so a field carrying
+  one would never reach the wire.
+
+### 12.7 Failure taxonomy
+
+| Code | Fires when |
+|---|---|
+| `PROCESS_IR_SCHEMA_RETRY_COUNT` | retry count is not an integer 0–5 |
+| `PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED` | unknown scope, or a known scope in an unverified placement |
+| `PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION` | the retried region contains the flow's producer |
+| `PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE` | a retried call's row is `non_idempotent`/`unverified` |
+| `PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING` | evidence absent, wrong kind, unresolved, or bound to another operation |
+| `PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED` | the catch body reaches no terminal |
+| `PROCESS_IR_COMPILE_ERROR_REGION_INVALID` | a derived region is structurally impossible — a compiler defect |
+
+Every code has at least one test that actually reaches it, and every rejection is paired with a
+positive case that compiles: a code tested only negatively can still be vacuous.

@@ -586,11 +586,12 @@ The verified shape serializers were extracted out of `ProcessFlowBuilder` into
 primitives), and a typed, test-only registry (`compiler/process_ir/emitter_registry.py`) now emits
 from that same copy behind the `EmissionPlanV1` boundary. Compatibility facts:
 
-- **17 registry keys / 16 model classes** (the `connectoraction_source`/`connectoraction_target`
-  keys share `ConnectorActionInputV1`). Every currently-emitted process shape kind has exactly one
-  registered typed emitter or a documented legacy-only exception (`_emit_start_listen` → #140,
-  `_emit_catcherrors`/`_emit_notify` → #142, connector `dynamic_path` → #139/#140, `emit_fragment`
-  permanently excluded, `route` no entry).
+- **17 registry keys / 16 model classes** at #138 (the `connectoraction_source`/
+  `connectoraction_target` keys share `ConnectorActionInputV1`); **18 / 17 after #142**, which
+  registered `catcherrors`. Every currently-emitted process shape kind has exactly one registered
+  typed emitter or a documented legacy-only exception (`_emit_start_listen` → #140, `_emit_notify`
+  → still legacy-only, connector `dynamic_path` → #139/#140, `emit_fragment` permanently excluded,
+  `route` no entry). `_emit_catcherrors` left this exception list in #142.
 - **Zero normalized comparisons remain among the process-emitter goldens.** The eight C14N-compared
   fixtures (try_catch/notify/connector-scoped/exception/processcall/archetype) were converted to raw
   `==`; five new raw fixtures freeze previously structural-only or differential-only paths
@@ -1078,3 +1079,51 @@ emitted bytes move. Pinned by the unchanged adapter/codec suites plus byte-ident
 per §5 of PROCESS_IR_V1): the diff adds and removes no `$defs`, touching only `BranchLegV1`,
 `DecisionTrueArmV1`, `DecisionFalseArmV1` and `SequenceNodeV1`. The three golden *documents* in
 `process_ir_v1.json` are byte-identical, which is the backward-compatibility signal.
+
+
+## #142 M12.7 ledger — scoped Try/Catch is DIRECT-IR ONLY
+
+Scoped error handling extends the **new IR surface only**. The legacy `flow_sequence` dialect and
+`ProcessFlowBuilder`'s own `reliability` path are unchanged in every observable way.
+
+| Construct | Direct ProcessIR (#142) | Legacy `flow_sequence` / builder |
+|---|---|---|
+| `try_catch` node (process or connector scope) | accepted | not expressible; builder keeps its own `reliability` config |
+| bounded `retry.count` 0–5 | accepted, **safety-checked** | builder validator keeps its existing 0–5 range check, unchanged |
+| typed `idempotency` evidence on a call | accepted | not expressible |
+| positive retry over a write | **rejected** (no row ships as replay-safe) | builder behaviour unchanged — #142 adds no new rejection to the legacy path |
+| catch body as an ordinary IR body | accepted | fixed legacy catch layouts only |
+
+**The new safety rules apply to new ProcessIR retry intent only.** The issue's backward-compatibility
+requirement is explicit that legacy behaviour changes only through a separately documented safety fix
+with its own compatibility analysis — so no existing `catch-errors`/Try/Catch request became invalid,
+and no legacy diagnostic moved.
+
+**Byte compatibility.** All 11 pre-existing `catchAll="true"` goldens are byte-identical, verified by
+`git diff --exit-code --diff-filter=MDR <baseline> -- tests/fixtures/golden_xml
+tests/fixtures/process_ir/emitter_parity` (additive fixtures permitted; any modification, deletion or
+rename fails). `render_catcherrors` gained documentation only — no output change — and is now shared
+between the legacy adapters and the ProcessIR registry, which is precisely why nothing moved.
+
+`tests/fixtures/process_ir/process_ir_v1.schema.json` was regenerated (a **reviewed** regeneration,
+per §5 of PROCESS_IR_V1). The diff is exactly:
+
+- **added `$defs`** — `TryCatchNodeV1`, `TryCatchTryBodyV1`, `TryCatchCatchBodyV1`, `RetryPolicyV1`,
+  `VerifiedActionIdempotencyV1`, `KeyReferenceIdempotencyV1`;
+- **removed `$defs`** — none;
+- **changed `$defs`** — `ConnectorCallNodeV1` (gains the optional `idempotency` field) and
+  `SequenceNodeV1` (its step discriminator gains `try_catch`).
+
+Nothing was removed or narrowed, so no previously-valid document became invalid. The three golden
+*documents* in `process_ir_v1.json` and the compiler fixtures in `process_ir_compiler_v1.json` are
+byte-identical, which is the backward-compatibility signal.
+
+**Surface stays dark.** No ProcessIR field was added to `build_integration`; #146 owns that
+boundary. The MCP-surface guard test additionally forbids `IdempotencyContractSymbolV1`,
+`TryCatchSemanticV1`, `CatchErrorsInputV1`, `ErrorRegionV1` and `retry_safety` from every tool
+schema and description — exported-to-the-compiler and visible-to-an-LLM are separate questions.
+
+**Reservations retained.** Listener error scopes, queue/Event-Streams topology, nested Try/Catch and
+failure-trigger selection all stay out; see PROCESS_IR_V1 §8 for which are `gated` ("not yet") and
+which are `unsupported` ("never"), and `.codex/plans/issue-142-live-captures.md` for the evidence
+behind each.

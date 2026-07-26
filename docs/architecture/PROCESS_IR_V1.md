@@ -190,6 +190,86 @@ the KB documents no merge step for integration processes — so the diagnostics 
 ProcessIR v1 **does not emit** these, never that Boomi would reject them. Examples in this document
 must not visually imply convergence.
 
+### 3c. Scoped error handling — the #142 Try/Catch node
+
+`try_catch` protects a region of the flow and routes a failed document to a recovery path. It is
+authored as `{scope, try_body, catch_body, retry?}`; both bodies are `steps` + one `terminal`, and
+both terminate independently — there is no join and **nothing may follow a `try_catch`**.
+
+**Placement is part of the contract.** `scope` is not a free-form label: each value names a topology
+the compiler has a verified emitter shape for.
+
+| Scope | Where it may sit | What its try body must be |
+|---|---|---|
+| `process` | the **sole root step** | begins with the `connector_call` that produces the flow's documents |
+| `connector` | the **last step** of a `connector_call` sequence | optional `set_ddp`/`set_dpp` preparation, then exactly the one `connector_call` it protects |
+
+Both placements are re-checked independently of the parsed model in `body_capabilities`, because
+`ProcessIRV1` is exported and mutable — a gate only `parse_process_ir_v1` enforces is not a gate.
+
+**Body matrix.** Both bodies share one step vocabulary; the terminal sets differ.
+
+| Slot | Admitted kinds |
+|---|---|
+| `try_body.step` | the linear set minus `flow_control`/`data_process`, plus `connector_call` |
+| `try_body.terminal` | `stop` |
+| `catch_body.step` | same as `try_body.step` |
+| `catch_body.terminal` | `stop`, `exception`, `cache_put` (staging sink) |
+
+The asymmetry is deliberate: an `exception` raised inside a protected path would be caught by that
+same path's own handler and no evidence covers the loop, while a staging `cache_put` is a recovery
+shape rather than a success one. `catch_body` is **mandatory and must terminate** — a caught document
+that reaches no terminal is one the process silently drops.
+
+**Retry.** `retry.count` is an integer `0..5`, and that bound is the platform's own: the Try/Catch
+step documents exactly that range together with a fixed wait schedule — `0` none, `1` immediate,
+then 10s / 30s / 60s / 120s — and auto-retries are skipped entirely in test runs
+(`.codex/plans/issue-142-live-captures.md` §G1). **The schedule is platform-owned and not
+authorable**; there is no wire field for a delay or a backoff curve, so `retry_backoff_authoring` is
+`unsupported` rather than gated. An absent `retry` and an explicit `{"count": 0}` are the same thing
+and compile to identical bytes.
+
+**Retry is bounded by SAFETY, not only by range.** Two rules run before anything is emitted:
+
+1. *Source isolation.* A positive count is rejected when the protected region would re-run whatever
+   produced the flow's documents (`PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION`). This is derived
+   **structurally from the graph** — "is there a producing call strictly upstream of the handler?" —
+   not read off the authored `scope`, so a mutated document whose scope disagrees with its shape
+   cannot smuggle an unsafe region through. Live evidence: a real process with process-wide retry 2
+   reran its entire Get→Map→Send chain on each attempt
+   (`docs/archive/2026-06-19-issue-91-capstone-recipe-evidence.md`), and official guidance
+   independently advises against a Try/Catch at the start of a process or before a query
+   (capture §G7). In practice this means **positive retry is a connector-scope construct**.
+2. *Replay safety.* Every retried `connector_call` must sit on a connector-registry row whose
+   `retry_safety` permits replay. The registry decides; authored evidence never overrides it.
+
+**Typed idempotency evidence.** `connector_call.idempotency` is a discriminated union, never a
+boolean:
+
+- `{"kind": "verified_action"}` — required by an `idempotent_write` row.
+- `{"kind": "key_reference", "contract_ref": "$ref:KEY"}` — required by a `conditionally_idempotent`
+  row. The reference must resolve in the symbol table **and name the same operation** as the call;
+  a contract for a different operation is not evidence about this one.
+
+`contract_ref` accepts an exact `$ref:KEY` token **only** — deliberately stricter than an ordinary
+component reference, which also admits a literal id. That is what makes the acceptance criterion
+"cannot be satisfied by an unverified free-form Boolean" hold: with a literal-id escape hatch,
+`"yes"` would parse as evidence. No key material is ever authored, stored, or emitted.
+
+**Catch always means all errors in V1.** The emitted shape carries exactly two settings — an
+all-errors flag and the retry count — and there is **no error-type or error-code list on the wire at
+all**, which is why `catch_error_type_lists` is `unsupported` rather than gated: there is nothing to
+research later. The flag itself has a documented second value (the platform's default catches only
+document-level errors), but the shared renderer fixes the all-errors form together with a matching
+label, and changing either would alter bytes for already-shipped processes. That omission is
+therefore recorded as `catch_failure_trigger_selection: gated` — a deliberate V1 surface decision
+with the semantics fully known (capture §G2/§G3), not an unknown.
+
+**Nesting is gated.** A `try_catch` admits no control node in either body and may not nest. Official
+documentation shows that composing two Try/Catch steps silently rewrites the OUTER step's effective
+error selection, and that the rule differs depending on whether the two are adjacent (capture §G6) —
+so a single deterministic semantic cannot be derived from the authored fields alone.
+
 ## 4. Alias normalization (private codec)
 
 The public model has ONE canonical spelling per node. Legacy spellings are normalized only in
@@ -277,11 +357,24 @@ Published as the immutable `PROCESS_IR_V1_CAPABILITIES` manifest (not an authore
 | `connector_call_in_control_body` — a `connector_call` inside a Branch leg or Decision arm | **supported** | #141 (shipped) |
 | `rich_branch_decision_bodies` — the §3b body matrix, nested Decision, bare false Stop | **supported** | #141 (shipped) |
 | `continuation_after_branch_or_decision` | gated | #141 — terminal fan-out only |
-| scoped Try/Catch | gated | #142 |
+| `scoped_try_catch` — the §3c `try_catch` node, both verified scopes | **supported** | #142 (shipped) |
+| `bounded_retry` — `retry.count` 0–5 | **supported** | #142 (shipped) |
+| `typed_idempotency_evidence` — the §3c evidence union | **supported** | #142 (shipped) |
+| `catch_error_type_lists` — catching named error types/codes | **unsupported (permanent)** | #142 — no wire representation exists (capture §G2) |
+| `retry_backoff_authoring` — authoring the retry wait schedule | **unsupported (permanent)** | #142 — platform-owned, no wire field (capture §G1) |
+| `queue_topology` — creating queues / Event Streams objects | **unsupported** | #142 — out of scope; zero live queue components (capture §G5) |
+| `catch_failure_trigger_selection` — choosing document-errors vs all-errors | gated | #142 — semantics known, emitter fixed (capture §G2/§G3) |
+| `verified_write_retry_safety` — a stock write action classified replay-safe | gated | #142 — no authoritative classification (capture §G4) |
+| `listener_error_scope` | gated | #142 — the fused listener start rejects reliability composition |
+| `nested_try_catch` | gated | #142 — composition rewrites the outer error selection (capture §G6) |
 | keyed cache (`doc_cache_index`/`cache_key_values`/keyed `load_all_documents`) | gated | no live-captured wire shape (#119) |
 | `definedparameter` property source | gated | no verified wire shape |
 | joins, loops | gated | ADR-001 §8 |
 | caller-authored CFG edges, XML/layout/shape ids, secret values | unsupported (permanent) | ADR-001 §12 |
+
+**`unsupported` means "never", `gated` means "not yet".** #142 uses both deliberately: marking an
+impossibility as gated promises follow-up research that cannot conclude, and marking a deliberate
+omission as unsupported forecloses a decision that is still open.
 
 `mixed_connector_execution` was **overloaded** before #140: ADR-001 §8 lists it as "multiple
 connector calls per path" (which #140 ships), while this document's sequence rules used the same name

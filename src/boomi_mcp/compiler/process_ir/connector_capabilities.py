@@ -58,6 +58,17 @@ class ConnectorCapabilityV1(_CompilerModel):
     data to the process for further processing", and Database (Legacy) declares
     no response profile at all — only a Write profile, which is an *input*
     ("referenced as the destination profile in a map").
+
+    ``retry_safety`` (#142) is a SEPARATE fact from ``side_effect`` and must not
+    be inferred from it. ``side_effect`` answers "does this change anything?";
+    ``retry_safety`` answers "may this be run twice?" — and a read-shaped action
+    is not automatically replay-safe (a SOAP EXECUTE can invoke anything). It has
+    NO DEFAULT on purpose: a new row cannot forget to classify itself, because
+    omitting the field is an import-time error rather than a silent "safe".
+
+    ``unverified`` is a fail-closed SENTINEL, not a fifth safe classification. It
+    means "nobody has established this", and it can never authorise a positive
+    retry no matter what evidence a caller attaches.
     """
 
     family: str = Field(..., min_length=1)
@@ -65,6 +76,13 @@ class ConnectorCapabilityV1(_CompilerModel):
     accepts_input: Literal["none_or_documents", "documents_required"]
     produces_output: bool
     side_effect: Literal["read", "write"]
+    retry_safety: Literal[
+        "read_only",
+        "idempotent_write",
+        "conditionally_idempotent",
+        "non_idempotent",
+        "unverified",
+    ]
 
 
 def _rows(*specs: ConnectorCapabilityV1) -> Mapping[Tuple[str, str], ConnectorCapabilityV1]:
@@ -95,6 +113,9 @@ CONNECTOR_CALL_CAPABILITIES_V1 = _rows(
         accepts_input="none_or_documents",
         produces_output=True,
         side_effect="read",
+        # A GET retrieves; replaying it re-reads. This is the one classification
+        # the HTTP method itself establishes.
+        retry_safety="read_only",
     ),
     # REST Client PATCH — a `rest_send`-class verb. It consumes the outbound
     # document AND declares a Response Profile ("Structure of the response
@@ -105,6 +126,13 @@ CONNECTOR_CALL_CAPABILITIES_V1 = _rows(
         accepts_input="documents_required",
         produces_output=True,
         side_effect="write",
+        # UNVERIFIED, deliberately. PATCH is not idempotent in general (a
+        # relative/append-style patch compounds on replay), and the knowledge base
+        # returns no authoritative retry-safety answer for this connector at all —
+        # the one on-point official statement makes the CALLER responsible for
+        # ensuring retries are safe rather than promising the connector is
+        # (.codex/plans/issue-142-live-captures.md §G4). Fail closed.
+        retry_safety="unverified",
     ),
     # SOAP Client EXECUTE — the single action of `wssoapclientsdk` (#126),
     # declaring request AND response XML profiles, so it produces.
@@ -118,6 +146,11 @@ CONNECTOR_CALL_CAPABILITIES_V1 = _rows(
         accepts_input="none_or_documents",
         produces_output=True,
         side_effect="read",
+        # UNVERIFIED even though ``side_effect`` is "read" — and this row is
+        # exactly why the two facts are separate. EXECUTE is a single generic
+        # action covering every operation a SOAP service exposes, so "fetch-shaped
+        # here" says nothing about whether the remote call may be replayed.
+        retry_safety="unverified",
     ),
     # Database (Legacy) Get. Produces: its ReadProfile is the output ("in a map,
     # the Read profile is referenced as the source profile").
@@ -130,6 +163,8 @@ CONNECTOR_CALL_CAPABILITIES_V1 = _rows(
         accepts_input="none_or_documents",
         produces_output=True,
         side_effect="read",
+        # A Get issues a read query; replaying it re-reads.
+        retry_safety="read_only",
     ),
     # Database (Legacy) Send — the `db_write` target primitive. TERMINAL: only a
     # WriteProfile (an input), no response profile, and the official Get-vs-Send
@@ -140,6 +175,12 @@ CONNECTOR_CALL_CAPABILITIES_V1 = _rows(
         accepts_input="documents_required",
         produces_output=False,
         side_effect="write",
+        # UNVERIFIED. A Send carries whatever statement the operation configures —
+        # an INSERT duplicates on replay, an idempotent UPSERT does not — and the
+        # registry keys on (family, action), which cannot see that configuration.
+        # No authoritative source classifies the action itself as replay-safe
+        # (capture §G4), so no positive retry is authorised over it.
+        retry_safety="unverified",
     ),
 )
 
@@ -161,6 +202,12 @@ GATED_CONNECTOR_CALL_REASONS: Mapping[str, str] = MappingProxyType(
         "unverified_action": (
             "This connector family/action pair has no verified operation, emitter and "
             "document-cardinality evidence; see the #140 capability matrix in "
+            "docs/architecture/PROCESS_IR_COMPILER_V1.md."
+        ),
+        "retry_unverified_write": (
+            "This connector action has no established retry safety, so it may not sit "
+            "inside a retried region; set the retry count to zero or move the call "
+            "outside the protected scope. See the #142 retry-safety matrix in "
             "docs/architecture/PROCESS_IR_COMPILER_V1.md."
         ),
     }

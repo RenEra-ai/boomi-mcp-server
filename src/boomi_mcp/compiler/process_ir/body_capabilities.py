@@ -35,13 +35,16 @@ from types import MappingProxyType
 from typing import Any, Dict, FrozenSet, List, Mapping, Tuple
 
 from ...errors import (
+    PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+    PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
 )
 from ...models.process_ir import (
     _CONNECTOR_KINDS,
     LINEAR_BODY_KINDS,
     PROCESS_IR_V1_MAX_CONTROL_DEPTH,
+    TRY_CATCH_BODY_KINDS,
     ProcessIRV1,
 )
 from .diagnostics import raise_compile_error
@@ -53,11 +56,15 @@ _SEMANTIC_PHASE = "semantic_lowering"
 BRANCH_LEG = "branch_leg"
 DECISION_TRUE_ARM = "decision_true_arm"
 DECISION_FALSE_ARM = "decision_false_arm"
+#: #142 Try/Catch body contexts, spelled as their authored pointer segments.
+TRY_BODY = "try_body"
+CATCH_BODY = "catch_body"
 
 STEP_SLOT = "step"
 TERMINAL_SLOT = "terminal"
 
 _LINEAR = frozenset(LINEAR_BODY_KINDS)
+_TRY_CATCH = frozenset(TRY_CATCH_BODY_KINDS)
 
 #: The closed matrix. Keyed by ``(context, slot)``; the value is the exact set of
 #: admitted ``kind`` discriminators.
@@ -89,6 +96,27 @@ BODY_CAPABILITIES_V1: Mapping[Tuple[str, str], FrozenSet[str]] = MappingProxyTyp
         (DECISION_FALSE_ARM, TERMINAL_SLOT): frozenset(
             {"stop", "exception", "branch", "decision"}
         ),
+        # #142 M12.7. Both Try/Catch bodies share ONE step vocabulary — a caught
+        # document is an ordinary document. The TERMINAL sets differ, and that
+        # asymmetry is the design:
+        #
+        # * a Try body ends only on ``stop``. An ``exception`` raised inside a
+        #   protected path would be caught by that same path's own handler, and
+        #   no evidence covers that loop; a staging ``cache_put`` is a recovery
+        #   shape, not a success one.
+        # * a Catch body ends on ``stop``, ``exception``, or a staging
+        #   ``cache_put`` — stop the document, raise it explicitly, or hand it to
+        #   a downstream sink.
+        #
+        # No control kind appears in either set: nesting is gated (a composed
+        # handler silently rewrites the outer one's effective error selection —
+        # `.codex/plans/issue-142-live-captures.md` §G6), and ``process_call``,
+        # ``flow_control``, ``data_process``, ``target`` and ``return_documents``
+        # are absent for want of evidence. All of them are rejected by ABSENCE.
+        (TRY_BODY, STEP_SLOT): _TRY_CATCH,
+        (TRY_BODY, TERMINAL_SLOT): frozenset({"stop"}),
+        (CATCH_BODY, STEP_SLOT): _TRY_CATCH,
+        (CATCH_BODY, TERMINAL_SLOT): frozenset({"stop", "exception", "cache_put"}),
     }
 )
 
@@ -201,6 +229,9 @@ def _walk_control(
     authored pointer rather than the document root.
     """
     kind = getattr(node, "kind", None)
+    if kind == "try_catch":
+        _walk_try_catch(node, path, depth, connector_above, process_call_above)
+        return
     if kind not in ("branch", "decision"):
         return
     depth += 1
@@ -246,6 +277,155 @@ def _walk_control(
     )
 
 
+def _walk_try_catch(
+    node: Any,
+    path: str,
+    depth: int,
+    connector_above: bool,
+    process_call_above: bool,
+) -> None:
+    """Re-check a Try/Catch INDEPENDENTLY of the authored model (#142).
+
+    Every rule here is also stated by ``TryCatchNodeV1``'s own validators — and
+    that duplication is the point, for the same reason ``_walk_body`` re-checks
+    process-call mixing: ``ProcessIRV1`` is exported and NOT frozen, so a caller
+    can validate a legal document, mutate it, and hand the model straight to
+    ``compile_process_ir_v1``. A gate only ``parse_process_ir_v1`` enforces is not
+    a gate.
+
+    ``try_catch`` deliberately does not increment ``depth``. Depth bounds control
+    NESTING, and a Try/Catch can neither nest nor contain a control node, so it
+    can never lengthen a control chain.
+    """
+    catch_body = getattr(node, "catch_body", None)
+    if catch_body is None or getattr(catch_body, "terminal", None) is None:
+        raise raise_compile_error(
+            PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
+            _SEMANTIC_PHASE,
+            _join(path, "catch_body", "terminal"),
+            message="the catch body does not reach a terminal",
+        )
+
+    try_body = getattr(node, "try_body", None)
+    if try_body is None or getattr(try_body, "terminal", None) is None:
+        raise raise_compile_error(
+            PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
+            _SEMANTIC_PHASE,
+            _join(path, "try_body", "terminal"),
+            message="the try body does not reach a terminal",
+        )
+
+    scope = getattr(node, "scope", None)
+    if scope not in ("process", "connector"):
+        raise raise_compile_error(
+            PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
+            _SEMANTIC_PHASE,
+            _join(path, "scope"),
+            message="unsupported error scope",
+        )
+
+    try_steps = list(try_body.steps)
+    try_kinds = [getattr(step, "kind", None) for step in try_steps]
+    if scope == "connector":
+        # The verified target-local topology: property preparation, then exactly
+        # the one call being protected.
+        if (
+            not try_kinds
+            or try_kinds[-1] != "connector_call"
+            or try_kinds.count("connector_call") != 1
+            or any(k not in ("set_ddp", "set_dpp") for k in try_kinds[:-1])
+        ):
+            raise raise_compile_error(
+                PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
+                _SEMANTIC_PHASE,
+                _join(path, "try_body", "steps"),
+                message=(
+                    "a connector-scoped try body must be optional property steps "
+                    "followed by exactly the one connector_call it protects"
+                ),
+            )
+    elif not try_kinds or try_kinds[0] != "connector_call":
+        raise raise_compile_error(
+            PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
+            _SEMANTIC_PHASE,
+            _join(path, "try_body", "steps"),
+            message=(
+                "a process-scoped try body must begin with the connector_call that "
+                "produces the flow's documents"
+            ),
+        )
+
+    _walk_body(
+        try_steps,
+        try_body.terminal,
+        TRY_BODY,
+        _join(path, "try_body"),
+        depth,
+        connector_above,
+        process_call_above,
+    )
+    _walk_body(
+        list(catch_body.steps),
+        catch_body.terminal,
+        CATCH_BODY,
+        _join(path, "catch_body"),
+        depth,
+        connector_above,
+        process_call_above,
+    )
+
+
+def _check_try_catch_placement(ir: ProcessIRV1) -> None:
+    """Re-check WHERE a Try/Catch sits, independently of the model (#142).
+
+    Placement is part of the error-scope contract — each scope names a topology
+    the compiler has a verified shape for — so it needs the same mutable-model
+    defence as the body rules above.
+    """
+    steps = list(ir.body.steps)
+    kinds = [getattr(step, "kind", None) for step in steps]
+    for index, step in enumerate(steps):
+        if kinds[index] != "try_catch":
+            continue
+        path = _join("/body", "steps", index)
+        if index != len(steps) - 1:
+            raise raise_compile_error(
+                PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
+                _SEMANTIC_PHASE,
+                path,
+                message=(
+                    "no step may follow a try_catch — both its paths terminate "
+                    "independently and ProcessIR v1 emits no join"
+                ),
+            )
+        scope = getattr(step, "scope", None)
+        if scope == "process":
+            # A process scope owns the whole flow, so it must BE the whole flow.
+            if len(steps) != 1:
+                raise raise_compile_error(
+                    PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
+                    _SEMANTIC_PHASE,
+                    path,
+                    message=(
+                        "a process-scoped try_catch must be the sole root step"
+                    ),
+                )
+        elif scope == "connector":
+            # A connector scope protects a DOWNSTREAM call, so something must
+            # produce the documents ahead of it. This is also what keeps the
+            # source outside the retried region.
+            if len(steps) < 2 or "connector_call" not in kinds[:index]:
+                raise raise_compile_error(
+                    PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
+                    _SEMANTIC_PHASE,
+                    path,
+                    message=(
+                        "a connector-scoped try_catch must follow the connector_call "
+                        "that produces the flow's documents"
+                    ),
+                )
+
+
 def validate_body_capabilities(ir: ProcessIRV1) -> None:
     """Check every control-body slot and the control-depth bound.
 
@@ -255,6 +435,7 @@ def validate_body_capabilities(ir: ProcessIRV1) -> None:
     A document with no control node walks zero bodies and returns immediately,
     so no pre-#141 dialect changes behaviour.
     """
+    _check_try_catch_placement(ir)
     root_kinds = [getattr(step, "kind", None) for step in ir.body.steps]
     connector_at_root = any(k in _CONNECTOR_KINDS for k in root_kinds)
     for index, step in enumerate(ir.body.steps):
@@ -275,10 +456,12 @@ def registry_kinds() -> Dict[Tuple[str, str], FrozenSet[str]]:
 __all__ = [
     "BODY_CAPABILITIES_V1",
     "BRANCH_LEG",
+    "CATCH_BODY",
     "DECISION_FALSE_ARM",
     "DECISION_TRUE_ARM",
     "STEP_SLOT",
     "TERMINAL_SLOT",
+    "TRY_BODY",
     "is_allowed",
     "registry_kinds",
     "validate_body_capabilities",

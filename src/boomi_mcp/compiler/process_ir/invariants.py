@@ -29,6 +29,7 @@ import re
 from typing import Dict, List, Optional, Set
 
 from ...errors import (
+    PROCESS_IR_COMPILE_ERROR_REGION_INVALID,
     PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID,
     PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
     PROCESS_IR_COMPILE_INTERNAL,
@@ -44,6 +45,8 @@ from ...models.process_ir import PROCESS_IR_V1_MAX_CONTROL_DEPTH
 from .contracts import (
     BRANCH_MAX_LEGS,
     BRANCH_MIN_LEGS,
+    CATCH_DRAGPOINT_Y,
+    CATCH_SHAPE_Y,
     DECISION_FALSE_DRAGPOINT_Y,
     DRAGPOINT_Y,
     SHAPE_Y,
@@ -60,13 +63,18 @@ from .contracts import (
     shape_x,
 )
 from .diagnostics import raise_compile_error
+from .error_handling import catch_region_node_ids, derive_error_regions
 
 _SEMANTIC_PHASE = "semantic_lowering"
 _PLAN_PHASE = "emission_planning"
 
 # Semantic kinds whose successors are control edges rather than a single
 # sequential successor.
-_CONTROL_KINDS = frozenset({"branch", "decision"})
+# #142 adds ``try_catch``: like a Branch/Decision it fans out through typed
+# control edges rather than a single sequential successor, so every rule keyed on
+# this set (wiring diagnostics, per-path termination, successor shape) applies to
+# it for the same reason.
+_CONTROL_KINDS = frozenset({"branch", "decision", "try_catch"})
 
 # Which exit roles each semantic kind may carry. A terminal semantic MUST carry
 # its role; a ``target`` is an exit only in a leg/arm position (routed), and a
@@ -84,8 +92,11 @@ _ALLOWED_EXIT_ROLES = {
 # ``BranchLegV1.terminal`` and ``DecisionTrueArmV1.terminal``.
 _ROUTED_TARGET_PATH = re.compile(r"(?:/legs/\d+|/true_arm)/terminal$")
 
-# ``cache_stage`` is authored only as ``BranchLegV1.terminal``.
-_CACHE_STAGE_PATH = re.compile(r"/legs/\d+/terminal$")
+# ``cache_stage`` is authored as ``BranchLegV1.terminal`` or — since #142 — as a
+# Try/Catch CATCH terminal, the staging sink that hands a caught document to a
+# downstream handler. A TRY terminal is deliberately absent: that body ends only
+# on a plain stop.
+_CACHE_STAGE_PATH = re.compile(r"(?:/legs/\d+|/catch_body)/terminal$")
 
 # Emitter-input fields that must name a component resolved through the symbol
 # table. Anything here that is absent from the table means the plan carries a
@@ -207,12 +218,20 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                 edge.provenance_path,
                 "CFG edge references a node that does not exist",
             )
-        if edge.kind == "catch":
+        # #142 LIFTED the blanket rejection this used to be, and replaced it with
+        # the positive rule: a recovery edge is meaningful only out of an error
+        # handler. Everything else that used to be covered by "no catch edges at
+        # all" is still covered — a catch edge grafted onto any other node kind is
+        # rejected here, before the region walk ever runs.
+        if edge.kind == "catch" and (
+            by_id[edge.source_node_id].semantic.semantic_kind != "try_catch"
+        ):
             raise _fail(
-                PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+                PROCESS_IR_COMPILE_ERROR_REGION_INVALID,
                 _SEMANTIC_PHASE,
                 edge.provenance_path,
-                "catch edges are reserved and are not generated in v1",
+                "a catch edge may leave only a try_catch node",
+                edge.source_node_id,
             )
 
     # --- canonical edge ordering ------------------------------------------
@@ -422,6 +441,12 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
     # non-control path it already owned.
     _check_every_control_path_terminates(nodes, by_id, outbound)
     _check_control_depth(nodes, by_id, outbound, cfg.entry_node_id)
+    # #142: the region walk runs LAST, once reachability, join-freedom, cycle and
+    # forward-only checks above have proven the graph is a tree. Running it
+    # earlier would mean walking subtrees of a graph that might still contain a
+    # cycle — the walk would have to defend itself against something the checker
+    # right above it already rejects.
+    derive_error_regions(cfg)
 
     # --- per-node successor rules -----------------------------------------
     for node in nodes:
@@ -530,6 +555,38 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                 _check_region_containment(edge, prefix, by_id, outbound, node)
             continue
 
+        if kind == "try_catch":
+            # Exactly one protected edge then one recovery edge, in that order.
+            # Both the kinds AND the local ordinals are pinned: order alone would
+            # let the two be swapped while still "having one of each", which would
+            # route the caught document down the protected path.
+            if [edge.kind for edge in successors] != ["ordering", "catch"] or [
+                edge.local_ordinal for edge in successors
+            ] != [1, 2]:
+                raise _fail(
+                    PROCESS_IR_COMPILE_ERROR_REGION_INVALID,
+                    _SEMANTIC_PHASE,
+                    node.source_path,
+                    "a try_catch must have exactly one ordering then one catch successor",
+                    node.node_id,
+                )
+            # Same containment discipline as a Branch leg / Decision arm: each
+            # edge's whole subtree must live under its own authored body. Trailing
+            # "/" is load-bearing here too — a bare prefix test would let
+            # "/try_body_extra/..." satisfy "/try_body".
+            for edge, body in zip(successors, ("try_body", "catch_body")):
+                prefix = "{0}/{1}/".format(node.source_path, body)
+                if not by_id[edge.target_node_id].source_path.startswith(prefix):
+                    raise _fail(
+                        PROCESS_IR_COMPILE_ERROR_REGION_INVALID,
+                        _SEMANTIC_PHASE,
+                        node.source_path,
+                        "a try_catch edge targets a node outside its own body",
+                        node.node_id,
+                    )
+                _check_region_containment(edge, prefix, by_id, outbound, node)
+            continue
+
         if len(successors) != 1:
             raise _fail(
                 PROCESS_IR_SEMANTIC_MISSING_TERMINAL
@@ -623,11 +680,18 @@ def _check_every_control_path_terminates(nodes, by_id, outbound) -> None:
         # first precisely so it must not steal diagnostics it does not own.
         if node.semantic.semantic_kind not in _CONTROL_KINDS:
             continue
-        control_edges = [
-            edge
-            for edge in outbound[node.node_id]
-            if edge.kind in ("branch_leg", "decision_outcome")
-        ]
+        # #142: a try_catch's two paths are ``ordering`` + ``catch``, not
+        # branch_leg/decision_outcome — so selecting by edge kind would silently
+        # skip it and let an unterminated protected path through. Both of ITS
+        # edges are control paths, so take them all.
+        if node.semantic.semantic_kind == "try_catch":
+            control_edges = list(outbound[node.node_id])
+        else:
+            control_edges = [
+                edge
+                for edge in outbound[node.node_id]
+                if edge.kind in ("branch_leg", "decision_outcome")
+            ]
         for edge in control_edges:
             seen = set()
             stack = [edge.target_node_id]
@@ -647,7 +711,7 @@ def _check_every_control_path_terminates(nodes, by_id, outbound) -> None:
                     PROCESS_IR_SEMANTIC_UNTERMINATED_PATH,
                     _SEMANTIC_PHASE,
                     edge.provenance_path,
-                    "a branch leg or decision outcome reaches no terminal",
+                    "a divergent control path reaches no terminal",
                     node.node_id,
                 )
 
@@ -699,6 +763,10 @@ def check_emission_plan_invariants(
     against the cost of shipping a plan built from a broken graph.
     """
     check_cfg_invariants(cfg)
+    # #142: derived ONCE per plan check and reused by both geometry rules below.
+    # This is the same call lowering made, against the same graph — which is what
+    # makes "the shape is on the right row" a claim about the CFG.
+    catch_cfg_node_ids = catch_region_node_ids(cfg)
     nodes = list(plan.nodes)
     if not nodes:
         raise _fail(
@@ -970,7 +1038,15 @@ def check_emission_plan_invariants(
                 )
 
         # --- geometry -------------------------------------------------------
-        expected_y = START_SHAPE_Y if node.synthetic_role == "start" else SHAPE_Y
+        # #142: a node on a recovery path sits on the catch row. Membership is
+        # RE-DERIVED from the CFG above, so this compares the plan against the
+        # graph rather than against a flag lowering left on the plan.
+        if node.synthetic_role == "start":
+            expected_y = START_SHAPE_Y
+        elif node.cfg_node_id in catch_cfg_node_ids:
+            expected_y = CATCH_SHAPE_Y
+        else:
+            expected_y = SHAPE_Y
         expected_x = START_SHAPE_X if node.synthetic_role == "start" else shape_x(
             node.ordinal
         )
@@ -1184,6 +1260,26 @@ def check_emission_plan_invariants(
                     path,
                     "branch dragpoint row does not match parity geometry",
                 )
+        elif kind == "catcherrors":
+            # #142. Fixed two-edge wiring: the protected path first on the normal
+            # row, the recovery path second one row down. Labels and rows are
+            # pinned together — either alone would let a swap through.
+            if [item.identifier for item in transitions] != ["default", "error"] or [
+                item.text for item in transitions
+            ] != ["Try", "Catch"]:
+                raise _fail(
+                    PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID,
+                    _PLAN_PHASE,
+                    path,
+                    "try/catch dragpoint labels must be default/Try then error/Catch",
+                )
+            if [item.y for item in transitions] != [DRAGPOINT_Y, CATCH_DRAGPOINT_Y]:
+                raise _fail(
+                    PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID,
+                    _PLAN_PHASE,
+                    path,
+                    "try/catch dragpoint rows do not match parity geometry",
+                )
         else:
             for item in transitions:
                 if item.identifier is not None or item.text is not None:
@@ -1191,9 +1287,18 @@ def check_emission_plan_invariants(
                         PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
                         _PLAN_PHASE,
                         path,
-                        "only branch and decision dragpoints carry labels",
+                        "only branch, decision and try/catch dragpoints carry labels",
                     )
-                if item.y != DRAGPOINT_Y:
+                # #142: a node ON a recovery path emits its ordinary edges one row
+                # down, so the expected row depends on where the node sits.
+                # Re-derived from the CFG, never read off the plan — comparing the
+                # plan against itself would verify nothing.
+                expected_row = (
+                    CATCH_DRAGPOINT_Y
+                    if node.cfg_node_id in catch_cfg_node_ids
+                    else DRAGPOINT_Y
+                )
+                if item.y != expected_row:
                     raise _fail(
                         PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
                         _PLAN_PHASE,

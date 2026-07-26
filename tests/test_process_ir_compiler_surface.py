@@ -58,6 +58,18 @@ FORBIDDEN_NAMES = (
     "EmitterInputV1",
     "ComponentSymbolV1",
     "SymbolTableV1",
+    # #142. ``IdempotencyContractSymbolV1`` is EXPORTED from the compiler package
+    # (it is trusted compiler input, like ComponentSymbolV1 above) and is still
+    # forbidden on the MCP surface — exported-to-the-compiler and visible-to-an-LLM
+    # are different questions, and the second stays closed until #146.
+    "IdempotencyContractSymbolV1",
+    "IdempotencyEvidenceSemanticV1",
+    "TryCatchSemanticV1",
+    "CatchErrorsInputV1",
+    "ConnectorCallBindingV1",
+    "ErrorRegionV1",
+    "retry_safety",
+    "catch_region_node_ids",
     "CompilerDiagnostic",
     "ProcessIRCompileError",
     "exit_role",

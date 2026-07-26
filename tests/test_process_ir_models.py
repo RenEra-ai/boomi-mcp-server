@@ -1032,6 +1032,7 @@ def test_schema_closed_discriminated_union():
         "source", "target", "connector_call", "flow_control", "message", "map_ref",
         "data_process", "cache_put", "document_cache_retrieve", "cache_get",
         "cache_remove", "set_ddp", "set_dpp", "process_call", "branch", "decision",
+        "try_catch",  # #142
         "exception", "stop", "return_documents",
     }
 
@@ -1173,7 +1174,25 @@ def test_capability_manifest_immutable_and_complete():
     assert PROCESS_IR_V1_CAPABILITIES["continuation_after_branch_or_decision"] == "gated"
     assert PROCESS_IR_V1_CAPABILITIES["joins"] == "gated"
     assert PROCESS_IR_V1_CAPABILITIES["loops"] == "gated"
-    assert PROCESS_IR_V1_CAPABILITIES["scoped_try_catch"] == "gated"
+    # #142 M12.7 flipped scoped_try_catch and added two more supported rows.
+    assert PROCESS_IR_V1_CAPABILITIES["scoped_try_catch"] == "supported"
+    assert PROCESS_IR_V1_CAPABILITIES["bounded_retry"] == "supported"
+    assert PROCESS_IR_V1_CAPABILITIES["typed_idempotency_evidence"] == "supported"
+    # #142's three UNSUPPORTED rows mean "never", not "not yet" — the same sense
+    # as caller_authored_cfg_edges. Pinning them here is what stops a later slice
+    # from quietly downgrading an impossibility into a promise of future work:
+    # error-type lists have no wire representation at all, the retry wait
+    # schedule is platform-owned with no authorable field, and no queue component
+    # exists to model (.codex/plans/issue-142-live-captures.md §G2/§G1/§G5).
+    assert PROCESS_IR_V1_CAPABILITIES["catch_error_type_lists"] == "unsupported"
+    assert PROCESS_IR_V1_CAPABILITIES["retry_backoff_authoring"] == "unsupported"
+    assert PROCESS_IR_V1_CAPABILITIES["queue_topology"] == "unsupported"
+    # ...while these four are genuinely "not yet", each blocked on a different
+    # missing thing (see the manifest comments).
+    assert PROCESS_IR_V1_CAPABILITIES["catch_failure_trigger_selection"] == "gated"
+    assert PROCESS_IR_V1_CAPABILITIES["verified_write_retry_safety"] == "gated"
+    assert PROCESS_IR_V1_CAPABILITIES["listener_error_scope"] == "gated"
+    assert PROCESS_IR_V1_CAPABILITIES["nested_try_catch"] == "gated"
     assert set(PROCESS_IR_V1_CAPABILITIES.values()) <= {
         "supported",
         "gated",
@@ -1184,8 +1203,11 @@ def test_capability_manifest_immutable_and_complete():
         for name, state in PROCESS_IR_V1_CAPABILITIES.items()
         if state == "supported"
     ) == [
+        "bounded_retry",
         "connector_call_in_control_body",
         "generalized_connector_call",
         "mixed_connector_execution",
         "rich_branch_decision_bodies",
+        "scoped_try_catch",
+        "typed_idempotency_evidence",
     ]

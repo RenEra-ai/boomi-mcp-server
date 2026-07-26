@@ -55,6 +55,18 @@ DRAGPOINT_X_OFFSET = 144.0
 DRAGPOINT_Y = 104.0
 DECISION_FALSE_DRAGPOINT_Y = 464.0
 
+# #142: the catch row sits below the try row. Transcribed from the SAME shared
+# renderer constants the legacy builder uses (``rendering._CATCH_SHAPE_Y`` /
+# ``_CATCH_DRAGPOINT_Y``), so a Try/Catch the compiler emits lands on the exact
+# rows the shipped Try/Catch goldens already occupy.
+#
+# ``CATCH_DRAGPOINT_Y`` and ``DECISION_FALSE_DRAGPOINT_Y`` hold the same NUMBER
+# and are deliberately kept as two names: they are two independent facts that
+# happen to coincide (the false arm and the catch path both render one row down),
+# and collapsing them would make a future divergence in either silently wrong.
+CATCH_SHAPE_Y = 456.0
+CATCH_DRAGPOINT_Y = 464.0
+
 # Branch leg bounds, mirroring ``BranchNodeV1.legs`` (min_length=2, max_length=25).
 BRANCH_MIN_LEGS = 2
 BRANCH_MAX_LEGS = 25
@@ -209,6 +221,37 @@ class ComponentSymbolV1(_CompilerModel):
         return value
 
 
+class IdempotencyContractSymbolV1(_CompilerModel):
+    """A resolved, opaque idempotency contract (#142).
+
+    Trusted COMPILER INPUT, in the same sense as :class:`ComponentSymbolV1`: the
+    caller supplies it alongside the symbol table, and the compiler treats it as
+    already-verified provenance rather than something to re-derive.
+
+    It binds a contract reference to the ONE operation it covers. That binding is
+    the whole point — evidence naming a contract for a different operation is not
+    evidence for this call, and the retry check rejects it.
+
+    It carries NO key material, by construction. There is no field for a key
+    value, a header, or a token; ``ref`` names the contract and nothing more, so
+    no key can reach a diagnostic, a canonical fixture, or the emitted document
+    even if a caller tried to put one there.
+    """
+
+    ref: str = Field(..., min_length=1)
+    operation_ref: str = Field(..., min_length=1)
+    kind: Literal["opaque_key_binding"] = "opaque_key_binding"
+
+    @field_validator("ref", "operation_ref")
+    @classmethod
+    def _no_surrounding_whitespace(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError(
+                "idempotency contract fields must not carry surrounding whitespace"
+            )
+        return value
+
+
 class SymbolTableV1(_CompilerModel):
     """Closed, deterministic set of resolved references.
 
@@ -222,6 +265,8 @@ class SymbolTableV1(_CompilerModel):
     """
 
     symbols: Tuple[ComponentSymbolV1, ...] = ()
+    #: #142. Defaults to empty, so every pre-#142 table stays byte-identical.
+    idempotency_contracts: Tuple[IdempotencyContractSymbolV1, ...] = ()
 
     @field_validator("symbols")
     @classmethod
@@ -234,6 +279,30 @@ class SymbolTableV1(_CompilerModel):
                 raise ValueError("duplicate symbol reference")
             seen.add(symbol.ref)
         return tuple(sorted(value, key=lambda item: item.ref))
+
+    @field_validator("idempotency_contracts")
+    @classmethod
+    def _contracts_unique_and_canonical(
+        cls, value: Tuple[IdempotencyContractSymbolV1, ...]
+    ) -> Tuple[IdempotencyContractSymbolV1, ...]:
+        # Same discipline as ``symbols``: duplicates are an authoring error (two
+        # contracts under one name have no principled winner), and sorting means
+        # the caller's insertion order cannot reach compiler output.
+        seen = set()
+        for contract in value:
+            if contract.ref in seen:
+                raise ValueError("duplicate idempotency contract reference")
+            seen.add(contract.ref)
+        return tuple(sorted(value, key=lambda item: item.ref))
+
+    def build_idempotency_index(self) -> dict:
+        """Build a ref -> contract index.
+
+        Deliberately NOT cached, for exactly the reasons spelled out on
+        :meth:`build_index` — a cached private attribute breaks ``__eq__``, goes
+        stale under ``model_copy``, and stays writable despite ``frozen=True``.
+        """
+        return {contract.ref: contract for contract in self.idempotency_contracts}
 
     def build_index(self) -> dict:
         """Build a ref -> symbol index for resolving many references.
@@ -369,6 +438,24 @@ class ConnectorSemanticV1(_CompilerModel):
     label: Optional[str] = None
 
 
+class IdempotencyEvidenceSemanticV1(_CompilerModel):
+    """The AUTHORED idempotency evidence, snapshotted for the semantic layer (#142).
+
+    This carries what the caller CLAIMED, never what the compiler concluded. The
+    resolved retry-safety classification stays in the connector capability
+    registry and is re-read wherever it is needed — snapshotting it here would
+    create a second copy of a registry fact that could drift from the row the
+    check actually consults, which is exactly the duplicate-authority failure
+    #140 removed for connection refs.
+
+    ``contract_ref`` is a NAME the symbol table must resolve. It is never key
+    material: the key value itself is never authored and never reaches the CFG.
+    """
+
+    kind: Literal["verified_action", "key_reference"]
+    contract_ref: Optional[str] = None
+
+
 class ConnectorCallSemanticV1(_CompilerModel):
     """A first-class connector call (#140).
 
@@ -388,6 +475,10 @@ class ConnectorCallSemanticV1(_CompilerModel):
     role: Literal["entry", "downstream"]
     operation_ref: str
     action_intent: Optional[str] = None
+    # #142: the AUTHORED retry-safety evidence, carried so the retry check can see
+    # what the caller claimed. Like ``action_intent`` above, it is an assertion,
+    # never a grant: the registry row decides what may be retried.
+    idempotency: Optional[IdempotencyEvidenceSemanticV1] = None
     label: Optional[str] = None
 
 
@@ -483,6 +574,25 @@ class ExceptionSemanticV1(_CompilerModel):
     parameter_source: str = "caught_error"
 
 
+class TryCatchSemanticV1(_CompilerModel):
+    """A scoped error handler (#142).
+
+    ``retry_count`` is already normalised here: an absent authored retry and an
+    explicit zero both arrive as 0, so downstream layers have one value to reason
+    about and the two authored forms provably compile to identical output.
+
+    ``scope`` is retained as a semantic fact for diagnostics and documentation,
+    but it is NOT what any structural rule keys on: retry-source isolation is
+    re-derived from the graph itself, so a scope value that disagreed with the
+    graph could not smuggle an unsafe region past the check.
+    """
+
+    semantic_kind: Literal["try_catch"] = "try_catch"
+    scope: Literal["process", "connector"]
+    retry_count: int = Field(..., ge=0, le=5)
+    label: Optional[str] = None
+
+
 class StopSemanticV1(_CompilerModel):
     semantic_kind: Literal["stop"] = "stop"
 
@@ -508,6 +618,7 @@ CfgSemanticV1 = Annotated[
         ProcessCallSemanticV1,
         BranchSemanticV1,
         DecisionSemanticV1,
+        TryCatchSemanticV1,
         ExceptionSemanticV1,
         StopSemanticV1,
         ReturnDocumentsSemanticV1,
@@ -537,8 +648,10 @@ CfgEdgeKindV1 = Literal[
     "branch_leg",
     "decision_outcome",
     "terminal",
-    # Reserved for #142 scoped Try/Catch. V1 generates none, and the invariant
-    # checker rejects any edge that carries it.
+    # #142 scoped Try/Catch: the recovery edge out of an error handler. Generated
+    # ONLY by a ``try_catch`` node, and the invariant checker rejects it out of
+    # any other node kind — the reservation this comment used to describe has
+    # been lifted, not widened.
     "catch",
 ]
 
@@ -758,6 +871,26 @@ class DecisionInputV1(_CompilerModel):
     userlabel: str = ""
 
 
+class CatchErrorsInputV1(_CompilerModel):
+    """Everything the error-handling shape needs, and nothing else (#142).
+
+    ``retry_count`` is the ONLY field, and that is the wire's own shape rather
+    than a simplification: the emitted element carries exactly a retry count and
+    a fixed all-errors flag.
+
+    ``scope`` is deliberately ABSENT. Graph placement is the sole authority on
+    what a region protects, so a scope field here would be a second copy of a
+    fact the plan invariants already re-derive — and one that could disagree.
+
+    ``userlabel`` is absent for the same reason: the shared renderer composes the
+    label itself from the retry count, so a field carrying one would never reach
+    the wire.
+    """
+
+    emitter_kind: Literal["catcherrors"] = "catcherrors"
+    retry_count: int = Field(..., ge=0, le=5)
+
+
 # Wire binding for an Exception's parameter source, resolved by the compiler so
 # #138 only has to serialise it (``_emit_exception_parameters``, builder :6164).
 # ``caught_error`` binds the fixed Try/Catch message token.
@@ -830,6 +963,7 @@ EmitterInputV1 = Annotated[
         ProcessCallInputV1,
         BranchInputV1,
         DecisionInputV1,
+        CatchErrorsInputV1,
         ExceptionInputV1,
         StopInputV1,
         ReturnDocumentsInputV1,
@@ -942,6 +1076,8 @@ def dragpoint_name(shape: str, local_ordinal: int) -> str:
 __all__: List[str] = [
     "BRANCH_MAX_LEGS",
     "BRANCH_MIN_LEGS",
+    "CATCH_DRAGPOINT_Y",
+    "CATCH_SHAPE_Y",
     "DECISION_FALSE_DRAGPOINT_Y",
     "DRAGPOINT_X_OFFSET",
     "DRAGPOINT_Y",
@@ -960,6 +1096,7 @@ __all__: List[str] = [
     "CfgExitRoleV1",
     "CfgNodeV1",
     "CfgSemanticV1",
+    "CatchErrorsInputV1",
     "ComponentSymbolV1",
     "ConnectorActionInputV1",
     "ConnectorSemanticV1",
@@ -970,6 +1107,9 @@ __all__: List[str] = [
     "DecisionInputV1",
     "DecisionOperandSemanticV1",
     "DecisionSemanticV1",
+    "IdempotencyContractSymbolV1",
+    "IdempotencyEvidenceSemanticV1",
+    "TryCatchSemanticV1",
     "DocCacheLoadInputV1",
     "DocCacheRemoveInputV1",
     "DocCacheRetrieveInputV1",
