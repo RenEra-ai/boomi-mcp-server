@@ -216,8 +216,8 @@ shape.
 **B. Registered in the taxonomy with NO rule behind it (2 of 17).**
 
 TWO codes are declared with no collector emitting them. Group A's defining test — forcing the
-condition makes it fire — does **not** hold for either: `finding()` accepts any registered code, so a
-synthetic report proves registration, not wiring.
+condition makes it fire — does **not** hold for either: `finding()` accepts any code outside the
+compile family (registered or not), so a synthetic report proves registration, not wiring.
 
 `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` is the first. No collector references it. An earlier
 draft filed it under A with the reason "no production caller supplies typed effect contracts yet",
@@ -227,7 +227,8 @@ them against the IR.
 
 `PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` is the second. It exists as a
 constant, a taxonomy row, and a message/remediation entry — no collector references it, and it has no
-unit test. A synthetic report can carry it only because `finding()` accepts any registered code.
+unit test. A synthetic report can carry it only because `finding()` accepts any code outside the
+compile family — registered or not.
 
 This is deliberate rather than an oversight, and the reason is structural: ProcessIR v1 has **no
 merge point**. Control nodes are terminal fan-out — nothing may follow a Branch or Decision

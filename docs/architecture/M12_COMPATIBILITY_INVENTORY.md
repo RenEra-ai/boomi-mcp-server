@@ -1381,7 +1381,8 @@ warnings and `apply_policy` reclassifies only errors. All of this is enumerated 
 
 The 4 implemented codes and the 2 inert exemption rows ARE wired correctly — forcing the condition
 makes each fire. That argument does **not** extend to the 2 group-B codes: `finding()` accepts any
-registered code, so building a synthetic report carrying one proves REGISTRATION, not wiring. Those
+code outside the compile family (registered or not), so building a synthetic report carrying one
+proves REGISTRATION, not wiring. Those
 two have no rule behind them at all.
 
 None of this is a regression — the baseline had no such checks. It is a statement of how much of the
