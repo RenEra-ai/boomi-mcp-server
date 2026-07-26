@@ -243,6 +243,21 @@ Existing legacy codes — for example `SYNC_PIPELINE_CONFIG_INVALID`, `SYNC_PIPE
 
 **Implementation note (#141, M12.6).** #141 adds seven codes across three existing families and introduces no new family: `PROCESS_IR_SCHEMA_BRANCH_CARDINALITY`; `PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED`, `PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED`, `PROCESS_IR_SEMANTIC_NESTING_LIMIT`, `PROCESS_IR_SEMANTIC_UNTERMINATED_PATH`; `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY`; and `PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID` (all `category="process_ir"`, `retryable=False`, `owner="#141"`). Four are deliberately **more specific than an existing family member that would also have described the condition** — this is the same move #140 made one slice earlier when it registered `PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH` beside `PROCESS_IR_SCHEMA_INVALID_CARDINALITY` and `PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID` beside `PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID`, and it is exactly what the "later introducers ADD codes, never rename" rule above permits. Every pre-existing code keeps every raise site it already had. `PROCESS_IR_SEMANTIC_NESTING_LIMIT` names a **compiler** bound, not a platform one, and its remediation says so.
 
+**Implementation note (#143, M12.8).** #143 adds **17** codes across the four families it is a
+declared introducer for, and introduces no new family: two `PROCESS_IR_REFERENCE_*`
+(`…COMPONENT_NOT_FOUND`, `…COMPONENT_TYPE_MISMATCH`), one `PROCESS_IR_CAPABILITY_*`
+(`…EFFECT_CONTRACT_INVALID`), ten `PROCESS_IR_SEMANTIC_*` (seven `…LINEAGE_*`, two
+`…SIDE_EFFECT_ORDERING_*`, one `…RETRY_EFFECT_UNSAFE`), and four `LEGACY_ADAPTER_EXEMPTION_*` — all
+`category="process_ir"`, `retryable=False`, `owner="#143"`. It introduces **no**
+`PROCESS_IR_COMPILE_*` code: that family blames the compiler, whereas every #143 code blames the
+authored payload, and a `ValidationReportV1` cannot carry a compile-family code at all (an unexpected
+internal defect escapes to the compiler's own `_guarded` boundary instead). The specialized #140
+operation/connection codes and the #142 connector retry/idempotency codes keep every raise site they
+had — the generic codes cover only the roles those do not. Semantic authority is `ProcessIRV1` plus
+TRUSTED CAPABILITY METADATA (compiler context, never authored fields — §6); the validation output is
+`ValidationReportV1`; and emitted-XML verification remains a separate post-emission oracle. See
+[PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md).
+
 ## 8. Capability and Non-Goal Matrix
 
 Every authoring capability sits in exactly one of four states:

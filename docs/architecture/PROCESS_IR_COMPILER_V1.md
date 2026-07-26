@@ -757,7 +757,12 @@ In `connector_resolution._walk_paths`, a child pushed on a `catch` edge gets a s
 `try_catch` joins `_MAP_PAIRING_TRANSPARENT`: like Branch/Decision it routes documents without
 altering them, so `call -> try_catch -> [map, call]` stays profile-checkable.
 
-### 12.5 Validation order
+### 12.5 Validation order (HISTORICAL — superseded by #143 §13)
+
+> **Superseded.** This describes the #142 connector-scoped order and remains accurate for
+> `validate_connector_calls` itself, which is unchanged. Since #143 (M12.8) the NORMATIVE
+> validation order for the canonical path is the unified semantic pipeline — see §13 below and
+> [PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md).
 
 `validate_connector_calls` remains the single entry point and now runs three passes:
 
@@ -820,3 +825,52 @@ deep the corruption happened to be rather than on what kind of defect it was.
   not a body slot. `{"kind": "message"}` there hits a tag that is a real node kind inside a body
   location, and would otherwise report "message is not admitted in this control-body slot" — wrong,
   and self-contradictory, since Message *is* admitted there.
+
+
+## 13. #143 M12.8 — unified semantic validation (shipped)
+
+Full contract: [PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md).
+Migration matrix: [M12 Compatibility Inventory](./M12_COMPATIBILITY_INVENTORY.md) §7.
+
+### 13.1 Where the gate runs — and where it deliberately does NOT
+
+`compile_process_ir_v1` is **unchanged**. The plan placed the gate inside it; that was implemented
+and measured, and it breaks 26 tests across the legacy parity suites for a structural reason:
+canonical validation is deliberately stricter than the legacy surface, the legacy surface keeps its
+behaviour through exemptions keyed on ADAPTER IDENTITY, and `compile_process_ir_v1(ir, symbols)` does
+not know which adapter produced its IR. The measured failures were exactly
+`…LINEAGE_CACHE_WRITER_MISSING` (23) and `…LINEAGE_PROPERTY_READ_BEFORE_WRITE` (7) — precisely the
+codes the exemptions cover.
+
+The gate therefore runs at the two places that know their context:
+
+| Site | Gates | Policy |
+|---|---|---|
+| `integration_builder._process_component_preflight` | plan/apply for authoring actions | strict |
+| `legacy_adapters.emission.emit_legacy_result` | the canonical `compile → emit` chain | the named dialect's exemptions |
+
+`emit_legacy_result(result, *, resolver=None, dialect=None)` — with `dialect=None` the gate is
+SKIPPED, not run strictly. Running strictly with exemptions unavailable is the same mismatch that
+makes a compiler-internal gate unshippable.
+
+### 13.2 Normative order on the canonical path
+
+```
+parse → body capabilities → lower to CFG → CFG invariants → connector calls
+      → lower to emission plan → plan invariants → [#143 semantic report] → emit → verify
+```
+
+The report validates the CFG that was **just lowered**, not a fresh one — the gate must judge exactly
+the graph about to be emitted.
+
+### 13.3 What did NOT change
+
+- `validate_connector_calls` and its #140/#142 codes — `port-unchanged`, and the flow collector
+  DELEGATES to it rather than re-deriving it, so map-bracketing and the non-producing-connector rule
+  keep one implementation.
+- `check_cfg_invariants` / `check_emission_plan_invariants` — still compiler oracles, still raising.
+- The post-emission graph verifier — still separate, still post-emission, still classified as a
+  compiler/emitter defect on failure.
+- `cache_property_lineage` — `adapter-only-compat`. The new lineage module does not import it; the
+  wildcard default stays on the legacy surface only.
+- All 40 raw-byte XML goldens — byte-identical.
