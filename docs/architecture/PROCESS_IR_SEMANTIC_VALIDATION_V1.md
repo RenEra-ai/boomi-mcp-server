@@ -226,13 +226,20 @@ Measured by a live census over 5933 authorable configs plus a 606-config gate di
 #143 QA, 2026-07-26). Two DIFFERENT situations are separated below, because collapsing them is
 exactly how a taxonomy entry gets mistaken for a shipped rule.
 
-**A. Implemented, unit-tested, wired — but not producible from an authorable config (5 of 17).**
+**A. Implemented, unit-tested, wired — but not producible from an authorable config (4 of 17).**
 Forcing the condition makes each of these fire; the v1 authored surface simply cannot produce the
 shape.
 
+`…SIDE_EFFECT_ORDERING_UNSAFE` was listed here through THREE drafts and does not belong: it is
+producible. `branch([[process_call(wait=False)], [set_dpp reading a DPP]])` parses and reports it
+under `DEFAULT_VALIDATION_CAPABILITIES` — no typed contract required. The first draft said a
+`process_call` "is rejected inside a Branch/Decision body" (false — only MIXING one with property
+steps in the SAME leg is gated); the second said the reads could only come from a subprocess summary
+(also false — the reader is a `set_dpp` in a LATER leg, and legs run sequentially).
+`test_the_unsafe_branch_is_producible_from_an_authorable_document` pins it.
+
 | Code | Why it cannot fire yet |
 |---|---|
-| `…SIDE_EFFECT_ORDERING_UNSAFE` | needs a read downstream of a non-waiting `process_call`, and the only reads that can be there come from a subprocess SUMMARY, which no production caller supplies. NOT because the shape is unauthorable — an earlier version said a `process_call` "is rejected inside a Branch/Decision body", which is false: what is gated is MIXING a process call with property steps. `branch([[call(wait=False)], [call(wait=True)]])` with two summaries is a parseable document that reports this code (`test_the_unsafe_branch_is_authorable`) |
 | `PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND` | the legacy adapter's symbol table carries only refs it declared, so an undeclared ref never reaches the collector |
 | `PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH` | same — a literal wrong-type id (a `map_ref` bound to a `profile.json` id, or an unresolvable UUID) still reports `is_valid: true` |
 | `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` | fires only when a caller supplies a typed contract that binds to nothing. Every production call site passes `DEFAULT_VALIDATION_CAPABILITIES`, which is empty, so there is no contract to be unbound — the collector exists and is unit-tested, but no authorable config reaches it |

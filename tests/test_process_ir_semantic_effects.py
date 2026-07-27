@@ -1097,3 +1097,34 @@ def test_execution_downstream_excludes_the_calls_own_leg():
     assert "n2" not in downstream, downstream   # ran BEFORE the call
     assert "n4" in downstream, downstream       # the strictly-later leg
     assert "n3" not in downstream
+
+
+def test_the_unsafe_branch_is_producible_from_an_authorable_document():
+    """§6 round 5. `…SIDE_EFFECT_ORDERING_UNSAFE` was listed as unreachable in
+    the §10 census through three drafts, with two different wrong reasons. It is
+    producible: a non-waiting call in leg 0 and an ordinary property read in a
+    LATER leg, under the EMPTY default capabilities — legs run sequentially, so
+    the child may still be running when leg 1 reads.
+
+    Pinned as a test because a prose reachability claim is exactly what rots."""
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        DEFAULT_VALIDATION_CAPABILITIES,
+        validate_process_ir,
+    )
+
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "legs": [
+            {"steps": [_pc("$ref:child", False)], "terminal": {"kind": "stop"}},
+            {"steps": [{"kind": "set_dpp", "name": "OUT", "source_values": [
+                {"value_type": "dpp", "property_name": "A"}]}],
+             "terminal": {"kind": "stop"}}]}]}}
+    symbols = SymbolTableV1(symbols=(
+        ComponentSymbolV1(ref="$ref:child", component_id="i1",
+                          component_type="process"),))
+    report = validate_process_ir(
+        parse_process_ir_v1(doc), symbols, DEFAULT_VALIDATION_CAPABILITIES
+    )
+    assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE in {
+        f.code for f in report.errors
+    }

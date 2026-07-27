@@ -1404,8 +1404,8 @@ The ledger contains 44 existing registered codes plus 17 new #143 additions. No 
 An exemption RECLASSIFIES an error as an advisory carrying the original code as evidence — it never
 deletes the finding, so this ledger stays falsifiable.
 
-**Live-census note (2026-07-26, #143 QA).** Over 5933 authorable configs, 6 of #143's 17 codes were
-not producible from any of them — 5 are implemented and wired but unreachable from the v1 authored
+**Live-census note (2026-07-26, #143 QA).** Over 5933 authorable configs, 5 of #143's 17 codes were
+not producible from any of them — 4 are implemented and wired but unreachable from the v1 authored
 surface, and 1 (`PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE`) is registered in the taxonomy
 with NO collector behind it at all. `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` was the second
 until the `capability`-phase collector was written for it; it is now emitted, though a caller has to
@@ -1413,7 +1413,7 @@ supply typed contracts to reach it. A further 2 of the 4 exemption rows are iner
 warnings and `apply_policy` reclassifies only errors. All of this is enumerated in
 [PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md) §10.
 
-The 5 implemented codes and the 2 inert exemption rows ARE wired correctly — forcing the condition
+The 4 implemented codes and the 2 inert exemption rows ARE wired correctly — forcing the condition
 makes each fire. That argument does **not** extend to the single group-B code: `finding()` accepts
 any code outside the compile family (registered or not), so building a synthetic report carrying it
 proves REGISTRATION, not wiring. `PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` has no rule
