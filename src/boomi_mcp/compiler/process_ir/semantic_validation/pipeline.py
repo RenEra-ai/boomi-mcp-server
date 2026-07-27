@@ -207,7 +207,15 @@ _SPECIALIZED_REFERENCE_CODES = frozenset({
     "PROCESS_IR_SEMANTIC_PROFILE_MISMATCH",
 })
 
-_GENERIC_REFERENCE_CODE = "PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH"
+#: This module's GENERIC reference codes. Both collide with #140 on a connector
+#: flow: an absent map symbol yields `…COMPONENT_NOT_FOUND` here and
+#: `…PROFILE_MISMATCH` there; a mistyped one yields `…COMPONENT_TYPE_MISMATCH`
+#: here and `…PROFILE_MISMATCH` there. Filtering only the type case left the
+#: not-found duplicate sorting ahead of the established specialized code.
+_GENERIC_REFERENCE_CODES = frozenset({
+    "PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH",
+    "PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND",
+})
 
 
 def _prefer_specialized_codes(
@@ -222,7 +230,7 @@ def _prefer_specialized_codes(
     reads FIRST, and existing public codes keep winning (that ordering rule is
     stated in the legacy bridge and pinned by the connector suites).
 
-    Narrow on purpose: only the one generic code, and only where a specialized
+    Narrow on purpose: only this module's generic codes, and only where a specialized
     finding names the SAME node. The two paths differ in depth — #140 points at
     `/body/steps/1/map_ref`, this module at `/body/steps/1` — so the match is
     prefix containment on a path SEGMENT boundary, never a bare `startswith`
@@ -243,7 +251,7 @@ def _prefer_specialized_codes(
     return tuple(
         item
         for item in findings
-        if not (item.code == _GENERIC_REFERENCE_CODE and _covered(item.path))
+        if not (item.code in _GENERIC_REFERENCE_CODES and _covered(item.path))
     )
 
 

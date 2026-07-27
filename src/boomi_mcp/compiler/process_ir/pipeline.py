@@ -52,8 +52,8 @@ def _guarded(phase, action, *args):
         ) from None
 
 
-def _connector_phases(cfg, symbols):
-    """``(code, path) -> compiler phase``, recovered from #140 itself.
+def _connector_metadata(cfg, symbols):
+    """``(code, path) -> the original CompilerDiagnostic``, from #140 itself.
 
     The gate reaches #140's codes by DELEGATION, and the conversion to findings
     drops the compiler `phase` — which is part of the diagnostic contract. It
@@ -61,14 +61,19 @@ def _connector_phases(cfg, symbols):
     is raised by connector resolution (`reference_resolution`) AND by the map
     pass (`semantic_lowering`), so only the raising site knows.
 
-    So the phases are read back from the one function that assigns them. This
-    runs ONLY when the report already has errors — the success path pays
+    The MESSAGE and REMEDIATION are recovered for the same reason. The gate
+    rebuilds diagnostics through `finding()`, whose static tables cover this
+    issue's own codes only — a delegated #140/#142 code therefore fell back to
+    generic text, losing the code-specific wording an author actually acts on.
+
+    So the whole diagnostic is read back from the one function that produces it.
+    This runs ONLY when the report already has errors — the success path pays
     nothing, and the compile is failing anyway.
     """
     try:
         validate_connector_calls(cfg, symbols)
     except ProcessIRCompileError as exc:
-        return {(item.code, item.path): item.phase for item in exc.diagnostics}
+        return {(item.code, item.path): item for item in exc.diagnostics}
     except Exception:  # noqa: BLE001 - phase recovery must never mask the report
         pass
     return {}
@@ -106,21 +111,26 @@ def _enforce_semantic_report(ir, cfg, symbols, policy, capabilities) -> None:
     report = apply_policy(report, policy)
     if not report.errors:
         return
-    phases = _connector_phases(cfg, symbols)
-    raise ProcessIRCompileError(
-        [
-            CompilerDiagnostic(
-                code=item.code,
-                phase=phases.get((item.code, item.path), "semantic_lowering"),
-                path=item.path,
-                node_identity=item.node_identity,
-                message=item.message,
-                remediation=item.remediation,
-                internal_node_id=item.internal_node_id,
-            )
-            for item in report.errors
-        ]
-    )
+    delegated = _connector_metadata(cfg, symbols)
+
+    def _restore(item):
+        """The delegated original where there is one, else the report finding.
+
+        #140/#142 own their codes AND their wording; this gate only changes the
+        presentation, so anything it can hand back verbatim it does.
+        """
+        origin = delegated.get((item.code, item.path))
+        return CompilerDiagnostic(
+            code=item.code,
+            phase=origin.phase if origin else "semantic_lowering",
+            path=item.path,
+            node_identity=item.node_identity,
+            message=origin.message if origin else item.message,
+            remediation=origin.remediation if origin else item.remediation,
+            internal_node_id=item.internal_node_id,
+        )
+
+    raise ProcessIRCompileError([_restore(item) for item in report.errors])
 
 
 def compile_process_ir_v1(

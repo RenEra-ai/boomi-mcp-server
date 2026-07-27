@@ -579,3 +579,57 @@ def test_connector_resolution_runs_once_per_successful_compile():
     finally:
         fl.validate_connector_calls = original
     assert calls["n"] == 1, calls["n"]
+
+
+def test_a_delegated_connector_diagnostic_keeps_its_own_message():
+    """Codex review round 14. The gate rebuilds diagnostics through `finding()`,
+    whose static tables cover THIS issue's codes only — so a delegated #140/#142
+    code fell back to generic wording, losing the code-specific text an author
+    acts on. The whole original diagnostic is now recovered from #140."""
+    from boomi_mcp.compiler.process_ir.contracts import (
+        ComponentSymbolV1,
+        SymbolTableV1,
+    )
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "connector_call", "operation_ref": "op"}, {"kind": "stop"}]}}
+    table = SymbolTableV1(symbols=(
+        ComponentSymbolV1(ref="other", component_id="x",
+                          component_type="connector-action"),))
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        compiler_pipeline.compile_process_ir_v1(parse_process_ir_v1(doc), table)
+    item = excinfo.value.diagnostics[0]
+    assert item.code == "PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND"
+    assert item.phase == "reference_resolution"
+    # #140's own wording, not the generic reference text
+    assert "operation reference" in item.message
+    assert "connector-action" in item.remediation
+
+
+def test_a_missing_map_symbol_keeps_the_specialized_code_first():
+    """Codex review round 14. An absent map symbol makes the generic collector
+    emit `…COMPONENT_NOT_FOUND` while #140 emits `…PROFILE_MISMATCH`. Filtering
+    only the type-mismatch case left the not-found duplicate sorting AHEAD of
+    the established specialized code."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "mixed_flow_mod", str(_ROOT / "tests" / "test_connector_call_mixed_flow.py")
+    )
+    mixed = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mixed)
+
+    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+    from boomi_mcp.compiler.process_ir.semantic_validation import validate_process_ir
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    # drop the map symbol entirely
+    table = SymbolTableV1(symbols=tuple(
+        s for s in mixed.mixed_symbols().symbols if s.ref != "map_get_to_soap"))
+    report = validate_process_ir(parse_process_ir_v1(mixed.MIXED_DOC), table)
+    codes = [f.code for f in report.errors]
+    assert codes, "expected the mis-referenced map to be rejected"
+    assert "PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND" not in codes, codes

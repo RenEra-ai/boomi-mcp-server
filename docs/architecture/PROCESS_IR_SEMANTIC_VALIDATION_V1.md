@@ -323,40 +323,42 @@ The §6 architect impl-vs-plan review found seven gaps. Five were fixed. The two
 **retired on purpose**, recorded here so a future reader does not have to re-derive the decision
 from silence — and so the next issue that extends this module knows what is genuinely missing.
 
-### 13.1 "Resolve once" — connector resolution still runs twice (accepted)
+### 13.1 "Resolve once" — FIXED
 
-`validate_connector_calls` executes **twice per compile**, measured: once as its own compiler stage,
-and once again inside the gate, because `flow.collect_connector_flow_findings` DELEGATES to it
-rather than re-deriving its rules.
+Connector resolution used to run **twice per compile**: once as its own compiler stage, and again
+inside the gate, because `flow.collect_connector_flow_findings` delegates to it. Two earlier drafts
+of this section retired that as acceptable. Both were wrong, and the second reason is the one that
+mattered.
 
-Removing the standalone compiler stage was tried and **breaks 9 tests** in
-`tests/test_connector_call_resolution.py`. An earlier version of this section reported 11 and
-concluded that "the delegation does not surface every #140 code" — **both were wrong**, and the
-measurement says something more useful.
+The pre-pass was **fail-fast**, and it ran BEFORE the gate — so an invalid connector stopped every
+other collector from running. Measured: a document with an unresolvable operation in one Branch leg
+and a read-before-write in another reported BOTH from the standalone validator and **only the
+connector error** from the compiler. "Accumulate, don't fail fast" is a stated criterion of this
+issue, so this was never a cost-only tradeoff.
 
-Every failure is `assert 'semantic_lowering' == 'reference_resolution'`. The #140 **codes and paths
-are preserved exactly**; what changes is the compiler PHASE, because `_enforce_semantic_report`
-converts findings back into `CompilerDiagnostic`s with a hardcoded `phase="semantic_lowering"`,
-discarding the validation phase `flow._phase_for(code)` had already assigned.
+The standalone stage is gone. A successful compile now resolves connectors **once**, inside the gate.
+Two things had to be preserved to make that safe, and both are:
 
-So the duplicate pass **is** removable, and the blocking work is small and specific: map the
-finding's validation phase back to its compiler phase in `_enforce_semantic_report` instead of
-hardcoding one. That is left to a follow-up rather than done here because it changes the `phase`
-field of every diagnostic the gate emits — a contract other callers key on — and deserves its own
-review round rather than riding along in a documentation change.
+- **Phase.** `phase` is part of the diagnostic contract and cannot be re-derived from the code —
+  `…PROFILE_MISMATCH` is raised by connector resolution (`reference_resolution`) AND by the map pass
+  (`semantic_lowering`). It is read back from `validate_connector_calls` itself.
+- **Message and remediation.** The gate rebuilds diagnostics through `finding()`, whose static tables
+  cover this issue's own codes only, so a delegated #140/#142 code fell back to generic wording. The
+  original diagnostic is recovered whole and handed back verbatim.
 
-Removing the delegation instead is not an option: `validate_process_ir` is a public entry point, and
-standalone callers have nothing else validating their connector calls.
+That recovery re-runs connector resolution, but **only when the report already has errors** — the
+success path pays nothing and the compile is failing anyway.
 
-Until then the cost is one extra pass over the CFG and nothing else: both runs see the same graph
-and reach the same verdict, and the first one raising means the second never observes a divergent
-state.
+One compatibility rule comes with it: where #140 reports on a node, this module's GENERIC reference
+codes (`…COMPONENT_NOT_FOUND`, `…COMPONENT_TYPE_MISMATCH`) are dropped for that node, so the
+established specialized code still reads first. Accumulating both changed which code a caller sees
+FIRST, and existing public codes keep winning.
 
-Related, and also accepted: plan preflight synthesizes its symbol table from adapter
-`symbol_requirements` rather than from `components_by_key`, so the generic missing/type-mismatch
-reference codes cannot fire on an authorable plan input (the declared type IS the resolved type).
-`ResolvedReferenceFactsV1` is likewise a plain mutable object rather than the planned immutable
-contract — it is built during one walk, never crosses a public boundary, and never reaches a report.
+Still accepted: plan preflight synthesizes its symbol table from adapter `symbol_requirements` rather
+than from `components_by_key`, so the generic reference codes cannot fire on an authorable plan input
+(the declared type IS the resolved type). `ResolvedReferenceFactsV1` is likewise a plain mutable
+object rather than the planned immutable contract — built during one walk, never crossing a public
+boundary, never reaching a report.
 
 ### 13.2 The authored `external_writer` flag is a real trust-boundary gap (open)
 
