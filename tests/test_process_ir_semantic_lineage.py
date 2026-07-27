@@ -867,14 +867,96 @@ def test_a_waiting_childs_write_is_still_analysed():
     }
 
 
-def test_every_lattice_consumer_shares_one_establishing_writes_rule():
-    """The defect was one rule applied at one of three sites. Pinned
-    structurally: no consumer may read `effect.writes` directly."""
+def test_the_three_lattice_consumers_ask_three_different_questions():
+    """The corrected shape, pinned because I got it wrong in BOTH directions.
+
+    First the async-write exclusion was applied to the traversal only, and
+    `_written_anywhere` / `_leg_write_index` kept counting the async write —
+    which rejected a valid payload. Then it was applied to all three, which
+    silently ACCEPTED a cross-copy DDP read (a false negative) and downgraded a
+    later-leg ordering defect. The sites ask different questions:
+
+    * `_visit`            — does this write ESTABLISH state downstream? async: no
+    * `_written_anywhere` — did anyone write this key AT ALL?          async: yes
+    * `_leg_write_index`  — WHERE is the write?                        async: yes
+    """
     import inspect
 
     from boomi_mcp.compiler.process_ir.semantic_validation import lineage
 
+    # the two INDEXES must count async writes — they ask existence/position
     for fn in (lineage._leg_write_index, lineage._written_anywhere):
-        source = inspect.getsource(fn)
-        assert "_establishing_writes(" in source, fn.__name__
-        assert "effect.writes" not in source, fn.__name__
+        assert "effect.writes" in inspect.getsource(fn), fn.__name__
+        assert "_establishes_downstream(" not in inspect.getsource(fn), fn.__name__
+
+    # and the establishment question must consult the predicate
+    assert "_establishes_downstream(" in inspect.getsource(lineage._established_anywhere)
+
+
+def test_a_nonstrict_ddp_read_still_fails_on_a_cross_copy_async_write():
+    """The false NEGATIVE the over-broad fix introduced. A DDP write on another
+    document copy can NEVER reach this reader — that is not absence, and a
+    non-strict reader only tolerates absence."""
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        ProcessIRValidationCapabilitiesV1,
+        StateEffectV1 as _Effect,
+        SubprocessSummaryV1,
+        validate_process_ir,
+    )
+
+    decision = {
+        "kind": "decision", "comparison": "equals",
+        "left": {"value_type": "track", "property_id": "dynamicdocument.P"},
+        "right": {"value_type": "static", "static_value": "x"},
+        "true_arm": {"steps": [{"kind": "message", "text": "t"}],
+                     "terminal": {"kind": "stop"}},
+        "false_arm": {"steps": [{"kind": "message", "text": "f"}],
+                      "terminal": {"kind": "stop"}},
+    }
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "legs": [
+            {"steps": [{"kind": "message", "text": "m"}], "terminal": decision},
+            {"steps": [{"kind": "process_call", "process_ref": "$ref:a",
+                        "wait": False, "abort_on_error": False}],
+             "terminal": {"kind": "stop"}}]}]}}
+    symbols = SymbolTableV1(symbols=(
+        ComponentSymbolV1(ref="$ref:a", component_id="i1",
+                          component_type="process"),))
+    caps = ProcessIRValidationCapabilitiesV1(subprocess_summaries=(
+        SubprocessSummaryV1(process_ref="$ref:a",
+                            effect=_Effect(writes=(("ddp", "P"),),
+                                           replay_safe=True)),))
+    codes = {f.code for f in validate_process_ir(
+        parse_process_ir_v1(doc), symbols, caps).errors}
+    assert PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID in codes
+
+
+def test_a_later_leg_async_write_keeps_the_precise_ordering_code():
+    """The downgrade the over-broad fix introduced: `wait` does not move a
+    write, so a later-leg write is still a branch-ORDER defect, not a generic
+    missing-write one."""
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        ProcessIRValidationCapabilitiesV1,
+        StateEffectV1 as _Effect,
+        SubprocessSummaryV1,
+        validate_process_ir,
+    )
+
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "legs": [
+            {"steps": [_read_prop("dpp", "A")], "terminal": {"kind": "stop"}},
+            {"steps": [{"kind": "process_call", "process_ref": "$ref:a",
+                        "wait": False, "abort_on_error": False}],
+             "terminal": {"kind": "stop"}}]}]}}
+    symbols = SymbolTableV1(symbols=(
+        ComponentSymbolV1(ref="$ref:a", component_id="i1",
+                          component_type="process"),))
+    caps = ProcessIRValidationCapabilitiesV1(subprocess_summaries=(
+        SubprocessSummaryV1(process_ref="$ref:a",
+                            effect=_Effect(writes=(("dpp", "A"),),
+                                           replay_safe=True)),))
+    codes = {f.code for f in validate_process_ir(
+        parse_process_ir_v1(doc), symbols, caps).errors}
+    assert PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID in codes

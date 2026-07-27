@@ -236,15 +236,50 @@ def _establishes_downstream(semantic) -> bool:
     )
 
 
-def _establishing_writes(semantic, capabilities) -> Tuple[StateKey, ...]:
-    """Every contract write this node establishes downstream — possibly none."""
-    if not _establishes_downstream(semantic):
-        return ()
-    return tuple(
-        (key[0], key[1])
-        for effect in _trusted_effects(semantic, capabilities)
-        for key in effect.writes
-    )
+def _nonstrict_read_can_fail(
+    prepared: PreparedProcessValidationV1,
+    key: StateKey,
+    capabilities: ProcessIRValidationCapabilitiesV1,
+) -> bool:
+    """Whether a NON-strict read can fail at all, given who writes the key.
+
+    A non-strict reader (a Decision operand) tolerates ABSENCE — the wire
+    carries `defaultValue=""` — but not a writer that exists somewhere it can
+    never see. Which writers count depends on the scope, and conflating the two
+    is what made an async summary reject a valid payload:
+
+    * **DDP** — a write on a DIFFERENT document copy can never reach this
+      reader. That is not absence, it is a structural mistake, and it holds
+      whether or not the writer is fire-and-forget. ANY write counts.
+    * **DPP / cache** — execution-scoped. A fire-and-forget child may or may not
+      have run, which is indistinguishable from absence, and absence is exactly
+      what this reader tolerates. Only ESTABLISHING writes count.
+    """
+    if key[0] == DDP:
+        return _written_anywhere(prepared, key, capabilities)
+    return _established_anywhere(prepared, key, capabilities)
+
+
+def _established_anywhere(
+    prepared: PreparedProcessValidationV1,
+    key: StateKey,
+    capabilities: ProcessIRValidationCapabilitiesV1,
+) -> bool:
+    """Whether any node writes ``key`` in a way that can ESTABLISH it.
+
+    Differs from `_written_anywhere` only in excluding a fire-and-forget
+    `process_call`'s declared writes — it may still be running, so it proves
+    nothing to a reader.
+    """
+    for node in prepared.cfg.nodes:
+        if key in _writes_of(node.semantic):
+            return True
+        if not _establishes_downstream(node.semantic):
+            continue
+        for effect in _trusted_effects(node.semantic, capabilities):
+            if key in [(k[0], k[1]) for k in effect.writes]:
+                return True
+    return False
 
 
 def _opaque_reason(
@@ -388,7 +423,9 @@ def collect_lineage_findings(
                 continue
             # A non-strict reader tolerates ABSENCE (the wire carries a defined
             # empty default) but not a writer that exists somewhere unreachable.
-            if not strict and not _written_anywhere(prepared, key, capabilities):
+            if not strict and not _nonstrict_read_can_fail(
+                prepared, key, capabilities
+            ):
                 continue
             _classify_unmet_read(node, semantic, key, leg)
 
@@ -549,7 +586,12 @@ def _leg_write_index(
             # as establishing state, so omitting them made the later-leg
             # check blind to a contract write and silently downgraded a
             # reverse-leg dependency to "not written anywhere".
-            written.update(_establishing_writes(inner.semantic, capabilities))
+            # EXACT writes, async included. This index answers "WHERE is the
+            # write", and `wait` does not move it: a later-leg write is a
+            # later-leg write, so the precise BRANCH_ORDER_INVALID still
+            # applies. Filtering here downgraded it to a generic missing-write.
+            for effect in _trusted_effects(inner.semantic, capabilities):
+                written.update((k[0], k[1]) for k in effect.writes)
         index[leg] = frozenset(written)
     return index
 
@@ -584,8 +626,12 @@ def _written_anywhere(
     for node in prepared.cfg.nodes:
         if key in _writes_of(node.semantic):
             return True
-        if key in _establishing_writes(node.semantic, capabilities):
-            return True
+        # ANY write, async included: this asks whether an author wrote the key
+        # ANYWHERE, not whether it establishes downstream state. Filtering here
+        # made a cross-copy DDP read validate silently — a false NEGATIVE.
+        for effect in _trusted_effects(node.semantic, capabilities):
+            if key in [(k[0], k[1]) for k in effect.writes]:
+                return True
     return False
 
 
