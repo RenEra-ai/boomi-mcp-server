@@ -232,9 +232,10 @@ shape.
 
 | Code | Why it cannot fire yet |
 |---|---|
-| `…SIDE_EFFECT_ORDERING_UNSAFE` | needs a property read downstream of a non-waiting `process_call`; a `process_call` may live only in a pure process-call sequence (`process_call_connector_mixing` is gated) and is rejected inside a Branch/Decision body |
+| `…SIDE_EFFECT_ORDERING_UNSAFE` | needs a read downstream of a non-waiting `process_call`, and the only reads that can be there come from a subprocess SUMMARY, which no production caller supplies. NOT because the shape is unauthorable — an earlier version said a `process_call` "is rejected inside a Branch/Decision body", which is false: what is gated is MIXING a process call with property steps. `branch([[call(wait=False)], [call(wait=True)]])` with two summaries is a parseable document that reports this code (`test_the_unsafe_branch_is_authorable`) |
 | `PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND` | the legacy adapter's symbol table carries only refs it declared, so an undeclared ref never reaches the collector |
 | `PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH` | same — a literal wrong-type id (a `map_ref` bound to a `profile.json` id, or an unresolvable UUID) still reports `is_valid: true` |
+| `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` | fires only when a caller supplies a typed contract that binds to nothing. Every production call site passes `DEFAULT_VALIDATION_CAPABILITIES`, which is empty, so there is no contract to be unbound — the collector exists and is unit-tested, but no authorable config reaches it |
 | `…RETRY_EFFECT_UNSAFE` | **no legacy dialect can project a Try/Catch region at all**, so `derive_error_regions` returns an empty tuple on every legacy-projected CFG and `collect_retry_effect_findings` never has a region to examine. The blocker is one layer earlier than "the hazard never lands inside a retried region" |
 
 **B. Registered in the taxonomy with NO rule behind it (1 of 17).**
