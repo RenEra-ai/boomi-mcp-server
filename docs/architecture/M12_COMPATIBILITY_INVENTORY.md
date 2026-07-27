@@ -1313,8 +1313,9 @@ reverse of what a narrower wording would imply.
 
 The 8 reclassified `no` rows matter most:
 several are raised by `parse_process_ir_v1`, so the payload is rejected before `validate_process_ir`
-ever runs. There is no body collector and no capability collector — `semantic_validation/` defines
-nine `collect_*` functions and the pipeline runs four (references, flow, lineage, effects).
+ever runs. There is no body collector. The capability collector now exists —
+`semantic_validation/pipeline.py` runs it first, reporting a supplied effect contract that binds to
+nothing in the IR.
 
 This reflects the slice-9 delegation decision recorded in
 [PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md) §8: rather than re-derive
@@ -1404,10 +1405,11 @@ An exemption RECLASSIFIES an error as an advisory carrying the original code as 
 deletes the finding, so this ledger stays falsifiable.
 
 **Live-census note (2026-07-26, #143 QA).** Over 5933 authorable configs, 6 of #143's 17 codes were
-not producible from any of them — 4 are implemented and wired but unreachable from the v1 authored
-surface, and 2 (`PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE`,
-`PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID`) are registered in the taxonomy with NO collector
-behind them at all. A further 2 of the 4 exemption rows are inert because their target codes ship as
+not producible from any of them — 5 are implemented and wired but unreachable from the v1 authored
+surface, and 1 (`PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE`) is registered in the taxonomy
+with NO collector behind it at all. `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` was the second
+until the `capability`-phase collector was written for it; it is now emitted, though a caller has to
+supply typed contracts to reach it. A further 2 of the 4 exemption rows are inert because their target codes ship as
 warnings and `apply_policy` reclassifies only errors. All of this is enumerated in
 [PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md) §10.
 

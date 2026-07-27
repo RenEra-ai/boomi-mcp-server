@@ -378,6 +378,27 @@ class ScriptEffectContractV1(_ValidationModel):
     effect: StateEffectV1
 
 
+class ExternalWriterContractV1(_ValidationModel):
+    """Typed proof that something OUTSIDE this process writes a cache.
+
+    The authored `cache_get.external_writer` boolean used to do this on its own,
+    turning a blocking `…LINEAGE_CACHE_WRITER_MISSING` into a non-blocking
+    warning. That is a free-form "trust me" flag suppressing a fatal safety
+    rule, which #143 excludes by name: a payload cannot assert its own
+    trustworthiness (§7), and capabilities are compiler context that no authored
+    document can reach.
+
+    The flag remains meaningful as a DECLARATION of intent — it is what says
+    which cache reads expect an outside writer — but it now needs this contract
+    to confirm it. Legacy dialects keep working through
+    `LEGACY_ADAPTER_EXEMPTION_STANDALONE_CACHE_READ`, which already covers the
+    same code, so compatibility comes from the named registry-owned policy
+    rather than from a caller-supplied boolean.
+    """
+
+    cache_ref: str
+
+
 class SubprocessSummaryV1(_ValidationModel):
     """Declared effects of a child process, bound to its ``process_ref``."""
 
@@ -395,8 +416,15 @@ class ProcessIRValidationCapabilitiesV1(_ValidationModel):
     map_effects: Tuple[MapEffectContractV1, ...] = ()
     script_effects: Tuple[ScriptEffectContractV1, ...] = ()
     subprocess_summaries: Tuple[SubprocessSummaryV1, ...] = ()
+    external_writers: Tuple[ExternalWriterContractV1, ...] = ()
 
-    @field_validator("map_effects", "script_effects", "subprocess_summaries")
+    def writes_cache_externally(self, cache_ref: str) -> bool:
+        """Whether a typed contract vouches for an outside writer of this cache."""
+        return any(item.cache_ref == cache_ref for item in self.external_writers)
+
+    @field_validator(
+        "map_effects", "script_effects", "subprocess_summaries", "external_writers"
+    )
     @classmethod
     def _binding_keys_are_unique(cls, value):
         """Reject duplicate binding keys at construction.
@@ -412,6 +440,8 @@ class ProcessIRValidationCapabilitiesV1(_ValidationModel):
         for item in value:
             if hasattr(item, "map_ref"):
                 keys.append(item.map_ref)
+            elif hasattr(item, "cache_ref"):
+                keys.append(item.cache_ref)
             elif hasattr(item, "process_ref"):
                 keys.append(item.process_ref)
             else:
@@ -501,6 +531,7 @@ __all__: List[str] = [
     "MapEffectContractV1",
     "ProcessIRValidationCapabilitiesV1",
     "STATE_SCOPES",
+    "ExternalWriterContractV1",
     "ScriptEffectContractV1",
     "StateEffectV1",
     "SubprocessSummaryV1",

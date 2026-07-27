@@ -311,7 +311,12 @@ def test_a_cache_read_with_no_writer_is_reported():
     assert PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING in _codes(doc)
 
 
-def test_a_declared_external_writer_downgrades_to_a_warning():
+def test_a_declared_external_writer_alone_no_longer_downgrades():
+    """#143 excludes "relaxing rules via free-form 'trust me' flags" and requires
+    that no free-form assertion suppress a fatal safety rule. The authored
+    `external_writer` boolean did exactly that: it turned a blocking
+    `…CACHE_WRITER_MISSING` into a non-blocking warning, so a payload could
+    unblock its own build."""
     doc = _doc(
         [
             {
@@ -322,22 +327,66 @@ def test_a_declared_external_writer_downgrades_to_a_warning():
             }
         ]
     )
-    findings = _findings(doc)
-    assumed = [
-        f
-        for f in findings
-        if f.code == PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED
-    ]
-    assert assumed, "external writer should be recorded"
-    assert assumed[0].severity == "warning"
-    assert PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING not in {
-        f.code for f in findings
-    }
+    assert PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING in _codes(doc)
 
 
-# ---------------------------------------------------------------------------
-# opaque effects — uncertainty, never proof
-# ---------------------------------------------------------------------------
+def test_a_typed_external_writer_contract_does_downgrade():
+    """The flag DECLARES the expectation; the contract CONFIRMS it. Capabilities
+    are compiler context no authored document can reach, which is what makes
+    this a trust boundary rather than a self-assertion."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        ExternalWriterContractV1,
+        ProcessIRValidationCapabilitiesV1,
+    )
+
+    doc = _doc(
+        [
+            {
+                "kind": "cache_get",
+                "cache_ref": "$ref:c",
+                "empty_cache_behavior": "stopprocess",
+                "external_writer": True,
+            }
+        ]
+    )
+    prepared = prepare_validation_context(
+        parse_process_ir_v1(doc), SymbolTableV1(symbols=())
+    )
+    capabilities = ProcessIRValidationCapabilitiesV1(
+        external_writers=(ExternalWriterContractV1(cache_ref="$ref:c"),)
+    )
+    findings = collect_lineage_findings(prepared, capabilities)
+    codes = {f.code for f in findings}
+    assert PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED in codes
+    assert PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING not in codes
+
+
+def test_a_contract_for_a_DIFFERENT_cache_does_not_downgrade():
+    """The discriminator: the contract is bound to a cache, not to the idea of
+    external writers."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        ExternalWriterContractV1,
+        ProcessIRValidationCapabilitiesV1,
+    )
+
+    doc = _doc(
+        [
+            {
+                "kind": "cache_get",
+                "cache_ref": "$ref:c",
+                "empty_cache_behavior": "stopprocess",
+                "external_writer": True,
+            }
+        ]
+    )
+    prepared = prepare_validation_context(
+        parse_process_ir_v1(doc), SymbolTableV1(symbols=())
+    )
+    capabilities = ProcessIRValidationCapabilitiesV1(
+        external_writers=(ExternalWriterContractV1(cache_ref="$ref:other"),)
+    )
+    codes = {f.code for f in collect_lineage_findings(prepared, capabilities)}
+    assert PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING in codes
 
 
 def test_a_map_contributes_uncertainty_not_proof():

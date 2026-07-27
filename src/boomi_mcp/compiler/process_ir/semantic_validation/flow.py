@@ -35,12 +35,13 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Set, Tuple
 
 from ....errors import (
+    PROCESS_IR_COMPILE_INTERNAL,
     PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
     PROCESS_IR_SEMANTIC_UNREACHABLE,
     PROCESS_IR_SEMANTIC_UNTERMINATED_PATH,
 )
 from ..connector_resolution import validate_connector_calls
-from ..diagnostics import ProcessIRCompileError
+from ..diagnostics import CompilerDiagnostic, ProcessIRCompileError
 from .contracts import ValidationDiagnosticV1
 from .context import PreparedProcessValidationV1
 from .findings import finding
@@ -209,6 +210,30 @@ def collect_connector_flow_findings(
             )
             for item in exc.diagnostics
         )
+    except Exception:  # noqa: BLE001 - an UNEXPECTED resolver defect
+        # `phase` is load-bearing, and this stage has always reported its own
+        # defects as `reference_resolution`. The compiler used to run connector
+        # resolution under its own guard, which supplied that phase; now that it
+        # runs here, the phase has to be attached here or the outer guard would
+        # relabel a resolver crash as `semantic_lowering`.
+        #
+        # Raised as ProcessIRCompileError so the outer `_guarded` passes it
+        # through untouched rather than re-wrapping it.
+        raise ProcessIRCompileError(
+            [
+                CompilerDiagnostic(
+                    code=PROCESS_IR_COMPILE_INTERNAL,
+                    phase="reference_resolution",
+                    path="",
+                    node_identity="",
+                    message="connector resolution failed unexpectedly",
+                    remediation=(
+                        "This is a compiler defect, not a payload error. "
+                        "Please report it with the process configuration."
+                    ),
+                )
+            ]
+        ) from None
     return ()
 
 

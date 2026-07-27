@@ -342,6 +342,7 @@ def test_the_package_exports_only_its_public_surface():
     assert set(semantic_validation.__all__) == {
         "DEFAULT_VALIDATION_CAPABILITIES",
         "MapEffectContractV1",
+        "ExternalWriterContractV1",
         "ProcessIRValidationCapabilitiesV1",
         "STATE_SCOPES",
         "ScriptEffectContractV1",

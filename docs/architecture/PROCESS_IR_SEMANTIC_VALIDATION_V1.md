@@ -236,9 +236,12 @@ shape.
 | `PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH` | same — a literal wrong-type id (a `map_ref` bound to a `profile.json` id, or an unresolvable UUID) still reports `is_valid: true` |
 | `…RETRY_EFFECT_UNSAFE` | **no legacy dialect can project a Try/Catch region at all**, so `derive_error_regions` returns an empty tuple on every legacy-projected CFG and `collect_retry_effect_findings` never has a region to examine. The blocker is one layer earlier than "the hazard never lands inside a retried region" |
 
-**B. Registered in the taxonomy with NO rule behind it (2 of 17).**
+**B. Registered in the taxonomy with NO rule behind it (1 of 17).**
 
-TWO codes are declared with no collector emitting them. Group A's defining test — forcing the
+ONE code is declared with no collector emitting it —
+`PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` (§10 B, below).
+`PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` was the second until the
+`capability`-phase collector was written; it is now emitted. Group A's defining test — forcing the
 condition makes it fire — does **not** hold for either: `finding()` accepts any code outside the
 compile family (registered or not), so a synthetic report proves registration, not wiring.
 
@@ -294,7 +297,7 @@ carry one.
 |---|---|---|
 | `PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND` | error | a non-connector component ref does not resolve |
 | `PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH` | error | a resolved symbol is the wrong type for its role |
-| `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` | error | **taxonomy-only — no collector emits it** (see §10 B) |
+| `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` | error | a supplied effect contract binds to nothing in the IR |
 | `PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE` | error | a strict read has no establishing write on its path |
 | `PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID` | error | a DDP is read outside the document copy that wrote it |
 | `PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID` | error | a leg depends on state written by a LATER leg |
@@ -385,37 +388,19 @@ The fix, when it is taken: add an external-writer contract to
 `ProcessIRValidationCapabilitiesV1`, require it for the downgrade, and treat the authored flag as a
 DECLARATION that the contract must confirm.
 
-### 13.3 Capability-contract surface stops at effects (accepted)
+### 13.3 Connector-capability snapshot and `validate_legacy_result` (accepted)
 
-`ProcessIRValidationCapabilitiesV1` carries map, script and subprocess effects. The plan also asked
-for a connector-capability snapshot and typed external-writer contracts. Neither is shipped, and
-neither has a caller: connector capability is already owned by #140's registry, which this module
-delegates to rather than duplicating, and `external_writer` is a BOOLEAN on the authored `cache_get`
-node that the lineage phase already honours. Adding a second, typed representation of either would
-create exactly the "second copy of a fact past a checker that re-derives it" this issue exists to
-remove.
+`ProcessIRValidationCapabilitiesV1` carries map, script and subprocess effects, and — since §13.2 —
+external-writer contracts. The plan also asked for a connector-capability snapshot. That one is not
+shipped and has no caller: connector capability is owned by #140's registry, which this module
+delegates to rather than duplicating, so a second typed representation would be exactly the "second
+copy of a fact past a checker that re-derives it" this issue exists to remove.
 
-Also not shipped, for the same reason: a separate pure `validate_legacy_result`
+An earlier version of this section listed the typed external-writer contract here too, on the same
+"unnecessary duplication" reasoning. That was wrong and it contradicted §13.2: `external_writer` was
+NOT a second copy of a compiler-derived fact, it was an authored assertion with nothing behind it.
+It is now a real contract — see §13.2.
+
+Also not shipped, for the stated reason: a separate pure `validate_legacy_result`
 (`validate_legacy_process_config` is that function, reached from the config rather than the result),
-The connector-capability snapshot and `validate_legacy_result` retirements below stand; the
-external-writer one did not, and is §13.2.
-
-**The report snapshot IS shipped** — `tests/fixtures/process_ir/semantic_report_linear_flow.json`,
-asserted by `test_the_report_matches_its_committed_oracle`. An earlier version of this section
-retired it, arguing a frozen artifact would churn on every message edit. That was the wrong trade:
-without a committed oracle nothing catches a deterministic CHANGE to codes, paths, ordering,
-messages or remediation, and this repo already keeps 40 raw-byte XML goldens on exactly that
-reasoning. The remaining three planned IR fixtures are not shipped; the report was the one that
-carried the guarantee.
-
-On determinism, an earlier version of this section cited
-`test_report_buckets_are_ordered_deterministically_across_runs` and
-`test_validation_is_pure_and_repeatable` as replacing the fixtures. They do not, and the objection is
-correct: both call validation twice **inside one pytest process**, so they share a hash seed and
-assert no expected bytes — a report that is deterministic but CHANGED passes both, and so does an
-ordering that varies only between interpreter invocations.
-
-`test_the_report_is_byte_identical_across_processes` closes that: it serializes the canonical report
-in two subprocesses under **different `PYTHONHASHSEED` values** and compares the bytes. It proves the
-two runs AGREE; the oracle above is what proves they are RIGHT. Both are needed — measured: mutating
-one finding message makes the oracle test fail while the cross-process test still passes.
+and the three planned IR snapshot fixtures beyond the report oracle.

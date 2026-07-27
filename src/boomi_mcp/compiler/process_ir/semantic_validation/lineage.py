@@ -299,7 +299,20 @@ def collect_lineage_findings(
                 + extra,
             )
         elif scope == CACHE:
-            if getattr(semantic, "external_writer", False):
+            # The authored `external_writer` boolean DECLARES the expectation;
+            # a typed contract CONFIRMS it. The flag alone used to downgrade a
+            # blocking finding to a warning, which is a free-form "trust me"
+            # assertion suppressing a fatal safety rule — excluded by name in
+            # this issue's own criteria, and the reason capabilities are
+            # compiler context no payload can reach.
+            #
+            # Legacy dialects are unaffected: their compatibility comes from
+            # LEGACY_ADAPTER_EXEMPTION_STANDALONE_CACHE_READ, a named
+            # registry-owned policy covering this exact code, not from a
+            # caller-supplied field.
+            if getattr(semantic, "external_writer", False) and (
+                capabilities.writes_cache_externally(getattr(semantic, "cache_ref", ""))
+            ):
                 _report(
                     PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED,
                     node,

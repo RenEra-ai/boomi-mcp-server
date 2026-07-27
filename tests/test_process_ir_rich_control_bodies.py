@@ -167,9 +167,29 @@ BRANCH_MIXED_DOC = {
 }
 
 
-def compile_doc(doc, symbols=None):
+def compile_doc(doc, symbols=None, capabilities=None):
     table = symbols or rich_symbols()
-    return compile_process_ir_v1(parse_process_ir_v1(doc), table), table
+    return (
+        compile_process_ir_v1(
+            parse_process_ir_v1(doc), table, capabilities=capabilities
+        ),
+        table,
+    )
+
+
+def external_writer_for(cache_ref):
+    """#143: an authored `external_writer` flag DECLARES an outside writer; a
+    typed contract must CONFIRM it. The flag alone no longer downgrades the
+    blocking finding — that would be a free-form assertion suppressing a fatal
+    rule, which the issue excludes by name."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        ExternalWriterContractV1,
+        ProcessIRValidationCapabilitiesV1,
+    )
+
+    return ProcessIRValidationCapabilitiesV1(
+        external_writers=(ExternalWriterContractV1(cache_ref=cache_ref),)
+    )
 
 
 def codes_for(doc, symbols=None):
@@ -788,7 +808,7 @@ def test_a_send_may_be_followed_by_a_stream_replacing_cache_read():
             ]},
         ]},
     }
-    compile_doc(doc)
+    compile_doc(doc, capabilities=external_writer_for("doc_cache"))
 
 
 def test_every_map_in_a_body_is_validated_or_rejected():
