@@ -153,10 +153,14 @@ def _collect_capability_findings(
     """
     map_refs: set = set()
     process_refs: set = set()
+    cache_refs: set = set()
     script_keys: set = set()
     for node in prepared.cfg.nodes:
         semantic = node.semantic
         kind = semantic.semantic_kind
+        cache_ref = getattr(semantic, "cache_ref", None)
+        if isinstance(cache_ref, str) and cache_ref:
+            cache_refs.add(cache_ref)
         if kind == "map":
             map_refs.add(semantic.map_ref)
         elif kind == "process_call":
@@ -190,6 +194,13 @@ def _collect_capability_findings(
     for index, item in enumerate(capabilities.subprocess_summaries):
         if item.process_ref not in process_refs:
             _unbound("subprocess_summaries", index, "subprocess")
+    # An unbound external-writer contract is the MOST important one to report:
+    # it is a trusted proof that downgrades a blocking finding, so a typo in the
+    # cache ref would silently leave the payload validated on the strength of a
+    # contract that vouches for nothing.
+    for index, item in enumerate(capabilities.external_writers):
+        if item.cache_ref not in cache_refs:
+            _unbound("external_writers", index, "cache")
 
     return tuple(findings)
 

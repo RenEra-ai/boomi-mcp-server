@@ -41,7 +41,11 @@ from ....errors import (
     PROCESS_IR_SEMANTIC_UNTERMINATED_PATH,
 )
 from ..connector_resolution import validate_connector_calls
-from ..diagnostics import CompilerDiagnostic, ProcessIRCompileError
+from ..diagnostics import (
+    CompilerDiagnostic,
+    ProcessIRCompileError,
+    node_identity_for,
+)
 from .contracts import ValidationDiagnosticV1
 from .context import PreparedProcessValidationV1
 from .findings import finding
@@ -225,7 +229,9 @@ def collect_connector_flow_findings(
                     code=PROCESS_IR_COMPILE_INTERNAL,
                     phase="reference_resolution",
                     path="",
-                    node_identity="",
+                    # `node_identity_for("")` is `<root>`; a bare "" is not a
+                    # valid identity and would lose the failure location.
+                    node_identity=node_identity_for(""),
                     message="connector resolution failed unexpectedly",
                     remediation=(
                         "This is a compiler defect, not a payload error. "

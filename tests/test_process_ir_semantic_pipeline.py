@@ -881,3 +881,39 @@ def test_the_report_is_byte_identical_across_processes():
     second = _report_in_subprocess("12345")
     assert first, "the probe produced no report"
     assert first == second, "report bytes differ across hash seeds"
+
+
+def test_an_unbound_external_writer_contract_is_reported_and_does_not_downgrade():
+    """Codex review round 16. An external-writer contract is a trusted proof
+    that DOWNGRADES a blocking finding, so a typo in its cache ref is the most
+    dangerous unbound contract of all — it would otherwise leave the payload
+    validated on the strength of a proof that vouches for nothing."""
+    from boomi_mcp.compiler.process_ir.contracts import (
+        ComponentSymbolV1,
+        SymbolTableV1 as _ST,
+    )
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        ExternalWriterContractV1,
+    )
+
+    doc = _doc([{"kind": "cache_get", "cache_ref": "$ref:k",
+                 "empty_cache_behavior": "stopprocess", "external_writer": True}])
+    ir = parse_process_ir_v1(doc)
+    symbols = _ST(symbols=tuple(
+        ComponentSymbolV1(ref=r, component_id="id" + r, component_type=t)
+        for r, t in (("$ref:conn", "connector-settings"),
+                     ("$ref:op", "connector-action"),
+                     ("$ref:tconn", "connector-settings"),
+                     ("$ref:top", "connector-action"),
+                     ("$ref:k", "documentcache"))))
+
+    def _codes(cache_ref):
+        caps = ProcessIRValidationCapabilitiesV1(
+            external_writers=(ExternalWriterContractV1(cache_ref=cache_ref),))
+        return {f.code for f in validate_process_ir(ir, symbols, caps).errors}
+
+    typo = _codes("$ref:typo")
+    assert _CONTRACT_INVALID in typo
+    assert "PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING" in typo
+    # the discriminator: a correctly bound contract does downgrade, and is clean
+    assert _codes("$ref:k") == set()

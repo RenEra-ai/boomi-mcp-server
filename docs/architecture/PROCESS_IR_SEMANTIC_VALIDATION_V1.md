@@ -241,9 +241,10 @@ shape.
 ONE code is declared with no collector emitting it —
 `PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` (§10 B, below).
 `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` was the second until the
-`capability`-phase collector was written; it is now emitted. Group A's defining test — forcing the
-condition makes it fire — does **not** hold for either: `finding()` accepts any code outside the
-compile family (registered or not), so a synthetic report proves registration, not wiring.
+`capability`-phase collector was written; it is now emitted and has moved to group A. Group A's
+defining test — forcing the condition makes it fire — does **not** hold for the one code left here:
+`finding()` accepts any code outside the compile family (registered or not), so a synthetic report
+proves registration, not wiring.
 
 `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` **is now emitted** — by the `capability`-phase
 collector in `semantic_validation/pipeline.py`, when a supplied contract binds to nothing in the IR
@@ -363,30 +364,35 @@ than from `components_by_key`, so the generic reference codes cannot fire on an 
 object rather than the planned immutable contract — built during one walk, never crossing a public
 boundary, never reaching a report.
 
-### 13.2 The authored `external_writer` flag is a real trust-boundary gap (open)
+### 13.2 The authored `external_writer` flag — FIXED
 
-The §6 review is **correct** and this is recorded rather than argued away.
+The §6 review was **correct** and my pushback was wrong, on the strongest possible grounds: #143's
+own body excludes "relaxing rules via free-form 'trust me' flags" and requires that "no free-form
+assertion suppresses a fatal safety rule". `cache_get.external_writer` was exactly that — an AUTHORED
+boolean that turned a blocking `…LINEAGE_CACHE_WRITER_MISSING` into a non-blocking
+`…LINEAGE_EXTERNAL_WRITER_ASSUMED`, letting a payload unblock its own build. I first argued this was
+out of scope because `external_writer` is a shipped authoring surface; the issue's acceptance
+criteria say otherwise.
 
-`cache_get.external_writer` is an AUTHORED boolean. Setting it turns
-`…LINEAGE_CACHE_WRITER_MISSING` (error, blocking) into `…LINEAGE_EXTERNAL_WRITER_ASSUMED` (warning,
-non-blocking) — measured. So a payload can unblock its own build by asserting that something outside
-the process writes the cache, which is exactly the self-asserted trust §7 says the typed capability
-boundary exists to prevent ("no payload can assert its own trustworthiness"). The plan asked for a
-typed external-writer contract for this reason.
+**Now:** the flag DECLARES the expectation and `ExternalWriterContractV1` CONFIRMS it. Capabilities
+are compiler context no authored document can reach (§7), so the downgrade is a trust boundary again
+rather than a self-assertion. Measured:
 
-It is **not** fixed here, and the reason is scope rather than merit: `external_writer` is a shipped
-authoring surface, not an oversight of this issue. `map_builder.py` accepts it in join config,
-`integration_builder.py` documents "a joined cache there must declare `external_writer: true`", and
-production tests author it. Removing its effect is a breaking change to a public authoring contract
-and belongs to an issue that can migrate callers, not to a validation-unification pass.
+| authored flag | typed contract | policy | result |
+|---|---|---|---|
+| `true` | — | strict | `…CACHE_WRITER_MISSING` (blocking) |
+| `true` | bound to that cache | strict | `…EXTERNAL_WRITER_ASSUMED` (warning) |
+| `true` | bound to a DIFFERENT cache | strict | `…CACHE_WRITER_MISSING` (blocking) |
+| `true` | — | `flow_sequence` | clean, via the named exemption |
 
-What limits the damage today: the downgrade is **recorded**, not silent. The report carries
-`…EXTERNAL_WRITER_ASSUMED` with `external_writer: True` evidence, so every use is auditable in the
-report a gate already produces.
+Backward compatibility comes from the registry, not the payload:
+`LEGACY_ADAPTER_EXEMPTION_STANDALONE_CACHE_READ` already covers this exact code for `flow_sequence`,
+so migrated legacy dialects are unaffected — which is what made the fix shippable inside #143 rather
+than a breaking change deferred to a follow-up.
 
-The fix, when it is taken: add an external-writer contract to
-`ProcessIRValidationCapabilitiesV1`, require it for the downgrade, and treat the authored flag as a
-DECLARATION that the contract must confirm.
+An unbound external-writer contract reports `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` like any
+other, and deliberately does NOT downgrade: a typo in the cache ref would otherwise leave a payload
+validated on the strength of a proof that vouches for nothing.
 
 ### 13.3 Connector-capability snapshot and `validate_legacy_result` (accepted)
 
