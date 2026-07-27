@@ -489,3 +489,93 @@ def test_the_parse_wrapper_still_rejects_without_the_contract():
     assert "PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE" in [
         d.code for d in excinfo.value.diagnostics
     ]
+
+
+# ---------------------------------------------------------------------------
+# §6 architect review round 2, finding 1: the connector PRE-PASS defeated
+# accumulation. It ran fail-fast before the gate, so an invalid connector
+# stopped every other collector from running.
+# ---------------------------------------------------------------------------
+
+
+def _accumulation_case():
+    from boomi_mcp.compiler.process_ir.contracts import (
+        ComponentSymbolV1,
+        SymbolTableV1,
+    )
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    call = {"kind": "connector_call", "operation_ref": "op"}
+    bad_read = {"kind": "set_dpp", "name": "OUT",
+                "source_values": [{"value_type": "dpp", "property_name": "NEVER"}]}
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "legs": [
+            {"steps": [call], "terminal": {"kind": "stop"}},
+            {"steps": [bad_read], "terminal": {"kind": "stop"}}]}]}}
+    table = SymbolTableV1(symbols=(
+        ComponentSymbolV1(ref="other", component_id="x",
+                          component_type="connector-action"),))
+    return parse_process_ir_v1(doc), table
+
+
+def test_a_connector_error_no_longer_hides_every_other_finding():
+    """The compiler must report what the standalone validator reports. With the
+    fail-fast pre-pass in front of the gate it returned ONLY the connector
+    error, and "accumulate, don't fail fast" is a stated criterion."""
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.semantic_validation import validate_process_ir
+
+    ir, table = _accumulation_case()
+    expected = {f.code for f in validate_process_ir(ir, table).errors}
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        compiler_pipeline.compile_process_ir_v1(ir, table)
+    actual = {d.code for d in excinfo.value.diagnostics}
+
+    assert "PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND" in actual
+    assert "PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE" in actual
+    assert expected - actual == set(), sorted(expected - actual)
+
+
+def test_the_delegated_connector_codes_keep_their_compiler_phase():
+    """`phase` is part of the diagnostic contract. It cannot be re-derived from
+    the code — `…PROFILE_MISMATCH` is raised by connector resolution AND by the
+    map pass with different phases — so it is read back from #140 itself."""
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+
+    ir, table = _accumulation_case()
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        compiler_pipeline.compile_process_ir_v1(ir, table)
+    phases = {d.code: d.phase for d in excinfo.value.diagnostics}
+    assert phases["PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND"] == "reference_resolution"
+    assert phases[
+        "PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE"
+    ] == "semantic_lowering"
+
+
+def test_connector_resolution_runs_once_per_successful_compile():
+    """The pre-pass is gone, so a clean compile resolves connectors exactly
+    once — the "resolve once" property, now actually held rather than
+    documented around."""
+    from boomi_mcp.compiler.process_ir import pipeline as cp
+    from boomi_mcp.compiler.process_ir.semantic_validation import flow as fl
+
+    calls = {"n": 0}
+    original = fl.validate_connector_calls
+
+    def _counted(*a, **k):
+        calls["n"] += 1
+        return original(*a, **k)
+
+    fl.validate_connector_calls = _counted
+    try:
+        from boomi_mcp.compiler.process_ir.lowering import lower_process_ir_to_cfg
+        from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+        ir = parse_process_ir_v1(_contracted_map_doc())
+        cfg = lower_process_ir_to_cfg(ir)
+        cp._enforce_semantic_report(
+            ir, cfg, _contracted_symbols(), None, _map_capabilities()
+        )
+    finally:
+        fl.validate_connector_calls = original
+    assert calls["n"] == 1, calls["n"]

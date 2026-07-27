@@ -52,6 +52,28 @@ def _guarded(phase, action, *args):
         ) from None
 
 
+def _connector_phases(cfg, symbols):
+    """``(code, path) -> compiler phase``, recovered from #140 itself.
+
+    The gate reaches #140's codes by DELEGATION, and the conversion to findings
+    drops the compiler `phase` — which is part of the diagnostic contract. It
+    cannot be re-derived from the code: `PROCESS_IR_SEMANTIC_PROFILE_MISMATCH`
+    is raised by connector resolution (`reference_resolution`) AND by the map
+    pass (`semantic_lowering`), so only the raising site knows.
+
+    So the phases are read back from the one function that assigns them. This
+    runs ONLY when the report already has errors — the success path pays
+    nothing, and the compile is failing anyway.
+    """
+    try:
+        validate_connector_calls(cfg, symbols)
+    except ProcessIRCompileError as exc:
+        return {(item.code, item.path): item.phase for item in exc.diagnostics}
+    except Exception:  # noqa: BLE001 - phase recovery must never mask the report
+        pass
+    return {}
+
+
 def _enforce_semantic_report(ir, cfg, symbols, policy, capabilities) -> None:
     """Block the compile when the unified semantic report has ERRORS.
 
@@ -84,11 +106,12 @@ def _enforce_semantic_report(ir, cfg, symbols, policy, capabilities) -> None:
     report = apply_policy(report, policy)
     if not report.errors:
         return
+    phases = _connector_phases(cfg, symbols)
     raise ProcessIRCompileError(
         [
             CompilerDiagnostic(
                 code=item.code,
-                phase="semantic_lowering",
+                phase=phases.get((item.code, item.path), "semantic_lowering"),
                 path=item.path,
                 node_identity=item.node_identity,
                 message=item.message,
@@ -137,14 +160,16 @@ def compile_process_ir_v1(
     _guarded("semantic_lowering", validate_body_capabilities, ir)
     cfg = _guarded("semantic_lowering", lower_process_ir_to_cfg, ir)
     _guarded("semantic_lowering", check_cfg_invariants, cfg)
-    # #140: resolve and validate connector calls BEFORE any emission plan exists,
-    # so a bad reference, an unsupported family/action, an impossible document
-    # cardinality, or a map whose profiles do not line up is rejected long before
-    # an emitter — and therefore before any component mutation. A CFG with no
-    # connector_call node returns immediately, so no pre-#140 dialect is touched.
-    # The phase here only labels an UNEXPECTED crash; the deliberate diagnostics
-    # inside carry their own (reference_resolution / semantic_lowering).
-    _guarded("reference_resolution", validate_connector_calls, cfg, symbols)
+    # #140's connector resolution is NOT a separate stage here. It runs inside
+    # the gate below, via `flow.collect_connector_flow_findings`, which delegates
+    # to `validate_connector_calls` and preserves its codes verbatim.
+    #
+    # It used to run first, and that destroyed ACCUMULATION: a payload with an
+    # unresolvable operation in one Branch leg and a read-before-write in another
+    # reported only the connector error, because the fail-fast stage raised
+    # before any other collector ran. Measured — the standalone validator
+    # reported both. "Accumulate, don't fail fast" is a stated criterion of this
+    # issue, so the duplicate pass had to go rather than be documented around.
     # #143: the unified semantic gate. It runs on the CFG that was just lowered
     # and BEFORE any emission plan exists, so "no plan lowering occurs with
     # report errors" holds by construction rather than by convention.

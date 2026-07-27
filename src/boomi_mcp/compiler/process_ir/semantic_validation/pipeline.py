@@ -127,7 +127,9 @@ def _validate_prepared(
     findings.extend(collect_effect_findings(prepared, capabilities))
 
     return build_validation_report(
-        _suppress_dependents(findings, prepared, reference_facts)
+        _prefer_specialized_codes(
+            _suppress_dependents(findings, prepared, reference_facts)
+        )
     )
 
 
@@ -190,6 +192,59 @@ def _collect_capability_findings(
             _unbound("subprocess_summaries", index, "subprocess")
 
     return tuple(findings)
+
+
+#: Codes #140 owns for a connector flow. They say strictly more than this
+#: module's generic reference code — a missing operation vs. an operation whose
+#: connection is unknown vs. a profile that does not line up — and the migration
+#: matrix classifies that resolver `port-unchanged` for exactly that reason.
+_SPECIALIZED_REFERENCE_CODES = frozenset({
+    "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED",
+    "PROCESS_IR_REFERENCE_CONNECTION_MISMATCH",
+    "PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND",
+    "PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND",
+    "PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH",
+    "PROCESS_IR_SEMANTIC_PROFILE_MISMATCH",
+})
+
+_GENERIC_REFERENCE_CODE = "PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH"
+
+
+def _prefer_specialized_codes(
+    findings: Tuple[ValidationDiagnosticV1, ...],
+) -> Tuple[ValidationDiagnosticV1, ...]:
+    """Where #140 already spoke about a path, drop this module's generic code.
+
+    Both fire on a `map_ref` pointing at a non-map component: #140 says
+    `…PROFILE_MISMATCH`, this module says `…COMPONENT_TYPE_MISMATCH`. Before the
+    connector pre-pass was removed the fail-fast stage raised first and only
+    #140's code was ever seen; accumulating both changed which code a caller
+    reads FIRST, and existing public codes keep winning (that ordering rule is
+    stated in the legacy bridge and pinned by the connector suites).
+
+    Narrow on purpose: only the one generic code, and only where a specialized
+    finding names the SAME node. The two paths differ in depth — #140 points at
+    `/body/steps/1/map_ref`, this module at `/body/steps/1` — so the match is
+    prefix containment on a path SEGMENT boundary, never a bare `startswith`
+    (which would let `/body/steps/1` swallow `/body/steps/10`). A generic
+    finding on a node #140 never mentions still reports.
+    """
+    specialized = [
+        item.path for item in findings if item.code in _SPECIALIZED_REFERENCE_CODES
+    ]
+    if not specialized:
+        return findings
+
+    def _covered(path: str) -> bool:
+        return any(
+            other == path or other.startswith(path + "/") for other in specialized
+        )
+
+    return tuple(
+        item
+        for item in findings
+        if not (item.code == _GENERIC_REFERENCE_CODE and _covered(item.path))
+    )
 
 
 def _suppress_dependents(

@@ -175,28 +175,17 @@ These gates can only ADD a rejection the legacy path missed.
 A fatal report at the plan gate sets `planned_action = "error_process_validation"`, which is in
 `_apply_plan`'s fail-fast `unresolvable_steps` set — so **no `_execute_component` runs**.
 
-### Deviation from the architect plan, and why
+### Deviation from the architect plan — WITHDRAWN
 
-The plan placed the compiler gate inside `compile_process_ir_v1`. That was implemented and measured:
-it breaks the legacy parity suites for TWO independent reasons.
+This section used to argue that the gate could not live in `compile_process_ir_v1`, for two reasons:
+that the compiler cannot know which adapter produced its IR (so cannot look up an exemption policy),
+and that its own fixtures used placeholder component types.
 
-The first is structural: canonical validation is deliberately stricter than the legacy surface, the
-legacy surface keeps its behavior through exemptions keyed on ADAPTER IDENTITY, and
-`compile_process_ir_v1(ir, symbols)` does not know which adapter produced its IR, so it cannot look a
-policy up.
-
-The second is independent and no exemption addresses it: the compiler's own fixtures use placeholder
-component types (`component_type="t"`), which the reference phase reports as
-`…REFERENCE_COMPONENT_TYPE_MISMATCH`. A faithful reproduction at `ba0d51c` measures **20 failing
-tests** — `…LINEAGE_CACHE_WRITER_MISSING` (17), `…LINEAGE_PROPERTY_READ_BEFORE_WRITE` (7, with 7
-tests carrying both), and `…REFERENCE_COMPONENT_TYPE_MISMATCH` (3, exempted by nothing). An earlier
-version of this section said the failures were "exactly" the two exemption-covered codes; that was
-wrong. The third code strengthens the case — even a policy-aware compiler gate would still reject
-those three.
-
-`emit_legacy_result` is the single production entry into the canonical chain **and** knows its
-dialect, so the gate lives there. With policies applied, all 40 raw-byte XML goldens and every parity
-suite stay green. `compile_process_ir_v1` keeps its existing contract for direct callers.
+**Both were wrong, and the gate is now in the compiler.** See §8.1. The compiler cannot look the
+policy up, but the ADAPTER can and now passes it as `validation_policy`; that one keyword fixed 19 of
+27 failures. The fixtures were debt, retyped by role. The deviation is withdrawn rather than deleted
+because the reasoning is instructive: a measurement ("27 tests fail") was read as a structural
+impossibility when it was a missing parameter and some test debt.
 
 ## 9. Legacy exemptions
 
@@ -253,11 +242,15 @@ TWO codes are declared with no collector emitting them. Group A's defining test 
 condition makes it fire — does **not** hold for either: `finding()` accepts any code outside the
 compile family (registered or not), so a synthetic report proves registration, not wiring.
 
-`PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` is the first. No collector references it. An earlier
-draft filed it under A with the reason "no production caller supplies typed effect contracts yet",
-which describes a reachability gap and so implies a rule a caller could reach. There is none: the
-capability contracts are validated structurally by pydantic at construction, and nothing re-checks
-them against the IR.
+`PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` **is now emitted** — by the `capability`-phase
+collector in `semantic_validation/pipeline.py`, when a supplied contract binds to nothing in the IR
+(a map ref, script digest or subprocess ref the document does not contain). That is a CALLER error:
+ignoring it let a caller believe a map was vouched for while the node stayed opaque, and the only
+symptom was a lineage warning pointing at the NODE rather than at the contract that failed to match.
+
+Two earlier drafts of this paragraph were wrong in opposite directions — one filed it as a
+reachability gap ("no production caller supplies typed contracts yet"), the next as permanently
+unraisable ("there is no rule a caller could reach"). The rule was simply unwritten.
 
 `PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` is the second. It exists as a
 constant, a taxonomy row, and a message/remediation entry — no collector references it, and it has no
@@ -321,8 +314,8 @@ unification must not downgrade them.
 ## 12. Rollout
 
 Ten slices, each independently committable and each leaving the suite green. Slices 1–7 shipped dark
-(wired to nothing); slice 8 is the first mutation gate; slice 9 is the emission gate; slice 10 is
-this documentation. Baseline at `4a5ad67`: 7269 passed / 16 skipped / 0 failed.
+(wired to nothing); slice 8 is the first mutation gate; slice 9 is the compiler gate (originally
+scoped as an emission gate — see §8.1 for why it moved); slice 10 is this documentation. Baseline at `4a5ad67`: 7269 passed / 16 skipped / 0 failed.
 
 ## 13. Plan items deliberately NOT shipped
 
@@ -365,7 +358,32 @@ reference codes cannot fire on an authorable plan input (the declared type IS th
 `ResolvedReferenceFactsV1` is likewise a plain mutable object rather than the planned immutable
 contract — it is built during one walk, never crosses a public boundary, and never reaches a report.
 
-### 13.2 Capability-contract surface stops at effects (accepted)
+### 13.2 The authored `external_writer` flag is a real trust-boundary gap (open)
+
+The §6 review is **correct** and this is recorded rather than argued away.
+
+`cache_get.external_writer` is an AUTHORED boolean. Setting it turns
+`…LINEAGE_CACHE_WRITER_MISSING` (error, blocking) into `…LINEAGE_EXTERNAL_WRITER_ASSUMED` (warning,
+non-blocking) — measured. So a payload can unblock its own build by asserting that something outside
+the process writes the cache, which is exactly the self-asserted trust §7 says the typed capability
+boundary exists to prevent ("no payload can assert its own trustworthiness"). The plan asked for a
+typed external-writer contract for this reason.
+
+It is **not** fixed here, and the reason is scope rather than merit: `external_writer` is a shipped
+authoring surface, not an oversight of this issue. `map_builder.py` accepts it in join config,
+`integration_builder.py` documents "a joined cache there must declare `external_writer: true`", and
+production tests author it. Removing its effect is a breaking change to a public authoring contract
+and belongs to an issue that can migrate callers, not to a validation-unification pass.
+
+What limits the damage today: the downgrade is **recorded**, not silent. The report carries
+`…EXTERNAL_WRITER_ASSUMED` with `external_writer: True` evidence, so every use is auditable in the
+report a gate already produces.
+
+The fix, when it is taken: add an external-writer contract to
+`ProcessIRValidationCapabilitiesV1`, require it for the downgrade, and treat the authored flag as a
+DECLARATION that the contract must confirm.
+
+### 13.3 Capability-contract surface stops at effects (accepted)
 
 `ProcessIRValidationCapabilitiesV1` carries map, script and subprocess effects. The plan also asked
 for a connector-capability snapshot and typed external-writer contracts. Neither is shipped, and
@@ -377,6 +395,9 @@ remove.
 
 Also not shipped, for the same reason: a separate pure `validate_legacy_result`
 (`validate_legacy_process_config` is that function, reached from the config rather than the result),
+The connector-capability snapshot and `validate_legacy_result` retirements below stand; the
+external-writer one did not, and is §13.2.
+
 **The report snapshot IS shipped** — `tests/fixtures/process_ir/semantic_report_linear_flow.json`,
 asserted by `test_the_report_matches_its_committed_oracle`. An earlier version of this section
 retired it, arguing a frozen artifact would churn on every message edit. That was the wrong trade:

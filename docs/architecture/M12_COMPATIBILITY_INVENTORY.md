@@ -1371,7 +1371,7 @@ map-bracketing and the non-producing-connector rule keep ONE implementation.
 | `PROCESS_IR_COMPILE_ERROR_REGION_INVALID` | `PROCESS_IR_COMPILE_*` | `error_handling.py` region helpers; CFG invariants | Same structural oracle; never a user semantic finding | no |
 | `PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND` | `PROCESS_IR_REFERENCE_*` | Not currently registered | Unified resolver for non-specialized component refs | new |
 | `PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH` | `PROCESS_IR_REFERENCE_*` | Not currently registered | Unified resolver for non-specialized component roles | new |
-| `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` | `PROCESS_IR_CAPABILITY_*` | Not currently registered | Registered, intentionally unraised — no collector emits it (see §10 B) | new |
+| `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` | `PROCESS_IR_CAPABILITY_*` | Not currently registered | Emitted by the `capability`-phase collector when a supplied contract binds to nothing in the IR | new |
 | `PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE` | `PROCESS_IR_SEMANTIC_*` | Not currently registered | Unified lineage collector | new |
 | `PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID` | `PROCESS_IR_SEMANTIC_*` | Not currently registered | Document-copy scope validation | new |
 | `PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID` | `PROCESS_IR_SEMANTIC_*` | Not currently registered | Sequential-leg order validation | new |

@@ -50,65 +50,6 @@ def _symbol_table(result: LegacyAdapterResultV1, resolver: Resolver) -> SymbolTa
     return SymbolTableV1(symbols=symbols)
 
 
-def _enforce_semantic_report(result: LegacyAdapterResultV1, symbols: SymbolTableV1, cfg, dialect: str) -> None:
-    """Apply #143's unified semantic report at the canonical emission boundary.
-
-    WHY HERE, and not inside ``compile_process_ir_v1``
-    --------------------------------------------------
-    The architect plan placed this gate in the compiler. Implementing it there
-    breaks tests across the legacy parity suites for TWO independent reasons, and the
-    first is structural: canonical ProcessIR validation is deliberately STRICTER
-    than the legacy surface (an undeclared map no longer proves state, a cache
-    read wants an in-process writer), and the legacy surface keeps its behaviour
-    through named, registry-owned exemptions keyed on ADAPTER IDENTITY.
-    ``compile_process_ir_v1(ir, symbols)`` does not know which adapter — if any —
-    produced its IR, so it cannot look a policy up. A gate there is therefore
-    unconditionally stricter than the surface it serves.
-
-    The SECOND reason is independent and no exemption addresses it: the
-    compiler's own fixtures use placeholder component types (``component_type="t"``),
-    so the reference phase reports
-    ``PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH`` on them. A faithful
-    reproduction at ``ba0d51c`` measures 20 failing tests —
-    ``…LINEAGE_CACHE_WRITER_MISSING`` (17), ``…LINEAGE_PROPERTY_READ_BEFORE_WRITE``
-    (7, with 7 tests carrying both), and ``…REFERENCE_COMPONENT_TYPE_MISMATCH``
-    (3, exempted by nothing). An earlier version of this note said the failures
-    were "exactly" the two exemption-covered codes; that was wrong, and the third
-    code makes the case stronger rather than weaker — even a policy-aware
-    compiler gate would still reject those three.
-
-    ``emit_legacy_result`` is the single production entry into the canonical
-    ``compile -> emit`` chain AND it knows its dialect, so the policy applies
-    here. Direct callers of ``compile_process_ir_v1`` (the compiler's own tests,
-    and future canonical paths that carry no legacy baggage) keep their existing
-    contract unchanged.
-
-    Errors block; warnings and advisories do not — the emission contract is an
-    artifact or an exception, with nowhere to carry a non-blocking finding.
-    """
-    from ..semantic_validation.pipeline import validate_lowered_process_ir
-    from ..semantic_validation.validation_policy import apply_policy, lookup_policy
-
-    report = validate_lowered_process_ir(result.process_ir, cfg, symbols)
-    report = apply_policy(report, lookup_policy(dialect))
-    if not report.errors:
-        return
-    raise ProcessIRCompileError(
-        [
-            CompilerDiagnostic(
-                code=item.code,
-                phase="semantic_lowering",
-                path=item.path,
-                node_identity=item.node_identity,
-                message=item.message,
-                remediation=item.remediation,
-                internal_node_id=item.internal_node_id,
-            )
-            for item in report.errors
-        ]
-    )
-
-
 def emit_legacy_result(
     result: LegacyAdapterResultV1,
     *,
