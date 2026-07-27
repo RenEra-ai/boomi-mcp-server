@@ -973,3 +973,127 @@ def test_a_non_waiting_child_establishes_nothing_downstream_in_any_scope():
         # the discriminator: a WAITING child genuinely does establish it, and
         # a rule that rejected both would make every subprocess summary useless
         assert _report(scope, True).is_valid is True, scope
+
+
+# ---------------------------------------------------------------------------
+# QA round 16, mutation testing: three rules added in this issue were asserted
+# by tests that could not detect their removal.
+# ---------------------------------------------------------------------------
+
+
+def test_an_async_writers_declared_write_never_exempts_another_calls_racer():
+    """QA #201. The exclusion of a non-waiting call's own writes from
+    `writers_by_key` had a "discriminator" that never reached it: that test gave
+    the async call a SUMMARY, so the collector took the `summary is not None`
+    arm and decided on `declared` alone. `writers_by_key` is consulted only when
+    the call under investigation has NO summary.
+
+    So the exclusion is exercised here by a second, LATER async call whose
+    summary writes the key. Placing it after the reader keeps it from raising a
+    hazard of its own, isolating the exemption path: delete the exclusion and
+    that write lands in the index, exempts the read, and the finding vanishes.
+    """
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        _pc("$ref:u", False),   # unknown async call — no summary
+        _pc("$ref:r", True),    # reads A
+        _pc("$ref:v", False),   # async, DECLARES it writes A, and runs after
+        {"kind": "stop"}]}}
+    codes = _orch_codes(
+        doc, ["$ref:u", "$ref:r", "$ref:v"],
+        [_sub("$ref:r", reads=(("dpp", "A"),)),
+         _sub("$ref:v", writes=(("dpp", "A"),))],
+    )
+    assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE in codes
+
+
+def test_a_later_legs_membership_extends_past_its_first_node():
+    """QA #202. `_leg_member_index` is "the single definition of what is in a
+    leg", but every Branch test used SINGLE-STEP legs, so cutting the subtree
+    walk left the whole suite green. The reader here is the SECOND step of the
+    later leg, so it is found only if the walk continues."""
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        ProcessIRValidationCapabilitiesV1,
+        validate_process_ir,
+    )
+
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "legs": [
+            {"steps": [_pc("$ref:a", False)], "terminal": {"kind": "stop"}},
+            {"steps": [
+                {"kind": "set_dpp", "name": "FIRST",
+                 "source_values": [{"value_type": "static", "value": "v"}]},
+                {"kind": "set_dpp", "name": "OUT",
+                 "source_values": [{"value_type": "dpp", "property_name": "A"}]},
+            ], "terminal": {"kind": "stop"}}]}]}}
+    symbols = SymbolTableV1(symbols=(
+        ComponentSymbolV1(ref="$ref:a", component_id="i1", component_type="process"),))
+    caps = ProcessIRValidationCapabilitiesV1(
+        subprocess_summaries=(_sub("$ref:a", writes=(("dpp", "A"),)),))
+    codes = {f.code for f in validate_process_ir(
+        parse_process_ir_v1(doc), symbols, caps).errors}
+    assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE in codes
+
+
+def test_execution_downstream_excludes_the_calls_own_leg():
+    """QA #204. `other_ordinal > ordinal` selects strictly LATER legs. Relaxing
+    it to `>=` pulls in the call's own leg — which holds nodes that run BEFORE
+    it — and `discard(start)` removes only the call itself, so a reader earlier
+    in the same leg becomes a hazard of a call it precedes.
+
+    A synthetic CFG is required: the schema rejects a process_call that follows
+    another step in a leg, the same reason the older tests here build one.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import (
+        CfgEdgeV1,
+        CfgNodeV1,
+        SemanticCfgV1,
+    )
+    from boomi_mcp.compiler.process_ir.semantic_validation.context import (
+        PreparedProcessValidationV1,
+        _edge_index,
+    )
+    from boomi_mcp.compiler.process_ir.semantic_validation.effects import (
+        _execution_downstream,
+    )
+
+    nodes = [
+        CfgNodeV1(node_id="n1", ordinal=1, source_path="/body/steps/0",
+                  semantic={"semantic_kind": "branch", "leg_count": 2}),
+        # leg 1: a reader, THEN the non-waiting call it precedes
+        CfgNodeV1(node_id="n2", ordinal=2, source_path="/body/steps/0/legs/0/steps/0",
+                  semantic={"semantic_kind": "set_property", "scope": "dpp", "name": "P",
+                            "persist": False,
+                            "source_values": [{"value_type": "static", "value": "v"}]}),
+        CfgNodeV1(node_id="n3", ordinal=3, source_path="/body/steps/0/legs/0/steps/1",
+                  semantic={"semantic_kind": "process_call", "process_ref": "$ref:c",
+                            "wait": False, "abort_on_error": False}),
+        # leg 2
+        CfgNodeV1(node_id="n4", ordinal=4, source_path="/body/steps/0/legs/1/steps/0",
+                  semantic={"semantic_kind": "message", "text": "x"}),
+    ]
+    edges = [
+        CfgEdgeV1(edge_id="e1", ordinal=1, source_node_id="n1", target_node_id="n2",
+                  kind="branch_leg", local_ordinal=1, leg_ordinal=1,
+                  provenance_path="/body/steps/0"),
+        CfgEdgeV1(edge_id="e2", ordinal=2, source_node_id="n2", target_node_id="n3",
+                  kind="ordering", local_ordinal=1,
+                  provenance_path="/body/steps/0/legs/0/steps/0"),
+        CfgEdgeV1(edge_id="e3", ordinal=3, source_node_id="n1", target_node_id="n4",
+                  kind="branch_leg", local_ordinal=2, leg_ordinal=2,
+                  provenance_path="/body/steps/0"),
+    ]
+    cfg = SemanticCfgV1(entry_node_id="n1", nodes=tuple(nodes), edges=tuple(edges),
+                        exit_node_ids=())
+    prepared = PreparedProcessValidationV1(
+        ir=parse_process_ir_v1(GOLDEN_DOCS["linear_flow"]),
+        cfg=cfg, symbols=SymbolTableV1(symbols=()),
+        node_by_id={n.node_id: n for n in cfg.nodes},
+        outgoing=_edge_index(cfg.edges, "source_node_id"),
+        incoming=_edge_index(cfg.edges, "target_node_id"),
+        symbol_by_ref={})
+
+    downstream = _execution_downstream(prepared, "n3")
+    assert "n2" not in downstream, downstream   # ran BEFORE the call
+    assert "n4" in downstream, downstream       # the strictly-later leg
+    assert "n3" not in downstream
