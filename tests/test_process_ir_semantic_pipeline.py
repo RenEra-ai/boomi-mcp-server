@@ -37,7 +37,7 @@ from boomi_mcp.errors import (
     PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,
     PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNKNOWN,
 )
-from boomi_mcp.models.process_ir import parse_process_ir_v1
+from boomi_mcp.models.process_ir import ProcessIRValidationError, parse_process_ir_v1
 
 _FIXTURES = _ROOT / "tests" / "fixtures" / "process_ir"
 GOLDEN_DOCS = json.loads((_FIXTURES / "process_ir_v1.json").read_text())
@@ -517,3 +517,128 @@ def test_two_unresolved_nested_profile_refs_are_two_findings():
     ]
     assert len(notfound) == 2, [f.path for f in notfound]
     assert len({f.path for f in notfound}) == 2
+
+
+# ---------------------------------------------------------------------------
+# QA #198 (round 14): F3's narrowing was applied with the DATA PROCESS
+# vocabulary to BOTH nested containers. The two do not share one:
+#
+#   data_process step      -> a bare KIND        ("json" / "xml")
+#   set_property source    -> the FULL type      ("profile.json" / … / "profile.db")
+#
+# so on `source_values` the lookup could never hit, the narrowing was inert,
+# and `profile.db` had no representation at all. Both vocabularies now come
+# from the emitter that enforces them.
+# ---------------------------------------------------------------------------
+
+
+def _profile_source_doc(declared, ref="$ref:profileP"):
+    return _doc(
+        [
+            {
+                "kind": "set_dpp",
+                "name": "OUT",
+                "source_values": [
+                    {
+                        "value_type": "profile",
+                        "element_id": "e1",
+                        "element_name": "en",
+                        "profile_ref": ref,
+                        "profile_type": declared,
+                    }
+                ],
+            }
+        ]
+    )
+
+
+def _rebound(ir, ref, component_type):
+    return SymbolTableV1(
+        symbols=tuple(
+            ComponentSymbolV1(
+                ref=s.ref,
+                component_id=s.component_id,
+                component_type=component_type if s.ref == ref else s.component_type,
+            )
+            for s in _symbols_for(ir).symbols
+        )
+    )
+
+
+def _codes_for(declared, bound_to):
+    doc = _profile_source_doc(declared)
+    ir = parse_process_ir_v1(doc)
+    symbols = _rebound(ir, "$ref:profileP", bound_to)
+    return {f.code for f in validate_process_ir(ir, symbols).errors}
+
+
+_MISMATCH = "PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH"
+
+
+def test_a_set_property_profile_source_is_narrowed_to_its_declared_type():
+    """The half F3 missed: declared `profile.json`, bound to `profile.xml`.
+    Previously clean here and surfaced only as a compiler-defect code from the
+    emitter."""
+    assert _MISMATCH in _codes_for("profile.json", "profile.xml")
+
+
+def test_a_matching_set_property_profile_source_stays_clean():
+    """The discriminator — narrowing that rejected the correct binding too
+    would satisfy the case above and break every real payload."""
+    assert _MISMATCH not in _codes_for("profile.json", "profile.json")
+
+
+def test_the_set_property_surface_supports_profile_db():
+    """`profile.db` is legitimate for a Set-Properties source and is absent
+    from the data-process map, so the inherited vocabulary could not express
+    it at all — the correct binding would have been narrowed to nothing."""
+    assert _MISMATCH not in _codes_for("profile.db", "profile.db")
+    assert _MISMATCH in _codes_for("profile.db", "profile.json")
+
+
+def test_an_uninterpretable_declaration_does_not_invent_a_mismatch():
+    """Fail-open is deliberate: a declaration this phase cannot interpret is
+    the emitter's to reject. Narrowing on a vocabulary it does not understand
+    would manufacture a reference error out of an unread value.
+
+    Reachable specifically HERE: the Set-Properties source types `profile_type`
+    as a free non-blank string (`models/process_ir.py:346`), whereas the
+    data_process container closes it to `Literal["json", "xml"]` at parse time.
+    """
+    assert _MISMATCH not in _codes_for("profile.nonsense", "profile.json")
+
+
+def test_a_blank_declaration_never_reaches_this_phase():
+    """The other half of the fail-open story: blank is rejected by the IR model
+    itself, so the empty-string branch of the resolver is unreachable through
+    the parser rather than merely untested."""
+    with pytest.raises(ProcessIRValidationError):
+        parse_process_ir_v1(_profile_source_doc(""))
+
+
+def test_the_data_process_container_keeps_the_bare_kind_vocabulary():
+    """The container that WAS correct must stay correct: a bare kind still
+    narrows there, and the full type is not its vocabulary."""
+    from boomi_mcp.compiler.process_ir.semantic_validation.references import (
+        _declared_allowed,
+    )
+
+    assert _declared_allowed("steps", "json") == frozenset({"profile.json"})
+    assert _declared_allowed("steps", "xml") == frozenset({"profile.xml"})
+    assert _declared_allowed("source_values", "profile.db") == frozenset({"profile.db"})
+    # each vocabulary is inert on the other container, so neither narrows to a
+    # type that surface cannot declare
+    assert len(_declared_allowed("steps", "profile.json")) > 1
+    assert len(_declared_allowed("source_values", "json")) > 1
+
+
+def test_the_validator_narrows_with_the_emitters_own_vocabularies():
+    """One definition. A private second copy of the asymmetry is what shipped
+    it inverted, so the identity — not merely the value — is asserted."""
+    from boomi_mcp.compiler.process_ir import emitter_registry
+    from boomi_mcp.compiler.process_ir.semantic_validation import references
+
+    assert references.DP_PROFILE_COMPONENT_TYPE is emitter_registry._DP_PROFILE_COMPONENT_TYPE
+    assert references.SETPROP_PROFILE_TYPES == frozenset(
+        emitter_registry._SETPROP_PROFILE_TYPES
+    )

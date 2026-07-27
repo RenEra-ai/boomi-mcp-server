@@ -343,6 +343,7 @@ def test_the_package_exports_only_its_public_surface():
         "DEFAULT_VALIDATION_CAPABILITIES",
         "MapEffectContractV1",
         "ProcessIRValidationCapabilitiesV1",
+        "STATE_SCOPES",
         "ScriptEffectContractV1",
         "StateEffectV1",
         "SubprocessSummaryV1",

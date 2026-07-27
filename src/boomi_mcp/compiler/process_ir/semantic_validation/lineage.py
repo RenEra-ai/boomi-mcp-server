@@ -271,6 +271,65 @@ def collect_lineage_findings(
             )
         )
 
+    def _classify_unmet_read(node, semantic, key, leg, extra=()) -> None:
+        """Report ONE unestablished read under the sharpest code that fits.
+
+        Shared by both read paths. The refinements below are what make a
+        lineage finding actionable, and which one applies is a property of the
+        READ — its scope, and where its writer sits in the graph — never of who
+        declared it. Reporting the flat fallback for a contract's declared read
+        while an identical authored read got ``…BRANCH_ORDER_INVALID`` made the
+        diagnostic depend on the reader's provenance, which is the mirror image
+        of the writer-side asymmetry fixed alongside it.
+        """
+        scope, _name = key
+        if scope != DDP and _written_in_a_later_leg(leg_writes, leg, key):
+            # The write exists, in a LATER leg of the same Branch. Legs run
+            # in order, so it has not happened yet. Saying "read before
+            # write" here would send the author looking for a missing write
+            # that is right there — the defect is its position, not its
+            # absence.
+            _report(
+                PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID,
+                node,
+                evidence=(
+                    ("state_scope", scope),
+                    ("leg_ordinal", leg[1] if leg else 0),
+                )
+                + extra,
+            )
+        elif scope == CACHE:
+            if getattr(semantic, "external_writer", False):
+                _report(
+                    PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED,
+                    node,
+                    severity="warning",
+                    evidence=(("state_scope", CACHE), ("external_writer", True))
+                    + extra,
+                )
+            else:
+                _report(
+                    PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING,
+                    node,
+                    evidence=(("state_scope", CACHE),) + extra,
+                )
+        elif scope == DDP and _written_anywhere(prepared, key, capabilities):
+            # The property IS written in this process, just not on a path
+            # that reaches here. For a DDP that is specifically a scope
+            # error — the write landed on a different document copy — and
+            # saying so is far more actionable than "read before write".
+            _report(
+                PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID,
+                node,
+                evidence=(("state_scope", DDP),) + extra,
+            )
+        else:
+            _report(
+                PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,
+                node,
+                evidence=(("state_scope", scope),) + extra,
+            )
+
     def _visit(node_id: str, state: _State, depth: int, leg=None) -> _State:
         node = prepared.node(node_id)
         if node is None or depth > 256:
@@ -282,69 +341,26 @@ def collect_lineage_findings(
         for key, has_default, strict in _reads_of(semantic):
             if has_default or state.establishes(key):
                 continue
-            scope, _name = key
             # A non-strict reader tolerates ABSENCE (the wire carries a defined
             # empty default) but not a writer that exists somewhere unreachable.
             if not strict and not _written_anywhere(prepared, key, capabilities):
                 continue
-            if scope != DDP and _written_in_a_later_leg(leg_writes, leg, key):
-                # The write exists, in a LATER leg of the same Branch. Legs run
-                # in order, so it has not happened yet. Saying "read before
-                # write" here would send the author looking for a missing write
-                # that is right there — the defect is its position, not its
-                # absence.
-                _report(
-                    PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID,
-                    node,
-                    evidence=(
-                        ("state_scope", scope),
-                        ("leg_ordinal", leg[1] if leg else 0),
-                    ),
-                )
-            elif scope == CACHE:
-                if getattr(semantic, "external_writer", False):
-                    _report(
-                        PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED,
-                        node,
-                        severity="warning",
-                        evidence=(("state_scope", CACHE), ("external_writer", True)),
-                    )
-                else:
-                    _report(
-                        PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING,
-                        node,
-                        evidence=(("state_scope", CACHE),),
-                    )
-            elif scope == DDP and _written_anywhere(prepared, key, capabilities):
-                # The property IS written in this process, just not on a path
-                # that reaches here. For a DDP that is specifically a scope
-                # error — the write landed on a different document copy — and
-                # saying so is far more actionable than "read before write".
-                _report(
-                    PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID,
-                    node,
-                    evidence=(("state_scope", DDP),),
-                )
-            else:
-                _report(
-                    PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,
-                    node,
-                    evidence=(("state_scope", scope),),
-                )
+            _classify_unmet_read(node, semantic, key, leg)
 
         # --- a trusted contract's declared READS are dependencies -----------
         # Applying only its writes made a contract that READS unwritten state
         # produce a valid report: the contract says the map consumes a key, and
         # nothing checked that anything establishes it.
+        #
+        # A declared read is always STRICT: the contract asserts the effect
+        # consumes the key, so there is no wire default to fall back to.
         for effect in _trusted_effects(semantic, capabilities):
             for raw in effect.reads:
                 key = (raw[0], raw[1])
                 if state.establishes(key):
                     continue
-                _report(
-                    PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,
-                    node,
-                    evidence=(("state_scope", key[0]), ("effect_kind", "declared_read")),
+                _classify_unmet_read(
+                    node, semantic, key, leg, extra=(("effect_kind", "declared_read"),)
                 )
 
         # --- opaque effects contribute uncertainty, never proof -------------

@@ -38,6 +38,10 @@ from ..connector_resolution import (
     MAP_COMPONENT_TYPE,
     PROFILE_COMPONENT_TYPES,
 )
+from ..emitter_registry import (
+    DP_PROFILE_COMPONENT_TYPE,
+    SETPROP_PROFILE_TYPES,
+)
 from .contracts import ValidationDiagnosticV1
 from .context import PreparedProcessValidationV1
 from .findings import finding
@@ -47,14 +51,32 @@ _REFERENCE_PHASE = "reference"
 CACHE_COMPONENT_TYPE = "documentcache"
 PROCESS_COMPONENT_TYPE = "process"
 
-#: A Data Process split/combine step declares ``profile_type`` as a KIND; the
-#: resolved symbol must carry the matching Boomi component type. Mirrors
-#: ``emitter_registry._DP_PROFILE_COMPONENT_TYPE`` deliberately — the emitter
-#: already enforces this, but only as a compiler-defect code.
-_DECLARED_PROFILE_TYPE: Dict[str, str] = {
-    "json": "profile.json",
-    "xml": "profile.xml",
-}
+#: The two profile containers declare their type in DIFFERENT vocabularies, and
+#: both are imported from the emitter rather than re-stated here — the emitter
+#: is the component that enforces them, so a local copy could only drift.
+#:
+#: * a Data Process split/combine step declares a bare KIND (``json``/``xml``)
+#: * a Set-Properties profile source declares the FULL component type
+#:   (``profile.json``/``profile.xml``/``profile.db``)
+#:
+#: Applying the Data Process map to both — which is how this first shipped —
+#: leaves the Set-Properties half permanently inert, because ``profile.json``
+#: is not a key of it, and makes ``profile.db`` unrepresentable.
+def _declared_allowed(container: str, declared) -> FrozenSet[str]:
+    """Component types satisfying one nested profile ref's own declaration.
+
+    Fail-OPEN to the broad profile family when the declaration is absent or
+    unrecognised: an unknown declaration is the emitter's to reject, and
+    narrowing on a vocabulary this function does not understand would invent a
+    reference error out of a value it cannot interpret.
+    """
+    raw = str(declared).strip().lower() if declared else ""
+    if not raw:
+        return PROFILE_COMPONENT_TYPES
+    if container == "steps":
+        mapped = DP_PROFILE_COMPONENT_TYPE.get(raw)
+        return frozenset({mapped}) if mapped else PROFILE_COMPONENT_TYPES
+    return frozenset({raw}) if raw in SETPROP_PROFILE_TYPES else PROFILE_COMPONENT_TYPES
 
 #: Which component types satisfy each reference role. Closed sets, fail-closed:
 #: an unlisted role is not validated here rather than being waved through under
@@ -119,15 +141,12 @@ def _ref_roles(semantic) -> Tuple[Tuple[str, str, str, FrozenSet[str]], ...]:
             nested = getattr(item, "profile_ref", None)
             if not isinstance(nested, str) or not nested:
                 continue
-            # The step declares its own profile KIND, so accept only the
+            # The step declares its own profile type, so accept only the
             # matching component type. The broad profile set let a
             # json-declared split bind to profile.xml; the emitter rejects
-            # that later, but as PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID —
-            # a compiler-defect code for what is an authored mis-binding.
-            declared = getattr(item, "profile_type", None)
-            allowed = _DECLARED_PROFILE_TYPE.get(
-                str(declared).strip().lower() if declared else "", None
-            )
+            # that later, but as a compiler-defect code — for what is an
+            # authored mis-binding. Resolved PER CONTAINER: the two surfaces
+            # do not share a vocabulary.
             pairs.append(
                 (
                     "profile_ref",
@@ -136,7 +155,7 @@ def _ref_roles(semantic) -> Tuple[Tuple[str, str, str, FrozenSet[str]], ...]:
                     # refs in one node are two findings, not one collapsed by
                     # dedup with neither step identified
                     "/{0}/{1}".format(container, index),
-                    frozenset({allowed}) if allowed else PROFILE_COMPONENT_TYPES,
+                    _declared_allowed(container, getattr(item, "profile_type", None)),
                 )
             )
 

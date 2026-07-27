@@ -574,3 +574,143 @@ def test_a_later_legs_trusted_contract_write_is_visible_to_branch_ordering():
     # "nothing writes this anywhere"
     codes = {f.code for f in collect_lineage_findings(prepared, capabilities)}
     assert PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID in codes
+
+
+# ---------------------------------------------------------------------------
+# QA #199 / #200 (round 14): the declared-read loop added for F1 diverged from
+# the authored one in two ways at once — it fed an unconstrained caller string
+# into the closed evidence vocabulary, and it skipped every refinement.
+# ---------------------------------------------------------------------------
+
+
+def _caps_reading(pairs, map_ref="$ref:m"):
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        MapEffectContractV1,
+        ProcessIRValidationCapabilitiesV1,
+        StateEffectV1,
+    )
+
+    return ProcessIRValidationCapabilitiesV1(
+        map_effects=(
+            MapEffectContractV1(
+                map_ref=map_ref, effect=StateEffectV1(reads=tuple(pairs))
+            ),
+        )
+    )
+
+
+def _declared_codes(doc, pairs):
+    prepared = prepare_validation_context(
+        parse_process_ir_v1(doc), SymbolTableV1(symbols=())
+    )
+    return {f.code for f in collect_lineage_findings(prepared, _caps_reading(pairs))}
+
+
+_MAP = {"kind": "map_ref", "map_ref": "$ref:m"}
+
+
+def test_a_contract_scope_outside_the_closed_vocabulary_is_rejected_at_construction():
+    """QA #199. The scope element reaches EVIDENCE, which accepts only a closed
+    vocabulary — so an arbitrary caller string used to escape as a raw
+    `pydantic.ValidationError` out of `validate_process_ir`, whose contract
+    promises to raise only on a COMPILER defect. Rejecting it where the value
+    enters closes that by construction rather than by catching it later."""
+    from pydantic import ValidationError
+
+    from boomi_mcp.compiler.process_ir.semantic_validation import StateEffectV1
+
+    for bad in ("my-scope", "", "Ddp Scope", "DPP", "dpp_customer_email"):
+        with pytest.raises(ValidationError):
+            StateEffectV1(reads=((bad, "X"),))
+        with pytest.raises(ValidationError):
+            StateEffectV1(writes=((bad, "X"),))
+
+
+def test_every_known_scope_is_still_accepted():
+    """The discriminator: a validator that rejected everything would satisfy
+    the case above and make the whole contract surface unusable."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import STATE_SCOPES, StateEffectV1
+
+    for scope in sorted(STATE_SCOPES):
+        assert StateEffectV1(reads=((scope, "X"),)).reads == ((scope, "X"),)
+        assert StateEffectV1(writes=((scope, "X"),)).writes == ((scope, "X"),)
+
+
+def test_the_contract_vocabulary_and_the_lattice_scopes_cannot_drift():
+    """`STATE_SCOPES` gates construction; DDP/DPP/CACHE key the lattice. If the
+    two ever disagree, a scope accepted at the boundary lands in a lattice slot
+    nothing matches — established state that silently is not."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import STATE_SCOPES
+    from boomi_mcp.compiler.process_ir.semantic_validation.lineage import (
+        CACHE,
+        DDP,
+        DPP,
+    )
+
+    assert STATE_SCOPES == {DDP, DPP, CACHE}
+
+
+def test_a_declared_read_satisfied_in_a_later_leg_is_an_ORDER_defect():
+    """QA #200, case 1. The authored path calls this `…BRANCH_ORDER_INVALID`
+    because the writer is right there, just later. A contract reader used to
+    get the flat fallback for the identical graph."""
+    doc = _branch_doc([[_MAP], [_set_prop("dpp", "A")]])
+    codes = _declared_codes(doc, [("dpp", "A")])
+    assert PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID in codes
+    assert PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE not in codes
+
+
+def test_a_declared_ddp_read_written_on_another_copy_is_a_SCOPE_defect():
+    """QA #200, case 2."""
+    doc = _branch_doc([[_MAP], [_set_prop("ddp", "D")]])
+    codes = _declared_codes(doc, [("ddp", "D")])
+    assert PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID in codes
+    assert PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE not in codes
+
+
+def test_a_declared_cache_read_with_no_writer_names_the_CACHE():
+    """QA #200, case 3."""
+    codes = _declared_codes(_doc([_MAP]), [("cache", "$ref:C")])
+    assert PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING in codes
+    assert PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE not in codes
+
+
+def test_a_declared_read_still_falls_back_when_no_refinement_applies():
+    """The discriminator for #200: refinement must be selective. A dpp read
+    with no writer anywhere has no sharper story than 'read before write'."""
+    codes = _declared_codes(_doc([_MAP]), [("dpp", "A")])
+    assert codes == {PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE}
+
+
+def test_a_satisfied_declared_read_reports_nothing():
+    """The strongest discriminator: the refinements must not turn a CLEAN
+    contract into a finding."""
+    doc = _doc([_set_prop("dpp", "A"), _MAP])
+    assert _declared_codes(doc, [("dpp", "A")]) == set()
+
+
+def test_the_declared_read_marker_survives_refinement():
+    """`effect_kind: declared_read` is what tells an author the dependency came
+    from a contract rather than from a step they can see. Routing through the
+    shared classifier must not drop it."""
+    doc = _branch_doc([[_MAP], [_set_prop("dpp", "A")]])
+    prepared = prepare_validation_context(
+        parse_process_ir_v1(doc), SymbolTableV1(symbols=())
+    )
+    findings = collect_lineage_findings(prepared, _caps_reading([("dpp", "A")]))
+    ordered = [
+        f
+        for f in findings
+        if f.code == PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID
+    ]
+    assert ordered
+    values = {(e.key, e.value) for e in ordered[0].evidence}
+    assert ("effect_kind", "declared_read") in values
+
+
+def test_an_authored_and_a_declared_read_of_the_same_graph_agree():
+    """The property #200 is really about: one condition, one code, regardless of
+    who declared the read."""
+    authored = _codes(_branch_doc([[_read_prop("dpp", "A")], [_set_prop("dpp", "A")]]))
+    declared = _declared_codes(_branch_doc([[_MAP], [_set_prop("dpp", "A")]]), [("dpp", "A")])
+    assert authored == declared == {PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID}

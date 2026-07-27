@@ -313,16 +313,49 @@ class ValidationReportV1(_ValidationModel):
 # --------------------------------------------------------------------------
 
 
+#: The closed set of state scopes a contract may name. Kept here rather than in
+#: ``lineage`` because it is a CONSTRUCTION-time constraint: ``StateEffectV1``
+#: is caller-supplied data, and an unconstrained scope element used to reach two
+#: places it must never reach. It became evidence — where the closed-vocabulary
+#: check raised a raw ``pydantic.ValidationError`` straight out of
+#: ``validate_process_ir``, whose contract promises to raise only on a COMPILER
+#: defect — and it became a lattice key, where any unrecognised scope silently
+#: landed in the execution-scoped set and was treated as established.
+#: Rejecting it at construction closes both at once.
+STATE_SCOPES: FrozenSet[str] = frozenset({"ddp", "dpp", "cache"})
+
+
 class StateEffectV1(_ValidationModel):
     """Exact state a trusted effect reads and writes.
 
     Names ride here because this is INPUT, not output. They are matched against
-    the IR and then discarded; no name reaches a diagnostic.
+    the IR and then discarded; no name reaches a diagnostic. The SCOPE half of
+    each pair does reach one, so it is constrained to ``STATE_SCOPES``.
     """
 
     reads: Tuple[Tuple[str, str], ...] = ()
     writes: Tuple[Tuple[str, str], ...] = ()
     replay_safe: bool = False
+
+    @field_validator("reads", "writes")
+    @classmethod
+    def _scopes_are_known(cls, value):
+        """Reject a scope outside the closed vocabulary.
+
+        Applied to ``writes`` as well as ``reads``, though only ``reads``
+        currently reaches a diagnostic: a write with an unknown scope is
+        recorded into the lattice under a key nothing can ever match, so it
+        silently vouches for state it does not establish. Both halves of the
+        contract mean the same thing, so both are held to it.
+        """
+        for pair in value:
+            if pair[0] not in STATE_SCOPES:
+                raise ValueError(
+                    "unknown state scope {0!r}; expected one of {1}".format(
+                        pair[0], sorted(STATE_SCOPES)
+                    )
+                )
+        return value
 
 
 class MapEffectContractV1(_ValidationModel):
@@ -467,6 +500,7 @@ __all__: List[str] = [
     "DEFAULT_VALIDATION_CAPABILITIES",
     "MapEffectContractV1",
     "ProcessIRValidationCapabilitiesV1",
+    "STATE_SCOPES",
     "ScriptEffectContractV1",
     "StateEffectV1",
     "SubprocessSummaryV1",

@@ -106,6 +106,16 @@ _PROCESS_TYPES = ("process",)
 _DP_PROFILE_COMPONENT_TYPE = {"json": "profile.json", "xml": "profile.xml"}
 _SETPROP_PROFILE_TYPES = ("profile.db", "profile.json", "profile.xml")
 
+#: Public aliases. The #143 semantic validator narrows a profile reference to
+#: the type its step DECLARES, and must narrow with exactly the vocabulary the
+#: emitter enforces below — the two containers use DIFFERENT ones (see the note
+#: above), and a private second copy of that asymmetry is how the validator
+#: first shipped it inverted: the data-process map applied to both containers,
+#: which made the Set-Properties half inert and left ``profile.db``
+#: unrepresentable. One definition, imported, cannot drift.
+DP_PROFILE_COMPONENT_TYPE = _DP_PROFILE_COMPONENT_TYPE
+SETPROP_PROFILE_TYPES = frozenset(_SETPROP_PROFILE_TYPES)
+
 
 # ---------------------------------------------------------------------------
 # Frozen registry / artifact value objects
