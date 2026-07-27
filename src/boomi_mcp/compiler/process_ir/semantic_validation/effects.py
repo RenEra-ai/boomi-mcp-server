@@ -258,6 +258,18 @@ def collect_ordering_findings(
                 # default that could absorb an unordered write.
                 reads.extend(((raw[0], raw[1]), False, True) for raw in effect.reads)
 
+            # A node's OWN contract writes never establish its OWN reads. One
+            # StateEffectV1 carries no intra-effect ordering, and the lineage
+            # phase resolves that the same way — reads are checked against the
+            # incoming state, then writes are applied. Without this a contract
+            # declaring `reads=(A,), writes=(A,)` exempted its own read from
+            # the very race it was exposed to.
+            own_writes = {
+                (k[0], k[1])
+                for effect in _trusted_effects(node.semantic, capabilities)
+                for k in effect.writes
+            }
+
             for key, has_default, strict in reads:
                 if has_default or key[0] == DDP:
                     continue
@@ -276,10 +288,24 @@ def collect_ordering_findings(
                     # ("nothing writes this") correctly.
                     if key not in declared:
                         continue
-                elif key in in_process_writes:
-                    # The child's effects are unknown, but something in this
-                    # process does write the key, so the read does not depend
+                elif key in in_process_writes - own_writes:
+                    # The child's effects are unknown, but something ELSE in
+                    # this process writes the key, so the read does not depend
                     # on the call.
+                    #
+                    # This membership test is deliberately order-BLIND, and a
+                    # write that lands after the read still exempts it. That is
+                    # the original conservative contract of this collector, not
+                    # an oversight: `…ORDERING_UNSAFE` is an ERROR reported only
+                    # for a DEMONSTRATED hazard, and ordering-of-establishment
+                    # is owned by the lineage phase, which walks the graph and
+                    # already reports `…PROPERTY_READ_BEFORE_WRITE` for exactly
+                    # those payloads (measured: they are rejected, is_valid is
+                    # False, with or without a second finding here). Making this
+                    # test order-aware would mean re-deriving lineage's
+                    # traversal inside the ordering collector — a second,
+                    # independently-drifting model of execution order, which is
+                    # the duplication this issue exists to remove.
                     continue
                 findings.append(
                     finding(

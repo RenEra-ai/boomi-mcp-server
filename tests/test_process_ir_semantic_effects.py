@@ -813,3 +813,32 @@ def test_an_async_calls_own_declared_write_never_exempts_its_racer():
         [_sub("$ref:u", writes=(("dpp", "A"),)), _sub("$ref:r", reads=(("dpp", "A"),))],
     )
     assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE in codes
+
+
+def test_a_contracts_own_write_does_not_exempt_its_own_read():
+    """Codex review round 4. One `StateEffectV1` carries no intra-effect
+    ordering, and lineage resolves that by checking reads against the incoming
+    state before applying writes. The ordering collector's process-wide write
+    union did not, so a contract declaring `reads=(A,), writes=(A,)` exempted
+    its own read from the very race it was exposed to."""
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        _pc("$ref:u", False), _pc("$ref:rw", True), {"kind": "stop"}]}}
+    codes = _orch_codes(
+        doc, ["$ref:u", "$ref:rw"],
+        # no summary for the async call — its effects are unknown
+        [_sub("$ref:rw", reads=(("dpp", "A"),), writes=(("dpp", "A"),))],
+    )
+    assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE in codes
+
+
+def test_a_separate_synchronous_writer_still_exempts_the_read():
+    """The discriminator: excluding a node's OWN writes must not disturb the
+    exemption a DIFFERENT trusted writer provides."""
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        _pc("$ref:u", False), _pc("$ref:w", True), _pc("$ref:r", True),
+        {"kind": "stop"}]}}
+    codes = _orch_codes(
+        doc, ["$ref:u", "$ref:w", "$ref:r"],
+        [_sub("$ref:w", writes=(("dpp", "A"),)), _sub("$ref:r", reads=(("dpp", "A"),))],
+    )
+    assert codes == set()
