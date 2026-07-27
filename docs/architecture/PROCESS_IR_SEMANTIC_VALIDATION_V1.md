@@ -323,3 +323,51 @@ unification must not downgrade them.
 Ten slices, each independently committable and each leaving the suite green. Slices 1–7 shipped dark
 (wired to nothing); slice 8 is the first mutation gate; slice 9 is the emission gate; slice 10 is
 this documentation. Baseline at `4a5ad67`: 7269 passed / 16 skipped / 0 failed.
+
+## 13. Plan items deliberately NOT shipped
+
+The §6 architect impl-vs-plan review found seven gaps. Five were fixed. The two below are
+**retired on purpose**, recorded here so a future reader does not have to re-derive the decision
+from silence — and so the next issue that extends this module knows what is genuinely missing.
+
+### 13.1 "Resolve once" — connector resolution still runs twice (accepted)
+
+`validate_connector_calls` executes **twice per compile**, measured: once as its own compiler stage,
+and once again inside the gate, because `flow.collect_connector_flow_findings` DELEGATES to it
+rather than re-deriving its rules.
+
+Removing the standalone compiler stage was tried and **breaks 11 tests** in
+`tests/test_connector_call_resolution.py`: the delegation does not surface every #140 code the way
+the direct stage does, so the two are not interchangeable. Removing the delegation instead is also
+wrong — `validate_process_ir` is a public entry point, and standalone callers have nothing else
+validating their connector calls.
+
+Eliminating the duplication properly means threading resolved connector facts through
+`PreparedProcessValidationV1` so both readers share one derivation. That is the plan's
+"prepared-fact reuse", it is a real improvement, and it is a refactor of the validation context
+rather than a patch. It is deliberately **not** attempted here: the duplication costs a second pass
+over the CFG and is otherwise invisible — both runs see the same graph and reach the same verdict,
+and the first one raising means the second never observes a divergent state.
+
+Related, and also accepted: plan preflight synthesizes its symbol table from adapter
+`symbol_requirements` rather than from `components_by_key`, so the generic missing/type-mismatch
+reference codes cannot fire on an authorable plan input (the declared type IS the resolved type).
+`ResolvedReferenceFactsV1` is likewise a plain mutable object rather than the planned immutable
+contract — it is built during one walk, never crosses a public boundary, and never reaches a report.
+
+### 13.2 Capability-contract surface stops at effects (accepted)
+
+`ProcessIRValidationCapabilitiesV1` carries map, script and subprocess effects. The plan also asked
+for a connector-capability snapshot and typed external-writer contracts. Neither is shipped, and
+neither has a caller: connector capability is already owned by #140's registry, which this module
+delegates to rather than duplicating, and `external_writer` is a BOOLEAN on the authored `cache_get`
+node that the lineage phase already honours. Adding a second, typed representation of either would
+create exactly the "second copy of a fact past a checker that re-derives it" this issue exists to
+remove.
+
+Also not shipped, for the same reason: a separate pure `validate_legacy_result`
+(`validate_legacy_process_config` is that function, reached from the config rather than the result),
+and the four planned deterministic report/IR snapshot fixtures — report determinism is asserted
+directly by `test_report_buckets_are_ordered_deterministically_across_runs` and
+`test_validation_is_pure_and_repeatable`, which pin the property rather than a frozen artifact that
+must be regenerated on every message change.
