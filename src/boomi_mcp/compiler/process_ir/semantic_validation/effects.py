@@ -89,14 +89,36 @@ def _replay_hazard(semantic) -> Optional[str]:
     return None
 
 
+def _declared_replay_hazard(semantic, capabilities) -> Optional[str]:
+    """A trusted contract that declares itself NOT replay-safe.
+
+    Only a contract that actually has effects counts: a replay-safe=False
+    contract declaring no reads and no writes replays nothing observable, and
+    flagging it would reject a payload with no hazard in it.
+    """
+    from .lineage import _trusted_effects
+
+    for effect in _trusted_effects(semantic, capabilities):
+        if not effect.replay_safe and (effect.writes or effect.reads):
+            return "declared_unsafe_effect"
+    return None
+
+
 def collect_retry_effect_findings(
     prepared: PreparedProcessValidationV1,
+    capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
 ) -> Tuple[ValidationDiagnosticV1, ...]:
     """Non-connector effects inside a region with a positive retry count.
 
     Regions come from #142's own ``derive_error_regions`` rather than a second
     walk of the catch edges — one derivation, so the gate cannot disagree with
     the compiler about what the region contains.
+
+    A node with a TRUSTED effect contract is classified from that contract's
+    ``replay_safe`` flag. Without this the flag was declared and never read: a
+    map whose contract says it is NOT replay-safe would sit inside a retried
+    region unreported, because ``_replay_hazard`` only recognises explicit
+    cache and persisted-property writes.
     """
     findings: List[ValidationDiagnosticV1] = []
 
@@ -108,6 +130,8 @@ def collect_retry_effect_findings(
             if node is None:
                 continue
             hazard = _replay_hazard(node.semantic)
+            if hazard is None:
+                hazard = _declared_replay_hazard(node.semantic, capabilities)
             if hazard is None:
                 continue
             findings.append(
@@ -227,9 +251,9 @@ def collect_effect_findings(
     prepared: PreparedProcessValidationV1,
     capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
 ) -> Tuple[ValidationDiagnosticV1, ...]:
-    return collect_retry_effect_findings(prepared) + collect_ordering_findings(
+    return collect_retry_effect_findings(
         prepared, capabilities
-    )
+    ) + collect_ordering_findings(prepared, capabilities)
 
 
 __all__ = [

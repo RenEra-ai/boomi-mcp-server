@@ -345,3 +345,175 @@ def test_the_package_is_wired_at_exactly_the_two_intended_sites():
         Path(line).name for line in result.stdout.split() if line.strip()
     )
     assert reached == ["emission.py", "integration_builder.py"], reached
+
+
+# ---------------------------------------------------------------------------
+# Repo Codex commit-review findings (6 x P2) — regressions
+#
+# All six concerned the TYPED CAPABILITY path, where declared contract fields
+# were accepted and then not consumed. That is the same defect class this issue
+# has hit repeatedly: a field that exists, validates, and means nothing.
+# ---------------------------------------------------------------------------
+
+
+def test_a_trusted_contract_read_of_unestablished_state_is_reported():
+    """F1. Applying only a contract's writes let a map that DECLARES it reads an
+    unwritten key produce a valid report."""
+    doc = _doc([{"kind": "map_ref", "map_ref": "$ref:m"}])
+    capabilities = ProcessIRValidationCapabilitiesV1(
+        map_effects=(
+            MapEffectContractV1(
+                map_ref="$ref:m", effect=StateEffectV1(reads=(("dpp", "NEVER_SET"),))
+            ),
+        )
+    )
+    codes = {f.code for f in _validate(doc, capabilities).errors}
+    assert PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE in codes
+
+
+def test_a_trusted_contract_read_that_is_established_is_clean():
+    """The discriminator for F1 — the rule must not fire on a satisfied read."""
+    doc = _doc(
+        [
+            {
+                "kind": "set_dpp",
+                "name": "SET_FIRST",
+                "source_values": [{"value_type": "static", "value": "v"}],
+            },
+            {"kind": "map_ref", "map_ref": "$ref:m"},
+        ]
+    )
+    capabilities = ProcessIRValidationCapabilitiesV1(
+        map_effects=(
+            MapEffectContractV1(
+                map_ref="$ref:m", effect=StateEffectV1(reads=(("dpp", "SET_FIRST"),))
+            ),
+        )
+    )
+    assert _validate(doc, capabilities).errors == ()
+
+
+def test_duplicate_effect_contract_bindings_are_rejected():
+    """F4. First-match-wins made the report depend on tuple ORDER."""
+    effect = StateEffectV1(writes=(("dpp", "A"),))
+    with pytest.raises(Exception):
+        ProcessIRValidationCapabilitiesV1(
+            map_effects=(
+                MapEffectContractV1(map_ref="$ref:m", effect=effect),
+                MapEffectContractV1(map_ref="$ref:m", effect=StateEffectV1()),
+            )
+        )
+
+
+def test_duplicate_subprocess_and_script_bindings_are_rejected():
+    import hashlib
+
+    digest = hashlib.sha256(b"s").hexdigest()
+    with pytest.raises(Exception):
+        ProcessIRValidationCapabilitiesV1(
+            subprocess_summaries=(
+                SubprocessSummaryV1(process_ref="$ref:c", effect=StateEffectV1()),
+                SubprocessSummaryV1(process_ref="$ref:c", effect=StateEffectV1()),
+            )
+        )
+    with pytest.raises(Exception):
+        ProcessIRValidationCapabilitiesV1(
+            script_effects=(
+                ScriptEffectContractV1(
+                    language="groovy2", source_sha256=digest, effect=StateEffectV1()
+                ),
+                ScriptEffectContractV1(
+                    language="groovy2", source_sha256=digest, effect=StateEffectV1()
+                ),
+            )
+        )
+
+
+def test_distinct_bindings_are_still_accepted():
+    """Guard the F4 guard: rejecting duplicates must not reject distinct rows."""
+    capabilities = ProcessIRValidationCapabilitiesV1(
+        map_effects=(
+            MapEffectContractV1(map_ref="$ref:m1", effect=StateEffectV1()),
+            MapEffectContractV1(map_ref="$ref:m2", effect=StateEffectV1()),
+        )
+    )
+    assert len(capabilities.map_effects) == 2
+
+
+def test_a_profile_ref_must_match_the_kind_its_step_declares():
+    """F3. A json-declared split bound to profile.xml was accepted here and only
+    caught at emission — as a COMPILER-defect code for an authored mistake."""
+    doc = _doc(
+        [
+            {
+                "kind": "data_process",
+                "steps": [
+                    {
+                        "operation": "split_documents",
+                        "profile_type": "json",
+                        "profile_ref": "$ref:profileX",
+                        "link_element_key": "k",
+                        "link_element_name": "n",
+                    }
+                ],
+            }
+        ]
+    )
+    ir = parse_process_ir_v1(doc)
+    symbols = _symbols_for(ir)
+    # rebind that one profile symbol to the WRONG kind
+    rebound = SymbolTableV1(
+        symbols=tuple(
+            ComponentSymbolV1(
+                ref=s.ref,
+                component_id=s.component_id,
+                component_type="profile.xml" if s.ref == "$ref:profileX" else s.component_type,
+            )
+            for s in symbols.symbols
+        )
+    )
+    codes = {f.code for f in validate_process_ir(ir, rebound).errors}
+    assert "PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH" in codes
+
+
+def test_two_unresolved_nested_profile_refs_are_two_findings():
+    """F5. Both reported at the node path with identical evidence, so dedup
+    collapsed them into one and identified neither step."""
+    doc = _doc(
+        [
+            {
+                "kind": "data_process",
+                "steps": [
+                    {
+                        "operation": "split_documents",
+                        "profile_type": "json",
+                        "profile_ref": "$ref:missingA",
+                        "link_element_key": "k",
+                        "link_element_name": "n",
+                    },
+                    {
+                        "operation": "combine_documents",
+                        "profile_type": "json",
+                        "profile_ref": "$ref:missingB",
+                        "combine_into_link_element_key": "p",
+                        "link_element_key": "k2",
+                        "link_element_name": "n2",
+                    },
+                ],
+            }
+        ]
+    )
+    ir = parse_process_ir_v1(doc)
+    # deliberately supply NO symbols for either nested profile
+    bare = SymbolTableV1(
+        symbols=tuple(
+            s for s in _symbols_for(ir).symbols if "missing" not in s.ref
+        )
+    )
+    notfound = [
+        f
+        for f in validate_process_ir(ir, bare).errors
+        if f.code == "PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND"
+    ]
+    assert len(notfound) == 2, [f.path for f in notfound]
+    assert len({f.path for f in notfound}) == 2

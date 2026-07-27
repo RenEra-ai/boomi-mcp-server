@@ -528,3 +528,49 @@ def test_a_non_strict_read_still_fails_when_the_writer_exists_but_is_invisible()
         },
     }
     assert PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID in _codes(doc)
+
+
+# ---------------------------------------------------------------------------
+# F6 (repo Codex review): the leg-write index ignored trusted contract writes
+# ---------------------------------------------------------------------------
+
+
+def test_a_later_legs_trusted_contract_write_is_visible_to_branch_ordering():
+    """`_leg_write_index` recorded only explicit node writes, so a reverse-leg
+    dependency satisfied by a MAP CONTRACT in a later leg was silently
+    downgraded to 'never written anywhere'."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        MapEffectContractV1,
+        ProcessIRValidationCapabilitiesV1,
+        StateEffectV1,
+    )
+    from boomi_mcp.compiler.process_ir.semantic_validation.lineage import (
+        _leg_write_index,
+    )
+
+    doc = _branch_doc(
+        [
+            [_read_prop("dpp", "A")],
+            [{"kind": "map_ref", "map_ref": "$ref:m"}],
+        ]
+    )
+    prepared = prepare_validation_context(
+        parse_process_ir_v1(doc), SymbolTableV1(symbols=())
+    )
+    capabilities = ProcessIRValidationCapabilitiesV1(
+        map_effects=(
+            MapEffectContractV1(
+                map_ref="$ref:m", effect=StateEffectV1(writes=(("dpp", "A"),))
+            ),
+        )
+    )
+
+    without = _leg_write_index(prepared)
+    with_caps = _leg_write_index(prepared, capabilities)
+    assert not any(("dpp", "A") in w for w in without.values())
+    assert any(("dpp", "A") in w for w in with_caps.values())
+
+    # and it changes the diagnostic: the read is now an ORDER defect, not
+    # "nothing writes this anywhere"
+    codes = {f.code for f in collect_lineage_findings(prepared, capabilities)}
+    assert PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID in codes

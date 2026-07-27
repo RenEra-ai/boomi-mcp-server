@@ -250,7 +250,7 @@ def collect_lineage_findings(
     """
     findings: List[ValidationDiagnosticV1] = []
     reported: Set[Tuple[str, str]] = set()
-    leg_writes = _leg_write_index(prepared)
+    leg_writes = _leg_write_index(prepared, capabilities)
 
     def _report(code: str, node, severity="error", evidence=()) -> None:
         # One finding per (code, node). The report dedups too, but stopping the
@@ -285,7 +285,7 @@ def collect_lineage_findings(
             scope, _name = key
             # A non-strict reader tolerates ABSENCE (the wire carries a defined
             # empty default) but not a writer that exists somewhere unreachable.
-            if not strict and not _written_anywhere(prepared, key):
+            if not strict and not _written_anywhere(prepared, key, capabilities):
                 continue
             if scope != DDP and _written_in_a_later_leg(leg_writes, leg, key):
                 # The write exists, in a LATER leg of the same Branch. Legs run
@@ -315,7 +315,7 @@ def collect_lineage_findings(
                         node,
                         evidence=(("state_scope", CACHE),),
                     )
-            elif scope == DDP and _written_anywhere(prepared, key):
+            elif scope == DDP and _written_anywhere(prepared, key, capabilities):
                 # The property IS written in this process, just not on a path
                 # that reaches here. For a DDP that is specifically a scope
                 # error — the write landed on a different document copy — and
@@ -330,6 +330,21 @@ def collect_lineage_findings(
                     PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,
                     node,
                     evidence=(("state_scope", scope),),
+                )
+
+        # --- a trusted contract's declared READS are dependencies -----------
+        # Applying only its writes made a contract that READS unwritten state
+        # produce a valid report: the contract says the map consumes a key, and
+        # nothing checked that anything establishes it.
+        for effect in _trusted_effects(semantic, capabilities):
+            for raw in effect.reads:
+                key = (raw[0], raw[1])
+                if state.establishes(key):
+                    continue
+                _report(
+                    PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,
+                    node,
+                    evidence=(("state_scope", key[0]), ("effect_kind", "declared_read")),
                 )
 
         # --- opaque effects contribute uncertainty, never proof -------------
@@ -400,6 +415,7 @@ def collect_lineage_findings(
 
 def _leg_write_index(
     prepared: PreparedProcessValidationV1,
+    capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
 ) -> Dict[Tuple[str, int], FrozenSet[StateKey]]:
     """``(branch_node_id, leg_ordinal) -> keys written anywhere in that leg``.
 
@@ -425,6 +441,12 @@ def _leg_write_index(
                 if inner is None:
                     continue
                 written.update(_writes_of(inner.semantic))
+                # Trusted writes count here too. The main traversal treats them
+                # as establishing state, so omitting them made the later-leg
+                # check blind to a contract write and silently downgraded a
+                # reverse-leg dependency to "not written anywhere".
+                for effect in _trusted_effects(inner.semantic, capabilities):
+                    written.update((k[0], k[1]) for k in effect.writes)
                 for out in prepared.successors(current):
                     stack.append(out.target_node_id)
             index[(node.node_id, ordinal)] = frozenset(written)
@@ -447,7 +469,11 @@ def _written_in_a_later_leg(
     )
 
 
-def _written_anywhere(prepared: PreparedProcessValidationV1, key: StateKey) -> bool:
+def _written_anywhere(
+    prepared: PreparedProcessValidationV1,
+    key: StateKey,
+    capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
+) -> bool:
     """Whether any node in the CFG writes this key, ignoring reachability.
 
     Used only to sharpen a DDP diagnostic from "never written" to "written on a
@@ -457,6 +483,9 @@ def _written_anywhere(prepared: PreparedProcessValidationV1, key: StateKey) -> b
     for node in prepared.cfg.nodes:
         if key in _writes_of(node.semantic):
             return True
+        for effect in _trusted_effects(node.semantic, capabilities):
+            if key in [(k[0], k[1]) for k in effect.writes]:
+                return True
     return False
 
 

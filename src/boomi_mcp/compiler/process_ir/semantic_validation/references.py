@@ -47,9 +47,19 @@ _REFERENCE_PHASE = "reference"
 CACHE_COMPONENT_TYPE = "documentcache"
 PROCESS_COMPONENT_TYPE = "process"
 
+#: A Data Process split/combine step declares ``profile_type`` as a KIND; the
+#: resolved symbol must carry the matching Boomi component type. Mirrors
+#: ``emitter_registry._DP_PROFILE_COMPONENT_TYPE`` deliberately — the emitter
+#: already enforces this, but only as a compiler-defect code.
+_DECLARED_PROFILE_TYPE: Dict[str, str] = {
+    "json": "profile.json",
+    "xml": "profile.xml",
+}
+
 #: Which component types satisfy each reference role. Closed sets, fail-closed:
 #: an unlisted role is not validated here rather than being waved through under
-#: a guessed type.
+#: a guessed type. ``profile_ref`` is the fallback for a source that declares no
+#: kind; a step that DOES declare one is narrowed to it in ``_ref_roles``.
 _ROLE_TYPES: Dict[str, FrozenSet[str]] = {
     "map_ref": frozenset({MAP_COMPONENT_TYPE}),
     "cache_ref": frozenset({CACHE_COMPONENT_TYPE}),
@@ -87,8 +97,8 @@ class ResolvedReferenceFactsV1:
         return ref is not None and ref in self.resolved
 
 
-def _ref_roles(semantic) -> Tuple[Tuple[str, str], ...]:
-    """The ``(role, ref)`` pairs a CFG node's semantic carries.
+def _ref_roles(semantic) -> Tuple[Tuple[str, str, str, FrozenSet[str]], ...]:
+    """``(role, ref, path_suffix, allowed_component_types)`` for one CFG node.
 
     Connector operation/connection refs are deliberately excluded — see the
     module docstring.
@@ -98,17 +108,37 @@ def _ref_roles(semantic) -> Tuple[Tuple[str, str], ...]:
     source value. Walking only the top level would silently skip every profile
     reference in the payload, so both containers are descended explicitly.
     """
-    pairs: List[Tuple[str, str]] = []
+    pairs: List[Tuple[str, str, str, FrozenSet[str]]] = []
     for role in ("map_ref", "cache_ref", "process_ref"):
         value = getattr(semantic, role, None)
         if isinstance(value, str) and value:
-            pairs.append((role, value))
+            pairs.append((role, value, "", _ROLE_TYPES[role]))
 
     for container in ("steps", "source_values"):
-        for item in getattr(semantic, container, ()) or ():
+        for index, item in enumerate(getattr(semantic, container, ()) or ()):
             nested = getattr(item, "profile_ref", None)
-            if isinstance(nested, str) and nested:
-                pairs.append(("profile_ref", nested))
+            if not isinstance(nested, str) or not nested:
+                continue
+            # The step declares its own profile KIND, so accept only the
+            # matching component type. The broad profile set let a
+            # json-declared split bind to profile.xml; the emitter rejects
+            # that later, but as PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID —
+            # a compiler-defect code for what is an authored mis-binding.
+            declared = getattr(item, "profile_type", None)
+            allowed = _DECLARED_PROFILE_TYPE.get(
+                str(declared).strip().lower() if declared else "", None
+            )
+            pairs.append(
+                (
+                    "profile_ref",
+                    nested,
+                    # each nested ref gets its OWN pointer, so two unresolved
+                    # refs in one node are two findings, not one collapsed by
+                    # dedup with neither step identified
+                    "/{0}/{1}".format(container, index),
+                    frozenset({allowed}) if allowed else PROFILE_COMPONENT_TYPES,
+                )
+            )
 
     return tuple(pairs)
 
@@ -124,7 +154,8 @@ def collect_reference_findings(
     # deterministic order, so the walk itself is reproducible even before the
     # report is sorted.
     for node in prepared.cfg.nodes:
-        for role, ref in _ref_roles(node.semantic):
+        for role, ref, suffix, allowed in _ref_roles(node.semantic):
+            path = node.source_path + suffix
             symbol = prepared.symbol(ref)
             if symbol is None:
                 facts.unresolved.add(ref)
@@ -133,13 +164,12 @@ def collect_reference_findings(
                         PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND,
                         "error",
                         _REFERENCE_PHASE,
-                        node.source_path,
+                        path,
                         evidence=(("component_type_class", _TYPE_CLASS[role]),),
                         internal_node_id=node.node_id,
                     )
                 )
                 continue
-            allowed = _ROLE_TYPES[role]
             if symbol.component_type not in allowed:
                 facts.unresolved.add(ref)
                 findings.append(
@@ -147,7 +177,7 @@ def collect_reference_findings(
                         PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH,
                         "error",
                         _REFERENCE_PHASE,
-                        node.source_path,
+                        path,
                         evidence=(("component_type_class", _TYPE_CLASS[role]),),
                         internal_node_id=node.node_id,
                     )

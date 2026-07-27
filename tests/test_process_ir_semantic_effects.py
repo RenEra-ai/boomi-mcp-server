@@ -452,3 +452,76 @@ def test_a_non_persisted_write_inside_a_retried_region_does_not_fire():
         _try_catch_cfg(retry_count=3, hazard_kind="transient")
     )
     assert findings == ()
+
+
+# ---------------------------------------------------------------------------
+# F2 (repo Codex review): StateEffectV1.replay_safe was declared and never read
+# ---------------------------------------------------------------------------
+
+
+def test_a_declared_unsafe_effect_in_a_retried_region_fires():
+    """A map contract saying replay_safe=False inside a positive-retry region
+    was invisible: `_replay_hazard` recognised only explicit cache/persisted
+    writes, so the flag existed and meant nothing."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        MapEffectContractV1,
+        ProcessIRValidationCapabilitiesV1,
+        StateEffectV1,
+    )
+
+    prepared = _try_catch_cfg(retry_count=2, hazard_kind="transient")
+    # replace the transient node with a map carrying an unsafe contract
+    from boomi_mcp.compiler.process_ir.contracts import CfgNodeV1, SemanticCfgV1
+    from boomi_mcp.compiler.process_ir.semantic_validation.context import (
+        PreparedProcessValidationV1,
+        _edge_index,
+    )
+
+    nodes = tuple(
+        CfgNodeV1(
+            node_id=n.node_id,
+            ordinal=n.ordinal,
+            source_path=n.source_path,
+            semantic={"semantic_kind": "map", "map_ref": "$ref:m"}
+            if n.node_id == "n2"
+            else n.semantic,
+            exit_role=n.exit_role,
+        )
+        for n in prepared.cfg.nodes
+    )
+    cfg = SemanticCfgV1(
+        entry_node_id="n1", nodes=nodes, edges=prepared.cfg.edges, exit_node_ids=()
+    )
+    rebuilt = PreparedProcessValidationV1(
+        ir=prepared.ir,
+        cfg=cfg,
+        symbols=SymbolTableV1(symbols=()),
+        node_by_id={n.node_id: n for n in cfg.nodes},
+        outgoing=_edge_index(cfg.edges, "source_node_id"),
+        incoming=_edge_index(cfg.edges, "target_node_id"),
+        symbol_by_ref={},
+    )
+
+    unsafe = ProcessIRValidationCapabilitiesV1(
+        map_effects=(
+            MapEffectContractV1(
+                map_ref="$ref:m",
+                effect=StateEffectV1(writes=(("dpp", "A"),), replay_safe=False),
+            ),
+        )
+    )
+    safe = ProcessIRValidationCapabilitiesV1(
+        map_effects=(
+            MapEffectContractV1(
+                map_ref="$ref:m",
+                effect=StateEffectV1(writes=(("dpp", "A"),), replay_safe=True),
+            ),
+        )
+    )
+
+    fired = {f.code for f in collect_retry_effect_findings(rebuilt, unsafe)}
+    assert PROCESS_IR_SEMANTIC_RETRY_EFFECT_UNSAFE in fired
+    # and the flag genuinely discriminates
+    assert collect_retry_effect_findings(rebuilt, safe) == ()
+    # no contract at all -> opaque, still not a declared hazard
+    assert collect_retry_effect_findings(rebuilt) == ()

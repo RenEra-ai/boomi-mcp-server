@@ -363,6 +363,30 @@ class ProcessIRValidationCapabilitiesV1(_ValidationModel):
     script_effects: Tuple[ScriptEffectContractV1, ...] = ()
     subprocess_summaries: Tuple[SubprocessSummaryV1, ...] = ()
 
+    @field_validator("map_effects", "script_effects", "subprocess_summaries")
+    @classmethod
+    def _binding_keys_are_unique(cls, value):
+        """Reject duplicate binding keys at construction.
+
+        The lookups below take the FIRST match, so two contracts bound to the
+        same map/script/process would make the result depend on tuple order —
+        reordering identical inputs could change whether state is established
+        and therefore change the report. That is exactly the non-determinism
+        the report contract forbids, so it is rejected here rather than
+        resolved by position.
+        """
+        keys = []
+        for item in value:
+            if hasattr(item, "map_ref"):
+                keys.append(item.map_ref)
+            elif hasattr(item, "process_ref"):
+                keys.append(item.process_ref)
+            else:
+                keys.append((item.language, item.source_sha256))
+        if len(set(keys)) != len(keys):
+            raise ValueError("duplicate effect-contract binding key")
+        return value
+
     def map_effect(self, map_ref: str) -> Optional[StateEffectV1]:
         for item in self.map_effects:
             if item.map_ref == map_ref:
