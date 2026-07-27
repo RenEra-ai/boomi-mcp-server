@@ -238,6 +238,11 @@ steps in the SAME leg is gated); the second said the reads could only come from 
 (also false — the reader is a `set_dpp` in a LATER leg, and legs run sequentially).
 `test_the_unsafe_branch_is_producible_from_an_authorable_document` pins it.
 
+This classification is by the **ProcessIR** surface. The migration inventory's 5933-config census
+measures the LEGACY dialects and still counts this code unreachable there — correctly: neither
+`flow_sequence` nor `wrapper_subprocess` can project the shape. Two scopes, two answers, and the
+inventory says so explicitly rather than the counts silently disagreeing.
+
 | Code | Why it cannot fire yet |
 |---|---|
 | `PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND` | the legacy adapter's symbol table carries only refs it declared, so an undeclared ref never reaches the collector |
@@ -315,7 +320,7 @@ carry one.
 | `PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` | error | **taxonomy-only — no collector emits it** (see §10 B) |
 | `PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN` | warning | a map/script has no typed effect contract |
 | `PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED` | warning | state is assumed to come from a declared external writer |
-| `PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE` | error | a demonstrated unordered dependency (see §10 gap) |
+| `PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE` | error | a demonstrated unordered dependency behind a non-waiting `process_call` |
 | `PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNKNOWN` | warning | a non-waiting call with undeclared child effects |
 | `PROCESS_IR_SEMANTIC_RETRY_EFFECT_UNSAFE` | error | a retried region replays a non-connector effect |
 | `LEGACY_ADAPTER_EXEMPTION_*` (4) | advisory | a named legacy policy reclassified an error |
