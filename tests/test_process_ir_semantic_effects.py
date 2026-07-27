@@ -525,3 +525,171 @@ def test_a_declared_unsafe_effect_in_a_retried_region_fires():
     assert collect_retry_effect_findings(rebuilt, safe) == ()
     # no contract at all -> opaque, still not a declared hazard
     assert collect_retry_effect_findings(rebuilt) == ()
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 2 (#143). Four findings, all in the typed-contract path,
+# plus one adjacent false positive found while verifying them.
+# ---------------------------------------------------------------------------
+
+
+def _map_retry_prepared(retry_count=3):
+    """A retried region whose only member is a contracted MAP node."""
+    from boomi_mcp.compiler.process_ir.contracts import (
+        CfgEdgeV1,
+        CfgNodeV1,
+        SemanticCfgV1,
+    )
+    from boomi_mcp.compiler.process_ir.semantic_validation.context import (
+        PreparedProcessValidationV1,
+        _edge_index,
+    )
+
+    nodes = [
+        CfgNodeV1(node_id="n1", ordinal=1, source_path="/body/steps/0",
+                  semantic={"semantic_kind": "try_catch", "scope": "process",
+                            "retry_count": retry_count}),
+        CfgNodeV1(node_id="n2", ordinal=2, source_path="/body/steps/1",
+                  semantic={"semantic_kind": "map", "map_ref": "$ref:m"}),
+        CfgNodeV1(node_id="n3", ordinal=3, source_path="/body/steps/2",
+                  semantic={"semantic_kind": "stop"}, exit_role="stop"),
+        CfgNodeV1(node_id="n4", ordinal=4, source_path="/body/catch_body/terminal",
+                  semantic={"semantic_kind": "stop"}, exit_role="stop"),
+    ]
+    edges = [
+        CfgEdgeV1(edge_id="e1", ordinal=1, source_node_id="n1", target_node_id="n2",
+                  kind="ordering", local_ordinal=1, provenance_path="/body/steps/0"),
+        CfgEdgeV1(edge_id="e2", ordinal=2, source_node_id="n2", target_node_id="n3",
+                  kind="ordering", local_ordinal=1, provenance_path="/body/steps/1"),
+        CfgEdgeV1(edge_id="e3", ordinal=3, source_node_id="n1", target_node_id="n4",
+                  kind="catch", local_ordinal=2, provenance_path="/body/steps/0"),
+    ]
+    cfg = SemanticCfgV1(entry_node_id="n1", nodes=tuple(nodes), edges=tuple(edges),
+                        exit_node_ids=())
+    return PreparedProcessValidationV1(
+        ir=parse_process_ir_v1(GOLDEN_DOCS["linear_flow"]),
+        cfg=cfg,
+        symbols=SymbolTableV1(symbols=()),
+        node_by_id={n.node_id: n for n in cfg.nodes},
+        outgoing=_edge_index(cfg.edges, "source_node_id"),
+        incoming=_edge_index(cfg.edges, "target_node_id"),
+        symbol_by_ref={},
+    )
+
+
+def _map_caps(**effect_kwargs):
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        MapEffectContractV1,
+        ProcessIRValidationCapabilitiesV1,
+        StateEffectV1,
+    )
+
+    return ProcessIRValidationCapabilitiesV1(
+        map_effects=(
+            MapEffectContractV1(map_ref="$ref:m", effect=StateEffectV1(**effect_kwargs)),
+        )
+    )
+
+
+def test_an_unsafe_replay_contract_with_no_state_footprint_is_still_a_hazard():
+    """`reads`/`writes` describe DDP/DPP/cache only. A script that posts to an
+    external API has an EMPTY footprint, and `replay_safe` is the only field
+    that can describe it — so gating the declaration on the footprint discarded
+    it exactly where it carried all the information."""
+    findings = collect_retry_effect_findings(
+        _map_retry_prepared(), _map_caps(replay_safe=False)
+    )
+    assert [f.code for f in findings] == [PROCESS_IR_SEMANTIC_RETRY_EFFECT_UNSAFE]
+
+
+def test_a_replay_safe_contract_with_no_footprint_is_still_clean():
+    """The discriminator: honouring the declaration must not mean flagging
+    every contract in a retried region."""
+    assert collect_retry_effect_findings(
+        _map_retry_prepared(), _map_caps(replay_safe=True)
+    ) == ()
+
+
+def test_replay_safety_is_decided_by_the_flag_not_the_footprint():
+    """Both footprints, both flags — the flag alone decides."""
+    for kwargs in ({}, {"writes": (("dpp", "A"),)}):
+        unsafe = collect_retry_effect_findings(
+            _map_retry_prepared(), _map_caps(replay_safe=False, **kwargs)
+        )
+        safe = collect_retry_effect_findings(
+            _map_retry_prepared(), _map_caps(replay_safe=True, **kwargs)
+        )
+        assert [f.code for f in unsafe] == [PROCESS_IR_SEMANTIC_RETRY_EFFECT_UNSAFE]
+        assert safe == ()
+
+
+# --- ordering: contract reads behind a non-waiting call --------------------
+
+
+def _async_pair(reads, writes=(("dpp", "A"),), first_wait=False):
+    from boomi_mcp.compiler.process_ir.contracts import (
+        ComponentSymbolV1,
+        SymbolTableV1 as _ST,
+    )
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        ProcessIRValidationCapabilitiesV1,
+        StateEffectV1,
+        SubprocessSummaryV1,
+        validate_process_ir,
+    )
+
+    doc = {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                {"kind": "process_call", "process_ref": "$ref:c1", "wait": first_wait,
+                 "abort_on_error": False},
+                {"kind": "process_call", "process_ref": "$ref:c2", "wait": True,
+                 "abort_on_error": False},
+                {"kind": "stop"},
+            ],
+        },
+    }
+    ir = parse_process_ir_v1(doc)
+    symbols = _ST(symbols=(
+        ComponentSymbolV1(ref="$ref:c1", component_id="i1", component_type="process"),
+        ComponentSymbolV1(ref="$ref:c2", component_id="i2", component_type="process"),
+    ))
+    caps = ProcessIRValidationCapabilitiesV1(subprocess_summaries=(
+        SubprocessSummaryV1(process_ref="$ref:c1",
+                            effect=StateEffectV1(writes=writes, replay_safe=True)),
+        SubprocessSummaryV1(process_ref="$ref:c2",
+                            effect=StateEffectV1(reads=reads, replay_safe=True)),
+    ))
+    return {f.code for f in validate_process_ir(ir, symbols, caps).errors}
+
+
+def test_a_contract_read_behind_a_non_waiting_call_is_an_ordering_hazard():
+    """The ordering collector scanned `_reads_of` only. A non-waiting call is
+    authorable in an ORCHESTRATION root, where every sibling is itself a
+    process_call and NO authored read can appear — so downstream of the call a
+    contract read is the only kind of read there is, and lineage was proving it
+    'established' by applying the child's writes synchronously."""
+    assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE in _async_pair(
+        reads=(("dpp", "A"),)
+    )
+
+
+def test_a_contract_read_behind_a_WAITING_call_is_not_a_hazard():
+    """The discriminator: with `wait=True` the child is ordered, so the
+    identical contract pair carries no hazard at all. Without this, a collector
+    that flagged every contract read would satisfy the test above."""
+    assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE not in _async_pair(
+        reads=(("dpp", "A"),), first_wait=True
+    )
+
+
+def test_a_key_the_child_provably_does_not_write_is_not_its_ordering_hazard():
+    """Adjacent false positive, found while verifying the above and not part of
+    the review. A declared summary is EXACT, so a read of a key outside it
+    cannot race that call — yet it was reported as an ordering hazard while the
+    lineage phase was already reporting the real defect (nothing writes it)."""
+    codes = _async_pair(reads=(("dpp", "Z"),), writes=(("dpp", "A"),))
+    assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE not in codes
+    assert "PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE" in codes

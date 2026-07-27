@@ -69,8 +69,17 @@ def _declared_allowed(container: str, declared) -> FrozenSet[str]:
     unrecognised: an unknown declaration is the emitter's to reject, and
     narrowing on a vocabulary this function does not understand would invent a
     reference error out of a value it cannot interpret.
+
+    Matched EXACTLY, with no case-folding or trimming, because the emitter
+    matches exactly. A Set-Properties `profile_type` is an unconstrained
+    non-blank string that lowering passes through verbatim, so normalising here
+    would make this phase accept `PROFILE.JSON` as a supported declaration the
+    emitter then rejects — and, against a differently-typed symbol, would
+    manufacture a type mismatch for a declaration that is not supported at all
+    and is meant to fall open. Divergence in either direction is a defect; the
+    only safe rule is to narrow on precisely what the emitter honours.
     """
-    raw = str(declared).strip().lower() if declared else ""
+    raw = declared if isinstance(declared, str) else ""
     if not raw:
         return PROFILE_COMPONENT_TYPES
     if container == "steps":

@@ -354,6 +354,13 @@ def collect_lineage_findings(
         #
         # A declared read is always STRICT: the contract asserts the effect
         # consumes the key, so there is no wire default to fall back to.
+        #
+        # Reads and writes are interleaved IN STEP ORDER, one contract at a
+        # time. One data_process node can carry several contracted scripts, and
+        # they run in sequence — checking every read against the state from
+        # before the whole node reported a script's read of what the PREVIOUS
+        # script in the same node just wrote as read-before-write. The effects
+        # are ordered, so the walk over them has to be too.
         for effect in _trusted_effects(semantic, capabilities):
             for raw in effect.reads:
                 key = (raw[0], raw[1])
@@ -362,6 +369,12 @@ def collect_lineage_findings(
                 _classify_unmet_read(
                     node, semantic, key, leg, extra=(("effect_kind", "declared_read"),)
                 )
+            # A trusted contract contributes EXACT writes, visible to the next
+            # contract on this node. An untrusted node contributes none — that
+            # inversion of the legacy wildcard default is the whole point of
+            # the typed contract.
+            for key in effect.writes:
+                state = state.with_write((key[0], key[1]))
 
         # --- opaque effects contribute uncertainty, never proof -------------
         opaque = _opaque_reason(semantic, capabilities)
@@ -374,14 +387,12 @@ def collect_lineage_findings(
             )
 
         # --- writes ---------------------------------------------------------
+        # Contract writes are applied above, interleaved with their own reads.
+        # Only the node's AUTHORED writes remain, and the two sets never meet
+        # on one node: `_writes_of` covers set_property / cache_put, while
+        # `_trusted_effects` covers map / process_call / data_process.
         for key in _writes_of(semantic):
             state = state.with_write(key)
-        # A trusted contract contributes EXACT writes. An untrusted node
-        # contributes none — that inversion of the legacy wildcard default is
-        # the whole point of the typed contract.
-        for effect in _trusted_effects(semantic, capabilities):
-            for key in effect.writes:
-                state = state.with_write((key[0], key[1]))
 
         # --- successors -----------------------------------------------------
         edges = prepared.successors(node_id)

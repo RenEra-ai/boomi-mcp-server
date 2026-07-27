@@ -71,7 +71,15 @@ from .contracts import (
 )
 from .context import PreparedProcessValidationV1
 from .findings import finding
-from .lineage import CACHE, DDP, DPP, StateKey, _reads_of, _writes_of
+from .lineage import (
+    CACHE,
+    DDP,
+    DPP,
+    StateKey,
+    _reads_of,
+    _trusted_effects,
+    _writes_of,
+)
 
 _RETRY_PHASE = "retry"
 _SIDE_EFFECT_PHASE = "side_effect"
@@ -92,14 +100,22 @@ def _replay_hazard(semantic) -> Optional[str]:
 def _declared_replay_hazard(semantic, capabilities) -> Optional[str]:
     """A trusted contract that declares itself NOT replay-safe.
 
-    Only a contract that actually has effects counts: a replay-safe=False
-    contract declaring no reads and no writes replays nothing observable, and
-    flagging it would reject a payload with no hazard in it.
-    """
-    from .lineage import _trusted_effects
+    The declaration is taken at face value, with NO state-footprint condition.
+    An earlier version required ``effect.writes or effect.reads``, reasoning
+    that a contract touching no tracked state replays nothing observable. That
+    is exactly backwards: ``reads``/``writes`` describe DDP/DPP/cache only, so
+    a script that posts to an external API, sends mail or moves a file has an
+    EMPTY footprint and ``replay_safe`` is the only field that can describe it.
+    Gating on the footprint therefore discarded the declaration precisely where
+    it carried all of the information, and let a retry duplicate an action the
+    author had explicitly marked unsafe.
 
+    ``replay_safe`` defaults to False, so an author who has not considered
+    replay gets the hazard reported rather than assumed away — the same
+    fail-closed default the rest of the capability contract uses.
+    """
     for effect in _trusted_effects(semantic, capabilities):
-        if not effect.replay_safe and (effect.writes or effect.reads):
+        if not effect.replay_safe:
             return "declared_unsafe_effect"
     return None
 
@@ -205,7 +221,26 @@ def collect_ordering_findings(
             node = prepared.node(node_id)
             if node is None:
                 continue
-            for key, has_default, strict in _reads_of(node.semantic):
+            # Authored reads AND a trusted contract's declared reads. Scanning
+            # only `_reads_of` left the hazard unreported in the one shape that
+            # can actually express it: a non-waiting call is authorable in an
+            # ORCHESTRATION root, where every sibling step is itself a
+            # process_call and no authored read can appear at all. So the
+            # contract read was not merely an extra case — downstream of a
+            # non-waiting call it is the ONLY kind of read there is, and the
+            # lineage phase happily proves it "established" by applying the
+            # child's writes synchronously.
+            reads = [
+                (key, has_default, strict)
+                for key, has_default, strict in _reads_of(node.semantic)
+            ]
+            for effect in _trusted_effects(node.semantic, capabilities):
+                # A declared read is exact and always strict: the contract
+                # asserts the effect consumes the key, so there is no wire
+                # default that could absorb an unordered write.
+                reads.extend(((raw[0], raw[1]), False, True) for raw in effect.reads)
+
+            for key, has_default, strict in reads:
                 if has_default or key[0] == DDP:
                     continue
                 # A non-strict reader (a Decision operand) carries a defined
@@ -213,7 +248,20 @@ def collect_ordering_findings(
                 # it fail — same rule the lineage phase applies.
                 if not strict:
                     continue
-                if key in in_process_writes and key not in declared:
+                if summary is not None:
+                    # The summary is EXACT, so a key the child does not write
+                    # cannot race this call. Only `declared` decides. Testing
+                    # solely `key in in_process_writes and key not in declared`
+                    # reported a read of an unwritten key as an ordering hazard
+                    # of a call demonstrably unrelated to it — while the
+                    # lineage phase was already reporting the real defect
+                    # ("nothing writes this") correctly.
+                    if key not in declared:
+                        continue
+                elif key in in_process_writes:
+                    # The child's effects are unknown, but something in this
+                    # process does write the key, so the read does not depend
+                    # on the call.
                     continue
                 findings.append(
                     finding(

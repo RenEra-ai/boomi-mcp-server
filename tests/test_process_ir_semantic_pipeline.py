@@ -642,3 +642,98 @@ def test_the_validator_narrows_with_the_emitters_own_vocabularies():
     assert references.SETPROP_PROFILE_TYPES == frozenset(
         emitter_registry._SETPROP_PROFILE_TYPES
     )
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 2: several contracted scripts in ONE data_process node run
+# in sequence, so the walk over their effects must be sequential too. Checking
+# every declared read against the state from before the whole node reported a
+# script's read of what the PREVIOUS script in the same node had just written.
+# ---------------------------------------------------------------------------
+
+_S1 = "script one"
+_S2 = "script two"
+
+
+def _two_script_doc():
+    return _doc(
+        [
+            {
+                "kind": "data_process",
+                "steps": [
+                    {"operation": "custom_scripting", "script": _S1, "language": "groovy2"},
+                    {"operation": "custom_scripting", "script": _S2, "language": "groovy2"},
+                ],
+            }
+        ]
+    )
+
+
+def _script_caps(first, second):
+    return ProcessIRValidationCapabilitiesV1(
+        script_effects=(
+            ScriptEffectContractV1(
+                language="groovy2",
+                source_sha256=hashlib.sha256(_S1.encode()).hexdigest(),
+                effect=StateEffectV1(replay_safe=True, **first),
+            ),
+            ScriptEffectContractV1(
+                language="groovy2",
+                source_sha256=hashlib.sha256(_S2.encode()).hexdigest(),
+                effect=StateEffectV1(replay_safe=True, **second),
+            ),
+        )
+    )
+
+
+def _script_codes(first, second):
+    doc = _two_script_doc()
+    ir = parse_process_ir_v1(doc)
+    return {
+        f.code for f in validate_process_ir(ir, _symbols_for(ir), _script_caps(first, second)).errors
+    }
+
+
+def test_a_script_may_read_what_an_earlier_script_in_the_same_node_wrote():
+    """The valid dependency: step order is execution order."""
+    codes = _script_codes({"writes": (("dpp", "A"),)}, {"reads": (("dpp", "A"),)})
+    assert "PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE" not in codes
+
+
+def test_a_script_may_not_read_what_a_LATER_script_in_the_same_node_writes():
+    """The discriminator, and the reason this cannot be fixed by simply
+    applying all writes before all reads: reversing the order must still be a
+    defect, or the sequencing is not being modelled at all."""
+    codes = _script_codes({"reads": (("dpp", "A"),)}, {"writes": (("dpp", "A"),)})
+    assert "PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE" in codes
+
+
+def test_a_profile_declaration_is_matched_exactly_not_case_folded():
+    """Codex review round 2. A Set-Properties `profile_type` is an
+    unconstrained non-blank string that lowering passes through verbatim, and
+    the emitter matches it EXACTLY. Case-folding here made this phase accept
+    `PROFILE.JSON` as supported — which emission then rejects — and, against a
+    differently-typed symbol, manufacture a type mismatch for a declaration
+    that is not supported at all and is meant to fall open."""
+    from boomi_mcp.compiler.process_ir import emitter_registry
+    from boomi_mcp.compiler.process_ir.semantic_validation.references import (
+        _declared_allowed,
+    )
+
+    for variant in ("PROFILE.JSON", "Profile.Json", " profile.json "):
+        narrowed = _declared_allowed("source_values", variant)
+        assert variant not in emitter_registry._SETPROP_PROFILE_TYPES, variant
+        # unsupported by the emitter -> must fall OPEN here, never narrow
+        assert len(narrowed) > 1, (variant, sorted(narrowed))
+
+    # and the exact form still narrows, so this is not "never narrow anything"
+    assert _declared_allowed("source_values", "profile.json") == frozenset(
+        {"profile.json"}
+    )
+
+
+def test_an_exactly_declared_profile_still_reports_a_real_mismatch():
+    """The discriminator for the above: falling open on unsupported spellings
+    must not disarm the check for the supported ones."""
+    assert _MISMATCH in _codes_for("profile.json", "profile.xml")
+    assert _MISMATCH not in _codes_for("PROFILE.JSON", "profile.xml")
