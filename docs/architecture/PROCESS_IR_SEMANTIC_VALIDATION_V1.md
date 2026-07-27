@@ -115,6 +115,7 @@ reads and writes:
 | `MapEffectContractV1` | the map component (`map_ref`) |
 | `ScriptEffectContractV1` | `language` + **SHA-256 of the exact source** |
 | `SubprocessSummaryV1` | the child's `process_ref` |
+| `ExternalWriterContractV1` | the `cache_ref` whose outside writer it vouches for (§13.2) |
 
 Binding a script contract to its digest makes it non-transferable: editing the script invalidates
 the contract automatically instead of silently vouching for code that no longer exists.
@@ -225,7 +226,7 @@ Measured by a live census over 5933 authorable configs plus a 606-config gate di
 #143 QA, 2026-07-26). Two DIFFERENT situations are separated below, because collapsing them is
 exactly how a taxonomy entry gets mistaken for a shipped rule.
 
-**A. Implemented, unit-tested, wired — but not producible from an authorable config (4 of 17).**
+**A. Implemented, unit-tested, wired — but not producible from an authorable config (5 of 17).**
 Forcing the condition makes each of these fire; the v1 authored surface simply cannot produce the
 shape.
 
@@ -256,7 +257,7 @@ Two earlier drafts of this paragraph were wrong in opposite directions — one f
 reachability gap ("no production caller supplies typed contracts yet"), the next as permanently
 unraisable ("there is no rule a caller could reach"). The rule was simply unwritten.
 
-`PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` is the second. It exists as a
+`PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` is the one that remains. It exists as a
 constant, a taxonomy row, and a message/remediation entry — no collector references it, and it has no
 unit test. A synthetic report can carry it only because `finding()` accepts any code outside the
 compile family — registered or not.

@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ....errors import PROCESS_IR_COMPILE_INTERNAL
 from ..contracts import ComponentSymbolV1, SymbolTableV1
-from ..diagnostics import CompilerDiagnostic, ProcessIRCompileError
+from ..diagnostics import ProcessIRCompileError, diagnostic
 from .contracts import (
     DEFAULT_VALIDATION_CAPABILITIES,
     ProcessIRValidationCapabilitiesV1,
@@ -132,20 +132,9 @@ def validate_legacy_process_config(
     except ProcessIRCompileError:
         raise
     except Exception:  # noqa: BLE001 — anything else is also a defect here
+        # Shared factory: one code, one static text (see flow.py).
         raise ProcessIRCompileError(
-            [
-                CompilerDiagnostic(
-                    code=PROCESS_IR_COMPILE_INTERNAL,
-                    phase="semantic_lowering",
-                    path="",
-                    node_identity="",
-                    message="semantic validation failed unexpectedly",
-                    remediation=(
-                        "This is a compiler defect, not a payload error. "
-                        "Please report it with the process configuration."
-                    ),
-                )
-            ]
+            [diagnostic(PROCESS_IR_COMPILE_INTERNAL, "semantic_lowering", "")]
         ) from None  # never chain: the raw text can carry authored values
 
     return apply_policy(report, lookup_policy(policy_name))

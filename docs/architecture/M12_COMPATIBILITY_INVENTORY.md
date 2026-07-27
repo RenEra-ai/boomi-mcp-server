@@ -1413,11 +1413,11 @@ supply typed contracts to reach it. A further 2 of the 4 exemption rows are iner
 warnings and `apply_policy` reclassifies only errors. All of this is enumerated in
 [PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md) §10.
 
-The 4 implemented codes and the 2 inert exemption rows ARE wired correctly — forcing the condition
-makes each fire. That argument does **not** extend to the 2 group-B codes: `finding()` accepts any
-code outside the compile family (registered or not), so building a synthetic report carrying one
-proves REGISTRATION, not wiring. Those
-two have no rule behind them at all.
+The 5 implemented codes and the 2 inert exemption rows ARE wired correctly — forcing the condition
+makes each fire. That argument does **not** extend to the single group-B code: `finding()` accepts
+any code outside the compile family (registered or not), so building a synthetic report carrying it
+proves REGISTRATION, not wiring. `PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` has no rule
+behind it at all.
 
 None of this is a regression — the baseline had no such checks. It is a statement of how much of the
 new surface is currently exercised, and by what.

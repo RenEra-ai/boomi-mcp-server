@@ -41,11 +41,7 @@ from ....errors import (
     PROCESS_IR_SEMANTIC_UNTERMINATED_PATH,
 )
 from ..connector_resolution import validate_connector_calls
-from ..diagnostics import (
-    CompilerDiagnostic,
-    ProcessIRCompileError,
-    node_identity_for,
-)
+from ..diagnostics import ProcessIRCompileError, diagnostic
 from .contracts import ValidationDiagnosticV1
 from .context import PreparedProcessValidationV1
 from .findings import finding
@@ -223,22 +219,12 @@ def collect_connector_flow_findings(
         #
         # Raised as ProcessIRCompileError so the outer `_guarded` passes it
         # through untouched rather than re-wrapping it.
+        # Built through the shared factory: message and remediation are
+        # STATIC and selected BY CODE, so hand-writing them here would give one
+        # code two different texts. `diagnostic()` also supplies the root node
+        # identity for an empty path.
         raise ProcessIRCompileError(
-            [
-                CompilerDiagnostic(
-                    code=PROCESS_IR_COMPILE_INTERNAL,
-                    phase="reference_resolution",
-                    path="",
-                    # `node_identity_for("")` is `<root>`; a bare "" is not a
-                    # valid identity and would lose the failure location.
-                    node_identity=node_identity_for(""),
-                    message="connector resolution failed unexpectedly",
-                    remediation=(
-                        "This is a compiler defect, not a payload error. "
-                        "Please report it with the process configuration."
-                    ),
-                )
-            ]
+            [diagnostic(PROCESS_IR_COMPILE_INTERNAL, "reference_resolution", "")]
         ) from None
     return ()
 
