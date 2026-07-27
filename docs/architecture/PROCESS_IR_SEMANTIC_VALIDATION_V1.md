@@ -377,16 +377,22 @@ remove.
 
 Also not shipped, for the same reason: a separate pure `validate_legacy_result`
 (`validate_legacy_process_config` is that function, reached from the config rather than the result),
-and the four planned deterministic report/IR snapshot fixtures.
+**The report snapshot IS shipped** — `tests/fixtures/process_ir/semantic_report_linear_flow.json`,
+asserted by `test_the_report_matches_its_committed_oracle`. An earlier version of this section
+retired it, arguing a frozen artifact would churn on every message edit. That was the wrong trade:
+without a committed oracle nothing catches a deterministic CHANGE to codes, paths, ordering,
+messages or remediation, and this repo already keeps 40 raw-byte XML goldens on exactly that
+reasoning. The remaining three planned IR fixtures are not shipped; the report was the one that
+carried the guarantee.
 
-On that last one, an earlier version of this section cited
+On determinism, an earlier version of this section cited
 `test_report_buckets_are_ordered_deterministically_across_runs` and
 `test_validation_is_pure_and_repeatable` as replacing the fixtures. They do not, and the objection is
 correct: both call validation twice **inside one pytest process**, so they share a hash seed and
 assert no expected bytes — a report that is deterministic but CHANGED passes both, and so does an
 ordering that varies only between interpreter invocations.
 
-`test_the_report_is_byte_identical_across_processes` closes exactly that gap: it serializes the
-canonical report in two subprocesses run under **different `PYTHONHASHSEED` values** and compares the
-bytes. It tests the property the fixtures were meant to protect (cross-process stability) without a
-frozen artifact that has to be regenerated whenever a message string changes.
+`test_the_report_is_byte_identical_across_processes` closes that: it serializes the canonical report
+in two subprocesses under **different `PYTHONHASHSEED` values** and compares the bytes. It proves the
+two runs AGREE; the oracle above is what proves they are RIGHT. Both are needed — measured: mutating
+one finding message makes the oracle test fail while the cross-process test still passes.

@@ -810,53 +810,74 @@ def test_the_capability_finding_carries_no_contract_content():
     assert "/capabilities/map_effects/0" in blob
 
 
-def test_the_report_is_byte_identical_across_processes():
-    """Codex review round 11. `test_validation_is_pure_and_repeatable` and
-    `test_report_buckets_are_ordered_deterministically_across_runs` both call
-    validation twice INSIDE one pytest process, so they share a hash seed and
-    assert no expected bytes — a report that is deterministic but changed passes
-    both, and so does an ordering that varies only between interpreter runs.
+#: The committed report oracle. Regenerated deliberately, exactly like the 40
+#: raw-byte XML goldens this repo already keeps — a message or remediation edit
+#: is a contract change and should show up as a diff someone approves.
+_REPORT_ORACLE = _FIXTURES / "semantic_report_linear_flow.json"
 
-    This runs the same document in two subprocesses under DIFFERENT
-    `PYTHONHASHSEED` values and compares the serialized bytes, which is the
-    property the planned snapshot fixtures existed to protect — without a frozen
-    artifact that must be regenerated whenever a message string changes.
-    """
+#: Builds the canonical report for `linear_flow` and writes it to stdout. Run in
+#: a subprocess so `PYTHONHASHSEED` can differ between invocations.
+_REPORT_PROBE = (
+    "import json,sys;"
+    "sys.path.insert(0,'src');sys.path.insert(0,'.');"
+    "from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1,SymbolTableV1;"
+    "from boomi_mcp.compiler.process_ir.lowering import lower_process_ir_to_cfg;"
+    "from boomi_mcp.compiler.process_ir.semantic_validation import "
+    "canonical_report_json,validate_process_ir;"
+    "from boomi_mcp.models.process_ir import parse_process_ir_v1;"
+    "doc=json.load(open('tests/fixtures/process_ir/process_ir_v1.json'))['linear_flow'];"
+    "ir=parse_process_ir_v1(doc);cfg=lower_process_ir_to_cfg(ir);"
+    "roles={'connection_ref':'connector-settings','operation_ref':'connector-action',"
+    "'map_ref':'transform.map','cache_ref':'documentcache','process_ref':'process'};"
+    "DP={'json':'profile.json','xml':'profile.xml'};refs={}\n"
+    "for n in cfg.nodes:\n"
+    "    for r,t in roles.items():\n"
+    "        v=getattr(n.semantic,r,None)\n"
+    "        if isinstance(v,str) and v: refs[v]=t\n"
+    "    for c in ('steps','source_values'):\n"
+    "        for i in (getattr(n.semantic,c,()) or ()):\n"
+    "            pr=getattr(i,'profile_ref',None)\n"
+    "            if isinstance(pr,str) and pr:\n"
+    "                d=getattr(i,'profile_type',None);refs[pr]=DP.get(d,d or 'profile.json')\n"
+    "st=SymbolTableV1(symbols=tuple(ComponentSymbolV1(ref=r,component_id='id'+r,"
+    "component_type=t) for r,t in sorted(refs.items())))\n"
+    "sys.stdout.write(canonical_report_json(validate_process_ir(ir,st)))\n"
+)
+
+
+def _report_in_subprocess(seed):
     import os
 
-    program = (
-        "import json,sys;"
-        "sys.path.insert(0,'src');sys.path.insert(0,'.');"
-        "from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1,SymbolTableV1;"
-        "from boomi_mcp.compiler.process_ir.semantic_validation import "
-        "canonical_report_json,validate_process_ir;"
-        "from boomi_mcp.models.process_ir import parse_process_ir_v1;"
-        "doc=json.load(open('tests/fixtures/process_ir/process_ir_v1.json'))['linear_flow'];"
-        "ir=parse_process_ir_v1(doc);"
-        "from boomi_mcp.compiler.process_ir.lowering import lower_process_ir_to_cfg;"
-        "roles={'connection_ref':'connector-settings','operation_ref':'connector-action',"
-        "'map_ref':'transform.map','cache_ref':'documentcache','process_ref':'process'};"
-        "refs={};"
-        "cfg=lower_process_ir_to_cfg(ir);"
-        "[refs.__setitem__(getattr(n.semantic,r),t) for n in cfg.nodes for r,t in roles.items()"
-        " if isinstance(getattr(n.semantic,r,None),str) and getattr(n.semantic,r)];"
-        "[refs.__setitem__(i.profile_ref,'profile.json') for n in cfg.nodes"
-        " for c in ('steps','source_values') for i in (getattr(n.semantic,c,()) or ())"
-        " if isinstance(getattr(i,'profile_ref',None),str)];"
-        "st=SymbolTableV1(symbols=tuple(ComponentSymbolV1(ref=r,component_id='id'+r,"
-        "component_type=t) for r,t in sorted(refs.items())));"
-        "sys.stdout.write(canonical_report_json(validate_process_ir(ir,st)))"
+    env = dict(os.environ, PYTHONHASHSEED=seed, PYTHONPATH="src:.")
+    result = subprocess.run(
+        [sys.executable, "-c", _REPORT_PROBE],
+        capture_output=True, text=True, cwd=str(_ROOT), env=env,
     )
+    assert result.returncode == 0, result.stderr[-2000:]
+    return result.stdout
 
-    outputs = []
-    for seed in ("0", "12345"):
-        env = dict(os.environ, PYTHONHASHSEED=seed, PYTHONPATH="src:.")
-        result = subprocess.run(
-            [sys.executable, "-c", program],
-            capture_output=True, text=True, cwd=str(_ROOT), env=env,
-        )
-        assert result.returncode == 0, result.stderr[-2000:]
-        outputs.append(result.stdout)
 
-    assert outputs[0], "the probe produced no report"
-    assert outputs[0] == outputs[1], "report bytes differ across hash seeds"
+def test_the_report_matches_its_committed_oracle():
+    """The snapshot the plan asked for, and the piece the cross-process check
+    below cannot supply: comparing two implementation-generated outputs proves
+    they AGREE, never that they are RIGHT, so any deterministic change to codes,
+    paths, ordering, messages or remediation slips through.
+
+    The oracle is regenerated deliberately, like the 40 raw-byte XML goldens.
+    """
+    assert _REPORT_ORACLE.exists(), _REPORT_ORACLE
+    assert _report_in_subprocess("0") == _REPORT_ORACLE.read_text()
+
+
+def test_the_report_is_byte_identical_across_processes():
+    """The other half. `test_validation_is_pure_and_repeatable` and
+    `test_report_buckets_are_ordered_deterministically_across_runs` both call
+    validation twice INSIDE one pytest process, so they share a hash seed — an
+    ordering that varies only between interpreter invocations passes both.
+
+    Two subprocesses under DIFFERENT `PYTHONHASHSEED` values close that.
+    """
+    first = _report_in_subprocess("0")
+    second = _report_in_subprocess("12345")
+    assert first, "the probe produced no report"
+    assert first == second, "report bytes differ across hash seeds"
