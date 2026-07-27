@@ -361,6 +361,22 @@ def collect_lineage_findings(
         # before the whole node reported a script's read of what the PREVIOUS
         # script in the same node just wrote as read-before-write. The effects
         # are ordered, so the walk over them has to be too.
+        # A FIRE-AND-FORGET child establishes nothing downstream. Its reads are
+        # still dependencies — it consumes state when it is launched — but its
+        # writes are unordered with respect to everything after the call, so
+        # applying them proves a downstream read that may run first.
+        #
+        # This has to hold HERE, in the lattice, not only in the ordering
+        # collector. That collector deliberately skips DDP (document scope is
+        # not what an async race is about), so a DDP write applied here fell
+        # through both checks and a `wait=False` child's declared DDP write
+        # silently established a downstream read. DPP and cache only looked
+        # correct because the ordering phase happened to cover them.
+        establishes_downstream = not (
+            semantic.semantic_kind == "process_call"
+            and not getattr(semantic, "wait", True)
+        )
+
         for effect in _trusted_effects(semantic, capabilities):
             for raw in effect.reads:
                 key = (raw[0], raw[1])
@@ -373,6 +389,8 @@ def collect_lineage_findings(
             # contract on this node. An untrusted node contributes none — that
             # inversion of the legacy wildcard default is the whole point of
             # the typed contract.
+            if not establishes_downstream:
+                continue
             for key in effect.writes:
                 state = state.with_write((key[0], key[1]))
 

@@ -936,3 +936,40 @@ def test_the_unsafe_finding_comes_from_a_parsed_document_not_only_a_synthetic_cf
         [_sub("$ref:a", writes=(("dpp", "A"),)), _sub("$ref:b", reads=(("dpp", "A"),))],
     )
     assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE in codes
+
+
+def test_a_non_waiting_child_establishes_nothing_downstream_in_any_scope():
+    """§6 architect review. `_trusted_effects` applied a subprocess summary's
+    writes regardless of `wait`, so the lineage lattice treated a fire-and-forget
+    child's declared write as established state.
+
+    DPP and cache only LOOKED correct: the ordering collector happened to cover
+    them. It deliberately skips DDP — document scope is not what an async race
+    is about — so a `wait=False` child's declared DDP write fell through both
+    checks and validated clean. The rule belongs in the lattice, where it holds
+    for every scope at once.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        ProcessIRValidationCapabilitiesV1,
+        validate_process_ir,
+    )
+
+    def _report(scope, wait):
+        doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+            _pc("$ref:a", wait), _pc("$ref:b", True), {"kind": "stop"}]}}
+        symbols = SymbolTableV1(symbols=(
+            ComponentSymbolV1(ref="$ref:a", component_id="i1", component_type="process"),
+            ComponentSymbolV1(ref="$ref:b", component_id="i2", component_type="process"),
+        ))
+        caps = ProcessIRValidationCapabilitiesV1(subprocess_summaries=(
+            _sub("$ref:a", writes=((scope, "A"),)),
+            _sub("$ref:b", reads=((scope, "A"),)),
+        ))
+        return validate_process_ir(parse_process_ir_v1(doc), symbols, caps)
+
+    for scope in ("dpp", "cache", "ddp"):
+        assert _report(scope, False).is_valid is False, scope
+        # the discriminator: a WAITING child genuinely does establish it, and
+        # a rule that rejected both would make every subprocess summary useless
+        assert _report(scope, True).is_valid is True, scope
