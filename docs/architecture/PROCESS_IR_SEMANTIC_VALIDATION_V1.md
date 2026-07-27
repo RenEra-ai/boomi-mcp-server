@@ -226,7 +226,11 @@ Measured by a live census over 5933 authorable configs plus a 606-config gate di
 #143 QA, 2026-07-26). Two DIFFERENT situations are separated below, because collapsing them is
 exactly how a taxonomy entry gets mistaken for a shipped rule.
 
-**A. Implemented, unit-tested, wired — but not producible from a LEGACY config (5).**
+**A. Implemented, unit-tested, wired — but not producible from a LEGACY config (5 of 13).**
+
+Both counts are **out of the 13 DIAGNOSTIC codes** #143 adds, not out of 17 — the other 4 are
+`LEGACY_ADAPTER_EXEMPTION_*` rows, which fire only when the error they cover does and so cannot be
+measured by the same "producible" test. The migration inventory's census uses the same split.
 
 **Scope, stated once because getting it wrong cost four drafts.** This group is about the LEGACY
 dialects, measured by the 5933-config census in the migration inventory. It is NOT about the direct
@@ -257,7 +261,7 @@ Through the direct API the code IS producible —
 | `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` | fires only when a caller supplies a typed contract that binds to nothing. Every production call site passes `DEFAULT_VALIDATION_CAPABILITIES`, which is empty, so there is no contract to be unbound — the collector exists and is unit-tested, but no authorable config reaches it |
 | `…RETRY_EFFECT_UNSAFE` | **no legacy dialect can project a Try/Catch region at all**, so `derive_error_regions` returns an empty tuple on every legacy-projected CFG and `collect_retry_effect_findings` never has a region to examine. The blocker is one layer earlier than "the hazard never lands inside a retried region" |
 
-**B. Registered in the taxonomy with NO rule behind it (1 of 17).**
+**B. Registered in the taxonomy with NO rule behind it (1 of 13).**
 
 ONE code is declared with no collector emitting it —
 `PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` (§10 B, below).
