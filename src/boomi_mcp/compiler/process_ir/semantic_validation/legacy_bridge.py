@@ -131,7 +131,7 @@ def validate_legacy_process_config(
         report = validate_process_ir(process_ir, _symbols_from(result), capabilities)
     except ProcessIRCompileError:
         raise
-    except Exception as exc:  # noqa: BLE001 — anything else is also a defect here
+    except Exception:  # noqa: BLE001 — anything else is also a defect here
         raise ProcessIRCompileError(
             [
                 CompilerDiagnostic(
@@ -146,7 +146,7 @@ def validate_legacy_process_config(
                     ),
                 )
             ]
-        ) from exc
+        ) from None  # never chain: the raw text can carry authored values
 
     return apply_policy(report, lookup_policy(policy_name))
 

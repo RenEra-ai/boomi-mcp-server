@@ -58,7 +58,10 @@ def test_the_gate_runs_inside_the_canonical_compiler():
     import inspect
 
     source = inspect.getsource(compiler_pipeline.compile_process_ir_v1)
-    assert "_enforce_semantic_report(" in source
+    # Dispatched THROUGH `_guarded`, so an unexpected collector failure becomes
+    # a value-free PROCESS_IR_COMPILE_INTERNAL like every other stage.
+    assert "_enforce_semantic_report," in source
+    assert "_guarded(" in source
 
 
 def test_the_gate_runs_before_any_emission_plan_exists():
@@ -69,7 +72,7 @@ def test_the_gate_runs_before_any_emission_plan_exists():
 
     source = inspect.getsource(compiler_pipeline.compile_process_ir_v1)
     lowered_at = source.index("lower_process_ir_to_cfg")
-    gate_at = source.index("_enforce_semantic_report(")
+    gate_at = source.index("_enforce_semantic_report,")
     plan_at = source.index("lower_cfg_to_emission_plan")
     assert lowered_at < gate_at < plan_at
 
@@ -80,7 +83,8 @@ def test_the_gate_validates_the_cfg_that_was_just_lowered():
     import inspect
 
     source = inspect.getsource(compiler_pipeline._enforce_semantic_report)
-    assert "validate_lowered_process_ir(ir, cfg, symbols)" in source
+    assert "validate_lowered_process_ir(" in source
+    assert "ir, cfg, symbols, capabilities or DEFAULT_VALIDATION_CAPABILITIES" in source
 
 
 def test_the_default_is_STRICT():
@@ -295,4 +299,145 @@ def test_a_clean_document_still_compiles_through_the_gate():
     # test supplies and would fail for a reason that has nothing to do with the
     # gate — a green-for-the-wrong-reason risk in both directions.
     cfg = lower_process_ir_to_cfg(ir)
-    compiler_pipeline._enforce_semantic_report(ir, cfg, symbols, None)  # must not raise
+    compiler_pipeline._enforce_semantic_report(
+        ir, cfg, symbols, None, None
+    )  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 8: three regressions introduced BY the relocation itself.
+# ---------------------------------------------------------------------------
+
+
+def _contracted_map_doc():
+    """A flow that is valid ONLY because a typed map contract establishes DPP A."""
+    return {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                {"kind": "source", "connection_ref": "$ref:conn",
+                 "operation_ref": "$ref:op"},
+                {"kind": "map_ref", "map_ref": "$ref:m"},
+                {"kind": "set_dpp", "name": "OUT",
+                 "source_values": [{"value_type": "dpp", "property_name": "A"}]},
+                {"kind": "target", "connection_ref": "$ref:tconn",
+                 "operation_ref": "$ref:top"},
+                {"kind": "stop"},
+            ],
+        },
+    }
+
+
+def _contracted_symbols():
+    from boomi_mcp.compiler.process_ir.contracts import (
+        ComponentSymbolV1,
+        SymbolTableV1,
+    )
+
+    return SymbolTableV1(symbols=tuple(
+        ComponentSymbolV1(ref=ref, component_id="id" + ref, component_type=ctype)
+        for ref, ctype in (
+            ("$ref:conn", "connector-settings"),
+            ("$ref:op", "connector-action"),
+            ("$ref:tconn", "connector-settings"),
+            ("$ref:top", "connector-action"),
+            ("$ref:m", "transform.map"),
+        )
+    ))
+
+
+def _map_capabilities():
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        MapEffectContractV1,
+        ProcessIRValidationCapabilitiesV1,
+        StateEffectV1,
+    )
+
+    return ProcessIRValidationCapabilitiesV1(map_effects=(
+        MapEffectContractV1(
+            map_ref="$ref:m",
+            effect=StateEffectV1(writes=(("dpp", "A"),), replay_safe=True),
+        ),
+    ))
+
+
+def test_the_compiler_gate_accepts_a_trusted_capability_set():
+    """Gating the compiler without threading capabilities through made the typed
+    contract surface unusable for canonical compilation: `validate_process_ir`
+    called with the same contracts reports the flow VALID, while the compiler
+    rejected it because the gate always ran with the empty default."""
+    from boomi_mcp.compiler.process_ir.lowering import lower_process_ir_to_cfg
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    ir = parse_process_ir_v1(_contracted_map_doc())
+    cfg = lower_process_ir_to_cfg(ir)
+    compiler_pipeline._enforce_semantic_report(
+        ir, cfg, _contracted_symbols(), None, _map_capabilities()
+    )  # must not raise
+
+
+def test_the_same_flow_without_the_contract_is_still_rejected():
+    """The discriminator: capabilities must EARN the pass, not disable the gate."""
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.lowering import lower_process_ir_to_cfg
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    ir = parse_process_ir_v1(_contracted_map_doc())
+    cfg = lower_process_ir_to_cfg(ir)
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        compiler_pipeline._enforce_semantic_report(
+            ir, cfg, _contracted_symbols(), None, None
+        )
+    assert "PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE" in [
+        d.code for d in excinfo.value.diagnostics
+    ]
+
+
+def test_the_public_compiler_entry_point_accepts_capabilities():
+    """The keyword has to exist on the API callers actually use, not only on the
+    private helper."""
+    import inspect
+
+    parameters = inspect.signature(
+        compiler_pipeline.compile_process_ir_v1
+    ).parameters
+    assert "capabilities" in parameters
+    assert parameters["capabilities"].default is None
+
+
+def test_an_unexpected_gate_failure_becomes_a_value_free_internal_diagnostic():
+    """The gate runs through `_guarded`. Without that a collector defect escaped
+    as a raw exception — and production builders catch `ProcessIRCompileError`,
+    not arbitrary validator exceptions."""
+    from boomi_mcp.compiler.process_ir import pipeline as cp
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("authored-value-carrying text")
+
+    ir = parse_process_ir_v1(_contracted_map_doc())
+    original = cp._enforce_semantic_report
+    cp._enforce_semantic_report = _boom
+    try:
+        with pytest.raises(ProcessIRCompileError) as excinfo:
+            cp.compile_process_ir_v1(ir, _contracted_symbols())
+    finally:
+        cp._enforce_semantic_report = original
+    codes = [d.code for d in excinfo.value.diagnostics]
+    assert codes == ["PROCESS_IR_COMPILE_INTERNAL"]
+    assert "authored-value-carrying" not in str(excinfo.value)
+
+
+def test_the_bridge_does_not_chain_the_raw_validator_exception():
+    """`from exc` kept the raw text in the traceback, defeating the redaction
+    boundary for any caller or log that captures tracebacks. The compiler's own
+    `_guarded` uses `from None` for exactly this reason."""
+    import inspect
+
+    from boomi_mcp.compiler.process_ir.semantic_validation import legacy_bridge
+
+    source = inspect.getsource(legacy_bridge.validate_legacy_process_config)
+    assert "from None" in source
+    assert "from exc" not in source

@@ -32,6 +32,7 @@ from .invariants import check_cfg_invariants, check_emission_plan_invariants
 from .lowering import lower_cfg_to_emission_plan, lower_process_ir_to_cfg
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, avoids an import cycle
+    from .semantic_validation.contracts import ProcessIRValidationCapabilitiesV1
     from .semantic_validation.validation_policy import LegacyValidationPolicyV1
 
 
@@ -51,11 +52,18 @@ def _guarded(phase, action, *args):
         ) from None
 
 
-def _enforce_semantic_report(ir, cfg, symbols, policy) -> None:
+def _enforce_semantic_report(ir, cfg, symbols, policy, capabilities) -> None:
     """Block the compile when the unified semantic report has ERRORS.
 
     Imported lazily: ``semantic_validation`` imports the compiler's own
     contracts, so a module-level import here would close a cycle.
+
+    ``capabilities`` is the trusted-contract set. Without it the gate always ran
+    with ``DEFAULT_VALIDATION_CAPABILITIES``, so a flow that is valid ONLY
+    because a typed map/script/subprocess contract establishes an effect was
+    rejected by the compiler even though ``validate_process_ir`` called with the
+    same contracts reports it valid — which made the typed capability surface
+    unusable for canonical compilation.
 
     ``policy`` is a legacy adapter's exemption set, or None for STRICT. Applying
     it here rather than at an outer boundary is what lets the canonical path be
@@ -68,7 +76,11 @@ def _enforce_semantic_report(ir, cfg, symbols, policy) -> None:
     from .semantic_validation.pipeline import validate_lowered_process_ir
     from .semantic_validation.validation_policy import apply_policy
 
-    report = validate_lowered_process_ir(ir, cfg, symbols)
+    from .semantic_validation.contracts import DEFAULT_VALIDATION_CAPABILITIES
+
+    report = validate_lowered_process_ir(
+        ir, cfg, symbols, capabilities or DEFAULT_VALIDATION_CAPABILITIES
+    )
     report = apply_policy(report, policy)
     if not report.errors:
         return
@@ -93,6 +105,7 @@ def compile_process_ir_v1(
     symbols: SymbolTableV1,
     *,
     validation_policy: Optional["LegacyValidationPolicyV1"] = None,
+    capabilities: Optional["ProcessIRValidationCapabilitiesV1"] = None,
 ) -> Tuple[SemanticCfgV1, EmissionPlanV1]:
     """Lower a validated IR into its CFG and emission plan, invariant-checked.
 
@@ -135,7 +148,20 @@ def compile_process_ir_v1(
     # #143: the unified semantic gate. It runs on the CFG that was just lowered
     # and BEFORE any emission plan exists, so "no plan lowering occurs with
     # report errors" holds by construction rather than by convention.
-    _enforce_semantic_report(ir, cfg, symbols, validation_policy)
+    # Through `_guarded`, like every other stage: a deliberate finding raises
+    # ProcessIRCompileError and passes through untouched, while an UNEXPECTED
+    # collector or policy failure becomes the promised value-free
+    # PROCESS_IR_COMPILE_INTERNAL instead of escaping as a raw exception with
+    # its text — production builders catch ProcessIRCompileError, not anything.
+    _guarded(
+        "semantic_lowering",
+        _enforce_semantic_report,
+        ir,
+        cfg,
+        symbols,
+        validation_policy,
+        capabilities,
+    )
     plan = _guarded("emission_planning", lower_cfg_to_emission_plan, cfg, symbols)
     _guarded("emission_planning", check_emission_plan_invariants, plan, cfg, symbols)
     return cfg, plan
