@@ -168,9 +168,19 @@ def compile_process_ir_v1(
 
 
 def parse_and_compile_process_ir_v1(
-    payload: Any, symbols: SymbolTableV1
+    payload: Any,
+    symbols: SymbolTableV1,
+    *,
+    validation_policy: Optional["LegacyValidationPolicyV1"] = None,
+    capabilities: Optional["ProcessIRValidationCapabilitiesV1"] = None,
 ) -> Tuple[ProcessIRV1, SemanticCfgV1, EmissionPlanV1]:
     """Parse an authored payload, then compile it.
+
+    Both gate keywords are forwarded verbatim. They were added to
+    ``compile_process_ir_v1`` and not here, which split the exported surface in
+    two: a flow whose validity rests on a trusted contract compiled through the
+    direct API and was rejected by this wrapper, for no reason a caller could
+    see. Two entry points, one behaviour.
 
     #136's parse diagnostics are translated into compiler diagnostics with
     ``phase="schema"`` and their ``code``/``path``/``message``/``remediation``
@@ -203,7 +213,9 @@ def parse_and_compile_process_ir_v1(
         raise ProcessIRCompileError(
             [diagnostic(PROCESS_IR_COMPILE_INTERNAL, "schema", "")]
         ) from None
-    cfg, plan = compile_process_ir_v1(ir, symbols)
+    cfg, plan = compile_process_ir_v1(
+        ir, symbols, validation_policy=validation_policy, capabilities=capabilities
+    )
     return ir, cfg, plan
 
 

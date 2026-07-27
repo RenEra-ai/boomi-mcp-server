@@ -335,15 +335,19 @@ def _contracted_symbols():
         SymbolTableV1,
     )
 
-    return SymbolTableV1(symbols=tuple(
-        ComponentSymbolV1(ref=ref, component_id="id" + ref, component_type=ctype)
-        for ref, ctype in (
-            ("$ref:conn", "connector-settings"),
-            ("$ref:op", "connector-action"),
-            ("$ref:tconn", "connector-settings"),
-            ("$ref:top", "connector-action"),
-            ("$ref:m", "transform.map"),
-        )
+    return SymbolTableV1(symbols=(
+        ComponentSymbolV1(ref="$ref:conn", component_id="id1",
+                          component_type="connector-settings", connector_type="rest"),
+        ComponentSymbolV1(ref="$ref:op", component_id="id2",
+                          component_type="connector-action", connector_type="rest",
+                          action_type="GET"),
+        ComponentSymbolV1(ref="$ref:tconn", component_id="id3",
+                          component_type="connector-settings", connector_type="rest"),
+        ComponentSymbolV1(ref="$ref:top", component_id="id4",
+                          component_type="connector-action", connector_type="rest",
+                          action_type="POST"),
+        ComponentSymbolV1(ref="$ref:m", component_id="id5",
+                          component_type="transform.map"),
     ))
 
 
@@ -441,3 +445,47 @@ def test_the_bridge_does_not_chain_the_raw_validator_exception():
     source = inspect.getsource(legacy_bridge.validate_legacy_process_config)
     assert "from None" in source
     assert "from exc" not in source
+
+
+def test_the_parse_wrapper_forwards_both_gate_keywords():
+    """Codex review round 9. The keywords were added to `compile_process_ir_v1`
+    and not to `parse_and_compile_process_ir_v1`, splitting the exported surface
+    in two: the same contract-dependent flow compiled through one entry point
+    and was rejected by the other."""
+    import inspect
+
+    parameters = inspect.signature(
+        compiler_pipeline.parse_and_compile_process_ir_v1
+    ).parameters
+    assert "capabilities" in parameters
+    assert "validation_policy" in parameters
+
+    source = inspect.getsource(compiler_pipeline.parse_and_compile_process_ir_v1)
+    assert "validation_policy=validation_policy" in source
+    assert "capabilities=capabilities" in source
+
+
+def test_both_entry_points_accept_the_same_contract_dependent_flow():
+    """Executed, not just inspected: the wrapper must reach the same verdict as
+    the direct API for an identical payload."""
+    payload = _contracted_map_doc()
+    symbols = _contracted_symbols()
+    caps = _map_capabilities()
+
+    ir, cfg, plan = compiler_pipeline.parse_and_compile_process_ir_v1(
+        payload, symbols, capabilities=caps
+    )
+    assert cfg is not None and plan is not None
+
+
+def test_the_parse_wrapper_still_rejects_without_the_contract():
+    """The discriminator: forwarding must not become 'always permissive'."""
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        compiler_pipeline.parse_and_compile_process_ir_v1(
+            _contracted_map_doc(), _contracted_symbols()
+        )
+    assert "PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE" in [
+        d.code for d in excinfo.value.diagnostics
+    ]
