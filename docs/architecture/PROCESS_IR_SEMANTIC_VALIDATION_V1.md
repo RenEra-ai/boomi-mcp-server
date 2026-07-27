@@ -226,25 +226,32 @@ Measured by a live census over 5933 authorable configs plus a 606-config gate di
 #143 QA, 2026-07-26). Two DIFFERENT situations are separated below, because collapsing them is
 exactly how a taxonomy entry gets mistaken for a shipped rule.
 
-**A. Implemented, unit-tested, wired — but not producible from an authorable config (4 of 17).**
-Forcing the condition makes each of these fire; the v1 authored surface simply cannot produce the
-shape.
+**A. Implemented, unit-tested, wired — but not producible from a LEGACY config (5).**
 
-`…SIDE_EFFECT_ORDERING_UNSAFE` was listed here through THREE drafts and does not belong: it is
-producible. `branch([[process_call(wait=False)], [set_dpp reading a DPP]])` parses and reports it
-under `DEFAULT_VALIDATION_CAPABILITIES` — no typed contract required. The first draft said a
-`process_call` "is rejected inside a Branch/Decision body" (false — only MIXING one with property
-steps in the SAME leg is gated); the second said the reads could only come from a subprocess summary
-(also false — the reader is a `set_dpp` in a LATER leg, and legs run sequentially).
-`test_the_unsafe_branch_is_producible_from_an_authorable_document` pins it.
+**Scope, stated once because getting it wrong cost four drafts.** This group is about the LEGACY
+dialects, measured by the 5933-config census in the migration inventory. It is NOT about the direct
+ProcessIR API: with caller-supplied symbols and contracts, `validate_process_ir` can reach every one
+of these. An earlier draft relabelled the group "by the ProcessIR surface" while leaving rows whose
+reasons are legacy-adapter limitations — two scopes in one table, which is how the census and the
+sibling document ended up disagreeing.
 
-This classification is by the **ProcessIR** surface. The migration inventory's 5933-config census
-measures the LEGACY dialects and still counts this code unreachable there — correctly: neither
-`flow_sequence` nor `wrapper_subprocess` can project the shape. Two scopes, two answers, and the
-inventory says so explicitly rather than the counts silently disagreeing.
+`…SIDE_EFFECT_ORDERING_UNSAFE` belongs here for the LEGACY reason (neither `flow_sequence` nor
+`wrapper_subprocess` can project the shape), NOT the two reasons earlier drafts gave. Both were
+false, and the second was introduced while correcting the first:
 
-| Code | Why it cannot fire yet |
+* "a `process_call` is rejected inside a Branch/Decision body" — no; only MIXING one with property
+  steps in the SAME leg is gated.
+* "the reads can only come from a subprocess summary" — no; the reader is an ordinary `set_dpp` in a
+  LATER leg, and legs run sequentially.
+
+Through the direct API the code IS producible —
+`branch([[process_call(wait=False)], [set_dpp reading a DPP]])` reports it under the EMPTY
+`DEFAULT_VALIDATION_CAPABILITIES`, pinned by
+`test_the_unsafe_branch_is_producible_from_an_authorable_document`.
+
+| Code | Why it cannot fire from a legacy config |
 |---|---|
+| `…SIDE_EFFECT_ORDERING_UNSAFE` | `flow_sequence` cannot author a `process_call` at all, and `wrapper_subprocess` cannot author the Branch or its property reader |
 | `PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND` | the legacy adapter's symbol table carries only refs it declared, so an undeclared ref never reaches the collector |
 | `PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH` | same — a literal wrong-type id (a `map_ref` bound to a `profile.json` id, or an unresolvable UUID) still reports `is_valid: true` |
 | `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` | fires only when a caller supplies a typed contract that binds to nothing. Every production call site passes `DEFAULT_VALIDATION_CAPABILITIES`, which is empty, so there is no contract to be unbound — the collector exists and is unit-tested, but no authorable config reaches it |

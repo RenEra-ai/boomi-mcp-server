@@ -1404,14 +1404,25 @@ The ledger contains 44 existing registered codes plus 17 new #143 additions. No 
 An exemption RECLASSIFIES an error as an advisory carrying the original code as evidence — it never
 deletes the finding, so this ledger stays falsifiable.
 
-**Live-census note (2026-07-26, #143 QA).** Over 5933 authorable configs, 6 of #143's 17 codes were
-not producible from any of them — 5 are implemented and wired but unreachable from the LEGACY
-dialects, and 1 (`PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE`) is registered in the taxonomy
-with NO collector behind it at all. `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` was the second
-until the `capability`-phase collector was written for it; it is now emitted, though a caller has to
-supply typed contracts to reach it. A further 2 of the 4 exemption rows are inert because their target codes ship as
-warnings and `apply_policy` reclassifies only errors. All of this is enumerated in
-[PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md) §10.
+**Live-census note (2026-07-26, #143 QA).** #143 adds 17 codes: **13 diagnostic** codes and **4
+`LEGACY_ADAPTER_EXEMPTION_*`** rows. The two groups are counted separately below because "producible"
+means different things for them — a diagnostic is produced by a collector, an exemption row fires
+only when the error it covers does.
+
+Over 5933 authorable configs:
+
+| Group | Count | Status |
+|---|---|---|
+| diagnostic codes producible from some config | 7 of 13 | observed firing |
+| diagnostic codes implemented and wired, but unreachable from these dialects | 5 of 13 | see §10 A |
+| diagnostic codes registered with NO collector | 1 of 13 | see §10 B |
+| exemption rows observed firing | 2 of 4 | live |
+| exemption rows inert | 2 of 4 | their target codes ship as WARNINGS, and `apply_policy` reclassifies only errors |
+
+So **6 of the 13 diagnostic codes** are not producible from this corpus, and separately **2 of the 4
+exemption rows** are inert. An earlier version stated "6 of 17", which mixed the two denominators —
+the 4 exemption rows are among the 17 but are not diagnostics, so they cannot be counted against the
+same "producible" test.
 
 **Scope of that measurement.** The census ran the three LEGACY DIALECTS through
 `legacy_bridge.validate_legacy_process_config`. It says nothing about the direct ProcessIR API, and
