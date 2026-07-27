@@ -39,19 +39,30 @@ That asymmetry is the issue's "reject demonstrated hazards only" rule.
 
 Reachability of the UNSAFE branch — stated plainly
 --------------------------------------------------
-As of ProcessIR v1 the AUTHORED surface cannot express the unsafe shape. A
-``process_call`` may appear only in a pure process-call sequence
-(``process_call_connector_mixing`` is gated), and it is rejected outright inside
-a Branch or Decision body, so no property read can follow a non-waiting call in
-any authorable document. The CFG can represent it; the schema will not currently
-produce it.
+The branch IS reachable from the authored surface, via TYPED CONTRACT reads.
 
-The rule is implemented and tested against a hand-built CFG rather than dropped,
-and this note exists so the branch is not mistaken for accidentally-dead code. It
-is deliberately pre-positioned: the day the mixing gate lifts, the hazard becomes
-authorable, and a validator that had to grow the rule at the same moment the gate
-opened would be the wrong sequencing. The honest cost is that this one branch is
-proven by a synthetic CFG, not by a golden document.
+An earlier version of this note said the opposite — that a ``process_call`` "is
+rejected outright inside a Branch or Decision body", so no read could follow a
+non-waiting call in any authorable document, and that the rule was therefore
+proven only against a hand-built CFG. Re-measured, one claim at a time:
+
+    root  [process_call, set_dpp, stop]        -> PROCESS_IR_CAPABILITY_UNSUPPORTED
+    root  [process_call, process_call, stop]   -> ALLOWED
+    leg   [process_call, set_dpp]              -> PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+    leg   [process_call]                       -> ALLOWED
+
+So what is gated is MIXING a process call with property steps, not the process
+call itself. A Branch whose legs each hold one process call is authorable, and
+a subprocess SUMMARY supplies the read that the authored surface will not — the
+reads this collector scans come from the contract, not from a ``set_property``
+node. ``branch([[call(wait=False)], [call(wait=True)]])`` with two summaries is
+a genuine, parseable document that reports ``…SIDE_EFFECT_ORDERING_UNSAFE``.
+
+The synthetic-CFG tests are kept because they pin the shape independently of
+what the schema happens to allow, but they are no longer the only evidence:
+``test_a_non_waiting_call_races_a_contract_read_in_a_LATER_branch_leg`` runs a
+parsed document end to end, and ``test_the_unsafe_branch_is_authorable`` pins
+the four measurements above so this note cannot go stale again silently.
 """
 
 from __future__ import annotations

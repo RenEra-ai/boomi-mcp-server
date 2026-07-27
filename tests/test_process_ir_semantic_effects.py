@@ -176,14 +176,22 @@ def test_the_unknown_ordering_finding_is_a_warning_not_a_block():
 # ---------------------------------------------------------------------------
 # the UNSAFE branch, proven against a synthetic CFG
 #
-# The authored schema currently GATES this shape: a process_call may live only in
-# a pure process-call sequence and is rejected inside a Branch/Decision body, so
-# no property read can follow a non-waiting call in any authorable document.
-# Both facts were measured, not assumed:
-#     root  [process_call, set_dpp] -> PROCESS_IR_CAPABILITY_UNSUPPORTED
-#     leg   [process_call, set_dpp] -> PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
-# The CFG can still represent it, so the rule is proven here rather than dropped.
-# See the reachability note in effects.py for why it is pre-positioned.
+# These synthetic-CFG tests pin the shape independently of what the schema
+# happens to allow. They are NOT the only evidence: the branch is reachable from
+# the authored surface through typed contract reads — see
+# `test_the_unsafe_branch_is_authorable` below, and the corrected reachability
+# note in effects.py.
+#
+# What is gated is MIXING a process call with property steps, not the process
+# call itself:
+#     root  [process_call, set_dpp]      -> PROCESS_IR_CAPABILITY_UNSUPPORTED
+#     root  [process_call, process_call] -> ALLOWED
+#     leg   [process_call, set_dpp]      -> PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+#     leg   [process_call]               -> ALLOWED
+# An earlier version of this block read the first two rows as "no read can follow
+# a non-waiting call in any authorable document". That does not follow: the reads
+# this collector scans come from a subprocess SUMMARY, not from a set_property
+# node, so the gate on property steps never applied to them.
 # ---------------------------------------------------------------------------
 
 
@@ -870,5 +878,61 @@ def test_the_self_write_exclusion_survives_the_per_node_rewrite():
     codes = _orch_codes(
         doc, ["$ref:u", "$ref:rw"],
         [_sub("$ref:rw", reads=(("dpp", "A"),), writes=(("dpp", "A"),))],
+    )
+    assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE in codes
+
+
+def test_the_unsafe_branch_is_authorable():
+    """Pins the reachability measurements the module docstring states.
+
+    The docstring previously claimed the UNSAFE branch could not be expressed by
+    any authored document, and reasoned from two real rejections to a conclusion
+    that did not follow. The reads this collector scans come from a subprocess
+    SUMMARY, not from a `set_property` node, so a gate on mixing property steps
+    with process calls never applied to them.
+
+    A prose claim about what the schema accepts is exactly the kind that rots
+    silently, so it is re-derived here instead of asserted in a comment.
+    """
+    from boomi_mcp.models.process_ir import ProcessIRValidationError
+
+    pc = {"kind": "process_call", "process_ref": "$ref:a", "wait": False,
+          "abort_on_error": False}
+    pc2 = {"kind": "process_call", "process_ref": "$ref:b", "wait": True,
+           "abort_on_error": False}
+    read = {"kind": "set_dpp", "name": "OUT",
+            "source_values": [{"value_type": "dpp", "property_name": "A"}]}
+
+    def _parses(steps):
+        try:
+            parse_process_ir_v1({"version": "1",
+                                 "body": {"kind": "sequence", "steps": steps}})
+            return True
+        except ProcessIRValidationError:
+            return False
+
+    def _leg_parses(legs):
+        return _parses([{"kind": "branch", "legs": [
+            {"steps": leg, "terminal": {"kind": "stop"}} for leg in legs]}])
+
+    # MIXING is gated ...
+    assert not _parses([pc, read, {"kind": "stop"}])
+    assert not _leg_parses([[pc, read], [pc2]])
+    # ... the process call itself is not
+    assert _parses([pc, pc2, {"kind": "stop"}])
+    assert _leg_parses([[pc], [pc2]])
+
+
+def test_the_unsafe_finding_comes_from_a_parsed_document_not_only_a_synthetic_cfg():
+    """The consequence of the above: a real, parseable document reaches the
+    ERROR branch. Without this the rule's only evidence is a hand-built CFG,
+    which cannot show that the compiler ever produces the shape."""
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "legs": [
+            {"steps": [_pc("$ref:a", False)], "terminal": {"kind": "stop"}},
+            {"steps": [_pc("$ref:b", True)], "terminal": {"kind": "stop"}}]}]}}
+    codes = _orch_codes(
+        doc, ["$ref:a", "$ref:b"],
+        [_sub("$ref:a", writes=(("dpp", "A"),)), _sub("$ref:b", reads=(("dpp", "A"),))],
     )
     assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE in codes
