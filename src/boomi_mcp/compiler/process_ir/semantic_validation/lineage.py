@@ -440,23 +440,24 @@ def collect_lineage_findings(
     return tuple(findings)
 
 
-def _leg_write_index(
+def _leg_member_index(
     prepared: PreparedProcessValidationV1,
-    capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
-) -> Dict[Tuple[str, int], FrozenSet[StateKey]]:
-    """``(branch_node_id, leg_ordinal) -> keys written anywhere in that leg``.
+) -> Dict[Tuple[str, int], FrozenSet[str]]:
+    """``(branch_node_id, leg_ordinal) -> every node id inside that leg``.
 
-    Precomputed once. Built by walking each leg's subtree, which is bounded by
-    the leg's own reachable set — a leg cannot re-enter its Branch in a
-    forward-only CFG.
+    The single definition of "what is in a leg". Built by walking each leg's
+    subtree, which is bounded by the leg's own reachable set — a leg cannot
+    re-enter its Branch in a forward-only CFG.
+
+    Both the lineage write index and the ordering phase's execution-order walk
+    read it, so the two cannot disagree about leg membership.
     """
-    index: Dict[Tuple[str, int], FrozenSet[StateKey]] = {}
+    index: Dict[Tuple[str, int], FrozenSet[str]] = {}
     for node in prepared.cfg.nodes:
         if node.semantic.semantic_kind != "branch":
             continue
         for edge in prepared.successors(node.node_id):
             ordinal = edge.leg_ordinal or edge.local_ordinal
-            written: Set[StateKey] = set()
             seen: Set[str] = set()
             stack = [edge.target_node_id]
             while stack:
@@ -464,19 +465,34 @@ def _leg_write_index(
                 if current in seen:
                     continue
                 seen.add(current)
-                inner = prepared.node(current)
-                if inner is None:
+                if prepared.node(current) is None:
                     continue
-                written.update(_writes_of(inner.semantic))
-                # Trusted writes count here too. The main traversal treats them
-                # as establishing state, so omitting them made the later-leg
-                # check blind to a contract write and silently downgraded a
-                # reverse-leg dependency to "not written anywhere".
-                for effect in _trusted_effects(inner.semantic, capabilities):
-                    written.update((k[0], k[1]) for k in effect.writes)
                 for out in prepared.successors(current):
                     stack.append(out.target_node_id)
-            index[(node.node_id, ordinal)] = frozenset(written)
+            index[(node.node_id, ordinal)] = frozenset(seen)
+    return index
+
+
+def _leg_write_index(
+    prepared: PreparedProcessValidationV1,
+    capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
+) -> Dict[Tuple[str, int], FrozenSet[StateKey]]:
+    """``(branch_node_id, leg_ordinal) -> keys written anywhere in that leg``."""
+    index: Dict[Tuple[str, int], FrozenSet[StateKey]] = {}
+    for leg, members in _leg_member_index(prepared).items():
+        written: Set[StateKey] = set()
+        for node_id in members:
+            inner = prepared.node(node_id)
+            if inner is None:
+                continue
+            written.update(_writes_of(inner.semantic))
+            # Trusted writes count here too. The main traversal treats them
+            # as establishing state, so omitting them made the later-leg
+            # check blind to a contract write and silently downgraded a
+            # reverse-leg dependency to "not written anywhere".
+            for effect in _trusted_effects(inner.semantic, capabilities):
+                written.update((k[0], k[1]) for k in effect.writes)
+        index[leg] = frozenset(written)
     return index
 
 

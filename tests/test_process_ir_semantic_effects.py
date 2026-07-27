@@ -693,3 +693,123 @@ def test_a_key_the_child_provably_does_not_write_is_not_its_ordering_hazard():
     codes = _async_pair(reads=(("dpp", "Z"),), writes=(("dpp", "A"),))
     assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE not in codes
     assert "PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE" in codes
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 3: both findings are consequences of scanning contract
+# reads for ordering — one missed race, one manufactured one.
+# ---------------------------------------------------------------------------
+
+
+def _pc(ref, wait):
+    return {"kind": "process_call", "process_ref": ref, "wait": wait,
+            "abort_on_error": False}
+
+
+def _sub(ref, *, reads=(), writes=()):
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        StateEffectV1,
+        SubprocessSummaryV1,
+    )
+
+    return SubprocessSummaryV1(
+        process_ref=ref,
+        effect=StateEffectV1(reads=reads, writes=writes, replay_safe=True),
+    )
+
+
+def _orch_codes(doc, refs, summaries):
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        ProcessIRValidationCapabilitiesV1,
+        validate_process_ir,
+    )
+
+    symbols = SymbolTableV1(symbols=tuple(
+        ComponentSymbolV1(ref=r, component_id="i{0}".format(n),
+                          component_type="process")
+        for n, r in enumerate(refs)
+    ))
+    report = validate_process_ir(
+        parse_process_ir_v1(doc),
+        symbols,
+        ProcessIRValidationCapabilitiesV1(subprocess_summaries=tuple(summaries)),
+    )
+    return {f.code for f in report.errors}
+
+
+def _branch_doc_of(legs):
+    return {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch",
+         "legs": [{"steps": leg, "terminal": {"kind": "stop"}} for leg in legs]}]}}
+
+
+def test_a_non_waiting_call_races_a_contract_read_in_a_LATER_branch_leg():
+    """Branch legs fan out in the CFG but run SEQUENTIALLY, so a leg-1 reader
+    is not a graph descendant of a leg-0 call while still executing after it.
+    A descendants-only scan reported nothing at all for this race."""
+    codes = _orch_codes(
+        _branch_doc_of([[_pc("$ref:a", False)], [_pc("$ref:b", True)]]),
+        ["$ref:a", "$ref:b"],
+        [_sub("$ref:a", writes=(("dpp", "A"),)), _sub("$ref:b", reads=(("dpp", "A"),))],
+    )
+    assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE in codes
+
+
+def test_a_reader_in_an_EARLIER_leg_is_an_order_defect_not_a_race():
+    """Discriminator: reversing the legs is a different defect, and must not be
+    relabelled as an ordering hazard of the async call."""
+    codes = _orch_codes(
+        _branch_doc_of([[_pc("$ref:b", True)], [_pc("$ref:a", False)]]),
+        ["$ref:a", "$ref:b"],
+        [_sub("$ref:a", writes=(("dpp", "A"),)), _sub("$ref:b", reads=(("dpp", "A"),))],
+    )
+    assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE not in codes
+
+
+def test_a_later_leg_reading_an_unrelated_key_is_not_the_calls_hazard():
+    """Discriminator: extending the scan must not flag every later-leg read."""
+    codes = _orch_codes(
+        _branch_doc_of([[_pc("$ref:a", False)], [_pc("$ref:b", True)]]),
+        ["$ref:a", "$ref:b"],
+        [_sub("$ref:a", writes=(("dpp", "A"),)),
+         _sub("$ref:b", reads=(("dpp", "OTHER"),))],
+    )
+    assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE not in codes
+
+
+def test_a_WAITING_call_in_an_earlier_leg_creates_no_hazard():
+    """Discriminator: the hazard is `wait=False`, not leg order."""
+    codes = _orch_codes(
+        _branch_doc_of([[_pc("$ref:a", True)], [_pc("$ref:b", True)]]),
+        ["$ref:a", "$ref:b"],
+        [_sub("$ref:a", writes=(("dpp", "A"),)), _sub("$ref:b", reads=(("dpp", "A"),))],
+    )
+    assert codes == set()
+
+
+def test_a_trusted_synchronous_writer_answers_an_unknown_calls_race():
+    """`in_process_writes` held only `_writes_of` results, so a key established
+    by a WAITING child's exact summary looked unwritten and the unknown async
+    call was blamed for it."""
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        _pc("$ref:u", False), _pc("$ref:w", True), _pc("$ref:r", True),
+        {"kind": "stop"}]}}
+    codes = _orch_codes(
+        doc, ["$ref:u", "$ref:w", "$ref:r"],
+        # deliberately NO summary for $ref:u — its effects are unknown
+        [_sub("$ref:w", writes=(("dpp", "A"),)), _sub("$ref:r", reads=(("dpp", "A"),))],
+    )
+    assert codes == set()
+
+
+def test_an_async_calls_own_declared_write_never_exempts_its_racer():
+    """The discriminator that keeps the fix above from disarming the check: a
+    non-waiting call's declared writes are the hazard, not a remedy for it."""
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        _pc("$ref:u", False), _pc("$ref:r", True), {"kind": "stop"}]}}
+    codes = _orch_codes(
+        doc, ["$ref:u", "$ref:r"],
+        [_sub("$ref:u", writes=(("dpp", "A"),)), _sub("$ref:r", reads=(("dpp", "A"),))],
+    )
+    assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE in codes

@@ -76,6 +76,7 @@ from .lineage import (
     DDP,
     DPP,
     StateKey,
+    _leg_member_index,
     _reads_of,
     _trusted_effects,
     _writes_of,
@@ -191,9 +192,26 @@ def collect_ordering_findings(
         for key in _writes_of(node.semantic):
             if key[0] != DDP:
                 in_process_writes.add(key)
+        # A trusted contract's writes establish state exactly as an authored
+        # write does — the lineage phase already treats them that way, and
+        # omitting them here rejected a valid sequence (unknown async call, a
+        # WAITING child that declares it writes A, then a reader of A) because
+        # nothing in this set could account for A.
+        #
+        # A non-waiting call's own declared writes are excluded: they are the
+        # hazard under investigation, not a remedy for it. Counting them would
+        # let an async writer exempt the very read that races it.
+        if node.semantic.semantic_kind == "process_call" and not getattr(
+            node.semantic, "wait", True
+        ):
+            continue
+        for effect in _trusted_effects(node.semantic, capabilities):
+            for key in effect.writes:
+                if key[0] != DDP:
+                    in_process_writes.add((key[0], key[1]))
 
     for call in non_waiting:
-        downstream = _downstream_nodes(prepared, call.node_id)
+        downstream = _execution_downstream(prepared, call.node_id)
         summary = capabilities.subprocess_effect(call.semantic.process_ref)
 
         if summary is None:
@@ -293,6 +311,33 @@ def _downstream_nodes(
         for edge in prepared.successors(current):
             stack.append(edge.target_node_id)
     return tuple(sorted(seen))
+
+
+def _execution_downstream(
+    prepared: PreparedProcessValidationV1, start: str
+) -> Tuple[str, ...]:
+    """Every node that may execute AFTER ``start``.
+
+    Graph descendants are not enough. Branch legs FAN OUT from the Branch node
+    and terminate separately, so no node in leg 1 is a descendant of any node
+    in leg 0 — yet legs run SEQUENTIALLY, which is precisely why an earlier
+    leg's execution-scoped write is visible to a later one. A ``wait=False``
+    call in leg 0 can therefore still be running while leg 1 reads what its
+    child writes, and a descendants-only scan reported nothing at all for that.
+
+    Later legs of every enclosing Branch are added, so a nested Branch picks up
+    the later legs of both its own Branch and the outer one.
+    """
+    nodes: Set[str] = set(_downstream_nodes(prepared, start))
+    legs = _leg_member_index(prepared)
+    for (branch_id, ordinal), members in legs.items():
+        if start not in members:
+            continue
+        for (other_branch, other_ordinal), other_members in legs.items():
+            if other_branch == branch_id and other_ordinal > ordinal:
+                nodes.update(other_members)
+    nodes.discard(start)
+    return tuple(sorted(nodes))
 
 
 def collect_effect_findings(
