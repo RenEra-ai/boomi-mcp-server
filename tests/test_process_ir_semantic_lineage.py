@@ -792,3 +792,89 @@ def test_no_node_can_produce_both_an_authored_and_a_declared_read():
     assert authored, "the authored-read kinds could not be recovered"
     assert trusted, "the trusted-effect kinds could not be recovered"
     assert authored.isdisjoint(trusted), sorted(authored & trusted)
+
+
+# ---------------------------------------------------------------------------
+# QA #205: "a non-waiting subprocess establishes no downstream state" first
+# shipped inside the main traversal ONLY. `_leg_write_index` and
+# `_written_anywhere` kept counting the async write, and because both decide
+# WHICH code a finding gets — and `_written_anywhere` gates the non-strict-read
+# skip — attaching a summary to an unrelated `wait=False` child turned a VALID
+# payload into a rejected one.
+# ---------------------------------------------------------------------------
+
+
+def _async_decision_doc(wait):
+    """A non-strict Decision `track` operand in leg 0, a subprocess in leg 1."""
+    decision = {
+        "kind": "decision", "comparison": "equals",
+        "left": {"value_type": "track", "property_id": "process.P"},
+        "right": {"value_type": "static", "static_value": "x"},
+        "true_arm": {"steps": [{"kind": "message", "text": "t"}],
+                     "terminal": {"kind": "stop"}},
+        "false_arm": {"steps": [{"kind": "message", "text": "f"}],
+                      "terminal": {"kind": "stop"}},
+    }
+    return {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "legs": [
+            {"steps": [{"kind": "message", "text": "m"}], "terminal": decision},
+            {"steps": [{"kind": "process_call", "process_ref": "$ref:a",
+                        "wait": wait, "abort_on_error": False}],
+             "terminal": {"kind": "stop"}}]}]}}
+
+
+def _async_case(wait, with_contract):
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        ProcessIRValidationCapabilitiesV1,
+        SubprocessSummaryV1,
+        validate_process_ir,
+    )
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        StateEffectV1 as _Effect,
+    )
+
+    symbols = SymbolTableV1(symbols=(
+        ComponentSymbolV1(ref="$ref:a", component_id="i1",
+                          component_type="process"),))
+    caps = ProcessIRValidationCapabilitiesV1(
+        subprocess_summaries=(SubprocessSummaryV1(
+            process_ref="$ref:a",
+            effect=_Effect(writes=(("dpp", "P"),), replay_safe=True)),)
+    ) if with_contract else ProcessIRValidationCapabilitiesV1()
+    return validate_process_ir(
+        parse_process_ir_v1(_async_decision_doc(wait)), symbols, caps
+    )
+
+
+def test_an_async_summary_cannot_turn_a_valid_payload_into_a_rejected_one():
+    """A `wait=False` child establishes nothing, so attaching its summary must
+    not change any verdict. A non-strict `track` operand is clean when nothing
+    writes it — and stayed clean without the contract, which is what made the
+    contract-induced rejection a pure false positive."""
+    assert _async_case(False, with_contract=False).is_valid is True
+    assert _async_case(False, with_contract=True).is_valid is True
+
+
+def test_a_waiting_childs_write_is_still_analysed():
+    """The discriminator. The exclusion must be about `wait`, not about
+    ignoring subprocess summaries: a WAITING child's write genuinely lands, and
+    here it lands in a LATER leg, so the read is a real ordering defect."""
+    report = _async_case(True, with_contract=True)
+    assert report.is_valid is False
+    assert PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID in {
+        f.code for f in report.errors
+    }
+
+
+def test_every_lattice_consumer_shares_one_establishing_writes_rule():
+    """The defect was one rule applied at one of three sites. Pinned
+    structurally: no consumer may read `effect.writes` directly."""
+    import inspect
+
+    from boomi_mcp.compiler.process_ir.semantic_validation import lineage
+
+    for fn in (lineage._leg_write_index, lineage._written_anywhere):
+        source = inspect.getsource(fn)
+        assert "_establishing_writes(" in source, fn.__name__
+        assert "effect.writes" not in source, fn.__name__

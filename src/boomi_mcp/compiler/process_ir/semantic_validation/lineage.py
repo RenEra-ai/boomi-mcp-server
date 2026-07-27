@@ -215,6 +215,38 @@ def _trusted_effects(
     return tuple(found)
 
 
+def _establishes_downstream(semantic) -> bool:
+    """Whether this node's contract writes prove anything to a later reader.
+
+    False for a fire-and-forget `process_call`: it may still be running. The
+    predicate lives HERE, on its own, because THREE consumers ask the question
+    and a rule applied to only one of them is not a rule.
+
+    It first shipped inside the main traversal alone. `_leg_write_index` and
+    `_written_anywhere` kept counting the async write, and because both feed the
+    diagnostic CHOICE, a non-strict Decision operand — clean on its own, since an
+    unwritten `track` operand is a defined empty string on the wire — became a
+    BLOCKING `…BRANCH_ORDER_INVALID` the moment a summary was attached to an
+    unrelated `wait=False` child. Adding a contract that establishes nothing
+    turned a valid payload into a rejected one.
+    """
+    return not (
+        semantic.semantic_kind == "process_call"
+        and not getattr(semantic, "wait", True)
+    )
+
+
+def _establishing_writes(semantic, capabilities) -> Tuple[StateKey, ...]:
+    """Every contract write this node establishes downstream — possibly none."""
+    if not _establishes_downstream(semantic):
+        return ()
+    return tuple(
+        (key[0], key[1])
+        for effect in _trusted_effects(semantic, capabilities)
+        for key in effect.writes
+    )
+
+
 def _opaque_reason(
     semantic, capabilities: ProcessIRValidationCapabilitiesV1
 ) -> Optional[str]:
@@ -385,11 +417,7 @@ def collect_lineage_findings(
         # through both checks and a `wait=False` child's declared DDP write
         # silently established a downstream read. DPP and cache only looked
         # correct because the ordering phase happened to cover them.
-        establishes_downstream = not (
-            semantic.semantic_kind == "process_call"
-            and not getattr(semantic, "wait", True)
-        )
-
+        establishes = _establishes_downstream(semantic)
         for effect in _trusted_effects(semantic, capabilities):
             for raw in effect.reads:
                 key = (raw[0], raw[1])
@@ -399,10 +427,10 @@ def collect_lineage_findings(
                     node, semantic, key, leg, extra=(("effect_kind", "declared_read"),)
                 )
             # A trusted contract contributes EXACT writes, visible to the next
-            # contract on this node. An untrusted node contributes none — that
-            # inversion of the legacy wildcard default is the whole point of
-            # the typed contract.
-            if not establishes_downstream:
+            # contract ON THIS NODE — one data_process can carry several
+            # contracted scripts and they run in sequence, so the walk over
+            # them has to be sequential too.
+            if not establishes:
                 continue
             for key in effect.writes:
                 state = state.with_write((key[0], key[1]))
@@ -521,8 +549,7 @@ def _leg_write_index(
             # as establishing state, so omitting them made the later-leg
             # check blind to a contract write and silently downgraded a
             # reverse-leg dependency to "not written anywhere".
-            for effect in _trusted_effects(inner.semantic, capabilities):
-                written.update((k[0], k[1]) for k in effect.writes)
+            written.update(_establishing_writes(inner.semantic, capabilities))
         index[leg] = frozenset(written)
     return index
 
@@ -557,9 +584,8 @@ def _written_anywhere(
     for node in prepared.cfg.nodes:
         if key in _writes_of(node.semantic):
             return True
-        for effect in _trusted_effects(node.semantic, capabilities):
-            if key in [(k[0], k[1]) for k in effect.writes]:
-                return True
+        if key in _establishing_writes(node.semantic, capabilities):
+            return True
     return False
 
 
