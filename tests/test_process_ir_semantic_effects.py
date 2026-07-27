@@ -842,3 +842,33 @@ def test_a_separate_synchronous_writer_still_exempts_the_read():
         [_sub("$ref:w", writes=(("dpp", "A"),)), _sub("$ref:r", reads=(("dpp", "A"),))],
     )
     assert codes == set()
+
+
+def test_another_nodes_write_still_exempts_a_read_write_contract():
+    """Codex review round 5. Excluding the reader's own writes by SUBTRACTING
+    them from a flat key union discarded every other node's contribution to the
+    same key, so a valid sequence — async call, a waiting writer of A, then a
+    waiting contract that reads AND writes A — was rejected. Writers are
+    tracked per node, because the question is "does some node OTHER THAN ME
+    write this?" and a set of keys cannot answer it."""
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        _pc("$ref:u", False), _pc("$ref:w", True), _pc("$ref:rw", True),
+        {"kind": "stop"}]}}
+    codes = _orch_codes(
+        doc, ["$ref:u", "$ref:w", "$ref:rw"],
+        [_sub("$ref:w", writes=(("dpp", "A"),)),
+         _sub("$ref:rw", reads=(("dpp", "A"),), writes=(("dpp", "A"),))],
+    )
+    assert codes == set()
+
+
+def test_the_self_write_exclusion_survives_the_per_node_rewrite():
+    """The round-4 behaviour must not regress: with NO other writer, the
+    read+write contract is still exposed to the race."""
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        _pc("$ref:u", False), _pc("$ref:rw", True), {"kind": "stop"}]}}
+    codes = _orch_codes(
+        doc, ["$ref:u", "$ref:rw"],
+        [_sub("$ref:rw", reads=(("dpp", "A"),), writes=(("dpp", "A"),))],
+    )
+    assert PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE in codes

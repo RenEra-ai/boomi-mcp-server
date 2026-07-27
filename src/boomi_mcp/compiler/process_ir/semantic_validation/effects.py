@@ -187,16 +187,26 @@ def collect_ordering_findings(
     # Every execution-scoped key some node in this process writes. A read of a
     # key nothing here writes, downstream of a non-waiting call, has no
     # candidate writer other than that call.
-    in_process_writes: Set[StateKey] = set()
+    # key -> the node ids that write it. Attribution is load-bearing, not
+    # bookkeeping: the question a read asks is "does some node OTHER THAN ME
+    # write this?", and a flat set of keys cannot answer it. Subtracting the
+    # reader's own writes from a flat union discards every other node's
+    # contribution to the same key, which rejected the valid sequence
+    # (async call, a waiting writer of A, then a waiting read+write of A).
+    writers_by_key: Dict[StateKey, Set[str]] = {}
+
+    def _record(key, node_id) -> None:
+        if key[0] != DDP:
+            writers_by_key.setdefault((key[0], key[1]), set()).add(node_id)
+
     for node in prepared.cfg.nodes:
         for key in _writes_of(node.semantic):
-            if key[0] != DDP:
-                in_process_writes.add(key)
+            _record(key, node.node_id)
         # A trusted contract's writes establish state exactly as an authored
         # write does — the lineage phase already treats them that way, and
         # omitting them here rejected a valid sequence (unknown async call, a
         # WAITING child that declares it writes A, then a reader of A) because
-        # nothing in this set could account for A.
+        # nothing here could account for A.
         #
         # A non-waiting call's own declared writes are excluded: they are the
         # hazard under investigation, not a remedy for it. Counting them would
@@ -207,8 +217,7 @@ def collect_ordering_findings(
             continue
         for effect in _trusted_effects(node.semantic, capabilities):
             for key in effect.writes:
-                if key[0] != DDP:
-                    in_process_writes.add((key[0], key[1]))
+                _record(key, node.node_id)
 
     for call in non_waiting:
         downstream = _execution_downstream(prepared, call.node_id)
@@ -258,18 +267,6 @@ def collect_ordering_findings(
                 # default that could absorb an unordered write.
                 reads.extend(((raw[0], raw[1]), False, True) for raw in effect.reads)
 
-            # A node's OWN contract writes never establish its OWN reads. One
-            # StateEffectV1 carries no intra-effect ordering, and the lineage
-            # phase resolves that the same way — reads are checked against the
-            # incoming state, then writes are applied. Without this a contract
-            # declaring `reads=(A,), writes=(A,)` exempted its own read from
-            # the very race it was exposed to.
-            own_writes = {
-                (k[0], k[1])
-                for effect in _trusted_effects(node.semantic, capabilities)
-                for k in effect.writes
-            }
-
             for key, has_default, strict in reads:
                 if has_default or key[0] == DDP:
                     continue
@@ -280,18 +277,26 @@ def collect_ordering_findings(
                     continue
                 if summary is not None:
                     # The summary is EXACT, so a key the child does not write
-                    # cannot race this call. Only `declared` decides. Testing
-                    # solely `key in in_process_writes and key not in declared`
+                    # cannot race this call. Only `declared` decides. Gating
+                    # instead on "some node writes it AND the child does not"
                     # reported a read of an unwritten key as an ordering hazard
                     # of a call demonstrably unrelated to it — while the
                     # lineage phase was already reporting the real defect
                     # ("nothing writes this") correctly.
                     if key not in declared:
                         continue
-                elif key in in_process_writes - own_writes:
-                    # The child's effects are unknown, but something ELSE in
+                elif any(
+                    writer != node_id for writer in writers_by_key.get(key, ())
+                ):
+                    # The child's effects are unknown, but some OTHER node in
                     # this process writes the key, so the read does not depend
                     # on the call.
+                    #
+                    # "Other" is the whole test. A node's own write never
+                    # establishes its own read: one StateEffectV1 carries no
+                    # intra-effect ordering, and the lineage phase resolves
+                    # that the same way — reads are checked against the
+                    # incoming state, then writes are applied.
                     #
                     # This membership test is deliberately order-BLIND, and a
                     # write that lands after the read still exempts it. That is
