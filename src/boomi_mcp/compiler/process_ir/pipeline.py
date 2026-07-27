@@ -11,7 +11,7 @@ value it touches.
 
 from __future__ import annotations
 
-from typing import Any, List, Tuple
+from typing import TYPE_CHECKING, Any, List, Optional, Tuple
 
 from ...errors import PROCESS_IR_COMPILE_INTERNAL
 from ...models.process_ir import (
@@ -31,6 +31,9 @@ from .diagnostics import (
 from .invariants import check_cfg_invariants, check_emission_plan_invariants
 from .lowering import lower_cfg_to_emission_plan, lower_process_ir_to_cfg
 
+if TYPE_CHECKING:  # pragma: no cover - typing only, avoids an import cycle
+    from .semantic_validation.validation_policy import LegacyValidationPolicyV1
+
 
 def _guarded(phase, action, *args):
     """Run one compiler stage, converting an unexpected error into a diagnostic.
@@ -48,14 +51,66 @@ def _guarded(phase, action, *args):
         ) from None
 
 
+def _enforce_semantic_report(ir, cfg, symbols, policy) -> None:
+    """Block the compile when the unified semantic report has ERRORS.
+
+    Imported lazily: ``semantic_validation`` imports the compiler's own
+    contracts, so a module-level import here would close a cycle.
+
+    ``policy`` is a legacy adapter's exemption set, or None for STRICT. Applying
+    it here rather than at an outer boundary is what lets the canonical path be
+    gated for everyone while a migrated dialect keeps the behaviour its goldens
+    pin — the two are not in tension once the adapter passes its identity in.
+
+    Errors block; warnings and advisories do not — the compile contract is an
+    artifact or an exception, with nowhere to carry a non-blocking finding.
+    """
+    from .semantic_validation.pipeline import validate_lowered_process_ir
+    from .semantic_validation.validation_policy import apply_policy
+
+    report = validate_lowered_process_ir(ir, cfg, symbols)
+    report = apply_policy(report, policy)
+    if not report.errors:
+        return
+    raise ProcessIRCompileError(
+        [
+            CompilerDiagnostic(
+                code=item.code,
+                phase="semantic_lowering",
+                path=item.path,
+                node_identity=item.node_identity,
+                message=item.message,
+                remediation=item.remediation,
+                internal_node_id=item.internal_node_id,
+            )
+            for item in report.errors
+        ]
+    )
+
+
 def compile_process_ir_v1(
-    ir: ProcessIRV1, symbols: SymbolTableV1
+    ir: ProcessIRV1,
+    symbols: SymbolTableV1,
+    *,
+    validation_policy: Optional["LegacyValidationPolicyV1"] = None,
 ) -> Tuple[SemanticCfgV1, EmissionPlanV1]:
     """Lower a validated IR into its CFG and emission plan, invariant-checked.
 
     Any unexpected exception becomes a single static ``PROCESS_IR_COMPILE_INTERNAL``
     diagnostic. The exception's text and type are deliberately NOT interpolated:
     an internal message can carry authored values, and diagnostics are logged.
+
+    ``validation_policy`` is how a LEGACY dialect carries its exemptions into the
+    canonical gate. It is a keyword with a STRICT default, so the compiler is
+    gated for every caller and a legacy adapter opts into its own documented
+    leniency rather than the compiler guessing an identity it cannot see.
+
+    An earlier attempt put this gate at ``emit_legacy_result`` instead, on the
+    reasoning that the compiler cannot know which adapter produced its IR and so
+    cannot look a policy up. That is true and beside the point: the adapter knows,
+    and can pass it. Leaving the canonical path ungated meant a direct caller of
+    this function got no semantic validation at all — which is the acceptance
+    criterion this issue exists to satisfy.
     """
     # Phase is part of the diagnostic contract, so an unexpected defect is
     # attributed to the stage it actually happened in — reporting a CFG-lowering
@@ -77,6 +132,10 @@ def compile_process_ir_v1(
     # The phase here only labels an UNEXPECTED crash; the deliberate diagnostics
     # inside carry their own (reference_resolution / semantic_lowering).
     _guarded("reference_resolution", validate_connector_calls, cfg, symbols)
+    # #143: the unified semantic gate. It runs on the CFG that was just lowered
+    # and BEFORE any emission plan exists, so "no plan lowering occurs with
+    # report errors" holds by construction rather than by convention.
+    _enforce_semantic_report(ir, cfg, symbols, validation_policy)
     plan = _guarded("emission_planning", lower_cfg_to_emission_plan, cfg, symbols)
     _guarded("emission_planning", check_emission_plan_invariants, plan, cfg, symbols)
     return cfg, plan

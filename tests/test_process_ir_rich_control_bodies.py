@@ -121,6 +121,10 @@ def rich_symbols() -> SymbolTableV1:
                 input_profile_ref="prof_db_write",
             ),
             _symbol("child_process", "process"),
+            # A real document cache. The one cache_get in this file used to name
+            # `child_process` — a PROCESS component — which nothing checked until
+            # #143 gated the compiler on the unified report.
+            _symbol("doc_cache", "documentcache"),
         )
     )
 
@@ -776,7 +780,9 @@ def test_a_send_may_be_followed_by_a_stream_replacing_cache_read():
             call("op_rest_get", action="GET"),
             {"kind": "branch", "legs": [
                 {"steps": [call("op_db_send", action="Send"),
-                           {"kind": "cache_get", "cache_ref": "child_process"}],
+                           {"kind": "cache_get", "cache_ref": "doc_cache",
+                            "empty_cache_behavior": "stopprocess",
+                            "external_writer": True}],
                  "terminal": {"kind": "stop"}},
                 {"steps": [{"kind": "message", "text": "m"}], "terminal": {"kind": "stop"}},
             ]},

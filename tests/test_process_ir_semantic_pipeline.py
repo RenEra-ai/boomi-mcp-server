@@ -324,8 +324,11 @@ def test_the_package_is_wired_at_exactly_the_two_intended_sites():
     silently is exactly what this catches.
 
     * ``integration_builder.py`` — slice 8, the plan/apply mutation gate.
-    * ``emission.py``            — slice 9, the canonical emission boundary,
-      which is where the adapter identity (hence the exemption policy) is known.
+    * ``pipeline.py``            — the CANONICAL compiler gate: every caller of
+      ``compile_process_ir_v1`` is validated before an emission plan exists.
+    * ``emission.py``            — the legacy adapter, which now only hands its
+      dialect identity across so the compiler can apply that dialect's
+      exemptions. It no longer runs a gate of its own.
     """
     result = subprocess.run(
         [
@@ -344,7 +347,7 @@ def test_the_package_is_wired_at_exactly_the_two_intended_sites():
     reached = sorted(
         Path(line).name for line in result.stdout.split() if line.strip()
     )
-    assert reached == ["emission.py", "integration_builder.py"], reached
+    assert reached == ["emission.py", "integration_builder.py", "pipeline.py"], reached
 
 
 # ---------------------------------------------------------------------------

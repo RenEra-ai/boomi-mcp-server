@@ -126,15 +126,37 @@ an opt-in.
 
 ## 8. Where the gate runs
 
-| Site | Slice | What it gates | Policy |
-|---|---|---|---|
-| `integration_builder._process_component_preflight` | 8 | plan/apply, for `create`/`create_clone`/`update` on process components | the config's dialect exemptions (`legacy_bridge.py`) |
-| `legacy_adapters.emission.emit_legacy_result` | 9 | the canonical `compile → emit` chain | the named dialect's registered exemptions |
+| Site | What it gates | Policy |
+|---|---|---|
+| `integration_builder._process_component_preflight` | plan/apply, for `create`/`create_clone`/`update` on process components | the config's dialect exemptions (`legacy_bridge.py`) |
+| `pipeline.compile_process_ir_v1` | **every** canonical compile, between CFG lowering and plan lowering | the caller's `validation_policy`, **strict** by default |
+
+`legacy_adapters.emission.emit_legacy_result` is no longer a gate. It passes
+`validation_policy=lookup_policy(dialect)` into the compiler and nothing else — the adapter supplies
+the one fact the compiler cannot derive (which dialect produced the IR), and the compiler does the
+gating for everyone.
 
 **Both gates apply the same policy.** An earlier draft of this table said the plan gate was
 "strict"; that was wrong, and the two-row contrast wrongly implied a payload could survive plan and
 die at emission. No payload can: `legacy_bridge.validate_legacy_process_config` resolves the adapter
-from the config and applies its registered policy exactly as the emission gate does.
+from the config and applies its registered policy exactly as the compiler gate does.
+
+### 8.1 Why the gate is in the compiler
+
+It was not, at first. The gate was placed in `compile_process_ir_v1`, measured at **27 failing
+tests**, and moved out to `emit_legacy_result` on the reasoning that the compiler cannot know which
+adapter produced its IR and therefore cannot look up an exemption policy.
+
+That reasoning was wrong, and the §6 architect review said so. The compiler cannot look the policy
+up — but the **adapter can, and can pass it**. Adding a `validation_policy` keyword with a strict
+default fixed **19 of the 27** failures outright. Of the remainder, most were fixture debt
+(`tests/test_process_ir_compiler.py` typed every symbol `"sentinel"`), and the rest were tests
+asserting the old placement.
+
+Leaving the canonical path ungated meant a **direct caller of the compiler got no semantic
+validation at all**, which is the acceptance criterion this issue exists to satisfy. Gating it also
+immediately found a real fixture bug that had been invisible: the only `cache_get` in
+`test_process_ir_rich_control_bodies.py` named a **process** component as its document cache.
 
 The shipped behavior is the one the feature needs. A genuinely strict plan gate would reject every
 legacy `flow_sequence` standalone cache read at plan time, and

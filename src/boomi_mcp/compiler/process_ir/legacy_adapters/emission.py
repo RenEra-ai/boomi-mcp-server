@@ -123,18 +123,27 @@ def emit_legacy_result(
     internally), so the caller translates it to its existing public builder error
     family while the internal cause is the plan-mandated code.
     """
+    from ..semantic_validation.validation_policy import lookup_policy
+
     resolve: Resolver = resolver or (lambda ref: ref)
     symbols = _symbol_table(result, resolve)
     try:
-        cfg, plan = compile_process_ir_v1(result.process_ir, symbols)
-        # #143: gate on the unified report, under this dialect's registered
-        # exemption policy. ``dialect=None`` means the caller did not name one,
-        # so no policy can be looked up and the gate is SKIPPED rather than run
-        # strictly — running it strictly would apply canonical rules to a legacy
-        # payload with its exemptions unavailable, which is precisely the
-        # mismatch that makes a compiler-internal gate unshippable.
-        if dialect is not None:
-            _enforce_semantic_report(result, symbols, cfg, dialect)
+        # #143: the unified gate lives in `compile_process_ir_v1`, which runs it
+        # for EVERY caller before any emission plan exists. This adapter's only
+        # job is to hand its identity across, so the dialect's registered
+        # exemptions apply to its own goldens.
+        #
+        # An earlier version gated here instead and skipped entirely when
+        # `dialect` was None, on the reasoning that the compiler cannot look up
+        # a policy it has no identity for. True, and beside the point: the
+        # ADAPTER has the identity and can pass it. Gating out here left every
+        # direct compiler caller unvalidated — the acceptance criterion this
+        # issue exists to satisfy. `dialect=None` now means STRICT, not skipped.
+        cfg, plan = compile_process_ir_v1(
+            result.process_ir,
+            symbols,
+            validation_policy=lookup_policy(dialect) if dialect else None,
+        )
         return emit_process(plan, symbols)
     except ProcessIRCompileError as exc:
         raise adapter_diagnostic(

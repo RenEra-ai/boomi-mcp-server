@@ -92,21 +92,48 @@ _REF_FIELDS_BY_SEMANTIC = {
 }
 
 
+#: The Boomi component type each reference ROLE must resolve to. Typing by role
+#: rather than by name matters: a `process_call` may name a literal component id
+#: rather than a `$ref:` token, and a name-keyed table would mistype it.
+#:
+#: These used to all be the single placeholder `"sentinel"`. That was invisible
+#: until #143 gated the compiler on the unified semantic report, which resolves
+#: every reference against its declared type and reported the whole fixture as
+#: `…REFERENCE_COMPONENT_TYPE_MISMATCH`. The placeholder was fixture debt, not a
+#: reason to leave the canonical path ungated.
+_COMPONENT_TYPE_BY_ROLE = {
+    "connection_ref": "connector-settings",
+    "operation_ref": "connector-action",
+    "map_ref": "transform.map",
+    "cache_ref": "documentcache",
+    "process_ref": "process",
+}
+
+#: A Data Process split/combine step declares a bare KIND; a Set-Properties
+#: profile source declares the FULL component type. Both are mirrored from the
+#: emitter, which is what actually enforces them.
+_DP_PROFILE_TYPE = {"json": "profile.json", "xml": "profile.xml"}
+
+
 def _refs_in(cfg):
-    """Every authored reference the emission plan will have to resolve."""
-    refs = set()
+    """``{ref: component_type}`` for every reference the plan must resolve."""
+    refs = {}
     for node in cfg.nodes:
         semantic = node.semantic
         for field in _REF_FIELDS_BY_SEMANTIC.get(semantic.semantic_kind, ()):
-            refs.add(getattr(semantic, field))
+            refs[getattr(semantic, field)] = _COMPONENT_TYPE_BY_ROLE[field]
         if semantic.semantic_kind == "data_process":
             for step in semantic.steps:
                 if getattr(step, "profile_ref", None):
-                    refs.add(step.profile_ref)
+                    refs[step.profile_ref] = _DP_PROFILE_TYPE.get(
+                        getattr(step, "profile_type", None), "profile.json"
+                    )
         if semantic.semantic_kind == "set_property":
             for source in semantic.source_values:
                 if getattr(source, "profile_ref", None):
-                    refs.add(source.profile_ref)
+                    refs[source.profile_ref] = (
+                        getattr(source, "profile_type", None) or "profile.json"
+                    )
     return refs
 
 
@@ -116,7 +143,8 @@ def _symbols_for(cfg, *, reverse=False):
     Component ids are the reference token itself — a sentinel, so no live id is
     ever committed, and any id that leaks into a diagnostic is obvious.
     """
-    refs = sorted(_refs_in(cfg), reverse=reverse)
+    typed = _refs_in(cfg)
+    refs = sorted(typed, reverse=reverse)
     symbols = []
     for ref in refs:
         binding = _BINDINGS.get(ref)
@@ -124,7 +152,7 @@ def _symbols_for(cfg, *, reverse=False):
             ComponentSymbolV1(
                 ref=ref,
                 component_id=ref,
-                component_type="sentinel",
+                component_type=typed[ref],
                 connector_type=binding["connector_type"] if binding else None,
                 action_type=binding["action_type"] if binding else None,
             )

@@ -832,42 +832,45 @@ deep the corruption happened to be rather than on what kind of defect it was.
 Full contract: [PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md).
 Migration matrix: [M12 Compatibility Inventory](./M12_COMPATIBILITY_INVENTORY.md) §7.
 
-### 13.1 Where the gate runs — and where it deliberately does NOT
+### 13.1 Where the gate runs
 
-`compile_process_ir_v1` is **unchanged**. The plan placed the gate inside it; that was implemented
-and measured, and it breaks the legacy parity suites for TWO independent reasons.
-First, structurally: canonical validation is deliberately stricter than the legacy surface, the
-legacy surface keeps its behaviour through exemptions keyed on ADAPTER IDENTITY, and
-`compile_process_ir_v1(ir, symbols)` does not know which adapter produced its IR. Second, and
-covered by no exemption: the compiler's own fixtures use placeholder component types, which the
-reference phase reports as `…REFERENCE_COMPONENT_TYPE_MISMATCH`. A faithful reproduction measures
-**20 failing tests** — 17 / 7 / 3 across those three codes (7 tests carry two). An earlier version
-said "exactly" the two exemption-covered codes; that was wrong.
+`compile_process_ir_v1(ir, symbols, *, validation_policy=None)` **is the gate**. It runs the unified
+semantic report between CFG lowering and emission-plan lowering, so every canonical compile is
+validated and "no plan lowering occurs with report errors" holds by construction.
 
-The gate therefore runs at the two places that know their context:
-`integration_builder._process_component_preflight` (plan/apply) and
-`legacy_adapters.emission.emit_legacy_result` (the canonical `compile → emit` chain).
+`validation_policy` is how a legacy dialect carries its exemptions in. The default is **strict**, so
+a direct caller gets the canonical rules and a migrated adapter opts into its own documented
+leniency. `emit_legacy_result` passes `lookup_policy(dialect)` and no longer gates anything itself;
+`dialect=None` now means STRICT, not skipped.
+
+**This section previously said the opposite** — that `compile_process_ir_v1` was unchanged and the
+gate could not live there, for two reasons: that the compiler cannot know which adapter produced its
+IR (so cannot look up a policy), and that the compiler's own fixtures used placeholder component
+types. The §6 architect review rejected both and re-measurement agreed. The compiler cannot look the
+policy up, but the ADAPTER can and can pass it: adding the keyword fixed **19 of the 27** failing
+tests outright. The fixtures were debt — `tests/test_process_ir_compiler.py` typed every symbol
+`"sentinel"` — not an argument for leaving the canonical path ungated, which was the acceptance
+criterion at stake. Gating the compiler also immediately caught a real fixture bug that nothing else
+had: the one `cache_get` in `test_process_ir_rich_control_bodies.py` named a **process** component as
+its document cache.
 
 **The normative table lives in
 [PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md) §8 and is not duplicated
 here.** It was duplicated once, and the copy drifted: the sibling was corrected to say both gates
 apply the same dialect-exemption policy, while this copy went on saying the plan gate was `strict` —
-so the two documents stated opposite things about one row, and this one reproduced exactly the
-two-row contrast the sibling had been edited to remove. One authoritative table, referenced.
-
-`emit_legacy_result(result, *, resolver=None, dialect=None)` — with `dialect=None` the gate is
-SKIPPED, not run strictly. Running strictly with exemptions unavailable is the same mismatch that
-makes a compiler-internal gate unshippable.
+so the two documents stated opposite things about one row. One authoritative table, referenced.
 
 ### 13.2 Normative order on the canonical path
 
 ```
 parse → body capabilities → lower to CFG → CFG invariants → connector calls
-      → lower to emission plan → plan invariants → [#143 semantic report] → emit → verify
+      → [#143 semantic report] → lower to emission plan → plan invariants → emit → verify
 ```
 
 The report validates the CFG that was **just lowered**, not a fresh one — the gate must judge exactly
-the graph about to be emitted.
+the graph about to be emitted. It sits BEFORE plan lowering: a payload with report errors never
+reaches an emitter, so the "no mutation on a fatal finding" criterion holds structurally rather than
+by the ordering of two independent checks.
 
 ### 13.3 What did NOT change
 
