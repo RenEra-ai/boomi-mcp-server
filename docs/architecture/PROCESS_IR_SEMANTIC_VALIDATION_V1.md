@@ -336,18 +336,28 @@ from silence — and so the next issue that extends this module knows what is ge
 and once again inside the gate, because `flow.collect_connector_flow_findings` DELEGATES to it
 rather than re-deriving its rules.
 
-Removing the standalone compiler stage was tried and **breaks 11 tests** in
-`tests/test_connector_call_resolution.py`: the delegation does not surface every #140 code the way
-the direct stage does, so the two are not interchangeable. Removing the delegation instead is also
-wrong — `validate_process_ir` is a public entry point, and standalone callers have nothing else
-validating their connector calls.
+Removing the standalone compiler stage was tried and **breaks 9 tests** in
+`tests/test_connector_call_resolution.py`. An earlier version of this section reported 11 and
+concluded that "the delegation does not surface every #140 code" — **both were wrong**, and the
+measurement says something more useful.
 
-Eliminating the duplication properly means threading resolved connector facts through
-`PreparedProcessValidationV1` so both readers share one derivation. That is the plan's
-"prepared-fact reuse", it is a real improvement, and it is a refactor of the validation context
-rather than a patch. It is deliberately **not** attempted here: the duplication costs a second pass
-over the CFG and is otherwise invisible — both runs see the same graph and reach the same verdict,
-and the first one raising means the second never observes a divergent state.
+Every failure is `assert 'semantic_lowering' == 'reference_resolution'`. The #140 **codes and paths
+are preserved exactly**; what changes is the compiler PHASE, because `_enforce_semantic_report`
+converts findings back into `CompilerDiagnostic`s with a hardcoded `phase="semantic_lowering"`,
+discarding the validation phase `flow._phase_for(code)` had already assigned.
+
+So the duplicate pass **is** removable, and the blocking work is small and specific: map the
+finding's validation phase back to its compiler phase in `_enforce_semantic_report` instead of
+hardcoding one. That is left to a follow-up rather than done here because it changes the `phase`
+field of every diagnostic the gate emits — a contract other callers key on — and deserves its own
+review round rather than riding along in a documentation change.
+
+Removing the delegation instead is not an option: `validate_process_ir` is a public entry point, and
+standalone callers have nothing else validating their connector calls.
+
+Until then the cost is one extra pass over the CFG and nothing else: both runs see the same graph
+and reach the same verdict, and the first one raising means the second never observes a divergent
+state.
 
 Related, and also accepted: plan preflight synthesizes its symbol table from adapter
 `symbol_requirements` rather than from `components_by_key`, so the generic missing/type-mismatch
@@ -367,7 +377,16 @@ remove.
 
 Also not shipped, for the same reason: a separate pure `validate_legacy_result`
 (`validate_legacy_process_config` is that function, reached from the config rather than the result),
-and the four planned deterministic report/IR snapshot fixtures — report determinism is asserted
-directly by `test_report_buckets_are_ordered_deterministically_across_runs` and
-`test_validation_is_pure_and_repeatable`, which pin the property rather than a frozen artifact that
-must be regenerated on every message change.
+and the four planned deterministic report/IR snapshot fixtures.
+
+On that last one, an earlier version of this section cited
+`test_report_buckets_are_ordered_deterministically_across_runs` and
+`test_validation_is_pure_and_repeatable` as replacing the fixtures. They do not, and the objection is
+correct: both call validation twice **inside one pytest process**, so they share a hash seed and
+assert no expected bytes — a report that is deterministic but CHANGED passes both, and so does an
+ordering that varies only between interpreter invocations.
+
+`test_the_report_is_byte_identical_across_processes` closes exactly that gap: it serializes the
+canonical report in two subprocesses run under **different `PYTHONHASHSEED` values** and compares the
+bytes. It tests the property the fixtures were meant to protect (cross-process stability) without a
+frozen artifact that has to be regenerated whenever a message string changes.

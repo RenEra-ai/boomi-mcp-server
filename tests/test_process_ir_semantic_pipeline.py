@@ -808,3 +808,55 @@ def test_the_capability_finding_carries_no_contract_content():
     blob = report.model_dump_json()
     assert "secret-map" not in blob
     assert "/capabilities/map_effects/0" in blob
+
+
+def test_the_report_is_byte_identical_across_processes():
+    """Codex review round 11. `test_validation_is_pure_and_repeatable` and
+    `test_report_buckets_are_ordered_deterministically_across_runs` both call
+    validation twice INSIDE one pytest process, so they share a hash seed and
+    assert no expected bytes — a report that is deterministic but changed passes
+    both, and so does an ordering that varies only between interpreter runs.
+
+    This runs the same document in two subprocesses under DIFFERENT
+    `PYTHONHASHSEED` values and compares the serialized bytes, which is the
+    property the planned snapshot fixtures existed to protect — without a frozen
+    artifact that must be regenerated whenever a message string changes.
+    """
+    import os
+
+    program = (
+        "import json,sys;"
+        "sys.path.insert(0,'src');sys.path.insert(0,'.');"
+        "from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1,SymbolTableV1;"
+        "from boomi_mcp.compiler.process_ir.semantic_validation import "
+        "canonical_report_json,validate_process_ir;"
+        "from boomi_mcp.models.process_ir import parse_process_ir_v1;"
+        "doc=json.load(open('tests/fixtures/process_ir/process_ir_v1.json'))['linear_flow'];"
+        "ir=parse_process_ir_v1(doc);"
+        "from boomi_mcp.compiler.process_ir.lowering import lower_process_ir_to_cfg;"
+        "roles={'connection_ref':'connector-settings','operation_ref':'connector-action',"
+        "'map_ref':'transform.map','cache_ref':'documentcache','process_ref':'process'};"
+        "refs={};"
+        "cfg=lower_process_ir_to_cfg(ir);"
+        "[refs.__setitem__(getattr(n.semantic,r),t) for n in cfg.nodes for r,t in roles.items()"
+        " if isinstance(getattr(n.semantic,r,None),str) and getattr(n.semantic,r)];"
+        "[refs.__setitem__(i.profile_ref,'profile.json') for n in cfg.nodes"
+        " for c in ('steps','source_values') for i in (getattr(n.semantic,c,()) or ())"
+        " if isinstance(getattr(i,'profile_ref',None),str)];"
+        "st=SymbolTableV1(symbols=tuple(ComponentSymbolV1(ref=r,component_id='id'+r,"
+        "component_type=t) for r,t in sorted(refs.items())));"
+        "sys.stdout.write(canonical_report_json(validate_process_ir(ir,st)))"
+    )
+
+    outputs = []
+    for seed in ("0", "12345"):
+        env = dict(os.environ, PYTHONHASHSEED=seed, PYTHONPATH="src:.")
+        result = subprocess.run(
+            [sys.executable, "-c", program],
+            capture_output=True, text=True, cwd=str(_ROOT), env=env,
+        )
+        assert result.returncode == 0, result.stderr[-2000:]
+        outputs.append(result.stdout)
+
+    assert outputs[0], "the probe produced no report"
+    assert outputs[0] == outputs[1], "report bytes differ across hash seeds"
