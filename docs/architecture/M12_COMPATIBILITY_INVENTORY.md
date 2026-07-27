@@ -1432,8 +1432,10 @@ leg and a property read in a later one, under the empty default capabilities —
 `test_the_unsafe_branch_is_producible_from_an_authorable_document`), while remaining unreachable from
 every legacy config in this corpus, because `flow_sequence` cannot author a `process_call` and
 `wrapper_subprocess` cannot author the Branch and its property reader. It is counted here as
-legacy-unreachable, which is what this census measures, and §10 of the sibling document classifies
-it by the ProcessIR surface instead.
+legacy-unreachable, which is what this census measures — and §10 A of the sibling document uses the
+SAME legacy scope, so the two agree. Both also record the direct-API reachability separately, because
+that is a different question with a different answer and conflating them is what made three earlier
+drafts of these sections contradict each other.
 
 The 5 implemented codes and the 2 inert exemption rows ARE wired correctly — forcing the condition
 makes each fire. That argument does **not** extend to the single group-B code: `finding()` accepts
