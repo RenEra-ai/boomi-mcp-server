@@ -15,6 +15,7 @@ which is why 3 is asserted separately and in both directions.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -714,3 +715,31 @@ def test_an_authored_and_a_declared_read_of_the_same_graph_agree():
     authored = _codes(_branch_doc([[_read_prop("dpp", "A")], [_set_prop("dpp", "A")]]))
     declared = _declared_codes(_branch_doc([[_MAP], [_set_prop("dpp", "A")]]), [("dpp", "A")])
     assert authored == declared == {PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID}
+
+
+def test_no_node_can_produce_both_an_authored_and_a_declared_read():
+    """`_report` dedups on `(code, node_id)` and ignores evidence, so if one
+    node could raise the same code down both read paths, the first would win
+    and the `declared_read` marker would silently vanish.
+
+    It cannot today: the two sources cover disjoint semantic kinds. That is an
+    INVARIANT, not a coincidence — extending `_trusted_effects` to a kind
+    `_reads_of` already handles would reintroduce the collapse with no test
+    failing anywhere else. Pinned here so that change has to be deliberate.
+    """
+    import inspect
+
+    from boomi_mcp.compiler.process_ir.semantic_validation import lineage
+
+    def _kinds(fn):
+        found = set()
+        for line in inspect.getsource(fn).splitlines():
+            for token in re.findall(r'kind\s*(?:==|in)\s*(\(?[^:]+)', line):
+                found.update(re.findall(r'"([a-z_]+)"', token))
+        return found
+
+    authored = _kinds(lineage._reads_of)
+    trusted = _kinds(lineage._trusted_effects)
+    assert authored, "the authored-read kinds could not be recovered"
+    assert trusted, "the trusted-effect kinds could not be recovered"
+    assert authored.isdisjoint(trusted), sorted(authored & trusted)
