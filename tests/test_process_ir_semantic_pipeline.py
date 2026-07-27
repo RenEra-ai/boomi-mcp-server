@@ -737,3 +737,71 @@ def test_an_exactly_declared_profile_still_reports_a_real_mismatch():
     must not disarm the check for the supported ones."""
     assert _MISMATCH in _codes_for("profile.json", "profile.xml")
     assert _MISMATCH not in _codes_for("PROFILE.JSON", "profile.xml")
+
+
+# ---------------------------------------------------------------------------
+# §6 architect review: the `capability` phase existed in the order with no
+# collector, and PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID was registered,
+# given message and remediation text, and emitted by nobody.
+# ---------------------------------------------------------------------------
+
+_CONTRACT_INVALID = "PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID"
+_EFFECT = StateEffectV1(writes=(("dpp", "A"),), replay_safe=True)
+
+
+def _map_doc():
+    return _doc([{"kind": "map_ref", "map_ref": "$ref:m"}])
+
+
+def _caps_codes(capabilities):
+    doc = _map_doc()
+    ir = parse_process_ir_v1(doc)
+    return {f.code for f in validate_process_ir(ir, _symbols_for(ir), capabilities).errors}
+
+
+def test_a_contract_bound_to_a_map_that_is_not_in_the_document_is_reported():
+    """A contract naming a map the document does not contain is a CALLER error.
+    Ignoring it let a caller believe the map was vouched for while the node
+    stayed opaque, and the only symptom was a lineage warning pointing at the
+    NODE rather than at the contract that failed to match it."""
+    caps = ProcessIRValidationCapabilitiesV1(
+        map_effects=(MapEffectContractV1(map_ref="$ref:ghost", effect=_EFFECT),))
+    assert _CONTRACT_INVALID in _caps_codes(caps)
+
+
+def test_an_unbound_script_or_subprocess_contract_is_reported():
+    script = ProcessIRValidationCapabilitiesV1(script_effects=(
+        ScriptEffectContractV1(language="groovy2",
+                               source_sha256=hashlib.sha256(b"absent").hexdigest(),
+                               effect=_EFFECT),))
+    subprocess_ = ProcessIRValidationCapabilitiesV1(subprocess_summaries=(
+        SubprocessSummaryV1(process_ref="$ref:ghost", effect=_EFFECT),))
+    assert _CONTRACT_INVALID in _caps_codes(script)
+    assert _CONTRACT_INVALID in _caps_codes(subprocess_)
+
+
+def test_a_contract_that_does_bind_is_not_reported():
+    """The discriminator: a collector that flagged every contract would satisfy
+    the cases above and make the whole capability surface unusable."""
+    caps = ProcessIRValidationCapabilitiesV1(
+        map_effects=(MapEffectContractV1(map_ref="$ref:m", effect=_EFFECT),))
+    assert _CONTRACT_INVALID not in _caps_codes(caps)
+
+
+def test_the_default_capability_set_reports_nothing():
+    """Empty is the strict default and must stay silent — otherwise every
+    existing caller acquires an error."""
+    assert _CONTRACT_INVALID not in _caps_codes(DEFAULT_VALIDATION_CAPABILITIES)
+
+
+def test_the_capability_finding_carries_no_contract_content():
+    """Binding keys are caller-supplied strings. Only the container and index
+    reach the report, so no map ref, script text or digest can leak."""
+    caps = ProcessIRValidationCapabilitiesV1(
+        map_effects=(MapEffectContractV1(map_ref="$ref:secret-map", effect=_EFFECT),))
+    doc = _map_doc()
+    ir = parse_process_ir_v1(doc)
+    report = validate_process_ir(ir, _symbols_for(ir), caps)
+    blob = report.model_dump_json()
+    assert "secret-map" not in blob
+    assert "/capabilities/map_effects/0" in blob

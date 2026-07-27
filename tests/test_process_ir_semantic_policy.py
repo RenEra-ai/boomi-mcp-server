@@ -212,3 +212,49 @@ def test_lookup_is_keyed_on_adapter_identity_not_on_a_payload_token():
     string a caller could invent and have honoured."""
     for adapter in registered_adapters():
         assert lookup_policy(adapter).adapter == adapter
+
+
+# ---------------------------------------------------------------------------
+# §6 architect review: "registry-owned" and "immutable by construction" were
+# both only comments — the objects and the mapping were freely mutable.
+# ---------------------------------------------------------------------------
+
+
+def test_a_registered_policy_cannot_be_mutated():
+    """`__slots__` bounds WHICH attributes exist, not whether they can be
+    reassigned. Policies are shared module-level singletons reached through
+    `lookup_policy`, so one assignment repointed the registered policy for every
+    later caller in the process — the exact loosening this registry prevents."""
+    from boomi_mcp.compiler.process_ir.semantic_validation.validation_policy import (
+        lookup_policy,
+    )
+
+    policy = lookup_policy("flow_sequence")
+    with pytest.raises(AttributeError):
+        policy.adapter = "hacked"
+    with pytest.raises(AttributeError):
+        del policy.adapter
+    assert lookup_policy("flow_sequence").adapter == "flow_sequence"
+
+
+def test_the_policy_registry_itself_cannot_be_extended_at_runtime():
+    """An injected adapter policy would grant exemptions no review ever saw."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import validation_policy
+
+    with pytest.raises(TypeError):
+        validation_policy._POLICY_REGISTRY["injected"] = None
+    assert "injected" not in validation_policy.registered_adapters()
+
+
+def test_the_shipped_policies_still_work_after_being_frozen():
+    """The discriminator: freezing must not break construction or lookup."""
+    from boomi_mcp.compiler.process_ir.semantic_validation.validation_policy import (
+        lookup_policy,
+        registered_adapters,
+    )
+
+    assert set(registered_adapters()) == {
+        "flow_sequence", "wrapper_subprocess", "sync_pipeline",
+    }
+    assert len(lookup_policy("flow_sequence").exemptions) == 3
+    assert lookup_policy("nonexistent") is None

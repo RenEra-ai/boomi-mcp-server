@@ -28,8 +28,10 @@ convert a compiler bug into a user-facing validation finding.
 
 from __future__ import annotations
 
+import hashlib
 from typing import List, Optional, Tuple
 
+from ....errors import PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID
 from ....models.process_ir import ProcessIRV1
 from ..contracts import SymbolTableV1
 from .contracts import (
@@ -43,7 +45,10 @@ from .context import PreparedProcessValidationV1, prepare_validation_context
 from .effects import collect_effect_findings
 from .flow import collect_flow_findings
 from .lineage import collect_lineage_findings
+from .findings import finding
 from .references import collect_reference_findings
+
+_CAPABILITY_PHASE = "capability"
 
 
 def validate_process_ir(
@@ -108,6 +113,8 @@ def _validate_prepared(
     """
     findings: List[ValidationDiagnosticV1] = []
 
+    findings.extend(_collect_capability_findings(prepared, capabilities))
+
     reference_findings, reference_facts = collect_reference_findings(prepared)
     findings.extend(reference_findings)
 
@@ -122,6 +129,67 @@ def _validate_prepared(
     return build_validation_report(
         _suppress_dependents(findings, prepared, reference_facts)
     )
+
+
+def _collect_capability_findings(
+    prepared: PreparedProcessValidationV1,
+    capabilities: ProcessIRValidationCapabilitiesV1,
+) -> Tuple[ValidationDiagnosticV1, ...]:
+    """A supplied contract that binds to NOTHING in this IR.
+
+    The `capability` phase existed in the order with no collector behind it, and
+    `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` was registered, given a
+    message and a remediation, and emitted by nobody. A contract naming a map,
+    script digest or subprocess the document does not contain is a CALLER error:
+    silently ignoring it meant a caller could believe a map was vouched for
+    while the node stayed opaque, and the only symptom was a
+    `…LINEAGE_EFFECT_UNKNOWN` warning pointing at the node rather than at the
+    contract that failed to match it.
+
+    Binding keys only — no contract CONTENT reaches a diagnostic, so the
+    evidence stays inside the closed vocabulary the redaction boundary allows.
+    """
+    map_refs: set = set()
+    process_refs: set = set()
+    script_keys: set = set()
+    for node in prepared.cfg.nodes:
+        semantic = node.semantic
+        kind = semantic.semantic_kind
+        if kind == "map":
+            map_refs.add(semantic.map_ref)
+        elif kind == "process_call":
+            process_refs.add(semantic.process_ref)
+        elif kind == "data_process":
+            for step in getattr(semantic, "steps", ()) or ():
+                if getattr(step, "operation", None) != "custom_scripting":
+                    continue
+                digest = hashlib.sha256(step.script.encode("utf-8")).hexdigest()
+                script_keys.add((step.language, digest))
+
+    findings: List[ValidationDiagnosticV1] = []
+
+    def _unbound(container: str, index: int, effect_kind: str) -> None:
+        findings.append(
+            finding(
+                PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID,
+                "error",
+                _CAPABILITY_PHASE,
+                "/capabilities/{0}/{1}".format(container, index),
+                evidence=(("effect_kind", effect_kind),),
+            )
+        )
+
+    for index, item in enumerate(capabilities.map_effects):
+        if item.map_ref not in map_refs:
+            _unbound("map_effects", index, "map")
+    for index, item in enumerate(capabilities.script_effects):
+        if (item.language, item.source_sha256) not in script_keys:
+            _unbound("script_effects", index, "script")
+    for index, item in enumerate(capabilities.subprocess_summaries):
+        if item.process_ref not in process_refs:
+            _unbound("subprocess_summaries", index, "subprocess")
+
+    return tuple(findings)
 
 
 def _suppress_dependents(

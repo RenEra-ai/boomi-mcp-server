@@ -30,6 +30,7 @@ adapter path applies a policy, and only the one registered for itself.
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import Dict, FrozenSet, List, Mapping, Optional, Tuple
 
 from ....errors import (
@@ -69,7 +70,17 @@ _EXEMPT_CODE: Mapping[str, str] = {
 
 
 class LegacyValidationPolicyV1:
-    """One adapter's exemption set. Immutable by construction."""
+    """One adapter's exemption set. Immutable by construction.
+
+    ``__slots__`` alone does NOT buy that, and the claim above was false until
+    ``__setattr__`` existed: slots bound WHICH attributes a policy has, not
+    whether they can be reassigned. ``policy.adapter = "other"`` succeeded — and
+    because policies are shared module-level singletons reached through
+    ``lookup_policy``, that one assignment repointed the registered policy for
+    every later caller in the process. An adapter's exemption set is exactly the
+    thing that must not be reachable at runtime, so it is closed here rather
+    than asserted in a docstring.
+    """
 
     __slots__ = ("adapter", "_exemptions")
 
@@ -77,8 +88,18 @@ class LegacyValidationPolicyV1:
         for code in exemptions:
             if code not in _EXEMPT_CODE:
                 raise ValueError("unknown exemption code")
-        self.adapter = adapter
-        self._exemptions: FrozenSet[str] = frozenset(exemptions)
+        object.__setattr__(self, "adapter", adapter)
+        object.__setattr__(self, "_exemptions", frozenset(exemptions))
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError(
+            "LegacyValidationPolicyV1 is immutable; exemptions are registry-owned"
+        )
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(
+            "LegacyValidationPolicyV1 is immutable; exemptions are registry-owned"
+        )
 
     @property
     def exemptions(self) -> FrozenSet[str]:
@@ -95,7 +116,12 @@ class LegacyValidationPolicyV1:
 #: The complete set of shipped policies, keyed by ADAPTER identity. Module-level
 #: and never mutated: adding an exemption is a code change with a review, which
 #: is exactly the property "registry-owned" is meant to buy.
-_POLICY_REGISTRY: Dict[str, LegacyValidationPolicyV1] = {
+#:
+#: Wrapped in a MappingProxyType because "never mutated" was, until then, only a
+#: comment — a plain dict accepted a new adapter policy injected at runtime,
+#: which is precisely the loosening this registry exists to prevent. The policy
+#: OBJECTS are already frozen; the mapping that holds them now is too.
+_POLICY_REGISTRY: Mapping[str, LegacyValidationPolicyV1] = MappingProxyType({
     "flow_sequence": LegacyValidationPolicyV1(
         "flow_sequence",
         (
@@ -112,7 +138,7 @@ _POLICY_REGISTRY: Dict[str, LegacyValidationPolicyV1] = {
         "sync_pipeline",
         (LEGACY_ADAPTER_EXEMPTION_OPAQUE_STATE_WRITER,),
     ),
-}
+})
 
 
 def lookup_policy(adapter: str) -> Optional[LegacyValidationPolicyV1]:

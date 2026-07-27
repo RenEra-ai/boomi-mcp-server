@@ -5561,11 +5561,33 @@ def _process_ir_semantic_error(
     boundary), so there is no authored text available to interpolate even if a
     future edit wanted to.
     """
+    from ..compiler.process_ir.diagnostics import ProcessIRCompileError
     from ..compiler.process_ir.semantic_validation.legacy_bridge import (
         validate_legacy_process_config,
     )
+    from ..errors import PROCESS_IR_COMPILE_INTERNAL
 
-    report = validate_legacy_process_config(process_kind, raw_config)
+    try:
+        report = validate_legacy_process_config(process_kind, raw_config)
+    except ProcessIRCompileError as exc:
+        # A COMPILER defect, not an authoring error. It still blocks: the bridge
+        # used to swallow this and return None, which reads here as "nothing
+        # blocks" and let an UNVALIDATED process be built. The code stays in the
+        # compiler's own family — #143 reuses it rather than minting one, per
+        # ADR-001 §7 — and the message says plainly whose bug it is.
+        first = exc.diagnostics[0] if getattr(exc, "diagnostics", None) else None
+        return BuilderValidationError(
+            "ProcessIR semantic validation could not complete for this process.",
+            error_code=getattr(first, "code", PROCESS_IR_COMPILE_INTERNAL),
+            field="config",
+            hint=getattr(
+                first,
+                "remediation",
+                "This is a compiler defect, not a payload error. Please report it.",
+            ),
+            details={"codes": [getattr(first, "code", PROCESS_IR_COMPILE_INTERNAL)]},
+        )
+
     if report is None or not report.errors:
         return None
 

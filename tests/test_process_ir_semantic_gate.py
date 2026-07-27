@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -402,3 +403,84 @@ def test_the_guard_tuple_still_covers_every_authoring_action():
     marker = "process_flow_err = _process_ir_semantic_error(process_kind, raw_config)"
     guard = source.split(marker)[0][-600:]
     assert 'planned_action in ("create", "create_clone", "update")' in guard
+
+
+# ---------------------------------------------------------------------------
+# §6 architect review: the preflight bridge swallowed EVERY exception and
+# returned None, which the gate reads as "nothing blocks" — so an internal
+# failure of the validator became a silent approval of an UNVALIDATED payload.
+#
+# Fail OPEN on projection (above) and fail CLOSED on a defect are different
+# directions on purpose; only the second was wrong.
+# ---------------------------------------------------------------------------
+
+#: A config the flow_sequence adapter can actually PROJECT. `_flow_sequence_config`
+#: alone cannot: the adapter needs the endpoints too, and without them projection
+#: fails and the bridge returns None long before the validator is reached.
+_PROJECTABLE = {
+    "process_kind": "database_to_api_sync",
+    "source": {
+        "connector_type": "database",
+        "connection_id": "11111111-1111-1111-1111-111111111111",
+        "operation_id": "22222222-2222-2222-2222-222222222222",
+        "action_type": "Get",
+    },
+    "transform": {"mode": "passthrough"},
+    "target": {
+        "connector_type": "rest",
+        "connection_id": "33333333-3333-3333-3333-333333333333",
+        "operation_id": "44444444-4444-4444-4444-444444444444",
+        "action_type": "POST",
+    },
+    "flow_sequence": [
+        {
+            "kind": "set_dpp",
+            "name": "OUT",
+            "source_values": [{"value_type": "static", "value": "v"}],
+        }
+    ],
+}
+
+
+def _boom(*_args, **_kwargs):
+    raise RuntimeError("simulated validator defect")
+
+
+def test_a_validator_defect_raises_instead_of_reporting_no_findings():
+    """`validate_process_ir` documents that it raises only on a COMPILER
+    defect. Swallowing that and returning None told the caller the payload was
+    clean."""
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.semantic_validation import legacy_bridge as LB
+
+    config = dict(_PROJECTABLE)
+    with mock.patch.object(LB, "validate_process_ir", _boom):
+        with pytest.raises(ProcessIRCompileError) as excinfo:
+            validate_legacy_process_config("database_to_api_sync", config)
+    assert excinfo.value.diagnostics[0].code == "PROCESS_IR_COMPILE_INTERNAL"
+
+
+def test_the_builder_turns_that_defect_into_a_blocking_error():
+    """It still blocks — but under the COMPILER's own code, reused rather than
+    minted, and with a message that says whose bug it is."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import legacy_bridge as LB
+
+    config = dict(_PROJECTABLE)
+    with mock.patch.object(LB, "validate_process_ir", _boom):
+        error = _process_ir_semantic_error("database_to_api_sync", config)
+    assert error is not None
+    assert error.error_code == "PROCESS_IR_COMPILE_INTERNAL"
+
+
+def test_the_same_payload_is_clean_when_the_validator_is_healthy():
+    """The discriminator: the block above comes from the defect, not the
+    payload."""
+    config = dict(_PROJECTABLE)
+    assert _process_ir_semantic_error("database_to_api_sync", config) is None
+
+
+def test_a_projection_failure_still_fails_OPEN():
+    """The other direction must be untouched: an adapter that cannot project
+    the config still returns None rather than raising."""
+    broken = _flow_sequence_config([{"kind": "not_a_real_step"}])
+    assert validate_legacy_process_config("database_to_api_sync", broken) is None

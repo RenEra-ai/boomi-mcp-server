@@ -29,7 +29,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from ....errors import PROCESS_IR_COMPILE_INTERNAL
 from ..contracts import ComponentSymbolV1, SymbolTableV1
+from ..diagnostics import CompilerDiagnostic, ProcessIRCompileError
 from .contracts import (
     DEFAULT_VALIDATION_CAPABILITIES,
     ProcessIRValidationCapabilitiesV1,
@@ -117,10 +119,34 @@ def validate_legacy_process_config(
     if process_ir is None:
         return None
 
+    # A compiler defect is not the author's fault — but it is not a PASS either.
+    # This used to swallow every exception and return None, which the plan gate
+    # reads as "nothing blocks", so an internal failure of the validator became
+    # a silent approval of an UNVALIDATED payload. `validate_process_ir`
+    # documents that it raises only on a compiler defect, so the exception is
+    # propagated for the caller to classify under the compiler's own
+    # PROCESS_IR_COMPILE_INTERNAL. Fail closed: an unvalidated process does not
+    # get built.
     try:
         report = validate_process_ir(process_ir, _symbols_from(result), capabilities)
-    except Exception:  # noqa: BLE001 — a compiler defect is not the author's fault
-        return None
+    except ProcessIRCompileError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — anything else is also a defect here
+        raise ProcessIRCompileError(
+            [
+                CompilerDiagnostic(
+                    code=PROCESS_IR_COMPILE_INTERNAL,
+                    phase="semantic_lowering",
+                    path="",
+                    node_identity="",
+                    message="semantic validation failed unexpectedly",
+                    remediation=(
+                        "This is a compiler defect, not a payload error. "
+                        "Please report it with the process configuration."
+                    ),
+                )
+            ]
+        ) from exc
 
     return apply_policy(report, lookup_policy(policy_name))
 
