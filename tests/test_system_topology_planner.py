@@ -565,3 +565,110 @@ def test_a_prerequisite_type_always_matches_the_resolved_type():
     assert plan.blockers == (), [b.code for b in plan.blockers]
     emitted = {p.component_type for p in plan.executable_component_prerequisites}
     assert emitted == set(_COMPONENT_BACKED.values()), emitted
+
+
+def test_conflicting_duplicate_symbol_rows_resolve_deterministically():
+    """QA #231. The previous duplicate-row pin used two rows that NORMALIZE the same.
+
+    ``api_service`` and ``webservice`` both become ``webservice``, so the sort
+    could be dropped with the test still green — and dropping it reintroduces
+    both the order-dependence and a verdict flip. Rows whose CANONICAL types
+    genuinely conflict are what grade the ordering.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "prof",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "$ref:k"}
+            ],
+            "relations": [],
+        }
+    )
+    as_process = ComponentPlanSymbolV1(component_key="k", component_type="process")
+    as_cache = ComponentPlanSymbolV1(component_key="k", component_type="documentcache")
+
+    plans = [
+        plan_system_topology(
+            spec,
+            TopologyResolutionContextV1(profile="prof", component_plan_symbols=rows),
+        )
+        for rows in ((as_process, as_cache), (as_cache, as_process))
+    ]
+    # Same verdict AND same bytes, whichever order the caller supplied.
+    assert canonical_topology_plan_json(plans[0]) == canonical_topology_plan_json(
+        plans[1]
+    )
+
+    # And the specific VALUE is pinned, not just its stability. Asserting only
+    # that the two orders agree leaves the resolution rule free to change —
+    # ``dict(prepared.symbols)`` takes the last pair in sorted order, and
+    # ``dict(reversed(...))`` takes the first, and both are order-independent.
+    # Sorted-last is the rule; ``documentcache`` sorts before ``process``.
+    assert [p.component_type for p in plans[0].executable_component_prerequisites] == [
+        "process"
+    ]
+    assert plans[0].blockers == ()
+
+
+def test_two_objects_sharing_one_component_ref_do_not_break_the_plan():
+    """QA #232. Dropping the prerequisite dedup raises an INVARIANT error.
+
+    Two objects may legally share a ``component_ref`` — the schema forbids
+    duplicate object KEYS, not duplicate refs — so the dedup is the only thing
+    keeping a schema-legal spec from tripping the uniqueness invariant, which
+    would surface as a planner defect rather than an authored-payload problem.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "prof",
+            "objects": [
+                {"kind": "process", "key": "first", "component_ref": "$ref:shared"},
+                {"kind": "process", "key": "second", "component_ref": "$ref:shared"},
+            ],
+            "relations": [],
+        }
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="prof",
+            component_plan_symbols=(
+                ComponentPlanSymbolV1(component_key="shared", component_type="process"),
+            ),
+        ),
+    )
+    assert [p.component_key for p in plan.executable_component_prerequisites] == [
+        "shared"
+    ]
+
+
+def test_a_symbol_with_a_blank_type_still_becomes_a_prerequisite():
+    """QA #232. ``is None`` is not truthiness.
+
+    A symbol whose type normalizes to the empty string is present in the index;
+    testing truthiness instead of ``is None`` silently dropped it from the
+    prerequisites while resolution had already judged it.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "prof",
+            "objects": [{"kind": "process", "key": "a", "component_ref": "$ref:k"}],
+            "relations": [],
+        }
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="prof",
+            component_plan_symbols=(
+                ComponentPlanSymbolV1(component_key="k", component_type=""),
+            ),
+        ),
+    )
+    # It is judged — a blank type is not ``process`` — and it is still reported
+    # rather than silently vanishing.
+    assert [p.component_key for p in plan.executable_component_prerequisites] == ["k"]
+    assert [b.code for b in plan.blockers] == ["TOPOLOGY_REFERENCE_TYPE_MISMATCH"]

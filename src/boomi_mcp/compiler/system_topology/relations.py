@@ -359,16 +359,34 @@ def collect_environment_findings(
         )
 
     if snapshot is not None:
-        observed = {e.environment_id: e.classification for e in snapshot.environments}
+        # Every OBSERVED classification per environment, profile-filtered.
+        #
+        # Three defects in one line, previously: a ``{id: classification}``
+        # comprehension is last-wins, so a duplicate row with ``classification
+        # is None`` — the designed output of ``_opt_classification`` for a
+        # missing or mis-cased field — ERASED a real contradiction and a blocked
+        # plan came back valid. That is failing OPEN, not merely
+        # order-dependent. It also read the raw snapshot, so a foreign-account
+        # row supplied the classification for this account's environment.
+        #
+        # Unobserved rows contribute nothing rather than overwriting; a
+        # contradiction against any observed value is a finding.
+        observed: Dict[str, Set[str]] = {}
+        for fact in snapshot.environments:
+            if fact.profile != snapshot.profile or fact.classification is None:
+                continue
+            observed.setdefault(fact.environment_id, set()).add(fact.classification)
         for index, obj in enumerate(spec.objects):
             if obj.kind != "environment" or obj.classification is None:
                 continue
-            actual = observed.get(obj.environment_ref)
+            seen = observed.get(obj.environment_ref)
             # Only a CONTRADICTION is a finding. An environment discovery did
-            # not see is a not-found problem, already reported by the reference
-            # collector; reporting it twice under a different code would send a
-            # caller chasing a classification bug that does not exist.
-            if actual is not None and actual != obj.classification:
+            # not see — or saw without a classification — is not a
+            # classification problem; the reference collector already reports a
+            # genuinely missing environment, and reporting it twice under a
+            # different code would send a caller chasing a bug that does not
+            # exist.
+            if seen and obj.classification not in seen:
                 findings.append(
                     topology_finding(
                         TOPOLOGY_ENVIRONMENT_MISMATCH,

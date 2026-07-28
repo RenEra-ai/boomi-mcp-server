@@ -1937,3 +1937,128 @@ def test_two_disjoint_cycles_are_both_indexed():
     components = _cyclic_sccs(nodes, _arcs(spec))
     assert len(components) == 2, components
     assert set().union(*components) == set(nodes)
+
+
+# ---------------------------------------------------------------------------
+# QA round 10 — the last-wins class at its final site, and two ungraded pins
+# ---------------------------------------------------------------------------
+
+
+def _classification_verdict(env_facts):
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "x", "component_ref": "$ref:k"},
+                {
+                    "kind": "environment",
+                    "key": "e",
+                    "environment_ref": "env-1",
+                    "classification": "TEST",
+                },
+            ],
+            "relations": [],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(component_key="k", component_type="process"),
+        ),
+        snapshot=_snapshot(environments=env_facts),
+    )
+    return [
+        d
+        for d in validate_system_topology(spec, ctx).errors
+        if d.code == "TOPOLOGY_ENVIRONMENT_MISMATCH"
+    ]
+
+
+_REAL = EnvironmentFactV1(
+    profile="p-alpha", environment_id="env-1", classification="PROD"
+)
+_BLANK = EnvironmentFactV1(
+    profile="p-alpha", environment_id="env-1", classification=None
+)
+_AGREES = EnvironmentFactV1(
+    profile="p-alpha", environment_id="env-1", classification="TEST"
+)
+
+
+def test_a_blank_duplicate_cannot_erase_an_observed_contradiction():
+    """QA #230. A last-wins comprehension failed OPEN, not merely order-dependent.
+
+    ``classification=None`` is the designed output of ``_opt_classification``
+    for a missing or mis-cased field, so a second row carrying one overwrote a
+    real ``PROD`` observation and a blocked plan came back valid. Unobserved
+    rows must contribute nothing rather than overwrite.
+    """
+    assert _classification_verdict((_REAL,)), "baseline: the contradiction is seen"
+    assert _classification_verdict((_REAL, _BLANK)), "a blank must not erase it"
+    assert _classification_verdict((_BLANK, _REAL))
+    assert _classification_verdict((_BLANK, _REAL, _BLANK))
+
+
+def test_the_classification_verdict_is_order_independent():
+    forward = _classification_verdict((_REAL, _BLANK))
+    reverse = _classification_verdict((_BLANK, _REAL))
+    assert [d.path for d in forward] == [d.path for d in reverse]
+
+
+def test_an_agreeing_or_unobserved_classification_is_not_a_finding():
+    """Negative control: only a genuine contradiction may fire."""
+    assert _classification_verdict((_AGREES,)) == []
+    assert _classification_verdict((_BLANK,)) == []
+    assert _classification_verdict(()) == []
+    assert _classification_verdict((_AGREES, _BLANK)) == []
+
+
+def test_a_foreign_profile_row_never_supplies_a_classification():
+    """The collector read the RAW snapshot, so another account's row decided this.
+
+    The mixed-profile snapshot is still reported — at ``/profile_ref``, which is
+    what it actually is — but no classification claim is built on it.
+    """
+    foreign = EnvironmentFactV1(
+        profile="OTHER-ACCOUNT", environment_id="env-1", classification="PROD"
+    )
+    findings = _classification_verdict((foreign,))
+    assert findings, "the mixed-profile snapshot itself must still be reported"
+    assert all(d.path == "/profile_ref" for d in findings), [d.path for d in findings]
+    assert all(
+        "mixed-profile-snapshot" in " ".join(d.provenance) for d in findings
+    ), findings
+
+
+def test_no_last_wins_dict_survives_over_a_raw_caller_supplied_collection():
+    """The CLASS, not the instance.
+
+    Rounds 2, 3 and this one were all the same defect: a dict comprehension over
+    a caller-supplied collection that nothing constrains to be unique. Scanning
+    the source keeps a fourth instance from being written; the comment on each
+    surviving comprehension has to say why its key is unique.
+    """
+    import ast
+
+    package = (
+        _project_root / "src" / "boomi_mcp" / "compiler" / "system_topology"
+    )
+    offenders = []
+    for path in sorted(package.glob("*.py")):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.DictComp):
+                continue
+            source = ast.get_source_segment(path.read_text(), node) or ""
+            # A comprehension over the PREPARED index is fine: it is normalized,
+            # deduplicated and sorted by construction.
+            if "prepared.symbols" in source or "prepared.components" in source:
+                continue
+            # Over spec.objects/relations is fine: duplicate keys are already a
+            # schema error, and those sites use setdefault deliberately.
+            if "spec.objects" in source or "spec.relations" in source:
+                continue
+            if "snapshot." in source or "ctx." in source or "context." in source:
+                offenders.append((path.name, source.split("\n")[0]))
+    assert offenders == [], offenders
