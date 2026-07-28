@@ -148,13 +148,37 @@ def plan_system_topology(
     findings, planned = _collect(spec, prepared)
     report = build_topology_report(findings)
 
-    # Computed once, and used by BOTH resolution and the prerequisite filter: an
-    # object that drew a blocker is neither resolved nor built.
-    blocked_object_indexes = set(
-        _blocked_object_indexes({d.path for d in report.errors})
+    # Two different exclusions, deliberately not one set.
+    #
+    # ``unresolvable`` is the narrow one: objects whose REFERENCE itself failed,
+    # or that duplicate an earlier key. Only those may be dropped from
+    # ``resolved_references``, whose contract is "authored references that
+    # resolved". An environment whose authored CLASSIFICATION disagrees with
+    # discovery resolved perfectly well — excluding it because some other field
+    # drew a blocker deletes a true row from the resolution table.
+    #
+    # ``blocked_object_indexes`` is the broad one: any object-level blocker at
+    # all. That is the right test for the EXECUTABLE bucket, where the question
+    # is "should a consumer build this", and the answer for an object carrying
+    # any blocker is no.
+    error_paths = {d.path for d in report.errors}
+    unresolvable = set(
+        _blocked_object_indexes(
+            {
+                d.path
+                for d in report.errors
+                if d.code
+                in (
+                    "TOPOLOGY_REFERENCE_NOT_FOUND",
+                    "TOPOLOGY_REFERENCE_TYPE_MISMATCH",
+                    "TOPOLOGY_SCHEMA_DUPLICATE_KEY",
+                )
+            }
+        )
     )
+    blocked_object_indexes = set(_blocked_object_indexes(error_paths))
 
-    resolved = resolve_topology_references(spec, prepared, blocked_object_indexes)
+    resolved = resolve_topology_references(spec, prepared, unresolvable)
 
     # Only a $ref-backed object whose symbol is present becomes a prerequisite.
     # A literal id names something that already exists — reporting it as

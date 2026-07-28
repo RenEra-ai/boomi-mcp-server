@@ -746,3 +746,78 @@ def test_a_symbol_with_a_blank_type_is_judged_and_excluded_from_prerequisites():
     )
     assert [b.code for b in plan.blockers] == ["TOPOLOGY_REFERENCE_TYPE_MISMATCH"]
     assert plan.executable_component_prerequisites == ()
+
+
+def test_a_non_reference_blocker_does_not_delete_a_resolved_reference():
+    """Two exclusions, deliberately not one set.
+
+    ``resolved_references`` records "authored references that RESOLVED". An
+    environment whose authored classification disagrees with discovery resolved
+    perfectly well — excluding it because some other field on the same object
+    drew a blocker deletes a true row from the resolution table. The executable
+    bucket asks a different question ("should a consumer build this"), and there
+    any blocker is disqualifying.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "prof",
+            "objects": [
+                {"kind": "process", "key": "x", "component_ref": "$ref:k"},
+                {
+                    "kind": "environment",
+                    "key": "e",
+                    "environment_ref": "env-1",
+                    "classification": "TEST",
+                },
+            ],
+            "relations": [],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="prof",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(component_key="k", component_type="process"),
+        ),
+        snapshot=TopologyDiscoverySnapshotV1(
+            profile="prof",
+            captured_at="t",
+            source_revision="r",
+            service_release="s",
+            environments=(
+                EnvironmentFactV1(
+                    profile="prof", environment_id="env-1", classification="PROD"
+                ),
+            ),
+        ),
+    )
+    plan = plan_system_topology(spec, ctx)
+    assert [b.code for b in plan.blockers] == ["TOPOLOGY_ENVIRONMENT_MISMATCH"]
+    # The environment reference itself resolved, and is recorded.
+    assert ("e", "platform_resource") in [
+        (r.object_key, r.resolution) for r in plan.resolved_references
+    ]
+
+
+def test_a_reference_blocker_does_delete_the_resolved_reference():
+    """The counterpart: a reference that did NOT resolve is not recorded."""
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "prof",
+            "objects": [{"kind": "process", "key": "a", "component_ref": "$ref:k"}],
+            "relations": [],
+        }
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="prof",
+            component_plan_symbols=(
+                ComponentPlanSymbolV1(component_key="k", component_type="documentcache"),
+            ),
+        ),
+    )
+    assert [b.code for b in plan.blockers] == ["TOPOLOGY_REFERENCE_TYPE_MISMATCH"]
+    assert plan.resolved_references == ()
+    assert plan.executable_component_prerequisites == ()
