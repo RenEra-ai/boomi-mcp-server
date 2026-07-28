@@ -70,10 +70,31 @@ def _form(component_ref: str) -> str:
     return "planned" if component_ref.startswith(_REF_TOKEN_PREFIX) else "existing"
 
 
-def _witness_form_ok(subject_ref: str, witness: Optional[str]) -> bool:
-    if witness is None:
-        return False
-    return witness in _WITNESS_FORMS[_form(subject_ref)]
+def _accepted_witness(subject_ref: str, candidates) -> Optional[str]:
+    """The witness this subject's form accepts, or None.
+
+    Takes ALL candidates for the edge, not whichever one a dict comprehension
+    happened to keep. Building the lookup as ``{key: row.witness for row in ...}``
+    silently retains the LAST row for a duplicated key, so a context holding a
+    valid ``process_ir`` and a stale ``component_xml`` for the same edge gated
+    or accepted purely on their order in the tuple — the same evidence SET,
+    two different verdicts. Nothing constrains that tuple to be unique, and a
+    contract whose central claim is determinism cannot decide on input order.
+
+    "Any candidate of the accepted form" is also monotone: adding evidence can
+    turn a gated relation into a witnessed one, never the reverse.
+    """
+    accepted = sorted(
+        w for w in candidates if w in _WITNESS_FORMS[_form(subject_ref)]
+    )
+    # Sorted, then first. Today the choice is unobservable — every evidence
+    # model's ``witness`` Literal overlaps each form's accepted set in exactly
+    # ONE value, so ``accepted`` never holds two distinct kinds. The sort is
+    # here for the day a Literal widens: at that point the tie becomes real, and
+    # a total order is what keeps the plan from depending on input order again.
+    # ``test_at_most_one_witness_kind_is_accepted_per_form`` pins the invariant
+    # so the widening surfaces rather than silently reintroducing ambiguity.
+    return accepted[0] if accepted else None
 
 
 def _object_index(spec: SystemTopologySpecV1) -> Dict[str, object]:
@@ -203,18 +224,22 @@ def collect_lifecycle_findings(
     objects = _object_index(spec)
     ctx = prepared.context
 
-    call_witnesses = {
-        (e.caller_component_ref, e.callee_component_ref): e.witness
-        for e in ctx.process_call_evidence
-    }
-    route_witnesses = {
-        (e.api_service_component_ref, e.listener_component_ref): e.witness
-        for e in ctx.api_service_route_evidence
-    }
-    use_witnesses = {
-        (e.process_component_ref, e.resource_component_ref, e.resource_kind): e.witness
-        for e in ctx.shared_resource_use_evidence
-    }
+    # Every candidate per edge, not one survivor of a dict comprehension.
+    call_witnesses: Dict[Tuple[str, str], List[str]] = {}
+    for e in ctx.process_call_evidence:
+        call_witnesses.setdefault(
+            (e.caller_component_ref, e.callee_component_ref), []
+        ).append(e.witness)
+    route_witnesses: Dict[Tuple[str, str], List[str]] = {}
+    for e in ctx.api_service_route_evidence:
+        route_witnesses.setdefault(
+            (e.api_service_component_ref, e.listener_component_ref), []
+        ).append(e.witness)
+    use_witnesses: Dict[Tuple[str, str, str], List[str]] = {}
+    for e in ctx.shared_resource_use_evidence:
+        use_witnesses.setdefault(
+            (e.process_component_ref, e.resource_component_ref, e.resource_kind), []
+        ).append(e.witness)
 
     for index, rel in enumerate(spec.relations):
         if rel.kind not in _WITNESS_REQUIRED:
@@ -230,7 +255,7 @@ def collect_lifecycle_findings(
                 )
             continue
 
-        witness = None
+        candidates: List[str] = []
         # The subject whose artifact does the witnessing: the CALLER of a call,
         # the API service that routes, the process that uses a resource.
         subject_ref = ""
@@ -238,24 +263,25 @@ def collect_lifecycle_findings(
             caller = _component_ref(objects.get(rel.caller_process))
             callee = _component_ref(objects.get(rel.callee_process))
             subject_ref = caller
-            witness = call_witnesses.get((caller, callee))
+            candidates = call_witnesses.get((caller, callee), [])
         elif rel.kind == "api_service_route":
             asc = _component_ref(objects.get(rel.api_service))
             listener = _component_ref(objects.get(rel.listener_process))
             subject_ref = asc
-            witness = route_witnesses.get((asc, listener))
+            candidates = route_witnesses.get((asc, listener), [])
         elif rel.kind == "document_cache_use":
             process = _component_ref(objects.get(rel.process))
             cache = _component_ref(objects.get(rel.document_cache))
             subject_ref = process
-            witness = use_witnesses.get((process, cache, "document_cache"))
+            candidates = use_witnesses.get((process, cache, "document_cache"), [])
         elif rel.kind == "process_property_use":
             process = _component_ref(objects.get(rel.process))
             prop = _component_ref(objects.get(rel.process_property))
             subject_ref = process
-            witness = use_witnesses.get((process, prop, "process_property"))
+            candidates = use_witnesses.get((process, prop, "process_property"), [])
 
-        if not _witness_form_ok(subject_ref, witness):
+        witness = _accepted_witness(subject_ref, candidates)
+        if witness is None:
             findings.append(
                 topology_finding(
                     TOPOLOGY_CAPABILITY_GATED,

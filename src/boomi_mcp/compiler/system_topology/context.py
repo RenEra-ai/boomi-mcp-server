@@ -329,9 +329,16 @@ def prepare_topology_context(
     )
     snapshot = revalidated.snapshot
 
+    # Normalized HERE, not only in ``project_component_plan_symbols``.
+    # ``TopologyResolutionContextV1`` is a public input: a caller can assemble
+    # ``component_plan_symbols`` directly and never touch the projection helper,
+    # and a builder-legal alias such as ``api_service`` would then be compared
+    # verbatim against ``webservice`` and reported as a type mismatch against
+    # its own object. ``prepare_topology_context`` is the one gate every path
+    # passes through, so the rule belongs here.
     symbols = tuple(
         sorted(
-            (s.component_key, s.component_type)
+            (s.component_key, _normalize_component_type(s.component_type))
             for s in revalidated.component_plan_symbols
         )
     )
@@ -371,7 +378,10 @@ def prepare_topology_context(
         context=revalidated,
         symbols=symbols,
         components=tuple(
-            sorted((c.component_id, c.component_type) for c in kept_components)
+            sorted(
+                (c.component_id, _normalize_component_type(c.component_type))
+                for c in kept_components
+            )
         ),
         environment_ids=tuple(sorted(e.environment_id for e in kept_environments)),
         runtime_ids=tuple(sorted(r.runtime_id for r in kept_runtimes)),

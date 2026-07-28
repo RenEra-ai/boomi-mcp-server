@@ -1485,3 +1485,261 @@ def test_the_topology_alias_map_agrees_with_the_builders():
     for required in set(_COMPONENT_BACKED.values()):
         assert topology_normalize(required) == required, required
         assert _normalize_component_type(required) == required, required
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 2 — three P2 defects in the round-1 fixes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("alias", ["api_service", "api.service", "API_SERVICE"])
+def test_an_alias_supplied_through_the_public_context_is_normalized(alias):
+    """R2. ``TopologyResolutionContextV1`` is a public input.
+
+    A caller can assemble ``component_plan_symbols`` directly and never touch
+    ``project_component_plan_symbols``, so normalizing only in the projection
+    left a builder-legal alias reporting a type mismatch against its own object.
+    ``prepare_topology_context`` is the one gate every path passes through.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [{"kind": "api_service", "key": "a", "component_ref": "$ref:ak"}],
+            "relations": [],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(component_key="ak", component_type=alias),
+        ),
+    )
+    assert validate_system_topology(spec, ctx).errors == (), alias
+
+
+def test_a_live_component_fact_type_is_normalized_too():
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [{"kind": "api_service", "key": "a", "component_ref": "asc-1"}],
+            "relations": [],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        snapshot=_snapshot(
+            components=(
+                ComponentFactV1(
+                    profile="p-alpha", component_id="asc-1", component_type="API_Service"
+                ),
+            ),
+            pagination=_complete("webservice"),
+        ),
+    )
+    assert validate_system_topology(spec, ctx).errors == ()
+
+
+def _ordered_witness_verdict(evidence):
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "$ref:ka"},
+                {"kind": "process", "key": "b", "component_ref": "$ref:kb"},
+            ],
+            "relations": [
+                {"kind": "process_call", "key": "r", "caller_process": "a", "callee_process": "b"}
+            ],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(component_key="ka", component_type="process"),
+            ComponentPlanSymbolV1(component_key="kb", component_type="process"),
+        ),
+        process_call_evidence=evidence,
+    )
+    return _codes(validate_system_topology(spec, ctx))
+
+
+def test_the_witness_verdict_does_not_depend_on_evidence_order():
+    """R2. The same evidence SET gave two different verdicts.
+
+    A ``{key: row.witness for row in ...}`` comprehension keeps the LAST row for
+    a duplicated key, and nothing constrains the evidence tuple to be unique —
+    so a valid ``process_ir`` beside a stale ``component_xml`` gated or passed
+    purely on their order. A contract whose central claim is determinism cannot
+    decide on input order.
+    """
+    good = ProcessCallEvidenceV1(
+        caller_component_ref="$ref:ka",
+        callee_component_ref="$ref:kb",
+        witness="process_ir",
+    )
+    stale = ProcessCallEvidenceV1(
+        caller_component_ref="$ref:ka",
+        callee_component_ref="$ref:kb",
+        witness="component_xml",
+    )
+    forward = _ordered_witness_verdict((good, stale))
+    reverse = _ordered_witness_verdict((stale, good))
+    assert forward == reverse, (forward, reverse)
+    assert forward == [], forward
+
+
+def test_adding_evidence_never_removes_a_witness():
+    """Monotonicity: more evidence must not gate a previously-witnessed edge."""
+    good = ProcessCallEvidenceV1(
+        caller_component_ref="$ref:ka",
+        callee_component_ref="$ref:kb",
+        witness="process_ir",
+    )
+    stale = ProcessCallEvidenceV1(
+        caller_component_ref="$ref:ka",
+        callee_component_ref="$ref:kb",
+        witness="component_xml",
+    )
+    assert _ordered_witness_verdict((good,)) == []
+    assert _ordered_witness_verdict((good, stale)) == []
+    assert _ordered_witness_verdict((good, stale, stale)) == []
+
+
+def test_only_wrong_form_evidence_still_gates():
+    """Negative control: the form rule must still bite when nothing fits."""
+    stale = ProcessCallEvidenceV1(
+        caller_component_ref="$ref:ka",
+        callee_component_ref="$ref:kb",
+        witness="component_xml",
+    )
+    assert _ordered_witness_verdict((stale, stale)) == ["TOPOLOGY_CAPABILITY_GATED"]
+
+
+def test_the_planned_witness_reported_is_deterministic():
+    """The witness recorded in the plan must not depend on order either."""
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "$ref:ka"},
+                {"kind": "process", "key": "b", "component_ref": "$ref:kb"},
+            ],
+            "relations": [
+                {"kind": "process_call", "key": "r", "caller_process": "a", "callee_process": "b"}
+            ],
+        }
+    )
+    symbols = (
+        ComponentPlanSymbolV1(component_key="ka", component_type="process"),
+        ComponentPlanSymbolV1(component_key="kb", component_type="process"),
+    )
+    rows = [
+        ProcessCallEvidenceV1(
+            caller_component_ref="$ref:ka",
+            callee_component_ref="$ref:kb",
+            witness=w,
+        )
+        for w in ("process_ir", "component_xml")
+    ]
+    seen = set()
+    for order in (tuple(rows), tuple(reversed(rows))):
+        plan = plan_system_topology(
+            spec,
+            TopologyResolutionContextV1(
+                profile="p-alpha",
+                component_plan_symbols=symbols,
+                process_call_evidence=order,
+            ),
+        )
+        seen.add(tuple((r.relation_key, r.witness) for r in plan.planning_only_relations))
+    assert len(seen) == 1, seen
+
+
+def test_cycle_detection_is_linear_in_the_number_of_components():
+    """R2. One self-call per process makes components == arcs.
+
+    Scanning every SCC per arc is O(arcs x components); ``SystemTopologySpecV1``
+    bounds neither objects nor relations, and self-calls reach this collector
+    even though the relation phase also flags them. Ratio-based so the test is
+    not machine-speed dependent.
+    """
+    import time
+
+    from boomi_mcp.compiler.system_topology.dependencies import (
+        collect_dependency_findings,
+    )
+
+    def build(n):
+        return parse_system_topology_v1(
+            {
+                "version": "1",
+                "profile_ref": "p-alpha",
+                "objects": [
+                    {"kind": "process", "key": f"n{i}", "component_ref": f"$ref:k{i}"}
+                    for i in range(n)
+                ],
+                "relations": [
+                    {
+                        "kind": "process_call",
+                        "key": f"r{i}",
+                        "caller_process": f"n{i}",
+                        "callee_process": f"n{i}",
+                    }
+                    for i in range(n)
+                ],
+            }
+        )
+
+    def elapsed(spec):
+        start = time.perf_counter()
+        collect_dependency_findings(spec)
+        return time.perf_counter() - start
+
+    small_spec, large_spec = build(600), build(2400)
+    # Warm any lazy import so it is not charged to the first measurement.
+    collect_dependency_findings(build(10))
+    small = min(elapsed(small_spec) for _ in range(3))
+    large = min(elapsed(large_spec) for _ in range(3))
+    # 4x the input. Linear is ~4x; the quadratic version was ~16x.
+    assert large < small * 9, (small, large)
+
+
+def test_at_most_one_witness_kind_is_accepted_per_form():
+    """Why the first-vs-last choice in ``_accepted_witness`` is unobservable.
+
+    Each evidence model's ``witness`` Literal overlaps each form's accepted set
+    in exactly one value, so the accepted list never holds two distinct kinds
+    and the tie-break cannot be observed. That is a property of the current
+    Literals, not a guarantee — pinned here so widening one surfaces the
+    ambiguity instead of quietly making plan output depend on evidence order
+    again, which is the defect the sort exists to prevent.
+    """
+    from typing import get_args
+
+    from boomi_mcp.compiler.system_topology.context import (
+        ApiServiceRouteEvidenceV1,
+        ProcessCallEvidenceV1,
+        SharedResourceUseEvidenceV1,
+    )
+    from boomi_mcp.compiler.system_topology.relations import _WITNESS_FORMS
+
+    models = (
+        ProcessCallEvidenceV1,
+        ApiServiceRouteEvidenceV1,
+        SharedResourceUseEvidenceV1,
+    )
+    for model in models:
+        declared = set(get_args(model.model_fields["witness"].annotation))
+        assert declared, model.__name__
+        for form, accepted in _WITNESS_FORMS.items():
+            overlap = declared & set(accepted)
+            assert len(overlap) <= 1, (model.__name__, form, sorted(overlap))
+        # And every form is reachable — a model no form accepts would make its
+        # relation permanently ungateable-into-plannable.
+        assert any(declared & set(a) for a in _WITNESS_FORMS.values()), model.__name__

@@ -195,10 +195,22 @@ def collect_dependency_findings(
     # An arc is INTERNAL to a cycle when both endpoints sit in the same
     # strongly connected component. A bridge from one cycle to another has its
     # ends in two different components and is excluded.
+    #
+    # Indexed node -> component ONCE. Scanning every component per arc is
+    # O(arcs x components), and the pathological shape is not exotic: one
+    # self-call per process makes components == arcs, so a large payload — and
+    # ``SystemTopologySpecV1`` bounds neither objects nor relations — turns
+    # dependency validation quadratic. Self-calls reach this collector even
+    # though the relation phase also flags them.
+    component_of: Dict[str, int] = {}
+    for identifier, scc in enumerate(cyclic):
+        for node in scc:
+            component_of[node] = identifier
     internal = [
         arc.relation_index
         for arc in arcs
-        if any(arc.caller in scc and arc.callee in scc for scc in cyclic)
+        if component_of.get(arc.caller) is not None
+        and component_of.get(arc.caller) == component_of.get(arc.callee)
     ]
     if not internal:
         return ()
