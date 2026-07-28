@@ -473,3 +473,95 @@ def test_the_plan_golden_contains_no_real_account_identifier():
     assert not re.search(
         r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", text
     )
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 3 — prerequisites must agree with resolution
+# ---------------------------------------------------------------------------
+
+
+def _alias_plan(symbol_rows):
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "prof",
+            "objects": [
+                {"kind": "api_service", "key": "a", "component_ref": "$ref:ak"}
+            ],
+            "relations": [],
+        }
+    )
+    return plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="prof", component_plan_symbols=symbol_rows
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "alias", ["api_service", "api.service", "API_SERVICE", "webservice"]
+)
+def test_a_prerequisite_emits_the_canonical_type_not_the_authored_alias(alias):
+    """R3. The plan contradicted its own resolution.
+
+    Resolution validated the symbol as ``webservice``; the prerequisite emitted
+    whatever the caller wrote. A blocker-free plan that names two different
+    types for one component is telling a consumer to build the wrong thing.
+    """
+    plan = _alias_plan(
+        (ComponentPlanSymbolV1(component_key="ak", component_type=alias),)
+    )
+    assert plan.blockers == ()
+    assert [p.component_type for p in plan.executable_component_prerequisites] == [
+        "webservice"
+    ], alias
+
+
+def test_duplicate_symbol_rows_do_not_make_prerequisites_order_dependent():
+    """R3. ``{s.component_key: s for s in ...}`` over the raw tuple is last-wins.
+
+    Nothing constrains ``component_plan_symbols`` to be unique, so two rows for
+    one key made the emitted component type depend on their order — the same
+    determinism defect the witness lookup had, in the prerequisite path.
+    """
+    first = ComponentPlanSymbolV1(component_key="ak", component_type="api_service")
+    second = ComponentPlanSymbolV1(component_key="ak", component_type="webservice")
+    forward = _alias_plan((first, second))
+    reverse = _alias_plan((second, first))
+    assert [p.component_type for p in forward.executable_component_prerequisites] == [
+        "webservice"
+    ]
+    assert canonical_topology_plan_json(forward) == canonical_topology_plan_json(
+        reverse
+    )
+
+
+def test_a_prerequisite_type_always_matches_the_resolved_type():
+    """The invariant behind the fix, over every component-backed kind."""
+    from boomi_mcp.compiler.system_topology.references import _COMPONENT_BACKED
+
+    objects = []
+    symbols = []
+    for index, (object_kind, canonical) in enumerate(sorted(_COMPONENT_BACKED.items())):
+        key = f"k{index}"
+        objects.append(
+            {"kind": object_kind, "key": f"o{index}", "component_ref": f"$ref:{key}"}
+        )
+        # Authored in an upper-cased form, to prove normalization is what makes
+        # these agree rather than the caller happening to write canonical types.
+        symbols.append(
+            ComponentPlanSymbolV1(component_key=key, component_type=canonical.upper())
+        )
+    spec = parse_system_topology_v1(
+        {"version": "1", "profile_ref": "prof", "objects": objects, "relations": []}
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="prof", component_plan_symbols=tuple(symbols)
+        ),
+    )
+    assert plan.blockers == (), [b.code for b in plan.blockers]
+    emitted = {p.component_type for p in plan.executable_component_prerequisites}
+    assert emitted == set(_COMPONENT_BACKED.values()), emitted

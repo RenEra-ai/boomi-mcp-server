@@ -134,10 +134,16 @@ def plan_system_topology(
     # Only a $ref-backed object whose symbol is present becomes a prerequisite.
     # A literal id names something that already exists — reporting it as
     # something to build would be an instruction to rebuild a live component.
-    symbols = {
-        symbol.component_key: symbol
-        for symbol in prepared.context.component_plan_symbols
-    }
+    #
+    # Built from the PREPARED index, not from the raw context. The raw symbols
+    # keep whatever type the caller wrote, so a blocker-free plan emitted
+    # ``api_service`` as the prerequisite type while resolution had already
+    # validated it as ``webservice`` — the plan contradicting its own
+    # resolution. And ``{s.component_key: s for s in ...}`` over the raw tuple
+    # is last-wins, so duplicate rows for one key made the emitted type depend
+    # on tuple order. ``prepared.symbols`` is normalized and sorted, so both
+    # go away.
+    symbols = dict(prepared.symbols)
     prerequisites: List[ComponentPlanPrerequisiteV1] = []
     seen_keys: set = set()
     for obj in spec.objects:
@@ -145,14 +151,14 @@ def plan_system_topology(
         if not ref.startswith(_REF_TOKEN_PREFIX):
             continue
         key = ref[len(_REF_TOKEN_PREFIX) :]
-        symbol = symbols.get(key)
-        if symbol is None or key in seen_keys:
+        component_type = symbols.get(key)
+        if component_type is None or key in seen_keys:
             continue
         seen_keys.add(key)
         prerequisites.append(
             ComponentPlanPrerequisiteV1(
-                component_key=symbol.component_key,
-                component_type=symbol.component_type,
+                component_key=key,
+                component_type=component_type,
             )
         )
 
