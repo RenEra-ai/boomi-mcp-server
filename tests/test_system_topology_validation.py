@@ -2648,3 +2648,49 @@ def test_the_self_contradicting_case_has_a_reachable_remedy():
     assert findings and other, "both authored values fire, as the domain is closed"
     assert findings[0].remediation == other[0].remediation
     assert "re-captur" in findings[0].remediation.lower()
+
+
+def test_the_gated_remediation_names_a_discriminator_the_caller_actually_has():
+    """QA #238. ``validate_system_topology`` returns no capability report.
+
+    Its ``TopologyValidationReportV1`` has only the three severity buckets, and
+    the package exports the capability report TYPE but no builder — so a caller
+    on that path could neither receive nor construct the artifact the text told
+    them to consult. ``phase`` is on every finding on both paths and is the real
+    discriminator, which the design doc already documents.
+    """
+    from boomi_mcp.compiler.system_topology import TopologyValidationReportV1
+    from boomi_mcp.compiler.system_topology.findings import _REMEDIATION
+
+    text = _REMEDIATION["TOPOLOGY_CAPABILITY_GATED"].lower()
+    assert "phase" in text
+    assert "'capability'" in text and "'relation'" in text
+    # The named discriminator must be a field the caller actually holds...
+    assert "capability_report" not in set(TopologyValidationReportV1.model_fields)
+
+    # ...and it must genuinely discriminate the two cases.
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "p", "component_ref": "$ref:pk"},
+                {"kind": "process", "key": "p2", "component_ref": "$ref:p2k"},
+                {"kind": "external_queue", "key": "q", "resource_ref": "queue-1"},
+            ],
+            "relations": [
+                {"kind": "process_call", "key": "r1", "caller_process": "p", "callee_process": "p2"},
+                {"kind": "queue_reference", "key": "r2", "process": "p", "external_queue": "q"},
+            ],
+        }
+    )
+    report = validate_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha", component_plan_symbols=_SYMBOLS
+        ),
+    )
+    gated = [d for d in report.errors if d.code == "TOPOLOGY_CAPABILITY_GATED"]
+    phases = {d.subject: d.phase for d in gated}
+    assert phases["external_queue"] == "capability", phases
+    assert phases["process_call"] == "relation", phases

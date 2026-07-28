@@ -127,7 +127,8 @@ _REMEDIATION: Dict[str, str] = {
         "planned or the API Service Component's own XML when it exists. If the "
         "KIND itself is gated, no evidence you can supply will clear it and "
         "adding support requires a separate evidence-backed issue. The "
-        "capability report says which case this is."
+        "finding's own phase says which case this is: 'capability' for a gated "
+        "kind, 'relation' for a supported kind missing its witness."
     ),
     TOPOLOGY_ENVIRONMENT_MISMATCH: (
         "Topology never crosses a credential profile, and an authored "
