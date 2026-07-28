@@ -380,13 +380,20 @@ def collect_environment_findings(
             if obj.kind != "environment" or obj.classification is None:
                 continue
             seen = observed.get(obj.environment_ref)
-            # Only a CONTRADICTION is a finding. An environment discovery did
-            # not see — or saw without a classification — is not a
-            # classification problem; the reference collector already reports a
+            # EVERY observation must agree, not merely one of them.
+            # ``obj.classification not in seen`` was too weak: with both TEST
+            # and PROD observed for one environment, an authored TEST is "in"
+            # the set and passed silently — leaving the plan valid on evidence
+            # that contradicts itself. Inconsistent duplicate observations are
+            # exactly the case a caller needs told about.
+            #
+            # An environment discovery did not see, or saw without a
+            # classification, is still not a classification problem: ``seen`` is
+            # empty and nothing fires. The reference collector already reports a
             # genuinely missing environment, and reporting it twice under a
             # different code would send a caller chasing a bug that does not
             # exist.
-            if seen and obj.classification not in seen:
+            if seen and seen != {obj.classification}:
                 findings.append(
                     topology_finding(
                         TOPOLOGY_ENVIRONMENT_MISMATCH,

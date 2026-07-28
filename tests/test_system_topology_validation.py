@@ -2062,3 +2062,31 @@ def test_no_last_wins_dict_survives_over_a_raw_caller_supplied_collection():
             if "snapshot." in source or "ctx." in source or "context." in source:
                 offenders.append((path.name, source.split("\n")[0]))
     assert offenders == [], offenders
+
+
+def test_self_contradicting_duplicate_classifications_are_reported():
+    """R4. ``not in seen`` was too weak.
+
+    With both TEST and PROD observed for one environment, an authored TEST is
+    "in" the set and passed silently — the plan came back valid on evidence
+    that contradicts itself. Every observation must agree.
+    """
+    conflicting = (
+        EnvironmentFactV1(
+            profile="p-alpha", environment_id="env-1", classification="TEST"
+        ),
+        EnvironmentFactV1(
+            profile="p-alpha", environment_id="env-1", classification="PROD"
+        ),
+    )
+    assert _classification_verdict(conflicting), "self-contradicting evidence"
+    # Either order, same verdict.
+    assert _classification_verdict(tuple(reversed(conflicting)))
+
+
+def test_unanimous_agreeing_duplicates_are_still_not_a_finding():
+    """Negative control: agreement must stay silent however many rows say it."""
+    agreeing = (_AGREES, _AGREES, _AGREES)
+    assert _classification_verdict(agreeing) == []
+    # And a blank alongside unanimous agreement changes nothing.
+    assert _classification_verdict((_AGREES, _BLANK, _AGREES)) == []
