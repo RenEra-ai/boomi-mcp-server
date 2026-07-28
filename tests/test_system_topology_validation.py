@@ -3013,3 +3013,105 @@ def test_the_unknown_discriminator_pointer_names_the_kind_field():
             }
         )
     assert [d.path for d in exc.value.diagnostics] == ["/objects/0/kind"]
+
+
+def test_a_conflicting_symbol_row_cannot_authorize_a_process_ir_witness():
+    """Duplicate ComponentPlan rows are permitted; ``any()`` was too generous.
+
+    Resolution deterministically selects the sorted-last type, so a
+    ``documentcache`` row marked ``has_process_ir=True`` could authorize a
+    ProcessIR witness for the ``process`` row actually selected, which says it
+    has none.
+    """
+    from boomi_mcp.compiler.system_topology.relations import _process_ir_available
+
+    conflicting = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(
+                component_key="k", component_type="process", has_process_ir=False
+            ),
+            ComponentPlanSymbolV1(
+                component_key="k", component_type="documentcache", has_process_ir=True
+            ),
+        ),
+    )
+    assert _process_ir_available("$ref:k", conflicting) is False
+
+    # The selected row saying True is still honoured.
+    agreeing = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(
+                component_key="k", component_type="process", has_process_ir=True
+            ),
+        ),
+    )
+    assert _process_ir_available("$ref:k", agreeing) is True
+
+
+def test_a_foreign_profile_fact_cannot_corroborate_a_binding():
+    """The corroboration scans read the RAW snapshot.
+
+    So a foreign-account schedule fact whose ids happened to match was accepted,
+    and the plan published a foreign ``live_fact`` right beside its own
+    profile-mismatch blocker.
+    """
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import ScheduleBindingFactV1
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "pr", "component_ref": "proc-1"},
+                {"kind": "runtime", "key": "rt", "runtime_ref": "rt-1"},
+                {"kind": "schedule", "key": "s"},
+            ],
+            "relations": [
+                {"kind": "schedule_binding", "key": "rs", "schedule": "s", "process": "pr", "runtime": "rt"}
+            ],
+        }
+    )
+    base = dict(
+        components=(
+            ComponentFactV1(
+                profile="p-alpha", component_id="proc-1", component_type="process"
+            ),
+        ),
+        runtimes=(RuntimeFactV1(profile="p-alpha", runtime_id="rt-1"),),
+        pagination=_complete("process"),
+    )
+    foreign = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            snapshot=_snapshot(
+                schedule_bindings=(
+                    ScheduleBindingFactV1(
+                        profile="FOREIGN", process_id="proc-1", runtime_id="rt-1"
+                    ),
+                ),
+                **base,
+            ),
+        ),
+    )
+    assert [r.witness for r in foreign.planning_only_relations] == ["declared_intent"]
+
+    # The same fact from THIS profile does corroborate.
+    local = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            snapshot=_snapshot(
+                schedule_bindings=(
+                    ScheduleBindingFactV1(
+                        profile="p-alpha", process_id="proc-1", runtime_id="rt-1"
+                    ),
+                ),
+                **base,
+            ),
+        ),
+    )
+    assert [r.witness for r in local.planning_only_relations] == ["live_fact"]

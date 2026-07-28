@@ -239,6 +239,14 @@ def capture_existing_component_evidence(
     yet, so there is nothing to fetch — and its witness comes from ProcessIR.
     """
     profile = spec.profile_ref
+    # Profile-first, exactly as the snapshot capture does. Without it a
+    # misspelled or unavailable profile went straight to account-scoped XML and
+    # dependency reads — the boundary this module exists to hold, skipped in the
+    # one function that was added after it.
+    if profile not in tuple(port.list_profiles()):
+        raise TopologyDiscoveryError(
+            "topology discovery: the spec's profile is not among the available profiles"
+        )
 
     process_refs = []
     api_service_refs = []
@@ -279,6 +287,8 @@ def capture_existing_component_evidence(
 
     for ref in sorted(set(api_service_refs)):
         raw_xml = port.read_component_xml(profile, ref)
+        # ``listener_refs`` is passed even when EMPTY: the process-side check
+        # was run, so "no listeners" is a result, not an absence of one.
         routes.extend(
             parse_api_service_component_evidence(ref, raw_xml, tuple(listener_refs))
         )

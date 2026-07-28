@@ -83,10 +83,21 @@ def _process_ir_available(subject_ref: str, ctx) -> bool:
     if not subject_ref.startswith(_REF_TOKEN_PREFIX):
         return False
     key = subject_ref[len(_REF_TOKEN_PREFIX) :]
-    return any(
-        symbol.component_key == key and symbol.has_process_ir
-        for symbol in ctx.component_plan_symbols
+    # The SELECTED row, by the same deterministic rule resolution uses
+    # (sorted-last per key), not "any row with this key". Duplicate symbol rows
+    # are permitted, so ``any()`` let a conflicting row — a ``documentcache``
+    # entry marked ``has_process_ir=True`` — authorize a ProcessIR witness for
+    # the ``process`` row that was actually selected and says it has none.
+    candidates = sorted(
+        (
+            (symbol.component_type, symbol.has_process_ir)
+            for symbol in ctx.component_plan_symbols
+            if symbol.component_key == key
+        )
     )
+    if not candidates:
+        return False
+    return candidates[-1][1]
 
 
 def _accepted_witness(subject_ref: str, candidates) -> Optional[str]:
@@ -144,18 +155,28 @@ def _binding_corroborated(rel, objects, ctx) -> bool:
     snapshot = ctx.snapshot
     if snapshot is None:
         return False
+    # Profile-filtered. These scans read the RAW snapshot, so a foreign-account
+    # fact whose ids happen to match was accepted as corroboration and the plan
+    # published a foreign ``live_fact`` alongside its own profile-mismatch
+    # blocker. ``prepare_topology_context`` counts such rows as foreign; this
+    # helper has to refuse them too.
+    profile = ctx.profile
     if rel.kind == "schedule_binding":
         process_ref = _component_ref(objects.get(rel.process))
         runtime_ref = _platform_ref(objects.get(rel.runtime), "runtime_ref")
         return any(
-            fact.process_id == process_ref and fact.runtime_id == runtime_ref
+            fact.profile == profile
+            and fact.process_id == process_ref
+            and fact.runtime_id == runtime_ref
             for fact in snapshot.schedule_bindings
         )
     if rel.kind == "deployment_binding":
         process_ref = _component_ref(objects.get(rel.process))
         environment_ref = _platform_ref(objects.get(rel.environment), "environment_ref")
         return any(
-            fact.component_id == process_ref and fact.environment_id == environment_ref
+            fact.profile == profile
+            and fact.component_id == process_ref
+            and fact.environment_id == environment_ref
             for fact in snapshot.deployments
         )
     return False

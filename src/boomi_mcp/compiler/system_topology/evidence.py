@@ -238,19 +238,24 @@ def parse_process_wss_listener_refs(raw_xml: Optional[str]) -> Tuple[str, ...]:
     for element in root.iter():
         name = _local_name(element.tag)
         attrs = {_local_name(k): str(v).strip().lower() for k, v in element.attrib.items()}
-        if name in _WSS_TAGS or attrs.get("connectortype") == "wss":
-            if any(
-                attrs.get(key) in ("true", "listen")
-                for key in ("listen", "mode", "operationtype", "actiontype")
-            ) or name in _WSS_TAGS:
-                markers.append(name)
+        if name not in _WSS_TAGS and attrs.get("connectortype") != "wss":
+            continue
+        # A POSITIVE marker, always. ``or name in _WSS_TAGS`` short-circuited
+        # the attribute test, so ``<wss listen="false">`` — an explicit
+        # statement that this is NOT a listener — produced a listener marker,
+        # and that marker authorizes an existing API-service route.
+        if any(
+            attrs.get(key) in ("true", "listen")
+            for key in ("listen", "mode", "operationtype", "actiontype")
+        ):
+            markers.append(name)
     return tuple(markers)
 
 
 def parse_api_service_component_evidence(
     api_service_component_ref: str,
     raw_xml: Optional[str],
-    listener_process_refs: Sequence[str] = (),
+    listener_process_refs: Optional[Sequence[str]] = None,
 ) -> Tuple[ApiServiceRouteEvidenceV1, ...]:
     """Extract route-to-listener witnesses from an API Service Component's XML.
 
@@ -277,11 +282,16 @@ def parse_api_service_component_evidence(
         return ()
 
     targets = _collect(root, _ROUTE_TAGS, _ROUTE_ATTRS)
-    confirmed = set(listener_process_refs)
-    if confirmed:
+    if listener_process_refs is not None:
+        # Confirmation was RUN. An empty result therefore means "checked, and
+        # none of these processes is a listener" — which must fail closed.
+        # Defaulting the parameter to ``()`` made that indistinguishable from
+        # "not supplied", so a process that FAILED the process-side check could
+        # still be witnessed off the ASC's own marker.
+        confirmed = set(listener_process_refs)
         targets = tuple(target for target in targets if target in confirmed)
     else:
-        # No process-side confirmation supplied. Fall back to a listen marker on
+        # No process-side confirmation was run. Fall back to a listen marker on
         # the ASC itself, which some shapes do carry — but never witness a route
         # with no listen evidence from either side.
         asc_declares_listen = any(

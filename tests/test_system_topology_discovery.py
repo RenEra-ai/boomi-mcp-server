@@ -1641,3 +1641,83 @@ def test_a_process_start_shape_declares_the_listen_surface():
     )
     assert parse_process_wss_listener_refs("<process><shape/></process>") == ()
     assert parse_process_wss_listener_refs(None) == ()
+
+
+# ---------------------------------------------------------------------------
+# Commit review — five fail-open paths in the architect-review fixes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "xml,expected",
+    [
+        ('<process><wss listen="true"/></process>', True),
+        ('<process><shape connectorType="wss" actionType="Listen"/></process>', True),
+        ('<process><wss listen="false"/></process>', False),
+        ("<process><wss/></process>", False),
+        ('<process><shape connectorType="wss"/></process>', False),
+        ("<process><shape/></process>", False),
+    ],
+)
+def test_a_listener_marker_requires_a_positive_listen_value(xml, expected):
+    """``or name in _WSS_TAGS`` short-circuited the attribute test.
+
+    So ``<wss listen="false">`` — an explicit statement that this is NOT a
+    listener — produced a listener marker, and that marker authorizes an
+    existing API-service route.
+    """
+    from boomi_mcp.compiler.system_topology.evidence import (
+        parse_process_wss_listener_refs,
+    )
+
+    assert bool(parse_process_wss_listener_refs(xml)) is expected, xml
+
+
+def test_a_confirmed_empty_listener_set_fails_closed():
+    """"Checked, and none of them is a listener" is a RESULT, not an absence.
+
+    Defaulting the parameter to ``()`` made the two indistinguishable, so a
+    process that FAILED the process-side check could still be witnessed off the
+    ASC's own marker.
+    """
+    asc = '<webservice><wss listen="true"/><operation processId="L"/></webservice>'
+    # Confirmation ran and found none -> no route.
+    assert parse_api_service_component_evidence("asc-1", asc, ()) == ()
+    # Confirmation was never run -> the ASC-side marker may still speak.
+    assert parse_api_service_component_evidence("asc-1", asc)
+    # Confirmation ran and found this one -> witnessed.
+    assert parse_api_service_component_evidence("asc-1", asc, ("L",))
+
+
+def test_existing_component_evidence_validates_the_profile_first():
+    """The boundary the module exists to hold, skipped in a function added later.
+
+    A misspelled profile went straight to account-scoped XML and dependency
+    reads without ever calling ``list_profiles``.
+    """
+    from boomi_mcp.compiler.system_topology.discovery import (
+        TopologyDiscoveryError,
+        capture_existing_component_evidence,
+    )
+
+    class Recording(HostileFakePort):
+        def read_component_xml(self, profile, component_ref):
+            self.calls.append(("read_component_xml", profile, component_ref))
+            return None
+
+        def read_component_dependencies(self, profile, component_ref):
+            self.calls.append(("read_component_dependencies", profile, component_ref))
+            return []
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "prof-unknown",
+            "objects": [{"kind": "process", "key": "a", "component_ref": "proc-1"}],
+            "relations": [],
+        }
+    )
+    port = Recording(profiles=("prof-a",))
+    with pytest.raises(TopologyDiscoveryError):
+        capture_existing_component_evidence(spec, port)
+    assert [c for c in port.calls if c[0].startswith("read_")] == [], port.calls
