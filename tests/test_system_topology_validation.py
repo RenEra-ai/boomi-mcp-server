@@ -2278,18 +2278,43 @@ def test_every_environment_mismatch_cause_is_described_in_its_remediation(
     assert phrase in findings[0].remediation.lower(), (label, phrase)
 
 
-def test_each_environment_mismatch_cause_is_distinct():
-    """The cases must not collapse — otherwise the parametrization is padding."""
-    seen = set()
-    for label, build, _ in _ENVIRONMENT_MISMATCH_CAUSES:
+def test_each_environment_mismatch_cause_is_a_distinct_input():
+    """The cases must not collapse — otherwise the parametrization is padding.
+
+    Keyed on a fingerprint of the generated SPEC AND CONTEXT, deliberately
+    excluding the label. Including it made the assertion vacuous: labels are
+    unique by construction, so ``{(label, findings)}`` had one entry per case
+    however identical the inputs were, and two builders returning the very same
+    context passed.
+    """
+    from boomi_mcp.models.system_topology import canonical_system_topology_json
+
+    fingerprints = []
+    for _label, build, _phrase in _ENVIRONMENT_MISMATCH_CAUSES:
         spec, ctx = build()
-        findings = tuple(
-            (d.path, d.provenance)
-            for d in validate_system_topology(spec, ctx).errors
-            if d.code == "TOPOLOGY_ENVIRONMENT_MISMATCH"
+        fingerprints.append(
+            (canonical_system_topology_json(spec), ctx.model_dump_json())
         )
-        seen.add((label, findings))
-    assert len(seen) == len(_ENVIRONMENT_MISMATCH_CAUSES)
+    assert len(set(fingerprints)) == len(_ENVIRONMENT_MISMATCH_CAUSES), [
+        c[0] for c in _ENVIRONMENT_MISMATCH_CAUSES
+    ]
+
+
+def test_the_distinctness_check_would_notice_a_collapse():
+    """Positive control for the test above, since its first version was vacuous."""
+    from boomi_mcp.models.system_topology import canonical_system_topology_json
+
+    duplicated = (
+        _cause_context_profile,
+        _cause_context_profile,
+    )
+    fingerprints = []
+    for build in duplicated:
+        spec, ctx = build()
+        fingerprints.append(
+            (canonical_system_topology_json(spec), ctx.model_dump_json())
+        )
+    assert len(set(fingerprints)) == 1, "identical builders must collapse to one key"
 
 
 def _relation_unsupported_cases():
