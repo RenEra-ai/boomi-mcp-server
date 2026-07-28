@@ -66,8 +66,17 @@ _COMPONENT_BACKED = {
 def resolve_topology_references(
     spec: SystemTopologySpecV1,
     prepared: PreparedTopologyContextV1,
+    blocked_object_indexes=(),
 ) -> Tuple[ResolvedTopologyReferenceV1, ...]:
     """Resolve every OBJECT to what backs it, in a stable order.
+
+    ``blocked_object_indexes`` are authored positions that already drew a
+    blocker and must not be resolved. Without it a duplicate object KEY — which
+    the model rules correctly report — produced two resolution rows for one key
+    and tripped the uniqueness invariant, so the planner emitted the right
+    diagnostic and then RAISED ``TopologyPlanningInvariantError`` on top of it.
+    That exception's own contract is that it is never raised because of authored
+    input; a duplicate key is authored input.
 
     A ``$ref:KEY`` resolves against ComponentPlan symbols; a literal id resolves
     against live component facts; a platform ref (runtime, environment,
@@ -81,8 +90,13 @@ def resolve_topology_references(
     environment_ids = set(prepared.environment_ids)
     runtime_ids = set(prepared.runtime_ids)
 
+    blocked = set(blocked_object_indexes)
     resolved: List[ResolvedTopologyReferenceV1] = []
-    for obj in spec.objects:
+    seen_keys: set = set()
+    for object_index, obj in enumerate(spec.objects):
+        if object_index in blocked or obj.key in seen_keys:
+            continue
+        seen_keys.add(obj.key)
         if obj.kind in _COMPONENT_BACKED:
             ref = obj.component_ref  # type: ignore[union-attr]
             # A reference resolves only when the backing component is the RIGHT

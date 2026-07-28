@@ -3258,3 +3258,109 @@ def test_conflicting_processir_flags_gate_the_relation():
         ),
     )
     assert "TOPOLOGY_CAPABILITY_GATED" in _codes(validate_system_topology(spec, ctx))
+
+
+def test_a_duplicate_object_key_does_not_crash_the_planner():
+    """QA #240. The diagnostic was computed, then thrown away by a crash.
+
+    A duplicate object KEY produced two resolution rows for one key and tripped
+    the uniqueness invariant, so the planner emitted the right diagnostic and
+    then raised ``TopologyPlanningInvariantError`` on top of it — an exception
+    whose own contract is that it is never raised because of authored input. A
+    duplicate key is authored input.
+    """
+    from boomi_mcp.models.system_topology import SystemTopologySpecV1
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+
+    spec = SystemTopologySpecV1.model_validate(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "dup", "component_ref": "$ref:k1"},
+                {"kind": "process", "key": "dup", "component_ref": "$ref:k2"},
+            ],
+            "relations": [],
+        }
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            component_plan_symbols=(
+                ComponentPlanSymbolV1(component_key="k1", component_type="process"),
+                ComponentPlanSymbolV1(component_key="k2", component_type="process"),
+            ),
+        ),
+    )
+    assert [b.code for b in plan.blockers] == ["TOPOLOGY_SCHEMA_DUPLICATE_KEY"]
+    # One row per key, so the uniqueness invariant holds.
+    assert len({r.object_key for r in plan.resolved_references}) == len(
+        plan.resolved_references
+    )
+
+
+def test_all_three_per_fact_profile_filters_share_one_anchor():
+    """QA #239. The re-anchor moved two of three sites, creating a divergence.
+
+    A fact foreign to the CONTEXT was discarded for resolution yet still
+    supplied that same environment's classification — one report saying both
+    "this environment does not resolve in your context" and "your
+    classification for it disagrees with what discovery observed".
+    """
+    import inspect
+
+    from boomi_mcp.compiler.system_topology import context as ctx_mod
+    from boomi_mcp.compiler.system_topology import relations as rel_mod
+
+    sources = (
+        inspect.getsource(ctx_mod.prepare_topology_context),
+        inspect.getsource(rel_mod._binding_corroborated),
+        inspect.getsource(rel_mod.collect_environment_findings),
+    )
+    for source in sources:
+        assert "!= snapshot.profile" not in source, source[:120]
+        assert "== snapshot.profile" not in source, source[:120]
+
+
+def test_a_context_foreign_fact_supplies_no_classification():
+    """The behavioral half of #239."""
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "x", "component_ref": "$ref:k"},
+                {
+                    "kind": "environment",
+                    "key": "e",
+                    "environment_ref": "env-1",
+                    "classification": "TEST",
+                },
+            ],
+            "relations": [],
+        }
+    )
+    # The snapshot envelope agrees with the context; the FACT inside does not.
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(component_key="k", component_type="process"),
+        ),
+        snapshot=_snapshot(
+            environments=(
+                EnvironmentFactV1(
+                    profile="p-omega", environment_id="env-1", classification="PROD"
+                ),
+            )
+        ),
+    )
+    findings = [
+        d
+        for d in validate_system_topology(spec, ctx).errors
+        if d.code == "TOPOLOGY_ENVIRONMENT_MISMATCH"
+    ]
+    # Reported as a mixed-profile snapshot, never as a classification claim
+    # built on another account's row.
+    assert findings
+    assert all(d.path == "/profile_ref" for d in findings), [d.path for d in findings]

@@ -484,7 +484,14 @@ def collect_environment_findings(
         # contradiction against any observed value is a finding.
         observed: Dict[str, Set[str]] = {}
         for fact in snapshot.environments:
-            if fact.profile != snapshot.profile or fact.classification is None:
+            # Anchored on the CONTEXT's profile, like the other two per-fact
+            # filters. Leaving this one on the snapshot envelope made the three
+            # disagree: a fact foreign to the context was discarded for
+            # resolution yet still supplied that same environment's
+            # classification, so one report said both "this environment does not
+            # resolve in your context" and "your classification for it disagrees
+            # with what discovery observed."
+            if fact.profile != ctx.profile or fact.classification is None:
                 continue
             observed.setdefault(fact.environment_id, set()).add(fact.classification)
         for index, obj in enumerate(spec.objects):

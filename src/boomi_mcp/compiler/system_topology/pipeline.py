@@ -148,7 +148,13 @@ def plan_system_topology(
     findings, planned = _collect(spec, prepared)
     report = build_topology_report(findings)
 
-    resolved = resolve_topology_references(spec, prepared)
+    # Computed once, and used by BOTH resolution and the prerequisite filter: an
+    # object that drew a blocker is neither resolved nor built.
+    blocked_object_indexes = set(
+        _blocked_object_indexes({d.path for d in report.errors})
+    )
+
+    resolved = resolve_topology_references(spec, prepared, blocked_object_indexes)
 
     # Only a $ref-backed object whose symbol is present becomes a prerequisite.
     # A literal id names something that already exists — reporting it as
@@ -166,8 +172,6 @@ def plan_system_topology(
     # symbol whose type already failed resolution tells a consumer to build a
     # component the plan simultaneously rejects — the plan contradicting itself,
     # and the "invalid subjects are excluded from executable buckets" rule.
-    blocked_object_indexes = set(_blocked_object_indexes({d.path for d in report.errors}))
-
     symbols = dict(prepared.symbols)
     prerequisites: List[ComponentPlanPrerequisiteV1] = []
     seen_keys: set = set()
