@@ -121,9 +121,12 @@ _REMEDIATION: Dict[str, str] = {
         "support requires a separate evidence-backed issue."
     ),
     TOPOLOGY_ENVIRONMENT_MISMATCH: (
-        "Align the profile and environment evidence: topology never crosses a "
-        "credential profile, and an authored environment classification must "
-        "match what discovery reports."
+        "Align the profile and environment evidence. Three causes: the context "
+        "or snapshot names a different credential profile than the topology "
+        "does; an authored environment classification disagrees with the one "
+        "discovery reports; or discovery itself reports more than one "
+        "classification for the same environment, in which case no authored "
+        "value can satisfy it and the snapshot must be re-captured."
     ),
     TOPOLOGY_DEPENDENCY_CYCLE: (
         "Break the cross-process invocation cycle at the referenced relation."

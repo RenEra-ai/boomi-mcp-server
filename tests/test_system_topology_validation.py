@@ -1944,7 +1944,17 @@ def test_two_disjoint_cycles_are_both_indexed():
 # ---------------------------------------------------------------------------
 
 
-def _classification_verdict(env_facts):
+def _classification_verdict(env_facts, authored="TEST"):
+    """Drive the classification rule for a given AUTHORED value.
+
+    Parametrized on ``authored`` because hard-coding ``TEST`` left half the
+    rule's domain ungraded: a comparison written as ``sorted(seen)[0] !=
+    authored`` reintroduces the self-contradiction fail-open for authored
+    ``PROD`` only, and one written to also fire on ``PROD`` reports every
+    correctly-authored production environment as a mismatch — a blocking false
+    positive on a legitimate topology. Both survived the whole suite while the
+    mirrored edit, which breaks the ``TEST`` direction, was caught immediately.
+    """
     spec = parse_system_topology_v1(
         {
             "version": "1",
@@ -1955,7 +1965,7 @@ def _classification_verdict(env_facts):
                     "kind": "environment",
                     "key": "e",
                     "environment_ref": "env-1",
-                    "classification": "TEST",
+                    "classification": authored,
                 },
             ],
             "relations": [],
@@ -1983,6 +1993,12 @@ _BLANK = EnvironmentFactV1(
 )
 _AGREES = EnvironmentFactV1(
     profile="p-alpha", environment_id="env-1", classification="TEST"
+)
+#: The same fact from the other side of the closed domain, so every rule below
+#: can be asserted in both directions rather than only the one that happens to
+#: match the fixture's authored value.
+_PROD_AGREES = EnvironmentFactV1(
+    profile="p-alpha", environment_id="env-1", classification="PROD"
 )
 
 
@@ -2090,3 +2106,85 @@ def test_unanimous_agreeing_duplicates_are_still_not_a_finding():
     assert _classification_verdict(agreeing) == []
     # And a blank alongside unanimous agreement changes nothing.
     assert _classification_verdict((_AGREES, _BLANK, _AGREES)) == []
+
+
+
+# ---------------------------------------------------------------------------
+# QA #233 — the classification rule, graded in BOTH authored directions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("authored", ["TEST", "PROD"])
+def test_self_contradicting_duplicates_are_reported_for_either_authored_value(
+    authored,
+):
+    """``classification`` is a closed two-value domain, so both sides are cheap.
+
+    Grading only ``TEST`` left a comparison that fails open for ``PROD``
+    indistinguishable from the correct one.
+    """
+    conflicting = (_AGREES, _PROD_AGREES)
+    assert _classification_verdict(conflicting, authored)
+    assert _classification_verdict(tuple(reversed(conflicting)), authored)
+
+
+@pytest.mark.parametrize(
+    "authored,agreeing",
+    [("TEST", _AGREES), ("PROD", _PROD_AGREES)],
+)
+def test_unanimous_agreement_is_silent_for_either_authored_value(authored, agreeing):
+    """The false-positive direction.
+
+    A rule that also fired on a correctly-authored value would block every
+    legitimate production topology — worse than the fail-open it replaced,
+    because it rejects correct input.
+    """
+    assert _classification_verdict((agreeing,), authored) == []
+    assert _classification_verdict((agreeing, agreeing), authored) == []
+    assert _classification_verdict((agreeing, _BLANK), authored) == []
+
+
+@pytest.mark.parametrize(
+    "authored,observed",
+    [("TEST", _PROD_AGREES), ("PROD", _AGREES)],
+)
+def test_a_single_contradicting_observation_fires_either_way(authored, observed):
+    assert _classification_verdict((observed,), authored)
+
+
+@pytest.mark.parametrize("authored", ["TEST", "PROD"])
+def test_blank_and_missing_stay_silent_for_either_authored_value(authored):
+    assert _classification_verdict((), authored) == []
+    assert _classification_verdict((_BLANK,), authored) == []
+    assert _classification_verdict((_BLANK, _BLANK), authored) == []
+
+
+def test_the_environment_mismatch_remediation_names_every_cause():
+    """QA #234. The new firing case had no satisfiable instruction.
+
+    ``topology_finding`` attaches the static remediation to every finding, so
+    the caller of a self-contradicting snapshot was told to make the authored
+    classification match discovery — which reports two values, from a closed
+    domain of two, both of which fire. Following it flips TEST to PROD and
+    returns the identical finding at the identical path, which is the
+    chasing-a-nonexistent-bug failure this suite already treats as a defect.
+    """
+    from boomi_mcp.compiler.system_topology.findings import _REMEDIATION
+    from boomi_mcp.errors import TOPOLOGY_ENVIRONMENT_MISMATCH
+
+    remediation = _REMEDIATION[TOPOLOGY_ENVIRONMENT_MISMATCH].lower()
+    # All three causes the collector can emit this code for.
+    assert "profile" in remediation
+    assert "classification" in remediation
+    assert "more than one" in remediation
+    # And an action that is actually available for the third.
+    assert "re-captur" in remediation
+
+
+def test_the_self_contradicting_case_has_a_reachable_remedy():
+    """No authored value satisfies it, so the remedy cannot be an authored value."""
+    findings = _classification_verdict((_AGREES, _PROD_AGREES), "TEST")
+    other = _classification_verdict((_AGREES, _PROD_AGREES), "PROD")
+    assert findings and other, "both authored values fire, as the domain is closed"
+    assert findings[0].remediation == other[0].remediation
+    assert "re-captur" in findings[0].remediation.lower()
