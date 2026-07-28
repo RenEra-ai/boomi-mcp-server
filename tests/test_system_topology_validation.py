@@ -2159,85 +2159,314 @@ def test_blank_and_missing_stay_silent_for_either_authored_value(authored):
     assert _classification_verdict((_BLANK, _BLANK), authored) == []
 
 
-#: Every distinct CAUSE each code is emitted for, with a phrase that must
-#: appear in its remediation. Hand-maintained on purpose: the point is that
-#: adding an emit site forces someone to decide what to tell the caller.
+def _env_spec(classification="TEST", profile_ref="p-alpha"):
+    return parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": profile_ref,
+            "objects": [
+                {"kind": "process", "key": "x", "component_ref": "$ref:k"},
+                {
+                    "kind": "environment",
+                    "key": "e",
+                    "environment_ref": "env-1",
+                    "classification": classification,
+                },
+            ],
+            "relations": [],
+        }
+    )
+
+
+_K_SYMBOL = (ComponentPlanSymbolV1(component_key="k", component_type="process"),)
+
+
+def _cause_context_profile():
+    return _env_spec(), TopologyResolutionContextV1(
+        profile="p-other", component_plan_symbols=_K_SYMBOL
+    )
+
+
+def _cause_snapshot_envelope_profile():
+    return _env_spec(), TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=_K_SYMBOL,
+        snapshot=_snapshot(profile="p-other"),
+    )
+
+
+def _cause_foreign_row_inside_snapshot():
+    return _env_spec(), TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=_K_SYMBOL,
+        snapshot=_snapshot(
+            components=(
+                ComponentFactV1(
+                    profile="p-omega", component_id="c", component_type="process"
+                ),
+            ),
+            environments=(_AGREES,),
+        ),
+    )
+
+
+def _cause_unanimous_classification_mismatch():
+    return _env_spec("TEST"), TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=_K_SYMBOL,
+        snapshot=_snapshot(environments=(_PROD_AGREES,)),
+    )
+
+
+def _cause_self_contradicting_discovery():
+    return _env_spec("TEST"), TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=_K_SYMBOL,
+        snapshot=_snapshot(environments=(_AGREES, _PROD_AGREES)),
+    )
+
+
+#: One BEHAVIORAL case per cause: a context that actually provokes it, and the
+#: phrase its remediation must contain.
 #:
-#: The counts are checked against the source, so a new ``topology_finding``
-#: call for one of these codes fails until this map and the remediation catch
-#: up. That is the class behind #234, #235, #236 and #237 — a remediation that
-#: enumerates causes but omits one it actually fires for, sending a caller to
-#: fix something they do not have.
-_EMIT_SITE_CAUSES = {
-    "TOPOLOGY_ENVIRONMENT_MISMATCH": (
-        "context names a different profile",
-        "snapshot envelope does",
-        "inside the snapshot",
+#: The previous version of this pin counted ``topology_finding`` CALL SITES via
+#: the AST and compared that to the length of a hand-written cause list. That
+#: equates syntax with meaning and gave false assurance: the final
+#: environment-mismatch call site serves TWO logical causes — an authored value
+#: disagreeing with unanimous discovery, and discovery disagreeing with itself —
+#: so a four-entry list matched four call sites while the remediation had
+#: dropped one of the five real causes, and the omitted one's offered action
+#: was wrong for it. Provoking each cause is the only thing that grades the
+#: text a caller in that situation actually receives.
+_ENVIRONMENT_MISMATCH_CAUSES = (
+    ("context profile", _cause_context_profile, "context names a different profile"),
+    ("snapshot envelope profile", _cause_snapshot_envelope_profile, "snapshot envelope does"),
+    ("foreign row inside snapshot", _cause_foreign_row_inside_snapshot, "inside the snapshot"),
+    (
+        "unanimous classification mismatch",
+        _cause_unanimous_classification_mismatch,
+        "update the authored classification",
+    ),
+    (
+        "self-contradicting discovery",
+        _cause_self_contradicting_discovery,
         "more than one classification",
     ),
-    "TOPOLOGY_RELATION_UNSUPPORTED": (
-        "invoked by its api service",
-        "binds one process to one runtime",
-        "exactly one process and one environment",
-        "cannot call itself",
-    ),
-    "TOPOLOGY_CAPABILITY_GATED": (
-        "kind is supported",
-        "kind itself is gated",
-        "capability report",
-    ),
-}
+)
 
 
-def _emit_site_counts():
-    """How many times each code is passed to ``topology_finding`` in the package."""
-    import ast
-    import collections
+@pytest.mark.parametrize(
+    "label,build,phrase", _ENVIRONMENT_MISMATCH_CAUSES, ids=[c[0] for c in _ENVIRONMENT_MISMATCH_CAUSES]
+)
+def test_every_environment_mismatch_cause_is_described_in_its_remediation(
+    label, build, phrase
+):
+    """QA #235 / R7. A remediation must describe every case it is served for.
 
-    package = _project_root / "src" / "boomi_mcp" / "compiler" / "system_topology"
-    counts = collections.Counter()
-    for path in sorted(package.glob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text())):
-            if (
-                isinstance(node, ast.Call)
-                and getattr(node.func, "id", "") == "topology_finding"
-                and node.args
-                and isinstance(node.args[0], ast.Name)
-                and node.args[0].id.startswith("TOPOLOGY_")
-            ):
-                counts[node.args[0].id] += 1
-    return counts
-
-
-def test_the_emit_site_scan_finds_real_call_sites():
-    """Positive control: a scanner returning nothing passes every test below."""
-    counts = _emit_site_counts()
-    assert counts, counts
-    assert counts["TOPOLOGY_ENVIRONMENT_MISMATCH"] >= 4, counts
-
-
-@pytest.mark.parametrize("code", sorted(_EMIT_SITE_CAUSES))
-def test_every_emit_site_has_a_cause_named_in_its_remediation(code):
-    """QA #235/#236/#237. A remediation must describe every case it is served for.
-
-    ``topology_finding`` attaches the static remediation to EVERY finding for a
-    code, so a string that enumerates three causes while the collector emits it
-    for four sends one caller in four to fix something they do not have — and
-    for the mixed-profile-snapshot case the omitted instruction was actively
-    harmful, because aligning the profile trips a different site.
+    ``topology_finding`` attaches one static string to EVERY finding for a code,
+    so a caller in an undescribed case is told to fix something they do not
+    have — and for two of these five, the instruction the old text offered was
+    actively wrong.
     """
+    spec, ctx = build()
+    findings = [
+        d
+        for d in validate_system_topology(spec, ctx).errors
+        if d.code == "TOPOLOGY_ENVIRONMENT_MISMATCH"
+    ]
+    assert findings, f"{label} must actually provoke the code"
+    assert phrase in findings[0].remediation.lower(), (label, phrase)
+
+
+def test_each_environment_mismatch_cause_is_distinct():
+    """The cases must not collapse — otherwise the parametrization is padding."""
+    seen = set()
+    for label, build, _ in _ENVIRONMENT_MISMATCH_CAUSES:
+        spec, ctx = build()
+        findings = tuple(
+            (d.path, d.provenance)
+            for d in validate_system_topology(spec, ctx).errors
+            if d.code == "TOPOLOGY_ENVIRONMENT_MISMATCH"
+        )
+        seen.add((label, findings))
+    assert len(seen) == len(_ENVIRONMENT_MISMATCH_CAUSES)
+
+
+def _relation_unsupported_cases():
+    """One spec per lifecycle rule the collector rejects."""
+    base_objects = [
+        {"kind": "process", "key": "p", "component_ref": "$ref:pk"},
+        {"kind": "process", "key": "p2", "component_ref": "$ref:p2k"},
+        {"kind": "api_service", "key": "a", "component_ref": "$ref:ak"},
+        {"kind": "runtime", "key": "rt", "runtime_ref": "runtime-1"},
+        {"kind": "environment", "key": "e", "environment_ref": "env-1"},
+        {"kind": "schedule", "key": "s"},
+        {"kind": "schedule", "key": "s2"},
+        {"kind": "deployment_unit", "key": "u"},
+    ]
+    sched = {"kind": "schedule_binding", "key": "rs", "schedule": "s", "process": "p", "runtime": "rt"}
+    sched2 = {"kind": "schedule_binding", "key": "rs2", "schedule": "s2", "process": "p2", "runtime": "rt"}
+    dep = {
+        "kind": "deployment_binding",
+        "key": "rd",
+        "deployment_unit": "u",
+        "process": "p",
+        "environment": "e",
+    }
+    return (
+        (
+            "scheduled listener",
+            base_objects,
+            [
+                {"kind": "api_service_route", "key": "rr", "api_service": "a", "listener_process": "p"},
+                sched,
+                sched2,
+                dep,
+            ],
+            "invoked by its api service",
+        ),
+        (
+            "schedule bound twice",
+            base_objects,
+            [
+                sched,
+                {"kind": "schedule_binding", "key": "rsx", "schedule": "s", "process": "p2", "runtime": "rt"},
+                sched2,
+                dep,
+            ],
+            "binds one process to one runtime",
+        ),
+        (
+            "deployment unit bound twice",
+            base_objects,
+            [
+                sched,
+                sched2,
+                dep,
+                {
+                    "kind": "deployment_binding",
+                    "key": "rdx",
+                    "deployment_unit": "u",
+                    "process": "p2",
+                    "environment": "e",
+                },
+            ],
+            "exactly one process and one environment",
+        ),
+        (
+            "process self-call",
+            base_objects,
+            [
+                {"kind": "process_call", "key": "rc", "caller_process": "p", "callee_process": "p"},
+                sched,
+                sched2,
+                dep,
+            ],
+            "cannot call itself",
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "label,objects,relations,phrase",
+    _relation_unsupported_cases(),
+    ids=[c[0] for c in _relation_unsupported_cases()],
+)
+def test_every_relation_unsupported_cause_is_described(label, objects, relations, phrase):
+    """QA #236. Four lifecycle rules, one string that listed three."""
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": objects,
+            "relations": relations,
+        }
+    )
+    findings = [
+        d
+        for d in validate_system_topology(spec, _WITNESSED).errors
+        if d.code == "TOPOLOGY_RELATION_UNSUPPORTED"
+    ]
+    assert findings, f"{label} must actually provoke the code"
+    assert phrase in findings[0].remediation.lower(), (label, phrase)
+
+
+def _gated_cases():
+    process_objs = [
+        {"kind": "process", "key": "p", "component_ref": "$ref:pk"},
+        {"kind": "process", "key": "p2", "component_ref": "$ref:p2k"},
+        {"kind": "api_service", "key": "a", "component_ref": "$ref:ak"},
+        {"kind": "document_cache", "key": "c", "component_ref": "$ref:ck"},
+    ]
+    return (
+        (
+            "supported kind, no witness (ProcessCall)",
+            process_objs,
+            [{"kind": "process_call", "key": "r", "caller_process": "p", "callee_process": "p2"}],
+            "processir node",
+        ),
+        (
+            "supported kind, no witness (API route)",
+            process_objs,
+            [{"kind": "api_service_route", "key": "r", "api_service": "a", "listener_process": "p"}],
+            "typed builder projection",
+        ),
+        (
+            "gated kind",
+            process_objs + [{"kind": "external_queue", "key": "q", "resource_ref": "queue-1"}],
+            [{"kind": "queue_reference", "key": "r", "process": "p", "external_queue": "q"}],
+            "kind itself is gated",
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "label,objects,relations,phrase", _gated_cases(), ids=[c[0] for c in _gated_cases()]
+)
+def test_every_capability_gated_cause_is_described(label, objects, relations, phrase):
+    """QA #237 / R7. One string, categorically different callers.
+
+    An ``api_service_route`` cannot be witnessed by a ProcessIR node —
+    ``ApiServiceRouteEvidenceV1`` does not permit it — so telling every planned
+    relation to supply one cannot clear that supported case.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": objects,
+            "relations": relations,
+        }
+    )
+    bare = TopologyResolutionContextV1(
+        profile="p-alpha", component_plan_symbols=_SYMBOLS
+    )
+    findings = [
+        d
+        for d in validate_system_topology(spec, bare).errors
+        if d.code == "TOPOLOGY_CAPABILITY_GATED"
+    ]
+    assert findings, f"{label} must actually provoke the code"
+    assert phrase in findings[0].remediation.lower(), (label, phrase)
+
+
+def test_the_witness_a_remediation_names_is_the_one_the_model_accepts():
+    """The instruction must be satisfiable by the type system, not just readable."""
+    from typing import get_args
+
+    from boomi_mcp.compiler.system_topology.context import (
+        ApiServiceRouteEvidenceV1,
+        ProcessCallEvidenceV1,
+    )
     from boomi_mcp.compiler.system_topology.findings import _REMEDIATION
 
-    remediation = _REMEDIATION[code].lower()
-    causes = _EMIT_SITE_CAUSES[code]
-    for phrase in causes:
-        assert phrase in remediation, (code, phrase)
-    # The map must not fall behind the source.
-    assert _emit_site_counts()[code] == len(causes), (
-        code,
-        _emit_site_counts()[code],
-        len(causes),
-    )
+    text = _REMEDIATION["TOPOLOGY_CAPABILITY_GATED"].lower()
+    assert "process_ir" in get_args(ProcessCallEvidenceV1.model_fields["witness"].annotation)
+    assert "processir node" in text
+    route_witnesses = get_args(ApiServiceRouteEvidenceV1.model_fields["witness"].annotation)
+    assert "process_ir" not in route_witnesses
+    assert "typed_builder" in route_witnesses
+    assert "typed builder projection" in text
 
 
 def test_the_environment_mismatch_remediation_offers_a_reachable_action():
