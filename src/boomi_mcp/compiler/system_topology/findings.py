@@ -111,22 +111,30 @@ _REMEDIATION: Dict[str, str] = {
     ),
     TOPOLOGY_RELATION_UNSUPPORTED: (
         "Use the supported lifecycle shape for this relation, or remove it: a "
-        "schedule binds a process to a RUNTIME, a deployment unit targets "
-        "exactly one process and one environment, and a listener process is "
-        "invoked by its API service rather than scheduled."
+        "listener process is invoked by its API service rather than scheduled; "
+        "a schedule binds one process to one RUNTIME and is bound once; a "
+        "deployment unit targets exactly one process and one environment; and "
+        "a process cannot call itself, so a self-recursive Process Call must "
+        "be removed."
     ),
     TOPOLOGY_CAPABILITY_GATED: (
-        "Keep the subject only as blocked declared intent until evidence "
-        "exists; it will not enter an executable or planning bucket. Adding "
-        "support requires a separate evidence-backed issue."
+        "The subject stays blocked declared intent and will not enter an "
+        "executable or planning bucket. Two cases: if the relation KIND is "
+        "supported, supply the trusted witness it needs — a ProcessIR node for "
+        "a planned component, or the component's own XML for an existing one — "
+        "and the finding clears. If the KIND itself is gated, no evidence you "
+        "can supply will clear it and adding support requires a separate "
+        "evidence-backed issue. The capability report says which case this is."
     ),
     TOPOLOGY_ENVIRONMENT_MISMATCH: (
-        "Align the profile and environment evidence. Three causes: the context "
-        "or snapshot names a different credential profile than the topology "
-        "does; an authored environment classification disagrees with the one "
-        "discovery reports; or discovery itself reports more than one "
-        "classification for the same environment, in which case no authored "
-        "value can satisfy it and the snapshot must be re-captured."
+        "Topology never crosses a credential profile, and an authored "
+        "environment classification must match what discovery reports. Four "
+        "causes: the context names a different profile than the topology does; "
+        "the snapshot envelope does; an individual fact INSIDE the snapshot "
+        "names another account even though the envelope agrees; or discovery "
+        "reports more than one classification for one environment. For the "
+        "first two, align the profile. For the last two no authored value can "
+        "satisfy the evidence — re-capture the snapshot from a single account."
     ),
     TOPOLOGY_DEPENDENCY_CYCLE: (
         "Break the cross-process invocation cycle at the referenced relation."

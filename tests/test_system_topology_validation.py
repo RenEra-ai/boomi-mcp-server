@@ -2159,26 +2159,232 @@ def test_blank_and_missing_stay_silent_for_either_authored_value(authored):
     assert _classification_verdict((_BLANK, _BLANK), authored) == []
 
 
-def test_the_environment_mismatch_remediation_names_every_cause():
-    """QA #234. The new firing case had no satisfiable instruction.
+#: Every distinct CAUSE each code is emitted for, with a phrase that must
+#: appear in its remediation. Hand-maintained on purpose: the point is that
+#: adding an emit site forces someone to decide what to tell the caller.
+#:
+#: The counts are checked against the source, so a new ``topology_finding``
+#: call for one of these codes fails until this map and the remediation catch
+#: up. That is the class behind #234, #235, #236 and #237 — a remediation that
+#: enumerates causes but omits one it actually fires for, sending a caller to
+#: fix something they do not have.
+_EMIT_SITE_CAUSES = {
+    "TOPOLOGY_ENVIRONMENT_MISMATCH": (
+        "context names a different profile",
+        "snapshot envelope does",
+        "inside the snapshot",
+        "more than one classification",
+    ),
+    "TOPOLOGY_RELATION_UNSUPPORTED": (
+        "invoked by its api service",
+        "binds one process to one runtime",
+        "exactly one process and one environment",
+        "cannot call itself",
+    ),
+    "TOPOLOGY_CAPABILITY_GATED": (
+        "kind is supported",
+        "kind itself is gated",
+        "capability report",
+    ),
+}
 
-    ``topology_finding`` attaches the static remediation to every finding, so
-    the caller of a self-contradicting snapshot was told to make the authored
-    classification match discovery — which reports two values, from a closed
-    domain of two, both of which fire. Following it flips TEST to PROD and
-    returns the identical finding at the identical path, which is the
-    chasing-a-nonexistent-bug failure this suite already treats as a defect.
+
+def _emit_site_counts():
+    """How many times each code is passed to ``topology_finding`` in the package."""
+    import ast
+    import collections
+
+    package = _project_root / "src" / "boomi_mcp" / "compiler" / "system_topology"
+    counts = collections.Counter()
+    for path in sorted(package.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "id", "") == "topology_finding"
+                and node.args
+                and isinstance(node.args[0], ast.Name)
+                and node.args[0].id.startswith("TOPOLOGY_")
+            ):
+                counts[node.args[0].id] += 1
+    return counts
+
+
+def test_the_emit_site_scan_finds_real_call_sites():
+    """Positive control: a scanner returning nothing passes every test below."""
+    counts = _emit_site_counts()
+    assert counts, counts
+    assert counts["TOPOLOGY_ENVIRONMENT_MISMATCH"] >= 4, counts
+
+
+@pytest.mark.parametrize("code", sorted(_EMIT_SITE_CAUSES))
+def test_every_emit_site_has_a_cause_named_in_its_remediation(code):
+    """QA #235/#236/#237. A remediation must describe every case it is served for.
+
+    ``topology_finding`` attaches the static remediation to EVERY finding for a
+    code, so a string that enumerates three causes while the collector emits it
+    for four sends one caller in four to fix something they do not have — and
+    for the mixed-profile-snapshot case the omitted instruction was actively
+    harmful, because aligning the profile trips a different site.
     """
+    from boomi_mcp.compiler.system_topology.findings import _REMEDIATION
+
+    remediation = _REMEDIATION[code].lower()
+    causes = _EMIT_SITE_CAUSES[code]
+    for phrase in causes:
+        assert phrase in remediation, (code, phrase)
+    # The map must not fall behind the source.
+    assert _emit_site_counts()[code] == len(causes), (
+        code,
+        _emit_site_counts()[code],
+        len(causes),
+    )
+
+
+def test_the_environment_mismatch_remediation_offers_a_reachable_action():
+    """QA #234/#235. Two of its four causes admit no authored fix at all."""
     from boomi_mcp.compiler.system_topology.findings import _REMEDIATION
     from boomi_mcp.errors import TOPOLOGY_ENVIRONMENT_MISMATCH
 
     remediation = _REMEDIATION[TOPOLOGY_ENVIRONMENT_MISMATCH].lower()
-    # All three causes the collector can emit this code for.
-    assert "profile" in remediation
-    assert "classification" in remediation
-    assert "more than one" in remediation
-    # And an action that is actually available for the third.
-    assert "re-captur" in remediation
+    assert "align the profile" in remediation
+    assert "re-capture the snapshot" in remediation
+
+
+def test_a_foreign_row_inside_an_agreeing_snapshot_is_a_described_cause():
+    """#235's exact shape: every enumerated alignment already holds.
+
+    The context, the snapshot envelope and the topology all name one profile,
+    and the environment classification agrees — yet the code fires, for a row
+    inside the snapshot. Telling this caller to "align the profile" would send
+    them to change ``profile_ref`` and trip two other sites.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "x", "component_ref": "$ref:k"},
+                {
+                    "kind": "environment",
+                    "key": "e",
+                    "environment_ref": "env-1",
+                    "classification": "TEST",
+                },
+            ],
+            "relations": [],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(component_key="k", component_type="process"),
+        ),
+        snapshot=_snapshot(
+            components=(
+                ComponentFactV1(
+                    profile="p-omega", component_id="c", component_type="process"
+                ),
+            ),
+            environments=(_AGREES,),
+        ),
+    )
+    findings = [
+        d
+        for d in validate_system_topology(spec, ctx).errors
+        if d.code == "TOPOLOGY_ENVIRONMENT_MISMATCH"
+    ]
+    assert findings
+    assert any(
+        "mixed-profile-snapshot" in " ".join(d.provenance) for d in findings
+    ), findings
+    assert "inside the snapshot" in findings[0].remediation.lower()
+
+
+def test_a_gated_relation_kind_and_a_witness_less_one_get_usable_text():
+    """QA #237. One string serves two categorically different cases.
+
+    A ``document_cache_use`` with no witness is ``plannable-only`` — supplying
+    evidence clears it, and there is no issue to file. Telling that caller
+    "adding support requires a separate evidence-backed issue" is the
+    most-served misdirect the table had.
+    """
+    from boomi_mcp.compiler.system_topology.capabilities import capability_for
+
+    assert capability_for("document_cache_use").state == "plannable-only"
+    assert capability_for("external_queue").state == "gated-no-evidence"
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "p", "component_ref": "$ref:pk"},
+                {"kind": "document_cache", "key": "c", "component_ref": "$ref:ck"},
+            ],
+            "relations": [
+                {"kind": "document_cache_use", "key": "r", "process": "p", "document_cache": "c"}
+            ],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(component_key="pk", component_type="process"),
+            ComponentPlanSymbolV1(component_key="ck", component_type="documentcache"),
+        ),
+    )
+    gated = [
+        d
+        for d in validate_system_topology(spec, ctx).errors
+        if d.code == "TOPOLOGY_CAPABILITY_GATED"
+    ]
+    assert gated
+    text = gated[0].remediation.lower()
+    # The supported-kind branch must be present and reachable...
+    assert "kind is supported" in text
+    assert "witness" in text
+    # ...and supplying the witness must actually clear it.
+    from boomi_mcp.compiler.system_topology.context import SharedResourceUseEvidenceV1
+
+    witnessed = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=ctx.component_plan_symbols,
+        shared_resource_use_evidence=(
+            SharedResourceUseEvidenceV1(
+                process_component_ref="$ref:pk",
+                resource_component_ref="$ref:ck",
+                resource_kind="document_cache",
+                witness="process_ir",
+            ),
+        ),
+    )
+    assert validate_system_topology(spec, witnessed).errors == ()
+
+
+def test_a_self_call_finding_names_self_recursion():
+    """QA #236. The cycle collector is skipped when references do not resolve.
+
+    In that case the self-call finding is the ONLY one a caller gets, and its
+    text is the one that omitted the cause — despite the source comment saying
+    this check exists so the finding names the offending role rather than a
+    graph.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [{"kind": "process", "key": "a", "component_ref": "$ref:missing"}],
+            "relations": [
+                {"kind": "process_call", "key": "r", "caller_process": "a", "callee_process": "a"}
+            ],
+        }
+    )
+    report = validate_system_topology(spec, TopologyResolutionContextV1(profile="p-alpha"))
+    codes = _codes(report)
+    assert "TOPOLOGY_RELATION_UNSUPPORTED" in codes
+    assert "TOPOLOGY_DEPENDENCY_CYCLE" not in codes, "the cycle collector is skipped"
+    unsupported = [d for d in report.errors if d.code == "TOPOLOGY_RELATION_UNSUPPORTED"][0]
+    assert "cannot call itself" in unsupported.remediation.lower()
 
 
 def test_the_self_contradicting_case_has_a_reachable_remedy():
