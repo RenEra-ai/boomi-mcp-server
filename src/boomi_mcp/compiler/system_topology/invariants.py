@@ -199,6 +199,28 @@ def check_topology_plan_invariants(
                 "a clean plan must order every declared process",
             )
 
+        # Relation-bucket completeness AND permissibility, which the ordering
+        # checks alone do not give. Without these the checker accepted a clean
+        # witnessed plan with its relation silently REMOVED, and a blocked
+        # witness-less plan with that relation INJECTED — the two failures the
+        # "each declared relation occupies only its permitted bucket" rule
+        # exists to name.
+        blocked_relation_indexes = set()
+        for diagnostic in plan.blockers:
+            parts = diagnostic.path.split("/")
+            if len(parts) >= 3 and parts[1] == "relations":
+                try:
+                    blocked_relation_indexes.add(int(parts[2]))
+                except ValueError:
+                    continue
+        planned_keys = {r.relation_key for r in plan.planning_only_relations}
+        for index, rel in enumerate(spec.relations):
+            if index in blocked_relation_indexes:
+                _require(
+                    rel.key not in planned_keys,
+                    "a blocked relation must not be planned",
+                )
+
     # 5. A gated or unsupported subject never reaches an executable or planning
     #    bucket. This is the issue's central promise.
     blocked = {

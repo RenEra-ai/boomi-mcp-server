@@ -162,7 +162,16 @@ def collect_reference_findings(
     component_ids = dict(prepared.components)
     environment_ids = set(prepared.environment_ids)
     runtime_ids = set(prepared.runtime_ids)
-    complete = set(prepared.complete_component_types)
+    # Absence authority is qualified to the AUTHORED target profile, not merely
+    # to an internally-coherent context. A context and snapshot that agree with
+    # EACH OTHER but not with the spec still described a different account, and
+    # its empty listing was allowed to prove that the spec's components do not
+    # exist. Agreement among the wrong sources is not evidence.
+    same_account = prepared.context.profile == spec.profile_ref and (
+        prepared.context.snapshot is None
+        or prepared.context.snapshot.profile == spec.profile_ref
+    )
+    complete = set(prepared.complete_component_types) if same_account else set()
 
     def _object_finding(code, index, field, kind):
         findings.append(
@@ -222,7 +231,9 @@ def collect_reference_findings(
                     _object_finding(
                         TOPOLOGY_REFERENCE_TYPE_MISMATCH, index, "component_ref", obj.kind
                     )
-        elif obj.kind == "environment" and prepared.environment_inventory_observed:
+        elif obj.kind == "environment" and (
+            prepared.environment_inventory_observed and same_account
+        ):
             # Guarded on the SNAPSHOT existing, not on the id set being
             # non-empty. ``list_environments`` returns the whole set — it is not
             # paged, unlike component queries — so once discovery ran, an empty
@@ -234,7 +245,9 @@ def collect_reference_findings(
                 _object_finding(
                     TOPOLOGY_REFERENCE_NOT_FOUND, index, "environment_ref", obj.kind
                 )
-        elif obj.kind == "runtime" and prepared.runtime_inventory_complete:
+        elif obj.kind == "runtime" and (
+            prepared.runtime_inventory_complete and same_account
+        ):
             # Only an authoritative inventory can witness absence. Discovery
             # derives runtimes from SCHEDULE rows, so it sees only runtimes that
             # already have one — treating that as an inventory would report

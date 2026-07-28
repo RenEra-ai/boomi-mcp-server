@@ -3187,12 +3187,14 @@ def _binding_plan(schedule_facts, snapshot_profile="p-alpha"):
 
 
 def test_a_foreign_profile_fact_cannot_corroborate_a_binding():
-    """A foreign fact inside the snapshot invalidates the whole context.
+    """A foreign FACT is reported and refused as corroboration — not more.
 
-    It is counted as a mixed-profile snapshot, which raises ``/profile_ref`` —
-    and nothing derived from a mismatched context may be published at all, so
-    the binding is withdrawn rather than merely downgraded. Previously the plan
-    published a foreign ``live_fact`` right beside its own mismatch blocker.
+    It raises the mixed-profile ``/profile_ref`` blocker, and the corroboration
+    scan refuses it, so the binding stays ``declared_intent``. It does NOT
+    invalidate the whole context: the ComponentPlan symbols and the authored
+    relation are still this account's, and erasing them would delete valid
+    output over one bad row. Only a CONTEXT-level profile mismatch — the
+    evidence set as a whole being about another account — empties the buckets.
     """
     from boomi_mcp.compiler.system_topology.context import ScheduleBindingFactV1
 
@@ -3204,9 +3206,127 @@ def test_a_foreign_profile_fact_cannot_corroborate_a_binding():
         )
     )
     assert "TOPOLOGY_ENVIRONMENT_MISMATCH" in [b.code for b in plan.blockers]
+    assert [r.witness for r in plan.planning_only_relations] == ["declared_intent"]
+
+
+def test_a_context_level_profile_mismatch_does_empty_the_buckets():
+    """The grade above: the evidence set as a whole is about another account."""
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "$ref:ka"},
+                {"kind": "process", "key": "b", "component_ref": "$ref:kb"},
+            ],
+            "relations": [
+                {"kind": "process_call", "key": "r", "caller_process": "a", "callee_process": "b"}
+            ],
+        }
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-omega",
+            component_plan_symbols=(
+                ComponentPlanSymbolV1(
+                    component_key="ka", component_type="process", has_process_ir=True
+                ),
+                ComponentPlanSymbolV1(
+                    component_key="kb", component_type="process", has_process_ir=True
+                ),
+            ),
+            process_call_evidence=(
+                ProcessCallEvidenceV1(
+                    caller_component_ref="$ref:ka",
+                    callee_component_ref="$ref:kb",
+                    witness="process_ir",
+                ),
+            ),
+        ),
+    )
+    assert "TOPOLOGY_ENVIRONMENT_MISMATCH" in [b.code for b in plan.blockers]
     assert plan.planning_only_relations == ()
     assert plan.executable_component_prerequisites == ()
     assert plan.resolved_references == ()
+
+
+def test_a_snapshot_only_mismatch_keeps_valid_symbol_backed_evidence():
+    """R3. Emptying everything deleted perfectly valid prerequisites.
+
+    The ComponentPlan symbols and ProcessIR evidence are still this account's;
+    only the snapshot is foreign. A blocker must not suppress the parts of a
+    plan that are fine — the same rule that keeps one gated queue from emptying
+    an otherwise-complete plan.
+    """
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "$ref:ka"},
+                {"kind": "process", "key": "b", "component_ref": "$ref:kb"},
+            ],
+            "relations": [
+                {"kind": "process_call", "key": "r", "caller_process": "a", "callee_process": "b"}
+            ],
+        }
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            component_plan_symbols=(
+                ComponentPlanSymbolV1(
+                    component_key="ka", component_type="process", has_process_ir=True
+                ),
+                ComponentPlanSymbolV1(
+                    component_key="kb", component_type="process", has_process_ir=True
+                ),
+            ),
+            process_call_evidence=(
+                ProcessCallEvidenceV1(
+                    caller_component_ref="$ref:ka",
+                    callee_component_ref="$ref:kb",
+                    witness="process_ir",
+                ),
+            ),
+            snapshot=_snapshot(profile="p-omega"),
+        ),
+    )
+    assert "TOPOLOGY_ENVIRONMENT_MISMATCH" in [b.code for b in plan.blockers]
+    assert len(plan.executable_component_prerequisites) == 2
+    assert [r.relation_kind for r in plan.planning_only_relations] == ["process_call"]
+    # ...and the caller is told the snapshot proved nothing about this account.
+    assert "live_revalidation" in {d.subject for d in plan.unresolved_decisions}
+
+
+def test_a_coherent_foreign_context_never_proves_absence():
+    """R3-P1. Agreement among the WRONG sources is not evidence.
+
+    A context and snapshot that agree with each other but not with the spec
+    still describe a different account, and their empty listing was allowed to
+    prove that the spec's components do not exist.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [{"kind": "process", "key": "x", "component_ref": "alpha-lit"}],
+            "relations": [],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-omega",
+        snapshot=_snapshot(profile="p-omega", pagination=_complete("process")),
+    )
+    codes = _codes(validate_system_topology(spec, ctx))
+    assert "TOPOLOGY_ENVIRONMENT_MISMATCH" in codes
+    assert "TOPOLOGY_REFERENCE_NOT_FOUND" not in codes, codes
 
 
 def test_a_same_profile_fact_that_does_not_match_leaves_the_binding_declared():
@@ -3530,3 +3650,62 @@ def test_a_context_foreign_fact_supplies_no_classification():
     # built on another account's row.
     assert findings
     assert all(d.path == "/profile_ref" for d in findings), [d.path for d in findings]
+
+
+def test_the_invariant_checker_enforces_relation_bucket_permissibility():
+    """R3-F4. The ordering checks alone did not give the bucket rule.
+
+    The checker accepted a blocked, witness-less plan with that relation
+    INJECTED into ``planning_only_relations`` — the second half of "each
+    declared relation occupies only its permitted bucket".
+    """
+    import pytest as _pytest
+
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import prepare_topology_context
+    from boomi_mcp.compiler.system_topology.contracts import PlannedTopologyRelationV1
+    from boomi_mcp.compiler.system_topology.invariants import (
+        TopologyPlanningInvariantError,
+        check_topology_plan_invariants,
+    )
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "$ref:ka"},
+                {"kind": "process", "key": "b", "component_ref": "$ref:kb"},
+            ],
+            "relations": [
+                {"kind": "process_call", "key": "r", "caller_process": "a", "callee_process": "b"}
+            ],
+        }
+    )
+    # No witness -> the relation is gated, and its blocker sits at /relations/0.
+    bare = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(component_key="ka", component_type="process"),
+            ComponentPlanSymbolV1(component_key="kb", component_type="process"),
+        ),
+    )
+    plan = plan_system_topology(spec, bare)
+    prepared = prepare_topology_context(bare)
+    assert plan.blockers
+    assert plan.planning_only_relations == ()
+    check_topology_plan_invariants(plan, prepared, spec)
+
+    injected = plan.model_copy(
+        update={
+            "planning_only_relations": (
+                PlannedTopologyRelationV1(
+                    relation_key="r",
+                    relation_kind="process_call",
+                    witness="process_ir",
+                ),
+            )
+        }
+    )
+    with _pytest.raises(TopologyPlanningInvariantError):
+        check_topology_plan_invariants(injected, prepared, spec)

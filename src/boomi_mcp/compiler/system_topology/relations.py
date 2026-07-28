@@ -614,7 +614,12 @@ def derive_unresolved_decisions(
             ),
         )
     ]
-    if prepared.context.snapshot is None:
+    snapshot = prepared.context.snapshot
+    # A snapshot from ANOTHER account is not revalidation of this one. Testing
+    # only for ``is None`` let a foreign snapshot suppress the decision and then
+    # publish that account's paging gaps, telling the caller about omega's
+    # truncation instead of that alpha was never read.
+    if snapshot is None or snapshot.profile != spec.profile_ref:
         decisions.append(
             TopologyDecisionV1(
                 subject="live_revalidation",
@@ -626,7 +631,7 @@ def derive_unresolved_decisions(
             )
         )
     else:
-        pages = prepared.context.snapshot.pagination
+        pages = snapshot.pagination
         unobserved = tuple(page for page in pages if not page.observed)
         if unobserved:
             # Reported separately from truncation, even though an unobserved

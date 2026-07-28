@@ -178,13 +178,19 @@ def plan_system_topology(
     )
     blocked_object_indexes = set(_blocked_object_indexes(error_paths))
 
-    # A profile mismatch invalidates every CONTEXT-BACKED bucket, wholesale.
-    # The exclusions above key on ``/objects/N`` and ``/relations/N`` paths, and
-    # a profile blocker sits at ``/profile_ref`` — so a plan that had just
-    # declared its evidence to be about a different account went on to publish
-    # that account's prerequisites and witnessed relations as though they were
-    # this one's. Nothing derived from a mismatched context may be reported.
-    profile_mismatch = any(d.path == "/profile_ref" for d in report.errors)
+    # Two grades of profile problem, and they must not be conflated.
+    #
+    # A CONTEXT mismatch means the evidence set as a whole is about another
+    # account, so nothing derived from it may be published — a plan that had
+    # just declared that went on to publish that account's prerequisites and
+    # witnessed relations as though they were this one's.
+    #
+    # A SNAPSHOT-only mismatch is narrower: the ComponentPlan symbols and the
+    # ProcessIR evidence are still this account's, and erasing them too deleted
+    # perfectly valid prerequisites. A blocker must not suppress the parts of a
+    # plan that are fine — the same rule that keeps one gated queue from
+    # emptying an otherwise-complete plan.
+    profile_mismatch = prepared.context.profile != spec.profile_ref
 
     resolved = (
         () if profile_mismatch else resolve_topology_references(spec, prepared, unresolvable)

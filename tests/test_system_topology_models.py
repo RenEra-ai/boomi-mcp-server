@@ -817,44 +817,97 @@ def test_models_package_exports_are_pinned():
         "parse_system_topology_v1",
         "system_topology_v1_json_schema",
     }
-    # EXACT for the topology names, not a subset. A subset check passes while
-    # the surface silently widens, which is exactly what an "exact export" pin
-    # exists to stop.
-    topology_exports = {
+    # EXACT, by set difference against the WHOLE ``__all__`` — not a predicate
+    # filter over it. Filtering first meant an unexpected export that matched
+    # none of the predicates (``SystemTopologyUnexpectedV1``) was invisible to
+    # the equality assertion, so the surface could widen while the "exact" pin
+    # stayed green. The pre-#144 names are enumerated instead, so anything that
+    # is neither those nor these fails.
+    non_topology = {
         name
         for name in models.__all__
-        if name.startswith(("TOPOLOGY_", "SYSTEM_TOPOLOGY_"))
-        or name.startswith("Topology")
-        or "system_topology" in name
-        or name
-        in {
-            "ApiServiceObjectV1",
-            "ApiServiceRouteRelationV1",
-            "DeploymentBindingRelationV1",
-            "DeploymentUnitObjectV1",
-            "DocumentCacheObjectV1",
-            "DocumentCacheUseRelationV1",
-            "EnvironmentObjectV1",
-            "EventStreamReferenceRelationV1",
-            "ExternalEventStreamObjectV1",
-            "ExternalQueueObjectV1",
-            "OpaquePlatformRefV1",
-            "ProcessCallRelationV1",
-            "ProcessObjectV1",
-            "ProcessPropertyObjectV1",
-            "ProcessPropertyUseRelationV1",
-            "QueueReferenceRelationV1",
-            "RuntimeObjectV1",
-            "ScheduleBindingRelationV1",
-            "ScheduleObjectV1",
-            "SystemTopologyDiagnostic",
-            "SystemTopologySpecV1",
-            "SystemTopologyValidationError",
-        }
+        if not (
+            name in expected
+            or name.startswith(("PROCESS_IR", "Process", "Branch", "Cache", "Combine"))
+            or name
+            in {
+                "IntegrationSpecV1",
+                "IntegrationComponentSpec",
+                "PipelineSpec",
+                "StageSpec",
+                "PipelineEdgeSpec",
+                "PipelineStageKind",
+                "PipelineEdgeKind",
+                "StageCardinality",
+                "StageContextEffect",
+                "StageSideEffect",
+                "StageFailureBehavior",
+                "ComponentRefV1",
+                "ConnectorCallNodeV1",
+                "CurrentPropertySourceV1",
+                "CustomScriptingOpV1",
+                "DataProcessNodeV1",
+                "DataProcessOperationV1",
+                "DdpPropertySourceV1",
+                "DecisionFalseArmV1",
+                "DecisionNodeV1",
+                "DecisionOperandV1",
+                "DecisionTrueArmV1",
+                "DocumentCacheRetrieveNodeV1",
+                "DppPropertySourceV1",
+                "ErrorScopeV1",
+                "ExceptionNodeV1",
+                "FlowControlNodeV1",
+                "IdempotencyContractRefV1",
+                "IdempotencyEvidenceV1",
+                "KeyReferenceIdempotencyV1",
+                "LinearNodeV1",
+                "MapRefNodeV1",
+                "MessageNodeV1",
+                "ProfilePropertySourceV1",
+                "PropertySourceV1",
+                "RetryPolicyV1",
+                "ReturnDocumentsNodeV1",
+                "SequenceNodeV1",
+                "SetDdpNodeV1",
+                "SetDppNodeV1",
+                "SourceEndpointV1",
+                "SplitDocumentsOpV1",
+                "StaticOperandV1",
+                "StaticPropertySourceV1",
+                "StopNodeV1",
+                "TargetEndpointV1",
+                "TrackOperandV1",
+                "TryCatchBodyStepV1",
+                "TryCatchCatchBodyV1",
+                "TryCatchNodeV1",
+                "TryCatchTryBodyV1",
+                "VerifiedActionIdempotencyV1",
+                "canonical_process_ir_json",
+                "canonical_process_ir_schema_json",
+                "parse_process_ir_v1",
+                "process_ir_v1_json_schema",
+            }
+        )
     }
-    assert topology_exports == expected, topology_exports ^ expected
+    assert non_topology == set(), non_topology
+    assert expected <= set(models.__all__), expected - set(models.__all__)
     for name in expected:
         assert hasattr(models, name), name
+
+
+def test_the_export_pin_would_notice_an_unexpected_name():
+    """Positive control: the pin's first version was a predicate filter.
+
+    An export matching none of its predicates slipped through the equality
+    assertion entirely, so the surface could widen while the "exact" pin stayed
+    green. This drives the same set difference over a doctored list.
+    """
+    doctored = ["IntegrationSpecV1", "SystemTopologySpecV1", "SystemTopologyUnexpectedV1"]
+    known = {"IntegrationSpecV1", "SystemTopologySpecV1"}
+    assert {name for name in doctored if name not in known} == {
+        "SystemTopologyUnexpectedV1"
+    }
 
 
 def test_the_derived_reflection_tables_are_immutable():
