@@ -16,7 +16,7 @@ evidence that gates a relation is what makes a decision unresolved.
 
 from __future__ import annotations
 
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from ...errors import (
     TOPOLOGY_CAPABILITY_GATED,
@@ -43,6 +43,37 @@ _WITNESS_REQUIRED: Tuple[str, ...] = (
     "document_cache_use",
     "process_property_use",
 )
+
+_REF_TOKEN_PREFIX = "$ref:"
+
+#: Which witness kinds a subject of each FORM may be established by.
+#:
+#: A planned (``$ref:``) component has no deployed artifact to read, so its
+#: authored intent — the ProcessIR root, or the typed builder for an ASC — is
+#: the authority for what it will do. An EXISTING component does have one, and
+#: only that artifact witnesses what it actually does: an authored ProcessIR for
+#: an existing process may describe an intended future shape, and accepting it
+#: would let a plan assert an edge the deployed component does not have.
+#:
+#: ``evidence.py`` already enforces this when it CONSTRUCTS witnesses, but the
+#: context is a public input — a caller can hand over
+#: ``ProcessCallEvidenceV1(witness="process_ir")`` for a literal id directly,
+#: which bypasses the constructor entirely. The rule therefore has to hold at
+#: the point of use as well as the point of manufacture.
+_WITNESS_FORMS: Dict[str, Tuple[str, ...]] = {
+    "planned": ("process_ir", "typed_builder"),
+    "existing": ("component_xml",),
+}
+
+
+def _form(component_ref: str) -> str:
+    return "planned" if component_ref.startswith(_REF_TOKEN_PREFIX) else "existing"
+
+
+def _witness_form_ok(subject_ref: str, witness: Optional[str]) -> bool:
+    if witness is None:
+        return False
+    return witness in _WITNESS_FORMS[_form(subject_ref)]
 
 
 def _object_index(spec: SystemTopologySpecV1) -> Dict[str, object]:
@@ -200,24 +231,31 @@ def collect_lifecycle_findings(
             continue
 
         witness = None
+        # The subject whose artifact does the witnessing: the CALLER of a call,
+        # the API service that routes, the process that uses a resource.
+        subject_ref = ""
         if rel.kind == "process_call":
             caller = _component_ref(objects.get(rel.caller_process))
             callee = _component_ref(objects.get(rel.callee_process))
+            subject_ref = caller
             witness = call_witnesses.get((caller, callee))
         elif rel.kind == "api_service_route":
             asc = _component_ref(objects.get(rel.api_service))
             listener = _component_ref(objects.get(rel.listener_process))
+            subject_ref = asc
             witness = route_witnesses.get((asc, listener))
         elif rel.kind == "document_cache_use":
             process = _component_ref(objects.get(rel.process))
             cache = _component_ref(objects.get(rel.document_cache))
+            subject_ref = process
             witness = use_witnesses.get((process, cache, "document_cache"))
         elif rel.kind == "process_property_use":
             process = _component_ref(objects.get(rel.process))
             prop = _component_ref(objects.get(rel.process_property))
+            subject_ref = process
             witness = use_witnesses.get((process, prop, "process_property"))
 
-        if witness is None:
+        if not _witness_form_ok(subject_ref, witness):
             findings.append(
                 topology_finding(
                     TOPOLOGY_CAPABILITY_GATED,
@@ -274,6 +312,23 @@ def collect_environment_findings(
                 phase="environment",
                 path="/profile_ref",
                 subject="environment",
+            )
+        )
+
+    # A snapshot can carry the right profile while an individual fact inside it
+    # names another account. ``prepare_topology_context`` discards those so they
+    # cannot resolve anything, but discarding silently would leave a caller
+    # wondering why a component they can see in the snapshot does not resolve —
+    # and a mixed-profile snapshot is a defect in whatever produced it.
+    if prepared.foreign_profile_fact_count:
+        findings.append(
+            topology_finding(
+                TOPOLOGY_ENVIRONMENT_MISMATCH,
+                severity="error",
+                phase="environment",
+                path="/profile_ref",
+                subject="environment",
+                provenance=("capture:discovery/mixed-profile-snapshot",),
             )
         )
 

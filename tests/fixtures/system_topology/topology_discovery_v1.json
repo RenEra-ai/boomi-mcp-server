@@ -60,6 +60,7 @@
     }
   ],
   "profile": "prof-a",
+  "runtime_inventory_complete": false,
   "runtimes": [
     {
       "profile": "prof-a",

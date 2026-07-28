@@ -159,6 +159,47 @@ optional, and authoring it opts into an equality check against discovery.
 
 ---
 
+## 4b. Evidence discipline in the resolver
+
+Six rules the resolver enforces, each of which the first implementation got wrong in the
+same direction — by treating a gap in evidence as a fact.
+
+**Type is carried, never discarded.** Indexes hold `(id, type)`, not bare ids, and a reference
+resolves only when the backing component is the type the object kind requires
+(`process`→`process`, `api_service`→`webservice`, `document_cache`→`documentcache`,
+`process_property`→`processproperty`). An id-only index resolves a `process` object pointing at a
+Document Cache exactly as happily as a correct one.
+
+**Absence and mismatch are asymmetric.** A wrong type is conclusive from the fact alone — we read
+the component and it is a cache. Absence is conclusive only when the listing that would have
+contained it was **observed and complete**: a literal id missing from a 100-of-186 page is not
+evidence the component does not exist. A ComponentPlan symbol table is complete by construction (it
+*is* the plan); a live listing is not.
+
+**Profile isolation is per FACT.** A snapshot can carry the right profile while an individual fact
+inside it names another account. Such facts are **discarded** before indexing — a fact from another
+account is not weaker evidence about this one, it is evidence about a different system — and their
+presence raises `TOPOLOGY_ENVIRONMENT_MISMATCH` rather than being dropped silently.
+
+**Runtimes are not an inventory.** Discovery derives runtimes from *schedule rows*, so it sees only
+runtimes that already have a schedule. `runtime_inventory_complete` is `False` and nothing sets it
+True; absence of a runtime therefore witnesses nothing. Treating that list as authoritative would
+report every unscheduled runtime as not-found and block the primary use case — binding the **first**
+schedule to a runtime.
+
+**A blocked endpoint withdraws its relation.** An endpoint's failure is reported under `/objects/N`,
+a different path from the relation's own, so a filter keyed on `/relations/N` alone left a
+structural binding in `planning_only_relations` while it pointed at an unresolvable object. A plan
+may not present a relation as plannable when one of its ends is blocked.
+
+**Cycles are located by strongly connected component**, not by pruning sources and sinks. Two cycles
+joined by an acyclic bridge leave every node with both an in-edge and an out-edge, so nothing prunes
+and the *bridge* survives as if it were cyclic — and removing it breaks neither cycle. The pointer
+is the lowest authored index among edges **internal** to a cyclic SCC (iterative Tarjan, so a deep
+call graph cannot blow the stack).
+
+---
+
 ## 5. Witness policy
 
 What counts as proof depends on whether the process **exists** yet:
@@ -171,10 +212,29 @@ What counts as proof depends on whether the process **exists** yet:
 `project_process_ir_evidence` silently contributes nothing for a literal id — the fail-closed
 outcome, since the relation is then gated, which is the correct verdict.
 
+**The rule holds at the point of USE, not only at manufacture.** `evidence.py` enforces it when it
+constructs witnesses, but `TopologyResolutionContextV1` is a public input: a caller can hand over
+`ProcessCallEvidenceV1(witness="process_ir")` for a literal id directly and bypass the constructor
+entirely. `collect_lifecycle_findings` therefore re-checks the witness against the subject's form —
+planned subjects accept `process_ir`/`typed_builder`, existing subjects accept `component_xml` — and
+gates the relation on a mismatch in either direction.
+
+Extraction **parses** the document and walks elements; it does not pattern-match text. That
+distinction is load-bearing: a regex has no idea what a comment is, so
+`<!-- <processcall processId="x"/> -->` produced a witness for an edge the process does not have —
+and a witness is what authorizes a planning relation. `iter()` yields elements only, so a
+commented-out shape contributes nothing without any special handling. Tags and attributes are matched
+namespace-stripped and case-insensitively, because Boomi XML carries namespaces.
+
+Everything fails closed: oversized, DTD-bearing (`DOCTYPE`/`ENTITY` are rejected before parsing —
+XXE and billion-laughs, mirroring `categories.schema_discovery._safe_xml`), or malformed all yield
+*no witness*, and a relation with no witness is gated — the correct verdict for a document we could
+not read.
+
 Raw XML never leaves `evidence.py`: parsing extracts typed witness rows and discards everything else,
 so a connection property sitting beside a `<processcall>` cannot ride along. Route witnesses carry no
-path, method, or endpoint configuration. Oversized input is **refused, not truncated** — a
-half-parsed document produces confidently wrong witnesses.
+path, method, or endpoint configuration, and require a real WSS listen element rather than text that
+merely mentions one.
 
 ---
 

@@ -466,9 +466,25 @@ def test_a_duplicate_target_in_xml_yields_one_edge():
 
 
 def test_oversized_xml_is_refused_rather_than_truncated():
-    """A half-parsed document produces confidently wrong witnesses."""
-    huge = "<process>" + ("<pad/>" * 10) + '<processcall processId="x"/>'
-    huge += "y" * (9 * 1024 * 1024)
+    """A half-parsed document produces confidently wrong witnesses.
+
+    The fixture must be WELL-FORMED and oversized, or it proves nothing: a
+    malformed one is refused by the parser regardless, so the size bound could
+    be deleted with the test still green. This document parses cleanly and is
+    rejected only because of its length.
+    """
+    from boomi_mcp.compiler.system_topology.evidence import _MAX_XML_CHARS
+
+    # Sized from the constant, not a magic number: a hardcoded length silently
+    # stops exceeding the bound the day the bound is raised, and the test goes
+    # back to proving nothing.
+    padding = "<pad/>" * ((_MAX_XML_CHARS // 6) + 1000)
+    huge = f'<process><processcall processId="x"/>{padding}</process>'
+    assert len(huge) > _MAX_XML_CHARS, (len(huge), _MAX_XML_CHARS)
+    # Well-formed: the same document under the bound DOES yield a witness.
+    small = '<process><processcall processId="x"/><pad/></process>'
+    assert parse_process_component_evidence("caller-1", small)[0]
+
     calls, uses = parse_process_component_evidence("caller-1", huge)
     assert calls == ()
     assert uses == ()
@@ -1284,3 +1300,223 @@ def test_a_visible_space_character_is_handled_by_whitespace_collapsing(tmp_path)
             f"# every{space}live deployment record observed is inactive.\n",
         )
         assert _retraction_offenders([path]), repr(space)
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 1 — XML extraction must parse, not pattern-match
+# ---------------------------------------------------------------------------
+
+
+def test_a_commented_out_shape_creates_no_witness():
+    """A regex has no idea what a comment is.
+
+    This is the sharp case: a witness AUTHORIZES a planning relation, so a
+    commented-out sub-process call would establish an edge the process does not
+    have. ``iter()`` yields elements only, so comments contribute nothing
+    without any special handling.
+    """
+    calls, uses = parse_process_component_evidence(
+        "lit-1", '<process><!-- <processcall processId="ghost"/> --></process>'
+    )
+    assert calls == ()
+    assert uses == ()
+
+
+def test_a_real_shape_beside_a_commented_one_still_witnesses():
+    """Negative control: the fix must not stop seeing genuine shapes."""
+    calls, _ = parse_process_component_evidence(
+        "lit-1",
+        '<process><!-- <processcall processId="ghost"/> -->'
+        '<processcall processId="real"/></process>',
+    )
+    assert [c.callee_component_ref for c in calls] == ["real"]
+
+
+def test_malformed_xml_creates_no_witness():
+    """Fail closed: an unreadable document means no witness, hence gated."""
+    calls, uses = parse_process_component_evidence(
+        "lit-1", '<process><processcall processId="y"'
+    )
+    assert calls == ()
+    assert uses == ()
+
+
+def test_a_dtd_bearing_document_is_refused():
+    """XXE / billion-laughs: DOCTYPE and ENTITY are rejected before parsing."""
+    for hostile in (
+        '<!DOCTYPE f [<!ENTITY a "b">]><process><processcall processId="z"/></process>',
+        '<!ENTITY x "y"><process><processcall processId="z"/></process>',
+    ):
+        calls, _ = parse_process_component_evidence("lit-1", hostile)
+        assert calls == (), hostile
+
+
+def test_a_namespaced_component_still_witnesses():
+    """Boomi XML carries namespaces; a raw tag comparison would stop matching."""
+    calls, _ = parse_process_component_evidence(
+        "lit-1",
+        '<p:process xmlns:p="urn:x"><p:processcall processId="nsok"/></p:process>',
+    )
+    assert [c.callee_component_ref for c in calls] == ["nsok"]
+
+
+def test_an_api_service_route_requires_a_real_wss_listen_element():
+    """A comment mentioning wss/listen must not make a target a listener."""
+    assert (
+        parse_api_service_component_evidence(
+            "asc-1",
+            '<webservice><!-- <wss listen="true"/> -->'
+            '<operation processId="L"/></webservice>',
+        )
+        == ()
+    )
+    assert parse_api_service_component_evidence(
+        "asc-1", '<webservice><wss listen="true"/><operation processId="L"/></webservice>'
+    )
+
+
+def test_xml_target_extraction_is_linear_not_quadratic():
+    """The 8 MiB bound admits enough distinct targets for O(n^2) to bite.
+
+    Timed rather than asserted structurally: the defect is a performance
+    property, and a membership test against a list is the only way to fail it.
+    Ratio, not absolute time, so the test is not machine-speed dependent.
+    """
+    import time
+
+    def elapsed(count):
+        xml = (
+            "<process>"
+            + "".join(f'<processcall processId="p{i}"/>' for i in range(count))
+            + "</process>"
+        )
+        start = time.perf_counter()
+        parse_process_component_evidence("x", xml)
+        return time.perf_counter() - start
+
+    small = elapsed(4000)
+    large = elapsed(16000)
+    # 4x the input. Linear is ~4x; the quadratic version was ~16x. A generous
+    # ceiling keeps this from flaking on a loaded machine while still failing
+    # decisively if the set is removed.
+    assert large < small * 9, (small, large)
+
+
+# ---------------------------------------------------------------------------
+# QA #223 — the element-name filter, pinned against REAL Boomi component XML
+# ---------------------------------------------------------------------------
+
+_LIVE_XML = _project_root / "tests" / "fixtures" / "live_xml"
+
+
+def _live_process_xmls():
+    return sorted(
+        path
+        for path in _LIVE_XML.rglob("*.xml")
+        if path.name.startswith("process_")
+    )
+
+
+def test_the_live_xml_corpus_is_present():
+    """A parametrized scan over an empty corpus passes zero cases, silently."""
+    assert len(_live_process_xmls()) >= 3
+
+
+@pytest.mark.parametrize(
+    "path", _live_process_xmls(), ids=lambda p: p.name
+)
+def test_real_component_xml_fabricates_no_witness(path):
+    """QA #223. The element-name filter is load-bearing on REAL documents.
+
+    Every Boomi component's ROOT is ``<bns:Component … componentId="…">``, and
+    ``componentId`` is one of the attributes a Process Property is matched by.
+    Without the tag filter every real component would fabricate a
+    ``process_property`` witness for itself — a planning edge invented from the
+    document's own identity.
+
+    Parametrized over the real captures rather than a synthetic root, because
+    the point is that the filter holds against documents nobody wrote for it.
+    """
+    calls, uses = parse_process_component_evidence("lit-1", path.read_text())
+    fabricated = [
+        u for u in uses if u.resource_component_ref == u.process_component_ref
+    ]
+    assert fabricated == [], (path.name, fabricated)
+    # Nothing may claim the component calls itself, either.
+    assert [c for c in calls if c.callee_component_ref == "lit-1"] == []
+
+
+def test_a_component_root_alone_yields_no_process_property_witness():
+    """The minimal shape of the same defect, stated directly."""
+    root_only = (
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+        'componentId="abc-123" type="process" name="X"/>'
+    )
+    calls, uses = parse_process_component_evidence("lit-1", root_only)
+    assert calls == ()
+    assert uses == ()
+
+
+def test_a_genuine_processproperty_element_still_witnesses():
+    """Negative control: the filter must not stop seeing real shapes."""
+    xml = (
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+        'componentId="self-id"><processproperty componentId="prop-1"/></bns:Component>'
+    )
+    _, uses = parse_process_component_evidence("lit-1", xml)
+    assert [(u.resource_kind, u.resource_component_ref) for u in uses] == [
+        ("process_property", "prop-1")
+    ]
+
+
+@pytest.mark.parametrize(
+    "tag,attr,kind",
+    [
+        ("processcall", "processId", "call"),
+        ("documentcache", "documentCacheId", "document_cache"),
+        ("cache", "cacheId", "document_cache"),
+        ("processproperty", "componentId", "process_property"),
+        ("property", "processPropertyId", "process_property"),
+    ],
+)
+def test_every_declared_tag_and_attribute_is_exercised(tag, attr, kind):
+    """QA #223. Each vocabulary constant must be individually pinned.
+
+    Three sibling constants were unpinned, so any of them could be deleted with
+    the suite green — silently narrowing what the planner can witness.
+    """
+    xml = f'<process><{tag} {attr}="target-1"/></process>'
+    calls, uses = parse_process_component_evidence("lit-1", xml)
+    if kind == "call":
+        assert [c.callee_component_ref for c in calls] == ["target-1"], (tag, attr)
+    else:
+        assert [
+            u.resource_component_ref for u in uses if u.resource_kind == kind
+        ] == ["target-1"], (tag, attr)
+
+
+@pytest.mark.parametrize("tag", ["operation", "route"])
+def test_every_declared_route_tag_is_exercised(tag):
+    """``route`` is the tag the repo's own real ASC capture uses."""
+    xml = f'<webservice><wss listen="true"/><{tag} processId="L-1"/></webservice>'
+    assert [
+        r.listener_component_ref
+        for r in parse_api_service_component_evidence("asc-1", xml)
+    ] == ["L-1"], tag
+
+
+def test_the_real_api_service_capture_yields_no_route_witness_today():
+    """A recorded fact, not an aspiration.
+
+    The repo's real ASC capture carries no ``<wss>`` element at all — the WSS
+    Listen configuration lives on the linked PROCESS's start shape, not on the
+    API Service Component. So this returns nothing, and the api_service_route
+    relation stays witness-gated on a real ASC. That is pre-existing platform
+    shape, consistent with the registry's ``unavailable`` live leg for
+    ``api_service`` — and it is pinned here so a future change to the extraction
+    cannot quietly start claiming routes it cannot actually see.
+    """
+    capture = _LIVE_XML / "m6" / "api_service_minimal.xml"
+    if not capture.exists():
+        pytest.skip("the m6 ASC capture is not present")
+    assert parse_api_service_component_evidence("asc-1", capture.read_text()) == ()

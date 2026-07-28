@@ -24,6 +24,33 @@ from typing import FrozenSet, List, Literal, Optional, Tuple
 from ...models.integration_models import IntegrationSpecV1
 from .contracts import _TopologyPlanningModel
 
+#: Component-type aliases an ``IntegrationSpecV1`` may legitimately carry, for
+#: the four kinds topology is component-backed by. A COPY of the relevant subset
+#: of ``categories.integration_builder._TYPE_ALIASES`` — the compiler must not
+#: depend on the tool layer (ADR-001 §6), the same reason the secret list and
+#: the DOCTYPE screen are copied. A test pins equality with the builder's map so
+#: the two cannot drift.
+#:
+#: Without normalization a spec authored with ``type="api_service"`` — which the
+#: builder accepts and resolves to ``webservice`` — would be reported as a
+#: TOPOLOGY_REFERENCE_TYPE_MISMATCH against its own API-service object. Latent
+#: today because ``build_integration`` normalizes before planning, but the
+#: projection takes a RAW spec and must not assume a caller went through it.
+_COMPONENT_TYPE_ALIASES = {
+    "api.service": "webservice",
+    "api_service": "webservice",
+    "webservice": "webservice",
+    "process": "process",
+    "documentcache": "documentcache",
+    "processproperty": "processproperty",
+}
+
+
+def _normalize_component_type(value: str) -> str:
+    """Case-fold and de-alias, mirroring the builder's own normalizer."""
+    key = (value or "").strip().lower()
+    return _COMPONENT_TYPE_ALIASES.get(key, key)
+
 
 class ComponentPlanSymbolV1(_TopologyPlanningModel):
     """One ComponentPlan symbol, projected down to what topology may see.
@@ -200,6 +227,16 @@ class TopologyDiscoverySnapshotV1(_TopologyPlanningModel):
     deployments: Tuple[DeploymentFactV1, ...] = ()
     pagination: Tuple[DiscoveryPageProvenanceV1, ...] = ()
 
+    #: Is ``runtimes`` an INVENTORY, or just the runtimes that happened to turn
+    #: up? Discovery derives runtimes from schedule rows, so it only ever sees
+    #: runtimes that already have a schedule — which makes absence from the list
+    #: meaningless, and treating it as authoritative would report every
+    #: unscheduled runtime as not-found and block the primary use case: binding
+    #: the FIRST schedule to a runtime. Nothing sets this True today; the read
+    #: port has no runtime-list method, and inventing one would be a capability
+    #: claim with no evidence behind it.
+    runtime_inventory_complete: bool = False
+
 
 class TopologyResolutionContextV1(_TopologyPlanningModel):
     """Everything the planner may know. Pure data, no behavior, no I/O."""
@@ -223,10 +260,25 @@ class PreparedTopologyContextV1(_TopologyPlanningModel):
     """
 
     context: TopologyResolutionContextV1
-    symbol_keys: Tuple[str, ...] = ()
-    component_ids: Tuple[str, ...] = ()
+    #: ``(component_key, component_type)`` — the TYPE is carried, not discarded.
+    #: An id-only index cannot tell a process object pointing at a Document
+    #: Cache component from a correct reference, so it silently resolves the
+    #: wrong component instead of raising TOPOLOGY_REFERENCE_TYPE_MISMATCH.
+    symbols: Tuple[Tuple[str, str], ...] = ()
+    #: ``(component_id, component_type)``, same reason.
+    components: Tuple[Tuple[str, str], ...] = ()
     environment_ids: Tuple[str, ...] = ()
     runtime_ids: Tuple[str, ...] = ()
+    #: Component types whose live listing was OBSERVED and NOT truncated.
+    #: Absence is conclusive only for these: a literal id missing from a
+    #: 100-of-186 page is not evidence that the component does not exist, and
+    #: reporting it as not-found contradicts the pagination provenance this
+    #: contract records precisely so absence is not over-read.
+    complete_component_types: Tuple[str, ...] = ()
+    runtime_inventory_complete: bool = False
+    #: How many facts were discarded for naming a different profile. A COUNT,
+    #: never the values — the whole point is that they are foreign.
+    foreign_profile_fact_count: int = 0
 
 
 def project_component_plan_symbols(
@@ -249,7 +301,7 @@ def project_component_plan_symbols(
     return tuple(
         ComponentPlanSymbolV1(
             component_key=component.key,
-            component_type=component.type,
+            component_type=_normalize_component_type(component.type),
             materialization_dependencies=tuple(component.depends_on),
             has_process_ir=component.key in process_ir_keys,
         )
@@ -276,22 +328,56 @@ def prepare_topology_context(
         context.model_dump(mode="python")
     )
     snapshot = revalidated.snapshot
+
+    symbols = tuple(
+        sorted(
+            (s.component_key, s.component_type)
+            for s in revalidated.component_plan_symbols
+        )
+    )
+    if snapshot is None:
+        return PreparedTopologyContextV1(context=revalidated, symbols=symbols)
+
+    # Profile isolation is enforced per FACT, not just on the snapshot envelope.
+    # A snapshot may carry the right profile while an individual fact inside it
+    # names another account — and an index built without checking would let a
+    # foreign component id resolve with no mismatch reported at all. Discarded
+    # rather than merely flagged: a fact from another account is not weaker
+    # evidence about this one, it is evidence about a different system.
+    profile = snapshot.profile
+    kept_components = [c for c in snapshot.components if c.profile == profile]
+    kept_environments = [e for e in snapshot.environments if e.profile == profile]
+    kept_runtimes = [r for r in snapshot.runtimes if r.profile == profile]
+    foreign = (
+        len(snapshot.components)
+        - len(kept_components)
+        + len(snapshot.environments)
+        - len(kept_environments)
+        + len(snapshot.runtimes)
+        - len(kept_runtimes)
+        + sum(1 for s in snapshot.schedule_bindings if s.profile != profile)
+        + sum(1 for d in snapshot.deployments if d.profile != profile)
+    )
+
+    complete = tuple(
+        sorted(
+            page.component_type
+            for page in snapshot.pagination
+            if page.observed and not page.truncated
+        )
+    )
+
     return PreparedTopologyContextV1(
         context=revalidated,
-        symbol_keys=tuple(
-            sorted(s.component_key for s in revalidated.component_plan_symbols)
+        symbols=symbols,
+        components=tuple(
+            sorted((c.component_id, c.component_type) for c in kept_components)
         ),
-        component_ids=tuple(sorted(c.component_id for c in snapshot.components))
-        if snapshot
-        else (),
-        environment_ids=tuple(
-            sorted(e.environment_id for e in snapshot.environments)
-        )
-        if snapshot
-        else (),
-        runtime_ids=tuple(sorted(r.runtime_id for r in snapshot.runtimes))
-        if snapshot
-        else (),
+        environment_ids=tuple(sorted(e.environment_id for e in kept_environments)),
+        runtime_ids=tuple(sorted(r.runtime_id for r in kept_runtimes)),
+        complete_component_types=complete,
+        runtime_inventory_complete=snapshot.runtime_inventory_complete,
+        foreign_profile_fact_count=foreign,
     )
 
 

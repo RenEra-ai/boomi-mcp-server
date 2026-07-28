@@ -107,6 +107,69 @@ def _insert_sorted(items: List[str], value: str) -> None:
     items.insert(low, value)
 
 
+def _cyclic_sccs(
+    nodes: Tuple[str, ...], arcs
+) -> Tuple[frozenset, ...]:
+    """Strongly connected components that actually contain a cycle.
+
+    Tarjan, iterative so a deep call graph cannot blow the Python stack. A
+    single-node component counts only when it has a self-loop.
+
+    The first implementation pruned sources and sinks instead, which is not the
+    same thing: two cycles joined by an acyclic bridge leave every node with
+    both an in-edge and an out-edge, so nothing prunes and the BRIDGE survives
+    as if it were cyclic. Pointing a caller at a relation that is in no cycle
+    means following the remediation removes neither.
+    """
+    successors: Dict[str, Set[str]] = {node: set() for node in nodes}
+    for arc in arcs:
+        successors[arc.caller].add(arc.callee)
+
+    index_of: Dict[str, int] = {}
+    low: Dict[str, int] = {}
+    on_stack: Set[str] = set()
+    stack: List[str] = []
+    counter = 0
+    components: List[frozenset] = []
+
+    for root in nodes:
+        if root in index_of:
+            continue
+        work: List[Tuple[str, List[str]]] = [(root, sorted(successors[root]))]
+        index_of[root] = low[root] = counter
+        counter += 1
+        stack.append(root)
+        on_stack.add(root)
+        while work:
+            node, pending = work[-1]
+            if pending:
+                nxt = pending.pop(0)
+                if nxt not in index_of:
+                    index_of[nxt] = low[nxt] = counter
+                    counter += 1
+                    stack.append(nxt)
+                    on_stack.add(nxt)
+                    work.append((nxt, sorted(successors[nxt])))
+                elif nxt in on_stack:
+                    low[node] = min(low[node], index_of[nxt])
+                continue
+            work.pop()
+            if work:
+                parent = work[-1][0]
+                low[parent] = min(low[parent], low[node])
+            if low[node] == index_of[node]:
+                component = []
+                while True:
+                    member = stack.pop()
+                    on_stack.discard(member)
+                    component.append(member)
+                    if member == node:
+                        break
+                if len(component) > 1 or node in successors[node]:
+                    components.append(frozenset(component))
+    return tuple(components)
+
+
 def collect_dependency_findings(
     spec: SystemTopologySpecV1,
 ) -> Tuple[TopologyDiagnosticV1, ...]:
@@ -115,8 +178,9 @@ def collect_dependency_findings(
     "Canonical" matters: a cycle has no natural first element, so pointing at
     whichever node the traversal happened to reach would move the diagnostic when
     an unrelated relation is added. The pointer is the lowest authored index
-    among the relations participating in any cycle, which is stable under every
-    reordering that does not change the cycle itself.
+    among the relations that lie INSIDE a cyclic component — an edge merely
+    touching one, such as a bridge between two separate cycles, is not a
+    relation whose removal breaks anything.
     """
     nodes = _process_keys(spec)
     node_set = set(nodes)
@@ -124,43 +188,27 @@ def collect_dependency_findings(
     if not arcs:
         return ()
 
-    # Iteratively strip nodes with no outgoing call and no incoming call until
-    # nothing more can be removed; whatever remains is in, or feeds, a cycle.
-    remaining_arcs = [a for a in arcs if a.caller != a.callee]
-    self_calls = [a for a in arcs if a.caller == a.callee]
-
-    changed = True
-    while changed:
-        changed = False
-        callers = {a.caller for a in remaining_arcs}
-        callees = {a.callee for a in remaining_arcs}
-        # A node that is never called cannot be inside a cycle; drop its arcs.
-        droppable = callers - callees
-        if droppable:
-            kept = [a for a in remaining_arcs if a.caller not in droppable]
-            if len(kept) != len(remaining_arcs):
-                remaining_arcs = kept
-                changed = True
-                continue
-        # Symmetrically, a node that never calls anything cannot be in a cycle.
-        dead_ends = callees - callers
-        if dead_ends:
-            kept = [a for a in remaining_arcs if a.callee not in dead_ends]
-            if len(kept) != len(remaining_arcs):
-                remaining_arcs = kept
-                changed = True
-
-    cyclic = remaining_arcs + self_calls
+    cyclic = _cyclic_sccs(nodes, arcs)
     if not cyclic:
         return ()
 
-    earliest = min(a.relation_index for a in cyclic)
+    # An arc is INTERNAL to a cycle when both endpoints sit in the same
+    # strongly connected component. A bridge from one cycle to another has its
+    # ends in two different components and is excluded.
+    internal = [
+        arc.relation_index
+        for arc in arcs
+        if any(arc.caller in scc and arc.callee in scc for scc in cyclic)
+    ]
+    if not internal:
+        return ()
+
     return (
         topology_finding(
             TOPOLOGY_DEPENDENCY_CYCLE,
             severity="error",
             phase="dependency",
-            path=f"/relations/{earliest}",
+            path=f"/relations/{min(internal)}",
             subject="process_call",
         ),
     )

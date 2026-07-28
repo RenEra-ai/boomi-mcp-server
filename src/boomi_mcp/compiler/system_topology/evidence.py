@@ -32,7 +32,8 @@ distinction so the two cannot be confused at a call site.
 from __future__ import annotations
 
 import re
-from typing import Iterable, List, Optional, Sequence, Tuple
+import xml.etree.ElementTree as ET
+from typing import Iterable, List, Optional, Sequence, Set, Tuple
 
 from .context import (
     ApiServiceRouteEvidenceV1,
@@ -96,37 +97,90 @@ def project_process_ir_evidence(
     return calls, uses
 
 
-# ``<processcall>`` shapes carry the callee id in a ``processId`` attribute.
-# Matched with a bounded, attribute-scoped pattern rather than a full parse
-# because we want exactly one fact out of the document and nothing else: a
-# targeted extraction cannot accidentally surface a sibling element's secret.
-_PROCESS_CALL_ID = re.compile(
-    r"<processcall\b[^>]*\bprocessId\s*=\s*[\"']([^\"'<>&]{1,128})[\"']",
-    re.IGNORECASE,
-)
-_CACHE_ID = re.compile(
-    r"<(?:documentcache|cache)\b[^>]*\b(?:documentCacheId|cacheId)\s*=\s*[\"']([^\"'<>&]{1,128})[\"']",
-    re.IGNORECASE,
-)
-_PROPERTY_ID = re.compile(
-    r"<(?:processproperty|property)\b[^>]*\b(?:componentId|processPropertyId)\s*=\s*[\"']([^\"'<>&]{1,128})[\"']",
-    re.IGNORECASE,
-)
-_WSS_LISTEN = re.compile(r"\bwss\b[^>]*\blisten\b", re.IGNORECASE)
-_ROUTE_PROCESS_ID = re.compile(
-    r"<(?:operation|route)\b[^>]*\bprocessId\s*=\s*[\"']([^\"'<>&]{1,128})[\"']",
-    re.IGNORECASE,
-)
+# ---------------------------------------------------------------------------
+# XML extraction
+# ---------------------------------------------------------------------------
+
+# Element/attribute vocabulary, matched case-insensitively against the parsed
+# tree. Regex extraction was the first implementation and was WRONG: a pattern
+# has no idea what a comment is, so ``<!-- <processcall processId="x"/> -->``
+# produced a witness for an edge the process does not have — and a witness is
+# what authorizes a planning relation. The same applied to any malformed
+# fragment that happened to contain matching text.
+_PROCESS_CALL_TAGS = ("processcall",)
+_PROCESS_CALL_ATTRS = ("processid",)
+_CACHE_TAGS = ("documentcache", "cache")
+_CACHE_ATTRS = ("documentcacheid", "cacheid")
+_PROPERTY_TAGS = ("processproperty", "property")
+_PROPERTY_ATTRS = ("componentid", "processpropertyid")
+_ROUTE_TAGS = ("operation", "route")
+_ROUTE_ATTRS = ("processid",)
+_WSS_TAGS = ("wss",)
+
+#: XXE / billion-laughs mitigation — reject DOCTYPE/ENTITY outright. A COPY of
+#: the screen in ``categories.schema_discovery._safe_xml`` rather than an import:
+#: the compiler must not depend on the tool layer (ADR-001 §6), the same reason
+#: the secret list is copied in ``models.system_topology``.
+_DOCTYPE_RE = re.compile(r"<!\s*(DOCTYPE|ENTITY)", re.IGNORECASE)
 
 
-def _bounded(raw_xml: Optional[str]) -> str:
-    if not raw_xml:
+def _local_name(tag) -> str:
+    """Namespace-stripped, lowercased element name.
+
+    ``ElementTree`` reports a namespaced tag as ``{uri}local``. Comparing the
+    raw tag would silently stop matching the moment a component carries a
+    namespace declaration.
+    """
+    if not isinstance(tag, str):
         return ""
-    if len(raw_xml) > _MAX_XML_CHARS:
-        # Refuse rather than truncate: a half-parsed document produces
-        # confidently wrong witnesses, which is worse than no witness.
-        return ""
-    return raw_xml
+    return tag.rsplit("}", 1)[-1].lower()
+
+
+def _attr(element, names: Tuple[str, ...]) -> Optional[str]:
+    for key, value in element.attrib.items():
+        if _local_name(key) in names and value:
+            return value
+    return None
+
+
+def _parse(raw_xml: Optional[str]):
+    """Parse bounded component XML, or return None. Never raises.
+
+    Fail-closed at every step: too large, DTD-bearing, or malformed all yield
+    None, which means "no witness" — and a relation with no witness is gated,
+    which is the correct verdict for a document we could not read.
+    """
+    if not raw_xml or len(raw_xml) > _MAX_XML_CHARS:
+        return None
+    if _DOCTYPE_RE.search(raw_xml):
+        return None
+    try:
+        return ET.fromstring(raw_xml)
+    except ET.ParseError:
+        return None
+    except ValueError:
+        # An encoding declaration on a ``str`` — retry as bytes, as the tool
+        # layer's helper does.
+        try:
+            return ET.fromstring(raw_xml.encode("utf-8"))
+        except (ET.ParseError, ValueError):
+            return None
+
+
+def _collect(root, tags: Tuple[str, ...], attrs: Tuple[str, ...]) -> Tuple[str, ...]:
+    """Every attribute value on a matching element, deduplicated in order.
+
+    ``iter()`` yields ELEMENTS only — comments and processing instructions are
+    not elements under the default parser, so a commented-out shape contributes
+    nothing without any special handling.
+    """
+    found = []
+    for element in root.iter():
+        if _local_name(element.tag) in tags:
+            value = _attr(element, attrs)
+            if value:
+                found.append(value)
+    return _dedupe(found)
 
 
 def parse_process_component_evidence(
@@ -140,8 +194,8 @@ def parse_process_component_evidence(
     Required for an EXISTING (literal-id) process. Returns typed rows only; the
     XML itself is discarded here.
     """
-    text = _bounded(raw_xml)
-    if not text:
+    root = _parse(raw_xml)
+    if root is None:
         return (), ()
 
     calls = tuple(
@@ -150,7 +204,7 @@ def parse_process_component_evidence(
             callee_component_ref=callee,
             witness="component_xml",
         )
-        for callee in _dedupe(_PROCESS_CALL_ID.findall(text))
+        for callee in _collect(root, _PROCESS_CALL_TAGS, _PROCESS_CALL_ATTRS)
     )
     uses = tuple(
         SharedResourceUseEvidenceV1(
@@ -159,11 +213,11 @@ def parse_process_component_evidence(
             resource_kind=kind,  # type: ignore[arg-type]
             witness="component_xml",
         )
-        for kind, pattern in (
-            ("document_cache", _CACHE_ID),
-            ("process_property", _PROPERTY_ID),
+        for kind, tags, attrs in (
+            ("document_cache", _CACHE_TAGS, _CACHE_ATTRS),
+            ("process_property", _PROPERTY_TAGS, _PROPERTY_ATTRS),
         )
-        for resource in _dedupe(pattern.findall(text))
+        for resource in _collect(root, tags, attrs)
     )
     return calls, uses
 
@@ -179,14 +233,25 @@ def parse_api_service_component_evidence(
     carrying the path would put endpoint detail into a contract that promises
     opaque references only.
 
-    The document must actually look like a WSS listen surface. An ASC whose
+    The document must actually declare a WSS listen surface. An ASC whose
     operations are not listen-shaped does not make its targets listeners, and
     ``ListenerStatus`` is explicitly not accepted as a substitute (its observed
     behavior conflicts with the documented example, so it is registered
     ``unsupported`` rather than trusted).
     """
-    text = _bounded(raw_xml)
-    if not text or not _WSS_LISTEN.search(text):
+    root = _parse(raw_xml)
+    if root is None:
+        return ()
+    listens = any(
+        _local_name(element.tag) in _WSS_TAGS
+        and any(
+            str(value).strip().lower() in ("true", "listen")
+            for key, value in element.attrib.items()
+            if _local_name(key) in ("listen", "mode", "operationtype")
+        )
+        for element in root.iter()
+    )
+    if not listens:
         return ()
     return tuple(
         ApiServiceRouteEvidenceV1(
@@ -194,7 +259,7 @@ def parse_api_service_component_evidence(
             listener_component_ref=target,
             witness="component_xml",
         )
-        for target in _dedupe(_ROUTE_PROCESS_ID.findall(text))
+        for target in _collect(root, _ROUTE_TAGS, _ROUTE_ATTRS)
     )
 
 
@@ -219,12 +284,19 @@ def normalize_dependency_corroboration(
 
 
 def _dedupe(values: Iterable[str]) -> Tuple[str, ...]:
-    """Order-preserving dedupe — the same target listed twice is one edge."""
-    seen: List[str] = []
+    """Order-preserving dedupe — the same target listed twice is one edge.
+
+    The membership test runs against a SET while the list preserves order. A
+    list-only version is quadratic, and the 8 MiB bound admits enough distinct
+    targets for that to be a real cost on a corrupt or hostile component.
+    """
+    seen: Set[str] = set()
+    kept: List[str] = []
     for value in values:
         if value and value not in seen:
-            seen.append(value)
-    return tuple(seen)
+            seen.add(value)
+            kept.append(value)
+    return tuple(kept)
 
 
 __all__: List[str] = [

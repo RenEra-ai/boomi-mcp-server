@@ -50,11 +50,17 @@ TOPOLOGY_ENDPOINT_MATRIX: Mapping[Tuple[str, str], str] = {
 
 _REF_TOKEN_PREFIX = "$ref:"
 
-#: Object kinds whose identity is a component reference (vs a platform resource
-#: ref, vs nothing at all).
-_COMPONENT_BACKED = frozenset(
-    {"process", "api_service", "document_cache", "process_property"}
-)
+#: Object kinds whose identity is a component reference, and the Boomi component
+#: TYPE each one requires. Carrying the expected type is what makes a
+#: wrong-kinded reference detectable: an id-only index resolves a ``process``
+#: object pointing at a Document Cache component just as happily as a correct
+#: one, and the planner then treats a cache as a process.
+_COMPONENT_BACKED = {
+    "process": "process",
+    "api_service": "webservice",
+    "document_cache": "documentcache",
+    "process_property": "processproperty",
+}
 
 
 def resolve_topology_references(
@@ -70,11 +76,8 @@ def resolve_topology_references(
     collector's job, and returning a half-resolved row would make downstream
     bucket rules depend on interpreting a sentinel.
     """
-    symbols = {
-        symbol.component_key: symbol
-        for symbol in prepared.context.component_plan_symbols
-    }
-    component_ids = set(prepared.component_ids)
+    symbols = dict(prepared.symbols)
+    component_ids = dict(prepared.components)
     environment_ids = set(prepared.environment_ids)
     runtime_ids = set(prepared.runtime_ids)
 
@@ -82,8 +85,14 @@ def resolve_topology_references(
     for obj in spec.objects:
         if obj.kind in _COMPONENT_BACKED:
             ref = obj.component_ref  # type: ignore[union-attr]
+            # A reference resolves only when the backing component is the RIGHT
+            # TYPE. Resolving on the id alone would put a Document Cache into
+            # ``resolved_references`` as a process, and the type mismatch the
+            # collector reports would then contradict the plan's own resolution
+            # table.
+            expected = _COMPONENT_BACKED[obj.kind]
             if ref.startswith(_REF_TOKEN_PREFIX):
-                if ref[len(_REF_TOKEN_PREFIX) :] in symbols:
+                if symbols.get(ref[len(_REF_TOKEN_PREFIX) :]) == expected:
                     resolved.append(
                         ResolvedTopologyReferenceV1(
                             object_key=obj.key,
@@ -91,7 +100,7 @@ def resolve_topology_references(
                             resolution="component_plan_symbol",
                         )
                     )
-            elif ref in component_ids:
+            elif component_ids.get(ref) == expected:
                 resolved.append(
                     ResolvedTopologyReferenceV1(
                         object_key=obj.key,
@@ -135,58 +144,85 @@ def collect_reference_findings(
         # type mismatch on top of the duplicate.
         objects_by_key.setdefault(obj.key, obj.kind)
 
-    symbols = {
-        symbol.component_key for symbol in prepared.context.component_plan_symbols
-    }
-    component_ids = set(prepared.component_ids)
+    symbols = dict(prepared.symbols)
+    component_ids = dict(prepared.components)
     environment_ids = set(prepared.environment_ids)
     runtime_ids = set(prepared.runtime_ids)
+    complete = set(prepared.complete_component_types)
 
-    # Objects: does the thing this object claims to name exist in context?
-    # Only checked when a snapshot or symbol table is present — with neither,
-    # everything would be "not found", which is noise rather than a finding.
-    have_context = bool(symbols or component_ids or environment_ids or runtime_ids)
-    if have_context:
-        for index, obj in enumerate(spec.objects):
-            if obj.kind in _COMPONENT_BACKED:
-                ref = obj.component_ref  # type: ignore[union-attr]
-                known = (
-                    ref[len(_REF_TOKEN_PREFIX) :] in symbols
-                    if ref.startswith(_REF_TOKEN_PREFIX)
-                    else ref in component_ids
+    def _object_finding(code, index, field, kind):
+        findings.append(
+            topology_finding(
+                code,
+                severity="error",
+                phase="reference",
+                path=f"/objects/{index}/{field}",
+                subject=kind,
+            )
+        )
+
+    # Objects: does the thing this object claims to name exist in context, and
+    # is it the right KIND of thing?
+    #
+    # Absence and mismatch are asymmetric. A wrong TYPE is conclusive from the
+    # fact alone — we read the component and it is a Document Cache. Absence is
+    # only conclusive when the listing that would have contained it was both
+    # observed and complete: a literal id missing from a 100-of-186 page is not
+    # evidence that the component does not exist, and reporting it as not-found
+    # would contradict the pagination provenance this contract records precisely
+    # so absence is not over-read.
+    for index, obj in enumerate(spec.objects):
+        if obj.kind in _COMPONENT_BACKED:
+            ref = obj.component_ref  # type: ignore[union-attr]
+            expected = _COMPONENT_BACKED[obj.kind]
+            if ref.startswith(_REF_TOKEN_PREFIX):
+                key = ref[len(_REF_TOKEN_PREFIX) :]
+                actual = symbols.get(key)
+                if actual is None:
+                    # UNCONDITIONAL. A ComponentPlan symbol table is
+                    # authoritative and complete by construction — it IS the
+                    # plan, not a page of it — and that holds when it is empty
+                    # too: a ``$ref:`` naming nothing resolves to nothing.
+                    #
+                    # Guarding this on ``if symbols`` made the verdict depend on
+                    # whether some UNRELATED symbol happened to be present: the
+                    # same document flipped from "no blockers, binding
+                    # plannable" to "blocked, binding withdrawn" when one was
+                    # added. It also left the endpoint *unjudged* rather than
+                    # blocked, which defeats the endpoint-withdrawal rule.
+                    _object_finding(
+                        TOPOLOGY_REFERENCE_NOT_FOUND, index, "component_ref", obj.kind
+                    )
+                elif actual != expected:
+                    _object_finding(
+                        TOPOLOGY_REFERENCE_TYPE_MISMATCH, index, "component_ref", obj.kind
+                    )
+            else:
+                actual = component_ids.get(ref)
+                if actual is None:
+                    if expected in complete:
+                        _object_finding(
+                            TOPOLOGY_REFERENCE_NOT_FOUND, index, "component_ref", obj.kind
+                        )
+                elif actual != expected:
+                    _object_finding(
+                        TOPOLOGY_REFERENCE_TYPE_MISMATCH, index, "component_ref", obj.kind
+                    )
+        elif obj.kind == "environment" and environment_ids:
+            if obj.environment_ref not in environment_ids:  # type: ignore[union-attr]
+                _object_finding(
+                    TOPOLOGY_REFERENCE_NOT_FOUND, index, "environment_ref", obj.kind
                 )
-                if not known:
-                    findings.append(
-                        topology_finding(
-                            TOPOLOGY_REFERENCE_NOT_FOUND,
-                            severity="error",
-                            phase="reference",
-                            path=f"/objects/{index}/component_ref",
-                            subject=obj.kind,
-                        )
-                    )
-            elif obj.kind == "environment" and environment_ids:
-                if obj.environment_ref not in environment_ids:  # type: ignore[union-attr]
-                    findings.append(
-                        topology_finding(
-                            TOPOLOGY_REFERENCE_NOT_FOUND,
-                            severity="error",
-                            phase="reference",
-                            path=f"/objects/{index}/environment_ref",
-                            subject=obj.kind,
-                        )
-                    )
-            elif obj.kind == "runtime" and runtime_ids:
-                if obj.runtime_ref not in runtime_ids:  # type: ignore[union-attr]
-                    findings.append(
-                        topology_finding(
-                            TOPOLOGY_REFERENCE_NOT_FOUND,
-                            severity="error",
-                            phase="reference",
-                            path=f"/objects/{index}/runtime_ref",
-                            subject=obj.kind,
-                        )
-                    )
+        elif obj.kind == "runtime" and prepared.runtime_inventory_complete:
+            # Only an authoritative inventory can witness absence. Discovery
+            # derives runtimes from SCHEDULE rows, so it sees only runtimes that
+            # already have one — treating that as an inventory would report
+            # every unscheduled runtime as not-found and block the primary use
+            # case, binding the first schedule to a runtime.
+            if obj.runtime_ref not in runtime_ids:  # type: ignore[union-attr]
+                _object_finding(
+                    TOPOLOGY_REFERENCE_NOT_FOUND, index, "runtime_ref", obj.kind
+                )
 
     # Relations: does each role name a declared object, of the accepted kind?
     for index, rel in enumerate(spec.relations):

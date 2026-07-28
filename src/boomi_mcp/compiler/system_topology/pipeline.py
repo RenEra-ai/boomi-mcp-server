@@ -168,7 +168,19 @@ def plan_system_topology(
     # Only relations that survived every phase may be planned. ``planned`` is
     # what the witness collector accepted; anything that later drew an error is
     # withdrawn here rather than being trusted from an earlier phase.
+    #
+    # Withdrawal follows the OBJECT graph too, not just the relation's own path.
+    # An endpoint's failure is reported under ``/objects/N`` — a different path
+    # entirely — so a filter that looked only at ``/relations/N`` left a
+    # structural binding in ``planning_only_relations`` while it pointed at an
+    # object that does not resolve. A plan is not allowed to present a relation
+    # as plannable when one of its ends is blocked.
     blocked_paths = {d.path for d in report.errors}
+    blocked_object_keys = {
+        spec.objects[index].key
+        for index in _blocked_object_indexes(blocked_paths)
+        if 0 <= index < len(spec.objects)
+    }
     surviving = tuple(
         relation
         for index, relation in _indexed_relations(spec, planned)
@@ -176,6 +188,7 @@ def plan_system_topology(
         and not any(
             path.startswith(f"/relations/{index}/") for path in blocked_paths
         )
+        and not _touches_blocked_object(spec, index, blocked_object_keys)
     )
 
     plan = SystemTopologyPlanV1(
@@ -196,6 +209,33 @@ def plan_system_topology(
     )
     check_topology_plan_invariants(plan, prepared)
     return plan
+
+
+def _blocked_object_indexes(blocked_paths) -> Tuple[int, ...]:
+    """Authored object indexes named by any error path under ``/objects/``."""
+    indexes = []
+    for path in blocked_paths:
+        parts = path.split("/")
+        if len(parts) >= 3 and parts[1] == "objects":
+            try:
+                indexes.append(int(parts[2]))
+            except ValueError:
+                continue
+    return tuple(sorted(set(indexes)))
+
+
+def _touches_blocked_object(
+    spec: SystemTopologySpecV1, index: int, blocked_keys
+) -> bool:
+    if not blocked_keys or index < 0 or index >= len(spec.relations):
+        return False
+    from ...models.system_topology import TOPOLOGY_RELATION_ROLES
+
+    relation = spec.relations[index]
+    return any(
+        getattr(relation, role) in blocked_keys
+        for role in TOPOLOGY_RELATION_ROLES[relation.kind]
+    )
 
 
 def _indexed_relations(spec: SystemTopologySpecV1, planned) -> Tuple:
