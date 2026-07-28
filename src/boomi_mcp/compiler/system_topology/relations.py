@@ -495,7 +495,13 @@ def collect_environment_findings(
         # Unobserved rows contribute nothing rather than overwriting; a
         # contradiction against any observed value is a finding.
         observed: Dict[str, Set[str]] = {}
-        for fact in snapshot.environments:
+        # The envelope gate applies HERE as well. This scan read the raw
+        # snapshot, so a row stamped with the context's profile inside a
+        # foreign-envelope capture still produced a classification
+        # contradiction — from the very snapshot the planner had just declared
+        # untrustworthy.
+        envelope_ok = snapshot.profile == ctx.profile
+        for fact in snapshot.environments if envelope_ok else ():
             # Anchored on the CONTEXT's profile, like the other two per-fact
             # filters. Leaving this one on the snapshot envelope made the three
             # disagree: a fact foreign to the context was discarded for

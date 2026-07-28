@@ -3831,3 +3831,95 @@ def test_the_invariant_checker_enforces_relation_bucket_completeness():
     dropped = plan.model_copy(update={"planning_only_relations": ()})
     with _pytest.raises(TopologyPlanningInvariantError):
         check_topology_plan_invariants(dropped, prepared, spec)
+
+
+def test_a_mismatched_envelope_also_blocks_the_classification_scan():
+    """The envelope gate applies to every snapshot read, not just corroboration.
+
+    The classification scan read the raw snapshot, so a row stamped with the
+    context's profile inside a foreign-envelope capture still produced a
+    contradiction — from the very snapshot the planner had just declared
+    untrustworthy.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "x", "component_ref": "$ref:k"},
+                {
+                    "kind": "environment",
+                    "key": "e",
+                    "environment_ref": "env-1",
+                    "classification": "TEST",
+                },
+            ],
+            "relations": [],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(component_key="k", component_type="process"),
+        ),
+        snapshot=_snapshot(
+            profile="p-omega",
+            environments=(
+                EnvironmentFactV1(
+                    profile="p-alpha", environment_id="env-1", classification="PROD"
+                ),
+            ),
+        ),
+    )
+    findings = [
+        d
+        for d in validate_system_topology(spec, ctx).errors
+        if d.code == "TOPOLOGY_ENVIRONMENT_MISMATCH"
+    ]
+    assert findings, "the envelope mismatch itself is still reported"
+    assert all(d.path == "/profile_ref" for d in findings), [d.path for d in findings]
+
+
+def test_the_foreign_row_count_describes_rows_not_the_envelope():
+    """Two findings for one problem, one of them false.
+
+    Deriving the count from the kept-list lengths made an envelope mismatch
+    report every correctly-stamped row as foreign, so a capture with no foreign
+    row at all still emitted ``mixed-profile-snapshot`` on top of the true
+    envelope mismatch.
+    """
+    from boomi_mcp.compiler.system_topology.context import prepare_topology_context
+
+    clean_rows_foreign_envelope = prepare_topology_context(
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            snapshot=_snapshot(
+                profile="p-omega",
+                components=(
+                    ComponentFactV1(
+                        profile="p-alpha", component_id="c", component_type="process"
+                    ),
+                ),
+            ),
+        )
+    )
+    # No ROW is foreign, so the count is zero — the envelope problem is reported
+    # separately and once.
+    assert clean_rows_foreign_envelope.foreign_profile_fact_count == 0
+    # ...and the rows are still not indexed, because the envelope is wrong.
+    assert clean_rows_foreign_envelope.components == ()
+
+    genuinely_foreign = prepare_topology_context(
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            snapshot=_snapshot(
+                profile="p-alpha",
+                components=(
+                    ComponentFactV1(
+                        profile="p-omega", component_id="c", component_type="process"
+                    ),
+                ),
+            ),
+        )
+    )
+    assert genuinely_foreign.foreign_profile_fact_count == 1

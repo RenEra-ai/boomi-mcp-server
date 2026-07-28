@@ -379,13 +379,16 @@ def prepare_topology_context(
         kept_runtimes = [r for r in snapshot.runtimes if r.profile == profile]
     else:
         kept_components, kept_environments, kept_runtimes = [], [], []
+    # Counted from each ROW's own profile, independently of whether the envelope
+    # permitted indexing it. Deriving it from the kept-list lengths made an
+    # envelope mismatch report every correctly-stamped row as foreign, so a
+    # capture with no foreign row at all still emitted
+    # ``mixed-profile-snapshot`` on top of the true envelope mismatch — two
+    # findings for one problem, one of them false.
     foreign = (
-        len(snapshot.components)
-        - len(kept_components)
-        + len(snapshot.environments)
-        - len(kept_environments)
-        + len(snapshot.runtimes)
-        - len(kept_runtimes)
+        sum(1 for c in snapshot.components if c.profile != profile)
+        + sum(1 for e in snapshot.environments if e.profile != profile)
+        + sum(1 for r in snapshot.runtimes if r.profile != profile)
         + sum(1 for s in snapshot.schedule_bindings if s.profile != profile)
         + sum(1 for d in snapshot.deployments if d.profile != profile)
     )
