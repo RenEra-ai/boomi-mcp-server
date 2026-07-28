@@ -63,11 +63,15 @@ def _sorted_by(items, key) -> bool:
 def check_topology_plan_invariants(
     plan: SystemTopologyPlanV1,
     prepared: PreparedTopologyContextV1,
-    spec=None,
+    spec,
 ) -> None:
     """Verify the plan against every claim the contract makes about it.
 
-    ``spec`` is required to check the claims that are ABOUT the authored
+    ``spec`` is REQUIRED — not defaulted to ``None``. A default made every
+    spec-dependent check skippable by omitting an argument, which is the same
+    fail-open shape as the checks it was added to close.
+
+    It is needed for the claims that are ABOUT the authored
     document: that every planned relation is one the spec declares, and that the
     runtime order contains only processes the spec declares and linearizes its
     ProcessCall graph. Without it the checker could confirm shape and ordering
@@ -154,8 +158,9 @@ def check_topology_plan_invariants(
         "runtime order must not repeat a process",
     )
 
-    # 4b. Membership: everything planned must be something the spec declared.
-    if spec is not None:
+    # 4b. Membership AND completeness: everything planned must be something the
+    #     spec declared, and a clean plan must not silently drop what it owes.
+    if True:
         declared_relations = {rel.key: rel.kind for rel in spec.relations}
         for relation in plan.planning_only_relations:
             _require(
@@ -183,6 +188,16 @@ def check_topology_plan_invariants(
                     position[rel.callee_process] < position[rel.caller_process],
                     "the runtime order must place a callee before its caller",
                 )
+
+        # Completeness. Checking only the edges whose endpoints already appear
+        # let an emptied order pass every ordering test vacuously — there were
+        # no positions to compare. A blocked plan legitimately reports no order;
+        # a CLEAN one must order every declared process.
+        if not plan.blockers:
+            _require(
+                set(plan.runtime_process_order.order) == process_keys,
+                "a clean plan must order every declared process",
+            )
 
     # 5. A gated or unsupported subject never reaches an executable or planning
     #    bucket. This is the issue's central promise.

@@ -177,6 +177,16 @@ def _binding_corroborated(rel, objects, ctx) -> bool:
     # blocker. ``prepare_topology_context`` counts such rows as foreign; this
     # helper has to refuse them too.
     profile = ctx.profile
+
+    # ENFORCED, not merely documented. A planned ``$ref`` component does not
+    # exist yet, so nothing live can corroborate it — but a snapshot fact whose
+    # ``process_id`` literally read ``$ref:kp`` matched by string equality and
+    # promoted the binding to ``live_fact``. The docstring said literal ids; the
+    # code compared whatever it was handed.
+    subject_ref = _component_ref(objects.get(getattr(rel, "process", "")))
+    if not subject_ref or subject_ref.startswith(_REF_TOKEN_PREFIX):
+        return False
+
     if rel.kind == "schedule_binding":
         process_ref = _component_ref(objects.get(rel.process))
         runtime_ref = _platform_ref(objects.get(rel.runtime), "runtime_ref")

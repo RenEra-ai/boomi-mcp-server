@@ -2986,17 +2986,113 @@ def test_a_blocked_object_yields_no_prerequisite():
 
 
 def test_the_invariant_checker_verifies_membership_against_the_spec():
-    """A6-MED-9. Without the spec it could confirm shape but not membership."""
+    """A6-MED-9 / R2. Driven BEHAVIORALLY, not by grepping the source.
+
+    Grepping for a message proves the string exists, not that the check runs or
+    that it can fail. Each case below hands the checker a plan that is wrong in
+    exactly one way and asserts it raises.
+    """
     import inspect
 
+    import pytest as _pytest
+
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import prepare_topology_context
+    from boomi_mcp.compiler.system_topology.contracts import (
+        PlannedTopologyRelationV1,
+        TopologyRuntimeOrderV1,
+    )
     from boomi_mcp.compiler.system_topology.invariants import (
+        TopologyPlanningInvariantError,
         check_topology_plan_invariants,
     )
 
-    assert "spec" in inspect.signature(check_topology_plan_invariants).parameters
-    source = inspect.getsource(check_topology_plan_invariants)
-    assert "must be declared in the spec" in source
-    assert "callee before its caller" in source
+    # ``spec`` is REQUIRED. A default made every spec-dependent check skippable
+    # by omitting an argument — the same fail-open shape they were added to close.
+    parameter = inspect.signature(check_topology_plan_invariants).parameters["spec"]
+    assert parameter.default is inspect.Parameter.empty
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "top", "component_ref": "$ref:kt"},
+                {"kind": "process", "key": "leaf", "component_ref": "$ref:kl"},
+            ],
+            "relations": [
+                {"kind": "process_call", "key": "r", "caller_process": "top", "callee_process": "leaf"}
+            ],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(
+                component_key="kt", component_type="process", has_process_ir=True
+            ),
+            ComponentPlanSymbolV1(
+                component_key="kl", component_type="process", has_process_ir=True
+            ),
+        ),
+        process_call_evidence=(
+            ProcessCallEvidenceV1(
+                caller_component_ref="$ref:kt",
+                callee_component_ref="$ref:kl",
+                witness="process_ir",
+            ),
+        ),
+    )
+    plan = plan_system_topology(spec, ctx)
+    prepared = prepare_topology_context(ctx)
+    assert plan.blockers == ()
+    # The real plan passes its own checker.
+    check_topology_plan_invariants(plan, prepared, spec)
+
+    # 1. A relation the spec never declared.
+    invented = plan.model_copy(
+        update={
+            "planning_only_relations": plan.planning_only_relations
+            + (
+                PlannedTopologyRelationV1(
+                    relation_key="invented",
+                    relation_kind="process_call",
+                    witness="process_ir",
+                ),
+            )
+        }
+    )
+    with _pytest.raises(TopologyPlanningInvariantError):
+        check_topology_plan_invariants(invented, prepared, spec)
+
+    # 2. An order that does not linearize the ProcessCall graph.
+    reversed_order = plan.model_copy(
+        update={
+            "runtime_process_order": TopologyRuntimeOrderV1(order=("top", "leaf"))
+        }
+    )
+    with _pytest.raises(TopologyPlanningInvariantError):
+        check_topology_plan_invariants(reversed_order, prepared, spec)
+
+    # 3. A clean plan that silently dropped its order entirely. Checking only
+    #    the edges whose endpoints already appear let this pass vacuously —
+    #    there were no positions to compare.
+    emptied = plan.model_copy(
+        update={"runtime_process_order": TopologyRuntimeOrderV1(order=())}
+    )
+    with _pytest.raises(TopologyPlanningInvariantError):
+        check_topology_plan_invariants(emptied, prepared, spec)
+
+    # 4. An order naming a process the spec does not declare.
+    foreign = plan.model_copy(
+        update={
+            "runtime_process_order": TopologyRuntimeOrderV1(
+                order=("leaf", "top", "ghost")
+            )
+        }
+    )
+    with _pytest.raises(TopologyPlanningInvariantError):
+        check_topology_plan_invariants(foreign, prepared, spec)
 
 
 def test_the_unknown_discriminator_pointer_names_the_kind_field():
@@ -3050,15 +3146,8 @@ def test_a_conflicting_symbol_row_cannot_authorize_a_process_ir_witness():
     assert _process_ir_available("$ref:k", agreeing) is True
 
 
-def test_a_foreign_profile_fact_cannot_corroborate_a_binding():
-    """The corroboration scans read the RAW snapshot.
-
-    So a foreign-account schedule fact whose ids happened to match was accepted,
-    and the plan published a foreign ``live_fact`` right beside its own
-    profile-mismatch blocker.
-    """
+def _binding_plan(schedule_facts, snapshot_profile="p-alpha"):
     from boomi_mcp.compiler.system_topology import plan_system_topology
-    from boomi_mcp.compiler.system_topology.context import ScheduleBindingFactV1
 
     spec = parse_system_topology_v1(
         {
@@ -3074,47 +3163,124 @@ def test_a_foreign_profile_fact_cannot_corroborate_a_binding():
             ],
         }
     )
-    base = dict(
-        components=(
-            ComponentFactV1(
-                profile="p-alpha", component_id="proc-1", component_type="process"
-            ),
-        ),
-        runtimes=(RuntimeFactV1(profile="p-alpha", runtime_id="rt-1"),),
-        pagination=_complete("process"),
-    )
-    foreign = plan_system_topology(
+    return plan_system_topology(
         spec,
         TopologyResolutionContextV1(
             profile="p-alpha",
             snapshot=_snapshot(
-                schedule_bindings=(
-                    ScheduleBindingFactV1(
-                        profile="FOREIGN", process_id="proc-1", runtime_id="rt-1"
+                profile=snapshot_profile,
+                components=(
+                    ComponentFactV1(
+                        profile=snapshot_profile,
+                        component_id="proc-1",
+                        component_type="process",
                     ),
                 ),
-                **base,
+                runtimes=(
+                    RuntimeFactV1(profile=snapshot_profile, runtime_id="rt-1"),
+                ),
+                schedule_bindings=schedule_facts,
+                pagination=_complete("process"),
             ),
         ),
     )
-    assert [r.witness for r in foreign.planning_only_relations] == ["declared_intent"]
 
-    # The same fact from THIS profile does corroborate.
-    local = plan_system_topology(
+
+def test_a_foreign_profile_fact_cannot_corroborate_a_binding():
+    """A foreign fact inside the snapshot invalidates the whole context.
+
+    It is counted as a mixed-profile snapshot, which raises ``/profile_ref`` —
+    and nothing derived from a mismatched context may be published at all, so
+    the binding is withdrawn rather than merely downgraded. Previously the plan
+    published a foreign ``live_fact`` right beside its own mismatch blocker.
+    """
+    from boomi_mcp.compiler.system_topology.context import ScheduleBindingFactV1
+
+    plan = _binding_plan(
+        (
+            ScheduleBindingFactV1(
+                profile="FOREIGN", process_id="proc-1", runtime_id="rt-1"
+            ),
+        )
+    )
+    assert "TOPOLOGY_ENVIRONMENT_MISMATCH" in [b.code for b in plan.blockers]
+    assert plan.planning_only_relations == ()
+    assert plan.executable_component_prerequisites == ()
+    assert plan.resolved_references == ()
+
+
+def test_a_same_profile_fact_that_does_not_match_leaves_the_binding_declared():
+    """The corroboration rule in isolation: right account, wrong pair."""
+    from boomi_mcp.compiler.system_topology.context import ScheduleBindingFactV1
+
+    plan = _binding_plan(
+        (
+            ScheduleBindingFactV1(
+                profile="p-alpha", process_id="proc-1", runtime_id="OTHER-RUNTIME"
+            ),
+        )
+    )
+    assert plan.blockers == (), [b.code for b in plan.blockers]
+    assert [r.witness for r in plan.planning_only_relations] == ["declared_intent"]
+
+
+def test_a_same_profile_matching_fact_earns_live_fact():
+    from boomi_mcp.compiler.system_topology.context import ScheduleBindingFactV1
+
+    plan = _binding_plan(
+        (
+            ScheduleBindingFactV1(
+                profile="p-alpha", process_id="proc-1", runtime_id="rt-1"
+            ),
+        )
+    )
+    assert plan.blockers == (), [b.code for b in plan.blockers]
+    assert [r.witness for r in plan.planning_only_relations] == ["live_fact"]
+
+
+def test_a_planned_ref_subject_is_never_corroborated():
+    """R2. The docstring said literal ids; the code compared what it was handed.
+
+    A snapshot fact whose ``process_id`` literally read ``$ref:kp`` matched by
+    string equality and promoted a planned binding to ``live_fact`` — live data
+    corroborating a component that does not exist yet.
+    """
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import ScheduleBindingFactV1
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "pr", "component_ref": "$ref:kp"},
+                {"kind": "runtime", "key": "rt", "runtime_ref": "rt-1"},
+                {"kind": "schedule", "key": "s"},
+            ],
+            "relations": [
+                {"kind": "schedule_binding", "key": "rs", "schedule": "s", "process": "pr", "runtime": "rt"}
+            ],
+        }
+    )
+    plan = plan_system_topology(
         spec,
         TopologyResolutionContextV1(
             profile="p-alpha",
+            component_plan_symbols=(
+                ComponentPlanSymbolV1(component_key="kp", component_type="process"),
+            ),
             snapshot=_snapshot(
+                runtimes=(RuntimeFactV1(profile="p-alpha", runtime_id="rt-1"),),
                 schedule_bindings=(
                     ScheduleBindingFactV1(
-                        profile="p-alpha", process_id="proc-1", runtime_id="rt-1"
+                        profile="p-alpha", process_id="$ref:kp", runtime_id="rt-1"
                     ),
                 ),
-                **base,
+                pagination=_complete("process"),
             ),
         ),
     )
-    assert [r.witness for r in local.planning_only_relations] == ["live_fact"]
+    assert [r.witness for r in plan.planning_only_relations] == ["declared_intent"]
 
 
 @pytest.mark.parametrize("spelling", ["process", "PROCESS", "Process"])

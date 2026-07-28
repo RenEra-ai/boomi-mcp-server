@@ -178,7 +178,17 @@ def plan_system_topology(
     )
     blocked_object_indexes = set(_blocked_object_indexes(error_paths))
 
-    resolved = resolve_topology_references(spec, prepared, unresolvable)
+    # A profile mismatch invalidates every CONTEXT-BACKED bucket, wholesale.
+    # The exclusions above key on ``/objects/N`` and ``/relations/N`` paths, and
+    # a profile blocker sits at ``/profile_ref`` — so a plan that had just
+    # declared its evidence to be about a different account went on to publish
+    # that account's prerequisites and witnessed relations as though they were
+    # this one's. Nothing derived from a mismatched context may be reported.
+    profile_mismatch = any(d.path == "/profile_ref" for d in report.errors)
+
+    resolved = (
+        () if profile_mismatch else resolve_topology_references(spec, prepared, unresolvable)
+    )
 
     # Only a $ref-backed object whose symbol is present becomes a prerequisite.
     # A literal id names something that already exists — reporting it as
@@ -200,7 +210,7 @@ def plan_system_topology(
     prerequisites: List[ComponentPlanPrerequisiteV1] = []
     seen_keys: set = set()
     for object_index, obj in enumerate(spec.objects):
-        if object_index in blocked_object_indexes:
+        if profile_mismatch or object_index in blocked_object_indexes:
             continue
         ref = getattr(obj, "component_ref", "")
         if not ref.startswith(_REF_TOKEN_PREFIX):
@@ -242,7 +252,7 @@ def plan_system_topology(
         for index in blocked_object_indexes
         if 0 <= index < len(spec.objects)
     }
-    surviving = tuple(
+    surviving = () if profile_mismatch else tuple(
         relation
         for index, relation in _indexed_relations(spec, planned)
         if f"/relations/{index}" not in blocked_paths

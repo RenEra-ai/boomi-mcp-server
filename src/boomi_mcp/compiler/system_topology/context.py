@@ -282,6 +282,10 @@ class PreparedTopologyContextV1(_TopologyPlanningModel):
     #: contract records precisely so absence is not over-read.
     complete_component_types: Tuple[str, ...] = ()
     runtime_inventory_complete: bool = False
+    #: Did a snapshot for THIS profile actually observe the environment list?
+    #: ``list_environments`` is not paged, so an observed empty result is
+    #: conclusive — but only when the snapshot belongs to this account.
+    environment_inventory_observed: bool = False
     #: How many facts were discarded for naming a different profile. A COUNT,
     #: never the values — the whole point is that they are foreign.
     foreign_profile_fact_count: int = 0
@@ -385,14 +389,26 @@ def prepare_topology_context(
     # complete observed listing went unjudged rather than blocked. That is the
     # failure mode the unconditional ``$ref`` rule exists to prevent, reached by
     # a different route.
-    complete = tuple(
-        sorted(
-            {
-                _normalize_component_type(page.component_type)
-                for page in snapshot.pagination
-                if page.observed and not page.truncated
-            }
+    # A snapshot whose ENVELOPE names another account proves nothing about this
+    # one. Individual facts were filtered, but the snapshot's METADATA —
+    # pagination completeness, the runtime-inventory flag, and the mere fact
+    # that a snapshot exists — was still trusted, so an omega snapshot handed to
+    # an alpha context produced confident NOT_FOUND findings for alpha's
+    # components, environments and runtimes. Absence is the one claim that must
+    # never survive a profile mismatch.
+    envelope_matches = snapshot.profile == profile
+    complete = (
+        tuple(
+            sorted(
+                {
+                    _normalize_component_type(page.component_type)
+                    for page in snapshot.pagination
+                    if page.observed and not page.truncated
+                }
+            )
         )
+        if envelope_matches
+        else ()
     )
 
     return PreparedTopologyContextV1(
@@ -407,7 +423,10 @@ def prepare_topology_context(
         environment_ids=tuple(sorted(e.environment_id for e in kept_environments)),
         runtime_ids=tuple(sorted(r.runtime_id for r in kept_runtimes)),
         complete_component_types=complete,
-        runtime_inventory_complete=snapshot.runtime_inventory_complete,
+        runtime_inventory_complete=(
+            snapshot.runtime_inventory_complete and envelope_matches
+        ),
+        environment_inventory_observed=envelope_matches,
         foreign_profile_fact_count=foreign,
     )
 

@@ -58,7 +58,18 @@ because the live account does not support them:
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union, get_args
+from types import MappingProxyType
+from typing import (
+    Any,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+    get_args,
+)
 
 from pydantic import (
     AfterValidator,
@@ -617,16 +628,21 @@ TOPOLOGY_RELATION_KINDS: Tuple[str, ...] = _kinds_of(TopologyRelationV1)
 #: Role fields per relation kind, in authored order. DERIVED from the models so
 #: the endpoint matrix cannot drift from the schema; the resolver consumes this
 #: to know which fields name an object key.
-TOPOLOGY_RELATION_ROLES: Dict[str, Tuple[str, ...]] = {
-    kind: tuple(
-        name
-        for name in member.model_fields
-        if name not in ("kind", "key")
-    )
-    for kind, member in zip(
-        TOPOLOGY_RELATION_KINDS, get_args(get_args(TopologyRelationV1)[0])
-    )
-}
+#: IMMUTABLE. This is validation authority, not a convenience view: the endpoint
+#: matrix, the semantic-duplicate key and the invariant checker all consume it,
+#: so a caller who mutated the public mapping could delete a role from a
+#: relation and turn an unresolved reference into a valid planned one. A plain
+#: dict handed that power to anyone who imported it.
+TOPOLOGY_RELATION_ROLES: Mapping[str, Tuple[str, ...]] = MappingProxyType(
+    {
+        kind: tuple(
+            name for name in member.model_fields if name not in ("kind", "key")
+        )
+        for kind, member in zip(
+            TOPOLOGY_RELATION_KINDS, get_args(get_args(TopologyRelationV1)[0])
+        )
+    }
+)
 
 
 # ---------------------------------------------------------------------------

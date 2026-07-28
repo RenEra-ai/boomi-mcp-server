@@ -336,14 +336,14 @@ biconditional in `tests/test_error_taxonomy.py`. **Fourteen codes**, all `catego
 | `TOPOLOGY_SCHEMA_UNKNOWN_OBJECT` | missing/unknown object discriminator |
 | `TOPOLOGY_SCHEMA_UNKNOWN_RELATION` | missing/unknown relation discriminator |
 | `TOPOLOGY_SCHEMA_UNKNOWN_FIELD` | any extra, secret-shaped, open-payload or derived-verdict field |
-| `TOPOLOGY_SCHEMA_INVALID_CARDINALITY` | empty object list; unbound schedule or deployment unit |
+| `TOPOLOGY_SCHEMA_INVALID_CARDINALITY` | empty object list; unbound schedule or deployment unit; a schedule or deployment unit bound more than once |
 | `TOPOLOGY_SCHEMA_DUPLICATE_KEY` | duplicate object/relation key, or duplicate semantic relation tuple |
 | `TOPOLOGY_SCHEMA_VERSION_UNSUPPORTED` | missing/non-`"1"` version |
 | `TOPOLOGY_SCHEMA_INVALID` | remaining strict type/shape/reference-format failure |
 | `TOPOLOGY_REFERENCE_NOT_FOUND` | role or reference unresolvable in this profile's context |
 | `TOPOLOGY_REFERENCE_TYPE_MISMATCH` | role resolves to a kind it does not accept |
-| `TOPOLOGY_RELATION_UNSUPPORTED` | scheduled listener; schedule bound twice; multi-process deployment unit; self-call |
-| `TOPOLOGY_CAPABILITY_GATED` | gated kind present (phase `capability`), or supported relation with no witness (phase `relation`) |
+| `TOPOLOGY_RELATION_UNSUPPORTED` | scheduled listener; process self-call |
+| `TOPOLOGY_CAPABILITY_GATED` | gated kind present (phase `capability`), or supported relation with no witness (phase `lifecycle`) |
 | `TOPOLOGY_ENVIRONMENT_MISMATCH` | profile disagreement, or contradicted environment classification |
 | `TOPOLOGY_DEPENDENCY_CYCLE` | ProcessCall cycle, pointed at the canonical earliest participating relation |
 | `TOPOLOGY_APPLY_NOT_SUPPORTED` | any `requested_operation` other than `plan` |

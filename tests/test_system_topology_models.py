@@ -817,9 +817,67 @@ def test_models_package_exports_are_pinned():
         "parse_system_topology_v1",
         "system_topology_v1_json_schema",
     }
-    assert expected <= set(models.__all__)
+    # EXACT for the topology names, not a subset. A subset check passes while
+    # the surface silently widens, which is exactly what an "exact export" pin
+    # exists to stop.
+    topology_exports = {
+        name
+        for name in models.__all__
+        if name.startswith(("TOPOLOGY_", "SYSTEM_TOPOLOGY_"))
+        or name.startswith("Topology")
+        or "system_topology" in name
+        or name
+        in {
+            "ApiServiceObjectV1",
+            "ApiServiceRouteRelationV1",
+            "DeploymentBindingRelationV1",
+            "DeploymentUnitObjectV1",
+            "DocumentCacheObjectV1",
+            "DocumentCacheUseRelationV1",
+            "EnvironmentObjectV1",
+            "EventStreamReferenceRelationV1",
+            "ExternalEventStreamObjectV1",
+            "ExternalQueueObjectV1",
+            "OpaquePlatformRefV1",
+            "ProcessCallRelationV1",
+            "ProcessObjectV1",
+            "ProcessPropertyObjectV1",
+            "ProcessPropertyUseRelationV1",
+            "QueueReferenceRelationV1",
+            "RuntimeObjectV1",
+            "ScheduleBindingRelationV1",
+            "ScheduleObjectV1",
+            "SystemTopologyDiagnostic",
+            "SystemTopologySpecV1",
+            "SystemTopologyValidationError",
+        }
+    }
+    assert topology_exports == expected, topology_exports ^ expected
     for name in expected:
         assert hasattr(models, name), name
+
+
+def test_the_derived_reflection_tables_are_immutable():
+    """They are validation authority, not a convenience view.
+
+    The endpoint matrix, the semantic-duplicate key and the invariant checker
+    all consume ``TOPOLOGY_RELATION_ROLES``, so a caller who mutated the public
+    mapping could delete a role from a relation and turn an unresolved
+    reference into a valid planned one. A plain dict handed that power to
+    anyone who imported it.
+    """
+    from types import MappingProxyType
+
+    from boomi_mcp.models.system_topology import TOPOLOGY_RELATION_ROLES
+
+    assert isinstance(TOPOLOGY_RELATION_ROLES, MappingProxyType)
+    with pytest.raises(TypeError):
+        TOPOLOGY_RELATION_ROLES["schedule_binding"] = ()  # type: ignore[index]
+    with pytest.raises(TypeError):
+        del TOPOLOGY_RELATION_ROLES["schedule_binding"]  # type: ignore[attr-defined]
+    # The kind tuples are tuples, so their contents cannot be edited either.
+    for roles in TOPOLOGY_RELATION_ROLES.values():
+        assert isinstance(roles, tuple)
 
 
 def test_the_planner_is_not_exported_through_models():

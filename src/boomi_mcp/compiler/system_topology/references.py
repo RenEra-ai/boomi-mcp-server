@@ -222,7 +222,7 @@ def collect_reference_findings(
                     _object_finding(
                         TOPOLOGY_REFERENCE_TYPE_MISMATCH, index, "component_ref", obj.kind
                     )
-        elif obj.kind == "environment" and prepared.context.snapshot is not None:
+        elif obj.kind == "environment" and prepared.environment_inventory_observed:
             # Guarded on the SNAPSHOT existing, not on the id set being
             # non-empty. ``list_environments`` returns the whole set — it is not
             # paged, unlike component queries — so once discovery ran, an empty
