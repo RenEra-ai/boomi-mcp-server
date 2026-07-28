@@ -366,11 +366,21 @@ def prepare_topology_context(
         + sum(1 for d in snapshot.deployments if d.profile != profile)
     )
 
+    # The THIRD type-bearing field, normalized like the other two. Its consumer
+    # compares these against the same canonical vocabulary the expected object
+    # type comes from, so a page recorded as ``api_service`` — or merely
+    # ``Webservice`` — never matched ``webservice``, absence was never
+    # conclusive, and a ghost component whose absence IS fully witnessed by a
+    # complete observed listing went unjudged rather than blocked. That is the
+    # failure mode the unconditional ``$ref`` rule exists to prevent, reached by
+    # a different route.
     complete = tuple(
         sorted(
-            page.component_type
-            for page in snapshot.pagination
-            if page.observed and not page.truncated
+            {
+                _normalize_component_type(page.component_type)
+                for page in snapshot.pagination
+                if page.observed and not page.truncated
+            }
         )
     )
 

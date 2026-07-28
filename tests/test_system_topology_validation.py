@@ -1743,3 +1743,197 @@ def test_at_most_one_witness_kind_is_accepted_per_form():
         # And every form is reachable — a model no form accepts would make its
         # relation permanently ungateable-into-plannable.
         assert any(declared & set(a) for a in _WITNESS_FORMS.values()), model.__name__
+
+
+# ---------------------------------------------------------------------------
+# QA round 9 — one product defect the round-2 fix unmasked, two pin gaps
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "page_vocab", ["webservice", "api_service", "api.service", "Webservice", "API_Service"]
+)
+def test_a_pagination_vocabulary_alias_still_witnesses_absence(page_vocab):
+    """QA #227. The THIRD type-bearing field needed normalizing too.
+
+    ``complete_component_types`` is compared against the canonical expected
+    type, so a page recorded in any alias vocabulary never matched — absence
+    stopped being conclusive and a ghost component went UNJUDGED rather than
+    blocked. Pre-fix this was unreachable because the symbol type mismatch
+    stopped the caller first; normalizing the other two fields unmasked it.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "api_service", "key": "real", "component_ref": "real-asc"},
+                {"kind": "api_service", "key": "ghost", "component_ref": "does-not-exist"},
+            ],
+            "relations": [],
+        }
+    )
+    from boomi_mcp.compiler.system_topology.context import DiscoveryPageProvenanceV1
+
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        snapshot=_snapshot(
+            components=(
+                ComponentFactV1(
+                    profile="p-alpha", component_id="real-asc", component_type="webservice"
+                ),
+            ),
+            pagination=(
+                DiscoveryPageProvenanceV1(
+                    component_type=page_vocab, returned_count=1, total_available=1
+                ),
+            ),
+        ),
+    )
+    codes = _codes(validate_system_topology(spec, ctx))
+    assert codes == ["TOPOLOGY_REFERENCE_NOT_FOUND"], (page_vocab, codes)
+
+
+def test_all_three_type_bearing_fields_are_normalized_together():
+    """The invariant behind #226/#227: every type that reaches a comparison.
+
+    Stated as one test so a fourth type-bearing field added later has an
+    obvious home, rather than being normalized in two places out of three
+    again.
+    """
+    from boomi_mcp.compiler.system_topology.context import (
+        DiscoveryPageProvenanceV1,
+        prepare_topology_context,
+    )
+
+    prepared = prepare_topology_context(
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            component_plan_symbols=(
+                ComponentPlanSymbolV1(component_key="k", component_type="API_Service"),
+            ),
+            snapshot=_snapshot(
+                components=(
+                    ComponentFactV1(
+                        profile="p-alpha", component_id="c", component_type="api.service"
+                    ),
+                ),
+                pagination=(
+                    DiscoveryPageProvenanceV1(
+                        component_type="api_service", returned_count=1, total_available=1
+                    ),
+                ),
+            ),
+        )
+    )
+    assert prepared.symbols == (("k", "webservice"),)
+    assert prepared.components == (("c", "webservice"),)
+    assert prepared.complete_component_types == ("webservice",)
+
+
+def test_duplicate_accepted_witnesses_still_witness():
+    """QA #228. The monotonicity pin only ever appended REJECTED-form rows.
+
+    Those are filtered before ``accepted`` is built, so it never held two
+    entries and ``accepted[0] if len(accepted) == 1 else None`` survived —
+    which is not equivalent: two identical valid rows would gate a relation the
+    real code correctly witnesses. Nothing constrains the evidence tuple to be
+    unique, which is the whole premise of the order-independence fix.
+    """
+    good = ProcessCallEvidenceV1(
+        caller_component_ref="$ref:ka",
+        callee_component_ref="$ref:kb",
+        witness="process_ir",
+    )
+    assert _ordered_witness_verdict((good, good)) == []
+    assert _ordered_witness_verdict((good, good, good)) == []
+
+
+def test_the_accepted_witness_helper_handles_repeats_directly():
+    """The same property at the unit boundary, so the cause is unambiguous."""
+    from boomi_mcp.compiler.system_topology.relations import _accepted_witness
+
+    assert _accepted_witness("$ref:k", ["process_ir"]) == "process_ir"
+    assert _accepted_witness("$ref:k", ["process_ir", "process_ir"]) == "process_ir"
+    assert (
+        _accepted_witness("$ref:k", ["process_ir", "component_xml", "process_ir"])
+        == "process_ir"
+    )
+    assert _accepted_witness("literal", ["component_xml", "component_xml"]) == "component_xml"
+    assert _accepted_witness("$ref:k", ["component_xml"]) is None
+    assert _accepted_witness("$ref:k", []) is None
+
+
+def test_the_cycle_index_covers_every_component_not_just_the_first():
+    """QA #229. The existing pointer test's fixture has ONE cyclic component.
+
+    With a single component, which components get indexed cannot matter, so
+    ``enumerate(cyclic[:1])`` survived.
+
+    Two disjoint cycles are necessary but not sufficient: Tarjan emits
+    components in TRAVERSAL order (node-sorted), while the pointer is the
+    earliest AUTHORED index. The two orders must disagree, or indexing only the
+    first component still lands on the same answer by accident — which is what
+    a first attempt at this test did. So the cycle Tarjan finds LAST is the one
+    authored FIRST.
+    """
+    from boomi_mcp.compiler.system_topology.dependencies import (
+        _arcs,
+        _cyclic_sccs,
+        collect_dependency_findings,
+    )
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": f"n{i}", "component_ref": f"$ref:k{i}"}
+                for i in range(4)
+            ],
+            "relations": [
+                # cycle B (n2<->n3) authored FIRST, but traversal reaches it SECOND.
+                {"kind": "process_call", "key": "r0", "caller_process": "n2", "callee_process": "n3"},
+                {"kind": "process_call", "key": "r1", "caller_process": "n3", "callee_process": "n2"},
+                # cycle A (n0<->n1) authored second, traversal reaches it FIRST.
+                {"kind": "process_call", "key": "r2", "caller_process": "n0", "callee_process": "n1"},
+                {"kind": "process_call", "key": "r3", "caller_process": "n1", "callee_process": "n0"},
+            ],
+        }
+    )
+    # The premise, asserted rather than assumed: the two orders really disagree.
+    components = _cyclic_sccs(tuple(sorted(f"n{i}" for i in range(4))), _arcs(spec))
+    assert len(components) == 2
+    assert components[0] == frozenset({"n0", "n1"}), components
+    # ...so a first-component-only index would answer /relations/2.
+
+    findings = collect_dependency_findings(spec)
+    assert findings
+    # The EARLIEST authored internal edge, across BOTH components.
+    assert findings[0].path == "/relations/0", findings[0].path
+
+
+def test_two_disjoint_cycles_are_both_indexed():
+    """The same coverage, asserted on membership rather than the pointer."""
+    from boomi_mcp.compiler.system_topology.dependencies import _arcs, _cyclic_sccs
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": f"n{i}", "component_ref": f"$ref:k{i}"}
+                for i in range(4)
+            ],
+            "relations": [
+                {"kind": "process_call", "key": "r0", "caller_process": "n0", "callee_process": "n1"},
+                {"kind": "process_call", "key": "r1", "caller_process": "n1", "callee_process": "n0"},
+                {"kind": "process_call", "key": "r2", "caller_process": "n2", "callee_process": "n3"},
+                {"kind": "process_call", "key": "r3", "caller_process": "n3", "callee_process": "n2"},
+            ],
+        }
+    )
+    nodes = tuple(sorted(f"n{i}" for i in range(4)))
+    components = _cyclic_sccs(nodes, _arcs(spec))
+    assert len(components) == 2, components
+    assert set().union(*components) == set(nodes)
