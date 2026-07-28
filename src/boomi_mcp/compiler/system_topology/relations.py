@@ -500,16 +500,26 @@ def collect_environment_findings(
         # foreign-envelope capture still produced a classification
         # contradiction — from the very snapshot the planner had just declared
         # untrustworthy.
-        envelope_ok = snapshot.profile == ctx.profile
+        #
+        # And the gate is anchored on the AUTHORED profile, not merely on an
+        # internally-coherent context — the same predicate that qualifies
+        # absence authority in ``collect_reference_findings``. Gating on
+        # ``ctx.profile`` alone made the two halves of one report disagree about
+        # the very same evidence: a context and snapshot that agreed with each
+        # OTHER but not with the spec were refused as proof that this account's
+        # components are missing, and simultaneously accepted as proof that this
+        # account's authored classification is wrong — with a remediation that
+        # says to align the document with the other account's data. Agreement
+        # among the wrong sources is not evidence, in either direction.
+        envelope_ok = snapshot.profile == ctx.profile == spec.profile_ref
         for fact in snapshot.environments if envelope_ok else ():
-            # Anchored on the CONTEXT's profile, like the other two per-fact
-            # filters. Leaving this one on the snapshot envelope made the three
-            # disagree: a fact foreign to the context was discarded for
-            # resolution yet still supplied that same environment's
-            # classification, so one report said both "this environment does not
-            # resolve in your context" and "your classification for it disagrees
-            # with what discovery observed."
-            if fact.profile != ctx.profile or fact.classification is None:
+            # Per-fact, on the same anchor. A row naming another account inside
+            # an otherwise-matching envelope is discarded for resolution, so
+            # letting it supply that environment's classification would have one
+            # report say both "this environment does not resolve in your
+            # context" and "your classification for it disagrees with what
+            # discovery observed."
+            if fact.profile != spec.profile_ref or fact.classification is None:
                 continue
             observed.setdefault(fact.environment_id, set()).add(fact.classification)
         for index, obj in enumerate(spec.objects):
@@ -627,7 +637,19 @@ def derive_unresolved_decisions(
     # only for ``is None`` let a foreign snapshot suppress the decision and then
     # publish that account's paging gaps, telling the caller about omega's
     # truncation instead of that alpha was never read.
-    if snapshot is None or snapshot.profile != spec.profile_ref:
+    #
+    # BOTH anchors, not either. Usability is decided against the context's
+    # profile — ``prepare_topology_context`` discards every row of an
+    # envelope-mismatched snapshot — while relevance is decided against the
+    # authored one. Checking only the spec left the third shape unfixed: a
+    # snapshot matching the SPEC but not the CONTEXT contributed nothing at all,
+    # and the caller was still handed that discarded capture's pagination notice
+    # instead of being told to re-run with a snapshot the context can use.
+    if (
+        snapshot is None
+        or snapshot.profile != spec.profile_ref
+        or snapshot.profile != prepared.context.profile
+    ):
         decisions.append(
             TopologyDecisionV1(
                 subject="live_revalidation",
@@ -639,6 +661,30 @@ def derive_unresolved_decisions(
             )
         )
     else:
+        # The environment listing is the OTHER query that can fail to answer,
+        # and until it was given an observation flag it had no way to say so.
+        # Giving it one created a third state — observed / observed-empty /
+        # did-not-answer — whose only published trace was one missing row in
+        # ``resolved_references``: no blocker, no warning, ``is_valid`` true.
+        # That is the silence the component path already refuses, for the same
+        # reason and in the same words. Reported under its own subject rather
+        # than folded into ``discovery_unobserved_query``: that decision's text
+        # is about component queries and tells the caller what an unobserved
+        # QUEUE listing does not prove, which is not the action to take here.
+        if not prepared.environment_inventory_observed:
+            decisions.append(
+                TopologyDecisionV1(
+                    subject="environment_inventory_unobserved",
+                    question=(
+                        "The environment listing did not answer, so this "
+                        "snapshot cannot say which environments exist. No "
+                        "environment reference was judged against it — absence "
+                        "from it is not evidence of absence in the account. "
+                        "Re-run discovery before treating an environment "
+                        "reference as verified."
+                    ),
+                )
+            )
         pages = snapshot.pagination
         unobserved = tuple(page for page in pages if not page.observed)
         if unobserved:

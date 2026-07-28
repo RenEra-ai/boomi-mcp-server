@@ -84,8 +84,18 @@ class ReadOnlyTopologyDiscoveryPort(Protocol):
     ) -> Sequence[Mapping[str, Any]]:
         ...
 
-    def list_environments(self, profile: str) -> Sequence[Mapping[str, Any]]:
+    def list_environments(self, profile: str) -> Mapping[str, Any]:
         ...
+        # The tool ENVELOPE, not a bare row sequence — the same shape
+        # ``query_components`` returns, and for the same reason. This is the one
+        # listing whose emptiness is read as conclusive absence, so it is the
+        # one listing that must be able to say it failed. A bare ``Sequence``
+        # cannot: a transient outage and an account with no environments are
+        # both ``()``. The sibling ``list_schedules``/``list_deployments`` keep
+        # the sequence shape deliberately — nothing treats THEIR emptiness as
+        # evidence. An unwitnessed schedule binding degrades to
+        # ``declared_intent``, which fails safe; an unwitnessed environment
+        # would become a blocker, which does not.
 
     def list_schedules(self, profile: str) -> Sequence[Mapping[str, Any]]:
         ...
@@ -129,7 +139,7 @@ def capture_topology_discovery_snapshot(
     pagination: List[DiscoveryPageProvenanceV1] = []
     for component_type in DISCOVERY_COMPONENT_TYPES:
         payload = port.query_components(profile, component_type)
-        observed = _is_successful_listing(payload)
+        observed = _is_successful_listing(payload, "components")
         rows = (payload or {}).get("components") or () if observed else ()
         for row in rows:
             component_id = row.get("component_id") or row.get("id")
@@ -154,6 +164,21 @@ def capture_topology_discovery_snapshot(
             )
         )
 
+    # Observation is recorded, not assumed. An unanswered listing yields no
+    # rows AND no authority: ``environment_inventory_observed`` stays False, so
+    # the reference rule declines to read the resulting emptiness as proof that
+    # the account has no environments. Reading the rows out of a failed envelope
+    # would be worse than useless — it would be the outage speaking with the
+    # account's voice.
+    environments_payload = port.list_environments(profile)
+    environment_inventory_observed = _is_successful_listing(
+        environments_payload, "environments"
+    )
+    environment_rows = (
+        (environments_payload or {}).get("environments") or ()
+        if environment_inventory_observed
+        else ()
+    )
     environments = tuple(
         EnvironmentFactV1(
             profile=profile,
@@ -163,7 +188,7 @@ def capture_topology_discovery_snapshot(
             # contradicted by a default nobody read.
             classification=_opt_classification(row.get("classification")),
         )
-        for row in port.list_environments(profile)
+        for row in environment_rows
         if row.get("id")
     )
 
@@ -214,6 +239,7 @@ def capture_topology_discovery_snapshot(
         schedule_bindings=schedule_bindings,
         deployments=deployments,
         pagination=tuple(pagination),
+        environment_inventory_observed=environment_inventory_observed,
     )
 
 
@@ -296,13 +322,23 @@ def capture_existing_component_evidence(
     return tuple(calls), tuple(uses), tuple(routes), tuple(corroboration)
 
 
-def _is_successful_listing(payload: Any) -> bool:
+def _is_successful_listing(payload: Any, key: str) -> bool:
     """Did this query actually answer?
 
-    A tool envelope that reports failure, omits ``components``, or is not a
-    mapping at all has told us nothing. Treating that as "zero components" is
-    how a transient outage becomes a published capability claim — and the queue
-    gates are the rows that cite an empty listing as their live evidence.
+    A tool envelope that reports failure, omits its result ``key``, or is not a
+    mapping at all has told us nothing. Treating that as "zero rows" is how a
+    transient outage becomes a published capability claim — the queue gates
+    cite an empty component listing as their live evidence, and the environment
+    reference rule cites an empty environment listing as conclusive absence.
+
+    The last check is that the key holds an actual ROW LIST, not merely that it
+    is present. ``key in payload`` accepted ``{"environments": null}`` — a
+    fourth way to not answer, alongside the three the paragraph above
+    enumerates — and read it as an observed empty inventory, which is exactly
+    the confident ``TOPOLOGY_REFERENCE_NOT_FOUND`` the flag exists to prevent.
+    It also accepted a string, where the row walk then raised ``AttributeError``
+    out of a pure function. Both reproduce on the component path too; this is
+    one check, so both paths are closed by tightening it here.
     """
     if not isinstance(payload, Mapping):
         return False
@@ -310,7 +346,7 @@ def _is_successful_listing(payload: Any) -> bool:
         return False
     if payload.get("error"):
         return False
-    return "components" in payload
+    return isinstance(payload.get(key), (list, tuple))
 
 
 def _opt_classification(value: Any) -> Optional[str]:

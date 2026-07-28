@@ -243,6 +243,18 @@ class TopologyDiscoverySnapshotV1(_TopologyPlanningModel):
     #: claim with no evidence behind it.
     runtime_inventory_complete: bool = False
 
+    #: Did ``list_environments`` actually ANSWER? ``environments`` being empty
+    #: does not say: a failed listing and an account that genuinely has no
+    #: environments produce the same empty tuple, and the environment reference
+    #: rule cites emptiness as conclusive absence. Without this the identical
+    #: outage that is correctly left unjudged on a component query — which has
+    #: carried an observation guard from the start — turned every authored
+    #: environment into a confident ``TOPOLOGY_REFERENCE_NOT_FOUND``.
+    #:
+    #: Defaults False, so a snapshot assembled by hand claims nothing it cannot
+    #: support; only a capture that saw a successful listing sets it True.
+    environment_inventory_observed: bool = False
+
 
 class TopologyResolutionContextV1(_TopologyPlanningModel):
     """Everything the planner may know. Pure data, no behavior, no I/O."""
@@ -437,7 +449,15 @@ def prepare_topology_context(
         runtime_inventory_complete=(
             snapshot.runtime_inventory_complete and envelope_matches
         ),
-        environment_inventory_observed=envelope_matches,
+        # BOTH legs. The envelope gate says the snapshot is about this account;
+        # the snapshot's own flag says the listing answered. Deriving this from
+        # the envelope ALONE made it a synonym for "a snapshot exists", which is
+        # not what its name or its consumer means — and turned a failed
+        # ``list_environments`` into conclusive proof that the account has no
+        # environments.
+        environment_inventory_observed=(
+            snapshot.environment_inventory_observed and envelope_matches
+        ),
         foreign_profile_fact_count=foreign,
     )
 

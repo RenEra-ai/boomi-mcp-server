@@ -72,6 +72,10 @@ _SNAPSHOT = TopologyDiscoverySnapshotV1(
             profile="profile-placeholder", runtime_id="runtime-placeholder-1"
         ),
     ),
+    # This snapshot models a capture that ANSWERED — it carries a real
+    # environment row. The flag defaults False so a hand-built snapshot claims
+    # nothing, which makes stating it here part of what the fixture represents.
+    environment_inventory_observed=True,
 )
 
 _CONTEXT = TopologyResolutionContextV1(

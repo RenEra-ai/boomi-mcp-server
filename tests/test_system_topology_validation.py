@@ -2885,11 +2885,51 @@ def test_per_fact_filtering_anchors_on_the_context_profile():
     assert prepared.foreign_profile_fact_count == 1
 
 
+def test_a_foreign_snapshot_cannot_donate_its_observation_flag():
+    """The envelope leg of ``environment_inventory_observed``, at its own level.
+
+    Both current consumers independently require the profiles to agree, so
+    dropping this leg is behaviourally invisible today — an equivalent mutant,
+    verified as such. That is exactly why it is pinned HERE, on
+    ``prepare_topology_context``, rather than through a consumer whose own gate
+    masks it: the leg is what stops a THIRD consumer from inheriting a foreign
+    account's claim to have observed this one's environments, and a guarantee
+    graded only by proxy stops being graded the moment the proxy changes.
+    """
+    from boomi_mcp.compiler.system_topology.context import prepare_topology_context
+
+    prepared = prepare_topology_context(
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            snapshot=_snapshot(
+                profile="p-omega", environment_inventory_observed=True
+            ),
+        )
+    )
+    assert prepared.environment_inventory_observed is False
+
+    # ...and the same snapshot in its own account keeps the flag, so the
+    # assertion above is the envelope check and not a constant.
+    kept = prepare_topology_context(
+        TopologyResolutionContextV1(
+            profile="p-omega",
+            snapshot=_snapshot(
+                profile="p-omega", environment_inventory_observed=True
+            ),
+        )
+    )
+    assert kept.environment_inventory_observed is True
+
+
 def test_an_empty_environment_inventory_still_witnesses_absence():
-    """A6-F5b. ``list_environments`` is not paged; an empty result is a fact.
+    """A6-F5b. ``list_environments`` is not paged; an OBSERVED empty result is a fact.
 
     Guarding the check on the id set being non-empty let an empty inventory wave
     every authored environment through, and its deployment binding with it.
+
+    ``environment_inventory_observed=True`` is what makes the emptiness mean
+    something: it says the listing answered. Without it an empty tuple is
+    ambiguous, and the companion test below pins the other reading.
     """
     spec = parse_system_topology_v1(
         {
@@ -2916,7 +2956,11 @@ def test_an_empty_environment_inventory_still_witnesses_absence():
         component_plan_symbols=(
             ComponentPlanSymbolV1(component_key="kp", component_type="process"),
         ),
-        snapshot=_snapshot(environments=(), pagination=_complete("process")),
+        snapshot=_snapshot(
+            environments=(),
+            pagination=_complete("process"),
+            environment_inventory_observed=True,
+        ),
     )
     from boomi_mcp.compiler.system_topology import plan_system_topology
 
@@ -2924,6 +2968,294 @@ def test_an_empty_environment_inventory_still_witnesses_absence():
     assert "TOPOLOGY_REFERENCE_NOT_FOUND" in [b.code for b in plan.blockers]
     # ...and its binding is withdrawn with it.
     assert plan.planning_only_relations == ()
+
+
+def test_an_unobserved_environment_listing_does_not_witness_absence():
+    """QA #243. An outage is not an inventory.
+
+    ``environments=()`` is produced BOTH by an account with no environments and
+    by a ``list_environments`` call that failed. The first is conclusive; the
+    second is nothing at all. Deriving the observation flag from the snapshot's
+    ENVELOPE made every hand-built or failed capture claim the first reading,
+    turning a transient outage into a confident ``TOPOLOGY_REFERENCE_NOT_FOUND``
+    against every authored environment.
+
+    The identical outage on a COMPONENT query is correctly left unjudged —
+    ``_is_successful_listing`` guards it — so this is the environment path
+    catching up to the control that already existed beside it.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "pr", "component_ref": "$ref:kp"},
+                {"kind": "environment", "key": "e", "environment_ref": "env-real"},
+                {"kind": "deployment_unit", "key": "u"},
+            ],
+            "relations": [
+                {
+                    "kind": "deployment_binding",
+                    "key": "rd",
+                    "deployment_unit": "u",
+                    "process": "pr",
+                    "environment": "e",
+                }
+            ],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(component_key="kp", component_type="process"),
+        ),
+        # A snapshot whose envelope is perfectly in order — same profile, real
+        # pagination — but whose environment listing never answered.
+        snapshot=_snapshot(
+            environments=(),
+            pagination=_complete("process"),
+            environment_inventory_observed=False,
+        ),
+    )
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+
+    plan = plan_system_topology(spec, ctx)
+    assert [b.code for b in plan.blockers] == []
+    # Unjudged, not waved through as verified: the binding is still planned,
+    # but nothing in the plan claims the environment was confirmed to exist.
+    assert [r.relation_key for r in plan.planning_only_relations] == ["rd"]
+
+
+def test_the_environment_observation_flag_requires_a_real_listing():
+    """QA #243, at the boundary. The flag is earned by capture, never assumed."""
+    from boomi_mcp.compiler.system_topology.discovery import (
+        capture_topology_discovery_snapshot,
+    )
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "prof-a",
+            "objects": [
+                {"kind": "environment", "key": "e", "environment_ref": "env-1"}
+            ],
+        }
+    )
+
+    class _Port:
+        def __init__(self, envelope):
+            self._envelope = envelope
+
+        def list_profiles(self):
+            return ("prof-a",)
+
+        def query_components(self, profile, component_type):
+            return {"components": []}
+
+        def read_component_xml(self, profile, component_ref):
+            return None
+
+        def read_component_dependencies(self, profile, component_ref):
+            return []
+
+        def list_environments(self, profile):
+            return self._envelope
+
+        def list_schedules(self, profile):
+            return ()
+
+        def list_deployments(self, profile):
+            return ()
+
+    def _capture(envelope):
+        return capture_topology_discovery_snapshot(
+            spec,
+            _Port(envelope),
+            captured_at="2026-01-01T00:00:00Z",
+            source_revision="rev",
+            service_release="rel",
+        )
+
+    answered = _capture({"environments": [{"id": "env-1", "classification": "TEST"}]})
+    assert answered.environment_inventory_observed is True
+    assert len(answered.environments) == 1
+
+    empty_but_answered = _capture({"environments": []})
+    assert empty_but_answered.environment_inventory_observed is True
+    assert empty_but_answered.environments == ()
+
+    # A tuple of rows answers just as well as a list. The type test replaced a
+    # membership test to reject null and strings, not to start caring which
+    # sequence an adapter hands back — narrowing it to ``list`` alone would fail
+    # shut on a perfectly good listing.
+    as_tuple = _capture({"environments": ({"id": "env-1"},)})
+    assert as_tuple.environment_inventory_observed is True
+    assert len(as_tuple.environments) == 1
+
+    # Five ways a listing can fail to answer. None of them may claim otherwise,
+    # and none may let rows out of a failed envelope.
+    #
+    # The last two are QA #245: ``key in payload`` is a MEMBERSHIP test, so a
+    # null result read as an observed empty inventory — the exact confident
+    # NOT_FOUND the flag exists to prevent — and a string result reached the row
+    # walk and raised ``AttributeError`` out of a pure function.
+    for failed in (
+        {"_success": False, "environments": [{"id": "env-1"}]},
+        {"error": "timeout", "environments": [{"id": "env-1"}]},
+        {"message": "no environments key"},
+        {"_success": True, "environments": None},
+        {"_success": True, "environments": "env-1"},
+    ):
+        snapshot = _capture(failed)
+        assert snapshot.environment_inventory_observed is False
+        assert snapshot.environments == ()
+
+
+def test_a_null_component_listing_is_not_an_observed_empty_page():
+    """QA #245 on the sibling path. One check guards both; both are pinned."""
+    from boomi_mcp.compiler.system_topology.discovery import (
+        capture_topology_discovery_snapshot,
+    )
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "prof-a",
+            "objects": [{"kind": "process", "key": "p", "component_ref": "lit-1"}],
+        }
+    )
+
+    class _Port:
+        def list_profiles(self):
+            return ("prof-a",)
+
+        def query_components(self, profile, component_type):
+            return {"_success": True, "components": None}
+
+        def read_component_xml(self, profile, component_ref):
+            return None
+
+        def read_component_dependencies(self, profile, component_ref):
+            return []
+
+        def list_environments(self, profile):
+            return {"environments": []}
+
+        def list_schedules(self, profile):
+            return ()
+
+        def list_deployments(self, profile):
+            return ()
+
+    snapshot = capture_topology_discovery_snapshot(
+        spec,
+        _Port(),
+        captured_at="2026-01-01T00:00:00Z",
+        source_revision="rev",
+        service_release="rel",
+    )
+    # Not one page may claim to have been observed, so no component type is
+    # complete and the literal id is left unjudged rather than declared missing.
+    assert [page.observed for page in snapshot.pagination] == [False] * 5
+    ctx = TopologyResolutionContextV1(profile="prof-a", snapshot=snapshot)
+    assert "TOPOLOGY_REFERENCE_NOT_FOUND" not in _codes(
+        validate_system_topology(spec, ctx)
+    )
+
+
+def test_an_unobserved_environment_listing_is_announced_not_merely_survived():
+    """QA #244. The new third state had no published trace.
+
+    ``observed`` / ``observed-empty`` / ``did-not-answer`` are three different
+    situations, and the third showed up only as one absent row in
+    ``resolved_references`` — ``is_valid`` true, no blocker, no warning, no
+    string anywhere naming it. The component path already refuses that silence
+    via ``discovery_unobserved_query``; the environment listing gets the same
+    treatment under its own subject, because the component decision's text is
+    about queue listings and is not the action to take here.
+    """
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "environment", "key": "e", "environment_ref": "env-1"}
+            ],
+            "relations": [],
+        }
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            # A usable, same-account snapshot whose environment listing did not
+            # answer. Nothing else about it is wrong.
+            snapshot=_snapshot(
+                profile="p-alpha", environment_inventory_observed=False
+            ),
+        ),
+    )
+    assert plan.blockers == (), [b.code for b in plan.blockers]
+    assert "environment_inventory_unobserved" in {
+        d.subject for d in plan.unresolved_decisions
+    }
+    # And an observed listing says nothing, so the notice stays meaningful.
+    quiet = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            snapshot=_snapshot(
+                profile="p-alpha",
+                environments=(),
+                environment_inventory_observed=True,
+            ),
+        ),
+    )
+    assert "environment_inventory_unobserved" not in {
+        d.subject for d in quiet.unresolved_decisions
+    }
+    # And a plan with NO snapshot says nothing about an environment listing that
+    # was never attempted — that case is already `live_revalidation`'s, and
+    # stacking a second notice on it would tell the caller to re-run a discovery
+    # they have not run once. This pins the notice's placement inside the
+    # snapshot-usable branch, not merely its condition.
+    none = plan_system_topology(
+        spec, TopologyResolutionContextV1(profile="p-alpha")
+    )
+    subjects = {d.subject for d in none.unresolved_decisions}
+    assert "live_revalidation" in subjects
+    assert "environment_inventory_unobserved" not in subjects, subjects
+
+
+def test_the_observation_flag_defaults_to_claiming_nothing():
+    """QA #243, the default itself. A hand-built snapshot earns no authority.
+
+    Nothing graded the ``False`` default: every test that cared passed the flag
+    explicitly, so flipping the model default to ``True`` changed no test while
+    silently restoring the bug for every context assembled by hand — which is
+    precisely the pre-delta adapter's shape.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "environment", "key": "e", "environment_ref": "ghost-env"}
+            ],
+            "relations": [],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        # The flag is DELIBERATELY not passed. An empty inventory it never
+        # claims to have observed may not witness absence.
+        snapshot=_snapshot(profile="p-alpha", environments=()),
+    )
+    assert "TOPOLOGY_REFERENCE_NOT_FOUND" not in _codes(
+        validate_system_topology(spec, ctx)
+    )
 
 
 def test_no_snapshot_means_no_live_fact_claim():
@@ -3327,6 +3659,252 @@ def test_a_coherent_foreign_context_never_proves_absence():
     codes = _codes(validate_system_topology(spec, ctx))
     assert "TOPOLOGY_ENVIRONMENT_MISMATCH" in codes
     assert "TOPOLOGY_REFERENCE_NOT_FOUND" not in codes, codes
+
+
+def test_a_coherent_foreign_context_never_contradicts_a_classification():
+    """QA #241. The other half of the same rule, on the same evidence.
+
+    Absence authority was qualified to the AUTHORED profile while the
+    environment-classification scan stayed on the context's. With a context and
+    snapshot that agree with each other but not with the spec, one report then
+    said both "this beta snapshot cannot prove your alpha component is missing"
+    and "this beta snapshot proves your alpha environment's classification is
+    wrong" — the second carrying a remediation that says to align the document
+    with the other account's data.
+
+    One evidence set may not be authoritative in one direction and refused in
+    the other.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {
+                    "kind": "environment",
+                    "key": "e",
+                    "environment_ref": "env-1",
+                    "classification": "PROD",
+                }
+            ],
+            "relations": [],
+        }
+    )
+    from boomi_mcp.compiler.system_topology.context import EnvironmentFactV1
+
+    ctx = TopologyResolutionContextV1(
+        profile="p-beta",
+        snapshot=_snapshot(
+            profile="p-beta",
+            environments=(
+                EnvironmentFactV1(
+                    profile="p-beta", environment_id="env-1", classification="TEST"
+                ),
+            ),
+            environment_inventory_observed=True,
+        ),
+    )
+    report = validate_system_topology(spec, ctx)
+    # The profile mismatch itself is reported — loudly, and at ``/profile_ref``.
+    assert "TOPOLOGY_ENVIRONMENT_MISMATCH" in _codes(report)
+    # But nothing is said about the authored classification, because nothing
+    # this context holds is evidence about p-alpha's environments.
+    assert [d.path for d in report.errors if d.path.endswith("/classification")] == []
+
+
+def test_every_leg_of_the_classification_gate_is_load_bearing():
+    """QA #241, graded leg by leg. Three profiles must AGREE, not merely pair up.
+
+    The gate was fixed at two mutually-redundant sites, so the obvious test
+    input — a foreign fact in a foreign snapshot — is caught by either half
+    alone and therefore grades neither. Each arrangement below makes exactly ONE
+    leg of ``snapshot == ctx == spec`` disagree while the fact itself carries
+    the authored profile, so a gate that dropped that leg would fire and the
+    correct gate stays silent.
+    """
+    from boomi_mcp.compiler.system_topology.context import EnvironmentFactV1
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {
+                    "kind": "environment",
+                    "key": "e",
+                    "environment_ref": "env-1",
+                    "classification": "PROD",
+                }
+            ],
+            "relations": [],
+        }
+    )
+    # The fact always names the AUTHORED account, so the per-fact filter never
+    # masks the envelope gate under test.
+    fact = EnvironmentFactV1(
+        profile="p-alpha", environment_id="env-1", classification="TEST"
+    )
+    arrangements = (
+        # snapshot == ctx, both foreign to the spec — the coherent-foreign case.
+        ("p-beta", "p-beta"),
+        # ctx == spec, snapshot foreign.
+        ("p-alpha", "p-beta"),
+        # snapshot == spec, ctx foreign.
+        ("p-beta", "p-alpha"),
+    )
+    for ctx_profile, snapshot_profile in arrangements:
+        report = validate_system_topology(
+            spec,
+            TopologyResolutionContextV1(
+                profile=ctx_profile,
+                snapshot=_snapshot(
+                    profile=snapshot_profile,
+                    environments=(fact,),
+                    environment_inventory_observed=True,
+                ),
+            ),
+        )
+        offending = [
+            d.path for d in report.errors if d.path.endswith("/classification")
+        ]
+        assert offending == [], (ctx_profile, snapshot_profile, offending)
+
+    # The control: with all three in agreement the contradiction IS reported,
+    # so the assertions above are silence earned by the gate, not by the input.
+    agreed = validate_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            snapshot=_snapshot(
+                profile="p-alpha",
+                environments=(fact,),
+                environment_inventory_observed=True,
+            ),
+        ),
+    )
+    assert [d.path for d in agreed.errors if d.path.endswith("/classification")] == [
+        "/objects/0/classification"
+    ]
+
+
+def test_a_coherent_foreign_snapshot_is_not_revalidation_either():
+    """QA #242, the spec leg. ``snapshot == ctx`` is not enough.
+
+    The companion test below exercises the CONTEXT leg (snapshot matches the
+    spec but not the context). This one makes the snapshot agree with the
+    context and disagree with the authored spec, so a check that had kept only
+    the context anchor would fall through to the else branch and publish that
+    foreign capture's paging notice.
+    """
+    from boomi_mcp.compiler.system_topology.context import DiscoveryPageProvenanceV1
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [{"kind": "process", "key": "x", "component_ref": "lit-1"}],
+            "relations": [],
+        }
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-beta",
+            snapshot=_snapshot(
+                profile="p-beta",
+                pagination=(
+                    DiscoveryPageProvenanceV1(
+                        component_type="process",
+                        returned_count=1,
+                        total_available=2,
+                        has_more=True,
+                    ),
+                ),
+            ),
+        ),
+    )
+    subjects = {d.subject for d in plan.unresolved_decisions}
+    assert "live_revalidation" in subjects
+    assert "discovery_pagination" not in subjects, subjects
+
+
+def test_a_snapshot_the_context_discarded_is_not_revalidation():
+    """QA #242. Usability and relevance are two different anchors.
+
+    ``prepare_topology_context`` discards every row of an envelope-mismatched
+    snapshot, so a snapshot matching the SPEC but not the CONTEXT contributes
+    nothing at all. Anchoring the decision on the spec alone left that third
+    shape reporting the discarded capture's pagination notice — advising the
+    caller to page through a snapshot the planner had already thrown away —
+    instead of telling them to re-run with one the context can use.
+    """
+    from boomi_mcp.compiler.system_topology.context import DiscoveryPageProvenanceV1
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [{"kind": "process", "key": "x", "component_ref": "lit-1"}],
+            "relations": [],
+        }
+    )
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+
+    truncated = (
+        DiscoveryPageProvenanceV1(
+            component_type="process",
+            returned_count=1,
+            total_available=2,
+            has_more=True,
+        ),
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-beta",
+            snapshot=_snapshot(profile="p-alpha", pagination=truncated),
+        ),
+    )
+    subjects = {d.subject for d in plan.unresolved_decisions}
+    assert "live_revalidation" in subjects
+    assert "discovery_pagination" not in subjects, subjects
+
+
+def test_a_usable_same_account_snapshot_still_reports_its_pagination():
+    """The control for #242: the fix must not silence a genuine paging notice."""
+    from boomi_mcp.compiler.system_topology.context import DiscoveryPageProvenanceV1
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [{"kind": "process", "key": "x", "component_ref": "lit-1"}],
+            "relations": [],
+        }
+    )
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            snapshot=_snapshot(
+                profile="p-alpha",
+                pagination=(
+                    DiscoveryPageProvenanceV1(
+                        component_type="process",
+                        returned_count=1,
+                        total_available=2,
+                        has_more=True,
+                    ),
+                ),
+            ),
+        ),
+    )
+    subjects = {d.subject for d in plan.unresolved_decisions}
+    assert "discovery_pagination" in subjects
+    assert "live_revalidation" not in subjects, subjects
 
 
 def test_a_same_profile_fact_that_does_not_match_leaves_the_binding_declared():

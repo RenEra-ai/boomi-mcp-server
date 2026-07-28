@@ -161,7 +161,7 @@ optional, and authoring it opts into an equality check against discovery.
 
 ## 4b. Evidence discipline in the resolver
 
-Six rules the resolver enforces, each of which the first implementation got wrong in the
+Ten rules the resolver enforces, each of which the first implementation got wrong in the
 same direction — by treating a gap in evidence as a fact.
 
 **Type is carried, never discarded.** Indexes hold `(id, type)`, not bare ids, and a reference
@@ -197,6 +197,41 @@ joined by an acyclic bridge leave every node with both an in-edge and an out-edg
 and the *bridge* survives as if it were cyclic — and removing it breaks neither cycle. The pointer
 is the lowest authored index among edges **internal** to a cyclic SCC (iterative Tarjan, so a deep
 call graph cannot blow the stack).
+
+**An empty listing is not an answer until it says it answered.** `environments = ()` is produced
+both by an account with no environments and by a `list_environments` call that failed, and the
+environment reference rule reads emptiness as conclusive absence. So `list_environments` returns the
+tool **envelope**, like `query_components`, and the snapshot records
+`environment_inventory_observed`; the flag defaults `False`, and a failed envelope yields neither
+rows nor authority. The sibling `list_schedules` / `list_deployments` keep the bare-sequence shape
+deliberately — nothing treats *their* emptiness as evidence, and an unwitnessed schedule binding
+degrades to `declared_intent`, which fails safe, where an unwitnessed environment would become a
+blocker, which does not. "Answered" means the envelope reports success **and its result key holds an
+actual row list**: `key in payload` accepted `{"environments": null}` as an observed empty inventory
+and let a string reach the row walk, so the check is `isinstance(..., (list, tuple))`. One check
+guards both listings, so both are closed by it.
+
+**A query that did not answer is announced, never merely survived.** Giving the environment listing
+an observation flag created a third state beside *observed* and *observed-empty*, and its only
+published trace was one missing row in `resolved_references` — `is_valid` true, no blocker, no
+warning, nothing naming it. That is the silence the component path already refuses via
+`discovery_unobserved_query`, so the environment listing gets `environment_inventory_unobserved`
+under its own subject: the component decision's text is about what an unobserved *queue* listing
+does not prove, which is not the action to take here.
+
+**One evidence set is authoritative in every direction or in none.** Absence authority is qualified
+to the **authored** `profile_ref`, not merely to an internally-coherent context — and so is the
+environment-classification scan. Anchoring one on the spec and the other on the context made a
+single report say both "this snapshot cannot prove your component is missing" and "this snapshot
+proves your environment's classification is wrong", the second carrying a remediation that says to
+align the document with the *other* account's data. Agreement among the wrong sources is not
+evidence, whichever direction it is read in.
+
+**Usability and relevance are two different anchors.** A snapshot is live revalidation of this plan
+only when it is about the authored account *and* the context can use it — an envelope mismatch makes
+`prepare_topology_context` discard every row inside it. Checking only one anchor left a snapshot that
+matched the spec but not the context contributing nothing while the caller was still handed its
+pagination notice, advising them to page through a capture the planner had already thrown away.
 
 ---
 
@@ -250,7 +285,7 @@ recorded because each was a real capability the contract claimed and did not hav
 | 2 | `parse_api_service_component_evidence` searched for `<wss>` inside the ASC's own XML. A real ASC has none — the WSS Listen lives on the linked **process's** start shape | Restored the plan's three-argument shape: process-side listen confirmation is threaded in, so an existing-ASC route can be witnessed at all. |
 | 3 | Per-fact profile filtering anchored on `snapshot.profile`, itself caller-supplied | Anchored on the **context's** profile. A snapshot stamped with the wrong profile previously kept every fact inside it — the one arrangement the filter exists to stop. |
 | 4 | Document rules (duplicate keys, duplicate semantic relations, unbound schedule/deployment units) ran only in `parse_system_topology_v1` | They now run as the planner's `model` phase. A caller who built the spec with `model_validate` got **no duplicate-key error at all**, failing an acceptance criterion on the planner's own surface. |
-| 5 | Invalid or unresolved subjects reached the executable and planning buckets: a prerequisite emitted after a type-mismatch blocker; an empty environment inventory waving every environment through; `witness="live_fact"` claimed with no snapshot | Blocked objects yield no prerequisite; an empty `list_environments` result is conclusive (that read is not paged); and a structural binding is labelled `declared_intent` unless a snapshot genuinely corroborates it. |
+| 5 | Invalid or unresolved subjects reached the executable and planning buckets: a prerequisite emitted after a type-mismatch blocker; an empty environment inventory waving every environment through; `witness="live_fact"` claimed with no snapshot | Blocked objects yield no prerequisite; an **observed** empty `list_environments` result is conclusive (that read is not paged, so emptiness is a fact once the listing answered — see §4b for the observation flag that distinguishes it from an outage); and a structural binding is labelled `declared_intent` unless a snapshot genuinely corroborates it. |
 | 6 | The port declared `read_component_xml` and `read_component_dependencies`; the capture invoked neither | `capture_existing_component_evidence` performs both. Without it, every literal-id ProcessCall, cache use, property use and API route was gated regardless of what the account contained. |
 | 7 | Diagnostic contract details diverged: unknown discriminators pointed at the member position rather than `/kind`; a doubled schedule/deployment binding reported an unsupported *lifecycle* rather than a *cardinality* violation; the normative `lifecycle` phase was unused, with witness failures folded into `relation` | All three aligned. Witness-level gating now uses `lifecycle`; kind-level gating keeps `capability`. |
 

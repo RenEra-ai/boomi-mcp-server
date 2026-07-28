@@ -15,6 +15,7 @@
       "profile": "prof-a"
     }
   ],
+  "environment_inventory_observed": true,
   "environments": [
     {
       "classification": "TEST",

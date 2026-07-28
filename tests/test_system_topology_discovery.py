@@ -13,6 +13,7 @@ make the whole no-mutation claim untestable.
 import json
 import sys
 import unicodedata
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -83,7 +84,13 @@ class HostileFakePort:
 
     def list_environments(self, profile):
         self.calls.append(("list_environments", profile))
-        return self._environments
+        # The port returns the tool ENVELOPE here, like ``query_components``.
+        # Rows given to the constructor are wrapped into a successful one; a
+        # Mapping is passed through verbatim so a test can hand back a FAILED
+        # listing and check that its emptiness is not read as absence.
+        if isinstance(self._environments, Mapping):
+            return self._environments
+        return {"environments": list(self._environments)}
 
     def list_schedules(self, profile):
         self.calls.append(("list_schedules", profile))
