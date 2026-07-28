@@ -3709,3 +3709,125 @@ def test_the_invariant_checker_enforces_relation_bucket_permissibility():
     )
     with _pytest.raises(TopologyPlanningInvariantError):
         check_topology_plan_invariants(injected, prepared, spec)
+
+
+def test_a_mismatched_snapshot_envelope_invalidates_every_row_inside_it():
+    """A snapshot cannot be more trustworthy than the account it says it came from.
+
+    Filtering row-by-row let an omega-envelope capture whose rows happened to be
+    stamped alpha supply resolution and ``live_fact`` corroboration for alpha —
+    while ``/profile_ref`` was blocked and ``live_revalidation`` simultaneously
+    said the snapshot proved nothing.
+    """
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import ScheduleBindingFactV1
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "pr", "component_ref": "lit-1"},
+                {"kind": "runtime", "key": "rt", "runtime_ref": "rt-1"},
+                {"kind": "schedule", "key": "s"},
+            ],
+            "relations": [
+                {"kind": "schedule_binding", "key": "rs", "schedule": "s", "process": "pr", "runtime": "rt"}
+            ],
+        }
+    )
+    inner_rows = dict(
+        components=(
+            ComponentFactV1(
+                profile="p-alpha", component_id="lit-1", component_type="process"
+            ),
+        ),
+        runtimes=(RuntimeFactV1(profile="p-alpha", runtime_id="rt-1"),),
+        schedule_bindings=(
+            ScheduleBindingFactV1(
+                profile="p-alpha", process_id="lit-1", runtime_id="rt-1"
+            ),
+        ),
+        pagination=_complete("process"),
+    )
+
+    foreign_envelope = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha", snapshot=_snapshot(profile="p-omega", **inner_rows)
+        ),
+    )
+    assert "TOPOLOGY_ENVIRONMENT_MISMATCH" in [b.code for b in foreign_envelope.blockers]
+    assert foreign_envelope.resolved_references == ()
+    assert [r.witness for r in foreign_envelope.planning_only_relations] == [
+        "declared_intent"
+    ]
+
+    # The same rows under a MATCHING envelope do everything they should.
+    matching = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha", snapshot=_snapshot(profile="p-alpha", **inner_rows)
+        ),
+    )
+    assert matching.blockers == (), [b.code for b in matching.blockers]
+    assert matching.resolved_references
+    assert [r.witness for r in matching.planning_only_relations] == ["live_fact"]
+
+
+def test_the_invariant_checker_enforces_relation_bucket_completeness():
+    """The other half of the bucket rule.
+
+    Checking only the blocked case left a blocker-free plan free to drop its
+    relations entirely and still pass — the guarantee the permissibility check
+    was documented as closing.
+    """
+    import pytest as _pytest
+
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import prepare_topology_context
+    from boomi_mcp.compiler.system_topology.invariants import (
+        TopologyPlanningInvariantError,
+        check_topology_plan_invariants,
+    )
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "$ref:ka"},
+                {"kind": "process", "key": "b", "component_ref": "$ref:kb"},
+            ],
+            "relations": [
+                {"kind": "process_call", "key": "r", "caller_process": "a", "callee_process": "b"}
+            ],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(
+                component_key="ka", component_type="process", has_process_ir=True
+            ),
+            ComponentPlanSymbolV1(
+                component_key="kb", component_type="process", has_process_ir=True
+            ),
+        ),
+        process_call_evidence=(
+            ProcessCallEvidenceV1(
+                caller_component_ref="$ref:ka",
+                callee_component_ref="$ref:kb",
+                witness="process_ir",
+            ),
+        ),
+    )
+    plan = plan_system_topology(spec, ctx)
+    prepared = prepare_topology_context(ctx)
+    assert plan.blockers == ()
+    assert plan.planning_only_relations
+    check_topology_plan_invariants(plan, prepared, spec)
+
+    dropped = plan.model_copy(update={"planning_only_relations": ()})
+    with _pytest.raises(TopologyPlanningInvariantError):
+        check_topology_plan_invariants(dropped, prepared, spec)

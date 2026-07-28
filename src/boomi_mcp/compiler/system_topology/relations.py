@@ -169,7 +169,9 @@ def _binding_corroborated(rel, objects, ctx) -> bool:
     same overclaim as the ``live_fact`` label itself.
     """
     snapshot = ctx.snapshot
-    if snapshot is None:
+    # A snapshot whose ENVELOPE names another account corroborates nothing here,
+    # whatever its individual rows claim about themselves.
+    if snapshot is None or snapshot.profile != ctx.profile:
         return False
     # Profile-filtered. These scans read the RAW snapshot, so a foreign-account
     # fact whose ids happen to match was accepted as corroboration and the plan

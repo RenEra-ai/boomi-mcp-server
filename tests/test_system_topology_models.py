@@ -823,91 +823,118 @@ def test_models_package_exports_are_pinned():
     # the equality assertion, so the surface could widen while the "exact" pin
     # stayed green. The pre-#144 names are enumerated instead, so anything that
     # is neither those nor these fails.
-    non_topology = {
-        name
-        for name in models.__all__
-        if not (
-            name in expected
-            or name.startswith(("PROCESS_IR", "Process", "Branch", "Cache", "Combine"))
-            or name
-            in {
-                "IntegrationSpecV1",
-                "IntegrationComponentSpec",
-                "PipelineSpec",
-                "StageSpec",
-                "PipelineEdgeSpec",
-                "PipelineStageKind",
-                "PipelineEdgeKind",
-                "StageCardinality",
-                "StageContextEffect",
-                "StageSideEffect",
-                "StageFailureBehavior",
-                "ComponentRefV1",
-                "ConnectorCallNodeV1",
-                "CurrentPropertySourceV1",
-                "CustomScriptingOpV1",
-                "DataProcessNodeV1",
-                "DataProcessOperationV1",
-                "DdpPropertySourceV1",
-                "DecisionFalseArmV1",
-                "DecisionNodeV1",
-                "DecisionOperandV1",
-                "DecisionTrueArmV1",
-                "DocumentCacheRetrieveNodeV1",
-                "DppPropertySourceV1",
-                "ErrorScopeV1",
-                "ExceptionNodeV1",
-                "FlowControlNodeV1",
-                "IdempotencyContractRefV1",
-                "IdempotencyEvidenceV1",
-                "KeyReferenceIdempotencyV1",
-                "LinearNodeV1",
-                "MapRefNodeV1",
-                "MessageNodeV1",
-                "ProfilePropertySourceV1",
-                "PropertySourceV1",
-                "RetryPolicyV1",
-                "ReturnDocumentsNodeV1",
-                "SequenceNodeV1",
-                "SetDdpNodeV1",
-                "SetDppNodeV1",
-                "SourceEndpointV1",
-                "SplitDocumentsOpV1",
-                "StaticOperandV1",
-                "StaticPropertySourceV1",
-                "StopNodeV1",
-                "TargetEndpointV1",
-                "TrackOperandV1",
-                "TryCatchBodyStepV1",
-                "TryCatchCatchBodyV1",
-                "TryCatchNodeV1",
-                "TryCatchTryBodyV1",
-                "VerifiedActionIdempotencyV1",
-                "canonical_process_ir_json",
-                "canonical_process_ir_schema_json",
-                "parse_process_ir_v1",
-                "process_ir_v1_json_schema",
-            }
-        )
+    # The pre-#144 surface, ENUMERATED. Prefix allowances ({"Process*", "Cache*"}
+    # and friends) left a whole namespace open: an added ``ProcessTopologyUnexpectedV1``
+    # matched a prefix and bypassed the check, so the "exact whole-surface pin"
+    # was still a predicate. Derived once from the branch baseline
+    # (9258ac7:src/boomi_mcp/models/__init__.py) and pinned here.
+    _PRE_144_EXPORTS = {
+        "BranchLegV1",
+        "BranchNodeV1",
+        "CacheGetNodeV1",
+        "CachePutNodeV1",
+        "CacheRemoveNodeV1",
+        "CombineDocumentsOpV1",
+        "ComponentRefV1",
+        "ConnectorCallNodeV1",
+        "CurrentPropertySourceV1",
+        "CustomScriptingOpV1",
+        "DataProcessNodeV1",
+        "DataProcessOperationV1",
+        "DdpPropertySourceV1",
+        "DecisionFalseArmV1",
+        "DecisionNodeV1",
+        "DecisionOperandV1",
+        "DecisionTrueArmV1",
+        "DocumentCacheRetrieveNodeV1",
+        "DppPropertySourceV1",
+        "ErrorScopeV1",
+        "ExceptionNodeV1",
+        "FlowControlNodeV1",
+        "IdempotencyContractRefV1",
+        "IdempotencyEvidenceV1",
+        "IntegrationComponentSpec",
+        "IntegrationSpecV1",
+        "KeyReferenceIdempotencyV1",
+        "LinearNodeV1",
+        "MapRefNodeV1",
+        "MessageNodeV1",
+        "PROCESS_IR_V1_CAPABILITIES",
+        "PROCESS_IR_VERSION",
+        "PipelineEdgeKind",
+        "PipelineEdgeSpec",
+        "PipelineSpec",
+        "PipelineStageKind",
+        "ProcessCallNodeV1",
+        "ProcessIRDiagnostic",
+        "ProcessIRV1",
+        "ProcessIRValidationError",
+        "ProcessNodeV1",
+        "ProfilePropertySourceV1",
+        "PropertySourceV1",
+        "RetryPolicyV1",
+        "ReturnDocumentsNodeV1",
+        "SequenceNodeV1",
+        "SetDdpNodeV1",
+        "SetDppNodeV1",
+        "SourceEndpointV1",
+        "SplitDocumentsOpV1",
+        "StageCardinality",
+        "StageContextEffect",
+        "StageFailureBehavior",
+        "StageSideEffect",
+        "StageSpec",
+        "StaticOperandV1",
+        "StaticPropertySourceV1",
+        "StopNodeV1",
+        "TargetEndpointV1",
+        "TrackOperandV1",
+        "TryCatchBodyStepV1",
+        "TryCatchCatchBodyV1",
+        "TryCatchNodeV1",
+        "TryCatchTryBodyV1",
+        "VerifiedActionIdempotencyV1",
+        "canonical_process_ir_json",
+        "canonical_process_ir_schema_json",
+        "parse_process_ir_v1",
+        "process_ir_v1_json_schema",
     }
+    non_topology = set(models.__all__) - expected - _PRE_144_EXPORTS
     assert non_topology == set(), non_topology
     assert expected <= set(models.__all__), expected - set(models.__all__)
     for name in expected:
         assert hasattr(models, name), name
 
 
-def test_the_export_pin_would_notice_an_unexpected_name():
-    """Positive control: the pin's first version was a predicate filter.
+@pytest.mark.parametrize(
+    "intruder",
+    [
+        "SystemTopologyUnexpectedV1",
+        # The prefix-allowance escape: these matched ``Process*``/``Cache*`` and
+        # slipped straight through the predicate version of the pin.
+        "ProcessTopologyUnexpectedV1",
+        "CacheUnexpectedV1",
+        "PROCESS_IR_UNEXPECTED",
+        "BranchUnexpectedV1",
+        "CombineUnexpectedV1",
+    ],
+)
+def test_the_export_pin_would_notice_an_unexpected_name(intruder):
+    """Positive control, driving the REAL predicate the pin uses.
 
-    An export matching none of its predicates slipped through the equality
-    assertion entirely, so the surface could widen while the "exact" pin stayed
-    green. This drives the same set difference over a doctored list.
+    Its first version filtered by prefix, so an export matching one bypassed the
+    equality assertion entirely and the surface could widen while the "exact"
+    pin stayed green. This exercises the same set difference the guard performs.
     """
-    doctored = ["IntegrationSpecV1", "SystemTopologySpecV1", "SystemTopologyUnexpectedV1"]
-    known = {"IntegrationSpecV1", "SystemTopologySpecV1"}
-    assert {name for name in doctored if name not in known} == {
-        "SystemTopologyUnexpectedV1"
+    import boomi_mcp.models as models
+
+    expected_topology = {
+        name for name in models.__all__ if name.startswith("SYSTEM_TOPOLOGY_")
     }
+    pre_144 = set(models.__all__) - expected_topology
+    doctored = list(models.__all__) + [intruder]
+    leftover = set(doctored) - expected_topology - pre_144
+    assert leftover == {intruder}, (intruder, leftover)
 
 
 def test_the_derived_reflection_tables_are_immutable():

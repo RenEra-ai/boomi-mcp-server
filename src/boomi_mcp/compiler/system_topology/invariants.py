@@ -221,6 +221,15 @@ def check_topology_plan_invariants(
                     "a blocked relation must not be planned",
                 )
 
+        # COMPLETENESS, the other half. Checking only the blocked case left a
+        # blocker-free plan free to drop its relations entirely and still pass —
+        # the guarantee the permissibility check was documented as closing.
+        if not plan.blockers:
+            _require(
+                planned_keys == {rel.key for rel in spec.relations},
+                "a clean plan must plan every declared relation",
+            )
+
     # 5. A gated or unsupported subject never reaches an executable or planning
     #    bucket. This is the issue's central promise.
     blocked = {

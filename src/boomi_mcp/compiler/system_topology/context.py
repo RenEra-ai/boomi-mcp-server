@@ -367,9 +367,18 @@ def prepare_topology_context(
     # one arrangement the filter exists to stop. The envelope disagreeing with
     # the context is separately reported.
     profile = revalidated.profile
-    kept_components = [c for c in snapshot.components if c.profile == profile]
-    kept_environments = [e for e in snapshot.environments if e.profile == profile]
-    kept_runtimes = [r for r in snapshot.runtimes if r.profile == profile]
+    # A mismatched ENVELOPE invalidates the whole snapshot, not merely the rows
+    # that admit to being foreign. Filtering row-by-row let an omega-envelope
+    # capture whose rows happened to be stamped alpha supply resolution and
+    # ``live_fact`` corroboration for alpha — a snapshot cannot be more
+    # trustworthy than the account it says it came from.
+    envelope_matches = snapshot.profile == profile
+    if envelope_matches:
+        kept_components = [c for c in snapshot.components if c.profile == profile]
+        kept_environments = [e for e in snapshot.environments if e.profile == profile]
+        kept_runtimes = [r for r in snapshot.runtimes if r.profile == profile]
+    else:
+        kept_components, kept_environments, kept_runtimes = [], [], []
     foreign = (
         len(snapshot.components)
         - len(kept_components)
@@ -396,7 +405,6 @@ def prepare_topology_context(
     # an alpha context produced confident NOT_FOUND findings for alpha's
     # components, environments and runtimes. Absence is the one claim that must
     # never survive a profile mismatch.
-    envelope_matches = snapshot.profile == profile
     complete = (
         tuple(
             sorted(
