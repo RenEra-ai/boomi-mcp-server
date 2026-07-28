@@ -32,7 +32,7 @@ from .contracts import (
     TopologyDiagnosticV1,
     TopologyGuidanceV1,
 )
-from .context import PreparedTopologyContextV1
+from .context import PreparedTopologyContextV1, _normalize_component_type
 from .findings import topology_finding
 
 #: Relation kinds that require a trusted witness before they may be planned.
@@ -88,9 +88,15 @@ def _process_ir_available(subject_ref: str, ctx) -> bool:
     # are permitted, so ``any()`` let a conflicting row — a ``documentcache``
     # entry marked ``has_process_ir=True`` — authorize a ProcessIR witness for
     # the ``process`` row that was actually selected and says it has none.
+    #
+    # Sorted on the NORMALIZED type, because that is what resolution sorts on.
+    # Sorting raw types picks a different row whenever a duplicate uses a
+    # builder-legal case variant — ``PROCESS`` sorts before ``documentcache``
+    # while ``process`` sorts after it — so the two disagreed about which row
+    # was selected and a valid planned relation was gated.
     candidates = sorted(
         (
-            (symbol.component_type, symbol.has_process_ir)
+            (_normalize_component_type(symbol.component_type), symbol.has_process_ir)
             for symbol in ctx.component_plan_symbols
             if symbol.component_key == key
         )

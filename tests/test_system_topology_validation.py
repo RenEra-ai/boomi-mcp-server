@@ -3115,3 +3115,68 @@ def test_a_foreign_profile_fact_cannot_corroborate_a_binding():
         ),
     )
     assert [r.witness for r in local.planning_only_relations] == ["live_fact"]
+
+
+@pytest.mark.parametrize("spelling", ["process", "PROCESS", "Process"])
+def test_the_processir_symbol_selection_matches_resolutions(spelling):
+    """The two must agree on WHICH duplicate row was selected.
+
+    Sorting raw types picks a different row than sorting normalized ones
+    whenever a duplicate uses a builder-legal case variant — ``PROCESS`` sorts
+    before ``documentcache`` while ``process`` sorts after it — so a valid
+    planned relation was gated on a row resolution had not selected.
+    """
+    from boomi_mcp.compiler.system_topology.context import prepare_topology_context
+    from boomi_mcp.compiler.system_topology.relations import _process_ir_available
+
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(
+                component_key="k", component_type=spelling, has_process_ir=True
+            ),
+            ComponentPlanSymbolV1(
+                component_key="k", component_type="documentcache", has_process_ir=False
+            ),
+        ),
+    )
+    selected_type = dict(prepare_topology_context(ctx).symbols)["k"]
+    # Resolution picks the process row; the ProcessIR check must agree.
+    assert selected_type == "process", spelling
+    assert _process_ir_available("$ref:k", ctx) is True, spelling
+
+
+def test_a_case_variant_planned_process_call_is_not_gated():
+    """The same divergence, at the level a caller actually feels it."""
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "$ref:ka"},
+                {"kind": "process", "key": "b", "component_ref": "$ref:kb"},
+            ],
+            "relations": [
+                {"kind": "process_call", "key": "r", "caller_process": "a", "callee_process": "b"}
+            ],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(
+                component_key="ka", component_type="PROCESS", has_process_ir=True
+            ),
+            ComponentPlanSymbolV1(
+                component_key="kb", component_type="Process", has_process_ir=True
+            ),
+        ),
+        process_call_evidence=(
+            ProcessCallEvidenceV1(
+                caller_component_ref="$ref:ka",
+                callee_component_ref="$ref:kb",
+                witness="process_ir",
+            ),
+        ),
+    )
+    assert validate_system_topology(spec, ctx).errors == ()
