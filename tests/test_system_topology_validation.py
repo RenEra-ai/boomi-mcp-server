@@ -3180,3 +3180,81 @@ def test_a_case_variant_planned_process_call_is_not_gated():
         ),
     )
     assert validate_system_topology(spec, ctx).errors == ()
+
+
+@pytest.mark.parametrize(
+    "rows,expected",
+    [
+        # Conflicting alias rows: unresolvable evidence, fails closed.
+        ((("PROCESS", True), ("process", False)), False),
+        ((("process", False), ("PROCESS", True)), False),
+        # Agreeing alias rows: honoured.
+        ((("PROCESS", True), ("process", True)), True),
+        # A different TYPE loses the type selection outright; the flag on the
+        # selected type is what counts.
+        ((("PROCESS", True), ("documentcache", False)), True),
+        ((("documentcache", True), ("process", False)), False),
+        # Single rows.
+        ((("process", True),), True),
+        ((("process", False),), False),
+    ],
+)
+def test_conflicting_processir_flags_fail_closed(rows, expected):
+    """Sorting ``(type, flag)`` together made the boolean a TIE-BREAKER.
+
+    Two alias rows that normalize alike but disagree on the flag therefore
+    always yielded ``True`` — fail-open, in the one helper whose whole job is to
+    stop a witness being authorized by something that is not there. Resolution
+    makes no such choice: it selects a type and nothing else.
+    """
+    from boomi_mcp.compiler.system_topology.relations import _process_ir_available
+
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=tuple(
+            ComponentPlanSymbolV1(
+                component_key="k", component_type=component_type, has_process_ir=flag
+            )
+            for component_type, flag in rows
+        ),
+    )
+    assert _process_ir_available("$ref:k", ctx) is expected, rows
+
+
+def test_conflicting_processir_flags_gate_the_relation():
+    """The same property where a caller feels it."""
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "$ref:ka"},
+                {"kind": "process", "key": "b", "component_ref": "$ref:kb"},
+            ],
+            "relations": [
+                {"kind": "process_call", "key": "r", "caller_process": "a", "callee_process": "b"}
+            ],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(
+                component_key="ka", component_type="PROCESS", has_process_ir=True
+            ),
+            ComponentPlanSymbolV1(
+                component_key="ka", component_type="process", has_process_ir=False
+            ),
+            ComponentPlanSymbolV1(
+                component_key="kb", component_type="process", has_process_ir=True
+            ),
+        ),
+        process_call_evidence=(
+            ProcessCallEvidenceV1(
+                caller_component_ref="$ref:ka",
+                callee_component_ref="$ref:kb",
+                witness="process_ir",
+            ),
+        ),
+    )
+    assert "TOPOLOGY_CAPABILITY_GATED" in _codes(validate_system_topology(spec, ctx))

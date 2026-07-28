@@ -89,21 +89,31 @@ def _process_ir_available(subject_ref: str, ctx) -> bool:
     # entry marked ``has_process_ir=True`` — authorize a ProcessIR witness for
     # the ``process`` row that was actually selected and says it has none.
     #
-    # Sorted on the NORMALIZED type, because that is what resolution sorts on.
-    # Sorting raw types picks a different row whenever a duplicate uses a
-    # builder-legal case variant — ``PROCESS`` sorts before ``documentcache``
-    # while ``process`` sorts after it — so the two disagreed about which row
-    # was selected and a valid planned relation was gated.
-    candidates = sorted(
-        (
-            (_normalize_component_type(symbol.component_type), symbol.has_process_ir)
-            for symbol in ctx.component_plan_symbols
-            if symbol.component_key == key
-        )
-    )
-    if not candidates:
+    # Two steps, and they must not be collapsed into one sort.
+    #
+    # 1. Pick the TYPE exactly as resolution does: sorted-last over the
+    #    NORMALIZED type. Sorting raw types picks a different row whenever a
+    #    duplicate uses a builder-legal case variant — ``PROCESS`` sorts before
+    #    ``documentcache`` while ``process`` sorts after it — so the two
+    #    disagreed and a valid planned relation was gated.
+    #
+    # 2. Read the flag from EVERY row of that selected type, and require them to
+    #    agree. Sorting ``(type, flag)`` tuples together made the boolean a
+    #    tie-breaker, so two alias rows that normalize alike but disagree on the
+    #    flag always yielded ``True`` — fail-open, in the one helper whose whole
+    #    job is to stop a witness being authorized by something that is not
+    #    there. Resolution makes no such choice; it selects a type and nothing
+    #    else. Disagreement is unresolvable evidence, so it fails closed.
+    rows = [
+        (_normalize_component_type(symbol.component_type), symbol.has_process_ir)
+        for symbol in ctx.component_plan_symbols
+        if symbol.component_key == key
+    ]
+    if not rows:
         return False
-    return candidates[-1][1]
+    selected_type = sorted(component_type for component_type, _ in rows)[-1]
+    flags = {flag for component_type, flag in rows if component_type == selected_type}
+    return flags == {True}
 
 
 def _accepted_witness(subject_ref: str, candidates) -> Optional[str]:
