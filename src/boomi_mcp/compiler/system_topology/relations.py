@@ -22,6 +22,7 @@ from ...errors import (
     TOPOLOGY_CAPABILITY_GATED,
     TOPOLOGY_ENVIRONMENT_MISMATCH,
     TOPOLOGY_RELATION_UNSUPPORTED,
+    TOPOLOGY_SCHEMA_INVALID_CARDINALITY,
 )
 from ...models.system_topology import SystemTopologySpecV1
 from .capabilities import capability_for
@@ -70,6 +71,24 @@ def _form(component_ref: str) -> str:
     return "planned" if component_ref.startswith(_REF_TOKEN_PREFIX) else "existing"
 
 
+def _process_ir_available(subject_ref: str, ctx) -> bool:
+    """Does the ComponentPlan symbol behind this planned ref declare a ProcessIR root?
+
+    ``has_process_ir`` was carried on every symbol and consumed by nothing, so
+    a caller could label evidence ``witness="process_ir"`` for a planned process
+    whose symbol says it has no ProcessIR at all, and the relation planned
+    clean. The label was trusted on its own word; this is what makes it a claim
+    about the plan rather than about the string.
+    """
+    if not subject_ref.startswith(_REF_TOKEN_PREFIX):
+        return False
+    key = subject_ref[len(_REF_TOKEN_PREFIX) :]
+    return any(
+        symbol.component_key == key and symbol.has_process_ir
+        for symbol in ctx.component_plan_symbols
+    )
+
+
 def _accepted_witness(subject_ref: str, candidates) -> Optional[str]:
     """The witness this subject's form accepts, or None.
 
@@ -106,6 +125,40 @@ def _object_index(spec: SystemTopologySpecV1) -> Dict[str, object]:
 
 def _component_ref(obj: object) -> str:
     return getattr(obj, "component_ref", "")
+
+
+def _platform_ref(obj: object, field: str) -> str:
+    return getattr(obj, field, "")
+
+
+def _binding_corroborated(rel, objects, ctx) -> bool:
+    """Does a live snapshot actually contain this structural binding?
+
+    A schedule binding is corroborated when the snapshot holds a schedule fact
+    for the same (process, runtime) pair; a deployment binding when it holds a
+    deployment record for the same (component, environment) pair. Both compare
+    against LITERAL platform ids — a planned ``$ref`` component does not exist
+    yet, so nothing live can corroborate it, and saying otherwise would be the
+    same overclaim as the ``live_fact`` label itself.
+    """
+    snapshot = ctx.snapshot
+    if snapshot is None:
+        return False
+    if rel.kind == "schedule_binding":
+        process_ref = _component_ref(objects.get(rel.process))
+        runtime_ref = _platform_ref(objects.get(rel.runtime), "runtime_ref")
+        return any(
+            fact.process_id == process_ref and fact.runtime_id == runtime_ref
+            for fact in snapshot.schedule_bindings
+        )
+    if rel.kind == "deployment_binding":
+        process_ref = _component_ref(objects.get(rel.process))
+        environment_ref = _platform_ref(objects.get(rel.environment), "environment_ref")
+        return any(
+            fact.component_id == process_ref and fact.environment_id == environment_ref
+            for fact in snapshot.deployments
+        )
+    return False
 
 
 def collect_relation_findings(
@@ -148,9 +201,13 @@ def collect_relation_findings(
         if rel.kind != "schedule_binding":
             continue
         if rel.schedule in schedule_bindings:
+            # A CARDINALITY violation, not an unsupported lifecycle: the shape
+            # is fine, there is simply one binding too many. The plan specifies
+            # this code at the later binding, and using the lifecycle code here
+            # would send a caller looking for a shape problem that is not there.
             findings.append(
                 topology_finding(
-                    TOPOLOGY_RELATION_UNSUPPORTED,
+                    TOPOLOGY_SCHEMA_INVALID_CARDINALITY,
                     severity="error",
                     phase="relation",
                     path=f"/relations/{index}/schedule",
@@ -172,7 +229,7 @@ def collect_relation_findings(
         if rel.deployment_unit in unit_bindings:
             findings.append(
                 topology_finding(
-                    TOPOLOGY_RELATION_UNSUPPORTED,
+                    TOPOLOGY_SCHEMA_INVALID_CARDINALITY,
                     severity="error",
                     phase="relation",
                     path=f"/relations/{index}/deployment_unit",
@@ -246,11 +303,20 @@ def collect_lifecycle_findings(
             # Structural bindings the caller declares. They still had to pass
             # reference and shape checks to get here.
             if rel.kind in ("schedule_binding", "deployment_binding"):
+                # Corroborated only when a snapshot actually contains the
+                # matching binding; otherwise it is the caller's declaration and
+                # is labelled as such. Claiming ``live_fact`` with no snapshot
+                # at all put a corroboration the planner never had into the
+                # plan's own output.
                 planned.append(
                     PlannedTopologyRelationV1(
                         relation_key=rel.key,
                         relation_kind=rel.kind,
-                        witness="live_fact",
+                        witness=(
+                            "live_fact"
+                            if _binding_corroborated(rel, objects, ctx)
+                            else "declared_intent"
+                        ),
                     )
                 )
             continue
@@ -281,12 +347,20 @@ def collect_lifecycle_findings(
             candidates = use_witnesses.get((process, prop, "process_property"), [])
 
         witness = _accepted_witness(subject_ref, candidates)
+        # A ``process_ir`` witness is only as good as the ProcessIR root behind
+        # it. Without one there is nothing for the claim to be true OF.
+        if witness == "process_ir" and not _process_ir_available(subject_ref, ctx):
+            witness = None
         if witness is None:
+            # The normative ``lifecycle`` phase. Kind-level gating stays in
+            # ``capability``; this is the witness question, which the plan's
+            # phase order names separately and which was previously folded into
+            # ``relation``, leaving ``lifecycle`` unused entirely.
             findings.append(
                 topology_finding(
                     TOPOLOGY_CAPABILITY_GATED,
                     severity="error",
-                    phase="relation",
+                    phase="lifecycle",
                     path=f"/relations/{index}",
                     subject=rel.kind,
                     provenance=(capability_for(rel.kind).live.reference,),

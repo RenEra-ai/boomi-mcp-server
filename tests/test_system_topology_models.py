@@ -694,10 +694,20 @@ def test_canonical_json_is_stable_within_a_run():
 
 
 def test_canonical_spec_golden_pin():
+    """BYTE equality against a committed canonical form.
+
+    Comparing shape — version, profile and two counts — is not a golden: it
+    passes when a field's serialization changes, when a default stops being
+    expanded, and when key ordering shifts. Those are exactly the regressions a
+    canonical-serialization contract exists to catch.
+    """
     payload = _fixture("system_topology_v1.json")
     spec = parse_system_topology_v1(payload)
+    committed = (_FIXTURES / "system_topology_v1.canonical.json").read_text().strip()
+    assert canonical_system_topology_json(spec) == committed
+
+    # And the round trip preserves what was authored.
     produced = json.loads(canonical_system_topology_json(spec))
-    # Every authored value survives the round trip, defaults expanded.
     assert produced["version"] == SYSTEM_TOPOLOGY_VERSION
     assert produced["profile_ref"] == payload["profile_ref"]
     assert len(produced["objects"]) == len(payload["objects"])
@@ -828,3 +838,49 @@ def test_the_planner_is_not_exported_through_models():
 
 def test_spec_model_is_strict_at_the_root():
     assert SystemTopologySpecV1.model_config["extra"] == "forbid"
+
+
+
+def test_the_doctype_screen_matches_the_tool_layers():
+    """The XXE screen is a COPY; drift between the two is the failure mode.
+
+    The secret list and the ``$ref`` rule each have a pinned-equality test. This
+    one had behavioral tests but nothing tying it to the pattern it mirrors, so
+    a tightening in ``schema_discovery`` could leave the topology copy behind.
+    """
+    from boomi_mcp.categories import schema_discovery
+    from boomi_mcp.compiler.system_topology import evidence
+
+    assert evidence._DOCTYPE_RE.pattern == schema_discovery._DOCTYPE_RE.pattern
+    for hostile in ("<!DOCTYPE x>", "<!ENTITY y>", "<!  doctype z>", "<!dOcTyPe q>"):
+        assert evidence._DOCTYPE_RE.search(hostile), hostile
+        assert schema_discovery._DOCTYPE_RE.search(hostile), hostile
+    assert not evidence._DOCTYPE_RE.search("<process/>")
+
+
+def test_the_component_ref_rule_is_stricter_than_processirs_only_on_control_chars():
+    """The copy is not byte-identical to ProcessIR's — and that is deliberate.
+
+    The topology rule additionally rejects control characters, because a
+    newline inside a key would break the one-finding-per-line shape every log
+    consumer assumes. Pinned so the difference is a decision on the record
+    rather than an accident, and so the two cannot diverge further unnoticed.
+    """
+    from boomi_mcp.models import process_ir
+    from boomi_mcp.models import system_topology as st
+
+    # Identical on every ordinary form.
+    for value in ("$ref:key", "literal-id", "a", "a-b_c.d"):
+        assert process_ir._validate_component_ref(value) == value
+        assert st._validate_component_ref(value) == value
+    for value in ("", " x", "x ", "$ref:", "$ref:a b"):
+        with pytest.raises(Exception):
+            process_ir._validate_component_ref(value)
+        with pytest.raises(Exception):
+            st._validate_component_ref(value)
+
+    # And differ only here.
+    control = "id\x01with-control"
+    assert process_ir._validate_component_ref(control) == control
+    with pytest.raises(Exception):
+        st._validate_component_ref(control)

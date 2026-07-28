@@ -63,8 +63,18 @@ def _sorted_by(items, key) -> bool:
 def check_topology_plan_invariants(
     plan: SystemTopologyPlanV1,
     prepared: PreparedTopologyContextV1,
+    spec=None,
 ) -> None:
-    """Verify the plan against every claim the contract makes about it."""
+    """Verify the plan against every claim the contract makes about it.
+
+    ``spec`` is required to check the claims that are ABOUT the authored
+    document: that every planned relation is one the spec declares, and that the
+    runtime order contains only processes the spec declares and linearizes its
+    ProcessCall graph. Without it the checker could confirm shape and ordering
+    but not membership — it could not tell a planned relation that exists from
+    one invented, which is half of what "each declared relation occupies only
+    its permitted bucket" means.
+    """
     # 1. apply is structurally impossible.
     _require(plan.apply_supported is False, "apply_supported must be False")
 
@@ -143,6 +153,36 @@ def check_topology_plan_invariants(
         == len(plan.runtime_process_order.order),
         "runtime order must not repeat a process",
     )
+
+    # 4b. Membership: everything planned must be something the spec declared.
+    if spec is not None:
+        declared_relations = {rel.key: rel.kind for rel in spec.relations}
+        for relation in plan.planning_only_relations:
+            _require(
+                relation.relation_key in declared_relations,
+                "a planned relation must be declared in the spec",
+            )
+            _require(
+                declared_relations[relation.relation_key] == relation.relation_kind,
+                "a planned relation must keep the kind the spec declared",
+            )
+        process_keys = {obj.key for obj in spec.objects if obj.kind == "process"}
+        for key in plan.runtime_process_order.order:
+            _require(
+                key in process_keys,
+                "the runtime order may contain only declared processes",
+            )
+        # And it must LINEARIZE the ProcessCall graph: every callee before its
+        # caller. An order that merely contains the right names proves nothing.
+        position = {key: index for index, key in enumerate(plan.runtime_process_order.order)}
+        for rel in spec.relations:
+            if rel.kind != "process_call":
+                continue
+            if rel.caller_process in position and rel.callee_process in position:
+                _require(
+                    position[rel.callee_process] < position[rel.caller_process],
+                    "the runtime order must place a callee before its caller",
+                )
 
     # 5. A gated or unsupported subject never reaches an executable or planning
     #    bucket. This is the issue's central promise.

@@ -222,44 +222,87 @@ def parse_process_component_evidence(
     return calls, uses
 
 
+def parse_process_wss_listener_refs(raw_xml: Optional[str]) -> Tuple[str, ...]:
+    """Does THIS process's own XML declare a WSS listen start shape?
+
+    Returns the process's listen markers, or empty. The WSS Listen configuration
+    lives on the linked PROCESS's start shape, not on the API Service Component
+    — a real ASC capture contains no ``<wss>`` element at all. Looking for one
+    inside the ASC therefore found nothing on every real component, which made
+    the whole existing-ASC route witness unreachable.
+    """
+    root = _parse(raw_xml)
+    if root is None:
+        return ()
+    markers = []
+    for element in root.iter():
+        name = _local_name(element.tag)
+        attrs = {_local_name(k): str(v).strip().lower() for k, v in element.attrib.items()}
+        if name in _WSS_TAGS or attrs.get("connectortype") == "wss":
+            if any(
+                attrs.get(key) in ("true", "listen")
+                for key in ("listen", "mode", "operationtype", "actiontype")
+            ) or name in _WSS_TAGS:
+                markers.append(name)
+    return tuple(markers)
+
+
 def parse_api_service_component_evidence(
     api_service_component_ref: str,
     raw_xml: Optional[str],
+    listener_process_refs: Sequence[str] = (),
 ) -> Tuple[ApiServiceRouteEvidenceV1, ...]:
     """Extract route-to-listener witnesses from an API Service Component's XML.
+
+    ``listener_process_refs`` is the set of process refs whose OWN XML was found
+    to declare a WSS listen start shape (see
+    :func:`parse_process_wss_listener_refs`). A route is witnessed only when the
+    ASC names a target AND that target is independently confirmed to be a
+    listener — the plan's three-argument shape, which an earlier two-argument
+    version dropped by searching for ``<wss>`` inside the ASC instead. Real ASC
+    XML carries no such element, so that version witnessed nothing at all on a
+    real component.
 
     Note what is NOT extracted: paths, methods, auth type, endpoint config. A
     route witness answers "this ASC invokes that process" and nothing more —
     carrying the path would put endpoint detail into a contract that promises
     opaque references only.
 
-    The document must actually declare a WSS listen surface. An ASC whose
-    operations are not listen-shaped does not make its targets listeners, and
-    ``ListenerStatus`` is explicitly not accepted as a substitute (its observed
-    behavior conflicts with the documented example, so it is registered
-    ``unsupported`` rather than trusted).
+    ``ListenerStatus`` is explicitly not accepted as a substitute for the
+    process-side confirmation: its observed behavior conflicts with the
+    documented example, so it is registered ``unsupported`` rather than trusted.
     """
     root = _parse(raw_xml)
     if root is None:
         return ()
-    listens = any(
-        _local_name(element.tag) in _WSS_TAGS
-        and any(
-            str(value).strip().lower() in ("true", "listen")
-            for key, value in element.attrib.items()
-            if _local_name(key) in ("listen", "mode", "operationtype")
+
+    targets = _collect(root, _ROUTE_TAGS, _ROUTE_ATTRS)
+    confirmed = set(listener_process_refs)
+    if confirmed:
+        targets = tuple(target for target in targets if target in confirmed)
+    else:
+        # No process-side confirmation supplied. Fall back to a listen marker on
+        # the ASC itself, which some shapes do carry — but never witness a route
+        # with no listen evidence from either side.
+        asc_declares_listen = any(
+            _local_name(element.tag) in _WSS_TAGS
+            and any(
+                str(value).strip().lower() in ("true", "listen")
+                for key, value in element.attrib.items()
+                if _local_name(key) in ("listen", "mode", "operationtype")
+            )
+            for element in root.iter()
         )
-        for element in root.iter()
-    )
-    if not listens:
-        return ()
+        if not asc_declares_listen:
+            return ()
+
     return tuple(
         ApiServiceRouteEvidenceV1(
             api_service_component_ref=api_service_component_ref,
             listener_component_ref=target,
             witness="component_xml",
         )
-        for target in _collect(root, _ROUTE_TAGS, _ROUTE_ATTRS)
+        for target in targets
     )
 
 
@@ -302,6 +345,7 @@ def _dedupe(values: Iterable[str]) -> Tuple[str, ...]:
 __all__: List[str] = [
     "normalize_dependency_corroboration",
     "parse_api_service_component_evidence",
+    "parse_process_wss_listener_refs",
     "parse_process_component_evidence",
     "project_process_ir_evidence",
 ]

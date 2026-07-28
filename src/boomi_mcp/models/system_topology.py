@@ -721,14 +721,16 @@ def _translate_pydantic_error(err: Dict[str, Any]) -> SystemTopologyDiagnostic:
         return _diagnostic(_CUSTOM_ERROR_CODES[err_type], _loc_to_path(loc))
 
     if err_type in _UNION_TAG_ERRORS:
-        # The tag itself failed, so there is no tag element to strip; point at
-        # the union member position, which IS an authored location.
+        # The tag itself failed. Point at the ``kind`` FIELD, which is the thing
+        # the caller has to change — the plan specifies ``/objects/N/kind``, and
+        # pointing at the member position alone makes them hunt for which field
+        # of the object is wrong.
         code = (
             TOPOLOGY_SCHEMA_UNKNOWN_RELATION
             if loc and loc[0] == "relations"
             else TOPOLOGY_SCHEMA_UNKNOWN_OBJECT
         )
-        return _diagnostic(code, loc)
+        return _diagnostic(code, loc + ("kind",))
 
     if err_type == "extra_forbidden":
         return _diagnostic(TOPOLOGY_SCHEMA_UNKNOWN_FIELD, _loc_to_path(loc))
@@ -744,16 +746,18 @@ def _translate_pydantic_error(err: Dict[str, Any]) -> SystemTopologyDiagnostic:
 # ---------------------------------------------------------------------------
 
 
-def _check_document_rules(spec: "SystemTopologySpecV1") -> None:
-    """Uniqueness and binding cardinality — rules a per-model validator cannot state.
+def collect_document_rule_diagnostics(
+    spec: "SystemTopologySpecV1",
+) -> Tuple[SystemTopologyDiagnostic, ...]:
+    """Uniqueness and binding cardinality, as DIAGNOSTICS rather than an exception.
 
-    Run here rather than as a ``model_validator`` for the reason #141 documents:
-    a root-level validator attaches its error to the MODEL, so a duplicate key
-    anywhere reports the document root — true, and useless for finding the
-    offending declaration. Walking here keeps the authored path in hand.
-
-    All findings accumulate; a caller fixes everything in one pass instead of
-    discovering defects one round-trip at a time.
+    Split out from :func:`_check_document_rules` because these rules were
+    reachable only through ``parse_system_topology_v1``. A caller who built a
+    ``SystemTopologySpecV1`` the ordinary way — ``model_validate``, or the
+    constructor — and handed it to the planner got no duplicate-key or
+    cardinality error at all, which fails the issue's "duplicate ... errors are
+    caught deterministically" criterion outright. The planner now runs these in
+    its ``model`` phase, and the parser keeps raising on them.
     """
     diagnostics: List[SystemTopologyDiagnostic] = []
 
@@ -812,6 +816,21 @@ def _check_document_rules(spec: "SystemTopologySpecV1") -> None:
                 _diagnostic(TOPOLOGY_SCHEMA_INVALID_CARDINALITY, ("objects", index))
             )
 
+    return tuple(sorted(diagnostics, key=lambda d: (d.path, d.code)))
+
+
+def _check_document_rules(spec: "SystemTopologySpecV1") -> None:
+    """Raise if any document-level rule is violated.
+
+    Run here rather than as a ``model_validator`` for the reason #141
+    documents: a root-level validator attaches its error to the MODEL, so a
+    duplicate key anywhere reports the document root — true, and useless for
+    finding the offending declaration.
+
+    All findings accumulate; a caller fixes everything in one pass instead of
+    discovering defects one round-trip at a time.
+    """
+    diagnostics = list(collect_document_rule_diagnostics(spec))
     if diagnostics:
         raise SystemTopologyValidationError(diagnostics)
 

@@ -238,6 +238,36 @@ merely mentions one.
 
 ---
 
+## 5b. Corrections from the architect-vs-plan review
+
+A second Codex review judged the implementation against the design plan rather than on its own
+merits, and found seven places where the code had drifted from what the plan specified. Each is
+recorded because each was a real capability the contract claimed and did not have.
+
+| # | Gap | Correction |
+|---|---|---|
+| 1 | `has_process_ir` was carried on every ComponentPlan symbol and consumed by nothing, so a `witness="process_ir"` label was trusted on its own word | A ProcessIR witness now requires the planned symbol to declare a ProcessIR root. There was nothing for the claim to be true *of*. |
+| 2 | `parse_api_service_component_evidence` searched for `<wss>` inside the ASC's own XML. A real ASC has none — the WSS Listen lives on the linked **process's** start shape | Restored the plan's three-argument shape: process-side listen confirmation is threaded in, so an existing-ASC route can be witnessed at all. |
+| 3 | Per-fact profile filtering anchored on `snapshot.profile`, itself caller-supplied | Anchored on the **context's** profile. A snapshot stamped with the wrong profile previously kept every fact inside it — the one arrangement the filter exists to stop. |
+| 4 | Document rules (duplicate keys, duplicate semantic relations, unbound schedule/deployment units) ran only in `parse_system_topology_v1` | They now run as the planner's `model` phase. A caller who built the spec with `model_validate` got **no duplicate-key error at all**, failing an acceptance criterion on the planner's own surface. |
+| 5 | Invalid or unresolved subjects reached the executable and planning buckets: a prerequisite emitted after a type-mismatch blocker; an empty environment inventory waving every environment through; `witness="live_fact"` claimed with no snapshot | Blocked objects yield no prerequisite; an empty `list_environments` result is conclusive (that read is not paged); and a structural binding is labelled `declared_intent` unless a snapshot genuinely corroborates it. |
+| 6 | The port declared `read_component_xml` and `read_component_dependencies`; the capture invoked neither | `capture_existing_component_evidence` performs both. Without it, every literal-id ProcessCall, cache use, property use and API route was gated regardless of what the account contained. |
+| 7 | Diagnostic contract details diverged: unknown discriminators pointed at the member position rather than `/kind`; a doubled schedule/deployment binding reported an unsupported *lifecycle* rather than a *cardinality* violation; the normative `lifecycle` phase was unused, with witness failures folded into `relation` | All three aligned. Witness-level gating now uses `lifecycle`; kind-level gating keeps `capability`. |
+
+Three additions beyond the plan's enumerated surface are deliberate and are recorded here rather
+than removed: `SystemTopologyPlanV1.validation` (the only path by which warnings and advisories
+reach a caller — `guidance` is derived separately), `TopologyPlanningInvariantError` exported from
+the package root (a caller must be able to catch it), and the derived `TOPOLOGY_OBJECT_KINDS` /
+`TOPOLOGY_RELATION_KINDS` / `TOPOLOGY_RELATION_ROLES` reflection tables (derived from the unions, so
+they cannot drift). The package export list is pinned exactly.
+
+`ScheduleBindingFactV1.observed_max_retry` is likewise an addition: every live schedule carried
+`retry.max_retry: 5` while its `schedules` body was empty, so it is the one piece of schedule
+configuration with live evidence. It is recorded as an **observation** on the snapshot and appears
+nowhere in the authored contract.
+
+---
+
 ## 6. The plan
 
 `plan_system_topology(spec, context, requested_operation="plan") -> SystemTopologyPlanV1`

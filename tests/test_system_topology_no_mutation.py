@@ -164,8 +164,8 @@ spec = parse_system_topology_v1(json.loads(SPEC))
 ctx = TopologyResolutionContextV1(
     profile="prof",
     component_plan_symbols=(
-        ComponentPlanSymbolV1(component_key="ka", component_type="process"),
-        ComponentPlanSymbolV1(component_key="kb", component_type="process"),
+        ComponentPlanSymbolV1(component_key="ka", component_type="process", has_process_ir=True),
+        ComponentPlanSymbolV1(component_key="kb", component_type="process", has_process_ir=True),
     ),
     process_call_evidence=(
         ProcessCallEvidenceV1(

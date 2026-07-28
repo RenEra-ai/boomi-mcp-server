@@ -71,6 +71,7 @@
     {
       "active": false,
       "has_schedule_body": false,
+      "observed_max_retry": null,
       "process_id": "component-placeholder-1",
       "profile": "prof-a",
       "runtime_id": "runtime-placeholder-1"

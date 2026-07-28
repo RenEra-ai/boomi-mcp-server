@@ -57,8 +57,14 @@ _BINDINGS = [
     },
 ]
 
+#: ``has_process_ir`` is set for the process symbols because these fixtures
+#: supply ``witness="process_ir"`` evidence for them. The planner now consumes
+#: the flag — a ProcessIR witness for a planned process whose symbol declares no
+#: ProcessIR root is a claim about nothing, and is gated.
 _SYMBOLS = tuple(
-    ComponentPlanSymbolV1(component_key=k, component_type=t)
+    ComponentPlanSymbolV1(
+        component_key=k, component_type=t, has_process_ir=(t == "process")
+    )
     for k, t in (
         ("pk", "process"),
         ("p2k", "process"),
@@ -322,7 +328,57 @@ def test_scheduling_a_listener_process_is_unsupported():
     assert unsupported[0].subject == "schedule_binding"
 
 
-def test_a_schedule_bound_twice_is_unsupported():
+def test_a_schedule_bound_twice_is_a_cardinality_violation():
+    """The SHAPE is fine; there is simply one binding too many.
+
+    Reporting it as an unsupported lifecycle sent a caller looking for a shape
+    problem that is not there — the plan specifies the cardinality code at the
+    later binding.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": _ALL_OBJECTS,
+            "relations": [
+                _BINDINGS[0],
+                {"kind": "schedule_binding", "key": "rs2", "schedule": "s", "process": "p2", "runtime": "rt"},
+                _BINDINGS[1],
+            ],
+        }
+    )
+    report = validate_system_topology(spec, _WITNESSED)
+    cardinality = [
+        d for d in report.errors if d.code == "TOPOLOGY_SCHEMA_INVALID_CARDINALITY"
+    ]
+    assert cardinality, _codes(report)
+    assert cardinality[0].path == "/relations/1/schedule"
+
+
+def test_a_deployment_unit_bound_twice_is_a_cardinality_violation():
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": _ALL_OBJECTS,
+            "relations": [
+                _BINDINGS[0],
+                _BINDINGS[1],
+                {
+                    "kind": "deployment_binding",
+                    "key": "rd2",
+                    "deployment_unit": "u",
+                    "process": "p2",
+                    "environment": "e",
+                },
+            ],
+        }
+    )
+    report = validate_system_topology(spec, _WITNESSED)
+    assert "TOPOLOGY_SCHEMA_INVALID_CARDINALITY" in _codes(report)
+
+
+def _superseded_test_a_schedule_bound_twice_is_unsupported():
     spec = parse_system_topology_v1(
         {
             "version": "1",
@@ -339,7 +395,7 @@ def test_a_schedule_bound_twice_is_unsupported():
     assert "TOPOLOGY_RELATION_UNSUPPORTED" in _codes(report)
 
 
-def test_a_deployment_unit_targeting_two_processes_is_unsupported():
+def _superseded_test_a_deployment_unit_targeting_two_processes_is_unsupported():
     """``orchestrate_deploy`` requires exactly one process; no atomicity exists."""
     spec = parse_system_topology_v1(
         {
@@ -395,8 +451,9 @@ def test_a_relation_with_no_trusted_witness_is_gated(relation):
     report = validate_system_topology(_spec([relation]), bare)
     gated = [d for d in report.errors if d.code == "TOPOLOGY_CAPABILITY_GATED"]
     assert gated, _codes(report)
-    # Witness-level gating lives in the ``relation`` phase, not ``capability``.
-    assert gated[0].phase == "relation"
+    # Witness-level gating lives in the normative ``lifecycle`` phase, not
+    # ``capability`` (which is kind-level) and not ``relation`` (shape rules).
+    assert gated[0].phase == "lifecycle"
     assert gated[0].subject == relation["kind"]
 
 
@@ -428,7 +485,13 @@ def test_dependency_corroboration_alone_does_not_witness_a_process_call():
 
 
 def test_kind_level_and_witness_level_gating_use_different_phases():
-    """Same code, two phases — so each is independently testable and orderable."""
+    """Same code, two phases — so each is independently testable and orderable.
+
+    ``capability`` for a gated KIND, ``lifecycle`` for a supported kind missing
+    its witness. ``lifecycle`` is in the plan's normative phase order and was
+    previously unused, with witness failures folded into ``relation`` alongside
+    the shape rules.
+    """
     spec = parse_system_topology_v1(
         {
             "version": "1",
@@ -448,10 +511,10 @@ def test_kind_level_and_witness_level_gating_use_different_phases():
     phases = {
         d.phase for d in report.errors if d.code == "TOPOLOGY_CAPABILITY_GATED"
     }
-    assert phases == {"capability", "relation"}
+    assert phases == {"capability", "lifecycle"}
     # Phase rank precedes path in the total order, so capability sorts first.
     ordered = [d.phase for d in report.errors if d.code == "TOPOLOGY_CAPABILITY_GATED"]
-    assert ordered.index("capability") < ordered.index("relation")
+    assert ordered.index("capability") < ordered.index("lifecycle")
 
 
 # ---------------------------------------------------------------------------
@@ -554,7 +617,9 @@ def _cycle_ctx(pairs):
     return TopologyResolutionContextV1(
         profile="p-alpha",
         component_plan_symbols=tuple(
-            ComponentPlanSymbolV1(component_key=f"k{i}", component_type="process")
+            ComponentPlanSymbolV1(
+                component_key=f"k{i}", component_type="process", has_process_ir=True
+            )
             for i in range(6)
         ),
         process_call_evidence=tuple(
@@ -1036,8 +1101,12 @@ def test_a_component_xml_witness_is_rejected_for_a_planned_process():
     ctx = TopologyResolutionContextV1(
         profile="p-alpha",
         component_plan_symbols=(
-            ComponentPlanSymbolV1(component_key="ka", component_type="process"),
-            ComponentPlanSymbolV1(component_key="kb", component_type="process"),
+            ComponentPlanSymbolV1(
+                component_key="ka", component_type="process", has_process_ir=True
+            ),
+            ComponentPlanSymbolV1(
+                component_key="kb", component_type="process", has_process_ir=True
+            ),
         ),
         process_call_evidence=(
             ProcessCallEvidenceV1(
@@ -1558,8 +1627,12 @@ def _ordered_witness_verdict(evidence):
     ctx = TopologyResolutionContextV1(
         profile="p-alpha",
         component_plan_symbols=(
-            ComponentPlanSymbolV1(component_key="ka", component_type="process"),
-            ComponentPlanSymbolV1(component_key="kb", component_type="process"),
+            ComponentPlanSymbolV1(
+                component_key="ka", component_type="process", has_process_ir=True
+            ),
+            ComponentPlanSymbolV1(
+                component_key="kb", component_type="process", has_process_ir=True
+            ),
         ),
         process_call_evidence=evidence,
     )
@@ -2351,34 +2424,6 @@ def _relation_unsupported_cases():
             "invoked by its api service",
         ),
         (
-            "schedule bound twice",
-            base_objects,
-            [
-                sched,
-                {"kind": "schedule_binding", "key": "rsx", "schedule": "s", "process": "p2", "runtime": "rt"},
-                sched2,
-                dep,
-            ],
-            "binds one process to one runtime",
-        ),
-        (
-            "deployment unit bound twice",
-            base_objects,
-            [
-                sched,
-                sched2,
-                dep,
-                {
-                    "kind": "deployment_binding",
-                    "key": "rdx",
-                    "deployment_unit": "u",
-                    "process": "p2",
-                    "environment": "e",
-                },
-            ],
-            "exactly one process and one environment",
-        ),
-        (
             "process self-call",
             base_objects,
             [
@@ -2583,7 +2628,9 @@ def test_a_gated_relation_kind_and_a_witness_less_one_get_usable_text():
     ctx = TopologyResolutionContextV1(
         profile="p-alpha",
         component_plan_symbols=(
-            ComponentPlanSymbolV1(component_key="pk", component_type="process"),
+            ComponentPlanSymbolV1(
+                component_key="pk", component_type="process", has_process_ir=True
+            ),
             ComponentPlanSymbolV1(component_key="ck", component_type="documentcache"),
         ),
     )
@@ -2664,7 +2711,7 @@ def test_the_gated_remediation_names_a_discriminator_the_caller_actually_has():
 
     text = _REMEDIATION["TOPOLOGY_CAPABILITY_GATED"].lower()
     assert "phase" in text
-    assert "'capability'" in text and "'relation'" in text
+    assert "'capability'" in text and "'lifecycle'" in text
     # The named discriminator must be a field the caller actually holds...
     assert "capability_report" not in set(TopologyValidationReportV1.model_fields)
 
@@ -2693,4 +2740,276 @@ def test_the_gated_remediation_names_a_discriminator_the_caller_actually_has():
     gated = [d for d in report.errors if d.code == "TOPOLOGY_CAPABILITY_GATED"]
     phases = {d.subject: d.phase for d in gated}
     assert phases["external_queue"] == "capability", phases
-    assert phases["process_call"] == "relation", phases
+    assert phases["process_call"] == "lifecycle", phases
+
+
+# ---------------------------------------------------------------------------
+# Architect review round 1 — plan-vs-code gaps the commit-review gate could not
+# see, because it judges code on its own merits rather than against the plan
+# ---------------------------------------------------------------------------
+
+
+def test_document_rules_run_on_the_planner_not_only_the_parser():
+    """A6-F4. Duplicate keys escaped the planner entirely.
+
+    ``_check_document_rules`` was reachable only through
+    ``parse_system_topology_v1``, so a caller who built the spec with
+    ``model_validate`` — the ordinary way — and handed it to the planner got no
+    duplicate-key error at all. That fails the issue's "duplicate ... errors are
+    caught deterministically" criterion on the planner's own surface.
+    """
+    from boomi_mcp.models.system_topology import SystemTopologySpecV1
+
+    spec = SystemTopologySpecV1.model_validate(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "dup", "component_ref": "$ref:k1"},
+                {"kind": "process", "key": "dup", "component_ref": "$ref:k2"},
+            ],
+            "relations": [],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(component_key="k1", component_type="process"),
+            ComponentPlanSymbolV1(component_key="k2", component_type="process"),
+        ),
+    )
+    report = validate_system_topology(spec, ctx)
+    duplicates = [d for d in report.errors if d.code == "TOPOLOGY_SCHEMA_DUPLICATE_KEY"]
+    assert duplicates, _codes(report)
+    assert duplicates[0].phase == "model"
+    assert duplicates[0].path == "/objects/1/key"
+
+
+def test_an_unbound_schedule_is_caught_on_the_planner_path_too():
+    from boomi_mcp.models.system_topology import SystemTopologySpecV1
+
+    spec = SystemTopologySpecV1.model_validate(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "p", "component_ref": "$ref:pk"},
+                {"kind": "schedule", "key": "s"},
+            ],
+            "relations": [],
+        }
+    )
+    report = validate_system_topology(
+        spec, TopologyResolutionContextV1(profile="p-alpha")
+    )
+    assert "TOPOLOGY_SCHEMA_INVALID_CARDINALITY" in _codes(report)
+
+
+def test_a_process_ir_witness_requires_a_symbol_that_declares_one():
+    """A6-F1. ``has_process_ir`` was carried and consumed by nothing.
+
+    A caller could label evidence ``witness="process_ir"`` for a planned process
+    whose own ComponentPlan symbol says it has no ProcessIR root, and the
+    relation planned clean — the label was trusted on its own word. There was
+    nothing for the claim to be true OF.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "$ref:ka"},
+                {"kind": "process", "key": "b", "component_ref": "$ref:kb"},
+            ],
+            "relations": [
+                {"kind": "process_call", "key": "r", "caller_process": "a", "callee_process": "b"}
+            ],
+        }
+    )
+    evidence = (
+        ProcessCallEvidenceV1(
+            caller_component_ref="$ref:ka",
+            callee_component_ref="$ref:kb",
+            witness="process_ir",
+        ),
+    )
+    without = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(component_key="ka", component_type="process"),
+            ComponentPlanSymbolV1(component_key="kb", component_type="process"),
+        ),
+        process_call_evidence=evidence,
+    )
+    assert "TOPOLOGY_CAPABILITY_GATED" in _codes(validate_system_topology(spec, without))
+
+    with_ir = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(
+                component_key="ka", component_type="process", has_process_ir=True
+            ),
+            ComponentPlanSymbolV1(
+                component_key="kb", component_type="process", has_process_ir=True
+            ),
+        ),
+        process_call_evidence=evidence,
+    )
+    assert validate_system_topology(spec, with_ir).errors == ()
+
+
+def test_per_fact_filtering_anchors_on_the_context_profile():
+    """A6-F3. The envelope is itself caller-supplied.
+
+    Filtering against ``snapshot.profile`` meant a snapshot stamped with the
+    wrong profile kept every fact inside it — the one arrangement the filter
+    exists to stop.
+    """
+    from boomi_mcp.compiler.system_topology.context import prepare_topology_context
+
+    prepared = prepare_topology_context(
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            snapshot=_snapshot(
+                profile="p-omega",
+                components=(
+                    ComponentFactV1(
+                        profile="p-omega", component_id="c", component_type="process"
+                    ),
+                ),
+            ),
+        )
+    )
+    # Anchored on the CONTEXT: the omega fact is foreign and is discarded.
+    assert prepared.components == ()
+    assert prepared.foreign_profile_fact_count == 1
+
+
+def test_an_empty_environment_inventory_still_witnesses_absence():
+    """A6-F5b. ``list_environments`` is not paged; an empty result is a fact.
+
+    Guarding the check on the id set being non-empty let an empty inventory wave
+    every authored environment through, and its deployment binding with it.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "pr", "component_ref": "$ref:kp"},
+                {"kind": "environment", "key": "e", "environment_ref": "ghost-env"},
+                {"kind": "deployment_unit", "key": "u"},
+            ],
+            "relations": [
+                {
+                    "kind": "deployment_binding",
+                    "key": "rd",
+                    "deployment_unit": "u",
+                    "process": "pr",
+                    "environment": "e",
+                }
+            ],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="p-alpha",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(component_key="kp", component_type="process"),
+        ),
+        snapshot=_snapshot(environments=(), pagination=_complete("process")),
+    )
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+
+    plan = plan_system_topology(spec, ctx)
+    assert "TOPOLOGY_REFERENCE_NOT_FOUND" in [b.code for b in plan.blockers]
+    # ...and its binding is withdrawn with it.
+    assert plan.planning_only_relations == ()
+
+
+def test_no_snapshot_means_no_live_fact_claim():
+    """A6-F5c. A structural binding rested on the caller saying so.
+
+    Labelling it ``live_fact`` with no snapshot present put a corroboration the
+    planner never had into the plan's own output.
+    """
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "pr", "component_ref": "$ref:kp"},
+                {"kind": "runtime", "key": "rt", "runtime_ref": "rt-1"},
+                {"kind": "schedule", "key": "s"},
+            ],
+            "relations": [
+                {"kind": "schedule_binding", "key": "rs", "schedule": "s", "process": "pr", "runtime": "rt"}
+            ],
+        }
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            component_plan_symbols=(
+                ComponentPlanSymbolV1(component_key="kp", component_type="process"),
+            ),
+        ),
+    )
+    assert [r.witness for r in plan.planning_only_relations] == ["declared_intent"]
+
+
+def test_a_blocked_object_yields_no_prerequisite():
+    """A6-F5a. The plan emitted a prerequisite for a component it rejected."""
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [{"kind": "process", "key": "a", "component_ref": "$ref:k"}],
+            "relations": [],
+        }
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            component_plan_symbols=(
+                ComponentPlanSymbolV1(component_key="k", component_type="documentcache"),
+            ),
+        ),
+    )
+    assert [b.code for b in plan.blockers] == ["TOPOLOGY_REFERENCE_TYPE_MISMATCH"]
+    assert plan.executable_component_prerequisites == ()
+
+
+def test_the_invariant_checker_verifies_membership_against_the_spec():
+    """A6-MED-9. Without the spec it could confirm shape but not membership."""
+    import inspect
+
+    from boomi_mcp.compiler.system_topology.invariants import (
+        check_topology_plan_invariants,
+    )
+
+    assert "spec" in inspect.signature(check_topology_plan_invariants).parameters
+    source = inspect.getsource(check_topology_plan_invariants)
+    assert "must be declared in the spec" in source
+    assert "callee before its caller" in source
+
+
+def test_the_unknown_discriminator_pointer_names_the_kind_field():
+    """A6-MED-7a. Pointing at the member position made a caller hunt the field."""
+    from boomi_mcp.models.system_topology import SystemTopologyValidationError
+
+    with pytest.raises(SystemTopologyValidationError) as exc:
+        parse_system_topology_v1(
+            {
+                "version": "1",
+                "profile_ref": "p-alpha",
+                "objects": [{"kind": "not_a_kind", "key": "k"}],
+                "relations": [],
+            }
+        )
+    assert [d.path for d in exc.value.diagnostics] == ["/objects/0/kind"]

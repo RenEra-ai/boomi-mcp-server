@@ -64,10 +64,15 @@ def _context(build_dependencies):
             ComponentPlanSymbolV1(
                 component_key="k_top",
                 component_type="process",
+                has_process_ir=True,
                 materialization_dependencies=build_dependencies,
             ),
-            ComponentPlanSymbolV1(component_key="k_mid", component_type="process"),
-            ComponentPlanSymbolV1(component_key="k_leaf", component_type="process"),
+            ComponentPlanSymbolV1(
+                component_key="k_mid", component_type="process", has_process_ir=True
+            ),
+            ComponentPlanSymbolV1(
+                component_key="k_leaf", component_type="process", has_process_ir=True
+            ),
         ),
         process_call_evidence=(
             ProcessCallEvidenceV1(
@@ -328,9 +333,15 @@ def test_non_call_relations_never_enter_the_runtime_graph():
     context = TopologyResolutionContextV1(
         profile="prof",
         component_plan_symbols=(
-            ComponentPlanSymbolV1(component_key="k_top", component_type="process"),
-            ComponentPlanSymbolV1(component_key="k_mid", component_type="process"),
-            ComponentPlanSymbolV1(component_key="k_leaf", component_type="process"),
+            ComponentPlanSymbolV1(
+                component_key="k_top", component_type="process", has_process_ir=True
+            ),
+            ComponentPlanSymbolV1(
+                component_key="k_mid", component_type="process", has_process_ir=True
+            ),
+            ComponentPlanSymbolV1(
+                component_key="k_leaf", component_type="process", has_process_ir=True
+            ),
             ComponentPlanSymbolV1(component_key="k_cache", component_type="documentcache"),
         ),
         shared_resource_use_evidence=(

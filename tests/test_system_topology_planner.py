@@ -185,7 +185,77 @@ def test_every_witnessed_relation_is_planned_with_its_witness(representative_pla
     assert by_kind["api_service_route"] == "typed_builder"
     assert by_kind["document_cache_use"] == "process_ir"
     assert by_kind["process_property_use"] == "process_ir"
-    # Structural bindings the caller declares outright.
+    # Structural bindings the caller declares outright. The representative
+    # context carries no schedule or deployment FACTS, so nothing live
+    # corroborates them and they are labelled as the declarations they are —
+    # ``live_fact`` would claim a corroboration the planner does not have.
+    assert by_kind["schedule_binding"] == "declared_intent"
+    assert by_kind["deployment_binding"] == "declared_intent"
+
+
+def test_a_corroborated_binding_is_labelled_live_fact():
+    """The counterpart: with a matching live fact, ``live_fact`` is earned."""
+    from boomi_mcp.compiler.system_topology.context import (
+        DeploymentFactV1,
+        ScheduleBindingFactV1,
+    )
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "prof",
+            "objects": [
+                {"kind": "process", "key": "p", "component_ref": "proc-1"},
+                {"kind": "runtime", "key": "rt", "runtime_ref": "runtime-1"},
+                {"kind": "environment", "key": "e", "environment_ref": "env-1"},
+                {"kind": "schedule", "key": "s"},
+                {"kind": "deployment_unit", "key": "u"},
+            ],
+            "relations": [
+                {"kind": "schedule_binding", "key": "rs", "schedule": "s", "process": "p", "runtime": "rt"},
+                {
+                    "kind": "deployment_binding",
+                    "key": "rd",
+                    "deployment_unit": "u",
+                    "process": "p",
+                    "environment": "e",
+                },
+            ],
+        }
+    )
+    ctx = TopologyResolutionContextV1(
+        profile="prof",
+        snapshot=TopologyDiscoverySnapshotV1(
+            profile="prof",
+            captured_at="t",
+            source_revision="r",
+            service_release="s",
+            components=(
+                ComponentFactV1(
+                    profile="prof", component_id="proc-1", component_type="process"
+                ),
+            ),
+            environments=(
+                EnvironmentFactV1(
+                    profile="prof", environment_id="env-1", classification="TEST"
+                ),
+            ),
+            runtimes=(RuntimeFactV1(profile="prof", runtime_id="runtime-1"),),
+            schedule_bindings=(
+                ScheduleBindingFactV1(
+                    profile="prof", process_id="proc-1", runtime_id="runtime-1"
+                ),
+            ),
+            deployments=(
+                DeploymentFactV1(
+                    profile="prof", component_id="proc-1", environment_id="env-1"
+                ),
+            ),
+        ),
+    )
+    plan = plan_system_topology(spec, ctx)
+    assert plan.blockers == (), [b.code for b in plan.blockers]
+    by_kind = {r.relation_kind: r.witness for r in plan.planning_only_relations}
     assert by_kind["schedule_binding"] == "live_fact"
     assert by_kind["deployment_binding"] == "live_fact"
 
@@ -286,7 +356,9 @@ def test_a_clean_plan_orders_callees_before_callers():
     context = TopologyResolutionContextV1(
         profile="prof",
         component_plan_symbols=tuple(
-            ComponentPlanSymbolV1(component_key=k, component_type="process")
+            ComponentPlanSymbolV1(
+                component_key=k, component_type="process", has_process_ir=True
+            )
             for k in ("k_top", "k_mid", "k_leaf")
         ),
         process_call_evidence=(
@@ -320,7 +392,9 @@ def test_runtime_order_is_stable_under_relation_permutation():
     context = TopologyResolutionContextV1(
         profile="prof",
         component_plan_symbols=tuple(
-            ComponentPlanSymbolV1(component_key=k, component_type="process")
+            ComponentPlanSymbolV1(
+                component_key=k, component_type="process", has_process_ir=True
+            )
             for k in ("k_top", "k_mid", "k_leaf")
         ),
         process_call_evidence=(
@@ -644,12 +718,14 @@ def test_two_objects_sharing_one_component_ref_do_not_break_the_plan():
     ]
 
 
-def test_a_symbol_with_a_blank_type_still_becomes_a_prerequisite():
-    """QA #232. ``is None`` is not truthiness.
+def test_a_symbol_with_a_blank_type_is_judged_and_excluded_from_prerequisites():
+    """QA #232 plus the architect review's invalid-subject rule.
 
-    A symbol whose type normalizes to the empty string is present in the index;
-    testing truthiness instead of ``is None`` silently dropped it from the
-    prerequisites while resolution had already judged it.
+    A symbol whose type normalizes to the empty string IS present in the index —
+    ``is None`` is not truthiness — so it is judged rather than silently
+    skipped. Having drawn a type-mismatch blocker it is then excluded from the
+    executable bucket, because emitting a prerequisite for a component the plan
+    simultaneously rejects would have the plan contradict itself.
     """
     spec = parse_system_topology_v1(
         {
@@ -668,7 +744,5 @@ def test_a_symbol_with_a_blank_type_still_becomes_a_prerequisite():
             ),
         ),
     )
-    # It is judged — a blank type is not ``process`` — and it is still reported
-    # rather than silently vanishing.
-    assert [p.component_key for p in plan.executable_component_prerequisites] == ["k"]
     assert [b.code for b in plan.blockers] == ["TOPOLOGY_REFERENCE_TYPE_MISMATCH"]
+    assert plan.executable_component_prerequisites == ()

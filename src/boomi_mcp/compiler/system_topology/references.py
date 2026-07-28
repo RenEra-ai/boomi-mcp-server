@@ -208,7 +208,14 @@ def collect_reference_findings(
                     _object_finding(
                         TOPOLOGY_REFERENCE_TYPE_MISMATCH, index, "component_ref", obj.kind
                     )
-        elif obj.kind == "environment" and environment_ids:
+        elif obj.kind == "environment" and prepared.context.snapshot is not None:
+            # Guarded on the SNAPSHOT existing, not on the id set being
+            # non-empty. ``list_environments`` returns the whole set — it is not
+            # paged, unlike component queries — so once discovery ran, an empty
+            # result genuinely means the account has no environments and an
+            # authored reference to one is unresolvable. Guarding on
+            # non-emptiness let an empty inventory wave every environment
+            # through, and its deployment binding with it.
             if obj.environment_ref not in environment_ids:  # type: ignore[union-attr]
                 _object_finding(
                     TOPOLOGY_REFERENCE_NOT_FOUND, index, "environment_ref", obj.kind

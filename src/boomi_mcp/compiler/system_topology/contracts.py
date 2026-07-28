@@ -340,7 +340,14 @@ class PlannedTopologyRelationV1(_TopologyPlanningModel):
     namespace: Literal["system_topology"] = "system_topology"
     relation_key: str
     relation_kind: str
-    witness: Literal["process_ir", "component_xml", "live_fact", "typed_builder"]
+    #: ``declared_intent`` is what a structural binding actually rests on: the
+    #: caller said so. Labelling those ``live_fact`` claimed corroboration the
+    #: planner may not have — a schedule binding was reported as a live fact
+    #: with no snapshot present at all. ``live_fact`` is now reserved for a
+    #: binding a discovery snapshot genuinely corroborates.
+    witness: Literal[
+        "process_ir", "component_xml", "live_fact", "typed_builder", "declared_intent"
+    ]
 
 
 class TopologyRuntimeOrderV1(_TopologyPlanningModel):

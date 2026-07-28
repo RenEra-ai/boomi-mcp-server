@@ -26,6 +26,7 @@ from ...errors import TOPOLOGY_APPLY_NOT_SUPPORTED
 from ...models.system_topology import (
     SystemTopologySpecV1,
     canonical_system_topology_json,
+    collect_document_rule_diagnostics,
 )
 from .capabilities import build_capability_report, collect_capability_findings
 from .context import (
@@ -61,6 +62,24 @@ def _collect(
 ) -> Tuple[Tuple[TopologyDiagnosticV1, ...], Tuple]:
     """Run every collector in phase order and return findings plus planned relations."""
     findings: List[TopologyDiagnosticV1] = []
+
+    # PHASE 1 — model. The document-level rules (duplicate keys, duplicate
+    # semantic relations, unbound schedule/deployment units) were previously
+    # reachable only through ``parse_system_topology_v1``, so a caller who built
+    # the spec with ``model_validate`` and handed it straight to the planner got
+    # no duplicate-key error at all. That fails the issue's "duplicate ... errors
+    # are caught deterministically" criterion on the planner's own surface.
+    document_findings = tuple(
+        topology_finding(
+            diagnostic.code,
+            severity="error",
+            phase="model",
+            path=diagnostic.path,
+        )
+        for diagnostic in collect_document_rule_diagnostics(spec)
+    )
+    findings.extend(document_findings)
+
     findings.extend(collect_capability_findings(spec))
 
     reference_findings = collect_reference_findings(spec, prepared)
@@ -143,10 +162,18 @@ def plan_system_topology(
     # is last-wins, so duplicate rows for one key made the emitted type depend
     # on tuple order. ``prepared.symbols`` is normalized and sorted, so both
     # go away.
+    # An object that drew a blocker is not a prerequisite. Emitting one for a
+    # symbol whose type already failed resolution tells a consumer to build a
+    # component the plan simultaneously rejects — the plan contradicting itself,
+    # and the "invalid subjects are excluded from executable buckets" rule.
+    blocked_object_indexes = set(_blocked_object_indexes({d.path for d in report.errors}))
+
     symbols = dict(prepared.symbols)
     prerequisites: List[ComponentPlanPrerequisiteV1] = []
     seen_keys: set = set()
-    for obj in spec.objects:
+    for object_index, obj in enumerate(spec.objects):
+        if object_index in blocked_object_indexes:
+            continue
         ref = getattr(obj, "component_ref", "")
         if not ref.startswith(_REF_TOKEN_PREFIX):
             continue
@@ -184,7 +211,7 @@ def plan_system_topology(
     blocked_paths = {d.path for d in report.errors}
     blocked_object_keys = {
         spec.objects[index].key
-        for index in _blocked_object_indexes(blocked_paths)
+        for index in blocked_object_indexes
         if 0 <= index < len(spec.objects)
     }
     surviving = tuple(
@@ -213,7 +240,7 @@ def plan_system_topology(
         blockers=report.errors,
         unresolved_decisions=derive_unresolved_decisions(spec, prepared),
     )
-    check_topology_plan_invariants(plan, prepared)
+    check_topology_plan_invariants(plan, prepared, spec)
     return plan
 
 

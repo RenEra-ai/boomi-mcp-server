@@ -109,6 +109,12 @@ class ScheduleBindingFactV1(_TopologyPlanningModel):
     runtime_id: str
     active: bool = False
     has_schedule_body: bool = False
+    #: The retry bound the platform actually reported. An OBSERVATION, not
+    #: authored schedule content — every live schedule carried
+    #: ``retry.max_retry: 5`` while its ``schedules`` body was empty, so this is
+    #: the one piece of schedule configuration that has live evidence. It is
+    #: recorded here and nowhere in the authored contract.
+    observed_max_retry: Optional[int] = None
 
 
 class DeploymentFactV1(_TopologyPlanningModel):
@@ -351,7 +357,12 @@ def prepare_topology_context(
     # foreign component id resolve with no mismatch reported at all. Discarded
     # rather than merely flagged: a fact from another account is not weaker
     # evidence about this one, it is evidence about a different system.
-    profile = snapshot.profile
+    # Anchored on the CONTEXT's profile, not the snapshot envelope's. The
+    # envelope is itself caller-supplied; filtering against it means a snapshot
+    # stamped with the wrong profile keeps every fact inside it, which is the
+    # one arrangement the filter exists to stop. The envelope disagreeing with
+    # the context is separately reported.
+    profile = revalidated.profile
     kept_components = [c for c in snapshot.components if c.profile == profile]
     kept_environments = [e for e in snapshot.environments if e.profile == profile]
     kept_runtimes = [r for r in snapshot.runtimes if r.profile == profile]

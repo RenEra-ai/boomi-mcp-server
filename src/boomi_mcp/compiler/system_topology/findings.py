@@ -88,7 +88,9 @@ _REMEDIATION: Dict[str, str] = {
     ),
     TOPOLOGY_SCHEMA_INVALID_CARDINALITY: (
         "Satisfy the documented cardinality: declare at least one object, and "
-        "bind every schedule and deployment unit exactly once."
+        "bind every schedule and deployment unit exactly once — a schedule "
+        "binds one process to one RUNTIME, and a deployment unit targets "
+        "exactly one process and one environment."
     ),
     TOPOLOGY_SCHEMA_DUPLICATE_KEY: (
         "Give every object and relation a unique key, and declare each semantic "
@@ -112,10 +114,9 @@ _REMEDIATION: Dict[str, str] = {
     TOPOLOGY_RELATION_UNSUPPORTED: (
         "Use the supported lifecycle shape for this relation, or remove it: a "
         "listener process is invoked by its API service rather than scheduled; "
-        "a schedule binds one process to one RUNTIME and is bound once; a "
-        "deployment unit targets exactly one process and one environment; and "
-        "a process cannot call itself, so a self-recursive Process Call must "
-        "be removed."
+        "and a process cannot call itself, so a self-recursive Process Call "
+        "must be removed. (Binding one schedule or deployment unit more than "
+        "once is a cardinality violation, reported under its own code.)"
     ),
     TOPOLOGY_CAPABILITY_GATED: (
         "The subject stays blocked declared intent and will not enter an "
@@ -128,7 +129,7 @@ _REMEDIATION: Dict[str, str] = {
         "KIND itself is gated, no evidence you can supply will clear it and "
         "adding support requires a separate evidence-backed issue. The "
         "finding's own phase says which case this is: 'capability' for a gated "
-        "kind, 'relation' for a supported kind missing its witness."
+        "kind, 'lifecycle' for a supported kind missing its witness."
     ),
     TOPOLOGY_ENVIRONMENT_MISMATCH: (
         "Topology never crosses a credential profile, and an authored "

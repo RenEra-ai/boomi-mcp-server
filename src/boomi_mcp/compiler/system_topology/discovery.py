@@ -30,13 +30,23 @@ from typing import Any, List, Mapping, Optional, Protocol, Sequence, Tuple
 
 from ...models.system_topology import SystemTopologySpecV1
 from .context import (
+    ApiServiceRouteEvidenceV1,
     ComponentFactV1,
+    DependencyCorroborationV1,
     DeploymentFactV1,
     DiscoveryPageProvenanceV1,
     EnvironmentFactV1,
+    ProcessCallEvidenceV1,
     RuntimeFactV1,
     ScheduleBindingFactV1,
+    SharedResourceUseEvidenceV1,
     TopologyDiscoverySnapshotV1,
+)
+from .evidence import (
+    normalize_dependency_corroboration,
+    parse_api_service_component_evidence,
+    parse_process_component_evidence,
+    parse_process_wss_listener_refs,
 )
 
 #: The component types topology reads. Closed: a type absent here is a type the
@@ -167,6 +177,9 @@ def capture_topology_discovery_snapshot(
             # An empty ``schedules`` array is the live norm; recording it as a
             # boolean keeps the absence visible without modelling cron content.
             has_schedule_body=bool(row.get("schedules")),
+            observed_max_retry=_opt_int((row.get("retry") or {}).get("max_retry"))
+            if isinstance(row.get("retry"), Mapping)
+            else None,
         )
         for row in schedule_rows
         if row.get("process_id") and row.get("atom_id")
@@ -204,6 +217,75 @@ def capture_topology_discovery_snapshot(
     )
 
 
+def capture_existing_component_evidence(
+    spec: SystemTopologySpecV1,
+    port: ReadOnlyTopologyDiscoveryPort,
+) -> Tuple[
+    Tuple[ProcessCallEvidenceV1, ...],
+    Tuple[SharedResourceUseEvidenceV1, ...],
+    Tuple[ApiServiceRouteEvidenceV1, ...],
+    Tuple[DependencyCorroborationV1, ...],
+]:
+    """Read the XML and dependencies of every EXISTING component the spec names.
+
+    The port declared ``read_component_xml`` and ``read_component_dependencies``
+    from the start and the capture invoked neither, so no existing-component
+    witness was ever produced by the shipped path: every literal-id ProcessCall,
+    cache use, property use and API route was gated no matter what the account
+    actually contained. A read the port promises and the capture never makes is
+    a capability the contract advertises and does not have.
+
+    Only literal ids are read. A ``$ref`` names a component that does not exist
+    yet, so there is nothing to fetch — and its witness comes from ProcessIR.
+    """
+    profile = spec.profile_ref
+
+    process_refs = []
+    api_service_refs = []
+    for obj in spec.objects:
+        ref = getattr(obj, "component_ref", "")
+        if not ref or ref.startswith("$ref:"):
+            continue
+        if obj.kind == "process":
+            process_refs.append(ref)
+        elif obj.kind == "api_service":
+            api_service_refs.append(ref)
+
+    calls: List[ProcessCallEvidenceV1] = []
+    uses: List[SharedResourceUseEvidenceV1] = []
+    routes: List[ApiServiceRouteEvidenceV1] = []
+    corroboration: List[DependencyCorroborationV1] = []
+    listener_refs: List[str] = []
+
+    for ref in sorted(set(process_refs)):
+        raw_xml = port.read_component_xml(profile, ref)
+        process_calls, process_uses = parse_process_component_evidence(ref, raw_xml)
+        calls.extend(process_calls)
+        uses.extend(process_uses)
+        # The WSS Listen start shape lives on the PROCESS, which is why the ASC
+        # parse needs this list rather than searching its own document.
+        if parse_process_wss_listener_refs(raw_xml):
+            listener_refs.append(ref)
+        corroboration.extend(
+            normalize_dependency_corroboration(
+                ref,
+                tuple(
+                    (str(row.get("component_id") or row.get("id") or ""), str(row.get("component_type") or ""))
+                    for row in port.read_component_dependencies(profile, ref)
+                    if row.get("component_id") or row.get("id")
+                ),
+            )
+        )
+
+    for ref in sorted(set(api_service_refs)):
+        raw_xml = port.read_component_xml(profile, ref)
+        routes.extend(
+            parse_api_service_component_evidence(ref, raw_xml, tuple(listener_refs))
+        )
+
+    return tuple(calls), tuple(uses), tuple(routes), tuple(corroboration)
+
+
 def _is_successful_listing(payload: Any) -> bool:
     """Did this query actually answer?
 
@@ -238,6 +320,7 @@ def _opt_int(value: Any) -> Optional[int]:
 
 __all__: List[str] = [
     "DISCOVERY_COMPONENT_TYPES",
+    "capture_existing_component_evidence",
     "ReadOnlyTopologyDiscoveryPort",
     "TopologyDiscoveryError",
     "capture_topology_discovery_snapshot",

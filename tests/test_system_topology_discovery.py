@@ -325,10 +325,39 @@ def test_an_empty_schedule_body_is_recorded_without_inventing_content():
     assert binding.runtime_id == "atom-1"
     assert binding.active is False
     assert binding.has_schedule_body is False
-    # No cron/interval/retry field survives anywhere in the snapshot.
+    # The retry bound IS recorded — it is the one piece of schedule
+    # configuration with live evidence, observed on every live schedule while
+    # the body stayed empty — but as an OBSERVATION on the snapshot, never as
+    # authored content.
+    assert binding.observed_max_retry == 5
+
     blob = snapshot.model_dump_json()
-    for forbidden in ("cron", "interval", "max_retry"):
+    for forbidden in ("cron", "interval"):
         assert forbidden not in blob
+    # And nothing about retry reaches the AUTHORED contract. Checked against
+    # the schema's FIELD NAMES, not its serialized bytes: the schedule model's
+    # docstring says in so many words that it carries no cron body, and that
+    # sentence is the reason the omission is legible to a reader. A blob scan
+    # would make writing it a test failure.
+    from boomi_mcp.models.system_topology import system_topology_v1_json_schema
+
+    names = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "properties" and isinstance(value, dict):
+                    names.update(str(k).lower() for k in value)
+                if key != "description":
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(system_topology_v1_json_schema())
+    assert names, "the field-name walk is broken"
+    for forbidden in ("cron", "interval", "max_retry", "retry", "observed_max_retry"):
+        assert forbidden not in names, forbidden
 
 
 def test_a_schedule_binds_a_runtime_never_an_environment():
@@ -1520,3 +1549,95 @@ def test_the_real_api_service_capture_yields_no_route_witness_today():
     if not capture.exists():
         pytest.skip("the m6 ASC capture is not present")
     assert parse_api_service_component_evidence("asc-1", capture.read_text()) == ()
+
+
+# ---------------------------------------------------------------------------
+# Architect review round 1 — the reads the port promised and never made
+# ---------------------------------------------------------------------------
+
+
+def test_existing_component_evidence_actually_reads_xml_and_dependencies():
+    """A6-F6. The port declared two reads and the capture invoked neither.
+
+    So no existing-component witness ever shipped: every literal-id ProcessCall,
+    cache use, property use and API route was gated no matter what the account
+    contained. A read the port promises and the capture never makes is a
+    capability the contract advertises and does not have.
+    """
+    from boomi_mcp.compiler.system_topology.discovery import (
+        capture_existing_component_evidence,
+    )
+
+    class EvidencePort(HostileFakePort):
+        def read_component_xml(self, profile, component_ref):
+            self.calls.append(("read_component_xml", profile, component_ref))
+            return {
+                "proc-1": (
+                    '<process><processcall processId="proc-2"/>'
+                    '<documentcache documentCacheId="cache-1"/>'
+                    '<shape connectorType="wss" actionType="Listen"/></process>'
+                ),
+                "asc-1": '<webservice><operation processId="proc-1"/></webservice>',
+            }.get(component_ref)
+
+        def read_component_dependencies(self, profile, component_ref):
+            self.calls.append(("read_component_dependencies", profile, component_ref))
+            return [{"component_id": "prof-9", "component_type": "profile.json"}]
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "prof-a",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "proc-1"},
+                {"kind": "api_service", "key": "s", "component_ref": "asc-1"},
+                # A $ref names something that does not exist yet — nothing to read.
+                {"kind": "process", "key": "planned", "component_ref": "$ref:pk"},
+            ],
+            "relations": [],
+        }
+    )
+    port = EvidencePort()
+    calls, uses, routes, corroboration = capture_existing_component_evidence(spec, port)
+
+    assert [c.callee_component_ref for c in calls] == ["proc-2"]
+    assert all(c.witness == "component_xml" for c in calls)
+    assert [(u.resource_kind, u.resource_component_ref) for u in uses] == [
+        ("document_cache", "cache-1")
+    ]
+    assert [(r.api_service_component_ref, r.listener_component_ref) for r in routes] == [
+        ("asc-1", "proc-1")
+    ]
+    assert [d.child_component_ref for d in corroboration] == ["prof-9"]
+
+    read_refs = {c[2] for c in port.calls if c[0] == "read_component_xml"}
+    assert read_refs == {"proc-1", "asc-1"}, "a $ref must not be fetched"
+    assert all(c[1] == "prof-a" for c in port.calls if c[0].startswith("read_"))
+
+
+def test_the_route_witness_needs_the_process_side_listen_confirmation():
+    """A6-F2. A real ASC carries no ``<wss>`` element at all.
+
+    The WSS Listen configuration lives on the linked PROCESS's start shape, so
+    searching the ASC's own document found nothing on every real component and
+    the existing-ASC route witness was unreachable. The plan specified a
+    three-argument shape threading process evidence; it had been dropped to two.
+    """
+    asc = '<webservice><operation processId="L-1"/><route processId="L-2"/></webservice>'
+    # With process-side confirmation, only the confirmed listener is witnessed.
+    routes = parse_api_service_component_evidence("asc-1", asc, ("L-1",))
+    assert [r.listener_component_ref for r in routes] == ["L-1"]
+    # With none, and no listen marker on the ASC either, nothing is witnessed.
+    assert parse_api_service_component_evidence("asc-1", asc) == ()
+
+
+def test_a_process_start_shape_declares_the_listen_surface():
+    from boomi_mcp.compiler.system_topology.evidence import (
+        parse_process_wss_listener_refs,
+    )
+
+    assert parse_process_wss_listener_refs(
+        '<process><shape connectorType="wss" actionType="Listen"/></process>'
+    )
+    assert parse_process_wss_listener_refs("<process><shape/></process>") == ()
+    assert parse_process_wss_listener_refs(None) == ()
