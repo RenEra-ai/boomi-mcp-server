@@ -1,0 +1,80 @@
+{
+  "captured_at": "2026-01-01T00:00:00Z",
+  "components": [
+    {
+      "component_id": "component-placeholder-1",
+      "component_type": "process",
+      "profile": "prof-a"
+    }
+  ],
+  "deployments": [
+    {
+      "active": false,
+      "component_id": "component-placeholder-1",
+      "environment_id": "environment-placeholder-1",
+      "profile": "prof-a"
+    }
+  ],
+  "environments": [
+    {
+      "classification": "TEST",
+      "environment_id": "environment-placeholder-1",
+      "profile": "prof-a"
+    }
+  ],
+  "pagination": [
+    {
+      "component_type": "process",
+      "has_more": true,
+      "observed": true,
+      "returned_count": 1,
+      "total_available": 2
+    },
+    {
+      "component_type": "documentcache",
+      "has_more": false,
+      "observed": true,
+      "returned_count": 0,
+      "total_available": null
+    },
+    {
+      "component_type": "processproperty",
+      "has_more": false,
+      "observed": true,
+      "returned_count": 0,
+      "total_available": null
+    },
+    {
+      "component_type": "webservice",
+      "has_more": false,
+      "observed": true,
+      "returned_count": 0,
+      "total_available": null
+    },
+    {
+      "component_type": "queue",
+      "has_more": false,
+      "observed": true,
+      "returned_count": 0,
+      "total_available": null
+    }
+  ],
+  "profile": "prof-a",
+  "runtimes": [
+    {
+      "profile": "prof-a",
+      "runtime_id": "runtime-placeholder-1"
+    }
+  ],
+  "schedule_bindings": [
+    {
+      "active": false,
+      "has_schedule_body": false,
+      "process_id": "component-placeholder-1",
+      "profile": "prof-a",
+      "runtime_id": "runtime-placeholder-1"
+    }
+  ],
+  "service_release": "rel-1",
+  "source_revision": "rev-1"
+}

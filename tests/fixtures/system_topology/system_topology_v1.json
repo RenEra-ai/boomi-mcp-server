@@ -1,0 +1,26 @@
+{
+  "version": "1",
+  "profile_ref": "profile-placeholder",
+  "objects": [
+    {"kind": "process", "key": "order_sync_main", "component_ref": "$ref:proc_order_sync_main"},
+    {"kind": "process", "key": "order_sync_child", "component_ref": "$ref:proc_order_sync_child"},
+    {"kind": "process", "key": "order_intake_listener", "component_ref": "$ref:proc_order_intake_listener"},
+    {"kind": "api_service", "key": "order_api", "component_ref": "$ref:asc_order_api"},
+    {"kind": "document_cache", "key": "order_cache", "component_ref": "$ref:cache_order_lookup"},
+    {"kind": "process_property", "key": "order_settings", "component_ref": "$ref:prop_order_settings"},
+    {"kind": "runtime", "key": "primary_runtime", "runtime_ref": "runtime-placeholder-1"},
+    {"kind": "environment", "key": "test_env", "environment_ref": "environment-placeholder-1", "classification": "TEST"},
+    {"kind": "schedule", "key": "nightly_sync"},
+    {"kind": "deployment_unit", "key": "order_sync_unit"},
+    {"kind": "external_queue", "key": "downstream_queue", "resource_ref": "queue-placeholder-1"}
+  ],
+  "relations": [
+    {"kind": "process_call", "key": "main_calls_child", "caller_process": "order_sync_main", "callee_process": "order_sync_child"},
+    {"kind": "api_service_route", "key": "api_routes_listener", "api_service": "order_api", "listener_process": "order_intake_listener"},
+    {"kind": "document_cache_use", "key": "main_uses_cache", "process": "order_sync_main", "document_cache": "order_cache"},
+    {"kind": "process_property_use", "key": "main_uses_settings", "process": "order_sync_main", "process_property": "order_settings"},
+    {"kind": "schedule_binding", "key": "nightly_binds_main", "schedule": "nightly_sync", "process": "order_sync_main", "runtime": "primary_runtime"},
+    {"kind": "deployment_binding", "key": "unit_targets_test", "deployment_unit": "order_sync_unit", "process": "order_sync_main", "environment": "test_env"},
+    {"kind": "queue_reference", "key": "main_references_queue", "process": "order_sync_main", "external_queue": "downstream_queue"}
+  ]
+}

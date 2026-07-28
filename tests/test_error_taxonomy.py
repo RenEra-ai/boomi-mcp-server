@@ -373,3 +373,121 @@ def test_prior_process_ir_code_count_is_unchanged_at_forty_four():
         and (code.startswith("PROCESS_IR_") or code.startswith("LEGACY_ADAPTER_"))
     }
     assert len(prior) == 44
+
+
+# ---------------------------------------------------------------------------
+# Issue #144 (M12.9) — the TOPOLOGY_* family
+# ---------------------------------------------------------------------------
+
+_ISSUE_144_CODES = (
+    # TOPOLOGY_SCHEMA_* — shape of the authored document itself
+    "TOPOLOGY_SCHEMA_UNKNOWN_OBJECT",
+    "TOPOLOGY_SCHEMA_UNKNOWN_RELATION",
+    "TOPOLOGY_SCHEMA_UNKNOWN_FIELD",
+    "TOPOLOGY_SCHEMA_INVALID_CARDINALITY",
+    "TOPOLOGY_SCHEMA_DUPLICATE_KEY",
+    "TOPOLOGY_SCHEMA_VERSION_UNSUPPORTED",
+    "TOPOLOGY_SCHEMA_INVALID",
+    # TOPOLOGY_REFERENCE_* — does an authored reference resolve, and to what
+    "TOPOLOGY_REFERENCE_NOT_FOUND",
+    "TOPOLOGY_REFERENCE_TYPE_MISMATCH",
+    # lifecycle / capability / graph
+    "TOPOLOGY_RELATION_UNSUPPORTED",
+    "TOPOLOGY_CAPABILITY_GATED",
+    "TOPOLOGY_ENVIRONMENT_MISMATCH",
+    "TOPOLOGY_DEPENDENCY_CYCLE",
+    # the standing refusal
+    "TOPOLOGY_APPLY_NOT_SUPPORTED",
+)
+
+
+def test_issue_144_codes_present():
+    assert set(_ISSUE_144_CODES) <= set(ERROR_TAXONOMY)
+
+
+def test_issue_144_constants_are_taxonomy_reexports():
+    """Each code is reachable as a module constant equal to its own name."""
+    for code in _ISSUE_144_CODES:
+        assert getattr(taxonomy, code) == code, code
+
+
+def test_issue_144_adds_exactly_fourteen_codes():
+    """Pins the census the #144 plan declares: fourteen TOPOLOGY_* codes.
+
+    Counting by owner is the shrink-detector: a duplicate spec removes one key
+    from the last-wins dict entirely, so this total moves even when every code
+    the tuple names still resolves.
+    """
+    assert len(_ISSUE_144_CODES) == 14
+    owned = {c for c, s in ERROR_TAXONOMY.items() if s.owner == "#144"}
+    assert owned == set(_ISSUE_144_CODES)
+
+
+def test_issue_144_codes_owned_and_categorized():
+    for code in _ISSUE_144_CODES:
+        spec = ERROR_TAXONOMY[code]
+        assert spec.owner == "#144", code
+        assert spec.category == "topology", code
+        assert spec.retryable is False, code
+        assert spec.summary, code
+
+
+def test_issue_144_owns_the_whole_topology_family():
+    """ADR-001 §7 makes #144 the SOLE introducer of TOPOLOGY_*.
+
+    Asserted as a biconditional, which is stronger than the per-issue subset
+    check the ProcessIR families use: those are extended by several issues, so
+    only "mine are mine" is checkable there. Here "every TOPOLOGY_ code is
+    mine" is also true, and pinning it is what stops a later issue from
+    quietly appending to a family whose semantics #144 defined.
+    """
+    for code in _ISSUE_144_CODES:
+        assert code.startswith("TOPOLOGY_"), code
+    for code, spec in ERROR_TAXONOMY.items():
+        if code.startswith("TOPOLOGY_"):
+            assert spec.owner == "#144", code
+
+
+def test_issue_144_introduces_no_process_ir_or_legacy_code():
+    """#144 is not an introducer for any ProcessIR family.
+
+    The topology planner and the ProcessIR compiler are separate authorities
+    (ADR-001 §3): a topology finding must never blame process semantics, and a
+    compile diagnostic must never blame topology.
+    """
+    for code in _ISSUE_144_CODES:
+        assert not code.startswith("PROCESS_IR_"), code
+        assert not code.startswith("LEGACY_ADAPTER_"), code
+
+
+def test_issue_144_does_not_overwrite_any_prior_code():
+    """The silent-overwrite guard, now covering #143 as well."""
+    for codes, owner in (
+        (_ISSUE_136_CODES, "#136"),
+        (_ISSUE_137_CODES, "#137"),
+        (_ISSUE_138_CODES, "#138"),
+        (_ISSUE_139_CODES, "#139"),
+        (_ISSUE_140_CODES, "#140"),
+        (_ISSUE_141_CODES, "#141"),
+        (_ISSUE_142_CODES, "#142"),
+        (_ISSUE_143_CODES, "#143"),
+    ):
+        for code in codes:
+            assert ERROR_TAXONOMY[code].owner == owner, code
+
+
+def test_prior_m12_code_count_is_unchanged_at_sixty_one():
+    """44 pre-#143 ProcessIR codes + #143's 17 = 61, unmoved by #144.
+
+    The sibling test above pins the pre-#143 total at 44 and deliberately
+    excludes #143; this one carries the same guard forward one owner so a #144
+    collision with a #143 code cannot hide.
+    """
+    prior = {
+        code
+        for code, spec in ERROR_TAXONOMY.items()
+        if spec.owner
+        in {"#136", "#137", "#138", "#139", "#140", "#141", "#142", "#143"}
+        and (code.startswith("PROCESS_IR_") or code.startswith("LEGACY_ADAPTER_"))
+    }
+    assert len(prior) == 61

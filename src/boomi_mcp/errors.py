@@ -261,6 +261,48 @@ LEGACY_ADAPTER_EXEMPTION_SUBPROCESS_SUMMARY = (
     "LEGACY_ADAPTER_EXEMPTION_SUBPROCESS_SUMMARY"
 )
 
+# --- Capability-gated topology planning (M12.9 / issue #144; ADR-001 §7) ------
+# ADR-001 §7 reserves the whole ``TOPOLOGY_*`` family to #144, and #144 is its
+# SOLE introducer: the family is opened and closed here in one issue. That is
+# stronger than the ProcessIR families, which several issues extend, so the
+# guard test asserts the biconditional — every code below is owned by #144 AND
+# every ``TOPOLOGY_``-prefixed key in the taxonomy is owned by #144.
+#
+# These codes blame the AUTHORED topology payload. The topology planner's own
+# internal defects raise a private invariant error instead, for the same reason
+# ``PROCESS_IR_COMPILE_*`` is walled off from ValidationReportV1: telling a
+# caller to fix correct input is how someone ends up rewriting a working payload
+# to route around our bug. No ``TOPOLOGY_*`` code is reachable from the ProcessIR
+# compiler, and no ``PROCESS_IR_*`` code is reachable from the topology planner.
+#
+# ``ERROR_TAXONOMY`` is a dict comprehension keyed on ``spec.code``, so a
+# duplicate entry would silently overwrite the earlier owner's spec AND shrink
+# the dict by one key. tests/test_error_taxonomy.py pins both facts.
+
+# Schema: shape of the authored document itself.
+TOPOLOGY_SCHEMA_UNKNOWN_OBJECT = "TOPOLOGY_SCHEMA_UNKNOWN_OBJECT"
+TOPOLOGY_SCHEMA_UNKNOWN_RELATION = "TOPOLOGY_SCHEMA_UNKNOWN_RELATION"
+TOPOLOGY_SCHEMA_UNKNOWN_FIELD = "TOPOLOGY_SCHEMA_UNKNOWN_FIELD"
+TOPOLOGY_SCHEMA_INVALID_CARDINALITY = "TOPOLOGY_SCHEMA_INVALID_CARDINALITY"
+TOPOLOGY_SCHEMA_DUPLICATE_KEY = "TOPOLOGY_SCHEMA_DUPLICATE_KEY"
+TOPOLOGY_SCHEMA_VERSION_UNSUPPORTED = "TOPOLOGY_SCHEMA_VERSION_UNSUPPORTED"
+TOPOLOGY_SCHEMA_INVALID = "TOPOLOGY_SCHEMA_INVALID"
+
+# Resolution: does an authored reference name something real, of the right kind.
+TOPOLOGY_REFERENCE_NOT_FOUND = "TOPOLOGY_REFERENCE_NOT_FOUND"
+TOPOLOGY_REFERENCE_TYPE_MISMATCH = "TOPOLOGY_REFERENCE_TYPE_MISMATCH"
+
+# Lifecycle/capability/graph: is the RELATION something the platform supports,
+# is there evidence for it, and does the resulting graph make sense.
+TOPOLOGY_RELATION_UNSUPPORTED = "TOPOLOGY_RELATION_UNSUPPORTED"
+TOPOLOGY_CAPABILITY_GATED = "TOPOLOGY_CAPABILITY_GATED"
+TOPOLOGY_ENVIRONMENT_MISMATCH = "TOPOLOGY_ENVIRONMENT_MISMATCH"
+TOPOLOGY_DEPENDENCY_CYCLE = "TOPOLOGY_DEPENDENCY_CYCLE"
+
+# The standing refusal. #144 ships a PLANNER; there is no apply path at all, and
+# this code is what a caller gets for asking for one.
+TOPOLOGY_APPLY_NOT_SUPPORTED = "TOPOLOGY_APPLY_NOT_SUPPORTED"
+
 
 @dataclass(frozen=True)
 class ErrorCodeSpec:
@@ -1053,6 +1095,144 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "with no typed child effect summary."
             ),
             owner="#143",
+        ),
+        # --- #144 M12.9: capability-gated topology planning ------------------
+        ErrorCodeSpec(
+            code=TOPOLOGY_SCHEMA_UNKNOWN_OBJECT,
+            category="topology",
+            retryable=False,
+            summary=(
+                "An authored topology object carries a missing or unrecognized "
+                "'kind' discriminator."
+            ),
+            owner="#144",
+        ),
+        ErrorCodeSpec(
+            code=TOPOLOGY_SCHEMA_UNKNOWN_RELATION,
+            category="topology",
+            retryable=False,
+            summary=(
+                "An authored topology relation carries a missing or unrecognized "
+                "'kind' discriminator."
+            ),
+            owner="#144",
+        ),
+        ErrorCodeSpec(
+            code=TOPOLOGY_SCHEMA_UNKNOWN_FIELD,
+            category="topology",
+            retryable=False,
+            summary=(
+                "An unknown or prohibited field was authored; topology carries "
+                "opaque references only, never secrets, XML or free-form config."
+            ),
+            owner="#144",
+        ),
+        ErrorCodeSpec(
+            code=TOPOLOGY_SCHEMA_INVALID_CARDINALITY,
+            category="topology",
+            retryable=False,
+            summary=(
+                "A topology collection or binding violates its documented "
+                "cardinality."
+            ),
+            owner="#144",
+        ),
+        ErrorCodeSpec(
+            code=TOPOLOGY_SCHEMA_DUPLICATE_KEY,
+            category="topology",
+            retryable=False,
+            summary=(
+                "A topology object key, relation key, or semantic relation tuple "
+                "is declared more than once."
+            ),
+            owner="#144",
+        ),
+        ErrorCodeSpec(
+            code=TOPOLOGY_SCHEMA_VERSION_UNSUPPORTED,
+            category="topology",
+            retryable=False,
+            summary="The authored topology 'version' is missing or unsupported.",
+            owner="#144",
+        ),
+        ErrorCodeSpec(
+            code=TOPOLOGY_SCHEMA_INVALID,
+            category="topology",
+            retryable=False,
+            summary=(
+                "The authored topology payload does not conform to the strict "
+                "SystemTopologySpecV1 schema."
+            ),
+            owner="#144",
+        ),
+        ErrorCodeSpec(
+            code=TOPOLOGY_REFERENCE_NOT_FOUND,
+            category="topology",
+            retryable=False,
+            summary=(
+                "A relation role or external reference does not resolve within "
+                "the profile-qualified topology context."
+            ),
+            owner="#144",
+        ),
+        ErrorCodeSpec(
+            code=TOPOLOGY_REFERENCE_TYPE_MISMATCH,
+            category="topology",
+            retryable=False,
+            summary=(
+                "A relation role resolves to an object or component of a kind "
+                "that role does not accept."
+            ),
+            owner="#144",
+        ),
+        ErrorCodeSpec(
+            code=TOPOLOGY_RELATION_UNSUPPORTED,
+            category="topology",
+            retryable=False,
+            summary=(
+                "The authored relation shape is not a lifecycle the Boomi "
+                "platform supports."
+            ),
+            owner="#144",
+        ),
+        ErrorCodeSpec(
+            code=TOPOLOGY_CAPABILITY_GATED,
+            category="topology",
+            retryable=False,
+            summary=(
+                "The subject is representable as declared intent only: required "
+                "evidence for it is missing, so it never enters an apply plan."
+            ),
+            owner="#144",
+        ),
+        ErrorCodeSpec(
+            code=TOPOLOGY_ENVIRONMENT_MISMATCH,
+            category="topology",
+            retryable=False,
+            summary=(
+                "Profile or environment evidence is inconsistent; topology "
+                "never crosses a credential profile."
+            ),
+            owner="#144",
+        ),
+        ErrorCodeSpec(
+            code=TOPOLOGY_DEPENDENCY_CYCLE,
+            category="topology",
+            retryable=False,
+            summary=(
+                "The cross-process invocation graph contains a cycle, so no "
+                "deterministic runtime order exists."
+            ),
+            owner="#144",
+        ),
+        ErrorCodeSpec(
+            code=TOPOLOGY_APPLY_NOT_SUPPORTED,
+            category="topology",
+            retryable=False,
+            summary=(
+                "SystemTopologySpecV1 is a planning contract; it has no apply, "
+                "deploy, schedule or execute path."
+            ),
+            owner="#144",
         ),
     )
 }

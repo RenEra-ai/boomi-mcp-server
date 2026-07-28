@@ -553,7 +553,7 @@ verify surfaces · #147 M12.12 complete migration, documentation, examples, and 
 | Rich control flow (ConnectorCall, Branch/Decision bodies, scoped Try/Catch) | #140, #141, #142 | Capability-gated per ADR-001 matrix; existing M10/M11 goldens (§3.1) pin the current shapes |
 | Cache/property lineage pass | #143 | `PROCESS_LINEAGE_*` semantics re-homed onto ProcessIRV1 with unchanged verdicts on the current fixtures |
 | Materialization `depends_on` / topo-sort | — (unchanged; verified by #147) | Stays the authoritative component plan; no behavior change permitted in M12 |
-| Topology (`SystemTopologySpecV1`) | #144 | New capability-gated planning-only surface; `TOPOLOGY_*` family reserved |
+| Topology (`SystemTopologySpecV1`) | #144 | **LANDED, dark** — capability-gated planning-only surface; `TOPOLOGY_*` family opened and closed by #144 (14 codes). No existing surface or schema migrated; no MCP exposure (that is #146). See §8 and `SYSTEM_TOPOLOGY_V1.md` |
 | Verifier output / MCP verify-compile exposure | #138, #146 | Verifier remains the post-emission outer gate; new tool exposure is #146-gated (none ships in #135) |
 | `import_integration_draft.pipeline_draft` | #146 | Stays analysis-only; must be labeled a derived view per ADR-001 |
 | Doctrine views | #147 (docs refresh only) | Remains advisory text; never validation-bearing |
@@ -1445,3 +1445,94 @@ behind it at all.
 
 None of this is a regression — the baseline had no such checks. It is a statement of how much of the
 new surface is currently exercised, and by what.
+
+---
+
+## 8. #144 M12.9 — capability-gated `SystemTopologySpecV1` (planning-only, dark)
+
+Placed as its own section rather than folded into §7. §7.2's tally is re-derived from the text
+between its own markers by `tests/test_m12_migration_matrix_evidence.py`, and §7 is #143's ledger —
+adding a `TOPOLOGY_*` row inside it would both break that arithmetic and attribute #144's codes to
+#143's migration.
+
+### 8.1 What landed
+
+A strict, versioned authored contract (`src/boomi_mcp/models/system_topology.py`) plus a pure planner
+package (`src/boomi_mcp/compiler/system_topology/`). Nothing at runtime constructs or consumes
+either. No MCP tool or action is registered; no existing schema, wrapper signature or behavior
+changed.
+
+| Artifact | Verdict |
+|---|---|
+| `SystemTopologySpecV1` — 10 object kinds, 8 relation kinds, closed discriminated unions | new |
+| `TOPOLOGY_*` error family — 14 codes, `category="topology"`, owner `#144` | new |
+| Topology planner (validate / plan, pure, no I/O) | new |
+| Read-only discovery Protocol — 7 reads, no shipped adapter | new |
+| `IntegrationSpecV1`, `_build_plan`, `_topological_order`, `orchestrate_deploy` | **unchanged** |
+| `ProcessIRV1` schema and diagnostics | **unchanged** |
+| Free-form `endpoints` / `flows` / `runtime` / `validation_rules` | **not reinterpreted** |
+
+### 8.2 Authority boundary
+
+ADR-001 §3 assigns topology "a future capability-gated, planning-only topology authority (#144). It
+never mutates runtime state and never feeds the process compiler." Three graphs stay disjoint —
+ProcessIR CFG edges, ComponentPlan build dependencies (`depends_on`), and topology runtime
+(`process_call`) edges — enforced by vocabulary, import isolation and byte-independence proofs
+(`tests/test_system_topology_graph_namespaces.py`).
+
+### 8.3 Evidence corrections to this milestone's stated census
+
+The #144 research gate contradicted six claims in the issue text. Each weakened a claim; none
+strengthened one. Full detail in `SYSTEM_TOPOLOGY_V1.md` §4.
+
+| Claim | Live finding | Effect on the contract |
+|---|---|---|
+| component counts | page-capped (`documentcache`: 100 of 186, `has_more: true`) | no census number is hard-coded; pagination provenance recorded per query |
+| ASC/listener bindings exist | **zero `webservice` components in either profile** | `api_service` live leg `unavailable`; route needs a typed-builder/XML witness |
+| ProcessCall observable live | dependency API is a flat one-level mixed-type list with no edge kind | dependency rows are `corroborating_only`; the API is a registered **unsupported** witness |
+| six inactive schedules | all six carry an **empty** `schedules: []` body | schedule *content* is `guidance-only` and absent from the schema |
+| zero active deployments | **false as stated** — `work` has 18 inactive records, but `renera` has an active one. Deployment reads establish that records exist and can be listed; they establish nothing about creating one | verdict unchanged (`plannable-only`, no apply path); the published *reason* was corrected — see QA #207 |
+| zero queue components | confirmed | queue/Event Streams permanently `gated-no-evidence` in V1 |
+
+Two surfaces have no capture at all and are recorded as such: `account_capability_limits`
+(`not_captured` on all three legs) and `listener_status_as_api_route_witness` (`conflicting` source
+and documentation).
+
+### 8.4 `TOPOLOGY_*` ledger
+
+All 14 codes are **new**; none is re-homed, delegated, or migrated from a prior family. #144 is the
+family's sole introducer (ADR-001 §7), asserted as a biconditional.
+
+| Code | Verdict |
+|---|---|
+| `TOPOLOGY_SCHEMA_UNKNOWN_OBJECT` | new |
+| `TOPOLOGY_SCHEMA_UNKNOWN_RELATION` | new |
+| `TOPOLOGY_SCHEMA_UNKNOWN_FIELD` | new |
+| `TOPOLOGY_SCHEMA_INVALID_CARDINALITY` | new |
+| `TOPOLOGY_SCHEMA_DUPLICATE_KEY` | new |
+| `TOPOLOGY_SCHEMA_VERSION_UNSUPPORTED` | new |
+| `TOPOLOGY_SCHEMA_INVALID` | new |
+| `TOPOLOGY_REFERENCE_NOT_FOUND` | new |
+| `TOPOLOGY_REFERENCE_TYPE_MISMATCH` | new |
+| `TOPOLOGY_RELATION_UNSUPPORTED` | new |
+| `TOPOLOGY_CAPABILITY_GATED` | new |
+| `TOPOLOGY_ENVIRONMENT_MISMATCH` | new |
+| `TOPOLOGY_DEPENDENCY_CYCLE` | new |
+| `TOPOLOGY_APPLY_NOT_SUPPORTED` | new |
+
+Census: **14 new, 0 re-homed, 0 delegated, 0 unchanged.**
+
+### 8.5 Evidence
+
+Every claim above is pinned by a collectible test:
+
+- `tests/test_error_taxonomy.py::test_issue_144_adds_exactly_fourteen_codes`
+- `tests/test_error_taxonomy.py::test_issue_144_owns_the_whole_topology_family`
+- `tests/test_system_topology_capabilities.py::test_registry_covers_every_object_kind_exactly`
+- `tests/test_system_topology_capabilities.py::test_api_service_is_emittable_but_its_live_leg_is_unavailable`
+- `tests/test_system_topology_capabilities.py::test_dependency_api_is_registered_as_an_unsupported_process_call_witness`
+- `tests/test_system_topology_discovery.py::test_pagination_records_returned_total_and_truncation`
+- `tests/test_system_topology_discovery.py::test_an_empty_schedule_body_is_recorded_without_inventing_content`
+- `tests/test_system_topology_graph_namespaces.py::test_changing_the_build_graph_leaves_the_runtime_order_byte_identical`
+- `tests/test_system_topology_no_mutation.py::test_planning_performs_no_write_network_or_process_operation`
+- `tests/test_system_topology_regressions.py::test_integration_spec_still_accepts_its_permissive_payload`
