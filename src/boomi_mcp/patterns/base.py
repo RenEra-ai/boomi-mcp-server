@@ -176,6 +176,15 @@ class PrimitivePattern(PatternBase):
     ) -> Dict[str, Any]:
         """Return a structured planning fragment for issue #29 assembly.
 
+        **Compatibility-only, as of #145 M12.10.** This free-form dict convention
+        predates the typed contribution contract and is RETAINED unchanged — it
+        is classified a compatibility adapter, not an executable recipe surface.
+        New executable materialization goes through the strict contribution types
+        in ``boomi_mcp.models.recipe_contributions``, which admit no free-form
+        config, no ``depends_on`` edge, and no raw fragment. Nothing here is
+        deprecated and no behavior changes; the note exists so a reader does not
+        mistake a retained legacy convention for the current authoring path.
+
         Default is an empty dict, so component-emitting primitives (issue #27)
         stay source-compatible without overriding this method. Operation
         primitives — schedule, watermark, error classifier, DLQ, run metadata —

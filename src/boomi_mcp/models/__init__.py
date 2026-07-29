@@ -122,6 +122,47 @@ from .system_topology import (
     system_topology_v1_json_schema,
 )
 
+# Typed recipe contributions (issue #145). Same rule as the two families above:
+# this is the authored-CONTRACT surface, so the models and their parse/canonical
+# helpers are exported and the ``boomi_mcp.recipes`` package — descriptor
+# registry, composer, engine — deliberately is NOT. A recipe registry reached
+# through ``boomi_mcp.models`` is a mutation surface in an authoring namespace.
+from .recipe_contributions import (
+    RECIPE_COMPONENT_TYPES,
+    RECIPE_CONTRIBUTION_KINDS,
+    RECIPE_CONTRIBUTION_VERSION,
+    RECIPE_EXCLUDED_COMPONENT_TYPES,
+    AddTopologyObjectV1,
+    AddTopologyRelationV1,
+    AppendRootTerminalLegV1,
+    ComponentContributionV1,
+    ConstraintCheckV1,
+    ConstraintRequirementV1,
+    InsertRootLinearStepV1,
+    ProcessIRPatchOperationV1,
+    ProcessIRPatchV1,
+    RecipeComponentKey,
+    RecipeComponentType,
+    RecipeContributionV1,
+    RecipeContributionValidationError,
+    RecipeSemanticId,
+    RequireCapabilityV1,
+    RequireComponentV1,
+    RequireProcessV1,
+    RequireTopologyObjectV1,
+    RequireTopologyRelationV1,
+    SetProcessRootV1,
+    SystemTopologyPatchOperationV1,
+    SystemTopologyPatchV1,
+    canonical_recipe_contribution_json,
+    canonical_recipe_contribution_schema_json,
+    canonical_recipe_contributions_json,
+    parse_recipe_contribution,
+    recipe_contribution_v1_json_schema,
+    scan_forbidden_recipe_shape,
+    validate_contribution_object,
+)
+
 __all__ = [
     'IntegrationSpecV1',
     'IntegrationComponentSpec',
@@ -231,4 +272,40 @@ __all__ = [
     'canonical_system_topology_schema_json',
     'parse_system_topology_v1',
     'system_topology_v1_json_schema',
+    # Typed recipe contributions (issue #145) — the four contribution models and
+    # their parse/canonical/schema helpers. The recipe REGISTRY and ENGINE live
+    # in boomi_mcp.recipes and are deliberately not exported here.
+    'RECIPE_COMPONENT_TYPES',
+    'RECIPE_CONTRIBUTION_KINDS',
+    'RECIPE_CONTRIBUTION_VERSION',
+    'RECIPE_EXCLUDED_COMPONENT_TYPES',
+    'AddTopologyObjectV1',
+    'AddTopologyRelationV1',
+    'AppendRootTerminalLegV1',
+    'ComponentContributionV1',
+    'ConstraintCheckV1',
+    'ConstraintRequirementV1',
+    'InsertRootLinearStepV1',
+    'ProcessIRPatchOperationV1',
+    'ProcessIRPatchV1',
+    'RecipeComponentKey',
+    'RecipeComponentType',
+    'RecipeContributionV1',
+    'RecipeContributionValidationError',
+    'RecipeSemanticId',
+    'RequireCapabilityV1',
+    'RequireComponentV1',
+    'RequireProcessV1',
+    'RequireTopologyObjectV1',
+    'RequireTopologyRelationV1',
+    'SetProcessRootV1',
+    'SystemTopologyPatchOperationV1',
+    'SystemTopologyPatchV1',
+    'canonical_recipe_contribution_json',
+    'canonical_recipe_contribution_schema_json',
+    'canonical_recipe_contributions_json',
+    'parse_recipe_contribution',
+    'recipe_contribution_v1_json_schema',
+    'scan_forbidden_recipe_shape',
+    'validate_contribution_object',
 ]

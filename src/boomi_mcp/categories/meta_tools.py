@@ -6140,6 +6140,9 @@ def _valid_schema_names() -> list:
         "document_cache",
         "api_service",
         "compose_archetypes",
+        # Issue #145 M12.10 — typed recipe contributions.
+        "recipe_contributions",
+        "recipe_registry",
     ]
     names += [f"workflow:{key}" for key in _authoring_workflow_sequences()]
     # design_doctrine / account_governance are stdlib-only static modules —
@@ -6162,6 +6165,18 @@ def _valid_schema_names() -> list:
     except Exception:  # noqa: BLE001 — discovery is advisory here
         return names
     names += [f"archetype:{cls.metadata.name}" for cls in archetypes]
+    try:
+        # Same best-effort discipline as the archetype discovery above: a
+        # registry construction failure must not break the error envelope that
+        # calls this function purely to LIST valid names.
+        from ..recipes import production_registry
+
+        names += [
+            f"recipe:{d.recipe_id}@{d.recipe_version}"
+            for d in production_registry().descriptors()
+        ]
+    except Exception:  # noqa: BLE001 — discovery is advisory here
+        return names
     return names
 
 
@@ -6431,11 +6446,126 @@ def _cache_property_authoring_schema() -> Dict[str, Any]:
     }
 
 
+def _recipe_contributions_schema() -> Dict[str, Any]:
+    """The closed four-type contribution contract (issue #145 M12.10)."""
+    from ..models.recipe_contributions import (
+        RECIPE_COMPONENT_TYPES,
+        RECIPE_CONTRIBUTION_KINDS,
+        recipe_contribution_v1_json_schema,
+    )
+
+    return {
+        "_success": True,
+        "schema_name": "recipe_contributions",
+        "surface": "typed executable recipe contributions",
+        "read_only": True,
+        "raw_xml_exposed": False,
+        "boomi_mutation": False,
+        "contribution_kinds": list(RECIPE_CONTRIBUTION_KINDS),
+        "component_types": list(RECIPE_COMPONENT_TYPES),
+        "json_schema": recipe_contribution_v1_json_schema(),
+        "authoring_note": (
+            "These are the ONLY values a registered recipe may return. They "
+            "carry opaque references and closed enumerations — never "
+            "configuration, credentials, headers, SQL, raw XML, executable "
+            "code, JSON pointers, or caller-authored graph edges. Recipe output "
+            "is validated exactly as direct ProcessIR/topology/component "
+            "authoring and cannot be exempted."
+        ),
+        "doctrine_note": (
+            "Advisory doctrine may RECOMMEND a recipe by exact reference; it can "
+            "never be parsed or executed as one. Registry construction rejects an "
+            "advisory entry that declares an executor, so no advisory descriptor "
+            "a caller can reach carries one."
+        ),
+    }
+
+
+def _recipe_registry_schema() -> Dict[str, Any]:
+    """The live registry snapshot plus the expectation/skew contract."""
+    from ..recipes import production_registry
+    from ..recipes.contracts import ExpectedRecipeRegistryV1
+
+    return {
+        "_success": True,
+        "schema_name": "recipe_registry",
+        "surface": "recipe registry provenance and skew",
+        "read_only": True,
+        "raw_xml_exposed": False,
+        "boomi_mutation": False,
+        "snapshot": production_registry().snapshot(),
+        "expected_registry_schema": ExpectedRecipeRegistryV1.model_json_schema(),
+        "entry_kinds": {
+            "executable_recipe": "registered code that may emit any declared contribution type",
+            "constraint_only": "registered code that may emit ConstraintRequirement only",
+            "advisory": (
+                "a doctrine pointer. Registry construction rejects an advisory "
+                "entry that declares an executor, an input schema or outputs, so "
+                "no advisory descriptor a caller can reach carries one — and "
+                "doctrine prose is never parsed into a recipe id"
+            ),
+            "compatibility_adapter": "a legacy surface that projects into an exact recipe version",
+        },
+        "skew_note": (
+            "Equal recipe versions are NOT proof of equal code. Supply "
+            "implementation_sha256 in expected_recipe_registry entries to have "
+            "the live implementation hash compared; a difference reports "
+            "'mismatch' even when the versions agree. An expectation carrying "
+            "neither registry_revision nor source_revision AND lacking an "
+            "implementation_sha256 on some entry is a VERSION-ONLY comparison: "
+            "it reports 'unknown' with a reason, never 'match', because it "
+            "cannot establish parity. A difference found is still 'mismatch' "
+            "however partial the comparison was."
+        ),
+    }
+
+
+def _recipe_descriptor_schema(reference: str) -> Dict[str, Any]:
+    """One descriptor, addressed as ``recipe:<id>@<version>`` or ``recipe:<id>``."""
+    from ..recipes import RecipeError, production_registry
+
+    recipe_id, _, version = reference.partition("@")
+    try:
+        descriptor = production_registry().resolve(recipe_id, version or None)
+    except RecipeError:
+        return {
+            "_success": False,
+            "error": f"No registered recipe matches {reference!r}.",
+            "error_code": SCHEMA_NAME_UNSUPPORTED,
+            "valid_schema_names": _valid_schema_names(),
+        }
+
+    payload: Dict[str, Any] = {
+        "_success": True,
+        "schema_name": f"recipe:{descriptor.recipe_id}@{descriptor.recipe_version}",
+        "surface": "recipe descriptor",
+        "read_only": True,
+        "raw_xml_exposed": False,
+        "boomi_mutation": False,
+        "descriptor": descriptor.public_payload(),
+    }
+    if descriptor.input_schema_id is not None:
+        registry = production_registry()
+        payload["input_schema"] = registry.input_model_for(
+            descriptor
+        ).model_json_schema()
+    return payload
+
+
 def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
     """Dispatch get_schema_template(schema_name=...) requests (issue #10).
 
     Read-only reference data — never calls Boomi, never emits raw XML.
     """
+    if schema_name == "recipe_contributions":
+        return _recipe_contributions_schema()
+
+    if schema_name == "recipe_registry":
+        return _recipe_registry_schema()
+
+    if schema_name.startswith("recipe:"):
+        return _recipe_descriptor_schema(schema_name[len("recipe:"):])
+
     if schema_name == "cache_property_authoring":
         return _cache_property_authoring_schema()
 
@@ -8666,6 +8796,12 @@ PLAN_INTEGRATION_DESIGN_OUTPUT_SCHEMA: Dict[str, Any] = {
             "type": "array", "items": {"$ref": "#/$defs/pattern"}
         },
         "capability_gaps": {"type": "array", "items": {"$ref": "#/$defs/gap"}},
+        # Issue #145: EXACT recipe references only. Never a contribution, patch,
+        # or input payload — an advisory surface must not hand back executable
+        # material.
+        "recommended_recipes": {
+            "type": "array", "items": {"$ref": "#/$defs/recipe_ref"}
+        },
         "required_user_decisions": {
             "type": "array", "items": {"$ref": "#/$defs/decision"}
         },
@@ -8691,6 +8827,33 @@ PLAN_INTEGRATION_DESIGN_OUTPUT_SCHEMA: Dict[str, Any] = {
         "raw_xml_exposed", "text",
     ],
     "$defs": {
+        "recipe_ref": {
+            "type": "object",
+            "properties": {
+                "recipe_id": {"type": "string"},
+                "recipe_version": {"type": "string"},
+                "entry_kind": {
+                    "enum": [
+                        "executable_recipe", "constraint_only", "advisory",
+                        "compatibility_adapter",
+                    ]
+                },
+                "adapter_target": {
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "recipe_id": {"type": "string"},
+                                "recipe_version": {"type": "string"},
+                            },
+                            "required": ["recipe_id", "recipe_version"],
+                        },
+                        {"type": "null"},
+                    ]
+                },
+            },
+            "required": ["recipe_id", "recipe_version", "entry_kind"],
+        },
         "pattern": {
             "type": "object",
             "properties": {
@@ -9169,10 +9332,42 @@ def plan_integration_design_action(
         f"{len(discovery_steps)} discovery step(s).",
     ])
 
+    # --- Recommended recipes (issue #145) ------------------------------------
+    # EXACT references and nothing else. Doctrine text is never parsed, and no
+    # contribution, patch, or input payload is returned here: an advisory surface
+    # that handed back executable material would be the exact "prose becomes
+    # executable" failure this issue exists to prevent. Only an archetype that
+    # actually routes through a migrated recipe gets a reference — an unmigrated
+    # one is reported honestly by its absence.
+    recommended_recipes: list = []
+    if archetype_provided and cls is not None:
+        try:
+            from ..categories.integration_authoring import _ARCHETYPE_ADAPTERS
+            from ..recipes import production_registry
+
+            adapter_id = _ARCHETYPE_ADAPTERS.get(cls.metadata.name)
+            if adapter_id is not None:
+                adapter = production_registry().resolve(adapter_id)
+                recommended_recipes = [
+                    {
+                        "recipe_id": adapter.recipe_id,
+                        "recipe_version": adapter.recipe_version,
+                        "entry_kind": adapter.entry_kind,
+                        "adapter_target": (
+                            adapter.adapter_target.model_dump(mode="json")
+                            if adapter.adapter_target is not None
+                            else None
+                        ),
+                    }
+                ]
+        except Exception:  # noqa: BLE001 — advisory, never load-bearing
+            recommended_recipes = []
+
     return {
         "_success": True,
         "tool": "plan_integration_design",
         "mode": mode,
+        "recommended_recipes": recommended_recipes,
         "archetype": archetype if archetype_provided else None,
         "intent_flags": flags,
         "profile": profile,
@@ -10701,10 +10896,26 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         "index": list_account_governance_index(),
     }
 
+    # --- Typed recipe registry (issue #145 — provenance + skew) ---
+    # A live snapshot, not a text index: the whole point is that a caller can
+    # compare what is RUNNING against what their checkout has, and a summary
+    # they cannot hash would defeat that. Best-effort, like the doctrine blocks
+    # above — a registry construction failure must not break the catalog.
+    try:
+        from ..recipes import production_registry
+
+        recipe_registry = production_registry().snapshot()
+    except Exception:  # noqa: BLE001 — the catalog is advisory here
+        recipe_registry = {
+            "schema_version": "1",
+            "status": "unavailable",
+        }
+
     return {
         "_success": True,
         "server_name": "Boomi MCP Server",
         "server_version": "1.3",
+        "recipe_registry": recipe_registry,
         "total_tools": len(tools),
         "implemented_count": len(implemented),
         "not_implemented_count": len(not_implemented),

@@ -1,0 +1,1874 @@
+"""Recipe registry, versioning, provenance and skew (issue #145 M12.10).
+
+The registry is the thing that makes "which code is executable here" provable, so
+these tests care about three properties above all: entry kinds are distinguished
+mechanically, discovery is independent of registration order, and provenance is
+derived from code rather than accepted from anyone.
+"""
+
+import random
+import sys
+from pathlib import Path
+
+import pytest
+
+_project_root = Path(__file__).resolve().parent.parent
+_src = str(_project_root / "src")
+if _src not in sys.path:
+    sys.path.insert(0, _src)
+
+from boomi_mcp.build_info import (
+    BUILD_REVISION_PATH,
+    image_build_revision,
+    is_source_digest,
+    source_digest,
+    source_revision,
+)
+from boomi_mcp.errors import (
+    RECIPE_CAPABILITY_GATED,
+    RECIPE_NOT_FOUND,
+    RECIPE_VERSION_UNAVAILABLE,
+)
+from boomi_mcp.recipes import RecipeError, build_test_registry, production_registry
+from boomi_mcp.recipes import registry as registry_module
+from boomi_mcp.recipes.builtins import catalog
+from boomi_mcp.recipes.builtins.catalog import (
+    PRODUCTION_REGISTRATIONS,
+    RECIPE_ADVISORY_INTEGRATION_DESIGN,
+    RECIPE_API_TO_API_SYNC,
+    RECIPE_CONSTRAINT_INBOUND_VALIDATE,
+    RECIPE_DB_REST_FANOUT,
+)
+from boomi_mcp.recipes.contracts import (
+    ExpectedRecipeEntryV1,
+    ExpectedRecipeRegistryV1,
+    RecipeCapabilityRequirementV1,
+    RecipeConflictPolicyV1,
+    RecipeReferenceV1,
+    RecipeRegistrationV1,
+    parse_semver,
+)
+from boomi_mcp.recipes.builtins.sync import SyncRecipeInputV1, emit_api_to_api_sync
+
+
+def _reg(**kwargs):
+    base = dict(
+        recipe_id="test.recipe",
+        recipe_version="1.0.0",
+        entry_kind="executable_recipe",
+        is_default=True,
+        input_model=SyncRecipeInputV1,
+        executor=emit_api_to_api_sync,
+        output_types=(
+            "component_contribution",
+            "constraint_requirement",
+            "process_ir_patch",
+        ),
+        conflict_policy=RecipeConflictPolicyV1(),
+    )
+    base.update(kwargs)
+    return RecipeRegistrationV1(**base)
+
+
+# ---------------------------------------------------------------------------
+# SemVer
+# ---------------------------------------------------------------------------
+
+
+def test_semver_orders_numerically_not_lexically():
+    """The classic trap: ``1.10.0`` must sort AFTER ``1.9.0``."""
+    versions = ["1.9.0", "1.10.0", "1.2.0", "2.0.0", "1.0.0"]
+    assert sorted(versions, key=parse_semver) == [
+        "1.0.0",
+        "1.2.0",
+        "1.9.0",
+        "1.10.0",
+        "2.0.0",
+    ]
+
+
+def test_a_prerelease_sorts_before_its_release():
+    assert parse_semver("1.0.0-alpha") < parse_semver("1.0.0")
+    assert parse_semver("1.0.0-alpha.1") < parse_semver("1.0.0-alpha.beta")
+    assert parse_semver("1.0.0-2") < parse_semver("1.0.0-rc")
+
+
+def test_build_metadata_is_ignored_for_precedence():
+    assert parse_semver("1.0.0+build.1") == parse_semver("1.0.0+build.2")
+
+
+@pytest.mark.parametrize("bad", ["1", "1.0", "v1.0.0", "1.0.0.0", "01.0.0", ""])
+def test_an_invalid_semver_is_rejected_at_construction(bad):
+    with pytest.raises(ValueError):
+        build_test_registry((_reg(recipe_version=bad),))
+
+
+# ---------------------------------------------------------------------------
+# Resolution
+# ---------------------------------------------------------------------------
+
+
+def test_an_exact_version_resolves():
+    registry = build_test_registry((_reg(),))
+    assert registry.resolve("test.recipe", "1.0.0").recipe_version == "1.0.0"
+
+
+def test_a_name_only_call_selects_the_code_declared_default():
+    registry = build_test_registry(
+        (
+            _reg(recipe_version="1.0.0", is_default=False),
+            _reg(recipe_version="2.0.0", is_default=True),
+        )
+    )
+    assert registry.resolve("test.recipe").recipe_version == "2.0.0"
+
+
+def test_an_exact_request_never_falls_forward_or_backward():
+    """A silent fall-forward defeats the entire point of pinning."""
+    registry = build_test_registry(
+        (_reg(recipe_version="1.0.0"), _reg(recipe_version="2.0.0", is_default=False))
+    )
+    with pytest.raises(RecipeError) as exc:
+        registry.resolve("test.recipe", "1.5.0")
+    diagnostic = exc.value.diagnostics[0]
+    assert diagnostic.code == RECIPE_VERSION_UNAVAILABLE
+    assert diagnostic.available_versions == ("1.0.0", "2.0.0")
+
+
+def test_an_unknown_recipe_id_is_not_found():
+    registry = build_test_registry((_reg(),))
+    with pytest.raises(RecipeError) as exc:
+        registry.resolve("nope")
+    assert exc.value.diagnostics[0].code == RECIPE_NOT_FOUND
+
+
+def test_parallel_versions_coexist():
+    registry = build_test_registry(
+        (_reg(recipe_version="1.0.0"), _reg(recipe_version="2.0.0", is_default=False))
+    )
+    assert registry.versions_for("test.recipe") == ("1.0.0", "2.0.0")
+
+
+def test_two_defaults_for_one_id_fail_at_construction():
+    with pytest.raises(ValueError, match="default"):
+        build_test_registry(
+            (_reg(recipe_version="1.0.0"), _reg(recipe_version="2.0.0"))
+        )
+
+
+def test_a_duplicate_registration_fails_at_construction():
+    with pytest.raises(ValueError, match="duplicate"):
+        build_test_registry((_reg(), _reg(is_default=False)))
+
+
+# ---------------------------------------------------------------------------
+# Entry-kind invariants
+# ---------------------------------------------------------------------------
+
+
+def test_advisory_may_declare_no_executor_input_or_output():
+    """The STRUCTURAL reason doctrine can never become executable."""
+    for kwargs in (
+        {"executor": emit_api_to_api_sync},
+        {"input_model": SyncRecipeInputV1},
+        {"output_types": ("constraint_requirement",)},
+        {"adapter_target": RecipeReferenceV1(recipe_id="x.y", recipe_version="1.0.0")},
+        {"conflict_policy": RecipeConflictPolicyV1()},
+    ):
+        base = dict(
+            entry_kind="advisory",
+            executor=None,
+            input_model=None,
+            output_types=(),
+            conflict_policy=None,
+        )
+        base.update(kwargs)
+        with pytest.raises(ValueError, match="advisory"):
+            build_test_registry((_reg(**base),))
+
+
+def test_an_advisory_entry_registers_cleanly_with_nothing_attached():
+    registry = build_test_registry(
+        (
+            _reg(
+                entry_kind="advisory",
+                executor=None,
+                input_model=None,
+                output_types=(),
+                conflict_policy=None,
+            ),
+        )
+    )
+    descriptor = registry.resolve("test.recipe")
+    assert descriptor.entry_kind == "advisory"
+    assert descriptor.output_types == ()
+    with pytest.raises(RecipeError):
+        registry.executor_for(descriptor)
+
+
+def test_constraint_only_may_declare_only_constraint_output():
+    with pytest.raises(ValueError, match="constraint_only"):
+        build_test_registry(
+            (
+                _reg(
+                    entry_kind="constraint_only",
+                    output_types=("component_contribution", "constraint_requirement"),
+                ),
+            )
+        )
+
+
+def test_a_compatibility_adapter_needs_an_exact_target_and_no_executor():
+    with pytest.raises(ValueError, match="adapter target"):
+        build_test_registry(
+            (
+                _reg(
+                    entry_kind="compatibility_adapter",
+                    executor=None,
+                    input_model=None,
+                    output_types=(),
+                    conflict_policy=None,
+                    adapter_target=None,
+                ),
+            )
+        )
+    with pytest.raises(ValueError, match="compatibility_adapter"):
+        build_test_registry(
+            (
+                _reg(
+                    entry_kind="compatibility_adapter",
+                    conflict_policy=None,
+                    adapter_target=RecipeReferenceV1(
+                        recipe_id="x.y", recipe_version="1.0.0"
+                    ),
+                ),
+            )
+        )
+
+
+def test_an_executable_recipe_must_declare_at_least_one_output():
+    with pytest.raises(ValueError, match="output type"):
+        build_test_registry((_reg(output_types=()),))
+
+
+def test_an_unknown_output_type_fails_at_construction():
+    with pytest.raises(ValueError, match="unknown output type"):
+        build_test_registry((_reg(output_types=("nonsense",)),))
+
+
+def test_output_types_must_be_sorted_and_unique():
+    with pytest.raises(ValueError, match="sorted"):
+        build_test_registry(
+            (_reg(output_types=("process_ir_patch", "component_contribution")),)
+        )
+    with pytest.raises(ValueError, match="duplicate"):
+        build_test_registry(
+            (_reg(output_types=("process_ir_patch", "process_ir_patch")),)
+        )
+
+
+def test_an_input_model_must_subclass_recipe_input_base():
+    from pydantic import BaseModel
+
+    class Loose(BaseModel):
+        pass
+
+    with pytest.raises(ValueError, match="RecipeInputBase"):
+        build_test_registry((_reg(input_model=Loose),))
+
+
+# ---------------------------------------------------------------------------
+# Executor shape
+# ---------------------------------------------------------------------------
+
+
+async def _async_executor(inp):  # pragma: no cover - rejected at registration
+    return ()
+
+
+def test_a_coroutine_executor_is_rejected():
+    with pytest.raises(ValueError, match="coroutine"):
+        build_test_registry((_reg(executor=_async_executor),))
+
+
+def test_a_lambda_executor_is_rejected():
+    with pytest.raises(ValueError):
+        build_test_registry((_reg(executor=lambda inp: ()),))
+
+
+def test_a_partial_executor_is_rejected():
+    import functools
+
+    with pytest.raises(ValueError, match="module-level function"):
+        build_test_registry(
+            (_reg(executor=functools.partial(emit_api_to_api_sync)),)
+        )
+
+
+def test_a_closure_executor_is_rejected():
+    """A closure's captured state is invisible to ``inspect.getsource``.
+
+    Its implementation hash would therefore be blind to the very thing that
+    changes its behavior — and the skew report would say ``match`` for two
+    registries running different code.
+    """
+    captured = {"n": 1}
+
+    def closing(inp):  # pragma: no cover - rejected at registration
+        return captured["n"]
+
+    with pytest.raises(ValueError):
+        build_test_registry((_reg(executor=closing),))
+
+
+def test_a_bound_method_executor_is_rejected():
+    class Holder:
+        def run(self, inp):  # pragma: no cover - rejected at registration
+            return ()
+
+    with pytest.raises(ValueError):
+        build_test_registry((_reg(executor=Holder().run),))
+
+
+# ---------------------------------------------------------------------------
+# Deterministic discovery
+# ---------------------------------------------------------------------------
+
+
+def test_registry_revision_is_invariant_under_registration_order():
+    """Randomized, because a single reversed pair proves much less."""
+    baseline = build_test_registry(PRODUCTION_REGISTRATIONS).registry_revision
+    rng = random.Random(20261010)
+    for _ in range(8):
+        shuffled = list(PRODUCTION_REGISTRATIONS)
+        rng.shuffle(shuffled)
+        assert build_test_registry(tuple(shuffled)).registry_revision == baseline
+
+
+def test_descriptors_are_sorted_by_id_then_parsed_semver_then_kind():
+    registry = build_test_registry(
+        (
+            _reg(recipe_id="b.recipe", recipe_version="1.9.0"),
+            _reg(recipe_id="a.recipe", recipe_version="1.10.0"),
+            _reg(recipe_id="a.recipe", recipe_version="1.9.0", is_default=False),
+        )
+    )
+    assert [
+        (d.recipe_id, d.recipe_version) for d in registry.descriptors()
+    ] == [("a.recipe", "1.9.0"), ("a.recipe", "1.10.0"), ("b.recipe", "1.9.0")]
+
+
+def test_a_descriptor_change_moves_the_registry_revision():
+    baseline = build_test_registry(PRODUCTION_REGISTRATIONS).registry_revision
+    mutated = list(PRODUCTION_REGISTRATIONS) + [
+        _reg(recipe_id="extra.recipe", recipe_version="1.0.0")
+    ]
+    assert build_test_registry(tuple(mutated)).registry_revision != baseline
+
+
+def test_the_registry_module_exposes_no_runtime_registration_api():
+    """"There is no runtime registrar" is asserted, not merely documented."""
+    for name in ("register", "add", "install", "unregister", "clear"):
+        assert not hasattr(registry_module, name), name
+        assert not hasattr(registry_module.RecipeRegistry, name), name
+    from boomi_mcp import recipes
+
+    for name in ("register", "register_recipe", "add_recipe"):
+        assert not hasattr(recipes, name), name
+
+
+def test_the_production_registrations_are_an_immutable_tuple():
+    assert isinstance(PRODUCTION_REGISTRATIONS, tuple)
+    with pytest.raises((AttributeError, TypeError)):
+        PRODUCTION_REGISTRATIONS.append(_reg())  # type: ignore[attr-defined]
+
+
+def test_the_builtins_package_does_no_package_scanning():
+    """A scan would make the registry a property of the filesystem."""
+    import boomi_mcp.recipes.builtins as builtins_pkg
+
+    source = Path(builtins_pkg.__file__).read_text()
+    for token in ("pkgutil", "importlib", "walk_packages", "iter_modules"):
+        assert token not in source, token
+
+
+# ---------------------------------------------------------------------------
+# Provenance
+# ---------------------------------------------------------------------------
+
+
+def test_provenance_is_derived_from_the_registered_callable():
+    registry = build_test_registry((_reg(),))
+    provenance = registry.resolve("test.recipe").provenance
+    assert provenance.package_name == "boomi_mcp"
+    assert provenance.module == emit_api_to_api_sync.__module__
+    assert provenance.symbol == emit_api_to_api_sync.__qualname__
+    assert len(provenance.implementation_sha256) == 64
+    assert len(provenance.descriptor_sha256) == 64
+
+
+def test_a_different_executor_yields_a_different_implementation_hash():
+    from boomi_mcp.recipes.builtins.fanout import (
+        ComposeDbRestFanoutInputV1,
+        emit_db_rest_fanout,
+    )
+
+    a = build_test_registry((_reg(),)).resolve("test.recipe")
+    b = build_test_registry(
+        (_reg(executor=emit_db_rest_fanout, input_model=ComposeDbRestFanoutInputV1),)
+    ).resolve("test.recipe")
+    assert a.provenance.implementation_sha256 != b.provenance.implementation_sha256
+
+
+def test_the_same_registration_yields_the_same_implementation_hash():
+    a = build_test_registry((_reg(),)).resolve("test.recipe")
+    b = build_test_registry((_reg(),)).resolve("test.recipe")
+    assert a.provenance.implementation_sha256 == b.provenance.implementation_sha256
+    assert a.provenance.descriptor_sha256 == b.provenance.descriptor_sha256
+
+
+def test_the_descriptor_hash_excludes_itself():
+    """A self-referential hash is unverifiable — a reader could not reproduce it."""
+    descriptor = build_test_registry((_reg(),)).resolve("test.recipe")
+    assert descriptor.provenance.descriptor_sha256 not in (
+        descriptor.provenance.implementation_sha256,
+    )
+    # Reproducible from the published body: same registration, same hash.
+    assert (
+        build_test_registry((_reg(),)).resolve("test.recipe").provenance.descriptor_sha256
+        == descriptor.provenance.descriptor_sha256
+    )
+
+
+def test_source_revision_prefers_the_image_file(tmp_path):
+    revision = "a" * 40
+    path = tmp_path / "BUILD_REVISION"
+    path.write_text(revision)
+    assert image_build_revision(str(path)) == revision
+    assert source_revision(["boomi_mcp.build_info"], path=str(path)) == revision
+
+
+def test_a_malformed_image_revision_is_no_evidence_at_all(tmp_path):
+    """Half-read is not weaker evidence; reporting it would be confidently wrong."""
+    for bad in ("", "not-hex", "ZZZ", "a" * 41, "abc"):
+        path = tmp_path / "BUILD_REVISION"
+        path.write_text(bad)
+        assert image_build_revision(str(path)) is None
+
+
+def test_the_local_fallback_is_a_labelled_source_digest():
+    revision = source_revision(["boomi_mcp.build_info"], path="/nonexistent/path")
+    assert is_source_digest(revision)
+    assert revision.startswith("source-sha256:")
+
+
+def test_the_source_digest_is_order_independent_and_content_sensitive():
+    a = source_digest(["boomi_mcp.build_info", "boomi_mcp.errors"])
+    b = source_digest(["boomi_mcp.errors", "boomi_mcp.build_info"])
+    assert a == b
+    assert a != source_digest(["boomi_mcp.errors"])
+
+
+def test_the_source_digest_fails_closed_on_an_unreadable_module():
+    with pytest.raises(Exception):
+        source_digest(["boomi_mcp.definitely_not_a_module"])
+
+
+# ---------------------------------------------------------------------------
+# Capability preflight
+# ---------------------------------------------------------------------------
+
+
+def test_an_absent_capability_subject_fails_at_construction():
+    """A typo must not sit dormant and later blame the caller's platform."""
+    with pytest.raises(ValueError, match="unknown"):
+        build_test_registry(
+            (
+                _reg(
+                    capability_requirements=(
+                        RecipeCapabilityRequirementV1(
+                            authority="process_emitter",
+                            subject="no.such.emitter",
+                            required_state="supported",
+                        ),
+                    )
+                ),
+            )
+        )
+
+
+def test_a_gated_process_ir_capability_is_refused_at_preflight():
+    registry = build_test_registry(
+        (
+            _reg(
+                capability_requirements=(
+                    RecipeCapabilityRequirementV1(
+                        authority="process_ir", subject="joins", required_state="supported"
+                    ),
+                )
+            ),
+        )
+    )
+    with pytest.raises(RecipeError) as exc:
+        registry.preflight_capabilities(registry.resolve("test.recipe"))
+    assert exc.value.diagnostics[0].code == RECIPE_CAPABILITY_GATED
+
+
+def test_a_supported_process_ir_capability_passes_preflight():
+    registry = build_test_registry(
+        (
+            _reg(
+                capability_requirements=(
+                    RecipeCapabilityRequirementV1(
+                        authority="process_ir",
+                        subject="rich_branch_decision_bodies",
+                        required_state="supported",
+                    ),
+                )
+            ),
+        )
+    )
+    registry.preflight_capabilities(registry.resolve("test.recipe"))
+
+
+def test_plannable_only_is_satisfied_by_the_stronger_emittable_state():
+    registry = build_test_registry(
+        (
+            _reg(
+                capability_requirements=(
+                    RecipeCapabilityRequirementV1(
+                        authority="system_topology",
+                        subject="process",
+                        required_state="plannable-only",
+                    ),
+                )
+            ),
+        )
+    )
+    registry.preflight_capabilities(registry.resolve("test.recipe"))
+
+
+def test_a_gated_topology_subject_never_satisfies_a_requirement():
+    registry = build_test_registry(
+        (
+            _reg(
+                capability_requirements=(
+                    RecipeCapabilityRequirementV1(
+                        authority="system_topology",
+                        subject="queue_reference",
+                        required_state="plannable-only",
+                    ),
+                )
+            ),
+        )
+    )
+    with pytest.raises(RecipeError):
+        registry.preflight_capabilities(registry.resolve("test.recipe"))
+
+
+# ---------------------------------------------------------------------------
+# Skew
+# ---------------------------------------------------------------------------
+
+
+def _expected_from(registry, **overrides):
+    entries = tuple(
+        ExpectedRecipeEntryV1(
+            recipe_id=d.recipe_id,
+            recipe_version=d.recipe_version,
+            implementation_sha256=d.provenance.implementation_sha256,
+        )
+        for d in registry.descriptors()
+    )
+    payload = dict(
+        registry_revision=registry.registry_revision,
+        source_revision=registry.source_revision_value,
+        entries=entries,
+    )
+    payload.update(overrides)
+    return ExpectedRecipeRegistryV1(**payload)
+
+
+def test_no_expectation_is_reported_as_not_requested():
+    assert production_registry().compare(None).status == "not_requested"
+
+
+def test_an_exact_expectation_matches():
+    registry = production_registry()
+    assert registry.compare(_expected_from(registry)).status == "match"
+
+
+def test_a_missing_recipe_is_a_mismatch():
+    registry = production_registry()
+    expected = _expected_from(
+        registry,
+        entries=(
+            ExpectedRecipeEntryV1(recipe_id="not.registered", recipe_version="1.0.0"),
+        ),
+    )
+    skew = registry.compare(expected)
+    assert skew.status == "mismatch"
+    assert skew.missing_from_live == ("not.registered",)
+
+
+def test_equal_versions_with_different_code_are_a_mismatch_not_a_match():
+    """The skew this issue actually exists for.
+
+    Two registries can agree on ``api_to_api_sync@0.1.0`` and run different
+    bytes. A version-only comparison would call that a match.
+    """
+    registry = production_registry()
+    entries = []
+    for d in registry.descriptors():
+        sha = d.provenance.implementation_sha256
+        if d.recipe_id == RECIPE_API_TO_API_SYNC:
+            sha = "0" * 64
+        entries.append(
+            ExpectedRecipeEntryV1(
+                recipe_id=d.recipe_id,
+                recipe_version=d.recipe_version,
+                implementation_sha256=sha,
+            )
+        )
+    skew = registry.compare(_expected_from(registry, entries=tuple(entries)))
+    assert skew.status == "mismatch"
+    assert [m.recipe_id for m in skew.implementation_mismatches] == [
+        RECIPE_API_TO_API_SYNC
+    ]
+    assert skew.version_mismatches == ()
+
+
+def test_a_version_mismatch_is_reported_separately():
+    registry = production_registry()
+    expected = _expected_from(
+        registry,
+        entries=(
+            ExpectedRecipeEntryV1(
+                recipe_id=RECIPE_DB_REST_FANOUT, recipe_version="9.9.9"
+            ),
+        ),
+    )
+    skew = registry.compare(expected)
+    assert skew.status == "mismatch"
+    assert [m.recipe_id for m in skew.version_mismatches] == [RECIPE_DB_REST_FANOUT]
+
+
+def test_a_registry_revision_difference_is_reported():
+    registry = production_registry()
+    skew = registry.compare(_expected_from(registry, registry_revision="f" * 64))
+    assert skew.status == "mismatch"
+    assert skew.registry_revision_mismatch is True
+
+
+def test_a_source_revision_difference_is_reported():
+    registry = production_registry()
+    skew = registry.compare(_expected_from(registry, source_revision="deadbeef"))
+    assert skew.status == "mismatch"
+    assert skew.source_revision_mismatch is True
+
+
+def test_every_skew_collection_is_sorted():
+    registry = production_registry()
+    expected = _expected_from(
+        registry,
+        entries=(
+            ExpectedRecipeEntryV1(recipe_id="z.missing", recipe_version="1.0.0"),
+            ExpectedRecipeEntryV1(recipe_id="a.missing", recipe_version="1.0.0"),
+        ),
+    )
+    skew = registry.compare(expected)
+    assert list(skew.missing_from_live) == sorted(skew.missing_from_live)
+    assert list(skew.live_only) == sorted(skew.live_only)
+
+
+# ---------------------------------------------------------------------------
+# Snapshot
+# ---------------------------------------------------------------------------
+
+
+def test_the_snapshot_is_fully_sorted_and_carries_the_revisions():
+    snapshot = production_registry().snapshot()
+    ids = [entry["recipe_id"] for entry in snapshot["entries"]]
+    assert ids == sorted(ids)
+    assert len(snapshot["registry_revision"]) == 64
+    assert snapshot["source_revision"]
+    assert list(snapshot["capability_revisions"]) == sorted(
+        snapshot["capability_revisions"]
+    )
+
+
+def test_the_snapshot_names_every_entry_kind_the_registry_distinguishes():
+    kinds = {entry["entry_kind"] for entry in production_registry().snapshot()["entries"]}
+    assert kinds == {
+        "executable_recipe",
+        "constraint_only",
+        "advisory",
+        "compatibility_adapter",
+    }
+
+
+def test_the_public_descriptor_payload_redacts_capability_subjects():
+    """Capability subjects name DARK compiler-authority keys.
+
+    ``tests/test_process_ir_compiler_surface.py`` forbids those on any
+    LLM-visible surface, so the public view reports how many were checked
+    without naming them. They are still enforced — see the preflight tests above.
+    """
+    descriptor = production_registry().resolve(RECIPE_DB_REST_FANOUT)
+    assert descriptor.capability_requirements  # really has some
+    payload = descriptor.public_payload()
+    assert payload["capability_requirements"]["count"] == len(
+        descriptor.capability_requirements
+    )
+    import json as _json
+
+    blob = _json.dumps(payload)
+    for dark in ("connectoraction_source", "connectoraction_target", "doccacheload"):
+        assert dark not in blob, dark
+
+
+# ---------------------------------------------------------------------------
+# Doctrine is not executable
+# ---------------------------------------------------------------------------
+
+
+def test_doctrine_prose_never_resolves_to_a_recipe(monkeypatch):
+    """Prose that LOOKS like a recipe id executes nothing.
+
+    Spies on every registered executor, so "no execution" is observed rather
+    than inferred from an absent exception.
+    """
+    calls = []
+    for name in ("emit_api_to_api_sync", "emit_api_to_database_sync"):
+        original = getattr(catalog, name, None)
+        if original is None:
+            continue
+
+        def spy(inp, _name=name):  # pragma: no cover - must never run
+            calls.append(_name)
+            return ()
+
+        monkeypatch.setattr(catalog, name, spy, raising=False)
+
+    registry = production_registry()
+    for prose in (
+        "Use the api_to_api_sync archetype for REST-to-REST replication.",
+        "recipe: db_rest_fanout",
+        "design_doctrine:connector_retry_design",
+        "api_to_api_sync",  # the ARCHETYPE name — not a recipe id
+        "Consider boomi.archetype.api_to_api_sync when the source is REST.",
+    ):
+        with pytest.raises(RecipeError):
+            registry.resolve(prose)
+    assert calls == []
+
+
+def test_naming_a_real_recipe_id_resolves_but_still_executes_nothing(monkeypatch):
+    """Resolution is LOOKUP, not execution — the two are separate steps.
+
+    A caller may name a registered recipe; that returns a descriptor and runs no
+    code. Execution needs the engine, a validated input, and a materialization
+    catalog. Pinned so "resolve" can never quietly become "run".
+    """
+    calls = []
+    monkeypatch.setattr(
+        catalog,
+        "emit_api_to_api_sync",
+        lambda inp: calls.append("ran") or (),  # pragma: no cover
+        raising=False,
+    )
+    descriptor = production_registry().resolve(RECIPE_API_TO_API_SYNC)
+    assert descriptor.entry_kind == "executable_recipe"
+    assert calls == []
+
+
+def test_the_advisory_entry_has_no_executor_to_call():
+    registry = production_registry()
+    descriptor = registry.resolve(RECIPE_ADVISORY_INTEGRATION_DESIGN)
+    assert descriptor.entry_kind == "advisory"
+    assert descriptor.output_types == ()
+    assert descriptor.input_schema_id is None
+    with pytest.raises(RecipeError):
+        registry.executor_for(descriptor)
+    with pytest.raises(RecipeError):
+        registry.input_model_for(descriptor)
+
+
+def test_the_constraint_only_entry_emits_only_requirements():
+    descriptor = production_registry().resolve(RECIPE_CONSTRAINT_INBOUND_VALIDATE)
+    assert descriptor.entry_kind == "constraint_only"
+    assert descriptor.output_types == ("constraint_requirement",)
+
+
+# ---------------------------------------------------------------------------
+# Live-QA regression (issue #145): the digest must track its CALLEES
+# ---------------------------------------------------------------------------
+
+
+def test_the_implementation_digest_covers_the_defining_module_not_only_the_symbol():
+    """A behaviour-changing edit to a SHARED HELPER must move the hash.
+
+    Live QA found this: both sync recipes delegate their whole body to
+    ``_contributions``, so hashing only the registered function left every hash
+    unmoved while ``build_from_archetype`` went from a working spec to a hard
+    failure. A caller comparing implementation hashes would have been told
+    ``match`` about a registry whose output had changed.
+
+    Simulated by perturbing what ``inspect.getsource`` returns for the MODULE
+    while the registered function's own source is untouched — which is exactly
+    the shape of the real defect.
+    """
+    import inspect as inspect_module
+
+    import boomi_mcp.recipes.registry as registry_mod
+
+    baseline = build_test_registry((_reg(),)).resolve("test.recipe")
+
+    real_getsource = inspect_module.getsource
+    module_of_executor = inspect_module.getmodule(emit_api_to_api_sync)
+
+    def perturbed(obj):
+        text = real_getsource(obj)
+        if obj is module_of_executor:
+            return text + "\n# a shared helper changed\n"
+        return text
+
+    original = registry_mod.inspect.getsource
+    registry_mod.inspect.getsource = perturbed
+    try:
+        mutated = build_test_registry((_reg(),)).resolve("test.recipe")
+    finally:
+        registry_mod.inspect.getsource = original
+
+    assert (
+        mutated.provenance.implementation_sha256
+        != baseline.provenance.implementation_sha256
+    )
+
+
+def test_two_recipes_sharing_a_module_stay_distinguishable():
+    """Widening the digest must not collapse per-symbol attribution."""
+    from boomi_mcp.recipes.builtins.sync import emit_api_to_database_sync
+
+    a = build_test_registry(
+        (_reg(recipe_id="r.a", executor=emit_api_to_api_sync),)
+    ).resolve("r.a")
+    b = build_test_registry(
+        (_reg(recipe_id="r.b", executor=emit_api_to_database_sync),)
+    ).resolve("r.b")
+    assert a.provenance.implementation_sha256 != b.provenance.implementation_sha256
+
+
+def test_a_recipe_in_another_module_is_unaffected_by_a_shared_helper_change():
+    """The digest is per-MODULE, not per-package.
+
+    Hashing the whole import closure would move every recipe's hash on any change
+    anywhere — a hash of the package, not of a recipe. The fan-out recipe lives
+    in its own module and must not move when the sync module does.
+    """
+    from boomi_mcp.recipes.builtins.fanout import (
+        ComposeDbRestFanoutInputV1,
+        emit_db_rest_fanout,
+    )
+    import inspect as inspect_module
+
+    import boomi_mcp.recipes.registry as registry_mod
+
+    def fanout_reg():
+        return _reg(
+            recipe_id="r.fanout",
+            executor=emit_db_rest_fanout,
+            input_model=ComposeDbRestFanoutInputV1,
+        )
+
+    baseline = build_test_registry((fanout_reg(),)).resolve("r.fanout")
+
+    real_getsource = inspect_module.getsource
+    sync_module = inspect_module.getmodule(emit_api_to_api_sync)
+
+    def perturbed(obj):
+        text = real_getsource(obj)
+        if obj is sync_module:
+            return text + "\n# unrelated module changed\n"
+        return text
+
+    original = registry_mod.inspect.getsource
+    registry_mod.inspect.getsource = perturbed
+    try:
+        after = build_test_registry((fanout_reg(),)).resolve("r.fanout")
+    finally:
+        registry_mod.inspect.getsource = original
+
+    assert (
+        after.provenance.implementation_sha256
+        == baseline.provenance.implementation_sha256
+    )
+
+
+# ---------------------------------------------------------------------------
+# Live-QA regression (issue #145): a partial comparison is reported as such
+# ---------------------------------------------------------------------------
+
+
+def _entries(registry, *, with_hashes):
+    return tuple(
+        ExpectedRecipeEntryV1(
+            recipe_id=d.recipe_id,
+            recipe_version=d.recipe_version,
+            implementation_sha256=(
+                d.provenance.implementation_sha256 if with_hashes else None
+            ),
+        )
+        for d in registry.descriptors()
+    )
+
+
+def test_a_version_only_expectation_is_unknown_not_match():
+    """Equal versions are not evidence of equal code — so do not say ``match``.
+
+    A full entries list with no implementation hashes and no revisions is a
+    VERSION comparison. Reporting it as ``match`` is the silent "looks fine"
+    that ``RecipeRegistrySkewV1`` exists to forbid.
+    """
+    registry = production_registry()
+    skew = registry.compare(
+        ExpectedRecipeRegistryV1(entries=_entries(registry, with_hashes=False))
+    )
+    assert skew.status == "unknown"
+    assert "partial_comparison" in skew.reason
+    assert "not evidence of equal code" in skew.reason
+
+
+def test_an_entries_expectation_with_full_hashes_is_a_real_match():
+    registry = production_registry()
+    skew = registry.compare(
+        ExpectedRecipeRegistryV1(entries=_entries(registry, with_hashes=True))
+    )
+    assert skew.status == "match"
+    assert skew.reason is None
+
+
+def test_a_revision_alone_is_enough_for_a_real_match():
+    registry = production_registry()
+    skew = registry.compare(
+        ExpectedRecipeRegistryV1(
+            registry_revision=registry.registry_revision,
+            entries=_entries(registry, with_hashes=False),
+        )
+    )
+    assert skew.status == "match"
+
+
+def test_a_source_revision_alone_is_enough_for_a_real_match():
+    registry = production_registry()
+    skew = registry.compare(
+        ExpectedRecipeRegistryV1(
+            source_revision=registry.source_revision_value,
+            entries=_entries(registry, with_hashes=False),
+        )
+    )
+    assert skew.status == "match"
+
+
+def test_an_empty_entries_list_is_a_mismatch_not_unknown():
+    """An empty entries list ASSERTS "this registry has no recipes".
+
+    That is a claim, not an absent one — so the live registry's eight entries are
+    a real difference, reported with ``live_only``. ``unknown`` is for a
+    comparison that could not establish parity, not for one whose answer is no.
+    """
+    skew = production_registry().compare(ExpectedRecipeRegistryV1())
+    assert skew.status == "mismatch"
+    assert len(skew.live_only) == 8
+    assert skew.missing_from_live == ()
+
+
+def test_a_partial_comparison_that_finds_a_difference_is_still_a_mismatch():
+    """A finding is a finding, however partial the comparison was."""
+    registry = production_registry()
+    entries = list(_entries(registry, with_hashes=False))
+    entries[0] = ExpectedRecipeEntryV1(
+        recipe_id=entries[0].recipe_id, recipe_version="9.9.9"
+    )
+    skew = registry.compare(ExpectedRecipeRegistryV1(entries=tuple(entries)))
+    assert skew.status == "mismatch"
+    assert skew.version_mismatches
+
+
+# ---------------------------------------------------------------------------
+# Live-QA regression (issue #145): the two hashes have DIFFERENT scopes
+# ---------------------------------------------------------------------------
+#
+# ``implementation_sha256`` answers "WHICH recipe changed" and covers the entry's
+# own defining module. ``source_revision`` answers "did anything in the layer
+# change" and covers the whole execution path. Round 2 of live QA found the
+# second claim documented before it was true: the digest listed only the executor
+# modules, so an edit to ``engine.py`` or ``recipe_bridge.py`` moved nothing while
+# both migrated presets went from a working spec to a hard failure.
+
+
+def test_the_layer_module_list_covers_the_whole_recipe_package():
+    """Pinned in BOTH directions against the package's real contents.
+
+    A static list keeps the digest a property of the code rather than of the
+    filesystem — but a static list that silently stops covering a new module is
+    worse than a scan, so this is the guard that makes it safe.
+    """
+    from boomi_mcp.recipes.registry import RECIPE_LAYER_MODULES
+
+    import boomi_mcp.recipes as recipes_pkg
+
+    package_dir = Path(recipes_pkg.__file__).parent
+    on_disk = set()
+    for path in package_dir.rglob("*.py"):
+        if path.name == "__init__.py":
+            continue  # re-export shims carry no logic
+        rel = path.relative_to(package_dir).with_suffix("")
+        on_disk.add("boomi_mcp.recipes." + ".".join(rel.parts))
+
+    listed = {m for m in RECIPE_LAYER_MODULES if m.startswith("boomi_mcp.recipes.")}
+    assert listed == on_disk, listed ^ on_disk
+
+    # ...plus the modules OUTSIDE the package that are still in the path: the
+    # contribution models, the provenance helper, the bridge, and every migrated
+    # surface that calls the bridge.
+    assert set(RECIPE_LAYER_MODULES) - listed == {
+        "boomi_mcp.build_info",
+        "boomi_mcp.models.recipe_contributions",
+        "boomi_mcp.patterns.archetypes.api_to_api_sync",
+        "boomi_mcp.patterns.archetypes.api_to_database_sync",
+        "boomi_mcp.patterns.composition",
+        "boomi_mcp.patterns.recipe_bridge",
+    }
+
+
+def test_the_layer_module_list_is_sorted_and_unique():
+    from boomi_mcp.recipes.registry import RECIPE_LAYER_MODULES
+
+    assert list(RECIPE_LAYER_MODULES) == sorted(set(RECIPE_LAYER_MODULES))
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "boomi_mcp.recipes.engine",
+        "boomi_mcp.recipes.composer",
+        "boomi_mcp.recipes.materialization",
+        "boomi_mcp.patterns.recipe_bridge",
+        "boomi_mcp.models.recipe_contributions",
+    ],
+)
+def test_source_revision_moves_for_any_module_in_the_execution_path(module_name):
+    """The layer-wide backstop, tested where it previously did not reach.
+
+    Each of these modules can change what a recipe run produces, and none of them
+    is any single entry's defining module — so ``source_revision`` is the only
+    thing that can notice.
+    """
+    import importlib
+    import inspect as inspect_module
+
+    import boomi_mcp.build_info as build_info_mod
+
+    baseline = build_test_registry(PRODUCTION_REGISTRATIONS).source_revision_value
+
+    target = importlib.import_module(module_name)
+    real_getsource = inspect_module.getsource
+
+    def perturbed(obj):
+        text = real_getsource(obj)
+        if obj is target:
+            return text + "\n# changed\n"
+        return text
+
+    original = build_info_mod.inspect.getsource
+    build_info_mod.inspect.getsource = perturbed
+    try:
+        mutated = build_test_registry(PRODUCTION_REGISTRATIONS).source_revision_value
+    finally:
+        build_info_mod.inspect.getsource = original
+
+    assert mutated != baseline, module_name
+
+
+def test_an_executor_less_entry_hashes_its_declaration_source():
+    """An adapter/advisory entry IS a declaration, so hash where it is written.
+
+    Live QA found these hashing only ``(id, version, entry_kind)``, which never
+    moved for ANY edit — including one to the catalog module they themselves
+    declare. Four of eight published entries pinned nothing, in a field the skew
+    note tells callers to rely on.
+    """
+    import importlib
+    import inspect as inspect_module
+
+    import boomi_mcp.recipes.registry as registry_mod
+
+    def executor_less_hashes(registry):
+        return {
+            d.recipe_id: d.provenance.implementation_sha256
+            for d in registry.descriptors()
+            if d.entry_kind in ("compatibility_adapter", "advisory")
+        }
+
+    baseline = executor_less_hashes(build_test_registry(PRODUCTION_REGISTRATIONS))
+    assert len(baseline) == 4
+
+    catalog_module = importlib.import_module("boomi_mcp.recipes.builtins.catalog")
+    real_getsource = inspect_module.getsource
+
+    def perturbed(obj):
+        text = real_getsource(obj)
+        if obj is catalog_module:
+            return text + "\n# declaration changed\n"
+        return text
+
+    original = registry_mod.inspect.getsource
+    registry_mod.inspect.getsource = perturbed
+    try:
+        mutated = executor_less_hashes(build_test_registry(PRODUCTION_REGISTRATIONS))
+    finally:
+        registry_mod.inspect.getsource = original
+
+    for recipe_id, digest in baseline.items():
+        assert mutated[recipe_id] != digest, recipe_id
+
+
+def test_an_adapters_hash_depends_on_the_target_it_names():
+    """Repointing an adapter at a different recipe must move its hash."""
+    from boomi_mcp.recipes.contracts import RecipeReferenceV1
+
+    def adapter(target_version):
+        return RecipeRegistrationV1(
+            recipe_id="test.adapter",
+            recipe_version="1.0.0",
+            entry_kind="compatibility_adapter",
+            is_default=True,
+            adapter_target=RecipeReferenceV1(
+                recipe_id="boomi.archetype.api_to_api_sync",
+                recipe_version=target_version,
+            ),
+        )
+
+    a = build_test_registry((adapter("0.1.0"),)).resolve("test.adapter")
+    b = build_test_registry((adapter("0.2.0"),)).resolve("test.adapter")
+    assert (
+        a.provenance.implementation_sha256 != b.provenance.implementation_sha256
+    )
+
+
+def test_every_published_entry_pins_some_code():
+    """No published entry may carry a hash that pins nothing.
+
+    Asserted structurally: perturbing the catalog module (which every
+    executor-less entry declares) or an executor module must move every entry's
+    hash between them — so no entry is left with a constant.
+    """
+    import importlib
+    import inspect as inspect_module
+
+    import boomi_mcp.recipes.registry as registry_mod
+
+    def all_hashes(registry):
+        return {
+            d.recipe_id: d.provenance.implementation_sha256
+            for d in registry.descriptors()
+        }
+
+    baseline = all_hashes(build_test_registry(PRODUCTION_REGISTRATIONS))
+    moved = set()
+
+    for module_name in (
+        "boomi_mcp.recipes.builtins.catalog",
+        "boomi_mcp.recipes.builtins.sync",
+        "boomi_mcp.recipes.builtins.fanout",
+    ):
+        target = importlib.import_module(module_name)
+        real_getsource = inspect_module.getsource
+
+        def perturbed(obj, _target=target, _real=real_getsource):
+            text = _real(obj)
+            if obj is _target:
+                return text + "\n# changed\n"
+            return text
+
+        original = registry_mod.inspect.getsource
+        registry_mod.inspect.getsource = perturbed
+        try:
+            mutated = all_hashes(build_test_registry(PRODUCTION_REGISTRATIONS))
+        finally:
+            registry_mod.inspect.getsource = original
+
+        moved |= {rid for rid, h in mutated.items() if h != baseline[rid]}
+
+    assert moved == set(baseline), set(baseline) - moved
+
+
+#: The three entry points that INVOKE the recipe engine. A module calling any of
+#: them is in the execution path by definition.
+_ENGINE_ENTRY_POINTS = frozenset(
+    {"run_recipes", "run_sync_preset_recipe", "run_fanout_recipe"}
+)
+
+
+def _engine_invoking_modules():
+    """Every module that calls a recipe-engine entry point DIRECTLY.
+
+    Parsed, not grepped. An earlier version of this pin searched for the string
+    ``recipe_bridge``, which pinned reach through exactly one door: a module
+    importing the engine directly was invisible to it, and QA demonstrated the
+    blind spot.
+
+    DIRECT calls, one level — not the transitive closure. That is the rule
+    ``RECIPE_LAYER_MODULES`` encodes, and calling it a "call graph" scan (as an
+    earlier docstring did) overstated it: transitively, the reporting layer
+    reaches the engine through ``composition.py``, and the digest deliberately
+    excludes it. One level is the boundary between "this module runs recipes" and
+    "this module called something that does".
+
+    ``__init__.py`` is INCLUDED here, unlike in the package-contents pin below.
+    There a re-export shim genuinely carries no logic; here it could carry a call,
+    and skipping it left a hole QA found.
+    """
+    import ast
+
+    import boomi_mcp
+
+    package_dir = Path(boomi_mcp.__file__).parent
+    invoking = set()
+    for path in sorted(package_dir.rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - defensive
+            continue
+        called = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name):
+                    called.add(func.id)
+                elif isinstance(func, ast.Attribute):
+                    called.add(func.attr)
+        if called & _ENGINE_ENTRY_POINTS:
+            rel = path.relative_to(package_dir).with_suffix("")
+            parts = [p for p in rel.parts if p != "__init__"]
+            invoking.add(".".join(["boomi_mcp", *parts]))
+    return invoking
+
+
+def test_every_module_that_invokes_the_engine_is_in_the_layer_digest():
+    """The membership RULE, decided by an AST scan rather than by judgement.
+
+    Four consecutive rounds of live QA falsified a BROADER sentence than the list
+    backed, each time by finding a module the words covered and the digest did
+    not. The problem was never the missing module — it was writing a claim no
+    test could check. This pin and the rule in ``registry.py`` are now the same
+    statement, so a fifth migrated surface fails here until it is listed.
+    """
+    from boomi_mcp.recipes.registry import RECIPE_LAYER_MODULES
+
+    invoking = _engine_invoking_modules()
+    assert invoking, "the call scan found nothing — the pin would be vacuous"
+    missing = invoking - set(RECIPE_LAYER_MODULES)
+    assert missing == set(), missing
+
+
+def test_the_engine_invocation_scan_finds_the_surfaces_we_expect():
+    """Guard the guard: an AST scan that matched nothing would pass silently."""
+    invoking = _engine_invoking_modules()
+    assert {
+        "boomi_mcp.patterns.recipe_bridge",
+        "boomi_mcp.patterns.archetypes.api_to_api_sync",
+        "boomi_mcp.patterns.archetypes.api_to_database_sync",
+        "boomi_mcp.patterns.composition",
+    } <= invoking
+
+
+def test_the_reporting_layer_is_outside_the_digest_by_the_same_rule():
+    """The reporting modules never invoke the engine DIRECTLY.
+
+    They do reach it transitively — ``compose_archetypes_action`` calls
+    ``compose_archetypes``, which calls ``run_fanout_recipe`` — so the claim is
+    about direct invocation, which is the line the digest draws. An earlier
+    version of this docstring said they "never invoke the engine" full stop; QA
+    walked the live stack and falsified it.
+
+    Stated as a decision, not an oversight: an edit to a response builder can
+    change published bytes without changing any recipe's output, and folding it
+    in would move every recipe's revision on any response-shape change.
+    """
+    from boomi_mcp.recipes.registry import RECIPE_LAYER_MODULES
+
+    invoking = _engine_invoking_modules()
+    for reporting in (
+        "boomi_mcp.categories.integration_authoring",
+        "boomi_mcp.categories.integration_import",
+        "boomi_mcp.categories.meta_tools",
+    ):
+        assert reporting not in invoking, reporting
+        assert reporting not in RECIPE_LAYER_MODULES, reporting
+
+
+def test_the_migrated_surfaces_are_in_the_layer_digest():
+    """Named explicitly too, so the derived pin above cannot go vacuous.
+
+    If ``recipe_bridge`` were ever renamed, the caller scan would find nothing
+    and silently pass. This states the three modules the digest must carry today.
+    """
+    from boomi_mcp.recipes.registry import RECIPE_LAYER_MODULES
+
+    assert {
+        "boomi_mcp.patterns.archetypes.api_to_api_sync",
+        "boomi_mcp.patterns.archetypes.api_to_database_sync",
+        "boomi_mcp.patterns.composition",
+    } <= set(RECIPE_LAYER_MODULES)
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "boomi_mcp.patterns.archetypes.api_to_api_sync",
+        "boomi_mcp.patterns.archetypes.api_to_database_sync",
+        "boomi_mcp.patterns.composition",
+    ],
+)
+def test_source_revision_moves_for_a_migrated_surface(module_name):
+    """A migrated archetype can silently change the emitted result.
+
+    QA proved it: renaming an emitted component leaves the build succeeding and
+    every published field byte-identical. ``source_revision`` is the only thing
+    positioned to notice, so it must.
+    """
+    import importlib
+    import inspect as inspect_module
+
+    import boomi_mcp.build_info as build_info_mod
+
+    baseline = build_test_registry(PRODUCTION_REGISTRATIONS).source_revision_value
+
+    target = importlib.import_module(module_name)
+    real_getsource = inspect_module.getsource
+
+    def perturbed(obj):
+        text = real_getsource(obj)
+        if obj is target:
+            return text + "\n# changed\n"
+        return text
+
+    original = build_info_mod.inspect.getsource
+    build_info_mod.inspect.getsource = perturbed
+    try:
+        mutated = build_test_registry(PRODUCTION_REGISTRATIONS).source_revision_value
+    finally:
+        build_info_mod.inspect.getsource = original
+
+    assert mutated != baseline, module_name
+
+
+def test_the_downstream_compiler_modules_are_deliberately_outside_the_digest():
+    """The stated BOUND, pinned so it stays a decision rather than a drift.
+
+    A recipe run executes the ProcessIR compiler, the component builders and the
+    graph verifier. Editing one of those can change the emitted XML with nothing
+    published moving — round 4 of live QA measured it. They are excluded because
+    including them would make ``source_revision`` a hash of the package, which is
+    the same objection that keeps the per-entry digest scoped to one module.
+
+    This test exists so that boundary is asserted, not merely described: if
+    someone later widens the list to "fix" it, they have to change this test and
+    confront the trade-off rather than sliding into a package hash.
+    """
+    from boomi_mcp.recipes.registry import RECIPE_LAYER_MODULES
+
+    listed = set(RECIPE_LAYER_MODULES)
+    for downstream in (
+        "boomi_mcp.compiler.process_ir.pipeline",
+        "boomi_mcp.compiler.process_ir.emitter_registry",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.sync_pipeline",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.flow_sequence",
+        "boomi_mcp.models.process_ir",
+        "boomi_mcp.categories.components.process_graph_verifier",
+        "boomi_mcp.categories.integration_builder",
+    ):
+        assert downstream not in listed, downstream
+
+
+def test_no_listed_module_lies_outside_the_layer_this_issue_owns():
+    """Every listed module is one #145 introduced or migrated.
+
+    The converse of the bound above: the digest must not quietly grow into
+    someone else's authority either.
+    """
+    from boomi_mcp.recipes.registry import RECIPE_LAYER_MODULES
+
+    # Named EXACTLY outside the recipes package. A ``patterns.archetypes.``
+    # prefix would have admitted the four UNMIGRATED archetypes, which the
+    # docstring above says are not in the layer — QA caught that the allowance
+    # contradicted its own claim.
+    allowed_outside = {
+        "boomi_mcp.build_info",
+        "boomi_mcp.models.recipe_contributions",
+        "boomi_mcp.patterns.archetypes.api_to_api_sync",
+        "boomi_mcp.patterns.archetypes.api_to_database_sync",
+        "boomi_mcp.patterns.composition",
+        "boomi_mcp.patterns.recipe_bridge",
+    }
+    for module in RECIPE_LAYER_MODULES:
+        assert (
+            module.startswith("boomi_mcp.recipes.") or module in allowed_outside
+        ), module
+
+
+def test_an_unregistered_recipe_prerequisite_fails_the_run():
+    """``order_invocations`` skips a dependency outside the invocation set on the
+    stated grounds that "the engine preflights it". Live QA found the engine did
+    not — the sentence described an intention. Now it is a check.
+    """
+    from boomi_mcp.recipes import (
+        MaterializationCatalog,
+        RecipeRequestV1,
+        run_recipes,
+    )
+    from boomi_mcp.recipes.contracts import RecipeDependencyV1
+
+    registry = build_test_registry(
+        (
+            _reg(
+                prerequisites=(
+                    RecipeDependencyV1(
+                        kind="recipe",
+                        recipe_id="never.registered",
+                        recipe_version="1.0.0",
+                    ),
+                )
+            ),
+        )
+    )
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.recipe",
+                    invocation_id="i1",
+                    raw_input={
+                        "version": "1",
+                        "process_key": "p",
+                        "source_connection_ref": "$ref:a",
+                        "source_operation_ref": "$ref:b",
+                        "map_ref": "$ref:m",
+                        "target_connection_ref": "$ref:c",
+                        "target_operation_ref": "$ref:d",
+                        "component_slots": [
+                            {
+                                "contribution_id": "c.0",
+                                "component_key": "k",
+                                "component_type": "process",
+                                "materialization_mode": "create",
+                                "materializer_slot": "s.k",
+                            }
+                        ],
+                    },
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_NOT_FOUND
+
+
+def test_a_prerequisite_at_the_wrong_version_fails_the_run():
+    from boomi_mcp.recipes import (
+        MaterializationCatalog,
+        RecipeRequestV1,
+        run_recipes,
+    )
+    from boomi_mcp.recipes.contracts import RecipeDependencyV1
+
+    registry = build_test_registry(
+        (
+            _reg(recipe_id="test.base", recipe_version="1.0.0"),
+            _reg(
+                recipe_id="test.recipe",
+                prerequisites=(
+                    RecipeDependencyV1(
+                        kind="recipe", recipe_id="test.base", recipe_version="2.0.0"
+                    ),
+                ),
+            ),
+        )
+    )
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.recipe",
+                    invocation_id="i1",
+                    raw_input={
+                        "version": "1",
+                        "process_key": "p",
+                        "source_connection_ref": "$ref:a",
+                        "source_operation_ref": "$ref:b",
+                        "map_ref": "$ref:m",
+                        "target_connection_ref": "$ref:c",
+                        "target_operation_ref": "$ref:d",
+                        "component_slots": [
+                            {
+                                "contribution_id": "c.0",
+                                "component_key": "k",
+                                "component_type": "process",
+                                "materialization_mode": "create",
+                                "materializer_slot": "s.k",
+                            }
+                        ],
+                    },
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_VERSION_UNAVAILABLE
+
+
+def test_the_engine_invocation_scan_does_not_skip_package_inits():
+    """``__init__.py`` could carry a call; skipping it left a hole QA found.
+
+    Asserted by construction — the scan's own file walk must not filter them —
+    rather than by hoping no ``__init__`` ever gains one.
+    """
+    import inspect as inspect_module
+
+    source = inspect_module.getsource(_engine_invoking_modules)
+    assert 'if path.name == "__init__.py"' not in source
+    assert '__init__' in source  # the deliberate name-stripping, not a skip
+
+
+def test_an_unknown_recipe_registry_capability_subject_fails_at_construction():
+    """The seventh authority, which used to slip through.
+
+    ``recipe_registry`` subjects cannot be checked per-registration — a recipe may
+    require one registered later in the tuple — so they are swept at the END of
+    construction. Before that sweep existed, a typo'd subject was accepted and
+    then reported as ``RECIPE_CAPABILITY_GATED`` at preflight: exactly the
+    "blame the caller's platform for our typo" misdiagnosis construction-time
+    enforcement is supposed to prevent (issue #145, live QA).
+    """
+    with pytest.raises(ValueError, match="unknown recipe_registry subject"):
+        build_test_registry(
+            (
+                _reg(
+                    capability_requirements=(
+                        RecipeCapabilityRequirementV1(
+                            authority="recipe_registry",
+                            subject="no.such.recipe",
+                            required_state="supported",
+                        ),
+                    )
+                ),
+            )
+        )
+
+
+def test_a_recipe_registry_subject_registered_later_still_resolves():
+    """The reason the sweep is deferred rather than per-registration."""
+    registry = build_test_registry(
+        (
+            _reg(
+                recipe_id="a.first",
+                capability_requirements=(
+                    RecipeCapabilityRequirementV1(
+                        authority="recipe_registry",
+                        subject="z.later",
+                        required_state="supported",
+                    ),
+                ),
+            ),
+            _reg(recipe_id="z.later"),
+        )
+    )
+    registry.preflight_capabilities(registry.resolve("a.first"))
+
+
+# ---------------------------------------------------------------------------
+# Live-QA regression (issue #145): "at least this" was inverted
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "authority,subject",
+    [
+        ("component_builder", "process"),
+        ("process_emitter", "branch"),
+        ("process_body", "branch_leg.step"),
+    ],
+)
+@pytest.mark.parametrize("state", ["supported", "emittable", "plannable-only"])
+def test_a_registered_membership_subject_satisfies_every_positive_state(
+    authority, subject, state
+):
+    """A membership authority answers "is it there", so presence is the ceiling.
+
+    The check used to be ``present and "supported" in accepted``, which inverted
+    the "at least this" rule on five of the seven authorities: a
+    ``plannable-only`` requirement — the WEAKEST ask — could never be satisfied,
+    because ``_STATE_SATISFIES["plannable-only"]`` deliberately contains no
+    ``supported``. Latent while every built-in asks for ``supported``, which is
+    why a live-QA mutant read inert before this was found.
+    """
+    registry = build_test_registry(
+        (
+            _reg(
+                capability_requirements=(
+                    RecipeCapabilityRequirementV1(
+                        authority=authority, subject=subject, required_state=state
+                    ),
+                )
+            ),
+        )
+    )
+    registry.preflight_capabilities(registry.resolve("test.recipe"))
+
+
+@pytest.mark.parametrize(
+    "authority,absent_subject",
+    [
+        ("component_builder", "not.a.component.type"),
+        ("process_emitter", "not.an.emitter"),
+        ("process_body", "not.a.body.slot"),
+        ("recipe_registry", "not.a.registered.recipe"),
+    ],
+)
+def test_an_absent_membership_subject_is_rejected_at_construction(
+    authority, absent_subject
+):
+    """The converse guard, made non-vacuous.
+
+    Its first version asked for ``recipe_registry/test.recipe`` — the id the test
+    registry had just REGISTERED — so a mutant that ignored presence entirely
+    passed the whole suite. QA caught that (issue #145). These subjects are
+    genuinely absent, and an absent subject is a build defect: it fails at
+    construction, before any preflight.
+    """
+    with pytest.raises(ValueError, match="unknown"):
+        build_test_registry(
+            (
+                _reg(
+                    capability_requirements=(
+                        RecipeCapabilityRequirementV1(
+                            authority=authority,
+                            subject=absent_subject,
+                            required_state="supported",
+                        ),
+                    )
+                ),
+            )
+        )
+
+
+def test_a_gated_stateful_subject_still_fails_preflight():
+    """Widening the membership branch must not have touched the stateful ones."""
+    for subject in ("joins", "loops", "keyed_cache"):
+        registry = build_test_registry(
+            (
+                _reg(
+                    capability_requirements=(
+                        RecipeCapabilityRequirementV1(
+                            authority="process_ir",
+                            subject=subject,
+                            required_state="supported",
+                        ),
+                    )
+                ),
+            )
+        )
+        with pytest.raises(RecipeError):
+            registry.preflight_capabilities(registry.resolve("test.recipe"))
+
+
+@pytest.mark.parametrize(
+    "authority,subject,state",
+    [
+        ("process_ir", "rich_branch_decision_bodies", "emittable"),
+        ("process_ir", "rich_branch_decision_bodies", "plannable-only"),
+        ("system_topology", "process", "supported"),
+    ],
+)
+def test_an_unsatisfiable_authority_state_pair_fails_at_construction(
+    authority, subject, state
+):
+    """A required_state the authority can NEVER report is a build defect.
+
+    ``process_ir`` only ever reports supported/gated/unsupported, so requiring
+    ``emittable`` of it is impossible by construction. Surfacing that at preflight
+    as ``RECIPE_CAPABILITY_GATED`` would blame the caller's platform for our own
+    impossible declaration (issue #145, live QA).
+    """
+    with pytest.raises(ValueError, match="can never report it"):
+        build_test_registry(
+            (
+                _reg(
+                    capability_requirements=(
+                        RecipeCapabilityRequirementV1(
+                            authority=authority, subject=subject, required_state=state
+                        ),
+                    )
+                ),
+            )
+        )
+
+
+def test_the_runtime_capability_path_gets_the_same_guards_as_construction():
+    """A CONTRIBUTED ``RequireCapability`` is checked like a descriptor one.
+
+    The runtime path used to get neither the unknown-subject nor the
+    unsatisfiable-state guard, so a typo'd subject reported "not satisfied"
+    rather than "you asked for something that does not exist" — and round 8's
+    mutant read inert because of it (issue #145, live QA). Both return ``False``
+    here rather than raising: a contribution is caller-adjacent input, so an
+    unanswerable requirement is an unmet one.
+    """
+    registry = build_test_registry((_reg(),))
+
+    # A typo'd subject on a membership authority.
+    assert not registry.capability_satisfied(
+        RecipeCapabilityRequirementV1(
+            authority="process_emitter",
+            subject="no.such.emitter",
+            required_state="supported",
+        )
+    )
+    # A typo'd subject on a stateful authority.
+    assert not registry.capability_satisfied(
+        RecipeCapabilityRequirementV1(
+            authority="process_ir", subject="no.such.feature", required_state="supported"
+        )
+    )
+    # An unregistered recipe id.
+    assert not registry.capability_satisfied(
+        RecipeCapabilityRequirementV1(
+            authority="recipe_registry",
+            subject="not.registered",
+            required_state="supported",
+        )
+    )
+    # An (authority, state) pair the authority can never report.
+    assert not registry.capability_satisfied(
+        RecipeCapabilityRequirementV1(
+            authority="process_ir",
+            subject="rich_branch_decision_bodies",
+            required_state="emittable",
+        )
+    )
+    # ...and the legitimate case still passes, so this is not a blanket False.
+    assert registry.capability_satisfied(
+        RecipeCapabilityRequirementV1(
+            authority="process_ir",
+            subject="rich_branch_decision_bodies",
+            required_state="supported",
+        )
+    )
+
+
+def test_a_capability_diagnostic_does_not_publish_the_dark_subject():
+    """``public_payload`` redacts capability subjects; the diagnostic must too.
+
+    Publishing them here would have leaked through the failure path exactly what
+    the descriptor projection withholds — the emitter registry's own keys.
+    """
+    registry = build_test_registry(
+        (
+            _reg(
+                capability_requirements=(
+                    RecipeCapabilityRequirementV1(
+                        authority="process_ir", subject="joins", required_state="supported"
+                    ),
+                )
+            ),
+        )
+    )
+    with pytest.raises(RecipeError) as exc:
+        registry.preflight_capabilities(registry.resolve("test.recipe"))
+    diagnostic = exc.value.diagnostics[0]
+    assert diagnostic.target == "capability:process_ir"
+    assert "joins" not in diagnostic.target
+
+
+def test_an_async_generator_executor_is_rejected():
+    """``iscoroutinefunction`` is False for ``async def f(): yield``.
+
+    ``isfunction`` is True, so it slipped through construction and surfaced at
+    run time as ``RECIPE_CONTRIBUTION_INVALID`` — a build defect wearing a
+    caller-facing code (issue #145, live QA).
+    """
+
+    async def async_gen(inp):  # pragma: no cover - rejected at registration
+        yield ()
+
+    with pytest.raises(ValueError, match="coroutine"):
+        build_test_registry((_reg(executor=async_gen),))
+
+
+def test_a_plain_generator_executor_is_rejected():
+    def gen(inp):  # pragma: no cover - rejected at registration
+        yield ()
+
+    with pytest.raises(ValueError, match="generator"):
+        build_test_registry((_reg(executor=gen),))
+
+
+def test_a_self_dependent_prerequisite_is_rejected_at_construction():
+    """It used to build cleanly and then raise a BARE ValueError mid-run.
+
+    The composer's cycle guard fired from inside ``run_recipes``, outside the
+    ``RecipeError`` envelope, so only the MCP layer's last-line ``except
+    Exception`` caught it (issue #145, live QA). It is a build defect.
+    """
+    from boomi_mcp.recipes.contracts import RecipeDependencyV1
+
+    with pytest.raises(ValueError, match="itself as a prerequisite"):
+        build_test_registry(
+            (
+                _reg(
+                    prerequisites=(
+                        RecipeDependencyV1(
+                            kind="recipe",
+                            recipe_id="test.recipe",
+                            recipe_version="1.0.0",
+                        ),
+                    )
+                ),
+            )
+        )
+
+
+def test_running_a_registered_but_non_executable_entry_says_so():
+    """An advisory/adapter id IS registered — "not found" sent callers hunting
+    for a typo in a name that was correct (issue #145, live QA)."""
+    from boomi_mcp.errors import RECIPE_REQUEST_INVALID
+
+    registry = production_registry()
+    for recipe_id in (
+        RECIPE_ADVISORY_INTEGRATION_DESIGN,
+        "boomi.adapter.compose_archetypes",
+    ):
+        descriptor = registry.resolve(recipe_id)
+        with pytest.raises(RecipeError) as exc:
+            registry.executor_for(descriptor)
+        diagnostic = exc.value.diagnostics[0]
+        assert diagnostic.code == RECIPE_REQUEST_INVALID
+        assert diagnostic.target.startswith("not_executable:")
+
+
+def test_registry_revision_is_stable_across_semver_build_metadata():
+    """Build metadata is ignored FOR PRECEDENCE, so two versions differing only
+    in it compare equal — and their order fell to dict insertion order."""
+    def regs(order):
+        return tuple(
+            _reg(recipe_id="r.build", recipe_version=v, is_default=(i == 0))
+            for i, v in enumerate(order)
+        )
+
+    a = build_test_registry(regs(["1.0.0+alpha", "1.0.0+beta"]))
+    b = build_test_registry(regs(["1.0.0+beta", "1.0.0+alpha"]))
+    assert [d.recipe_version for d in a.descriptors()] == [
+        d.recipe_version for d in b.descriptors()
+    ]

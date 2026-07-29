@@ -135,6 +135,32 @@ _PRESET_TABLE: Dict[Tuple[str, str], Tuple[str, List[Tuple[str, str]]]] = {
     ),
 }
 
+def _selected_recipe_ref(preset: Optional[str]) -> Optional[Dict[str, str]]:
+    """The EXACT recipe reference for a migrated preset, else ``None``.
+
+    Additive metadata only: preset SELECTION, gap analysis and the draft are
+    untouched. ``None`` for the three presets not yet migrated — an honest
+    absence rather than a plausible-looking reference to code they do not use.
+    """
+    if preset is None:
+        return None
+    try:
+        from ..categories.integration_authoring import _ARCHETYPE_ADAPTERS
+        from ..recipes import production_registry
+
+        adapter_id = _ARCHETYPE_ADAPTERS.get(preset)
+        if adapter_id is None:
+            return None
+        descriptor = production_registry().resolve(adapter_id)
+    except Exception:  # noqa: BLE001 — advisory metadata, never load-bearing
+        return None
+    return {
+        "recipe_id": descriptor.recipe_id,
+        "recipe_version": descriptor.recipe_version,
+        "entry_kind": descriptor.entry_kind,
+    }
+
+
 # Transform kinds the import can express as archetype transform operations.
 _SUPPORTED_TRANSFORM_KINDS = {"field_mapping", "mapping", "direct"}
 
@@ -1475,6 +1501,7 @@ def import_integration_draft_action(
         "gaps": gaps,
         "pipeline_draft": pipeline_draft,
         "selected_preset": selected_preset,
+        "selected_recipe_ref": _selected_recipe_ref(selected_preset),
         "preset_parameters": preset_parameters,
         "next_steps": next_steps,
     }

@@ -1394,11 +1394,79 @@ def test_models_package_exports_are_pinned():
         "parse_process_ir_v1",
         "process_ir_v1_json_schema",
     }
-    non_topology = set(models.__all__) - expected - _PRE_144_EXPORTS
+    # The #145 (M12.10) recipe-contribution surface, ENUMERATED for exactly the
+    # reason the pre-#144 set is: a prefix allowance like "Recipe*" would leave a
+    # namespace open, and this pin exists to catch a widening surface, not to
+    # describe one.
+    _ISSUE_145_EXPORTS = {
+        "AddTopologyObjectV1",
+        "AddTopologyRelationV1",
+        "AppendRootTerminalLegV1",
+        "ComponentContributionV1",
+        "ConstraintCheckV1",
+        "ConstraintRequirementV1",
+        "InsertRootLinearStepV1",
+        "ProcessIRPatchOperationV1",
+        "ProcessIRPatchV1",
+        "RECIPE_COMPONENT_TYPES",
+        "RECIPE_CONTRIBUTION_KINDS",
+        "RECIPE_CONTRIBUTION_VERSION",
+        "RECIPE_EXCLUDED_COMPONENT_TYPES",
+        "RecipeComponentKey",
+        "RecipeComponentType",
+        "RecipeContributionV1",
+        "RecipeContributionValidationError",
+        "RecipeSemanticId",
+        "RequireCapabilityV1",
+        "RequireComponentV1",
+        "RequireProcessV1",
+        "RequireTopologyObjectV1",
+        "RequireTopologyRelationV1",
+        "SetProcessRootV1",
+        "SystemTopologyPatchOperationV1",
+        "SystemTopologyPatchV1",
+        "canonical_recipe_contribution_json",
+        "canonical_recipe_contribution_schema_json",
+        "canonical_recipe_contributions_json",
+        "parse_recipe_contribution",
+        "recipe_contribution_v1_json_schema",
+        "scan_forbidden_recipe_shape",
+        "validate_contribution_object",
+    }
+    non_topology = (
+        set(models.__all__) - expected - _PRE_144_EXPORTS - _ISSUE_145_EXPORTS
+    )
     assert non_topology == set(), non_topology
     assert expected <= set(models.__all__), expected - set(models.__all__)
-    for name in expected:
+    assert _ISSUE_145_EXPORTS <= set(models.__all__), _ISSUE_145_EXPORTS - set(
+        models.__all__
+    )
+    for name in expected | _ISSUE_145_EXPORTS:
         assert hasattr(models, name), name
+
+
+def test_models_package_does_not_export_the_recipe_engine():
+    """``boomi_mcp.models`` is the authored-CONTRACT surface.
+
+    The four contribution models belong here; the registry, composer and engine
+    do not — for the same reason #144 kept the topology PLANNER out. An execution
+    engine reachable through an authoring namespace is one import away from
+    appearing in an LLM-facing schema.
+    """
+    import boomi_mcp.models as models
+
+    forbidden = {
+        "RecipeRegistry",
+        "run_recipes",
+        "production_registry",
+        "build_test_registry",
+        "MaterializationCatalog",
+        "RecipeRequestV1",
+        "compose",
+    }
+    assert forbidden.isdisjoint(set(models.__all__))
+    for name in forbidden:
+        assert not hasattr(models, name), name
 
 
 @pytest.mark.parametrize(

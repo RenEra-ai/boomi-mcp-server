@@ -79,6 +79,8 @@ from .archetypes.database_to_api_sync import (
     _flatten_payload_profile_leaves,
     _required_simple_leaf_paths,
 )
+from ..recipes.builtins.catalog import RECIPE_DB_REST_FANOUT
+from .recipe_bridge import run_fanout_recipe
 from .base import PrimitiveBuildContext
 from .primitives._helpers import (
     ROLE_REST_CONNECTION,
@@ -1107,6 +1109,17 @@ def compose_archetypes(
         )
 
     spec.components = spec.components[:-1] + extra_components + [process]
+
+    # #145 M12.10: the composed components, routed through the typed contribution
+    # path. Placed AFTER the ProcessFlowBuilder self-check above so no recipe
+    # failure can preempt an existing COMPOSITION_* code, and after
+    # ``spec.components`` is final so the recipe sees the same ordered list the
+    # ComponentPlan will. Everything below this line is byte-unchanged.
+    run_fanout_recipe(
+        recipe_id=RECIPE_DB_REST_FANOUT,
+        components=spec.components,
+        process=process,
+    )
 
     spec.flows.append(
         {

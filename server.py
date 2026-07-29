@@ -2394,37 +2394,62 @@ if list_integration_archetypes_action:
     def list_integration_archetypes(
         query: str = None,
         tags: list[str] = None,
+        expected_recipe_registry: dict = None,
     ):
         """List V3 integration archetypes from the pattern registry.
 
         Read-only. Does not call Boomi. Use this to discover archetypes that
         you can then build with `build_from_archetype`.
 
+        Also returns `recipe_registry`: the live typed-recipe registry snapshot
+        (revision, source revision, capability revisions, and one entry per
+        registered recipe with its implementation hash).
+
         Args:
             query: Optional case-insensitive substring filter over name,
                 description, tags, use_cases, and not_for.
             tags: Optional list of tags; archetype must have all listed tags.
+            expected_recipe_registry: Optional snapshot you expect the live
+                registry to match: {schema_version: "1", registry_revision?,
+                source_revision?, entries: [{recipe_id, recipe_version,
+                implementation_sha256?}]}. Reported back as
+                `recipe_registry_skew` with status
+                not_requested|match|mismatch|unknown. Comparison only — it
+                never selects or alters which recipe code runs. Equal versions
+                with different implementation hashes report `mismatch`. An
+                expectation with neither revision and no per-entry
+                implementation_sha256 is version-only and reports `unknown`
+                with a reason — equal versions are not evidence of equal code.
         """
-        return list_integration_archetypes_action(query=query, tags=tags)
+        return list_integration_archetypes_action(
+            query=query, tags=tags, expected_recipe_registry=expected_recipe_registry
+        )
 
     print("[INFO] list_integration_archetypes tool registered successfully")
 
     @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
-    def get_integration_archetype(name: str):
+    def get_integration_archetype(name: str, recipe_version: str = None):
         """Get an archetype's metadata + machine-readable parameter schema.
 
         Read-only. Does not call Boomi. Returns describe() output plus a
-        `next_tool` pointer to `build_from_archetype`.
+        `next_tool` pointer to `build_from_archetype`, and `recipe_descriptor`
+        for archetypes migrated to the typed contribution path (null otherwise).
 
         Args:
             name: Archetype name (see `list_integration_archetypes`).
+            recipe_version: Optional EXACT recipe version to pin. Never falls
+                forward or backward: an unavailable version is
+                RECIPE_VERSION_UNAVAILABLE, and pinning an unmigrated archetype
+                is rejected rather than silently ignored.
         """
-        return get_integration_archetype_action(name=name)
+        return get_integration_archetype_action(name=name, recipe_version=recipe_version)
 
     print("[INFO] get_integration_archetype tool registered successfully")
 
     @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
-    def build_from_archetype(name: str, parameters: dict = None):
+    def build_from_archetype(
+        name: str, parameters: dict = None, recipe_version: str = None
+    ):
         """Build an IntegrationSpecV1 from an archetype WITHOUT calling Boomi.
 
         Read-only. Does not mutate Boomi. The returned `integration_spec`
@@ -2435,8 +2460,13 @@ if list_integration_archetypes_action:
             name: Archetype name (see `list_integration_archetypes`).
             parameters: Dict matching the archetype's parameter_schema.
                 None uses archetype defaults.
+            recipe_version: Optional EXACT recipe version to pin for a migrated
+                archetype. Validated BEFORE the spec is emitted, so a pin that
+                cannot be honoured never returns a spec.
         """
-        return build_from_archetype_action(name=name, parameters=parameters)
+        return build_from_archetype_action(
+            name=name, parameters=parameters, recipe_version=recipe_version
+        )
 
     print("[INFO] build_from_archetype tool registered successfully")
 

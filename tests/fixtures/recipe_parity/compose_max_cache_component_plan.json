@@ -1,0 +1,225 @@
+{
+  "_success": true,
+  "steps": [
+    {
+      "component_key": "source_db_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "source_db_read_profile",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "source_db_get_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t10_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t11_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t12_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t13_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t14_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t15_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t16_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t17_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t18_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t19_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t1_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t20_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t21_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t22_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t23_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t2_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t3_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t4_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t5_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t6_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t7_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t8_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t9_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "transform_target_profile",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "handoff_document_cache",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t10_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t11_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t12_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t13_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t14_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t15_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t16_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t17_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t18_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t19_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t1_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t20_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t21_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t22_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t23_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t2_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t3_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t4_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t5_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t6_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t7_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t8_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_t9_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "transform_transform_map",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "main_process",
+      "planned_action": "create"
+    }
+  ]
+}

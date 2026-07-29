@@ -1,0 +1,49 @@
+{
+  "_success": true,
+  "steps": [
+    {
+      "component_key": "source_db_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "source_db_read_profile",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "source_db_get_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_billing_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "transform_target_profile",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "handoff_document_cache",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_billing_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "transform_transform_map",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "main_process",
+      "planned_action": "create"
+    }
+  ]
+}

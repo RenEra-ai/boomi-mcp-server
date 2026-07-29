@@ -81,6 +81,7 @@ steps:
         docker build \
           --no-cache \
           --build-arg "KB_RELEASE_TAG=$$TAG" \
+          --build-arg "BOOMI_BUILD_REVISION=$COMMIT_SHA" \
           -t "$$IMAGE" \
           -f Dockerfile \
           .

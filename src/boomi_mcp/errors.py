@@ -303,6 +303,31 @@ TOPOLOGY_DEPENDENCY_CYCLE = "TOPOLOGY_DEPENDENCY_CYCLE"
 # this code is what a caller gets for asking for one.
 TOPOLOGY_APPLY_NOT_SUPPORTED = "TOPOLOGY_APPLY_NOT_SUPPORTED"
 
+# --- Typed executable recipe contributions (M12.10 / issue #145) --------------
+# #145 is the SOLE introducer of the ``RECIPE_*`` family, so the guard test
+# asserts the same biconditional #144's family carries: every code below is
+# owned by #145 AND every ``RECIPE_``-prefixed key in the taxonomy is owned by
+# #145.
+#
+# Every one of these blames the RECIPE LAYER — the descriptor a caller named, the
+# input it was given, or the contributions a registered executor returned. None
+# of them replaces a canonical validator's own code: when the strict ProcessIR
+# compiler, the topology planner, or the component-plan gate rejects an assembled
+# artifact, the recipe layer reports ``RECIPE_CONSTRAINT_FAILED`` and carries the
+# underlying canonical codes as value-free ``cause_codes``. That keeps the
+# canonical taxonomies authoritative about their own domains while still telling
+# the caller which layer they must fix.
+RECIPE_NOT_FOUND = "RECIPE_NOT_FOUND"
+RECIPE_VERSION_UNAVAILABLE = "RECIPE_VERSION_UNAVAILABLE"
+RECIPE_CAPABILITY_GATED = "RECIPE_CAPABILITY_GATED"
+RECIPE_INPUT_INVALID = "RECIPE_INPUT_INVALID"
+RECIPE_CONTRIBUTION_INVALID = "RECIPE_CONTRIBUTION_INVALID"
+RECIPE_PATCH_TARGET_NOT_FOUND = "RECIPE_PATCH_TARGET_NOT_FOUND"
+RECIPE_PATCH_CONFLICT = "RECIPE_PATCH_CONFLICT"
+RECIPE_CONSTRAINT_FAILED = "RECIPE_CONSTRAINT_FAILED"
+RECIPE_OUTPUT_NONDETERMINISTIC = "RECIPE_OUTPUT_NONDETERMINISTIC"
+RECIPE_REQUEST_INVALID = "RECIPE_REQUEST_INVALID"
+
 
 @dataclass(frozen=True)
 class ErrorCodeSpec:
@@ -1233,6 +1258,103 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "deploy, schedule or execute path."
             ),
             owner="#144",
+        ),
+        ErrorCodeSpec(
+            code=RECIPE_NOT_FOUND,
+            category="recipe",
+            retryable=False,
+            summary="No registered recipe carries the requested recipe id.",
+            owner="#145",
+        ),
+        ErrorCodeSpec(
+            code=RECIPE_VERSION_UNAVAILABLE,
+            category="recipe",
+            retryable=False,
+            summary=(
+                "The recipe id is registered but not at the requested version; "
+                "an exact version request never falls forward or backward."
+            ),
+            owner="#145",
+        ),
+        ErrorCodeSpec(
+            code=RECIPE_CAPABILITY_GATED,
+            category="recipe",
+            retryable=False,
+            summary=(
+                "A capability the recipe descriptor requires is absent, gated, "
+                "guidance-only or unsupported in its canonical authority."
+            ),
+            owner="#145",
+        ),
+        ErrorCodeSpec(
+            code=RECIPE_INPUT_INVALID,
+            category="recipe",
+            retryable=False,
+            summary=(
+                "The recipe input failed the forbidden-shape pre-scan or its "
+                "descriptor-declared strict input model."
+            ),
+            owner="#145",
+        ),
+        ErrorCodeSpec(
+            code=RECIPE_CONTRIBUTION_INVALID,
+            category="recipe",
+            retryable=False,
+            summary=(
+                "A registered executor returned something that is not a declared, "
+                "strictly-valid typed contribution."
+            ),
+            owner="#145",
+        ),
+        ErrorCodeSpec(
+            code=RECIPE_PATCH_TARGET_NOT_FOUND,
+            category="recipe",
+            retryable=False,
+            summary=(
+                "A closed patch operation names a semantic slot that does not "
+                "resolve after deterministic composition."
+            ),
+            owner="#145",
+        ),
+        ErrorCodeSpec(
+            code=RECIPE_PATCH_CONFLICT,
+            category="recipe",
+            retryable=False,
+            summary=(
+                "Two attributed writers target one semantic slot with no merge "
+                "rule both descriptors declare."
+            ),
+            owner="#145",
+        ),
+        ErrorCodeSpec(
+            code=RECIPE_CONSTRAINT_FAILED,
+            category="recipe",
+            retryable=False,
+            summary=(
+                "A canonical validator or a declared ConstraintRequirement "
+                "rejected the assembled recipe output."
+            ),
+            owner="#145",
+        ),
+        ErrorCodeSpec(
+            code=RECIPE_REQUEST_INVALID,
+            category="recipe",
+            retryable=False,
+            summary=(
+                "The recipe REQUEST envelope is malformed — e.g. two invocations "
+                "sharing one invocation_id."
+            ),
+            owner="#145",
+        ),
+        ErrorCodeSpec(
+            code=RECIPE_OUTPUT_NONDETERMINISTIC,
+            category="recipe",
+            retryable=False,
+            summary=(
+                "Two executions of one recipe over identical validated input "
+                "produced different canonical contributions."
+            ),
+            owner="#145",
         ),
     )
 }

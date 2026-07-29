@@ -1,0 +1,432 @@
+{
+  "components": [
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "CustSync Source Profile",
+        "profile_type": "json.generated",
+        "root": {
+          "children": [
+            {
+              "children": null,
+              "data_type": "character",
+              "description": null,
+              "kind": "simple",
+              "name": "id",
+              "required": false
+            },
+            {
+              "children": null,
+              "data_type": "character",
+              "description": null,
+              "kind": "simple",
+              "name": "name",
+              "required": false
+            }
+          ],
+          "data_type": null,
+          "description": null,
+          "kind": "object",
+          "name": "Root",
+          "required": false
+        }
+      },
+      "depends_on": [],
+      "key": "source_response_profile",
+      "name": "CustSync Source Profile",
+      "type": "profile.json"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "auth": "NONE",
+        "base_url": "https://api.example.com",
+        "component_name": "CustSync REST Source Connection",
+        "connector_type": "rest"
+      },
+      "depends_on": [],
+      "key": "source_rest_source_connection",
+      "name": "CustSync REST Source Connection",
+      "type": "connector-settings"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "CustSync REST Fetch",
+        "connection_ref_key": "source_rest_source_connection",
+        "connector_type": "rest",
+        "method": "GET",
+        "operation_mode": "execute",
+        "path": "/v1/<<source resource>>",
+        "response_profile_id": "$ref:source_response_profile",
+        "response_profile_type": "json"
+      },
+      "depends_on": [
+        "source_rest_source_connection",
+        "source_response_profile"
+      ],
+      "key": "source_rest_source_operation",
+      "name": "CustSync REST Fetch",
+      "type": "connector-action"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "<<existing DB connection>>",
+        "connector_type": "database",
+        "reference_only": true
+      },
+      "depends_on": [],
+      "key": "target_db_connection",
+      "name": "<<existing DB connection>>",
+      "type": "connector-settings"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "CustSync DB Write Profile",
+        "fields": [
+          {
+            "data_type": "character",
+            "enforce_unique": false,
+            "mandatory": true,
+            "name": "id"
+          },
+          {
+            "data_type": "character",
+            "enforce_unique": false,
+            "mandatory": false,
+            "name": "name"
+          }
+        ],
+        "profile_type": "database.write",
+        "statement_type": "dynamicinsert",
+        "table_name": "<<target table>>"
+      },
+      "depends_on": [],
+      "key": "target_db_write_profile",
+      "name": "CustSync DB Write Profile",
+      "type": "profile.db"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "CustSync DB Send",
+        "connection_ref_key": "target_db_connection",
+        "connector_type": "database",
+        "operation_mode": "send",
+        "write_profile_id": "$ref:target_db_write_profile"
+      },
+      "depends_on": [
+        "target_db_connection",
+        "target_db_write_profile"
+      ],
+      "key": "target_db_write_operation",
+      "name": "CustSync DB Send",
+      "type": "connector-action"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "CustSync Field Map",
+        "field_mappings": [
+          {
+            "source_path": "Root/id",
+            "target_path": "Fields/id"
+          },
+          {
+            "source_path": "Root/name",
+            "target_path": "Fields/name"
+          }
+        ],
+        "map_type": "direct",
+        "source_profile_id": "$ref:source_response_profile",
+        "source_profile_type": "profile.json",
+        "target_profile_id": "$ref:target_db_write_profile",
+        "target_profile_type": "profile.db"
+      },
+      "depends_on": [
+        "target_db_write_profile",
+        "source_response_profile"
+      ],
+      "key": "transform_transform_map",
+      "name": "CustSync Field Map",
+      "type": "transform.map"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "pipeline": {
+          "dependencies": [
+            {
+              "from_stage": "fetch",
+              "to_stage": "map"
+            },
+            {
+              "from_stage": "map",
+              "to_stage": "write"
+            }
+          ],
+          "stages": [
+            {
+              "config": {
+                "connection_id": "$ref:source_rest_source_connection",
+                "operation_id": "$ref:source_rest_source_operation",
+                "primitive": "rest_fetch"
+              },
+              "key": "fetch",
+              "kind": "fetch"
+            },
+            {
+              "config": {
+                "map_ref": "$ref:transform_transform_map",
+                "primitive": "map"
+              },
+              "key": "map",
+              "kind": "map"
+            },
+            {
+              "config": {
+                "connection_id": "$ref:target_db_connection",
+                "operation_id": "$ref:target_db_write_operation",
+                "primitive": "db_write"
+              },
+              "key": "write",
+              "kind": "write"
+            }
+          ]
+        },
+        "process_kind": "sync_pipeline"
+      },
+      "depends_on": [
+        "source_rest_source_connection",
+        "source_rest_source_operation",
+        "transform_transform_map",
+        "target_db_connection",
+        "target_db_write_operation"
+      ],
+      "key": "main_process",
+      "name": "CustSync API to Database Sync",
+      "type": "process"
+    }
+  ],
+  "endpoints": [
+    {
+      "auth_mode": "none",
+      "binding_mode": "create",
+      "direction": "source",
+      "executable": false,
+      "key": "rest_source",
+      "method": "GET",
+      "type": "rest"
+    },
+    {
+      "binding_mode": "reuse",
+      "component_name": "<<existing DB connection>>",
+      "direction": "target",
+      "executable": false,
+      "key": "database_target",
+      "operation": "Send",
+      "statement_type": "dynamicinsert",
+      "type": "database"
+    }
+  ],
+  "flows": [
+    {
+      "executable": false,
+      "key": "fetch",
+      "name": "Fetch from REST source",
+      "operation": "rest_fetch",
+      "source": "rest_source",
+      "target": null
+    },
+    {
+      "executable": false,
+      "key": "transform",
+      "name": "Map source response to database write profile",
+      "operation": "transform",
+      "operations": [
+        {
+          "future_builder_issue": "#26",
+          "operation_type": "direct",
+          "source_field": "Root/id",
+          "source_path": "Root/id",
+          "target_path": "Fields/id"
+        },
+        {
+          "future_builder_issue": "#26",
+          "operation_type": "direct",
+          "source_field": "Root/name",
+          "source_path": "Root/name",
+          "target_path": "Fields/name"
+        }
+      ],
+      "source": "fetch",
+      "source_schema": {
+        "format": "json",
+        "leaf_count": 2,
+        "leaves": [
+          {
+            "data_type": "character",
+            "path": "Root/id"
+          },
+          {
+            "data_type": "character",
+            "path": "Root/name"
+          }
+        ],
+        "root_name": "Root"
+      },
+      "target": null,
+      "target_write_profile": {
+        "condition_count": 0,
+        "field_count": 2,
+        "kind": "database.write",
+        "statement_type": "dynamicinsert",
+        "target_paths": [
+          {
+            "data_type": "character",
+            "path": "Fields/id",
+            "required": true
+          },
+          {
+            "data_type": "character",
+            "path": "Fields/name",
+            "required": false
+          }
+        ]
+      }
+    },
+    {
+      "executable": false,
+      "key": "write",
+      "name": "Write to database target",
+      "operation": "db_write",
+      "source": "transform",
+      "target": "database_target"
+    }
+  ],
+  "folders": {},
+  "goals": [
+    "Replicate records from a REST API source to a relational database target via a static fetch -> transform -> write pipeline.",
+    "Emit executable component specs whose main process is a process_kind='sync_pipeline' stage graph (fetch -> map -> write) for build_integration(action='plan'); the plan is inspectable through the existing MCP planning/review flows. Deployment, schedule activation, pagination, retry/DLQ, and runtime-bound behavior remain out of scope."
+  ],
+  "mode": "redesign",
+  "name": "Customer API to DB Sync",
+  "naming": {
+    "archetype": "api_to_database_sync",
+    "component_names": {},
+    "component_prefix": "CustSync",
+    "integration_name": "Customer API to DB Sync"
+  },
+  "pipeline": {
+    "dependencies": [
+      {
+        "edge_kind": "ordering",
+        "from_stage": "fetch",
+        "label": null,
+        "ordinal": null,
+        "to_stage": "map"
+      },
+      {
+        "edge_kind": "ordering",
+        "from_stage": "map",
+        "label": null,
+        "ordinal": null,
+        "to_stage": "write"
+      }
+    ],
+    "stages": [
+      {
+        "cardinality": null,
+        "component_ref": null,
+        "config": {
+          "connection_id": "$ref:source_rest_source_connection",
+          "operation_id": "$ref:source_rest_source_operation",
+          "primitive": "rest_fetch"
+        },
+        "context_effect": null,
+        "failure_behavior": null,
+        "key": "fetch",
+        "kind": "fetch",
+        "side_effect": null
+      },
+      {
+        "cardinality": null,
+        "component_ref": null,
+        "config": {
+          "map_ref": "$ref:transform_transform_map",
+          "primitive": "map"
+        },
+        "context_effect": null,
+        "failure_behavior": null,
+        "key": "map",
+        "kind": "map",
+        "side_effect": null
+      },
+      {
+        "cardinality": null,
+        "component_ref": null,
+        "config": {
+          "connection_id": "$ref:target_db_connection",
+          "operation_id": "$ref:target_db_write_operation",
+          "primitive": "db_write"
+        },
+        "context_effect": null,
+        "failure_behavior": null,
+        "key": "write",
+        "kind": "write",
+        "side_effect": null
+      }
+    ]
+  },
+  "profile_indexes_by_component_id": null,
+  "runtime": {},
+  "validation_rules": {
+    "boomi_mutation": false,
+    "component_count": 8,
+    "contract_only": false,
+    "limitations": {
+      "database_write": "statement_type one of standardinsertupdatedelete / dynamicinsert / dynamicupdate / dynamicdelete / storedprocedurewrite; unconfirmed variants (e.g. upsert) are blocked (UNSUPPORTED_DB_STATEMENT_TYPE)",
+      "map_script": "inline script_body only; external script_component_ref rejected (#51)",
+      "pagination": "out of scope for this preset (#72 records pagination metadata only)",
+      "reliability": "retry/DLQ not emitted (sync_pipeline is verified-linear, M5.2)",
+      "rest_create_auth": "auth='none' only; secured auth requires reuse",
+      "rest_source": "GET-only static fetch; runtime-bound path/query/header is #96 (M5.4a)",
+      "schedule_activation": "M3 (deploy to a runtime first)",
+      "watermark": "out of scope for this preset"
+    },
+    "metadata_version": "0.1.0",
+    "process_kind": "sync_pipeline",
+    "profile_schema_strategy": "M5.8 uses a caller-supplied JSON response profile for the REST source and a caller-supplied database write profile (columns + conditions) for the database target; no API browse, schema introspection, response sampling, or SQL generation is performed. The source profile is generated and bound as the fetch output shape; the write profile is the map target.",
+    "raw_xml_exposed": false,
+    "transform_review": {
+      "recommended_before_apply": [
+        "validate_unmapped",
+        "generate_test_payload"
+      ],
+      "supported_actions": [
+        "list_fields",
+        "validate_unmapped",
+        "mapping_diff",
+        "generate_test_payload",
+        "compare_expected_actual"
+      ]
+    },
+    "transform_routes": {
+      "direct": "#26",
+      "map_function": "#40",
+      "map_script": "#41",
+      "xslt": "#42 (rejected)"
+    }
+  },
+  "version": "1.0"
+}

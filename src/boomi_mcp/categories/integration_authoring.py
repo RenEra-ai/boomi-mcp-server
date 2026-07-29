@@ -37,6 +37,62 @@ from ..patterns import (
 from ..patterns.composition import compose_archetypes
 
 
+# --- #145 M12.10: typed recipe provenance + registry skew --------------------
+# Read-only, additive. The recipe LAYER is never selectable from here: a caller
+# may pin an exact version and may assert an expected registry, but neither can
+# register, execute, or reach a recipe the built-in catalog does not already
+# carry.
+from ..recipes import RecipeError, production_registry, recipe_error_envelope
+from ..recipes.contracts import ExpectedRecipeRegistryV1
+from ..recipes.builtins.catalog import (
+    ADAPTER_API_TO_API_SYNC,
+    ADAPTER_API_TO_DATABASE_SYNC,
+    ADAPTER_COMPOSE_ARCHETYPES,
+)
+
+#: Which compatibility adapter each MIGRATED archetype routes through. An
+#: archetype absent here is honestly reported as unmigrated rather than being
+#: given a plausible-looking reference it does not actually use.
+_ARCHETYPE_ADAPTERS: dict[str, str] = {
+    "api_to_api_sync": ADAPTER_API_TO_API_SYNC,
+    "api_to_database_sync": ADAPTER_API_TO_DATABASE_SYNC,
+}
+
+
+def _recipe_registry_block() -> dict[str, Any]:
+    """The live registry snapshot published on every discovery response."""
+    return production_registry().snapshot()
+
+
+def _normalize_expected_registry(
+    expected: dict[str, Any] | str | None,
+) -> ExpectedRecipeRegistryV1 | None:
+    if expected is None:
+        return None
+    payload = _normalize_parameters(expected)
+    return ExpectedRecipeRegistryV1.model_validate(payload)
+
+
+def _recipe_descriptor_block(
+    recipe_id: str, recipe_version: str | None = None
+) -> dict[str, Any] | None:
+    """The descriptor for one recipe, or ``None`` when it is not registered.
+
+    ``None`` rather than an exception: this block is additive metadata on an
+    otherwise-successful response, and an unmigrated archetype legitimately has
+    no descriptor. A caller that PINS a version gets a hard error instead —
+    that request cannot be satisfied silently.
+    """
+    registry = production_registry()
+    try:
+        descriptor = registry.resolve(recipe_id, recipe_version)
+    except RecipeError:
+        if recipe_version is not None:
+            raise
+        return None
+    return descriptor.public_payload()
+
+
 def _reliability_downgrade_hints(spec: Any) -> list[str]:
     """Surface design_doctrine pointers when a caller's reliability intent
     (retry / DLQ) was recorded but NOT emitted into the process.
@@ -107,7 +163,22 @@ def _reliability_downgrade_hints(spec: Any) -> list[str]:
 def list_integration_archetypes_action(
     query: str | None = None,
     tags: list[str] | str | None = None,
+    expected_recipe_registry: dict[str, Any] | str | None = None,
 ) -> dict[str, Any]:
+    try:
+        expected = _normalize_expected_registry(expected_recipe_registry)
+    except (TypeError, ValueError) as exc:
+        return PatternError(
+            error_code=INVALID_INPUT,
+            error=f"Invalid expected_recipe_registry argument: {exc}",
+            suggestion=(
+                "Provide expected_recipe_registry as a JSON object with "
+                "schema_version='1' and an entries[] list of "
+                "{recipe_id, recipe_version, implementation_sha256?}."
+            ),
+            retryable=False,
+        ).to_dict()
+
     try:
         normalized_tags = _normalize_tags(tags)
     except (TypeError, ValueError) as exc:
@@ -143,27 +214,64 @@ def list_integration_archetypes_action(
         "query": query,
         "tags": normalized_tags,
         "raw_xml_exposed": False,
+        "recipe_registry": _recipe_registry_block(),
+        "recipe_registry_skew": production_registry()
+        .compare(expected)
+        .model_dump(mode="json"),
     }
 
 
-def get_integration_archetype_action(name: str) -> dict[str, Any]:
+def get_integration_archetype_action(
+    name: str, recipe_version: str | None = None
+) -> dict[str, Any]:
     try:
         registry = PatternRegistry.from_package("boomi_mcp.patterns")
         cls = registry.get(name, kind=PatternKind.ARCHETYPE)
     except PatternRegistryError as exc:
         return exc.to_pattern_error().to_dict()
 
+    adapter_id = _ARCHETYPE_ADAPTERS.get(cls.metadata.name)
+    try:
+        descriptor = (
+            _recipe_descriptor_block(adapter_id, recipe_version)
+            if adapter_id
+            else None
+        )
+    except RecipeError as exc:
+        return recipe_error_envelope(
+            exc, registry_revision=production_registry().registry_revision
+        )
+
+    if adapter_id is None and recipe_version is not None:
+        # A pinned version for an archetype that does not route through a recipe
+        # at all. Answering "sure, here is your spec" would let a caller believe
+        # they had pinned something.
+        return PatternError(
+            error_code=INVALID_INPUT,
+            error=(
+                f"archetype {cls.metadata.name!r} is not migrated to the typed "
+                "recipe path, so recipe_version cannot be pinned"
+            ),
+            suggestion=(
+                "Omit recipe_version, or call list_integration_archetypes to see "
+                "which archetypes carry a recipe descriptor."
+            ),
+            retryable=False,
+        ).to_dict()
+
     return {
         "_success": True,
         "archetype": cls.describe(),
         "raw_xml_exposed": False,
         "next_tool": "build_from_archetype",
+        "recipe_descriptor": descriptor,
     }
 
 
 def build_from_archetype_action(
     name: str,
     parameters: dict[str, Any] | str | None = None,
+    recipe_version: str | None = None,
 ) -> dict[str, Any]:
     try:
         params_dict = _normalize_parameters(parameters)
@@ -189,8 +297,37 @@ def build_from_archetype_action(
             suggestion="Inspect field_errors[] for per-field problems.",
         ).to_dict()
 
+    adapter_id = _ARCHETYPE_ADAPTERS.get(cls.metadata.name)
+    if recipe_version is not None:
+        # Validate the pin BEFORE emitting. A pin that cannot be honoured must
+        # not produce a spec: returning one would be answering a different
+        # question than the caller asked.
+        if adapter_id is None:
+            return PatternError(
+                error_code=INVALID_INPUT,
+                error=(
+                    f"archetype {cls.metadata.name!r} is not migrated to the typed "
+                    "recipe path, so recipe_version cannot be pinned"
+                ),
+                suggestion="Omit recipe_version for this archetype.",
+                retryable=False,
+            ).to_dict()
+        try:
+            _recipe_descriptor_block(adapter_id, recipe_version)
+        except RecipeError as exc:
+            return recipe_error_envelope(
+                exc, registry_revision=production_registry().registry_revision
+            )
+
     try:
         spec = cls.emit_spec(params_obj)
+    except RecipeError as exc:
+        # The recipe layer rejected what the legacy path accepted. Surfaced, never
+        # swallowed: a decorative gate is worse than none, and the parity matrix
+        # is what proves this branch stays unreachable in practice.
+        return recipe_error_envelope(
+            exc, registry_revision=production_registry().registry_revision
+        )
     except BuilderValidationError as exc:
         # A primitive/builder rejected the assembly (e.g. UNSUPPORTED_REST_AUTH_MODE,
         # UNSUPPORTED_TRANSFORM_ROUTE, SCRIPT_MAPPING_REF_REQUIRED). These errors
@@ -241,6 +378,12 @@ def build_from_archetype_action(
     if hints:
         response["design_doctrine_hints"] = hints
 
+    if adapter_id is not None:
+        response["recipe_provenance"] = {
+            "registry_revision": production_registry().registry_revision,
+            "adapter": _recipe_descriptor_block(adapter_id, recipe_version),
+        }
+
     return response
 
 
@@ -271,6 +414,12 @@ def compose_archetypes_action(
 
     try:
         spec = compose_archetypes(parts_list, options_dict)
+    except RecipeError as exc:
+        # Same rule as build_from_archetype: surfaced with its own code, never
+        # laundered into a COMPOSITION_* error it is not.
+        return recipe_error_envelope(
+            exc, registry_revision=production_registry().registry_revision
+        )
     except ValidationError as exc:
         return pattern_validation_error(
             exc,
@@ -321,6 +470,10 @@ def compose_archetypes_action(
             "Pass integration_spec to build_integration(action='plan', "
             "config=...) to preview steps before applying."
         ),
+        "recipe_provenance": {
+            "registry_revision": production_registry().registry_revision,
+            "adapter": _recipe_descriptor_block(ADAPTER_COMPOSE_ARCHETYPES),
+        },
     }
 
 

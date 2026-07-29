@@ -1,0 +1,37 @@
+{
+  "_success": true,
+  "steps": [
+    {
+      "component_key": "source_response_profile",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "source_rest_source_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "source_rest_source_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_rest_connection",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "transform_target_profile",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "target_rest_operation",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "transform_transform_map",
+      "planned_action": "create"
+    },
+    {
+      "component_key": "main_process",
+      "planned_action": "create"
+    }
+  ]
+}

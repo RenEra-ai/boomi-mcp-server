@@ -53,6 +53,8 @@ from ..base import (
     PatternMetadata,
     PrimitiveBuildContext,
 )
+from ...recipes.builtins.catalog import RECIPE_API_TO_DATABASE_SYNC
+from ..recipe_bridge import run_sync_preset_recipe
 from ..primitives._helpers import (
     ROLE_DB_CONNECTION,
     ROLE_DB_WRITE_OPERATION,
@@ -830,6 +832,17 @@ class ApiToDatabaseSyncArchetype(ArchetypePattern):
         )
         pipeline_dict = _build_pipeline_dict(parameters)
         components.append(_build_main_process(parameters, overrides, pipeline_dict))
+
+        # #145 M12.10: the same components, routed through the typed contribution
+        # path. It runs AFTER the legacy materialization is complete and BEFORE
+        # the spec is assembled, so every existing archetype error still fires
+        # first and in its existing order — a recipe failure can never preempt
+        # one, and the emitted spec below is byte-unchanged.
+        run_sync_preset_recipe(
+            recipe_id=RECIPE_API_TO_DATABASE_SYNC,
+            components=components,
+            process=components[-1],
+        )
 
         return IntegrationSpecV1(
             version="1.0",

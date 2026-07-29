@@ -179,8 +179,13 @@ def test_list_tools_schemas_use_native_types_no_stale_args():
     list_schema = list_tool.parameters
     assert list_schema["type"] == "object"
     list_props = list_schema["properties"]
-    assert set(list_props.keys()) == {"query", "tags"}, (
-        "list_integration_archetypes must expose only query + tags — no profile / boomi_client"
+    # #145 M12.10 adds expected_recipe_registry: a caller-supplied snapshot the
+    # server COMPARES against and reports as recipe_registry_skew. It is
+    # comparison-only — it can never select, register, or reach recipe code —
+    # so it does not reopen the profile / boomi_client surface this pin guards.
+    assert set(list_props.keys()) == {"query", "tags", "expected_recipe_registry"}, (
+        "list_integration_archetypes must expose only query + tags + "
+        "expected_recipe_registry — no profile / boomi_client"
     )
     assert list_props["tags"]["type"] == "array"
     assert list_props["tags"]["items"]["type"] == "string"
@@ -189,7 +194,9 @@ def test_list_tools_schemas_use_native_types_no_stale_args():
     get_tool = by_name["get_integration_archetype"]
     get_schema = get_tool.parameters
     assert get_schema["type"] == "object"
-    assert set(get_schema["properties"].keys()) == {"name"}
+    # #145: recipe_version pins an EXACT recipe version; it never falls forward
+    # or backward, and pinning an unmigrated archetype is rejected outright.
+    assert set(get_schema["properties"].keys()) == {"name", "recipe_version"}
     assert get_schema["properties"]["name"]["type"] == "string"
     assert "name" in get_schema.get("required", [])
 
@@ -197,7 +204,7 @@ def test_list_tools_schemas_use_native_types_no_stale_args():
     build_schema = build_tool.parameters
     assert build_schema["type"] == "object"
     build_props = build_schema["properties"]
-    assert set(build_props.keys()) == {"name", "parameters"}, (
+    assert set(build_props.keys()) == {"name", "parameters", "recipe_version"}, (
         "build_from_archetype must expose only name + parameters — no profile arg"
     )
     assert build_props["name"]["type"] == "string"

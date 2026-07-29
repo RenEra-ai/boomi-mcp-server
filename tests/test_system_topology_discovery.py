@@ -1418,17 +1418,38 @@ def test_xml_target_extraction_is_linear_not_quadratic():
     property, and a membership test against a list is the only way to fail it.
     Ratio, not absolute time, so the test is not machine-speed dependent.
     """
+    import gc
     import time
 
     def elapsed(count):
+        """BEST of three, with GC quiesced.
+
+        A single sample times the scheduler as much as the algorithm: a cheap
+        4000-element run followed by a 16000-element run that catches a GC pass
+        can push the ratio past the ceiling even though the measured ratio is
+        consistently ~4 (issue #145 destabilized this by adding enough
+        allocation-heavy tests upstream to make the collection land here). Taking
+        the minimum is the standard way to time — noise only ever ADDS, so the
+        best sample is the closest to the algorithm's real cost. The property
+        under test is unchanged, and so is the 9x ceiling.
+        """
         xml = (
             "<process>"
             + "".join(f'<processcall processId="p{i}"/>' for i in range(count))
             + "</process>"
         )
-        start = time.perf_counter()
-        parse_process_component_evidence("x", xml)
-        return time.perf_counter() - start
+        best = None
+        for _ in range(3):
+            gc.collect()
+            gc.disable()
+            try:
+                start = time.perf_counter()
+                parse_process_component_evidence("x", xml)
+                sample = time.perf_counter() - start
+            finally:
+                gc.enable()
+            best = sample if best is None else min(best, sample)
+        return best
 
     small = elapsed(4000)
     large = elapsed(16000)

@@ -1536,3 +1536,117 @@ Every claim above is pinned by a collectible test:
 - `tests/test_system_topology_graph_namespaces.py::test_changing_the_build_graph_leaves_the_runtime_order_byte_identical`
 - `tests/test_system_topology_no_mutation.py::test_planning_performs_no_write_network_or_process_operation`
 - `tests/test_system_topology_regressions.py::test_integration_spec_still_accepts_its_permissive_payload`
+
+---
+
+# 9. Issue #145 (M12.10) — Typed executable recipe contributions
+
+Completes the classification the M12 research gate calls for: every archetype,
+composition, pattern, primitive, planner, guidance and capability-registry surface is
+now labelled, and the label decides what the surface is *allowed to do*.
+
+Contract detail lives in `docs/architecture/TYPED_RECIPE_CONTRIBUTIONS_V1.md`. This
+section is the inventory.
+
+## 9.1 Pattern infrastructure and archetypes
+
+| Surface | Classification | Evidence |
+|---|---|---|
+| `patterns/base.py` — `PatternMetadata`, `PatternIOContract`, `PatternExample` | ADVISORY | Descriptive only. `PatternExample` forces `example_only_not_reusable_template`; `PatternIOContract` is not compiler-enforced. |
+| `patterns/base.py::ArchetypePattern.emit_spec`, `PrimitivePattern.emit_components` | EXECUTABLE RECIPE (legacy/untyped) | Code-defined materialization, but returns a whole open `IntegrationSpecV1` rather than declared contribution effects. |
+| `patterns/base.py::PrimitivePattern.emit_fragment` | COMPATIBILITY ADAPTER | Free-form dict convention (`components` / `process_config` / `depends_on` / `metadata`). **Retained unchanged**; docstring now says so. |
+| `patterns/registry.py` | COMPATIBILITY ADAPTER | Dynamic package scan, `archetype\|primitive` only, no version selector, no provenance, no output declaration. |
+| `patterns/errors.py` | CONSTRAINT-ONLY support | Sanitizes pydantic errors; drops raw input. |
+| `patterns/archetypes/api_to_api_sync.py` | **EXECUTABLE RECIPE — MIGRATED** | Routes through `boomi.archetype.api_to_api_sync@0.1.0`. |
+| `patterns/archetypes/api_to_database_sync.py` | **EXECUTABLE RECIPE — MIGRATED** | Routes through `boomi.archetype.api_to_database_sync@0.1.0`. |
+| `patterns/archetypes/database_to_api_sync.py` | EXECUTABLE RECIPE + COMPATIBILITY ADAPTER | Emits a whole spec and retains legacy `flow_sequence` lowering, retry/DLQ/watermark advisory intent. Not migrated. |
+| `patterns/archetypes/http_listener_to_db.py`, `http_listener_to_rest.py` | EXECUTABLE RECIPE (legacy/untyped) | Not migrated. |
+| `patterns/archetypes/stub_minimal.py` | COMPATIBILITY ADAPTER / test fixture | Registry-visible, explicitly non-executable. Not dead. |
+| `patterns/composition.py` | **EXECUTABLE RECIPE — MIGRATED** | Routes through `boomi.compose.db_rest_fanout@1.0.0` behind an unchanged public adapter. |
+| `patterns/recipe_bridge.py` | COMPATIBILITY ADAPTER | The one place legacy input is materialized and a safe recipe input is projected. |
+| `categories/integration_authoring.py` list/get/build/compose | COMPATIBILITY ADAPTER | Public read-only facades. Now additionally publish recipe provenance and registry skew. |
+
+## 9.2 Primitives
+
+| Files | Classification |
+|---|---|
+| `db_extract`, `db_write`, `field_map`, `rest_fetch`, `rest_send`, `soap_fetch`, `soap_send`, `wss_listen`, `xml_json_convert` | EXECUTABLE RECIPE — internal legacy building blocks; remain internal materializers |
+| `branch`, `decision`, `flow_control`, `return_documents`, `throw_exception` | COMPATIBILITY ADAPTER — free-form `emit_fragment()` |
+| `document_cache_lookup/put/remove/retrieve` | COMPATIBILITY ADAPTER — free-form legacy cache fragments |
+| `data_process` | COMPATIBILITY ADAPTER — accepts raw Groovy; **cannot** become a native recipe input under the security contract |
+| `inbound_validate` | CONSTRAINT-ONLY — emits validation metadata, materializes nothing |
+| `operational.py` (`schedule_envelope`, `watermark_state`, `error_classifier`, `dlq_writer`, `run_metadata`) | ADVISORY — records intent only; no activation, mutation, wiring or persistence |
+| `_helpers`, `_soap_common`, `rest_runtime` | COMPATIBILITY ADAPTER support — helpers, not registered patterns |
+
+## 9.3 Planner, doctrine and guidance
+
+| Surface | Classification |
+|---|---|
+| `meta_tools::plan_integration_design_action` | ADVISORY — returns recommendations and now exact `recommended_recipes` **references**; never a contribution or an input |
+| `meta_tools::get_schema_template` skeletons, workflow sequences, operating doctrine | ADVISORY |
+| `kb/design_doctrine.py`, `kb/account_governance.py`, `kb/operational_gotchas.py` | ADVISORY |
+| `categories/marketplace.py::search_marketplace_recipes` | ADVISORY — public reference patterns; never installed, registered or executed |
+| `categories/integration_import.py` | COMPATIBILITY ADAPTER — read-only migration planner; now carries `selected_recipe_ref` for the two migrated presets, `null` otherwise |
+| `models/pipeline_models.py`, `IntegrationSpecV1.pipeline` | COMPATIBILITY ADAPTER / inert view |
+| `docs/companion/**` | ADVISORY — vendored reference |
+| `docs/archive/**` | DEPRECATED-DEAD |
+| `meta_tools::_PROCESS_CREATE_REMOVED` | DEPRECATED-DEAD — must never be revived as a recipe |
+
+## 9.4 Canonical authorities (unchanged by this issue)
+
+`models/process_ir.py`, `compiler/process_ir/pipeline.py`, `emitter_registry.py`,
+`body_capabilities.py`, `connector_capabilities.py`, `models/system_topology.py`,
+`compiler/system_topology/`, `process_graph_verifier.py`, and the component builders all
+remain CONSTRAINT-ONLY authorities. The recipe layer funnels **into** them; it neither
+extends nor exempts them.
+
+`semantic_validation/validation_policy.py` and `legacy_adapters/` remain COMPATIBILITY
+ADAPTERS. **A native recipe never receives a `LegacyValidationPolicyV1`** — the engine has
+no parameter through which one could be passed.
+
+## 9.5 Hidden assumptions preserved
+
+- Component identities are dependency keys; in-spec references use exact `$ref:KEY` tokens.
+- `depends_on` must cover every `$ref`, but materialization order is the **sorted**
+  topological order from `_topological_order`, not declaration order.
+- Reuse connections stay `action="create"` + `config.reference_only=True`.
+- Composition supports one `db_source`, one `transform`, 2–25 `rest_target` — 24 with a
+  cache handoff, which spends one Branch leg on the staging put.
+- The first target is privileged: fixed `target_*` keys and the only watermark-derived query.
+- Cache mode uses the fixed key `handoff_document_cache`; the staging leg is inserted
+  immediately before the first consumer; Branch legs run sequentially.
+- Standard two-target stream component order, cache insert position, and both preset orders
+  are pinned byte-for-byte by `tests/fixtures/recipe_parity/*` captured at baseline
+  `060dabad64e028d83d192e5820d8f37df64d54d3`.
+
+## 9.6 Error-code census
+
+| Code | Status |
+|---|---|
+| `RECIPE_NOT_FOUND` | new |
+| `RECIPE_VERSION_UNAVAILABLE` | new |
+| `RECIPE_CAPABILITY_GATED` | new |
+| `RECIPE_INPUT_INVALID` | new |
+| `RECIPE_CONTRIBUTION_INVALID` | new |
+| `RECIPE_PATCH_TARGET_NOT_FOUND` | new |
+| `RECIPE_PATCH_CONFLICT` | new |
+| `RECIPE_CONSTRAINT_FAILED` | new |
+| `RECIPE_OUTPUT_NONDETERMINISTIC` | new |
+
+Census: **9 new, 0 re-homed, 0 delegated, 0 unchanged.**
+
+## 9.7 Evidence
+
+- `tests/test_error_taxonomy.py::test_issue_145_adds_exactly_ten_codes`
+- `tests/test_error_taxonomy.py::test_issue_145_owns_the_whole_recipe_family`
+- `tests/test_recipe_contribution_models.py::test_contribution_kinds_are_derived_from_the_union_not_hand_listed`
+- `tests/test_recipe_contribution_models.py::test_recipe_component_types_are_pinned_against_the_builder_authority`
+- `tests/test_recipe_registry.py::test_registry_revision_is_invariant_under_registration_order`
+- `tests/test_recipe_registry.py::test_equal_versions_with_different_code_are_a_mismatch_not_a_match`
+- `tests/test_recipe_registry.py::test_doctrine_prose_never_resolves_to_a_recipe`
+- `tests/test_recipe_registry.py::test_the_registry_module_exposes_no_runtime_registration_api`
+- `tests/test_recipe_process_patch_composition.py::test_one_recipe_conflicting_with_itself_still_names_two_producers`
+- `tests/test_recipe_security.py::test_compose_sentinels_never_reach_the_recipe_side`
+- `tests/test_recipe_validation_gate.py::test_compile_is_always_called_with_no_validation_policy`
+- `tests/test_recipe_validation_gate.py::test_a_blocking_planned_step_produces_zero_execute_component_calls`
+- `tests/patterns/test_recipe_preset_parity.py::test_l4_legacy_cache_arm_still_requires_its_exemption`

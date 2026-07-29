@@ -58,6 +58,21 @@ RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
 ARG KB_RELEASE_TAG=""
 RUN mkdir -p /app/kb && chown -R appuser:appuser /app/kb
 
+# Trusted build provenance for the typed recipe registry (issue #145 M12.10).
+# The deployed container has no .git directory and must never trust a request
+# field, so the ONE trustworthy source of "which commit is running here" is a
+# file the build itself writes. Validated here (hex, 7-40 chars) so a malformed
+# value fails the build rather than becoming provenance a skew comparison would
+# then treat as authoritative; an empty arg is a no-op and boomi_mcp.build_info
+# falls back to its source digest.
+ARG BOOMI_BUILD_REVISION=""
+RUN if [ -n "$BOOMI_BUILD_REVISION" ]; then \
+        echo "$BOOMI_BUILD_REVISION" | grep -Eq '^[0-9a-f]{7,40}$' \
+            || { echo "BOOMI_BUILD_REVISION must be a 7-40 char lowercase hex commit sha" >&2; exit 1; }; \
+        printf '%s' "$BOOMI_BUILD_REVISION" > /app/BUILD_REVISION; \
+        chmod 0444 /app/BUILD_REVISION; \
+    fi
+
 # Switch to non-root user
 USER appuser
 

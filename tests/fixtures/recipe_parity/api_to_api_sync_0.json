@@ -1,0 +1,515 @@
+{
+  "components": [
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "DEMO Source Profile",
+        "profile_type": "json.generated",
+        "root": {
+          "children": [
+            {
+              "children": null,
+              "data_type": "character",
+              "description": null,
+              "kind": "simple",
+              "name": "source_a",
+              "required": false
+            }
+          ],
+          "data_type": null,
+          "description": null,
+          "kind": "object",
+          "name": "Root",
+          "required": false
+        }
+      },
+      "depends_on": [],
+      "key": "source_response_profile",
+      "name": "DEMO Source Profile",
+      "type": "profile.json"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "auth": "NONE",
+        "base_url": "https://source.example.com",
+        "component_name": "DEMO REST Source Connection",
+        "connector_type": "rest"
+      },
+      "depends_on": [],
+      "key": "source_rest_source_connection",
+      "name": "DEMO REST Source Connection",
+      "type": "connector-settings"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "DEMO REST Fetch",
+        "connection_ref_key": "source_rest_source_connection",
+        "connector_type": "rest",
+        "method": "GET",
+        "operation_mode": "execute",
+        "path": "/v1/<<source resource>>",
+        "response_profile_id": "$ref:source_response_profile",
+        "response_profile_type": "json"
+      },
+      "depends_on": [
+        "source_rest_source_connection",
+        "source_response_profile"
+      ],
+      "key": "source_rest_source_operation",
+      "name": "DEMO REST Fetch",
+      "type": "connector-action"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "DEMO Target Profile",
+        "profile_type": "json.generated",
+        "root": {
+          "children": [
+            {
+              "children": null,
+              "data_type": "character",
+              "description": null,
+              "kind": "simple",
+              "name": "target_a",
+              "required": false
+            }
+          ],
+          "data_type": null,
+          "description": null,
+          "kind": "object",
+          "name": "Root",
+          "required": false
+        }
+      },
+      "depends_on": [],
+      "key": "transform_target_profile",
+      "name": "DEMO Target Profile",
+      "type": "profile.json"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "DEMO Field Map",
+        "field_mappings": [
+          {
+            "source_path": "Root/source_a",
+            "target_path": "Root/target_a"
+          }
+        ],
+        "map_type": "direct",
+        "source_profile_id": "$ref:source_response_profile",
+        "source_profile_type": "profile.json",
+        "target_profile_id": "$ref:transform_target_profile",
+        "target_profile_type": "profile.json"
+      },
+      "depends_on": [
+        "transform_target_profile",
+        "source_response_profile"
+      ],
+      "key": "transform_transform_map",
+      "name": "DEMO Field Map",
+      "type": "transform.map"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "auth": "NONE",
+        "base_url": "https://target.example.com",
+        "component_name": "DEMO REST Connection",
+        "connector_type": "rest"
+      },
+      "depends_on": [],
+      "key": "target_rest_connection",
+      "name": "DEMO REST Connection",
+      "type": "connector-settings"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "DEMO REST Send",
+        "connection_ref_key": "target_rest_connection",
+        "connector_type": "rest",
+        "method": "POST",
+        "operation_mode": "execute",
+        "path": "/v1/<<target resource>>",
+        "request_profile_id": "$ref:transform_target_profile",
+        "request_profile_type": "json"
+      },
+      "depends_on": [
+        "target_rest_connection",
+        "transform_target_profile"
+      ],
+      "key": "target_rest_operation",
+      "name": "DEMO REST Send",
+      "type": "connector-action"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "pipeline": {
+          "dependencies": [
+            {
+              "from_stage": "fetch",
+              "to_stage": "map"
+            },
+            {
+              "from_stage": "map",
+              "to_stage": "send"
+            }
+          ],
+          "stages": [
+            {
+              "config": {
+                "connection_id": "$ref:source_rest_source_connection",
+                "operation_id": "$ref:source_rest_source_operation",
+                "primitive": "rest_fetch"
+              },
+              "key": "fetch",
+              "kind": "fetch"
+            },
+            {
+              "config": {
+                "map_ref": "$ref:transform_transform_map",
+                "primitive": "map"
+              },
+              "key": "map",
+              "kind": "map"
+            },
+            {
+              "config": {
+                "action_type": "POST",
+                "connection_id": "$ref:target_rest_connection",
+                "operation_id": "$ref:target_rest_operation",
+                "primitive": "rest_send"
+              },
+              "key": "send",
+              "kind": "send"
+            }
+          ]
+        },
+        "process_kind": "sync_pipeline"
+      },
+      "depends_on": [
+        "source_rest_source_connection",
+        "source_rest_source_operation",
+        "transform_transform_map",
+        "target_rest_connection",
+        "target_rest_operation"
+      ],
+      "key": "main_process",
+      "name": "DEMO API to API Sync",
+      "type": "process"
+    }
+  ],
+  "endpoints": [
+    {
+      "auth_mode": "none",
+      "binding_mode": "create",
+      "direction": "source",
+      "executable": false,
+      "key": "rest_source",
+      "method": "GET",
+      "type": "rest"
+    },
+    {
+      "auth_mode": "none",
+      "binding_mode": "create",
+      "direction": "target",
+      "executable": false,
+      "expected_status_codes": [
+        200,
+        201,
+        202
+      ],
+      "key": "rest_target",
+      "method": "POST",
+      "type": "rest"
+    }
+  ],
+  "flows": [
+    {
+      "executable": false,
+      "key": "fetch",
+      "name": "Fetch from REST source",
+      "operation": "rest_fetch",
+      "source": "rest_source",
+      "target": null
+    },
+    {
+      "direct_field_mappings": [
+        {
+          "route": "direct",
+          "source_data_type": "character",
+          "source_path": "Root/source_a",
+          "target_data_type": "character",
+          "target_path": "Root/target_a"
+        }
+      ],
+      "executable": false,
+      "key": "transform",
+      "name": "Map source response to target payload",
+      "operation": "transform",
+      "operations": [
+        {
+          "future_builder_issue": "#26",
+          "operation_type": "direct",
+          "source_field": "Root/source_a",
+          "source_path": "Root/source_a",
+          "target_path": "Root/target_a"
+        }
+      ],
+      "source": "fetch",
+      "source_profile_generation": {
+        "component_name": "DEMO Source Profile",
+        "component_type": "profile.json",
+        "field_index_by_path": {
+          "Root": {
+            "data_type": null,
+            "kind": "object",
+            "mappable": false,
+            "name": "Root",
+            "path": "Root",
+            "profile_component_type": "profile.json",
+            "required": false,
+            "source": "json_schema"
+          },
+          "Root/source_a": {
+            "data_type": "character",
+            "kind": "simple",
+            "mappable": true,
+            "name": "source_a",
+            "path": "Root/source_a",
+            "profile_component_type": "profile.json",
+            "required": false,
+            "source": "json_schema"
+          }
+        },
+        "generation_mode": "profile_from_json_schema",
+        "mappable_paths": [
+          "Root/source_a"
+        ],
+        "profile_config": {
+          "format": "json",
+          "root": {
+            "children": [
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "source_a",
+                "required": false
+              }
+            ],
+            "kind": "object",
+            "name": "Root",
+            "required": false
+          }
+        },
+        "profile_type": "json.generated"
+      },
+      "source_schema": {
+        "format": "json",
+        "leaf_count": 1,
+        "leaves": [
+          {
+            "data_type": "character",
+            "path": "Root/source_a"
+          }
+        ],
+        "root_name": "Root"
+      },
+      "target": null,
+      "target_payload_profile": {
+        "format": "json",
+        "leaf_count": 1,
+        "leaves": [
+          {
+            "data_type": "character",
+            "path": "Root/target_a"
+          }
+        ],
+        "root_name": "Root"
+      },
+      "target_profile_generation": {
+        "component_name": "DEMO Target Profile",
+        "component_type": "profile.json",
+        "field_index_by_path": {
+          "Root": {
+            "data_type": null,
+            "kind": "object",
+            "mappable": false,
+            "name": "Root",
+            "path": "Root",
+            "profile_component_type": "profile.json",
+            "required": false,
+            "source": "json_schema"
+          },
+          "Root/target_a": {
+            "data_type": "character",
+            "kind": "simple",
+            "mappable": true,
+            "name": "target_a",
+            "path": "Root/target_a",
+            "profile_component_type": "profile.json",
+            "required": false,
+            "source": "json_schema"
+          }
+        },
+        "generation_mode": "profile_from_json_schema",
+        "mappable_paths": [
+          "Root/target_a"
+        ],
+        "profile_config": {
+          "format": "json",
+          "root": {
+            "children": [
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "target_a",
+                "required": false
+              }
+            ],
+            "kind": "object",
+            "name": "Root",
+            "required": false
+          }
+        },
+        "profile_type": "json.generated"
+      }
+    },
+    {
+      "executable": false,
+      "key": "send",
+      "name": "Send to REST target",
+      "operation": "rest_send",
+      "source": "transform",
+      "target": "rest_target"
+    }
+  ],
+  "folders": {},
+  "goals": [
+    "Replicate records from a REST API source to a REST API target via a static fetch -> transform -> send pipeline.",
+    "Emit executable component specs whose main process is a process_kind='sync_pipeline' stage graph (fetch -> map -> send) for build_integration(action='plan'); the plan is inspectable through the existing MCP planning/review flows. Deployment, schedule activation, pagination, retry/DLQ, and runtime-bound behavior remain out of scope."
+  ],
+  "mode": "redesign",
+  "name": "demo-api-to-api-sync",
+  "naming": {
+    "archetype": "api_to_api_sync",
+    "component_names": {},
+    "component_prefix": "DEMO",
+    "integration_name": "demo-api-to-api-sync"
+  },
+  "pipeline": {
+    "dependencies": [
+      {
+        "edge_kind": "ordering",
+        "from_stage": "fetch",
+        "label": null,
+        "ordinal": null,
+        "to_stage": "map"
+      },
+      {
+        "edge_kind": "ordering",
+        "from_stage": "map",
+        "label": null,
+        "ordinal": null,
+        "to_stage": "send"
+      }
+    ],
+    "stages": [
+      {
+        "cardinality": null,
+        "component_ref": null,
+        "config": {
+          "connection_id": "$ref:source_rest_source_connection",
+          "operation_id": "$ref:source_rest_source_operation",
+          "primitive": "rest_fetch"
+        },
+        "context_effect": null,
+        "failure_behavior": null,
+        "key": "fetch",
+        "kind": "fetch",
+        "side_effect": null
+      },
+      {
+        "cardinality": null,
+        "component_ref": null,
+        "config": {
+          "map_ref": "$ref:transform_transform_map",
+          "primitive": "map"
+        },
+        "context_effect": null,
+        "failure_behavior": null,
+        "key": "map",
+        "kind": "map",
+        "side_effect": null
+      },
+      {
+        "cardinality": null,
+        "component_ref": null,
+        "config": {
+          "action_type": "POST",
+          "connection_id": "$ref:target_rest_connection",
+          "operation_id": "$ref:target_rest_operation",
+          "primitive": "rest_send"
+        },
+        "context_effect": null,
+        "failure_behavior": null,
+        "key": "send",
+        "kind": "send",
+        "side_effect": null
+      }
+    ]
+  },
+  "profile_indexes_by_component_id": null,
+  "runtime": {},
+  "validation_rules": {
+    "boomi_mutation": false,
+    "component_count": 8,
+    "contract_only": false,
+    "limitations": {
+      "map_script": "inline script_body only; external script_component_ref rejected (#51)",
+      "pagination": "out of scope for this preset (#72 records pagination metadata only)",
+      "reliability": "retry/DLQ not emitted (sync_pipeline is verified-linear, M5.2)",
+      "rest_create_auth": "auth='none' only; secured auth requires reuse",
+      "rest_source": "GET-only static fetch; runtime-bound path/query/header is #96 (M5.4a)",
+      "schedule_activation": "M3 (deploy to a runtime first)",
+      "watermark": "out of scope for this preset"
+    },
+    "metadata_version": "0.1.0",
+    "process_kind": "sync_pipeline",
+    "profile_schema_strategy": "M5.7 uses a caller-supplied JSON response profile for the REST source and a caller-supplied JSON payload profile for the REST target; no API browse, schema introspection, or response sampling is performed. The source profile is generated and bound as the fetch output shape; metadata/sample inference is available separately via infer_profile_fields (issue #47).",
+    "raw_xml_exposed": false,
+    "transform_review": {
+      "recommended_before_apply": [
+        "validate_unmapped",
+        "generate_test_payload"
+      ],
+      "supported_actions": [
+        "list_fields",
+        "validate_unmapped",
+        "mapping_diff",
+        "generate_test_payload",
+        "compare_expected_actual"
+      ]
+    },
+    "transform_routes": {
+      "direct": "#26",
+      "map_function": "#40",
+      "map_script": "#41",
+      "xslt": "#42 (rejected)"
+    }
+  },
+  "version": "1.0"
+}

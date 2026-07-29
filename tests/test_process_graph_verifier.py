@@ -1019,3 +1019,123 @@ def test_builder_loop_back_does_not_trigger_start_inbound():
     never the start — START_SHAPE_HAS_INBOUND must not fire on legal loop-backs."""
     result = verify_process_graph(_decision_process_xml(false_notify=None, false_next="shape2"))
     assert "START_SHAPE_HAS_INBOUND" not in _codes(result["errors"])
+
+
+# ---------------------------------------------------------------------------
+# Issue #145 (M12.10) — every migrated executable fixture verifies clean
+# ---------------------------------------------------------------------------
+#
+# The verifier already runs INSIDE ``emit_process``, so a recipe that produced a
+# broken graph would raise rather than return. These tests therefore assert the
+# stronger, observable thing: the artifact comes back with an empty error list
+# and a non-zero shape count, for every migrated surface and every handoff mode.
+# A zero shape count would make "no errors" vacuous.
+
+
+def _recipe_artifacts():
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent / "patterns"))
+    from boomi_mcp.categories.integration_authoring import (
+        build_from_archetype_action,
+        compose_archetypes_action,
+    )
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+    from boomi_mcp.patterns.archetypes.api_to_api_sync import ApiToApiSyncArchetype
+    from boomi_mcp.patterns.archetypes.api_to_database_sync import (
+        ApiToDatabaseSyncArchetype,
+    )
+    from boomi_mcp.patterns.recipe_bridge import (
+        run_fanout_recipe,
+        run_sync_preset_recipe,
+    )
+    from boomi_mcp.recipes.builtins.catalog import (
+        RECIPE_API_TO_API_SYNC,
+        RECIPE_API_TO_DATABASE_SYNC,
+        RECIPE_DB_REST_FANOUT,
+    )
+    from test_archetype_composition import _cache_links, _options, _parts
+
+    artifacts = {}
+
+    for label, links in (
+        ("compose_stream", None),
+        ("compose_mixed_cache", _cache_links("billing")),
+        ("compose_all_cache", _cache_links("orders", "billing")),
+    ):
+        options = dict(_options())
+        if links:
+            options["links"] = links
+        response = compose_archetypes_action(parts=_parts(), options=options)
+        spec = IntegrationSpecV1.model_validate(response["integration_spec"])
+        result = run_fanout_recipe(
+            recipe_id=RECIPE_DB_REST_FANOUT,
+            components=spec.components,
+            process=spec.components[-1],
+        )
+        artifacts[label] = result.artifact_for(spec.components[-1].key)
+
+    for label, archetype, cls, recipe_id in (
+        ("api_to_api", "api_to_api_sync", ApiToApiSyncArchetype, RECIPE_API_TO_API_SYNC),
+        (
+            "api_to_db",
+            "api_to_database_sync",
+            ApiToDatabaseSyncArchetype,
+            RECIPE_API_TO_DATABASE_SYNC,
+        ),
+    ):
+        response = build_from_archetype_action(archetype, cls.examples[0].parameters)
+        spec = IntegrationSpecV1.model_validate(response["integration_spec"])
+        result = run_sync_preset_recipe(
+            recipe_id=recipe_id, components=spec.components, process=spec.components[-1]
+        )
+        artifacts[label] = result.artifact_for(spec.components[-1].key)
+
+    return artifacts
+
+
+_RECIPE_ARTIFACTS = None
+
+
+def _artifact(label):
+    global _RECIPE_ARTIFACTS
+    if _RECIPE_ARTIFACTS is None:
+        _RECIPE_ARTIFACTS = _recipe_artifacts()
+    return _RECIPE_ARTIFACTS[label]
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "compose_stream",
+        "compose_mixed_cache",
+        "compose_all_cache",
+        "api_to_api",
+        "api_to_db",
+    ],
+)
+def test_migrated_recipe_fixture_verifies_with_zero_errors(label):
+    artifact = _artifact(label)
+    assert artifact.verifier.errors == ()
+    assert artifact.verifier.shapes_checked > 0, "a zero shape count makes this vacuous"
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "compose_stream",
+        "compose_mixed_cache",
+        "compose_all_cache",
+        "api_to_api",
+        "api_to_db",
+    ],
+)
+def test_migrated_recipe_xml_reverifies_standalone(label):
+    """Re-run the verifier on the emitted bytes, independently of the emitter.
+
+    ``emit_process`` verifies internally; running the verifier again on the
+    returned XML proves the clean result belongs to the OUTPUT rather than to
+    some intermediate state the emitter happened to hold.
+    """
+    result = verify_process_graph(_artifact(label).process_xml)
+    assert _codes(result["errors"]) == set()

@@ -1,0 +1,590 @@
+{
+  "components": [
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "auth_mode": "username_password",
+        "component_name": "DEMO DB Connection",
+        "connector_type": "database",
+        "credential_ref": "<<opaque credential reference>>",
+        "dbname": "AppDB",
+        "driver_id": "microsoft_jdbc",
+        "host": "db.example.invalid",
+        "port": 1433,
+        "username": "<<db user>>"
+      },
+      "depends_on": [],
+      "key": "source_db_connection",
+      "name": "DEMO DB Connection",
+      "type": "connector-settings"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "DEMO DB Read Profile",
+        "output_fields": [
+          {
+            "data_type": "character",
+            "enforce_unique": false,
+            "mandatory": false,
+            "name": "source_a"
+          }
+        ],
+        "profile_type": "database.read",
+        "query": "<<user-authored DB read statement>>"
+      },
+      "depends_on": [],
+      "key": "source_db_read_profile",
+      "name": "DEMO DB Read Profile",
+      "type": "profile.db"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "DEMO DB Get",
+        "connection_ref_key": "source_db_connection",
+        "connector_type": "database",
+        "operation_mode": "get",
+        "read_profile_id": "$ref:source_db_read_profile"
+      },
+      "depends_on": [
+        "source_db_connection",
+        "source_db_read_profile"
+      ],
+      "key": "source_db_get_operation",
+      "name": "DEMO DB Get",
+      "type": "connector-action"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "DEMO Target Profile",
+        "profile_type": "json.generated",
+        "root": {
+          "children": [
+            {
+              "children": null,
+              "data_type": "character",
+              "description": null,
+              "kind": "simple",
+              "name": "target_a",
+              "required": false
+            }
+          ],
+          "data_type": null,
+          "description": null,
+          "kind": "object",
+          "name": "Root",
+          "required": false
+        }
+      },
+      "depends_on": [],
+      "key": "transform_target_profile",
+      "name": "DEMO Target Profile",
+      "type": "profile.json"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "DEMO Field Map",
+        "field_mappings": [
+          {
+            "source_path": "source_a",
+            "target_path": "Root/target_a"
+          }
+        ],
+        "map_type": "direct",
+        "source_profile_id": "$ref:source_db_read_profile",
+        "source_profile_type": "profile.db",
+        "target_profile_id": "$ref:transform_target_profile",
+        "target_profile_type": "profile.json"
+      },
+      "depends_on": [
+        "transform_target_profile",
+        "source_db_read_profile"
+      ],
+      "key": "transform_transform_map",
+      "name": "DEMO Field Map",
+      "type": "transform.map"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "auth": "NONE",
+        "base_url": "https://orders.example.invalid",
+        "component_name": "DEMO Orders REST Connection",
+        "connector_type": "rest"
+      },
+      "depends_on": [],
+      "key": "target_rest_connection",
+      "name": "DEMO Orders REST Connection",
+      "type": "connector-settings"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "DEMO Orders REST Send",
+        "connection_ref_key": "target_rest_connection",
+        "connector_type": "rest",
+        "method": "POST",
+        "operation_mode": "execute",
+        "path": "/v1/orders",
+        "request_profile_id": "$ref:transform_target_profile",
+        "request_profile_type": "json"
+      },
+      "depends_on": [
+        "target_rest_connection",
+        "transform_target_profile"
+      ],
+      "key": "target_rest_operation",
+      "name": "DEMO Orders REST Send",
+      "type": "connector-action"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "auth": "NONE",
+        "base_url": "https://billing.example.invalid",
+        "component_name": "DEMO Billing REST Connection",
+        "connector_type": "rest"
+      },
+      "depends_on": [],
+      "key": "target_billing_rest_connection",
+      "name": "DEMO Billing REST Connection",
+      "type": "connector-settings"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "component_name": "DEMO Billing REST Send",
+        "connection_ref_key": "target_billing_rest_connection",
+        "connector_type": "rest",
+        "method": "POST",
+        "operation_mode": "execute",
+        "path": "/v1/billing",
+        "request_profile_id": "$ref:transform_target_profile",
+        "request_profile_type": "json"
+      },
+      "depends_on": [
+        "target_billing_rest_connection",
+        "transform_target_profile"
+      ],
+      "key": "target_billing_rest_operation",
+      "name": "DEMO Billing REST Send",
+      "type": "connector-action"
+    },
+    {
+      "action": "create",
+      "component_id": null,
+      "config": {
+        "flow_sequence": [
+          {
+            "kind": "map_ref",
+            "label": "Shared transform",
+            "map_ref": "$ref:transform_transform_map"
+          },
+          {
+            "kind": "branch",
+            "label": "Fan out",
+            "legs": [
+              {
+                "target": {
+                  "action_type": "POST",
+                  "connection_id": "$ref:target_rest_connection",
+                  "connector_type": "rest",
+                  "operation_id": "$ref:target_rest_operation"
+                }
+              },
+              {
+                "target": {
+                  "action_type": "POST",
+                  "connection_id": "$ref:target_billing_rest_connection",
+                  "connector_type": "rest",
+                  "operation_id": "$ref:target_billing_rest_operation"
+                }
+              }
+            ]
+          }
+        ],
+        "process_extensions": {
+          "connections": [
+            {
+              "connection_id": "$ref:source_db_connection",
+              "connector_type": "database",
+              "fields": [
+                {
+                  "id": "username",
+                  "label": "User",
+                  "xpath": "DatabaseConnectionSettings/@username"
+                },
+                {
+                  "id": "password",
+                  "label": "Password",
+                  "xpath": "DatabaseConnectionSettings/@password"
+                }
+              ]
+            }
+          ]
+        },
+        "process_kind": "database_to_api_sync",
+        "source": {
+          "action_type": "Get",
+          "connection_id": "$ref:source_db_connection",
+          "connector_type": "database",
+          "operation_id": "$ref:source_db_get_operation"
+        },
+        "target": {
+          "action_type": "POST",
+          "connection_id": "$ref:target_rest_connection",
+          "connector_type": "rest",
+          "operation_id": "$ref:target_rest_operation"
+        },
+        "transform": {
+          "mode": "passthrough"
+        }
+      },
+      "depends_on": [
+        "source_db_connection",
+        "source_db_get_operation",
+        "transform_transform_map",
+        "target_rest_connection",
+        "target_rest_operation",
+        "target_billing_rest_connection",
+        "target_billing_rest_operation"
+      ],
+      "key": "main_process",
+      "name": "DEMO DB to API Sync",
+      "type": "process"
+    }
+  ],
+  "endpoints": [
+    {
+      "auth_mode": "username_password",
+      "binding_mode": "create",
+      "direction": "source",
+      "driver": "microsoft_jdbc",
+      "executable": false,
+      "key": "db_source",
+      "type": "database"
+    },
+    {
+      "auth_mode": "none",
+      "binding_mode": "create",
+      "direction": "target",
+      "executable": false,
+      "key": "rest_target",
+      "method": "POST",
+      "type": "rest"
+    },
+    {
+      "auth_mode": "none",
+      "binding_mode": "create",
+      "direction": "target",
+      "executable": false,
+      "key": "rest_target_billing",
+      "method": "POST",
+      "type": "rest"
+    }
+  ],
+  "flows": [
+    {
+      "executable": false,
+      "key": "extract",
+      "name": "Read from database",
+      "operation": "db_get",
+      "source": "db_source",
+      "target": null
+    },
+    {
+      "direct_field_mappings": [
+        {
+          "route": "direct",
+          "source_data_type": "character",
+          "source_path": "source_a",
+          "target_data_type": "character",
+          "target_path": "Root/target_a"
+        }
+      ],
+      "executable": false,
+      "key": "transform",
+      "name": "Map source to JSON payload",
+      "operation": "transform",
+      "operations": [
+        {
+          "future_builder_issue": "#26",
+          "operation_type": "direct",
+          "source_field": "source_a",
+          "target_path": "Root/target_a"
+        }
+      ],
+      "source": "extract",
+      "source_profile_generation": {
+        "component_name": null,
+        "component_type": "profile.db",
+        "field_index_by_path": {
+          "source_a": {
+            "data_type": "character",
+            "mappable": true,
+            "name": "source_a",
+            "path": "source_a",
+            "profile_component_type": "profile.db",
+            "source": "db_read_fields"
+          }
+        },
+        "generation_mode": "profile_from_db_read_fields",
+        "mappable_paths": [
+          "source_a"
+        ],
+        "profile_config": {
+          "output_fields": [
+            {
+              "data_type": "character",
+              "enforce_unique": false,
+              "mandatory": false,
+              "name": "source_a"
+            }
+          ]
+        },
+        "profile_type": "database.read"
+      },
+      "source_schema": {
+        "field_count": 1,
+        "fields": [
+          {
+            "data_type": "character",
+            "name": "source_a",
+            "required": false
+          }
+        ]
+      },
+      "target": null,
+      "target_payload_profile": {
+        "format": "json",
+        "leaf_count": 1,
+        "leaves": [
+          {
+            "data_type": "character",
+            "path": "Root/target_a"
+          }
+        ],
+        "root_name": "Root"
+      },
+      "target_profile_generation": {
+        "component_name": null,
+        "component_type": "profile.json",
+        "field_index_by_path": {
+          "Root": {
+            "data_type": null,
+            "kind": "object",
+            "mappable": false,
+            "name": "Root",
+            "path": "Root",
+            "profile_component_type": "profile.json",
+            "required": false,
+            "source": "json_schema"
+          },
+          "Root/target_a": {
+            "data_type": "character",
+            "kind": "simple",
+            "mappable": true,
+            "name": "target_a",
+            "path": "Root/target_a",
+            "profile_component_type": "profile.json",
+            "required": false,
+            "source": "json_schema"
+          }
+        },
+        "generation_mode": "profile_from_json_schema",
+        "mappable_paths": [
+          "Root/target_a"
+        ],
+        "profile_config": {
+          "format": "json",
+          "root": {
+            "children": [
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "target_a",
+                "required": false
+              }
+            ],
+            "kind": "object",
+            "name": "Root",
+            "required": false
+          }
+        },
+        "profile_type": "json.generated"
+      }
+    },
+    {
+      "executable": false,
+      "key": "send",
+      "name": "Send to REST target",
+      "operation": "rest_send",
+      "source": "transform",
+      "target": "rest_target"
+    },
+    {
+      "executable": false,
+      "key": "reliability",
+      "name": "Retry / DLQ",
+      "operation": "reliability",
+      "source": "send",
+      "target": null
+    },
+    {
+      "executable": false,
+      "key": "fanout",
+      "legs": 2,
+      "name": "Fan out to REST targets",
+      "operation": "branch",
+      "source": "transform",
+      "target": "rest_target"
+    }
+  ],
+  "folders": {},
+  "goals": [
+    "Replicate data from a SQL Server source to a REST target on a manual or scheduled trigger.",
+    "Emit executable component specs (DB source, JSON transform, REST target, structured process) for build_integration(action='plan'); a verified Try/Catch + DLQ catch path is emitted for DLQ modes document_cache_ref / error_subprocess_ref, with caller retry (max_attempts 1..6 \u2192 platform-timed retry_count 0..5) wired through (#51 M3.R1a / #88 M4.5.3). Deployment and schedule activation remain M3."
+  ],
+  "mode": "redesign",
+  "name": "demo-composed-fanout",
+  "naming": {
+    "archetype": "database_to_api_sync",
+    "component_names": {
+      "rest_connection": "DEMO Orders REST Connection",
+      "rest_operation": "DEMO Orders REST Send"
+    },
+    "component_prefix": "DEMO",
+    "integration_name": "demo-composed-fanout"
+  },
+  "pipeline": null,
+  "profile_indexes_by_component_id": null,
+  "runtime": {},
+  "validation_rules": {
+    "boomi_mutation": false,
+    "component_count": 10,
+    "composition": {
+      "fanout_legs": [
+        {
+          "binding_mode": "create",
+          "expected_status_codes": [
+            200,
+            201,
+            202
+          ],
+          "leg": 2,
+          "method": "POST",
+          "part_key": "billing"
+        }
+      ],
+      "fanout_targets": 2,
+      "first_target_part": "orders",
+      "handoff": "document_stream",
+      "parts": [
+        {
+          "key": "db",
+          "kind": "db_source"
+        },
+        {
+          "key": "shape",
+          "kind": "transform"
+        },
+        {
+          "key": "orders",
+          "kind": "rest_target"
+        },
+        {
+          "key": "billing",
+          "kind": "rest_target"
+        }
+      ],
+      "topology": "db_source->transform->rest_fanout"
+    },
+    "contract_only": false,
+    "limitations": {
+      "db_create_auth": "username_password only; windows_integrated requires reuse",
+      "environment_extensions": "create-mode username_password AND reuse-mode DB sources declare credential connection fields (username/password) as per-environment override points by default; host/port opt-in via environment_extensions.endpoint_connection_fields; the REST target also declares reuse-mode credentials by default and the base URL on opt-in (rest_endpoint_connection_fields). DB overrides are xpath-keyed, REST overrides are id-keyed (no xpath). processOverrides is unowned so UI-populated override values survive updates; runtime override availability is live_QA_required (#92 / #102 B1)",
+      "jdbc_options_and_default_headers": "metadata-deferred; no builder field in M2 (use reuse)",
+      "process_dlq": "emitted for document_cache_ref / error_subprocess_ref (#51 M3.R1a)",
+      "process_notify": "optional log-only Notify on the catch path (reliability.catch_notify, #89 M4.5.4); requires a wired DLQ; email/SMS channels out of scope",
+      "process_retry": "max_attempts 1..6 wired as platform-timed Try/Catch retry_count 0..5 (#88 M4.5.3); requires a wired DLQ catch path; no caller-selected backoff",
+      "rest_create_auth": "auth='none' only; secured auth requires reuse",
+      "schedule_activation": "M3 (deploy to a runtime first)",
+      "watermark_update": "#51 (dynamic operation-property wiring)"
+    },
+    "metadata_version": "0.5.0",
+    "operational_intent": {
+      "execution": {
+        "trigger": {
+          "mode": "manual"
+        }
+      },
+      "expected_status_codes": [
+        200,
+        201,
+        202
+      ],
+      "reliability": {
+        "dlq": {
+          "mode": "disabled"
+        },
+        "error_classifier": {
+          "custom_rules": [],
+          "retriable_status_codes": [
+            502,
+            503,
+            504
+          ],
+          "terminal_status_codes": [
+            400,
+            401,
+            403,
+            404,
+            422
+          ]
+        },
+        "retry": {
+          "backoff": "platform",
+          "process_retry_count": 0,
+          "requested_max_attempts": 1
+        }
+      },
+      "watermark": {
+        "enabled": false
+      }
+    },
+    "profile_schema_strategy": "M2 uses caller-declared DB read result fields and a caller-supplied JSON profile tree for the REST target; no SQL parsing, DB metadata introspection, row sampling, or Boomi browse is performed by this archetype. Issue #43 generates deterministic source/target profile field indexes and normalized direct mapping metadata on the transform flow for downstream profile/map builders (issue #26); metadata/sample inference is available separately via infer_profile_fields (issue #47).",
+    "raw_xml_exposed": false,
+    "transform_review": {
+      "recommended_before_apply": [
+        "validate_unmapped",
+        "generate_test_payload"
+      ],
+      "supported_actions": [
+        "list_fields",
+        "validate_unmapped",
+        "mapping_diff",
+        "generate_test_payload",
+        "compare_expected_actual"
+      ]
+    },
+    "transform_routes": {
+      "direct": "#26",
+      "map_function": "#40",
+      "map_script": "#41",
+      "xslt": "#42 (rejected in M2)"
+    }
+  },
+  "version": "1.0"
+}

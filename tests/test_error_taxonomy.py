@@ -491,3 +491,118 @@ def test_prior_m12_code_count_is_unchanged_at_sixty_one():
         and (code.startswith("PROCESS_IR_") or code.startswith("LEGACY_ADAPTER_"))
     }
     assert len(prior) == 61
+
+
+# ---------------------------------------------------------------------------
+# Issue #145 (M12.10) — the RECIPE_* family
+# ---------------------------------------------------------------------------
+
+_ISSUE_145_CODES = (
+    # lookup / version / capability — is this recipe runnable at all
+    "RECIPE_NOT_FOUND",
+    "RECIPE_VERSION_UNAVAILABLE",
+    "RECIPE_CAPABILITY_GATED",
+    # input / output — is what went in and what came out strictly typed
+    "RECIPE_INPUT_INVALID",
+    "RECIPE_CONTRIBUTION_INVALID",
+    # composition — do the closed operations resolve and agree
+    "RECIPE_PATCH_TARGET_NOT_FOUND",
+    "RECIPE_PATCH_CONFLICT",
+    # validation / determinism
+    "RECIPE_CONSTRAINT_FAILED",
+    "RECIPE_OUTPUT_NONDETERMINISTIC",
+    # the request ENVELOPE, as distinct from the recipe input's contents
+    "RECIPE_REQUEST_INVALID",
+)
+
+
+def test_issue_145_codes_present():
+    assert set(_ISSUE_145_CODES) <= set(ERROR_TAXONOMY)
+
+
+def test_issue_145_constants_are_taxonomy_reexports():
+    """Each code is reachable as a module constant equal to its own name."""
+    for code in _ISSUE_145_CODES:
+        assert getattr(taxonomy, code) == code, code
+
+
+def test_issue_145_adds_exactly_ten_codes():
+    """Pins the census: the issue's nine RECIPE_* codes plus one.
+
+    ``RECIPE_REQUEST_INVALID`` was added after live QA showed a malformed request
+    ENVELOPE (two invocations sharing an id) reusing ``RECIPE_INPUT_INVALID``,
+    whose remediation tells the caller their input carried credentials, SQL and
+    raw XML. A wrong remediation is worse than a coarse one, and the envelope is
+    genuinely a different failure from the input's contents.
+
+    Counting by owner is the shrink-detector: a duplicate spec removes one key
+    from the last-wins dict entirely, so this total moves even when every code
+    the tuple names still resolves.
+    """
+    assert len(_ISSUE_145_CODES) == 10
+    owned = {c for c, s in ERROR_TAXONOMY.items() if s.owner == "#145"}
+    assert owned == set(_ISSUE_145_CODES)
+
+
+def test_issue_145_codes_owned_and_categorized():
+    for code in _ISSUE_145_CODES:
+        spec = ERROR_TAXONOMY[code]
+        assert spec.owner == "#145", code
+        assert spec.category == "recipe", code
+        assert spec.retryable is False, code
+        assert spec.summary, code
+
+
+def test_issue_145_owns_the_whole_recipe_family():
+    """#145 is the SOLE introducer of RECIPE_*, asserted as a biconditional.
+
+    Same discipline as #144's TOPOLOGY_* guard: "mine are mine" AND "every
+    RECIPE_ code is mine", so a later issue cannot quietly append to a family
+    whose semantics #145 defined.
+    """
+    for code in _ISSUE_145_CODES:
+        assert code.startswith("RECIPE_"), code
+    for code, spec in ERROR_TAXONOMY.items():
+        if code.startswith("RECIPE_"):
+            assert spec.owner == "#145", code
+
+
+def test_issue_145_introduces_no_foreign_family_code():
+    """The recipe layer blames the RECIPE layer, never a canonical authority.
+
+    A canonical rejection is carried as ``RECIPE_CONSTRAINT_FAILED`` with
+    value-free ``cause_codes``; #145 never introduces a ``PROCESS_IR_*``,
+    ``TOPOLOGY_*``, ``LEGACY_ADAPTER_*`` or ``COMPOSITION_*`` code of its own.
+    """
+    for code in _ISSUE_145_CODES:
+        assert not code.startswith("PROCESS_IR_"), code
+        assert not code.startswith("TOPOLOGY_"), code
+        assert not code.startswith("LEGACY_ADAPTER_"), code
+        assert not code.startswith("COMPOSITION_"), code
+
+
+def test_issue_145_does_not_overwrite_any_prior_code():
+    """The silent-overwrite guard, now covering #144 as well."""
+    for codes, owner in (
+        (_ISSUE_136_CODES, "#136"),
+        (_ISSUE_137_CODES, "#137"),
+        (_ISSUE_138_CODES, "#138"),
+        (_ISSUE_139_CODES, "#139"),
+        (_ISSUE_140_CODES, "#140"),
+        (_ISSUE_141_CODES, "#141"),
+        (_ISSUE_142_CODES, "#142"),
+        (_ISSUE_143_CODES, "#143"),
+        (_ISSUE_144_CODES, "#144"),
+    ):
+        for code in codes:
+            assert ERROR_TAXONOMY[code].owner == owner, code
+
+
+def test_issue_145_leaves_the_topology_family_at_fourteen():
+    """#145 adds no TOPOLOGY_* code and collides with none.
+
+    Carries #144's own census forward one owner, exactly as
+    ``test_prior_m12_code_count_is_unchanged_at_sixty_one`` carries #143's.
+    """
+    owned = {c for c, s in ERROR_TAXONOMY.items() if s.owner == "#144"}
+    assert len(owned) == 14
