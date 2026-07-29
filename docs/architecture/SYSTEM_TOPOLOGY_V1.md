@@ -131,7 +131,7 @@ one.
 | 1 | "85 processes, 100 Document Cache components, 81 Process Property components" | Counts are **page-capped artifacts**: `documentcache` returned `total_count: 100, has_more: true, total_available: 186` | No census number is hard-coded anywhere. Every live query records `returned_count`, `total_available`, `has_more`, and derived `truncated`. |
 | 2 | "Listener/API-service relationships are split between component dependencies and free-form metadata" | **Zero `webservice` components in *either* live profile.** The M6.1/#133 ASC fixtures are gone. | `api_service` stays `emittable` (the typed builder is real) but its **live leg is `unavailable`**. `api_service_route` needs a typed-builder or parsed-XML witness. |
 | 3 | "Live representative processes include ProcessCall" | `analyze_component(action="dependencies")` returns a **flat, one-level, mixed-type list with no edge kind** — 6 processes, 1 `profile.json`, 1 `profile.flatfile`, 1 `documentcache`, all identical in shape | The dependency API **cannot witness a ProcessCall**. It is `corroborating_only`, typed as `DependencyCorroborationV1` so promoting it is a type error. `dependency_api_as_process_call_witness` is registered `unsupported`. |
-| 4 | "six inactive schedules" | All six carry an **empty `schedules: []` body**; the id is base64 of `CPS{atomId}:{processId}` | Schedule **content** has zero evidence → `guidance-only`, absent from the schema. A schedule binds a process to a **RUNTIME**, never an environment → `schedule_environment_binding` is `unsupported`. |
+| 4 | "six inactive schedules" | All six carry an **empty `schedules: []` body**; the id is base64 of `CPS{atomId}:{processId}` | Schedule **cron/interval content** has no evidence to model from → `guidance-only`, absent from the schema. Retry and active state ARE observed and are recorded as snapshot observations, never as authored fields. A schedule binds a process to a **RUNTIME**, never an environment → `schedule_environment_binding` is `unsupported`. |
 | 5 | "zero active deployments" | **False as stated.** `work` has 18 inactive records; `renera` has an **active** one. | Deployment reads establish that records exist *and can be listed*; they establish nothing about **creating** one. `topology_apply` and `atomic_multi_process_deployment` stay `unsupported` — the verdict never depended on the active flag, and a reason falsifiable by looking at a second account is not a reason to publish. |
 | 6 | "zero queue components" | Confirmed, both profiles | `external_queue`, `external_event_stream`, `queue_reference`, `event_stream_reference` are permanently `gated-no-evidence` in V1. ADR-001 §12 rejects speculative queue mutation outright. |
 
@@ -153,7 +153,7 @@ collector's rule that only a genuine contradiction is a finding.
 - **`listener_status_as_api_route_witness`** — the source's observed behavior conflicts with its own
   documented example, so it is `unsupported` with `conflicting` source and documentation legs.
 
-**No environment classification is assumed.** One of the two live profiles has two `TEST`
+**No environment classification is assumed.** A profile in the capture has two `TEST`
 environments and no `PROD`; requiring one would make a real account unmodelable. `classification` is
 optional, and authoring it opts into an equality check against discovery.
 
@@ -161,7 +161,7 @@ optional, and authoring it opts into an equality check against discovery.
 
 ## 4b. Evidence discipline in the resolver
 
-Ten rules the resolver enforces, each of which the first implementation got wrong in the
+Eleven rules the resolver enforces, each of which the first implementation got wrong in the
 same direction — by treating a gap in evidence as a fact.
 
 **Type is carried, never discarded.** Indexes hold `(id, type)`, not bare ids, and a reference
@@ -176,10 +176,33 @@ contained it was **observed and complete**: a literal id missing from a 100-of-1
 evidence the component does not exist. A ComponentPlan symbol table is complete by construction (it
 *is* the plan); a live listing is not.
 
+Completeness is a **universal over a type's pages, never an existential**. Written as a set
+comprehension it asked whether *some* page for a type looked complete, so two pages normalizing to
+one name — a raw duplicate, or any pair from the alias set `_normalize_component_type` collapses —
+marked the type complete while one of them was truncated. Absence then published from a
+demonstrably partial listing, and paging through *removed* the resulting not-found: the one outcome
+this contract tells callers cannot happen.
+
+That asymmetry holds **within an account and nowhere else**. Across accounts the id names a
+different thing entirely — this package records that two profiles legitimately hold the same
+component ids for different things — so the type comparison answers to the same `same_account`
+predicate absence does. It did not, and a coherent capture of another account, barred from
+confirming a reference, witnessing its absence or supplying its classification, could still *refute*
+its type: a `TOPOLOGY_REFERENCE_TYPE_MISMATCH` published about an account nobody read.
+
 **Profile isolation is per FACT.** A snapshot can carry the right profile while an individual fact
 inside it names another account. Such facts are **discarded** before indexing — a fact from another
 account is not weaker evidence about this one, it is evidence about a different system — and their
 presence raises `TOPOLOGY_ENVIRONMENT_MISMATCH` rather than being dropped silently.
+
+Discarding and *accusing* answer to different anchors, and conflating them published a falsehood
+twice. What this context may index is decided against the **context's** profile. Whether the capture
+is internally mixed — the `mixed-profile-snapshot` provenance, which asserts a defect in whatever
+produced it — is decided against the **capture's own envelope**, in `_internally_mixed_fact_count`.
+A coherent single-account capture handed to another account's context is entirely unusable here and
+not mixed at all; counting its every row as foreign accused the producer of a defect it did not
+have, on top of the true `/profile_ref` mismatch. The two call for different fixes: repair the
+producer, versus supply the right capture.
 
 **Runtimes are not an inventory.** Discovery derives runtimes from *schedule rows*, so it sees only
 runtimes that already have a schedule. `runtime_inventory_complete` is `False` and nothing sets it
@@ -211,13 +234,68 @@ actual row list**: `key in payload` accepted `{"environments": null}` as an obse
 and let a string reach the row walk, so the check is `isinstance(..., (list, tuple))`. One check
 guards both listings, so both are closed by it.
 
+**No published string asserts a live universal — on any surface.** `TopologyGuidanceV1` is
+`subject + message` with no
+provenance and no revision stamp — unlike findings, which carry `capture:*` tokens, and capability
+legs, which name their source — so a present-tense claim about the account is unfalsifiable to a
+reader and refutable by the payload beside it. "No API Service Component exists in either live
+profile today" published next to a resolved `existing_component` row, reachable through the shipped
+capture, which reads `webservice`; and "no shape has evidence" for schedule content was false of
+retry, whose observed value the snapshot model records for exactly that reason. Guidance states what
+a **capture observed**, and keeps *not modeled* distinct from *no evidence*.
+
+The rule is enforced over **six surfaces at once** — rendered schema descriptions, all thirteen
+module docstrings (the package's own `__init__` included: `iter_modules` yields a package's
+children, never the package, and the front-door docstring was the one it missed), every class and
+function docstring in the package (only a fraction reach the schema), `_MESSAGES`, `_REMEDIATION`,
+and the guidance/decision strings collected by *invoking* the derivers rather than reading their
+source, which quotes retracted claims in order to refute them. The derivers are invoked over **both**
+context arms: with no snapshot, and with a same-account snapshot that is truncated, partly unanswered
+and unobserved — a single snapshot-free call reached only three of the six decisions, and the three
+it missed were the absence notices most of these defects shipped on.
+
+The prose surface is checked for **equality against an independent AST ledger** of the package's own
+source, not against a hand-kept floor. Two consecutive rounds of findings were the census missing a
+*kind of definition* — a package versus its children, then a class versus its methods, where
+`vars(cls)` hands back the `classmethod`/`property` descriptor rather than the function — and a
+floor with slack in it cannot notice a third. Per-surface minimums still guard the derived surfaces,
+and the decision subjects are asserted **by name**: a count alone was satisfied exactly by the
+reachable subset, so the mechanism meant to catch a missing surface could not see that half of one
+had never been there. The quote-and-refute exemption is granted **by phrase, never by module** — a
+module-granular one hid a genuine universal four list items from the citation it was granted for.
+
+The guard is a **vocabulary blocklist, not a scope discriminator** — a universal avoiding the words
+*live* and *zero* passes it, and some correct capture-scoped prose trips it. Both were measured.
+Widening it does not fix that; the class is not decidable from a word list, and each added pattern
+enlarges a false-positive surface an author routes around by rewording — which is how the class kept
+returning. What it buys is bounded and real: no sentence this project has already got wrong can come
+back on any published surface. The durable rule is editorial, and the guard enforces its cheapest
+half.
+
 **A query that did not answer is announced, never merely survived.** Giving the environment listing
 an observation flag created a third state beside *observed* and *observed-empty*, and its only
 published trace was one missing row in `resolved_references` — `is_valid` true, no blocker, no
 warning, nothing naming it. That is the silence the component path already refuses via
 `discovery_unobserved_query`, so the environment listing gets `environment_inventory_unobserved`
 under its own subject: the component decision's text is about what an unobserved *queue* listing
-does not prove, which is not the action to take here.
+does not prove, which is not the action to take here. All three absence notices are scoped to what they
+actually witness, and nothing wider. `discovery_pagination` says what truncation actually costs —
+*coverage* — and never offers paging as a way to clear a finding, because "page through fully before
+treating a not-found reference as real" was inert against every blocker there is: first against
+environment references judged from their own listing, and then, once narrowed to components, against
+component references too (a literal id is reported not-found only when its type is in `complete`,
+and a `$ref` resolves against the symbol table).
+
+It also makes **no claim about what a re-run does to the findings already in the plan**, and two
+attempts at one are on the record because both were false. "Paging can only add findings" is refuted
+by `_collect`, which skips the dependency phase whenever a reference finding exists — so a page that
+reveals one *removes* an already-reported cycle. "A not-found came from a complete listing" is true
+of that id and still does not bound the outcome, because `component_ids` is keyed by id across every
+type, so paging a *different* type can turn a not-found into a type mismatch and retire it. A notice
+whose job is to report a coverage gap has no business predicting a re-run. A snapshot can carry environment rows while claiming no observation — a hand-built
+context, or an adapter written before the envelope change — and those rows still resolve, because a
+present row is positive evidence that something saw it. A notice that said no reference had been
+judged would sit in the same plan as the `platform_resource` resolution contradicting it.
 
 **One evidence set is authoritative in every direction or in none.** Absence authority is qualified
 to the **authored** `profile_ref`, not merely to an internally-coherent context — and so is the
@@ -232,6 +310,10 @@ only when it is about the authored account *and* the context can use it — an e
 `prepare_topology_context` discard every row inside it. Checking only one anchor left a snapshot that
 matched the spec but not the context contributing nothing while the caller was still handed its
 pagination notice, advising them to page through a capture the planner had already thrown away.
+Widening the trigger set widened the sentence with it: `live_revalidation` now says a snapshot does
+not *apply*, because "produced without a live discovery snapshot" was false in two of its three
+triggers — one was supplied and then refused — beside a blocker whose own remediation names the
+snapshot envelope.
 
 ---
 

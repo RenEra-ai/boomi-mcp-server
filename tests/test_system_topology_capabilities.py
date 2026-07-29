@@ -146,7 +146,7 @@ def test_capability_for_refuses_an_unregistered_subject():
 
 
 def test_api_service_is_emittable_but_its_live_leg_is_unavailable():
-    """Zero ``webservice`` components exist in either live profile today.
+    """The capture observed no ``webservice`` components.
 
     The typed builder is real, so the object stays emittable — but claiming the
     live leg satisfied would be the exact overclaim this issue forbids.
@@ -169,7 +169,8 @@ def test_dependency_api_is_registered_as_an_unsupported_process_call_witness():
 
 
 def test_schedule_content_is_guidance_only_with_no_live_evidence():
-    """Every live schedule carried an empty body, so no shape has evidence."""
+    """Every schedule body in the capture was empty, so cron/interval shape
+    has no evidence to model from."""
     row = capability_for("schedule_content")
     assert row.state == "guidance-only"
     assert row.live.status == "unavailable"

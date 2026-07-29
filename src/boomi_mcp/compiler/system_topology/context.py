@@ -19,7 +19,7 @@ made by accident.
 
 from __future__ import annotations
 
-from typing import FrozenSet, List, Literal, Optional, Tuple
+from typing import Dict, FrozenSet, List, Literal, Optional, Tuple
 
 from ...models.integration_models import IntegrationSpecV1
 from .contracts import _TopologyPlanningModel
@@ -100,8 +100,10 @@ class ScheduleBindingFactV1(_TopologyPlanningModel):
     """An observed schedule binding.
 
     ``active`` and ``has_schedule_body`` are observations, not authored intent.
-    Both were False for every live schedule captured, which is precisely why
-    schedule content is guidance-only.
+    Both were False for every schedule in the capture. That is why cron/interval
+    CONTENT is guidance-only — there is no observed shape to model from — and
+    not a statement that nothing about a schedule was observed: these two fields
+    and ``observed_max_retry`` are exactly what was.
     """
 
     profile: str
@@ -110,9 +112,9 @@ class ScheduleBindingFactV1(_TopologyPlanningModel):
     active: bool = False
     has_schedule_body: bool = False
     #: The retry bound the platform actually reported. An OBSERVATION, not
-    #: authored schedule content — every live schedule carried
+    #: authored schedule content — every schedule in the capture carried
     #: ``retry.max_retry: 5`` while its ``schedules`` body was empty, so this is
-    #: the one piece of schedule configuration that has live evidence. It is
+    #: the one piece of schedule configuration with observed evidence. It is
     #: recorded here and nowhere in the authored contract.
     observed_max_retry: Optional[int] = None
 
@@ -121,9 +123,10 @@ class DeploymentFactV1(_TopologyPlanningModel):
     """An observed deployment record.
 
     ``active`` is recorded faithfully and carries no capability meaning either
-    way. Active records DO exist in the live account; that neither grants nor
-    withholds an apply path here, because listing a deployment and creating one
-    are different capabilities and only the first was ever observed.
+    way. The capture observed active records as well as inactive ones; that
+    neither grants nor withholds an apply path here, because listing a
+    deployment and creating one are different capabilities and only the first
+    was ever observed.
     """
 
     profile: str
@@ -298,8 +301,13 @@ class PreparedTopologyContextV1(_TopologyPlanningModel):
     #: ``list_environments`` is not paged, so an observed empty result is
     #: conclusive — but only when the snapshot belongs to this account.
     environment_inventory_observed: bool = False
-    #: How many facts were discarded for naming a different profile. A COUNT,
-    #: never the values — the whole point is that they are foreign.
+    #: How many facts disagree with their OWN capture's envelope — i.e. how
+    #: internally mixed the snapshot is. A COUNT, never the values; the whole
+    #: point is that they are foreign. Not "how many rows this context refused":
+    #: a coherent single-account capture handed to another account's context is
+    #: entirely unusable here and yet not mixed at all, and the two are reported
+    #: separately because they call for different fixes — repair the producer,
+    #: versus supply the right capture.
     foreign_profile_fact_count: int = 0
 
 
@@ -328,6 +336,37 @@ def project_component_plan_symbols(
             has_process_ir=component.key in process_ir_keys,
         )
         for component in spec.components
+    )
+
+
+def _internally_mixed_fact_count(snapshot) -> int:
+    """How many rows disagree with their OWN capture's envelope.
+
+    Deliberately NOT one of the per-fact profile filters, and deliberately not
+    anchored like them. Those decide what this CONTEXT may index, and answer to
+    the context's profile; this decides whether the CAPTURE is self-consistent,
+    and answers to the capture's own envelope. Its single consumer says a
+    mixed-profile snapshot is a defect in whatever produced it — a claim about
+    the producer, which the context cannot be evidence for.
+
+    Both anchorings have been wrong here in turn, in the same direction:
+    deriving the count from the kept-list lengths made an envelope mismatch
+    report every correctly-stamped row as foreign; re-deriving it per row but
+    against the CONTEXT left the identical falsehood reachable by the other
+    route, so a capture that is single-account by every reading of itself,
+    handed to a context for a different profile, had all of its rows counted
+    foreign and was accused of being mixed. Nothing about such a capture is
+    mixed — it is simply about another account, which is separately reported at
+    ``/profile_ref``, and the two call for different fixes: repair the producer,
+    versus supply the right capture.
+    """
+    envelope = snapshot.profile
+    return (
+        sum(1 for c in snapshot.components if c.profile != envelope)
+        + sum(1 for e in snapshot.environments if e.profile != envelope)
+        + sum(1 for r in snapshot.runtimes if r.profile != envelope)
+        + sum(1 for s in snapshot.schedule_bindings if s.profile != envelope)
+        + sum(1 for d in snapshot.deployments if d.profile != envelope)
     )
 
 
@@ -391,19 +430,10 @@ def prepare_topology_context(
         kept_runtimes = [r for r in snapshot.runtimes if r.profile == profile]
     else:
         kept_components, kept_environments, kept_runtimes = [], [], []
-    # Counted from each ROW's own profile, independently of whether the envelope
-    # permitted indexing it. Deriving it from the kept-list lengths made an
-    # envelope mismatch report every correctly-stamped row as foreign, so a
-    # capture with no foreign row at all still emitted
-    # ``mixed-profile-snapshot`` on top of the true envelope mismatch — two
-    # findings for one problem, one of them false.
-    foreign = (
-        sum(1 for c in snapshot.components if c.profile != profile)
-        + sum(1 for e in snapshot.environments if e.profile != profile)
-        + sum(1 for r in snapshot.runtimes if r.profile != profile)
-        + sum(1 for s in snapshot.schedule_bindings if s.profile != profile)
-        + sum(1 for d in snapshot.deployments if d.profile != profile)
-    )
+    # Not a fourth per-fact filter — a measure of the CAPTURE's own coherence,
+    # which is why it lives in its own function and is anchored differently.
+    # Conflating the two is what produced the defect it now avoids.
+    foreign = _internally_mixed_fact_count(snapshot)
 
     # The THIRD type-bearing field, normalized like the other two. Its consumer
     # compares these against the same canonical vocabulary the expected object
@@ -420,16 +450,23 @@ def prepare_topology_context(
     # an alpha context produced confident NOT_FOUND findings for alpha's
     # components, environments and runtimes. Absence is the one claim that must
     # never survive a profile mismatch.
-    complete = (
-        tuple(
-            sorted(
-                {
-                    _normalize_component_type(page.component_type)
-                    for page in snapshot.pagination
-                    if page.observed and not page.truncated
-                }
-            )
+    # A UNIVERSAL over a type's pages, not an existential. The set comprehension
+    # asked "does SOME page for this type look complete", so two pages
+    # normalizing to one type — a raw duplicate, or any pair from the alias set
+    # ``_normalize_component_type`` deliberately collapses — put the type in
+    # ``complete`` as long as ONE of them was untruncated. Absence was then read
+    # as conclusive from a listing that was demonstrably partial, and paging
+    # through REMOVED the resulting not-found: the one outcome this field's own
+    # docstring promises cannot happen. A type is complete only when every page
+    # under its normalized name was observed and untruncated.
+    page_complete: Dict[str, bool] = {}
+    for page in snapshot.pagination:
+        name = _normalize_component_type(page.component_type)
+        page_complete[name] = page_complete.get(name, True) and (
+            page.observed and not page.truncated
         )
+    complete = (
+        tuple(sorted(name for name, ok in page_complete.items() if ok))
         if envelope_matches
         else ()
     )

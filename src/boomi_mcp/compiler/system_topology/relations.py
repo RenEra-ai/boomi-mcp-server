@@ -571,11 +571,23 @@ def derive_guidance(
         guidance.append(
             TopologyGuidanceV1(
                 subject="schedule_content",
+                # "No shape has evidence" was false of one of the three things
+                # it listed. ``ScheduleBindingFactV1.observed_max_retry`` exists
+                # precisely because retry IS observed live — its own docstring
+                # calls it the one piece of schedule configuration with live
+                # evidence. Not-modeled and no-evidence are different claims,
+                # and collapsing them contradicted the snapshot in the same
+                # package.
                 message=(
-                    "Schedule content (cron/interval, retry policy, active state) "
-                    "is not modeled: every schedule observed live carries an empty "
-                    "body, so no shape has evidence. Set it with the existing "
-                    "schedule tools after the components exist."
+                    "Schedule content (cron/interval, retry policy, active "
+                    "state) is not modeled here. Every schedule body observed "
+                    "live was empty, so cron/interval shape has no evidence to "
+                    "model from. Retry differs: where a capture observes a "
+                    "max-retry value it is recorded as a discovery observation "
+                    "rather than as authored intent, so it is never something "
+                    "this contract sets. Set schedule "
+                    "content with the existing schedule tools after the "
+                    "components exist."
                 ),
             )
         )
@@ -583,11 +595,21 @@ def derive_guidance(
         guidance.append(
             TopologyGuidanceV1(
                 subject="api_service",
+                # About the CAPTURE behind the capability rows, not about the
+                # account as it stands. "No API Service Component exists in
+                # either live profile today" is a live universal in the present
+                # tense, and the plan's own payload can refute it: the shipped
+                # capture reads ``webservice``, so a resolved
+                # ``existing_component`` row published beside this sentence
+                # said both. "Either live profile" was stale on top of that —
+                # there is one profile now. A statement about what a past
+                # capture observed stays true whatever today's snapshot holds.
                 message=(
-                    "No API Service Component exists in either live profile today, "
-                    "so the live leg of this relation's evidence is unavailable. "
-                    "The typed builder and its recorded fixtures are the only "
-                    "current support."
+                    "The live evidence leg for this relation is unavailable: no "
+                    "API Service Component was observed when this contract's "
+                    "capability rows were captured, so route behavior rests on "
+                    "the typed builder and its recorded fixtures rather than on "
+                    "live confirmation."
                 ),
             )
         )
@@ -653,10 +675,28 @@ def derive_unresolved_decisions(
         decisions.append(
             TopologyDecisionV1(
                 subject="live_revalidation",
+                # True in all THREE triggers, and its remedy actionable in each.
+                # "Produced without a live discovery snapshot" was false in two
+                # of them — a snapshot was supplied and then refused — beside a
+                # blocker whose own remediation names the snapshot envelope.
+                # The first correction still failed the THIRD trigger, which
+                # fires alone when the snapshot matches the spec but not the
+                # context: there both "none was supplied" and "belongs to a
+                # different account than the one being planned" are false of a
+                # genuine capture of exactly the planned account, and "re-run
+                # with a snapshot for this account" is inert — following it
+                # reproduces the same plan. Matching BOTH anchors is the
+                # condition actually being tested, so it is the condition
+                # stated, and supplying a capture that matches both is a step
+                # that changes the outcome in every trigger.
                 question=(
-                    "This plan was produced without a live discovery snapshot, so "
-                    "existing-component references and environment classifications "
-                    "are unverified. Re-run with a snapshot before acting on it."
+                    "No live discovery snapshot applies to this plan. Either "
+                    "none was supplied, or the one supplied names an account "
+                    "that does not match BOTH this plan's profile_ref and the "
+                    "resolution context it was handed to. Existing-component "
+                    "references and environment classifications are therefore "
+                    "unverified. Supply a snapshot whose profile matches both "
+                    "before acting on it."
                 ),
             )
         )
@@ -675,13 +715,25 @@ def derive_unresolved_decisions(
             decisions.append(
                 TopologyDecisionV1(
                     subject="environment_inventory_unobserved",
+                    # Scoped to ABSENCE, exactly like the component sibling.
+                    # "No environment reference was judged against it" was
+                    # false and self-contradicting: a snapshot assembled by hand
+                    # (or by a pre-envelope adapter) can carry environment rows
+                    # while claiming no observation, and ``resolve_topology_
+                    # references`` still resolves against those rows — correctly,
+                    # because a PRESENT row is positive evidence that something
+                    # saw it. What an unobserved listing cannot support is the
+                    # inference from silence. One plan may not report an
+                    # environment as resolved and simultaneously say nothing was
+                    # judged.
                     question=(
                         "The environment listing did not answer, so this "
-                        "snapshot cannot say which environments exist. No "
-                        "environment reference was judged against it — absence "
-                        "from it is not evidence of absence in the account. "
-                        "Re-run discovery before treating an environment "
-                        "reference as verified."
+                        "snapshot cannot be read as a complete environment "
+                        "inventory. Rows it does carry still resolve; what it "
+                        "cannot witness is ABSENCE — a reference missing from "
+                        "it was left unjudged rather than reported not-found. "
+                        "Re-run discovery before relying on an environment "
+                        "being absent."
                     ),
                 )
             )
@@ -695,12 +747,20 @@ def derive_unresolved_decisions(
             decisions.append(
                 TopologyDecisionV1(
                     subject="discovery_unobserved_query",
+                    # Absence-scoped, for the same reason the environment
+                    # notice is: "cannot say whether those components exist"
+                    # publishes beside the rows that DID resolve out of the same
+                    # snapshot. An unanswered listing withdraws the inference
+                    # from silence, not the rows in hand.
                     question=(
-                        "At least one component query did not answer, so this "
-                        "snapshot cannot say whether those components exist. "
-                        "Re-run discovery before relying on any absence — in "
-                        "particular, an unobserved queue listing is not "
-                        "evidence that the account has no queues."
+                        "At least one component query did not answer. Rows the "
+                        "snapshot does carry still resolve; what it cannot "
+                        "witness is ABSENCE — a component missing from an "
+                        "unanswered listing was left unjudged rather than "
+                        "reported not-found. Re-run discovery before relying "
+                        "on any absence — in particular, an unobserved queue "
+                        "listing is not evidence that the account has no "
+                        "queues."
                     ),
                 )
             )
@@ -709,11 +769,48 @@ def derive_unresolved_decisions(
             decisions.append(
                 TopologyDecisionV1(
                     subject="discovery_pagination",
+                    # Scoped to COMPONENT references, because that is all
+                    # pagination witnesses. Environment and runtime absence are
+                    # judged from their own listings, so a plan could block on
+                    # ``/objects/N/environment_ref`` while this notice told the
+                    # caller that absence proved nothing and to page through
+                    # before believing it — advice that is inert against that
+                    # blocker: paging fully retires the notice and leaves the
+                    # blocker exactly where it was. Narrowing it to COMPONENT
+                    # references did not go far enough: no published component
+                    # not-found is a paging artifact either. A literal id is
+                    # only reported missing when ``expected in complete``, and
+                    # ``complete`` is exactly the types whose page was observed
+                    # AND untruncated; a ``$ref`` resolves against the symbol
+                    # table, complete by construction. Paging is therefore
+                    # inert against every blocker there is. What truncation
+                    # actually costs is COVERAGE, and that is all this notice
+                    # now claims.
+                    #
+                    # It deliberately makes NO claim about what re-running does
+                    # to existing findings. Two attempts at one did not survive
+                    # contact with the planner. "Paging can only add findings"
+                    # is false: ``_collect`` skips the dependency phase whenever
+                    # a reference finding exists, so a page that adds one
+                    # REMOVES an already-reported cycle. "A literal id is only
+                    # reported missing from a complete listing" is true of that
+                    # id and still does not bound the outcome, because
+                    # ``component_ids`` is keyed by id across every type — so
+                    # paging a DIFFERENT type can turn a not-found into a type
+                    # mismatch and retire it. A notice whose job is to report a
+                    # coverage gap has no business predicting a re-run.
                     question=(
-                        "At least one component query was truncated, so absence "
-                        "from this snapshot is not evidence of absence in the "
-                        "account. Page through fully before treating a "
-                        "not-found reference as real."
+                        "At least one component query was truncated, so any "
+                        "component on a page that was not read was left "
+                        "UNJUDGED — neither confirmed nor refuted. Page "
+                        "through fully to have those judged. This notice is "
+                        "about COVERAGE, and says nothing about the findings "
+                        "already in this plan: re-running against a complete "
+                        "capture can change them in either direction, so read "
+                        "the new plan rather than assuming this one held. "
+                        "Environment and runtime references are outside this "
+                        "notice's scope — their absence is judged from their "
+                        "own listings, not from pagination."
                     ),
                 )
             )

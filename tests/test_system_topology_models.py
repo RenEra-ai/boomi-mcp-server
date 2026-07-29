@@ -719,6 +719,501 @@ def test_schema_golden_pin_matches_the_committed_fixture():
     assert canonical_system_topology_schema_json() == committed.strip()
 
 
+#: Present-tense universals about the live account. A rendered schema
+#: description carries no provenance and no revision stamp, so a reader cannot
+#: check one and a later account state silently falsifies it. Statements about
+#: what a CAPTURE observed stay true; statements about what the account IS do
+#: not. Same rule the plan's decisions and guidance already follow.
+#: What this guard is, stated plainly so nobody mistakes it for more.
+#:
+#: It is a VOCABULARY BLOCKLIST, not a scope discriminator. It catches the
+#: phrasings this contract has actually shipped and retracted; a universal that
+#: avoids the words *live* and *zero* passes it, and some correct capture-scoped
+#: prose trips it. Both were measured, not assumed.
+#:
+#: Widening it does not fix that — the class "present-tense claim about the
+#: account" is not decidable from a word list, and every added pattern enlarges
+#: an unmeasured false-positive surface that a future author will route around
+#: by rewording, which is exactly how the class kept reappearing. What it buys
+#: is real and bounded: no sentence this project has already got wrong can come
+#: back on any of the six published surfaces, which is the failure mode that
+#: actually recurred nine times.
+#:
+#: The durable rule is editorial, and the guard only enforces its cheapest half:
+#: say what a CAPTURE OBSERVED, never what the account IS.
+_LIVE_UNIVERSAL_PATTERNS = (
+    r"\bthe live account\b",
+    r"\bevery live\b",
+    # Any count of "live profiles" at all. The account has ONE profile; every
+    # phrasing that presumes two has been retracted, and "one of the two
+    # live profiles" slipped past a pattern written for "in either/both".
+    r"\blive profiles?\b",
+    r"\bexists? in .{0,30}live\b",
+    # Absolute evidence denials, which have twice been false of one member of
+    # the very list they quantified over. ``no evidence to model from`` and
+    # ``no evidence you can supply will clear it`` are exempt by construction:
+    # the first is already capture-scoped by its sentence, the second is a
+    # statement about the GATE, not about the account.
+    r"\bno (live|current|available) evidence\b",
+    r"\bno evidence at all\b",
+    r"\bzero evidence\b",
+    # Bare existence counts about the account, the shape #260 and the queue
+    # bullet both used.
+    r"\bzero \w+ components? (exist|are)\b",
+    r"\bcontains zero\b",
+)
+
+
+def _schema_descriptions():
+    """Every ``description`` the rendered schema publishes, with its path."""
+    import json
+
+    found = []
+
+    def walk(node, path):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "description" and isinstance(value, str):
+                    found.append((path, value))
+                else:
+                    walk(value, f"{path}/{key}")
+        elif isinstance(node, list):
+            for index, item in enumerate(node):
+                walk(item, f"{path}/{index}")
+
+    walk(json.loads(canonical_system_topology_schema_json()), "")
+    return found
+
+
+def _live_universals(descriptions):
+    import re
+
+    offenders = []
+    for path, text in descriptions:
+        normalized = re.sub(r"\s+", " ", text).strip().lower()
+        for pattern in _LIVE_UNIVERSAL_PATTERNS:
+            if re.search(pattern, normalized):
+                offenders.append((path, pattern))
+    return offenders
+
+
+#: Deliberate quote-and-refute PHRASES: prose that names a retracted claim in
+#: order to say it was wrong. Exempted by phrase, never by module — a
+#: module-granular exemption hid a genuine live universal four items away from
+#: the citation it was granted for, in the same docstring (QA #266). Each is
+#: asserted to still be present, so the record of why cannot quietly vanish.
+#: Bare phrases, quote-agnostic: the citation is wrapped in curly quotes and
+#: split across source lines, so a literal with straight quotes matched nothing
+#: — the QA #212 failure mode exactly. Stripped from NORMALIZED text.
+_QUOTE_AND_REFUTE_PHRASES = ("every live deployment record is inactive",)
+
+
+def _unwrap_callable(member):
+    """The underlying function behind a method, property or decorator wrapper.
+
+    ``vars(cls)`` hands back the DESCRIPTOR, not the function: a ``classmethod``
+    object, a ``property``, a pydantic validator wrapper. Reading ``__doc__``
+    off the descriptor found three of the five method docstrings in one module
+    and silently skipped the other two — the same "the enumeration missed a kind
+    of thing" hole as the package-vs-children one, one level further in.
+    """
+    for attribute in ("__func__", "fget", "func", "wrapped", "wrapped_property"):
+        inner = getattr(member, attribute, None)
+        if inner is not None and inner is not member:
+            return _unwrap_callable(inner)
+    return member
+
+
+def _package_docstring_count():
+    """Every docstring in the package's SOURCE, counted by AST.
+
+    An independent ledger, so "the census reaches every docstring" is a checked
+    property rather than a magic number that drifts. Two consecutive rounds of
+    findings were the census missing a kind of definition; a hand-maintained
+    floor cannot notice a third.
+    """
+    import ast
+    import pathlib
+
+    import boomi_mcp.compiler.system_topology as pkg
+    import boomi_mcp.models.system_topology as models
+
+    # rglob, not glob: the two ledgers cannot drift FROM each other, but with a
+    # hard-coded flat file list they drift TOGETHER the moment a subpackage
+    # appears — and this equality exists precisely to survive future additions,
+    # in an epic whose history is module extraction.
+    files = sorted(pathlib.Path(pkg.__path__[0]).rglob("*.py"))
+    files.append(pathlib.Path(models.__file__))
+    total = 0
+    for path in files:
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(
+                node,
+                (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef),
+            ) and ast.get_docstring(node):
+                total += 1
+    return total
+
+
+def _emitted_strings(function_name, keyword):
+    """Every literal ``message=``/``question=`` the named deriver can construct.
+
+    Keyed on the STRING, not on the subject name. A subject-name ledger is
+    blind at exactly one notch: a second construction site reusing a subject
+    already reached from elsewhere adds no new name, so its text was never
+    censused — QA #275's own argument one level in. The string is a fixed
+    point, because the string is what a caller reads.
+
+    Every site must supply that keyword as a literal. A ``**kwargs`` splat
+    carries ``ast.keyword.arg is None`` and would otherwise contribute nothing
+    silently, so it is asserted rather than skipped; the same assert makes a
+    computed message loud instead of invisible.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    from boomi_mcp.compiler.system_topology import relations
+
+    tree = ast.parse(
+        textwrap.dedent(inspect.getsource(getattr(relations, function_name)))
+    )
+    constructors = {"TopologyGuidanceV1", "TopologyDecisionV1"}
+    strings, sites = set(), 0
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in constructors
+        ):
+            continue
+        sites += 1
+        values = [kw.value for kw in node.keywords if kw.arg == keyword]
+        assert len(values) == 1, (function_name, keyword, "site without one literal")
+        assert isinstance(values[0], ast.Constant), (
+            function_name,
+            ast.dump(values[0]),
+        )
+        strings.add(_normalize_prose(values[0].value))
+    assert sites and len(strings) == sites, (function_name, sites, len(strings))
+    return strings
+
+
+def _normalize_prose(text):
+    import re
+
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _all_published_prose():
+    """Every string this package puts in front of a caller, with its origin.
+
+    SIX surfaces. Each earlier version of this guard read a subset, and each
+    time the next defect shipped on a surface it did not read — including,
+    twice, the surface the motivating defect had itself shipped on. Guidance and
+    decisions are collected by INVOKING the derivers, not by reading their
+    source: source carries the comments that quote retracted claims in order to
+    refute them, and a guard that reads those is guaranteed to fire on its own
+    explanations. They are invoked over BOTH context arms, because one spec is
+    not enough — ``derive_unresolved_decisions`` branches on the snapshot, and a
+    snapshot-free call reaches only half its strings.
+    """
+    import importlib
+    import inspect
+    import pkgutil
+
+    import boomi_mcp.compiler.system_topology as pkg
+    import boomi_mcp.models.system_topology as models
+    from boomi_mcp.compiler.system_topology import findings as findings_mod
+    from boomi_mcp.compiler.system_topology.context import (
+        DependencyCorroborationV1,
+        TopologyResolutionContextV1,
+        prepare_topology_context,
+    )
+    from boomi_mcp.compiler.system_topology.relations import (
+        derive_guidance,
+        derive_unresolved_decisions,
+    )
+
+    # Prefixed so the per-surface tally below can tell schema descriptions
+    # from the class docstrings that are NOT rendered into the schema.
+    rows = [("schema" + path, text) for path, text in _schema_descriptions()]
+
+    # ``pkg`` itself is listed explicitly: ``iter_modules`` yields a package's
+    # CHILDREN, never the package, so the front-door ``__init__`` docstring —
+    # the first thing a reader opens — was the one module of thirteen this
+    # guard did not read.
+    # ``walk_packages`` recurses, so a future subpackage is censused rather than
+    # silently dropped from both sides at once (QA #274).
+    modules = [models, pkg] + [
+        importlib.import_module(info.name)
+        for info in pkgutil.walk_packages(pkg.__path__, prefix=f"{pkg.__name__}.")
+    ]
+    for module in modules:
+        short = module.__name__.rsplit(".", 1)[-1]
+        if module.__doc__:
+            rows.append((f"module:{short}", module.__doc__))
+        # Class and function docstrings too: only a fraction of the package's
+        # models are rendered into the schema, and one of the unrendered ones
+        # was carrying a live universal.
+        for name, obj in vars(module).items():
+            if (
+                (inspect.isclass(obj) or inspect.isfunction(obj))
+                and getattr(obj, "__module__", None) == module.__name__
+                and obj.__doc__
+            ):
+                rows.append((f"{short}.{name}", obj.__doc__))
+            # ...and the class's own MEMBERS. ``vars(module)`` yields the class,
+            # never its methods, so five docstrings — including a
+            # ``@computed_field`` property whose text a caller reads straight
+            # off the schema-adjacent contract — were outside the census. Same
+            # shape as the package-vs-children hole, one level further in.
+            if inspect.isclass(obj) and getattr(obj, "__module__", None) == module.__name__:
+                for member_name, member in vars(obj).items():
+                    if member_name.startswith("__"):
+                        continue
+                    target = _unwrap_callable(member)
+                    if inspect.isfunction(target) and target.__doc__:
+                        rows.append(
+                            (f"{short}.{name}.{member_name}", target.__doc__)
+                        )
+
+    for table in ("_MESSAGES", "_REMEDIATION"):
+        for code, text in getattr(findings_mod, table).items():
+            rows.append((f"{table}[{code}]", text))
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "a",
+            "objects": [
+                {"kind": "api_service", "key": "a", "component_ref": "x"},
+                {"kind": "process", "key": "p", "component_ref": "y"},
+                {"kind": "runtime", "key": "rt", "runtime_ref": "r"},
+                {"kind": "environment", "key": "e", "environment_ref": "env"},
+                {"kind": "schedule", "key": "s"},
+                {"kind": "deployment_unit", "key": "u"},
+                {"kind": "external_queue", "key": "q", "resource_ref": "qr"},
+            ],
+            "relations": [
+                {
+                    "kind": "schedule_binding",
+                    "key": "rs",
+                    "schedule": "s",
+                    "process": "p",
+                    "runtime": "rt",
+                },
+                {
+                    "kind": "deployment_binding",
+                    "key": "rd",
+                    "deployment_unit": "u",
+                    "process": "p",
+                    "environment": "e",
+                },
+                {
+                    "kind": "queue_reference",
+                    "key": "rq",
+                    "process": "p",
+                    "external_queue": "q",
+                },
+            ],
+        }
+    )
+    prepared = prepare_topology_context(
+        TopologyResolutionContextV1(
+            profile="a",
+            dependency_corroboration=(
+                DependencyCorroborationV1(
+                    parent_component_ref="x",
+                    child_component_ref="y",
+                    child_component_type="process",
+                ),
+            ),
+        )
+    )
+    # A SECOND context, because ``derive_unresolved_decisions`` has two arms and
+    # the snapshot-free one reaches only three of its six strings. The three it
+    # misses are precisely the absence notices that carried QA #250, #261 and
+    # #262 — the surface most of this sequence's defects shipped on. A snapshot
+    # that is same-account, truncated, partly unanswered and unobserved reaches
+    # every one of them at once.
+    from boomi_mcp.compiler.system_topology.context import (
+        DiscoveryPageProvenanceV1,
+        TopologyDiscoverySnapshotV1,
+    )
+
+    with_snapshot = prepare_topology_context(
+        TopologyResolutionContextV1(
+            profile="a",
+            snapshot=TopologyDiscoverySnapshotV1(
+                profile="a",
+                captured_at="2026-01-01T00:00:00Z",
+                source_revision="rev",
+                service_release="rel",
+                environment_inventory_observed=False,
+                pagination=(
+                    DiscoveryPageProvenanceV1(
+                        component_type="process",
+                        returned_count=1,
+                        total_available=9,
+                        has_more=True,
+                    ),
+                    DiscoveryPageProvenanceV1(
+                        component_type="queue", returned_count=0, observed=False
+                    ),
+                ),
+            ),
+        )
+    )
+    for context in (prepared, with_snapshot):
+        for guidance in derive_guidance(spec, context):
+            rows.append((f"guidance[{guidance.subject}]", guidance.message))
+        for decision in derive_unresolved_decisions(spec, context):
+            rows.append((f"decision[{decision.subject}]", decision.question))
+    return rows
+
+
+def _strip_quoted_refutations(text):
+    """Remove the exempt phrases, so what surrounds them is still read."""
+    import re
+
+    normalized = re.sub(r"\s+", " ", text).strip().lower()
+    for phrase in _QUOTE_AND_REFUTE_PHRASES:
+        normalized = normalized.replace(phrase, " ")
+    return normalized
+
+
+def test_no_published_surface_asserts_a_live_universal():
+    """QA #264/#266/#267. Every surface a caller can read, in one census.
+
+    Each earlier version read fewer surfaces than the last defect used, and the
+    exemption was module-granular, which hid a genuine universal four list items
+    from the citation it was granted for.
+    """
+    import re
+
+    rows = _all_published_prose()
+
+    # Per-surface minimums, so a surface disappearing is a FAILURE rather than a
+    # smaller number. A single total was satisfied by the schema rows alone.
+    kinds = {}
+    for path, _ in rows:
+        for prefix in ("schema", "module:", "_MESSAGES", "_REMEDIATION", "guidance[", "decision["):
+            if path.startswith(prefix):
+                kinds[prefix] = kinds.get(prefix, 0) + 1
+                break
+        else:
+            kinds["docstring"] = kinds.get("docstring", 0) + 1
+    # The prose surface is checked for EQUALITY against an independent AST
+    # ledger, not against a hand-kept floor: the last two findings were both the
+    # census missing a kind of definition (a package vs its children, a class vs
+    # its methods), and a floor with slack in it cannot see a third.
+    prose = sum(
+        1
+        for path, _ in rows
+        if not path.startswith(
+            ("schema", "_MESSAGES", "_REMEDIATION", "guidance[", "decision[")
+        )
+    )
+    assert prose == _package_docstring_count(), (prose, _package_docstring_count())
+
+    for prefix, minimum in (
+        ("schema", 40),
+        ("module:", 13),
+        ("_MESSAGES", 14),
+        ("_REMEDIATION", 14),
+        ("guidance[", 4),
+        # Six DISTINCT subjects, asserted separately below — a count alone was
+        # satisfied exactly by the three the old single context could reach, so
+        # the mechanism meant to make a vanished surface fail could not see that
+        # half of one had never been there.
+        ("decision[", 6),
+    ):
+        assert kinds.get(prefix, 0) >= minimum, (prefix, kinds.get(prefix, 0))
+
+    # Every subject the derivers can EMIT must have been reached — derived from
+    # their source, not from a hand-kept list. Pinning the reached set only
+    # described what the two context arms happened to produce, so a subject
+    # gated on something neither arm triggers was published uncensused. This is
+    # the finding that keeps recurring (a rule applied at N-1 of N consumers),
+    # and it is closed here for BOTH derived surfaces at once rather than for
+    # the one that happened to fail last.
+    for prefix, deriver, keyword in (
+        ("guidance[", "derive_guidance", "message"),
+        ("decision[", "derive_unresolved_decisions", "question"),
+    ):
+        reached = {
+            _normalize_prose(text) for p, text in rows if p.startswith(prefix)
+        }
+        emitted = _emitted_strings(deriver, keyword)
+        assert reached == emitted, (prefix, emitted - reached, reached - emitted)
+
+    exempt = [(p, _strip_quoted_refutations(t)) for p, t in rows]
+    assert _live_universals(exempt) == []
+
+    # The refutations are still on the record, where they belong.
+    joined = re.sub(r"\s+", " ", " ".join(t for _, t in rows)).lower()
+    for phrase in _QUOTE_AND_REFUTE_PHRASES:
+        assert phrase in joined, phrase
+
+
+def test_the_published_schema_asserts_no_live_universal():
+    """QA #255/#260. The surface six census rounds never rendered.
+
+    Class docstrings ARE published schema — the lesson of QA #210 — and this
+    schema publishes 60-odd of them verbatim. A retraction applied to
+    ``derive_guidance`` alone therefore landed at one of four asserting sites,
+    and the committed schema golden actively held the retracted sentence in
+    place. A guard that reads the planner's output cannot see this by
+    construction, so it is checked where it is published.
+    """
+    descriptions = _schema_descriptions()
+    # Guard against the walk silently finding nothing, which would pass forever.
+    assert len(descriptions) > 40, len(descriptions)
+    assert _live_universals(descriptions) == []
+
+
+def test_the_live_universal_guard_catches_what_was_retracted():
+    """The control. Each string below was published by this schema and removed."""
+    retracted = (
+        (
+            "/x",
+            "Permanently gated-no-evidence in V1: the live account contains "
+            "zero queue components.",
+        ),
+        (
+            "/y",
+            "Carries NO cron/interval body: every live schedule observed has "
+            "an empty schedules: [] array, so schedule content has no evidence "
+            "to model.",
+        ),
+        ("/z", "No API Service Component exists in either live profile today."),
+        ("/w", "Schedule CONTENT has no evidence at all."),
+        ("/v", "cron/interval shape has zero evidence."),
+    )
+    for row in retracted:
+        assert _live_universals([row]), row[1]
+
+    # ...and the capture-scoped replacements do not trip it, so the guard
+    # discriminates between the claim's SCOPE rather than its subject matter.
+    for row in (
+        ("/a", "the capture behind this contract observed no queue components"),
+        (
+            "/b",
+            "Every schedule body observed in the capture was an empty "
+            "schedules: [] array, so cron/interval shape has no evidence to "
+            "model from.",
+        ),
+        (
+            "/c",
+            "no API Service Component was observed when this contract's "
+            "capability rows were captured",
+        ),
+    ):
+        assert _live_universals([row]) == [], row[1]
+
+
 _HASH_SEED_SCRIPT = """
 import json, sys
 sys.path.insert(0, {src!r})

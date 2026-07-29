@@ -2882,7 +2882,9 @@ def test_per_fact_filtering_anchors_on_the_context_profile():
     )
     # Anchored on the CONTEXT: the omega fact is foreign and is discarded.
     assert prepared.components == ()
-    assert prepared.foreign_profile_fact_count == 1
+    # ...but the CAPTURE is coherent — an omega row inside an omega envelope —
+    # so it is not accused of being mixed on top of being the wrong account.
+    assert prepared.foreign_profile_fact_count == 0
 
 
 def test_a_foreign_snapshot_cannot_donate_its_observation_flag():
@@ -3227,6 +3229,841 @@ def test_an_unobserved_environment_listing_is_announced_not_merely_survived():
     subjects = {d.subject for d in none.unresolved_decisions}
     assert "live_revalidation" in subjects
     assert "environment_inventory_unobserved" not in subjects, subjects
+
+
+def test_the_unobserved_notice_never_contradicts_a_resolved_environment():
+    """The notice claims less than the plan knows, not more.
+
+    A snapshot assembled by hand — or by an adapter written before
+    ``list_environments`` returned an envelope — can carry environment rows and
+    still claim no observation. Those rows resolve, and correctly so: a PRESENT
+    row is positive evidence that something saw it, and withdrawing it would
+    make a real environment unresolvable to protect a claim about absence. So
+    the notice must be scoped to absence, like its component sibling. Saying
+    "no environment reference was judged against it" put a false sentence
+    beside a `platform_resource` resolution in the same plan.
+    """
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import EnvironmentFactV1
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "environment", "key": "e", "environment_ref": "env-1"},
+                {"kind": "environment", "key": "g", "environment_ref": "ghost"},
+            ],
+            "relations": [],
+        }
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            snapshot=_snapshot(
+                profile="p-alpha",
+                environments=(
+                    EnvironmentFactV1(profile="p-alpha", environment_id="env-1"),
+                ),
+                # Rows present, observation NOT claimed.
+                environment_inventory_observed=False,
+            ),
+        ),
+    )
+    # The present row resolves...
+    assert [
+        (r.object_key, r.resolution) for r in plan.resolved_references
+    ] == [("e", "platform_resource")]
+    # ...the absent one is left unjudged rather than reported not-found...
+    assert plan.blockers == (), [b.code for b in plan.blockers]
+    # ...and the notice is there, saying only what is true.
+    notice = next(
+        d
+        for d in plan.unresolved_decisions
+        if d.subject == "environment_inventory_unobserved"
+    )
+    assert "absence" in notice.question.lower()
+    assert _overclaiming_decisions(plan, snapshot_supplied=True) == []
+
+
+# --- the overclaim guard, and its controls -------------------------------
+
+#: A published decision may not assert a UNIVERSAL NEGATIVE about what was
+#: judged while the same plan publishes rows that resolved. Matching the CLASS
+#: rather than one retracted sentence: an identity guard that forbids one string
+#: and requires one word passes any reworded version of the same overclaim, and
+#: rewording is exactly how this defect keeps coming back.
+#: Claims about what the plan JUDGED. False once anything resolved.
+_JUDGEMENT_OVERCLAIMS = (
+    # "no reference was judged", "nothing was checked", "none were verified"
+    r"\b(no|none|nothing|neither)\b[^.]{0,80}"
+    r"\b(judged|checked|verified|examined|resolved|considered)\b",
+    # "presence and absence are both unknown" — a both-directions claim, where
+    # only the absence direction is actually unsupported.
+    r"\bpresence and absence\b",
+    # "cannot say whether X exists" — same both-directions overreach.
+    r"cannot say whether\b[^.]{0,60}\bexist",
+)
+
+#: Claims about whether a snapshot EXISTS. False once one was supplied — even
+#: when it was then refused for naming another account. A separate precondition
+#: on purpose: this class contradicts the blocker text, not the resolution
+#: table, and the shapes that trigger it resolve nothing at all. Folding it in
+#: under the judgement precondition made it unreachable, which is how a guard
+#: comes to forbid a sentence it can never see.
+_SNAPSHOT_EXISTENCE_OVERCLAIMS = (r"\bwithout a live discovery snapshot\b",)
+
+
+def _normalized_question(text):
+    import re as _re
+
+    return _re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _overclaiming_decisions(plan, *, snapshot_supplied=False):
+    """Decisions whose text asserts more than the plan itself supports.
+
+    Runs against the plan, so the controls below drive this same function —
+    a guard graded only by its ingredients is a guard nothing grades.
+    """
+    import re as _re
+
+    active = []
+    if plan.resolved_references:
+        active.extend(_JUDGEMENT_OVERCLAIMS)
+    if snapshot_supplied:
+        active.extend(_SNAPSHOT_EXISTENCE_OVERCLAIMS)
+    offenders = []
+    for decision in plan.unresolved_decisions:
+        question = _normalized_question(decision.question)
+        for pattern in active:
+            if _re.search(pattern, question):
+                offenders.append((decision.subject, pattern))
+    return offenders
+
+
+def test_the_pagination_notice_does_not_speak_for_a_non_component_blocker():
+    """QA #250. Pagination witnesses components; it was talking about all absence.
+
+    A plan can block on ``/objects/N/environment_ref`` — absence judged from an
+    OBSERVED environment listing, which pagination has nothing to do with —
+    while a truncated COMPONENT page publishes "absence from this snapshot is
+    not evidence of absence in the account. Page through fully before treating
+    a not-found reference as real." Against that blocker the remedy is inert:
+    paging fully retires the notice and leaves the blocker untouched.
+    """
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import (
+        ComponentFactV1,
+        DiscoveryPageProvenanceV1,
+        EnvironmentFactV1,
+    )
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "p", "component_ref": "lit-1"},
+                {"kind": "environment", "key": "e", "environment_ref": "ghost"},
+            ],
+            "relations": [],
+        }
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            snapshot=_snapshot(
+                profile="p-alpha",
+                components=(
+                    ComponentFactV1(
+                        profile="p-alpha",
+                        component_id="lit-1",
+                        component_type="process",
+                    ),
+                ),
+                environments=(
+                    EnvironmentFactV1(profile="p-alpha", environment_id="real"),
+                ),
+                environment_inventory_observed=True,
+                pagination=(
+                    DiscoveryPageProvenanceV1(
+                        component_type="process",
+                        returned_count=1,
+                        total_available=9,
+                        has_more=True,
+                    ),
+                ),
+            ),
+        ),
+    )
+    # The two coexist — the environment blocker is real, the truncation is real.
+    assert [b.path for b in plan.blockers] == ["/objects/1/environment_ref"]
+    notice = next(
+        d for d in plan.unresolved_decisions if d.subject == "discovery_pagination"
+    )
+    question = _normalized_question(notice.question)
+    # ...and the notice says which references it speaks for, so its remedy is
+    # not read as applying to a blocker paging cannot retire.
+    assert "environment" in question and "runtime" in question
+    # QA #252. Scoping to COMPONENT references was not enough, and a guard that
+    # only checked vocabulary passed a strictly WORSE sentence. No published
+    # component not-found is a paging artifact either: a literal id is reported
+    # missing only when its type is in ``complete`` — observed and untruncated —
+    # and a ``$ref`` comes from the symbol table. Paging is anti-monotone, so
+    # the notice may not offer it as a way to retire ANY blocker, and must say
+    # what truncation actually costs: coverage.
+    assert "unjudged" in question
+    assert "coverage" in question
+    assert "before treating a not-found" not in question
+    # QA #257/#261/#262. Two successive attempts to say what a re-run does to
+    # existing findings were both false of the planner, so the notice no longer
+    # says anything about it. "Paging can only add findings" is refuted by
+    # ``_collect`` skipping the dependency phase once a reference finding
+    # exists; "a not-found came from a complete listing" is refuted by
+    # ``component_ids`` being keyed by id across every type. A coverage notice
+    # may not predict a re-run.
+    for forbidden in (
+        "can only add findings",
+        "will not retire",
+        "never remove one",
+        "came from a complete listing",
+    ):
+        assert forbidden not in question, forbidden
+
+
+def test_the_two_reference_remediations_name_the_table_that_fixes_them():
+    """QA #258/#259. A remedy pointing at the wrong table does not terminate.
+
+    A ``$ref`` not-found is judged against the ComponentPlan symbol table, so
+    "declare the referenced object in this document" was advice about a document
+    where the object is already declared, and "supply the component fact" was
+    about a listing the ``$ref`` never consults. A type mismatch reported at
+    ``/objects/N/component_ref`` involves no relation role at all, so the
+    endpoint matrix answered nothing.
+    """
+    from boomi_mcp.compiler.system_topology.findings import topology_finding
+
+    not_found = topology_finding(
+        "TOPOLOGY_REFERENCE_NOT_FOUND",
+        severity="error",
+        phase="reference",
+        path="/objects/0/component_ref",
+    ).remediation.lower()
+    # QA #263: the first correction deleted the one arm that was already right.
+    # This code has FOUR emit sites across THREE fix locations, and the
+    # relation-role arm is judged against this document's objects — which the
+    # replacement text explicitly denied.
+    assert "/relations/n/role" in not_found
+    assert "declare that object here" in not_found
+    assert "componentplan" in not_found
+    assert "literal id" in not_found and "credential profile" in not_found
+    # And the wrong-table advice may not come back ALONGSIDE the right advice:
+    # the object referenced by a failing '$ref' is already declared here, so
+    # "declare it in this document" is a step that changes nothing.
+    assert "declare the referenced object in this document" not in not_found
+
+    mismatch = topology_finding(
+        "TOPOLOGY_REFERENCE_TYPE_MISMATCH",
+        severity="error",
+        phase="reference",
+        path="/objects/0/component_ref",
+    ).remediation.lower()
+    # Both arms, since one code serves both paths.
+    assert "on an object" in mismatch and "on a relation" in mismatch
+    assert "endpoint matrix" in mismatch
+
+
+def test_paging_can_remove_a_finding_which_is_why_nothing_claims_otherwise():
+    """QA #261/#262, pinned as BEHAVIOUR so the retracted claim cannot return.
+
+    Two counterexamples, each in a cell the earlier paging pins excluded by
+    construction — they used zero relations, one component type, and compared
+    ``{path}`` rather than ``{(code, path)}``.
+    """
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import (
+        ComponentFactV1,
+        DiscoveryPageProvenanceV1,
+    )
+
+    def _pages(**by_type):
+        return tuple(
+            DiscoveryPageProvenanceV1(
+                component_type=name,
+                returned_count=1,
+                total_available=9 if truncated else 1,
+                has_more=truncated,
+            )
+            for name, truncated in by_type.items()
+        )
+
+    def _findings(spec, facts, pages):
+        return {
+            (b.code, b.path)
+            for b in plan_system_topology(
+                spec,
+                TopologyResolutionContextV1(
+                    profile="p-alpha",
+                    snapshot=_snapshot(
+                        profile="p-alpha", components=facts, pagination=pages
+                    ),
+                ),
+            ).blockers
+        }
+
+    # 1. A reference finding SUPPRESSES the dependency phase, so revealing one
+    #    by paging removes an already-reported cycle.
+    cyclic = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "id-a"},
+                {"kind": "process", "key": "b", "component_ref": "id-b"},
+                {"kind": "process", "key": "c", "component_ref": "ghost"},
+            ],
+            "relations": [
+                {
+                    "kind": "process_call",
+                    "key": "r1",
+                    "caller_process": "a",
+                    "callee_process": "b",
+                },
+                {
+                    "kind": "process_call",
+                    "key": "r2",
+                    "caller_process": "b",
+                    "callee_process": "a",
+                },
+            ],
+        }
+    )
+    facts = (
+        ComponentFactV1(
+            profile="p-alpha", component_id="id-a", component_type="process"
+        ),
+        ComponentFactV1(
+            profile="p-alpha", component_id="id-b", component_type="process"
+        ),
+    )
+    truncated = _findings(cyclic, facts, _pages(process=True))
+    paged = _findings(cyclic, facts, _pages(process=False))
+    assert any(code == "TOPOLOGY_DEPENDENCY_CYCLE" for code, _ in truncated)
+    assert not any(code == "TOPOLOGY_DEPENDENCY_CYCLE" for code, _ in paged)
+
+    # 2. ``component_ids`` is keyed by id across ALL types, so paging a
+    #    DIFFERENT type turns a not-found into a type mismatch and retires it.
+    mistyped = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "document_cache", "key": "d", "component_ref": "id-a"}
+            ],
+            "relations": [],
+        }
+    )
+    before = _findings(mistyped, (), _pages(documentcache=False, process=True))
+    after = _findings(mistyped, facts[:1], _pages(documentcache=False, process=False))
+    assert ("TOPOLOGY_REFERENCE_NOT_FOUND", "/objects/0/component_ref") in before
+    assert ("TOPOLOGY_REFERENCE_NOT_FOUND", "/objects/0/component_ref") not in after
+    assert ("TOPOLOGY_REFERENCE_TYPE_MISMATCH", "/objects/0/component_ref") in after
+
+
+def test_a_type_is_complete_only_when_every_one_of_its_pages_is():
+    """QA #256. The completeness set was an EXISTENTIAL over pages.
+
+    Two pages normalizing to one type — a raw duplicate, or any pair from the
+    alias set ``_normalize_component_type`` collapses — put that type in
+    ``complete_component_types`` as long as ONE of them was untruncated. Absence
+    was then conclusive from a demonstrably partial listing, and paging through
+    REMOVED the resulting not-found: exactly the outcome the field promises
+    cannot happen, and the one the pagination notice now tells callers to expect.
+    """
+    from boomi_mcp.compiler.system_topology.context import (
+        DiscoveryPageProvenanceV1,
+        prepare_topology_context,
+    )
+
+    whole = DiscoveryPageProvenanceV1(
+        component_type="process", returned_count=1, total_available=1
+    )
+    partial = DiscoveryPageProvenanceV1(
+        component_type="process", returned_count=1, total_available=9, has_more=True
+    )
+    unanswered = DiscoveryPageProvenanceV1(
+        component_type="process", returned_count=0, observed=False
+    )
+
+    def _complete(*pages):
+        return prepare_topology_context(
+            TopologyResolutionContextV1(
+                profile="p-alpha",
+                snapshot=_snapshot(profile="p-alpha", pagination=pages),
+            )
+        ).complete_component_types
+
+    assert _complete(whole) == ("process",)
+    # One partial page anywhere disqualifies the type, in either order...
+    assert _complete(whole, partial) == ()
+    assert _complete(partial, whole) == ()
+    # ...and an unanswered page does too.
+    assert _complete(whole, unanswered) == ()
+    # The alias route, which is how this is reached without a duplicate: both
+    # names normalize to one type, so one truncated page poisons the other.
+    assert _complete(
+        DiscoveryPageProvenanceV1(
+            component_type="webservice", returned_count=1, total_available=1
+        ),
+        DiscoveryPageProvenanceV1(
+            component_type="Webservice",
+            returned_count=1,
+            total_available=9,
+            has_more=True,
+        ),
+    ) == ()
+
+
+def test_a_partially_paged_type_claims_nothing_until_it_is_paged():
+    """QA #256's behavioural half, in the shape the old pin could not reach.
+
+    ``test_paging_fully_never_retires_a_component_blocker`` passes a single page
+    per type, so it graded the claim only where the bug could not appear.
+    """
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import (
+        ComponentFactV1,
+        DiscoveryPageProvenanceV1,
+    )
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [{"kind": "process", "key": "b", "component_ref": "ghost"}],
+            "relations": [],
+        }
+    )
+    facts = (
+        ComponentFactV1(
+            profile="p-alpha", component_id="present", component_type="process"
+        ),
+    )
+
+    def _blockers(*pages):
+        return {
+            b.path
+            for b in plan_system_topology(
+                spec,
+                TopologyResolutionContextV1(
+                    profile="p-alpha",
+                    snapshot=_snapshot(
+                        profile="p-alpha", components=facts, pagination=pages
+                    ),
+                ),
+            ).blockers
+        }
+
+    mixed = _blockers(
+        DiscoveryPageProvenanceV1(
+            component_type="process", returned_count=1, total_available=1
+        ),
+        DiscoveryPageProvenanceV1(
+            component_type="process",
+            returned_count=1,
+            total_available=9,
+            has_more=True,
+        ),
+    )
+    paged = _blockers(
+        DiscoveryPageProvenanceV1(
+            component_type="process", returned_count=2, total_available=2
+        )
+    )
+    # Nothing was claimed while a page was still outstanding, and paging ADDED
+    # the finding rather than removing one.
+    assert mixed == set()
+    assert paged == {"/objects/0/component_ref"}
+
+
+def test_paging_a_single_type_adds_the_blocker_it_reveals():
+    """The behavioural claim the #252 wording rests on, measured not asserted."""
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import (
+        ComponentFactV1,
+        DiscoveryPageProvenanceV1,
+    )
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "present"},
+                {"kind": "process", "key": "b", "component_ref": "ghost"},
+            ],
+            "relations": [],
+        }
+    )
+    facts = (
+        ComponentFactV1(
+            profile="p-alpha", component_id="present", component_type="process"
+        ),
+    )
+
+    def _plan(page):
+        return plan_system_topology(
+            spec,
+            TopologyResolutionContextV1(
+                profile="p-alpha",
+                snapshot=_snapshot(
+                    profile="p-alpha", components=facts, pagination=(page,)
+                ),
+            ),
+        )
+
+    truncated = _plan(
+        DiscoveryPageProvenanceV1(
+            component_type="process",
+            returned_count=1,
+            total_available=9,
+            has_more=True,
+        )
+    )
+    paged = _plan(
+        DiscoveryPageProvenanceV1(
+            component_type="process", returned_count=1, total_available=1
+        )
+    )
+    before = {b.path for b in truncated.blockers}
+    after = {b.path for b in paged.blockers}
+    # Paging retired the NOTICE and added a blocker. It removed nothing — which
+    # is why the notice may not present paging as a way to clear one.
+    assert "discovery_pagination" in {d.subject for d in truncated.unresolved_decisions}
+    assert "discovery_pagination" not in {d.subject for d in paged.unresolved_decisions}
+    assert before <= after and after - before == {"/objects/1/component_ref"}
+
+
+def test_guidance_never_asserts_a_universal_the_plan_itself_refutes():
+    """QA #253/#254. Six rounds censused decisions; guidance was never read.
+
+    ``TopologyGuidanceV1`` carries no provenance and no revision stamp, so a
+    live universal in the present tense is unfalsifiable to a reader and
+    refutable by the very payload beside it. Both offenders asserted one.
+    """
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import ComponentFactV1
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "api_service", "key": "a", "component_ref": "asc-1"},
+                {"kind": "process", "key": "p", "component_ref": "$ref:kp"},
+                {"kind": "runtime", "key": "rt", "runtime_ref": "rt-1"},
+                {"kind": "schedule", "key": "s"},
+            ],
+            "relations": [
+                {
+                    "kind": "schedule_binding",
+                    "key": "rs",
+                    "schedule": "s",
+                    "process": "p",
+                    "runtime": "rt",
+                }
+            ],
+        }
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            snapshot=_snapshot(
+                profile="p-alpha",
+                components=(
+                    ComponentFactV1(
+                        profile="p-alpha",
+                        component_id="asc-1",
+                        component_type="webservice",
+                    ),
+                ),
+            ),
+        ),
+    )
+    # The plan resolves an API Service Component out of the shipped capture...
+    assert ("a", "existing_component") in [
+        (r.object_key, r.resolution) for r in plan.resolved_references
+    ]
+    messages = {g.subject: _normalized_question(g.message) for g in plan.guidance}
+    # ...so no guidance beside it may say none exists.
+    assert "no api service component exists" not in messages["api_service"]
+    assert "either live profile" not in messages["api_service"]
+    # And retry has live evidence, which the snapshot model records; guidance
+    # may say it is unmodeled, never that nothing about it was observed.
+    assert "no shape has evidence" not in messages["schedule_content"]
+    assert "retry" in messages["schedule_content"]
+
+    # QA #273. ``derive_guidance`` gates this string on the spec alone, so it
+    # publishes with no snapshot at all — beside `live_revalidation`'s "no live
+    # discovery snapshot applies to this plan", in one document. It therefore
+    # states a property of the CONTRACT ("where a capture observes one..."),
+    # never an observation this plan may not have. `observed_max_retry` also
+    # defaults to None, so even a snapshot does not guarantee the claim.
+    bare = plan_system_topology(
+        spec, TopologyResolutionContextV1(profile="p-alpha")
+    )
+    bare_messages = {g.subject: _normalized_question(g.message) for g in bare.guidance}
+    assert "live_revalidation" in {d.subject for d in bare.unresolved_decisions}
+    for forbidden in (
+        "a max-retry value is observed",
+        "is observed, and is recorded on the snapshot",
+        "is observed on the snapshot",
+    ):
+        assert forbidden not in bare_messages["schedule_content"], forbidden
+    assert "where a capture observes" in bare_messages["schedule_content"]
+
+
+def test_a_foreign_capture_may_not_refute_a_reference_type():
+    """QA #251. The one consumer `same_account` did not gate.
+
+    A coherent capture of another account may not confirm this account's
+    reference, witness its absence, or supply its classification — and yet it
+    could REFUTE the reference's type, because "a wrong type is conclusive from
+    the fact alone" was applied across an account boundary. It is not: this
+    package's own context docstring records that two profiles legitimately hold
+    the same component ids for different things.
+    """
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "x", "component_ref": "shared-id"}
+            ],
+            "relations": [],
+        }
+    )
+    foreign = validate_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-omega",
+            snapshot=_snapshot(
+                profile="p-omega",
+                components=(
+                    ComponentFactV1(
+                        profile="p-omega",
+                        component_id="shared-id",
+                        component_type="documentcache",
+                    ),
+                ),
+            ),
+        ),
+    )
+    codes = _codes(foreign)
+    # The account mismatch is reported, once, and nothing is claimed about the
+    # authored reference on another account's evidence.
+    assert "TOPOLOGY_ENVIRONMENT_MISMATCH" in codes
+    assert "TOPOLOGY_REFERENCE_TYPE_MISMATCH" not in codes, codes
+
+    # The control: the same disagreement inside the authored account IS a type
+    # mismatch, so the silence above is the account gate and not a lost rule.
+    same = validate_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            snapshot=_snapshot(
+                profile="p-alpha",
+                components=(
+                    ComponentFactV1(
+                        profile="p-alpha",
+                        component_id="shared-id",
+                        component_type="documentcache",
+                    ),
+                ),
+            ),
+        ),
+    )
+    assert "TOPOLOGY_REFERENCE_TYPE_MISMATCH" in _codes(same)
+
+
+def test_live_revalidation_is_true_in_the_trigger_no_earlier_wording_covered():
+    """QA #248. The third trigger, where both published disjuncts were false.
+
+    ``snapshot.profile != prepared.context.profile`` fires ALONE exactly when
+    the snapshot matches the spec — a genuine capture of precisely the account
+    being planned. There, "none was supplied" and "belongs to a different
+    account than the one being planned" are both false, and "re-run with a
+    snapshot for this account" is inert: following it reproduces the same plan.
+    The only true account of that state involves the resolution CONTEXT, so the
+    sentence has to name it. Both retracted wordings fail that, which is what
+    makes this a check and not a restatement.
+    """
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [{"kind": "process", "key": "x", "component_ref": "lit-1"}],
+            "relations": [],
+        }
+    )
+    plan = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-beta",
+            # Matches the SPEC exactly; only the context differs.
+            snapshot=_snapshot(profile="p-alpha"),
+        ),
+    )
+    notice = next(
+        d for d in plan.unresolved_decisions if d.subject == "live_revalidation"
+    )
+    question = _normalized_question(notice.question)
+    assert "context" in question, notice.question
+    # The two false accounts of this state, neither of which may return.
+    assert "without a live discovery snapshot" not in question
+    assert "different account than the one being planned" not in question
+
+
+def test_the_overclaim_guard_catches_every_retracted_sentence():
+    """The control. A guard that fires on nothing forbids nothing.
+
+    Each string below is a sentence this contract actually published and
+    retracted, or a reworded variant of one that survived the identity-based
+    pin. All of them must trip the guard.
+    """
+    from boomi_mcp.compiler.system_topology.contracts import TopologyDecisionV1
+
+    class _FakePlan:
+        resolved_references = ("one row, so a universal negative is a lie",)
+
+        def __init__(self, question):
+            self.unresolved_decisions = (
+                TopologyDecisionV1(subject="s", question=question),
+            )
+
+    retracted = (
+        "No environment reference was judged against it.",
+        "Nothing in this snapshot was checked against your environment "
+        "references: presence and absence are both unknown.",
+        "None of the authored references were verified.",
+        "This snapshot cannot say whether those components exist.",
+        "This plan was produced without a live discovery snapshot, so "
+        "existing-component references are unverified.",
+    )
+    for question in retracted:
+        assert _overclaiming_decisions(
+            _FakePlan(question), snapshot_supplied=True
+        ), question
+
+    # The guard's KNOWN false-positive class, recorded rather than left as a
+    # trap. Every one of these sentences is TRUE, and every one trips the
+    # pattern — a negative quantifier followed by a judgement verb reads the
+    # same whether it denies a judgement or merely limits a scope.
+    #
+    # The honest account of why the pattern stays: a narrowing DOES exist at no
+    # measured recall cost (exempt a negative quantifier followed within ~30
+    # characters by "about"/"applies to"/"in scope"/…), so "narrowing would
+    # lose coverage" is not the reason. The reason is that such an exemption is
+    # another keyword list whose false-NEGATIVE surface nobody has measured,
+    # and it hands the next rewording a ready-made bypass — "no reference was
+    # judged, which affects nothing here". What the pattern really encodes is a
+    # style rule: state a scope limit POSITIVELY. Its whole blast radius is the
+    # handful of decision strings this contract publishes, and every member of
+    # the class below has an accepted rewrite that is also the clearer sentence.
+    # A failure here means "say it positively", not "your sentence is false".
+    for question in (
+        "This says nothing about environment or runtime references, whose "
+        "absence is judged from their own listings.",
+        "None of this applies to references the plan already resolved.",
+        "Nothing here changes what was checked.",
+    ):
+        assert _overclaiming_decisions(
+            _FakePlan(question), snapshot_supplied=True
+        ), question
+
+    # ...and the wording actually shipped does not trip it, so the guard is
+    # discriminating rather than merely loud.
+    for question in (
+        "The environment listing did not answer, so this snapshot cannot be "
+        "read as a complete environment inventory. Rows it does carry still "
+        "resolve; what it cannot witness is ABSENCE.",
+        "At least one component query did not answer. Rows the snapshot does "
+        "carry still resolve; what it cannot witness is ABSENCE.",
+        "No live discovery snapshot applies to this plan: either none was "
+        "supplied, or the one supplied belongs to a different account.",
+    ):
+        assert _overclaiming_decisions(
+            _FakePlan(question), snapshot_supplied=True
+        ) == [], question
+
+
+def test_no_published_decision_overclaims_in_any_reachable_plan():
+    """The guard applied where it counts: every plan the matrix can produce."""
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import (
+        DiscoveryPageProvenanceV1,
+        EnvironmentFactV1,
+    )
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "x", "component_ref": "lit-1"},
+                {"kind": "environment", "key": "e", "environment_ref": "env-1"},
+                {"kind": "deployment_unit", "key": "u"},
+            ],
+            # Bound, so the spec is legal — and so `topology_apply` is one of
+            # the decisions the sweep actually reads.
+            "relations": [
+                {
+                    "kind": "deployment_binding",
+                    "key": "rd",
+                    "deployment_unit": "u",
+                    "process": "x",
+                    "environment": "e",
+                }
+            ],
+        }
+    )
+    row = EnvironmentFactV1(profile="p-alpha", environment_id="env-1")
+    truncated = DiscoveryPageProvenanceV1(
+        component_type="process", returned_count=1, total_available=2, has_more=True
+    )
+    unobserved = DiscoveryPageProvenanceV1(
+        component_type="process", returned_count=0, observed=False
+    )
+    for ctx_profile in ("p-alpha", "p-beta"):
+        for snapshot_profile in ("p-alpha", "p-beta"):
+            for observed in (True, False):
+                for pagination in ((), (truncated,), (unobserved,)):
+                    plan = plan_system_topology(
+                        spec,
+                        TopologyResolutionContextV1(
+                            profile=ctx_profile,
+                            snapshot=_snapshot(
+                                profile=snapshot_profile,
+                                environments=(row,),
+                                pagination=pagination,
+                                environment_inventory_observed=observed,
+                            ),
+                        ),
+                    )
+                    assert _overclaiming_decisions(
+                        plan, snapshot_supplied=True
+                    ) == [], (
+                        ctx_profile,
+                        snapshot_profile,
+                        observed,
+                        [p.component_type for p in pagination],
+                    )
 
 
 def test_the_observation_flag_defaults_to_claiming_nothing():
@@ -4171,6 +5008,12 @@ def test_all_three_per_fact_profile_filters_share_one_anchor():
     supplied that same environment's classification — one report saying both
     "this environment does not resolve in your context" and "your
     classification for it disagrees with what discovery observed".
+
+    Scoped to the three per-fact FILTERS. Capture self-consistency is a
+    different question with a different correct anchor (QA #249), so it lives
+    in ``_internally_mixed_fact_count`` — the one sanctioned envelope-anchored
+    comparison, asserted below to still be envelope-anchored so this guard
+    cannot be sidestepped by moving a filter into it.
     """
     import inspect
 
@@ -4185,6 +5028,17 @@ def test_all_three_per_fact_profile_filters_share_one_anchor():
     for source in sources:
         assert "!= snapshot.profile" not in source, source[:120]
         assert "== snapshot.profile" not in source, source[:120]
+
+    # The sanctioned exception: envelope-anchored by construction, and counting
+    # only — it indexes nothing, so it cannot become a filter without this
+    # assertion failing.
+    mixed = inspect.getsource(ctx_mod._internally_mixed_fact_count)
+    assert "envelope = snapshot.profile" in mixed
+    # It COUNTS. A filter would have to build a collection to be of any use to
+    # a caller, and this returns an int, so it cannot quietly become one.
+    assert "-> int:" in mixed
+    body = mixed.split('"""')[-1]
+    assert body.count("sum(1 for") == 5 and "[" not in body
 
 
 def test_a_context_foreign_fact_supplies_no_classification():
@@ -4458,17 +5312,43 @@ def test_a_mismatched_envelope_also_blocks_the_classification_scan():
     assert all(d.path == "/profile_ref" for d in findings), [d.path for d in findings]
 
 
-def test_the_foreign_row_count_describes_rows_not_the_envelope():
-    """Two findings for one problem, one of them false.
+def test_the_foreign_row_count_describes_the_capture_not_the_context():
+    """"Mixed" is a claim about the CAPTURE, so it is measured against itself.
 
     Deriving the count from the kept-list lengths made an envelope mismatch
-    report every correctly-stamped row as foreign, so a capture with no foreign
-    row at all still emitted ``mixed-profile-snapshot`` on top of the true
-    envelope mismatch.
+    report every correctly-stamped row as foreign; re-deriving it per row but
+    against the CONTEXT left the same falsehood reachable by the other route —
+    QA #249, where all 61 rows of a coherent single-account live capture were
+    counted foreign purely because the context named another profile.
     """
     from boomi_mcp.compiler.system_topology.context import prepare_topology_context
 
-    clean_rows_foreign_envelope = prepare_topology_context(
+    # QA #249: coherent capture, foreign context. Unusable here, but not mixed.
+    coherent_but_foreign = prepare_topology_context(
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            snapshot=_snapshot(
+                profile="p-omega",
+                components=(
+                    ComponentFactV1(
+                        profile="p-omega", component_id="c", component_type="process"
+                    ),
+                ),
+                environments=(
+                    EnvironmentFactV1(
+                        profile="p-omega", environment_id="e"
+                    ),
+                ),
+            ),
+        )
+    )
+    assert coherent_but_foreign.foreign_profile_fact_count == 0
+    # ...and nothing from it is indexed, because it is the wrong account.
+    assert coherent_but_foreign.components == ()
+
+    # A row that disagrees with its OWN envelope IS mixed, whichever account
+    # the context names — that is a defect in whatever produced the capture.
+    row_disagrees_with_envelope = prepare_topology_context(
         TopologyResolutionContextV1(
             profile="p-alpha",
             snapshot=_snapshot(
@@ -4481,11 +5361,8 @@ def test_the_foreign_row_count_describes_rows_not_the_envelope():
             ),
         )
     )
-    # No ROW is foreign, so the count is zero — the envelope problem is reported
-    # separately and once.
-    assert clean_rows_foreign_envelope.foreign_profile_fact_count == 0
-    # ...and the rows are still not indexed, because the envelope is wrong.
-    assert clean_rows_foreign_envelope.components == ()
+    assert row_disagrees_with_envelope.foreign_profile_fact_count == 1
+    assert row_disagrees_with_envelope.components == ()
 
     genuinely_foreign = prepare_topology_context(
         TopologyResolutionContextV1(

@@ -42,17 +42,21 @@ be decided structurally.
 Evidence bounds encoded here (see docs/architecture/SYSTEM_TOPOLOGY_V1.md)
 -------------------------------------------------------------------------
 The schema deliberately omits several fields the issue's prose gestures at,
-because the live account does not support them:
+because the capture behind this contract found no evidence for them:
 
-- **No schedule content.** Every live schedule observed carries an empty
-  ``schedules: []`` body, so cron/interval shape has zero evidence. A schedule
-  object here is an intent marker; its identity comes from its binding.
+- **No schedule content.** Every schedule body observed in the capture was an
+  empty ``schedules: []`` array, so cron/interval shape has no evidence to model
+  from. Retry and active state are observed, and are recorded as snapshot
+  observations rather than authored fields — reading a value is not evidence
+  that this contract may set one. A schedule object here is an intent marker;
+  its identity comes from its binding.
 - **No schedule-to-environment relation.** A schedule id is base64 of
   ``CPS{atomId}:{processId}`` — it binds a process to a RUNTIME, never to an
   environment. An environment-keyed schedule would be an invented field.
 - **No account capability limits.** Nothing was captured, so nothing is modeled.
-- **No queue/Event Streams semantics.** Zero queue components exist; both kinds
-  are representable as declared intent and permanently blocked in V1.
+- **No queue/Event Streams semantics.** The capture observed no queue
+  components, and there is no authoring evidence for queues at all; both
+  kinds are representable as declared intent and permanently blocked in V1.
 """
 
 from __future__ import annotations
@@ -385,7 +389,7 @@ class EnvironmentObjectV1(_SystemTopologyBase):
 
     ``classification`` is optional on purpose. It is a real, readable platform
     field (``TEST``/``PROD``), but a profile may legitimately contain no PROD
-    environment at all — one of the two live profiles observed has two TEST
+    environment at all — a profile in the capture behind this contract has two TEST
     environments and no PROD. Requiring it would make a valid account
     unmodelable; authoring it opts into an equality check against discovery.
     """
@@ -399,9 +403,13 @@ class EnvironmentObjectV1(_SystemTopologyBase):
 class ScheduleObjectV1(_SystemTopologyBase):
     """Declared intent that a process runs on a schedule.
 
-    Carries NO cron/interval body, no desired active state, and no retry policy:
-    every live schedule observed has an empty ``schedules: []`` array, so
-    schedule *content* has no evidence to model. Its identity is supplied
+    Carries NO cron/interval body, no desired active state, and no retry
+    policy. Every schedule body observed in the capture behind this contract was
+    an empty ``schedules: []`` array, so cron/interval shape has no evidence to
+    model from. Retry and active state are different: both ARE observed, and are
+    recorded on the snapshot as discovery observations rather than as authored
+    intent, because reading a value is not evidence that this contract may set
+    one. Its identity is supplied
     entirely by its :class:`ScheduleBindingRelationV1` — which is why an
     unbound schedule object is a cardinality error.
     """
@@ -430,10 +438,12 @@ class DeploymentUnitObjectV1(_SystemTopologyBase):
 class ExternalQueueObjectV1(_SystemTopologyBase):
     """An externally-managed queue referenced by, never created by, this plan.
 
-    Permanently ``gated-no-evidence`` in V1: the live account contains zero
-    queue components, and the queue MCP tools are runtime troubleshooting
-    surfaces, which are not authoring evidence (ADR-001 §12 rejects speculative
-    queue mutation outright).
+    Permanently ``gated-no-evidence`` in V1: the capture behind this contract
+    observed no queue components, and the queue MCP tools are runtime
+    troubleshooting surfaces, which are not authoring evidence (ADR-001 §12
+    rejects speculative queue mutation outright). The gate does not rest on that
+    count — it rests on there being no authoring evidence for queues at all, so
+    an account that has queues does not open it.
     """
 
     kind: Literal["external_queue"]
@@ -543,9 +553,10 @@ class DeploymentBindingRelationV1(_SystemTopologyBase):
     """A deployment unit targets one process at one environment.
 
     One process, not many: ``orchestrate_deploy`` requires exactly one process
-    per deployment, and no live evidence supports atomic multi-process
-    deployment. Typed as a ternary so a unit cannot silently accumulate several
-    process edges and imply an atomicity the platform does not offer.
+    per deployment, and nothing in the capture behind this contract supports
+    atomic multi-process deployment. Typed as a ternary so a unit cannot
+    silently accumulate several process edges and imply an atomicity the
+    platform does not offer.
     """
 
     kind: Literal["deployment_binding"]

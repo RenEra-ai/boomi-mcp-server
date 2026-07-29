@@ -28,7 +28,7 @@ Live evidence as of the #144 capture (see docs/architecture/SYSTEM_TOPOLOGY_V1.m
 Four captures bound what may be claimed here, and each is why a specific row
 below is weaker than the issue's prose suggested:
 
-1. **Zero ``webservice`` components in EITHER live profile.** The API-service
+1. **The capture observed no ``webservice`` components.** The API-service
    object stays ``emittable`` (the typed builder and its analyzer fixtures are
    real), but its live leg is ``unavailable`` — the three-way rule's live leg is
    genuinely missing, not satisfied-by-assumption.
@@ -36,9 +36,11 @@ below is weaker than the issue's prose suggested:
    reference list with no edge kind.** It cannot witness a ProcessCall; it
    corroborates one. Promoting it would let "process A references profile B"
    read as "process A calls process B".
-3. **Every live schedule carries an empty ``schedules: []`` body.** Schedule
-   CONTENT has no evidence at all, so it is guidance-only and absent from the
-   schema.
+3. **Every schedule body observed carries an empty ``schedules: []`` array.**
+   Cron/interval CONTENT has no evidence to model from, so it is guidance-only
+   and absent from the schema. Retry and active state are observed and are
+   recorded as snapshot observations — reading a value is not evidence that this
+   contract may set one.
 4. **Deployment reads establish that a (component, environment) record exists.
    They establish nothing about whether this planner may CREATE one.** Reading a
    deployment and being able to make one are different capabilities, and only

@@ -402,7 +402,7 @@ def test_environment_classification_is_captured_verbatim():
 
 
 def test_a_profile_with_no_prod_environment_is_representable():
-    """One of the two live profiles has two TEST environments and no PROD."""
+    """A profile in the capture has two TEST environments and no PROD."""
     port = HostileFakePort(
         environments=[
             {"id": "env-1", "classification": "TEST"},

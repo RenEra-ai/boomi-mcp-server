@@ -159,7 +159,6 @@ def collect_reference_findings(
         objects_by_key.setdefault(obj.key, obj.kind)
 
     symbols = dict(prepared.symbols)
-    component_ids = dict(prepared.components)
     environment_ids = set(prepared.environment_ids)
     runtime_ids = set(prepared.runtime_ids)
     # Absence authority is qualified to the AUTHORED target profile, not merely
@@ -172,6 +171,17 @@ def collect_reference_findings(
         or prepared.context.snapshot.profile == spec.profile_ref
     )
     complete = set(prepared.complete_component_types) if same_account else set()
+    # The TYPE comparison answers to the same predicate, which it did not.
+    # "A wrong type is conclusive from the fact alone" holds WITHIN an account;
+    # across accounts the id names a different thing entirely, and this module's
+    # own context docstring is the refutation — two profiles legitimately hold
+    # the same component ids for different things. So a coherent capture of
+    # omega, which may not confirm alpha's reference, witness its absence, or
+    # supply its classification, was still allowed to REFUTE its type: a
+    # ``TOPOLOGY_REFERENCE_TYPE_MISMATCH`` published about an account nobody
+    # read. Emptying the index is the whole fix — absence already keys on
+    # ``complete``, which is empty here for the same reason.
+    component_ids = dict(prepared.components) if same_account else {}
 
     def _object_finding(code, index, field, kind):
         findings.append(

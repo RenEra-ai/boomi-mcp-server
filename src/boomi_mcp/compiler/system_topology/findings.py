@@ -104,12 +104,23 @@ _REMEDIATION: Dict[str, str] = {
         "SystemTopologySpecV1 schema."
     ),
     TOPOLOGY_REFERENCE_NOT_FOUND: (
-        "Declare the referenced object in this document, or supply the "
-        "component/platform fact in the same credential profile."
+        "Three cases, fixed in three different places. Under "
+        "'/relations/N/ROLE' the role names an object key this document does "
+        "not declare: declare that object here, or point the role at one that "
+        "exists. Under '/objects/N/component_ref' a '$ref:KEY' is judged "
+        "against the ComponentPlan symbol table, so add that component to the "
+        "ComponentPlan — the object itself is already declared. A literal id, "
+        "environment_ref or runtime_ref is judged against the capture: correct "
+        "the id, or capture the platform fact, in this document's credential "
+        "profile."
     ),
     TOPOLOGY_REFERENCE_TYPE_MISMATCH: (
-        "Reference an object of the kind this relation role accepts "
-        "(see the endpoint matrix in docs/architecture/SYSTEM_TOPOLOGY_V1.md)."
+        "On an object, the reference resolves to a component of the wrong "
+        "type: point it at a component of the type this object kind requires, "
+        "or declare the object with the kind matching what the component "
+        "actually is. On a relation, reference an object of the kind the role "
+        "accepts (see the endpoint matrix in "
+        "docs/architecture/SYSTEM_TOPOLOGY_V1.md)."
     ),
     TOPOLOGY_RELATION_UNSUPPORTED: (
         "Use the supported lifecycle shape for this relation, or remove it: a "
