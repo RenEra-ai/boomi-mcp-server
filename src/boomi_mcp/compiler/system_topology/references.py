@@ -204,7 +204,31 @@ def collect_reference_findings(
     # evidence that the component does not exist, and reporting it as not-found
     # would contradict the pagination provenance this contract records precisely
     # so absence is not over-read.
-    for index, obj in enumerate(spec.objects):
+    #
+    # The whole loop is skipped when the CONTEXT names another account. Every
+    # judgement in it reads the context, so a foreign one does not merely fail
+    # to confirm — it changes the answer: an omega context carrying a symbol
+    # named ``ka`` silently REMOVED alpha's ``TOPOLOGY_REFERENCE_NOT_FOUND``,
+    # so the same mismatch produced a different report depending on what the
+    # wrong account happened to contain. Judging nothing is the only consistent
+    # reading, and it is the same rule as ``complete`` and ``component_ids``
+    # above, applied to the one consumer that still read through it. Reporting
+    # everything as not-found instead would over-claim absence from evidence
+    # that was never about this account.
+    #
+    # Gated on the CONTEXT alone, not on ``same_account``. ``same_account`` is a
+    # conjunction — context AND snapshot envelope — which is the right predicate
+    # for everything snapshot-derived (``complete``, ``component_ids``, and the
+    # environment/runtime branches, each of which keeps it). It is the wrong one
+    # here, because the ``$ref`` branch reads ``prepared.symbols``: a
+    # ComponentPlan symbol table that arrives on the CONTEXT and is qualified by
+    # the context's profile. Using the conjunction silenced this loop whenever
+    # merely the SNAPSHOT was foreign, deleting a real type mismatch from a plan
+    # whose context matched the spec exactly — and the invariant checker
+    # certified it, because it re-derives suppression from the very blocker that
+    # had gone missing.
+    same_context = prepared.context.profile == spec.profile_ref
+    for index, obj in enumerate(spec.objects if same_context else ()):
         if obj.kind in _COMPONENT_BACKED:
             ref = obj.component_ref  # type: ignore[union-attr]
             expected = _COMPONENT_BACKED[obj.kind]

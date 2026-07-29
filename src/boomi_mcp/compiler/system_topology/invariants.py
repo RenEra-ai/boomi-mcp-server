@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import List, Tuple
 
+from ...models.system_topology import TOPOLOGY_RELATION_ROLES
 from .capabilities import SYSTEM_TOPOLOGY_CAPABILITIES
 from .context import PreparedTopologyContextV1
 from .contracts import SystemTopologyPlanV1
@@ -205,29 +206,72 @@ def check_topology_plan_invariants(
         # witness-less plan with that relation INJECTED — the two failures the
         # "each declared relation occupies only its permitted bucket" rule
         # exists to name.
+        # The permitted bucket is RE-DERIVED and asserted as an equality, in
+        # every state — not "blocked relations are absent" plus "a clean plan
+        # is complete". That pair failed open exactly where a checker is worth
+        # having: the moment ANY blocker existed, completeness went unchecked,
+        # so a valid witnessed relation could be dropped beside an unrelated
+        # gated queue and the checker accepted it. And permissibility read only
+        # ``/relations/N`` paths, so a relation withdrawn because an ENDPOINT is
+        # blocked under ``/objects/N`` — or because the whole context names
+        # another account — could be injected straight back.
+        #
+        # A relation is legitimately absent for exactly three reasons, all of
+        # them derivable from the plan's own blockers plus the spec, which is
+        # what makes the equality checkable without re-running the collectors.
         blocked_relation_indexes = set()
+        blocked_object_indexes = set()
         for diagnostic in plan.blockers:
             parts = diagnostic.path.split("/")
-            if len(parts) >= 3 and parts[1] == "relations":
+            if len(parts) >= 3 and parts[1] in ("relations", "objects"):
                 try:
-                    blocked_relation_indexes.add(int(parts[2]))
+                    index = int(parts[2])
                 except ValueError:
                     continue
-        planned_keys = {r.relation_key for r in plan.planning_only_relations}
-        for index, rel in enumerate(spec.relations):
-            if index in blocked_relation_indexes:
-                _require(
-                    rel.key not in planned_keys,
-                    "a blocked relation must not be planned",
-                )
+                if parts[1] == "relations":
+                    blocked_relation_indexes.add(index)
+                else:
+                    blocked_object_indexes.add(index)
+        blocked_object_keys = {
+            spec.objects[index].key
+            for index in blocked_object_indexes
+            if 0 <= index < len(spec.objects)
+        }
+        # Read from the PREPARED context, the same anchor the pipeline gates on.
+        # Deriving it from a ``/profile_ref`` blocker would be wrong: a snapshot
+        # mismatch and a foreign row report there too, and neither empties the
+        # context-backed buckets.
+        profile_mismatch = prepared.context.profile != spec.profile_ref
 
-        # COMPLETENESS, the other half. Checking only the blocked case left a
-        # blocker-free plan free to drop its relations entirely and still pass —
-        # the guarantee the permissibility check was documented as closing.
-        if not plan.blockers:
+        suppressed = set()
+        for index, rel in enumerate(spec.relations):
+            if (
+                profile_mismatch
+                or index in blocked_relation_indexes
+                or any(
+                    getattr(rel, role) in blocked_object_keys
+                    for role in TOPOLOGY_RELATION_ROLES[rel.kind]
+                )
+            ):
+                suppressed.add(rel.key)
+        planned_keys = {r.relation_key for r in plan.planning_only_relations}
+        _require(
+            planned_keys == {rel.key for rel in spec.relations} - suppressed,
+            "planned relations must be exactly the declared relations that "
+            "nothing suppressed",
+        )
+
+        # A context about another account publishes no context-backed result at
+        # all. Without this, foreign prerequisites and resolutions could be
+        # injected into a plan whose only blocker is the mismatch itself.
+        if profile_mismatch:
             _require(
-                planned_keys == {rel.key for rel in spec.relations},
-                "a clean plan must plan every declared relation",
+                not plan.executable_component_prerequisites,
+                "a profile-mismatched plan must report no prerequisite",
+            )
+            _require(
+                not plan.resolved_references,
+                "a profile-mismatched plan must resolve no reference",
             )
 
     # 5. A gated or unsupported subject never reaches an executable or planning

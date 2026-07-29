@@ -3343,6 +3343,364 @@ def _overclaiming_decisions(plan, *, snapshot_supplied=False):
     return offenders
 
 
+def test_a_foreign_context_cannot_change_which_findings_are_reported():
+    """§6 R4-F1. The profile gate reached the buckets and not the collectors.
+
+    A context for another account was still consulted by reference resolution,
+    witness gating and guidance derivation, so what the WRONG account happened
+    to contain decided which findings appeared: an omega context carrying the
+    symbols and the ProcessCall witness silently removed alpha's two
+    ``TOPOLOGY_REFERENCE_NOT_FOUND`` findings and its
+    ``TOPOLOGY_CAPABILITY_GATED``, and published dependency guidance besides.
+
+    Under a mismatch the only honest report is the mismatch itself. Judging
+    everything as not-found instead would over-claim absence from evidence that
+    was never about this account — the rule the delta established for snapshots,
+    applied to the context.
+    """
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import (
+        DependencyCorroborationV1,
+        ProcessCallEvidenceV1,
+    )
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-alpha",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "$ref:ka"},
+                {"kind": "process", "key": "b", "component_ref": "$ref:kb"},
+            ],
+            "relations": [
+                {
+                    "kind": "process_call",
+                    "key": "r",
+                    "caller_process": "a",
+                    "callee_process": "b",
+                }
+            ],
+        }
+    )
+    symbols = (
+        ComponentPlanSymbolV1(
+            component_key="ka", component_type="process", has_process_ir=True
+        ),
+        ComponentPlanSymbolV1(
+            component_key="kb", component_type="process", has_process_ir=True
+        ),
+    )
+    witness = ProcessCallEvidenceV1(
+        caller_component_ref="$ref:ka",
+        callee_component_ref="$ref:kb",
+        witness="process_ir",
+    )
+    bare = TopologyResolutionContextV1(profile="p-omega")
+    loaded = TopologyResolutionContextV1(
+        profile="p-omega",
+        component_plan_symbols=symbols,
+        process_call_evidence=(witness,),
+        dependency_corroboration=(
+            DependencyCorroborationV1(
+                parent_component_ref="$ref:ka",
+                child_component_ref="$ref:kb",
+                child_component_type="process",
+            ),
+        ),
+    )
+    reports = [_codes(validate_system_topology(spec, c)) for c in (bare, loaded)]
+    # Identical, and containing only the mismatch: what the foreign account
+    # holds may not change this plan's verdict in either direction.
+    assert reports[0] == reports[1] == ["TOPOLOGY_ENVIRONMENT_MISMATCH"], reports
+    for context in (bare, loaded):
+        plan = plan_system_topology(spec, context)
+        assert plan.guidance == (), [g.subject for g in plan.guidance]
+        assert plan.planning_only_relations == ()
+        assert plan.executable_component_prerequisites == ()
+
+    # The control: the same evidence in the AUTHORED account still does its job,
+    # so the silence above is the profile gate and not a lost rule.
+    same = plan_system_topology(
+        spec,
+        TopologyResolutionContextV1(
+            profile="p-alpha",
+            component_plan_symbols=symbols,
+            process_call_evidence=(witness,),
+        ),
+    )
+    assert same.blockers == (), [b.code for b in same.blockers]
+    assert [r.relation_key for r in same.planning_only_relations] == ["r"]
+
+
+def test_the_reference_gate_answers_to_the_context_not_the_snapshot():
+    """QA #277. ``same_account`` is a CONJUNCTION, and this loop is not.
+
+    Gating the object loop on ``same_account`` — context AND snapshot envelope —
+    silenced it whenever merely the SNAPSHOT was foreign, even though the
+    ``$ref`` branch reads ``prepared.symbols``, which arrives on the context and
+    is qualified by the context's profile. A plan whose context matched the spec
+    exactly then lost a real ``TOPOLOGY_REFERENCE_TYPE_MISMATCH``, planned a
+    relation through the blocked endpoint, and emitted a prerequisite telling a
+    consumer to build a ``documentcache`` for an object declared a ``process``.
+
+    The invariant checker certified it, because it re-derives suppression from
+    the plan's own blockers — and the blocker was the thing that had vanished.
+    Two gates agreeing on the wrong answer is why this is pinned as a table:
+    only the middle row moves, and only against the fix.
+    """
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import ProcessCallEvidenceV1
+
+    spec = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-a",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "$ref:ka"},
+                {"kind": "process", "key": "x", "component_ref": "$ref:kx"},
+            ],
+            "relations": [
+                {
+                    "kind": "process_call",
+                    "key": "call",
+                    "caller_process": "a",
+                    "callee_process": "x",
+                }
+            ],
+        }
+    )
+    symbols = (
+        ComponentPlanSymbolV1(
+            component_key="ka", component_type="process", has_process_ir=True
+        ),
+        # Deliberately the WRONG type for the object kind that names it.
+        ComponentPlanSymbolV1(
+            component_key="kx", component_type="documentcache", has_process_ir=True
+        ),
+    )
+    witness = (
+        ProcessCallEvidenceV1(
+            caller_component_ref="$ref:ka",
+            callee_component_ref="$ref:kx",
+            witness="process_ir",
+        ),
+    )
+
+    def _plan(ctx_profile, snapshot_profile):
+        return plan_system_topology(
+            spec,
+            TopologyResolutionContextV1(
+                profile=ctx_profile,
+                component_plan_symbols=symbols,
+                process_call_evidence=witness,
+                snapshot=_snapshot(profile=snapshot_profile),
+            ),
+        )
+
+    mismatch = "TOPOLOGY_ENVIRONMENT_MISMATCH"
+    type_mismatch = "TOPOLOGY_REFERENCE_TYPE_MISMATCH"
+
+    # ctx and snapshot both this account: the type mismatch is reported.
+    agreed = _plan("p-a", "p-a")
+    assert [b.code for b in agreed.blockers] == [type_mismatch]
+
+    # Only the SNAPSHOT is foreign. The symbols are still this account's, so the
+    # type mismatch is STILL reported — beside the envelope mismatch.
+    snapshot_only = _plan("p-a", "p-omega")
+    assert sorted(b.code for b in snapshot_only.blockers) == sorted(
+        [mismatch, type_mismatch]
+    )
+    assert snapshot_only.planning_only_relations == ()
+    assert [p.component_key for p in snapshot_only.executable_component_prerequisites] == [
+        "ka"
+    ]
+
+    # The CONTEXT is foreign: nothing is judged from it, in either arrangement.
+    for snapshot_profile in ("p-omega", "p-a"):
+        foreign = _plan("p-omega", snapshot_profile)
+        assert [b.code for b in foreign.blockers] == [mismatch], snapshot_profile
+        assert foreign.planning_only_relations == ()
+        assert foreign.executable_component_prerequisites == ()
+
+
+def test_the_relation_bucket_invariant_holds_when_blockers_are_not_relation_local():
+    """§6 R4-F2. The checker failed open in exactly the states worth checking.
+
+    Completeness was gated on the plan having NO blockers, so one unrelated
+    gated queue disabled it entirely; and permissibility read only
+    ``/relations/N`` paths, so a relation withdrawn because an endpoint object
+    is blocked — or because the context names another account — could be
+    injected straight back. Both directions, in three states.
+    """
+    from boomi_mcp.compiler.system_topology import plan_system_topology
+    from boomi_mcp.compiler.system_topology.context import (
+        ComponentFactV1,
+        DiscoveryPageProvenanceV1,
+        ProcessCallEvidenceV1,
+        prepare_topology_context,
+    )
+    from boomi_mcp.compiler.system_topology.contracts import (
+        ComponentPlanPrerequisiteV1,
+        PlannedTopologyRelationV1,
+    )
+    from boomi_mcp.compiler.system_topology.invariants import (
+        TopologyPlanningInvariantError,
+        check_topology_plan_invariants,
+    )
+
+    def _rejects(plan, context, spec, **update):
+        with pytest.raises(TopologyPlanningInvariantError):
+            check_topology_plan_invariants(
+                plan.model_copy(update=update),
+                prepare_topology_context(context),
+                spec,
+            )
+
+    # 1. A valid witnessed call beside an UNRELATED gated-queue blocker. The
+    #    call is planned; dropping it must not be accepted just because some
+    #    other object blocked.
+    gated = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-a",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "$ref:ka"},
+                {"kind": "process", "key": "b", "component_ref": "$ref:kb"},
+                {"kind": "external_queue", "key": "q", "resource_ref": "qr"},
+            ],
+            "relations": [
+                {
+                    "kind": "process_call",
+                    "key": "r",
+                    "caller_process": "a",
+                    "callee_process": "b",
+                },
+                {
+                    "kind": "queue_reference",
+                    "key": "rq",
+                    "process": "a",
+                    "external_queue": "q",
+                },
+            ],
+        }
+    )
+    gated_ctx = TopologyResolutionContextV1(
+        profile="p-a",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(
+                component_key="ka", component_type="process", has_process_ir=True
+            ),
+            ComponentPlanSymbolV1(
+                component_key="kb", component_type="process", has_process_ir=True
+            ),
+        ),
+        process_call_evidence=(
+            ProcessCallEvidenceV1(
+                caller_component_ref="$ref:ka",
+                callee_component_ref="$ref:kb",
+                witness="process_ir",
+            ),
+        ),
+    )
+    gated_plan = plan_system_topology(gated, gated_ctx)
+    assert [r.relation_key for r in gated_plan.planning_only_relations] == ["r"]
+    assert {b.code for b in gated_plan.blockers} == {"TOPOLOGY_CAPABILITY_GATED"}
+    _rejects(gated_plan, gated_ctx, gated, planning_only_relations=())
+
+    # 2. A relation withdrawn ONLY because an endpoint object is blocked, under
+    #    a path the old scan never read.
+    endpoint = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "p-a",
+            "objects": [
+                {"kind": "process", "key": "a", "component_ref": "lit-a"},
+                {"kind": "process", "key": "b", "component_ref": "lit-b"},
+            ],
+            "relations": [
+                {
+                    "kind": "process_call",
+                    "key": "r",
+                    "caller_process": "a",
+                    "callee_process": "b",
+                }
+            ],
+        }
+    )
+    endpoint_ctx = TopologyResolutionContextV1(
+        profile="p-a",
+        snapshot=_snapshot(
+            profile="p-a",
+            components=(
+                ComponentFactV1(
+                    profile="p-a", component_id="lit-a", component_type="process"
+                ),
+                ComponentFactV1(
+                    profile="p-a",
+                    component_id="lit-b",
+                    component_type="documentcache",
+                ),
+            ),
+            pagination=(
+                DiscoveryPageProvenanceV1(
+                    component_type="process", returned_count=2, total_available=2
+                ),
+            ),
+        ),
+        process_call_evidence=(
+            ProcessCallEvidenceV1(
+                caller_component_ref="lit-a",
+                callee_component_ref="lit-b",
+                witness="component_xml",
+            ),
+        ),
+    )
+    endpoint_plan = plan_system_topology(endpoint, endpoint_ctx)
+    assert [b.path for b in endpoint_plan.blockers] == ["/objects/1/component_ref"]
+    assert endpoint_plan.planning_only_relations == ()
+    _rejects(
+        endpoint_plan,
+        endpoint_ctx,
+        endpoint,
+        planning_only_relations=(
+            PlannedTopologyRelationV1(
+                relation_key="r", relation_kind="process_call", witness="component_xml"
+            ),
+        ),
+    )
+
+    # 3. A context-profile mismatch: neither a relation nor a prerequisite may
+    #    be injected back into a plan whose only blocker is the mismatch.
+    foreign_ctx = TopologyResolutionContextV1(
+        profile="p-omega",
+        component_plan_symbols=(
+            ComponentPlanSymbolV1(
+                component_key="ka", component_type="process", has_process_ir=True
+            ),
+        ),
+    )
+    foreign_plan = plan_system_topology(endpoint, foreign_ctx)
+    assert [b.code for b in foreign_plan.blockers] == ["TOPOLOGY_ENVIRONMENT_MISMATCH"]
+    _rejects(
+        foreign_plan,
+        foreign_ctx,
+        endpoint,
+        planning_only_relations=(
+            PlannedTopologyRelationV1(
+                relation_key="r", relation_kind="process_call", witness="process_ir"
+            ),
+        ),
+    )
+    _rejects(
+        foreign_plan,
+        foreign_ctx,
+        endpoint,
+        executable_component_prerequisites=(
+            ComponentPlanPrerequisiteV1(component_key="ka", component_type="process"),
+        ),
+    )
+
+
 def test_the_pagination_notice_does_not_speak_for_a_non_component_blocker():
     """QA #250. Pagination witnesses components; it was talking about all absence.
 

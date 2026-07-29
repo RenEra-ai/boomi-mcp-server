@@ -330,6 +330,16 @@ def collect_lifecycle_findings(
     objects = _object_index(spec)
     ctx = prepared.context
 
+    # A context for another account witnesses nothing here, and — this is the
+    # part that mattered — its evidence must not be allowed to CLEAR a gate
+    # either. An omega context carrying a ProcessCall witness removed alpha's
+    # ``TOPOLOGY_CAPABILITY_GATED``, so a profile mismatch produced a shorter
+    # report than an empty context would have. Nothing is judged and nothing is
+    # planned: the caller is told about the mismatch, and told nothing that
+    # rests on the wrong account's evidence.
+    if ctx.profile != spec.profile_ref:
+        return (), ()
+
     # Every candidate per edge, not one survivor of a dict comprehension.
     call_witnesses: Dict[Tuple[str, str], List[str]] = {}
     for e in ctx.process_call_evidence:
@@ -625,7 +635,13 @@ def derive_guidance(
                 ),
             )
         )
-    if prepared.context.dependency_corroboration:
+    # Context-backed, so it answers to the profile gate like every other
+    # context-derived result. A corroboration row from another account was
+    # shaping this plan's published guidance.
+    if (
+        prepared.context.profile == spec.profile_ref
+        and prepared.context.dependency_corroboration
+    ):
         guidance.append(
             TopologyGuidanceV1(
                 subject="dependency_api_as_process_call_witness",

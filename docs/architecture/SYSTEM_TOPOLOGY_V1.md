@@ -161,7 +161,7 @@ optional, and authoring it opts into an equality check against discovery.
 
 ## 4b. Evidence discipline in the resolver
 
-Eleven rules the resolver enforces, each of which the first implementation got wrong in the
+Thirteen rules the resolver enforces, each of which the first implementation got wrong in the
 same direction — by treating a gap in evidence as a fact.
 
 **Type is carried, never discarded.** Indexes hold `(id, type)`, not bare ids, and a reference
@@ -209,6 +209,32 @@ runtimes that already have a schedule. `runtime_inventory_complete` is `False` a
 True; absence of a runtime therefore witnesses nothing. Treating that list as authoritative would
 report every unscheduled runtime as not-found and block the primary use case — binding the **first**
 schedule to a runtime.
+
+**A profile mismatch reaches the COLLECTORS, not only the buckets.** Emptying
+`resolved_references`, the prerequisites and the relations while the collectors still read the
+context left the wrong account deciding which *findings* appeared: an omega context carrying alpha's
+symbols and its ProcessCall witness removed two `TOPOLOGY_REFERENCE_NOT_FOUND` and a
+`TOPOLOGY_CAPABILITY_GATED`, and published dependency guidance — so the same mismatch produced a
+different report depending on what the wrong account happened to contain. Under a context mismatch
+the object loop, the witness gating and the context-backed guidance branch all judge nothing;
+document-internal rules (model, capability, relation shape, relation-role references) still run.
+Reporting everything as not-found instead would over-claim absence from evidence that was never
+about this account.
+
+The gate is the **context's** profile, not `same_account` — which is a conjunction with the snapshot
+envelope. That conjunction is correct for everything snapshot-derived, and wrong for the `$ref`
+branch, which reads the ComponentPlan symbol table: qualifying it by the snapshot silenced a real
+type mismatch in a plan whose context matched the spec exactly, and the invariant checker certified
+that plan, because it re-derives suppression from the very blocker that had gone missing. Two gates
+agreeing on the wrong answer is why the arrangement is pinned as a three-way table.
+
+**The plan's own self-check re-derives the permitted bucket, in every state.** "Blocked relations are
+absent" plus "a clean plan is complete" failed open the moment ANY blocker existed: a valid witnessed
+relation could be dropped beside an unrelated gated queue and the checker accepted it, and
+permissibility read only `/relations/N` paths, so a relation withdrawn because an *endpoint object*
+was blocked — or because the context named another account — could be injected straight back. A
+relation is legitimately absent for exactly three reasons, all derivable from the plan's own blockers
+plus the spec, so `planned == declared − suppressed` is asserted unconditionally.
 
 **A blocked endpoint withdraws its relation.** An endpoint's failure is reported under `/objects/N`,
 a different path from the relation's own, so a filter keyed on `/relations/N` alone left a
