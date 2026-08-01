@@ -146,13 +146,12 @@ def _preflight_prerequisites(
 ) -> None:
     """Resolve every declared recipe prerequisite, or fail.
 
-    ``order_invocations`` deliberately skips a dependency that is not in the
-    current invocation set, on the stated grounds that "the engine preflights
-    it". Live QA found that the engine did not — the sentence described an
-    intention rather than a check, so an unsatisfiable prerequisite ran anyway
-    (issue #145). Resolving here makes the claim true and puts the failure where
-    a caller can act on it: an exact `(recipe_id, recipe_version)` that is not
-    registered is `RECIPE_NOT_FOUND` / `RECIPE_VERSION_UNAVAILABLE`.
+    A RECIPE prerequisite is resolved here as defence in depth. Registry
+    construction already rejects one that names something unregistered — a
+    registration mistake is not a caller's to diagnose — so for any registry built
+    through ``RecipeRegistry.__init__`` this branch cannot fire. It stays because
+    ``resolve`` is the same call either way and a silent skip is what the earlier
+    version got wrong (issue #145).
 
     Context prerequisites are checked too, against what the caller actually
     supplied. An earlier version said the engine's signature made them

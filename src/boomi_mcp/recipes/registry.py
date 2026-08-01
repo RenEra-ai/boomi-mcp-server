@@ -285,17 +285,17 @@ class RecipeRegistry:
                         f"{target_key[0]}@{target_key[1]} is not executable"
                     )
             for prerequisite in descriptor.prerequisites:
-                # A self-dependency builds cleanly and then raises a BARE
-                # ValueError from the composer's cycle guard, outside the
-                # RecipeError envelope (issue #145, live QA). It is a build
-                # defect, so it belongs here.
-                if (
-                    getattr(prerequisite, "kind", None) == "recipe"
-                    and prerequisite.recipe_id == descriptor.recipe_id
-                    and prerequisite.recipe_version == descriptor.recipe_version
-                ):
+                if getattr(prerequisite, "kind", None) != "recipe":
+                    continue
+                # A prerequisite naming something unregistered can never be
+                # satisfied — the same argument that rejects an unregistered
+                # adapter target. Rejected HERE so it is a build defect rather
+                # than a caller-facing code for a mistake no caller made.
+                dependency = (prerequisite.recipe_id, prerequisite.recipe_version)
+                if dependency not in self._descriptors:
                     raise ValueError(
-                        f"{descriptor.recipe_id!r} declares itself as a prerequisite"
+                        f"{descriptor.recipe_id!r} declares unregistered prerequisite "
+                        f"{dependency[0]}@{dependency[1]}"
                     )
             for requirement in descriptor.capability_requirements:
                 if requirement.authority != "recipe_registry":
@@ -305,6 +305,10 @@ class RecipeRegistry:
                         f"{descriptor.recipe_id!r} requires unknown recipe_registry "
                         f"subject {requirement.subject!r}"
                     )
+
+        # After every descriptor exists, so a cycle through a recipe registered
+        # later in the tuple is still seen.
+        self._check_prerequisite_cycles()
 
         self._registry_revision = self._compute_registry_revision()
         self._source_revision = revision
@@ -632,6 +636,49 @@ class RecipeRegistry:
             ),
         }
     )
+
+    def _check_prerequisite_cycles(self) -> None:
+        """Reject ANY cycle in the prerequisite graph, not only a self-loop.
+
+        ``composer.order_invocations`` raises a BARE ``ValueError`` when it
+        cannot make progress — outside the ``RecipeError`` envelope, so only the
+        MCP layer's last-line ``except Exception`` would catch it. An earlier
+        version of this check handled N=1 only, and live QA measured a mutual
+        2-cycle, a 3-cycle and a same-id cross-version cycle all registering
+        cleanly and then escaping at run time (issue #145).
+
+        The rule the comment already stated was "a cyclic prerequisite is a build
+        defect and belongs at construction"; this implements it for every N. The
+        whole descriptor set is in hand here, so there is nothing to defer.
+        """
+        graph = {
+            (d.recipe_id, d.recipe_version): [
+                (p.recipe_id, p.recipe_version)
+                for p in d.prerequisites
+                if getattr(p, "kind", None) == "recipe"
+            ]
+            for d in self._descriptors.values()
+        }
+        WHITE, GREY, BLACK = 0, 1, 2
+        colour = {node: WHITE for node in graph}
+
+        def visit(node, stack):
+            colour[node] = GREY
+            for dependency in graph.get(node, ()):
+                if colour.get(dependency) == GREY:
+                    cycle = stack[stack.index(dependency):] + [dependency]
+                    raise ValueError(
+                        "recipe prerequisite cycle: "
+                        + " -> ".join(f"{i}@{v}" for i, v in cycle)
+                    )
+                if colour.get(dependency, BLACK) == WHITE:
+                    visit(dependency, stack + [dependency])
+            colour[node] = BLACK
+
+        # Sorted so the cycle a caller is shown does not depend on dict order.
+        for node in sorted(graph):
+            if colour[node] == WHITE:
+                visit(node, [node])
 
     def _check_capability_states(self, descriptor: RecipeDescriptorV1) -> None:
         for requirement in descriptor.capability_requirements:

@@ -137,12 +137,15 @@ Two invariant classes, reported differently:
   report, a self-dependent prerequisite, and an adapter whose `adapter_target` is unregistered
   or not executable — all raise `ValueError` at construction. They are not a caller's problem.
 
-  That list is prose and drifts — and the tests are not an exhaustive enumeration either. What
-  does not drift is `test_the_registry_build_defect_census_is_pinned`, which counts every
-  `raise ValueError` in `registry.py` and fails the moment one is added or removed. It is a
-  COUNT, not a reachability proof: asserting "every non-pragma raise is executed by a test"
-  needs a coverage tool this repo does not carry, so the guard forces a deliberate decision
-  rather than claiming coverage it cannot demonstrate.
+  That list is prose and drifts. What does not is
+  `test_every_reachable_registry_build_defect_is_exercised_by_a_test`, which runs the registry
+  suite under a stdlib `sys.settrace` tracer and asserts that **every non-pragma
+  `raise ValueError` in `registry.py` was actually executed**. It is a reachability proof, not
+  a count — an earlier version was a count, justified by "asserting reachability needs a
+  coverage tool this repo does not carry", which was simply false: a ~25-line tracer is that
+  assertion. Adding an untested build defect fails it; so does removing the test that reaches
+  one. The matcher counts both spellings, `raise ValueError(...)` and bare `raise ValueError`,
+  because the bare form is exactly what a guard that says "every one" must not miss.
 * **Caller-facing failures** — unknown id, missing version, gated capability — raise
   `RecipeError` with the taxonomy code and a value-free diagnostic.
 

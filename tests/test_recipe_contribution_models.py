@@ -16,6 +16,7 @@ _src = str(_project_root / "src")
 if _src not in sys.path:
     sys.path.insert(0, _src)
 
+from boomi_mcp.errors import RECIPE_CONTRIBUTION_INVALID
 from boomi_mcp.models import recipe_contributions as rc
 from boomi_mcp.models.recipe_contributions import (
     RECIPE_COMPONENT_TYPES,
@@ -758,6 +759,23 @@ def test_an_unhashable_or_wrong_typed_contribution_kind_is_a_diagnostic(bad):
     assert exc.value.diagnostics[0][1] == "/contribution_kind"
 
 
+class _EqualsAnything:
+    """An object whose ``__eq__`` is True for everything.
+
+    Not reachable from JSON — but ``parse_recipe_contribution`` takes a plain
+    Python dict, and this is the ONE input that tells the ``isinstance`` gate
+    apart from a bare ``!=``. Without it the ``version`` params below pass
+    identically against the pre-fix code, which is what live QA measured
+    (issue #145).
+    """
+
+    def __eq__(self, other):  # noqa: D105
+        return True
+
+    def __hash__(self):  # noqa: D105
+        return 0
+
+
 @pytest.mark.parametrize("bad", [{"a": 1}, ["x"], {"k"}, 1, None])
 def test_an_unhashable_or_wrong_typed_version_is_a_diagnostic(bad):
     payload = dict(_SAMPLES["component_contribution"])
@@ -765,3 +783,24 @@ def test_an_unhashable_or_wrong_typed_version_is_a_diagnostic(bad):
     with pytest.raises(RecipeContributionValidationError) as exc:
         parse_recipe_contribution(payload)
     assert exc.value.diagnostics[0][1] == "/version"
+
+
+def test_the_version_gate_rejects_before_the_model_rather_than_through_it():
+    """The ``isinstance`` gate's ONLY observable effect, pinned.
+
+    Every JSON-reachable bad version is caught either way — pydantic's
+    ``Literal["1"]`` rejects it downstream — so the five params above pass with
+    or without the gate, which is what live QA measured (issue #145). The
+    difference is WHERE and with what reason: the gate reports a value-free
+    ``unsupported_version`` without running the model, a bare ``!=`` lets an
+    object with a permissive ``__eq__`` through to pydantic's ``literal_error``.
+
+    Asserting the reason is the only thing that can tell them apart.
+    """
+    payload = dict(_SAMPLES["component_contribution"])
+    payload["version"] = _EqualsAnything()
+    with pytest.raises(RecipeContributionValidationError) as exc:
+        parse_recipe_contribution(payload)
+    assert exc.value.diagnostics == (
+        (RECIPE_CONTRIBUTION_INVALID, "/version", "unsupported_version"),
+    )

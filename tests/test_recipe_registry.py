@@ -6,8 +6,11 @@ mechanically, discovery is independent of registration order, and provenance is
 derived from code rather than accepted from anyone.
 """
 
+import json
+import os
 import random
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -51,6 +54,12 @@ from boomi_mcp.recipes.contracts import (
 from boomi_mcp.recipes.builtins.sync import SyncRecipeInputV1, emit_api_to_api_sync
 
 
+def _inherited_env():
+    """The caller's environment, copied. Separate from :func:`_clean_env`, which
+    strips ``PYTHONPATH`` — the tracer driver NEEDS it set."""
+    return dict(os.environ)
+
+
 def _clean_env():
     """The child's environment with ``PYTHONPATH`` REMOVED.
 
@@ -60,8 +69,6 @@ def _clean_env():
     not from the test. An absolute import added to an owned module passed
     (issue #145, live QA).
     """
-    import os
-
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
     return env
@@ -1458,114 +1465,135 @@ def test_no_listed_module_lies_outside_the_layer_this_issue_owns():
         ), module
 
 
-def test_an_unregistered_recipe_prerequisite_fails_the_run():
-    """``order_invocations`` skips a dependency outside the invocation set on the
-    stated grounds that "the engine preflights it". Live QA found the engine did
-    not — the sentence described an intention. Now it is a check.
+def test_an_unregistered_recipe_prerequisite_fails_at_construction():
+    """A prerequisite naming something unregistered can never be satisfied.
+
+    The same argument that rejects an unregistered adapter target: a
+    registration mistake is not a caller's to diagnose, so it is a build defect
+    rather than a ``RECIPE_*`` code at run time (issue #145, live QA).
     """
-    from boomi_mcp.recipes import (
-        MaterializationCatalog,
-        RecipeRequestV1,
-        run_recipes,
-    )
     from boomi_mcp.recipes.contracts import RecipeDependencyV1
 
-    registry = build_test_registry(
-        (
-            _reg(
-                prerequisites=(
-                    RecipeDependencyV1(
-                        kind="recipe",
-                        recipe_id="never.registered",
-                        recipe_version="1.0.0",
-                    ),
-                )
-            ),
+    with pytest.raises(ValueError, match="unregistered prerequisite"):
+        build_test_registry(
+            (
+                _reg(
+                    prerequisites=(
+                        RecipeDependencyV1(
+                            kind="recipe",
+                            recipe_id="never.registered",
+                            recipe_version="1.0.0",
+                        ),
+                    )
+                ),
+            )
         )
-    )
-    with pytest.raises(RecipeError) as exc:
-        run_recipes(
-            [
-                RecipeRequestV1(
+
+
+def test_a_prerequisite_at_the_wrong_version_fails_at_construction():
+    from boomi_mcp.recipes.contracts import RecipeDependencyV1
+
+    with pytest.raises(ValueError, match="unregistered prerequisite"):
+        build_test_registry(
+            (
+                _reg(recipe_id="test.base", recipe_version="1.0.0"),
+                _reg(
                     recipe_id="test.recipe",
-                    invocation_id="i1",
-                    raw_input={
-                        "version": "1",
-                        "process_key": "p",
-                        "source_connection_ref": "$ref:a",
-                        "source_operation_ref": "$ref:b",
-                        "map_ref": "$ref:m",
-                        "target_connection_ref": "$ref:c",
-                        "target_operation_ref": "$ref:d",
-                        "component_slots": [
-                            {
-                                "contribution_id": "c.0",
-                                "component_key": "k",
-                                "component_type": "process",
-                                "materialization_mode": "create",
-                                "materializer_slot": "s.k",
-                            }
-                        ],
-                    },
-                )
-            ],
-            catalog=MaterializationCatalog({}),
-            registry=registry,
+                    prerequisites=(
+                        RecipeDependencyV1(
+                            kind="recipe",
+                            recipe_id="test.base",
+                            recipe_version="2.0.0",
+                        ),
+                    ),
+                ),
+            )
         )
-    assert exc.value.diagnostics[0].code == RECIPE_NOT_FOUND
 
 
-def test_a_prerequisite_at_the_wrong_version_fails_the_run():
-    from boomi_mcp.recipes import (
-        MaterializationCatalog,
-        RecipeRequestV1,
-        run_recipes,
-    )
+@pytest.mark.parametrize(
+    "edges,label",
+    [
+        ({"cyc.a": "cyc.b", "cyc.b": "cyc.a"}, "mutual 2-cycle"),
+        ({"cyc.a": "cyc.b", "cyc.b": "cyc.c", "cyc.c": "cyc.a"}, "3-cycle"),
+    ],
+    ids=["two", "three"],
+)
+def test_a_multi_recipe_prerequisite_cycle_fails_at_construction(edges, label):
+    """The rule the code already stated, now implemented for every N.
+
+    ``composer.order_invocations`` raises a BARE ``ValueError`` outside the
+    ``RecipeError`` envelope when it cannot make progress. An earlier check
+    handled a self-loop only, and live QA measured a mutual 2-cycle, a 3-cycle
+    and a same-id cross-version cycle all registering cleanly and then escaping
+    at run time (issue #145).
+    """
     from boomi_mcp.recipes.contracts import RecipeDependencyV1
 
-    registry = build_test_registry(
-        (
-            _reg(recipe_id="test.base", recipe_version="1.0.0"),
-            _reg(
-                recipe_id="test.recipe",
-                prerequisites=(
-                    RecipeDependencyV1(
-                        kind="recipe", recipe_id="test.base", recipe_version="2.0.0"
-                    ),
+    registrations = tuple(
+        _reg(
+            recipe_id=source,
+            prerequisites=(
+                RecipeDependencyV1(
+                    kind="recipe", recipe_id=target, recipe_version="1.0.0"
                 ),
             ),
         )
+        for source, target in edges.items()
     )
-    with pytest.raises(RecipeError) as exc:
-        run_recipes(
-            [
-                RecipeRequestV1(
-                    recipe_id="test.recipe",
-                    invocation_id="i1",
-                    raw_input={
-                        "version": "1",
-                        "process_key": "p",
-                        "source_connection_ref": "$ref:a",
-                        "source_operation_ref": "$ref:b",
-                        "map_ref": "$ref:m",
-                        "target_connection_ref": "$ref:c",
-                        "target_operation_ref": "$ref:d",
-                        "component_slots": [
-                            {
-                                "contribution_id": "c.0",
-                                "component_key": "k",
-                                "component_type": "process",
-                                "materialization_mode": "create",
-                                "materializer_slot": "s.k",
-                            }
-                        ],
-                    },
-                )
-            ],
-            catalog=MaterializationCatalog({}),
-            registry=registry,
+    with pytest.raises(ValueError, match="prerequisite cycle"):
+        build_test_registry(registrations)
+
+
+def test_a_same_id_cross_version_cycle_fails_at_construction():
+    """Two VERSIONS of one recipe depending on each other is still a cycle."""
+    from boomi_mcp.recipes.contracts import RecipeDependencyV1
+
+    with pytest.raises(ValueError, match="prerequisite cycle"):
+        build_test_registry(
+            (
+                _reg(
+                    recipe_id="cyc.v",
+                    recipe_version="1.0.0",
+                    prerequisites=(
+                        RecipeDependencyV1(
+                            kind="recipe", recipe_id="cyc.v", recipe_version="2.0.0"
+                        ),
+                    ),
+                ),
+                _reg(
+                    recipe_id="cyc.v",
+                    recipe_version="2.0.0",
+                    is_default=False,
+                    prerequisites=(
+                        RecipeDependencyV1(
+                            kind="recipe", recipe_id="cyc.v", recipe_version="1.0.0"
+                        ),
+                    ),
+                ),
+            )
         )
-    assert exc.value.diagnostics[0].code == RECIPE_VERSION_UNAVAILABLE
+
+
+def test_an_acyclic_prerequisite_chain_still_registers():
+    """The non-vacuous control: a legitimate chain must not be rejected."""
+    from boomi_mcp.recipes.contracts import RecipeDependencyV1
+
+    def depends_on(recipe_id, target):
+        return _reg(
+            recipe_id=recipe_id,
+            prerequisites=(
+                RecipeDependencyV1(
+                    kind="recipe", recipe_id=target, recipe_version="1.0.0"
+                ),
+            ),
+        )
+
+    registry = build_test_registry(
+        (depends_on("chain.a", "chain.b"), depends_on("chain.b", "chain.c"),
+         _reg(recipe_id="chain.c"))
+    )
+    assert len(registry.descriptors()) == 3
 
 
 def test_the_engine_invocation_scan_does_not_skip_package_inits():
@@ -1863,7 +1891,7 @@ def test_a_self_dependent_prerequisite_is_rejected_at_construction():
     """
     from boomi_mcp.recipes.contracts import RecipeDependencyV1
 
-    with pytest.raises(ValueError, match="itself as a prerequisite"):
+    with pytest.raises(ValueError, match="prerequisite cycle"):
         build_test_registry(
             (
                 _reg(
@@ -2246,41 +2274,122 @@ def test_a_nested_executor_is_rejected_at_construction():
         build_test_registry((_reg(executor=outer()),))
 
 
-def test_the_registry_build_defect_census_is_pinned():
-    """Every ``raise ValueError`` in ``registry.py``, counted.
+def _raise_value_error_sites(module):
+    """Every ``raise ValueError`` line in a module, and whether it is pragma'd.
 
-    HONEST BOUND: this is a COUNT, not a reachability proof. A true "every
-    non-pragma raise is executed by a test" assertion needs a coverage tool, and
-    this repo has none — so rather than claim reachability, this fails loudly the
-    moment a raise is added or removed, forcing whoever does it to decide
-    deliberately whether it needs a test.
-
-    It replaces a prose list in the ADR that claimed the test file was the
-    exhaustive enumeration. It was not: four reachable build defects had no test
-    anywhere in the suite (issue #145, live QA), and the four now above this one
-    are those.
+    Matches BOTH spellings: ``raise ValueError(...)`` (an ``ast.Call``) and a bare
+    ``raise ValueError`` (an ``ast.Name``). Counting only the call form left the
+    bare one silent — and the bare form is precisely what bypasses a guard that
+    says it counts them all (issue #145, live QA).
     """
     import ast
 
+    source = Path(module.__file__).read_text()
+    lines = source.splitlines()
+    sites = {}
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Raise) or node.exc is None:
+            continue
+        exc = node.exc
+        name = (
+            getattr(exc.func, "id", None)
+            if isinstance(exc, ast.Call)
+            else getattr(exc, "id", None)
+        )
+        if name != "ValueError":
+            continue
+        pragma = any(
+            "pragma: no cover" in lines[i]
+            for i in range(max(0, node.lineno - 3), node.lineno)
+        )
+        sites[node.lineno] = pragma
+    return sites
+
+
+def test_every_reachable_registry_build_defect_is_exercised_by_a_test():
+    """A real REACHABILITY assertion, not a count.
+
+    Runs this module's own tests in a subprocess under ``sys.settrace`` and
+    requires every non-pragma ``raise ValueError`` in ``registry.py`` to have been
+    executed. An earlier version was a pinned count, justified by "asserting
+    reachability needs a coverage tool this repo does not carry" — which live QA
+    refuted: the stdlib tracer below is that assertion, and it is green
+    (issue #145).
+
+    The tracer returns ``None`` for frames outside the target file, so only
+    ``registry.py`` is line-traced and the run stays fast.
+    """
+    import subprocess
+    import sys
+
+    if os.environ.get("BOOMI_RECIPE_TRACE_CHILD"):
+        pytest.skip("re-entry guard: this test spawns the run it measures")
+
     from boomi_mcp.recipes import registry as registry_module
 
-    source = Path(registry_module.__file__).read_text()
-    lines = source.splitlines()
-    total = pragma = 0
-    for node in ast.walk(ast.parse(source)):
-        if (
-            isinstance(node, ast.Raise)
-            and isinstance(node.exc, ast.Call)
-            and getattr(node.exc.func, "id", None) == "ValueError"
-        ):
-            total += 1
-            if any(
-                "pragma: no cover" in lines[i]
-                for i in range(max(0, node.lineno - 3), node.lineno)
-            ):
-                pragma += 1
+    sites = _raise_value_error_sites(registry_module)
+    expected = sorted(line for line, pragma in sites.items() if not pragma)
+    assert expected, "no raise sites found — the matcher is broken"
 
-    assert (total, pragma) == (31, 3), (
-        f"registry.py has {total} raise ValueError sites ({pragma} pragma'd); "
-        "if you added one, add a test for it and update this census"
+    driver = f"""
+import sys, pathlib, json
+target = str(pathlib.Path({str(Path(registry_module.__file__))!r}).resolve())
+hit = set()
+def tracer(frame, event, arg):
+    if frame.f_code.co_filename != target:
+        return None
+    if event == "line":
+        hit.add(frame.f_lineno)
+    return tracer
+import pytest
+sys.settrace(tracer)
+code = pytest.main(["-q", "-p", "no:cacheprovider", {str(Path(__file__))!r}])
+sys.settrace(None)
+print("TRACE:" + json.dumps(sorted(hit)))
+raise SystemExit(0 if code == 0 else 1)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", driver],
+        cwd=str(_project_root),
+        capture_output=True,
+        text=True,
+        env={
+            **_inherited_env(),
+            "PYTHONPATH": str(_project_root / "src"),
+            # Without this the child re-runs THIS test, which spawns another
+            # child, forever.
+            "BOOMI_RECIPE_TRACE_CHILD": "1",
+        },
     )
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-2000:]
+    marker = [ln for ln in result.stdout.splitlines() if ln.startswith("TRACE:")]
+    assert marker, result.stdout[-2000:]
+    hit = set(json.loads(marker[-1][len("TRACE:"):]))
+
+    missed = [line for line in expected if line not in hit]
+    assert missed == [], (
+        f"registry.py build defects with no test: lines {missed}. "
+        "Either add a test or mark the site '# pragma: no cover' with a reason."
+    )
+
+
+def test_the_raise_site_matcher_sees_the_bare_spelling():
+    """Guard the guard: ``raise ValueError`` with no call must be counted.
+
+    The matcher missing it is what made the previous census silent on exactly the
+    form that bypasses it.
+    """
+    import ast
+    import types
+
+    module = types.SimpleNamespace()
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".py", delete=False, encoding="utf-8"
+    ) as handle:
+        handle.write("def f(x):\n    if x:\n        raise ValueError\n")
+        module.__file__ = handle.name
+    try:
+        sites = _raise_value_error_sites(module)
+        assert sites == {3: False}, sites
+    finally:
+        os.unlink(module.__file__)
