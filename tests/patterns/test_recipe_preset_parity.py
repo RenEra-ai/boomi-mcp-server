@@ -440,3 +440,155 @@ def test_unmigrated_archetype_reports_no_recipe_provenance():
     result = build_from_archetype_action("http_listener_to_db", example.parameters)
     assert result["_success"] is True
     assert "recipe_provenance" not in result
+
+
+# ---------------------------------------------------------------------------
+# Codex-review regression (issue #145): the pin must reach execution
+# ---------------------------------------------------------------------------
+
+
+def test_the_pin_names_the_executable_recipe_not_the_adapter():
+    """``recipe_version`` pins what RUNS, not the compatibility wrapper.
+
+    Validating the pin against the ADAPTER id made the real executable version
+    (``0.1.0``) a hard ``RECIPE_VERSION_UNAVAILABLE`` while the adapter's
+    unrelated ``1.0.0`` was accepted and then ignored — a pin the tool took and
+    the execution did not keep (issue #145, Codex review).
+    """
+    from boomi_mcp.categories.integration_authoring import (
+        get_integration_archetype_action,
+    )
+    from boomi_mcp.recipes import production_registry
+
+    registry = production_registry()
+    adapter = registry.resolve("boomi.adapter.api_to_api_sync")
+    executable = registry.resolve(adapter.adapter_target.recipe_id)
+    assert adapter.recipe_version != executable.recipe_version, (
+        "the two versions must differ, or this test proves nothing"
+    )
+
+    ok = get_integration_archetype_action(
+        "api_to_api_sync", recipe_version=executable.recipe_version
+    )
+    assert ok["_success"] is True
+    assert (
+        ok["recipe_executable_descriptor"]["recipe_version"]
+        == executable.recipe_version
+    )
+
+    rejected = get_integration_archetype_action(
+        "api_to_api_sync", recipe_version=adapter.recipe_version
+    )
+    assert rejected["_success"] is False
+    assert rejected["error_code"] == "RECIPE_VERSION_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("name", sorted(_PRESET_CASES))
+def test_a_pinned_build_reports_the_version_that_actually_ran(name):
+    from boomi_mcp.recipes import production_registry
+
+    archetype = _PRESET_CASES[name][0]
+    adapter_id = f"boomi.adapter.{archetype}"
+    registry = production_registry()
+    executable = registry.resolve(
+        registry.resolve(adapter_id).adapter_target.recipe_id
+    )
+
+    index = _PRESET_CASES[name][1]
+    example = _EXAMPLES[archetype].examples[index]
+    result = build_from_archetype_action(
+        archetype, example.parameters, recipe_version=executable.recipe_version
+    )
+    assert result["_success"] is True, result.get("error")
+    ran = result["recipe_provenance"]["executable"]
+    assert ran["recipe_id"] == executable.recipe_id
+    assert ran["recipe_version"] == executable.recipe_version
+
+
+def test_a_pin_that_cannot_be_honoured_returns_no_spec():
+    """Validated BEFORE emission — answering with a spec would answer a
+    different question than the caller asked."""
+    example = ApiToApiSyncArchetype.examples[0]
+    result = build_from_archetype_action(
+        "api_to_api_sync", example.parameters, recipe_version="9.9.9"
+    )
+    assert result["_success"] is False
+    assert result["error_code"] == "RECIPE_VERSION_UNAVAILABLE"
+    assert "integration_spec" not in result
+
+
+def test_the_pin_is_carried_all_the_way_into_run_recipes(monkeypatch):
+    """Structural: the version must appear on the RecipeRequestV1 the engine sees.
+
+    The response field alone could be reporting an intention; this observes the
+    request object the engine actually resolves.
+    """
+    import boomi_mcp.recipes as recipes_pkg
+    import boomi_mcp.patterns.recipe_bridge as bridge
+
+    seen = []
+    real = bridge.run_recipes
+
+    def spy(requests, **kwargs):
+        seen.extend((r.recipe_id, r.recipe_version) for r in requests)
+        return real(requests, **kwargs)
+
+    monkeypatch.setattr(bridge, "run_recipes", spy)
+    build_from_archetype_action(
+        "api_to_api_sync",
+        ApiToApiSyncArchetype.examples[0].parameters,
+        recipe_version="0.1.0",
+    )
+    assert seen == [("boomi.archetype.api_to_api_sync", "0.1.0")]
+
+
+def test_an_unpinned_build_still_reaches_the_engine_with_no_version(monkeypatch):
+    """The negative control: absent pin means the code-declared default."""
+    import boomi_mcp.patterns.recipe_bridge as bridge
+
+    seen = []
+    real = bridge.run_recipes
+
+    def spy(requests, **kwargs):
+        seen.extend(r.recipe_version for r in requests)
+        return real(requests, **kwargs)
+
+    monkeypatch.setattr(bridge, "run_recipes", spy)
+    build_from_archetype_action(
+        "api_to_api_sync", ApiToApiSyncArchetype.examples[0].parameters
+    )
+    assert seen == [None]
+
+
+def test_an_unmigrated_archetype_still_rejects_a_pin():
+    from boomi_mcp.patterns.archetypes.http_listener_to_db import (
+        HttpListenerToDbArchetype,
+    )
+
+    result = build_from_archetype_action(
+        "http_listener_to_db",
+        HttpListenerToDbArchetype.examples[0].parameters,
+        recipe_version="1.0.0",
+    )
+    assert result["_success"] is False
+    assert "integration_spec" not in result
+
+
+def test_every_archetype_accepts_the_uniform_emit_spec_contract():
+    """``recipe_version`` is on the ABC, so all six implementations take it.
+
+    Four ignore it — they have no recipe to pin — but the keyword is part of one
+    contract rather than something only some subclasses happen to accept.
+    """
+    import inspect
+
+    from boomi_mcp.patterns import PatternKind, PatternRegistry
+
+    registry = PatternRegistry.from_package("boomi_mcp.patterns")
+    archetypes = registry.list_patterns(kind=PatternKind.ARCHETYPE)
+    assert len(archetypes) >= 6
+    for cls in archetypes:
+        parameters = inspect.signature(cls.emit_spec).parameters
+        assert "recipe_version" in parameters, cls.metadata.name
+        assert parameters["recipe_version"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert parameters["recipe_version"].default is None

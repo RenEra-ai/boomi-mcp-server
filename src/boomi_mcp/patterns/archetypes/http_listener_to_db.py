@@ -924,7 +924,12 @@ class HttpListenerToDbArchetype(ArchetypePattern):
     ]
 
     @classmethod
-    def emit_spec(cls, parameters: HttpListenerToDbParameters) -> IntegrationSpecV1:
+    def emit_spec(
+        cls, parameters: HttpListenerToDbParameters, *, recipe_version: Optional[str] = None
+    ) -> IntegrationSpecV1:
+        # Not migrated to the typed contribution path, so there is no
+        # recipe to pin. Accepted for one uniform contract; ignored here.
+        del recipe_version
         naming = parameters.naming
         write_profile = parameters.target.write_profile
 

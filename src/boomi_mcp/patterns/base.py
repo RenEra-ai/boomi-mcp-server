@@ -139,7 +139,18 @@ class ArchetypePattern(PatternBase):
 
     @classmethod
     @abstractmethod
-    def emit_spec(cls, parameters: BaseModel) -> IntegrationSpecV1:
+    def emit_spec(
+        cls, parameters: BaseModel, *, recipe_version: Optional[str] = None
+    ) -> IntegrationSpecV1:
+        """Emit the archetype's IntegrationSpecV1.
+
+        ``recipe_version`` (#145 M12.10) pins the EXACT executable recipe version
+        an archetype MIGRATED to the typed contribution path runs. It is
+        keyword-only and defaults to ``None`` (the code-declared default), and an
+        archetype that is not migrated ignores it — its emission has no recipe to
+        pin. Declared on the base so the pin is part of one contract rather than a
+        keyword only some subclasses happen to accept.
+        """
         ...
 
     @classmethod

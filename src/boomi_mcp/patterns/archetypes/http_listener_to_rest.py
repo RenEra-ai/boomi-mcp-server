@@ -349,7 +349,12 @@ class HttpListenerToRestArchetype(ArchetypePattern):
     ]
 
     @classmethod
-    def emit_spec(cls, parameters: HttpListenerToRestParameters) -> IntegrationSpecV1:
+    def emit_spec(
+        cls, parameters: HttpListenerToRestParameters, *, recipe_version: Optional[str] = None
+    ) -> IntegrationSpecV1:
+        # Not migrated to the typed contribution path, so there is no
+        # recipe to pin. Accepted for one uniform contract; ignored here.
+        del recipe_version
         naming = parameters.naming
         target = parameters.target
 

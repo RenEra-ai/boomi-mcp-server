@@ -559,3 +559,88 @@ def test_semantic_ids_are_lower_case_and_bounded():
         payload = dict(_SAMPLES["component_contribution"], contribution_id=bad)
         with pytest.raises(RecipeContributionValidationError):
             parse_recipe_contribution(payload)
+
+
+# ---------------------------------------------------------------------------
+# Codex-review regression (issue #145): pointers must resolve against the payload
+# ---------------------------------------------------------------------------
+
+
+def _diagnostic_paths(payload):
+    try:
+        parse_recipe_contribution(payload)
+    except RecipeContributionValidationError as exc:
+        return [path for _code, path, _reason in exc.diagnostics]
+    raise AssertionError("expected a validation failure")
+
+
+def _resolves(payload, pointer):
+    """Whether an RFC 6901 pointer addresses something in the payload."""
+    if pointer == "/":
+        return True
+    cursor = payload
+    for raw in pointer.lstrip("/").split("/"):
+        segment = raw.replace("~1", "/").replace("~0", "~")
+        if isinstance(cursor, dict):
+            if segment not in cursor:
+                return False
+            cursor = cursor[segment]
+        elif isinstance(cursor, list):
+            if not segment.isdigit() or int(segment) >= len(cursor):
+                return False
+            cursor = cursor[int(segment)]
+        else:
+            return False
+    return True
+
+
+def test_a_union_tag_never_appears_in_a_diagnostic_pointer():
+    """Pydantic v2 inserts the TAG VALUE into a discriminated-union location.
+
+    A missing ``operation_ref`` was reported at
+    ``/operations/0/set_process_root/root/body/steps/0/source/operation_ref``,
+    where neither ``set_process_root`` nor ``source`` is a key in the payload —
+    they are the ``op`` and ``kind`` values. The earlier filter dropped segments
+    ending in ``]``, which is pydantic v1's spelling, so it matched nothing
+    (issue #145, Codex review).
+    """
+    payload = json.loads(json.dumps(_SAMPLES["process_ir_patch"]))
+    del payload["operations"][0]["root"]["body"]["steps"][0]["operation_ref"]
+
+    paths = _diagnostic_paths(payload)
+    assert "/operations/0/root/body/steps/0/operation_ref" in paths
+    for path in paths:
+        assert "set_process_root" not in path, path
+        assert "/source/" not in path, path
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(
+            lambda p: p["operations"][0]["root"]["body"]["steps"].__setitem__(
+                1, {"kind": "target", "connection_ref": "$ref:t"}
+            ),
+            id="missing_key_in_a_nested_union_member",
+        ),
+        pytest.param(
+            lambda p: p["operations"][0].__setitem__("slot", "not_a_slot"),
+            id="bad_literal_on_the_operation",
+        ),
+        pytest.param(
+            lambda p: p["operations"][0]["root"]["body"].__setitem__("steps", []),
+            id="empty_sequence",
+        ),
+    ],
+)
+def test_every_diagnostic_pointer_resolves_against_the_submitted_payload(mutate):
+    """The property the pointer CLAIMS — RFC 6901 against what was sent.
+
+    The final segment of a ``missing`` diagnostic is the absent key itself, so it
+    is allowed not to resolve; every segment before it must.
+    """
+    payload = json.loads(json.dumps(_SAMPLES["process_ir_patch"]))
+    mutate(payload)
+    for path in _diagnostic_paths(payload):
+        parent = path.rsplit("/", 1)[0] or "/"
+        assert _resolves(payload, parent), (path, parent)

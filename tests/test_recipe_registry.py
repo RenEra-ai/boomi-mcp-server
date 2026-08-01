@@ -1890,3 +1890,103 @@ def test_registry_revision_is_stable_across_semver_build_metadata():
     assert [d.recipe_version for d in a.descriptors()] == [
         d.recipe_version for d in b.descriptors()
     ]
+
+
+# ---------------------------------------------------------------------------
+# Codex-review regressions (issue #145)
+# ---------------------------------------------------------------------------
+
+
+def test_an_extra_live_version_is_reported_as_skew():
+    """``live_only`` compares (id, VERSION), not id.
+
+    An id-only subtraction is blind to an extra VERSION of a known recipe: a
+    live registry carrying x@1.0.0 AND x@2.0.0 reported ``match`` against a
+    fully-hashed expectation naming only x@1.0.0 — the parallel-version support
+    this registry advertises (issue #145, Codex review).
+    """
+    def reg(version, default):
+        return _reg(recipe_id="x.multi", recipe_version=version, is_default=default)
+
+    registry = build_test_registry((reg("1.0.0", True), reg("2.0.0", False)))
+    first = next(d for d in registry.descriptors() if d.recipe_version == "1.0.0")
+    skew = registry.compare(
+        ExpectedRecipeRegistryV1(
+            entries=(
+                ExpectedRecipeEntryV1(
+                    recipe_id="x.multi",
+                    recipe_version="1.0.0",
+                    implementation_sha256=first.provenance.implementation_sha256,
+                ),
+            )
+        )
+    )
+    assert skew.status == "mismatch"
+    assert skew.live_only == ("x.multi@2.0.0",)
+
+
+def test_an_expectation_naming_every_live_version_still_matches():
+    """The converse: the fix must not make a complete expectation mismatch."""
+    def reg(version, default):
+        return _reg(recipe_id="x.multi", recipe_version=version, is_default=default)
+
+    registry = build_test_registry((reg("1.0.0", True), reg("2.0.0", False)))
+    skew = registry.compare(
+        ExpectedRecipeRegistryV1(
+            entries=tuple(
+                ExpectedRecipeEntryV1(
+                    recipe_id=d.recipe_id,
+                    recipe_version=d.recipe_version,
+                    implementation_sha256=d.provenance.implementation_sha256,
+                )
+                for d in registry.descriptors()
+            )
+        )
+    )
+    assert skew.status == "match"
+    assert skew.live_only == ()
+
+
+def test_a_wholly_unknown_live_id_is_reported_by_id_not_by_version():
+    """An id the caller never claimed to know about is reported once, not per
+    version — otherwise one unknown recipe with five versions drowns the finding."""
+    registry = build_test_registry((_reg(recipe_id="a.known"), _reg(recipe_id="z.unknown")))
+    known = next(d for d in registry.descriptors() if d.recipe_id == "a.known")
+    skew = registry.compare(
+        ExpectedRecipeRegistryV1(
+            entries=(
+                ExpectedRecipeEntryV1(
+                    recipe_id="a.known",
+                    recipe_version=known.recipe_version,
+                    implementation_sha256=known.provenance.implementation_sha256,
+                ),
+            )
+        )
+    )
+    assert skew.live_only == ("z.unknown",)
+
+
+def test_the_layer_module_list_follows_the_ACTIVE_import_namespace():
+    """``PACKAGE_NAME`` is the DISTRIBUTION name; the import prefix is not.
+
+    Hard-coding ``boomi_mcp`` made ``source_digest`` import ``boomi_mcp.*`` from a
+    checkout loaded as ``src.boomi_mcp.*`` — a ``ModuleNotFoundError`` that took
+    the registry down at first use (issue #145, Codex review).
+    """
+    from boomi_mcp.recipes import registry as registry_module
+
+    expected_prefix = registry_module.__name__.rsplit(".recipes.registry", 1)[0]
+    for module in registry_module.RECIPE_LAYER_MODULES:
+        assert module.startswith(expected_prefix + "."), module
+    # ...and the DISTRIBUTION name in published provenance is unaffected.
+    assert production_registry().descriptors()[0].provenance.package_name == "boomi_mcp"
+
+
+def test_every_layer_module_is_importable_under_the_active_namespace():
+    """The property the prefix exists to guarantee, asserted directly."""
+    import importlib
+
+    from boomi_mcp.recipes.registry import RECIPE_LAYER_MODULES
+
+    for module in RECIPE_LAYER_MODULES:
+        importlib.import_module(module)

@@ -73,24 +73,43 @@ def _normalize_expected_registry(
     return ExpectedRecipeRegistryV1.model_validate(payload)
 
 
-def _recipe_descriptor_block(
-    recipe_id: str, recipe_version: str | None = None
-) -> dict[str, Any] | None:
-    """The descriptor for one recipe, or ``None`` when it is not registered.
+def _recipe_descriptor_block(recipe_id: str) -> dict[str, Any] | None:
+    """The descriptor for one recipe at its default version, or ``None``.
 
     ``None`` rather than an exception: this block is additive metadata on an
     otherwise-successful response, and an unmigrated archetype legitimately has
-    no descriptor. A caller that PINS a version gets a hard error instead —
-    that request cannot be satisfied silently.
+    no descriptor.
+    """
+    try:
+        return production_registry().resolve(recipe_id).public_payload()
+    except RecipeError:
+        return None
+
+
+def _resolve_pinned_target(
+    adapter_id: str, recipe_version: str | None
+) -> dict[str, Any] | None:
+    """Resolve the EXECUTABLE recipe an adapter targets, honouring a pin.
+
+    ``recipe_version`` pins the executable recipe, NOT the adapter. That is the
+    version a caller reads off the registry snapshot, the one that decides what
+    code runs, and the one this issue's acceptance criterion is about.
+
+    An earlier version validated the pin against the ADAPTER id, which made the
+    real executable version (``0.1.0`` for both sync presets) a hard
+    ``RECIPE_VERSION_UNAVAILABLE`` while the adapter's unrelated ``1.0.0`` was
+    accepted and then ignored — a pin the tool took and the execution did not
+    keep (issue #145, Codex review).
+
+    A pin that cannot be honoured RAISES; an absent pin returns the target's
+    default descriptor.
     """
     registry = production_registry()
-    try:
-        descriptor = registry.resolve(recipe_id, recipe_version)
-    except RecipeError:
-        if recipe_version is not None:
-            raise
+    adapter = registry.resolve(adapter_id)
+    if adapter.adapter_target is None:  # pragma: no cover - construction enforces it
         return None
-    return descriptor.public_payload()
+    target = registry.resolve(adapter.adapter_target.recipe_id, recipe_version)
+    return target.public_payload()
 
 
 def _reliability_downgrade_hints(spec: Any) -> list[str]:
@@ -232,10 +251,9 @@ def get_integration_archetype_action(
 
     adapter_id = _ARCHETYPE_ADAPTERS.get(cls.metadata.name)
     try:
-        descriptor = (
-            _recipe_descriptor_block(adapter_id, recipe_version)
-            if adapter_id
-            else None
+        descriptor = _recipe_descriptor_block(adapter_id) if adapter_id else None
+        target = (
+            _resolve_pinned_target(adapter_id, recipe_version) if adapter_id else None
         )
     except RecipeError as exc:
         return recipe_error_envelope(
@@ -265,6 +283,9 @@ def get_integration_archetype_action(
         "raw_xml_exposed": False,
         "next_tool": "build_from_archetype",
         "recipe_descriptor": descriptor,
+        # The EXECUTABLE recipe the adapter routes to — the thing
+        # ``recipe_version`` pins and the thing that decides what runs.
+        "recipe_executable_descriptor": target,
     }
 
 
@@ -313,14 +334,21 @@ def build_from_archetype_action(
                 retryable=False,
             ).to_dict()
         try:
-            _recipe_descriptor_block(adapter_id, recipe_version)
+            _resolve_pinned_target(adapter_id, recipe_version)
         except RecipeError as exc:
             return recipe_error_envelope(
                 exc, registry_revision=production_registry().registry_revision
             )
 
     try:
-        spec = cls.emit_spec(params_obj)
+        # The pin travels: ``emit_spec`` hands it to the bridge, which hands it to
+        # ``run_recipes``. Only a migrated archetype has a recipe to pin, and
+        # ``adapter_id`` is the same gate that decided the pin was legal at all.
+        spec = (
+            cls.emit_spec(params_obj, recipe_version=recipe_version)
+            if adapter_id is not None
+            else cls.emit_spec(params_obj)
+        )
     except RecipeError as exc:
         # The recipe layer rejected what the legacy path accepted. Surfaced, never
         # swallowed: a decorative gate is worse than none, and the parity matrix
@@ -381,7 +409,11 @@ def build_from_archetype_action(
     if adapter_id is not None:
         response["recipe_provenance"] = {
             "registry_revision": production_registry().registry_revision,
-            "adapter": _recipe_descriptor_block(adapter_id, recipe_version),
+            "adapter": _recipe_descriptor_block(adapter_id),
+            # The version that ACTUALLY ran — the pin if one was given, else the
+            # code-declared default. Reported so a caller can confirm the pin
+            # took effect rather than assume it.
+            "executable": _resolve_pinned_target(adapter_id, recipe_version),
         }
 
     return response
@@ -473,6 +505,9 @@ def compose_archetypes_action(
         "recipe_provenance": {
             "registry_revision": production_registry().registry_revision,
             "adapter": _recipe_descriptor_block(ADAPTER_COMPOSE_ARCHETYPES),
+            # ``compose_archetypes`` exposes no ``recipe_version`` parameter, so
+            # this is always the default — reported for symmetry with the presets.
+            "executable": _resolve_pinned_target(ADAPTER_COMPOSE_ARCHETYPES, None),
         },
     }
 

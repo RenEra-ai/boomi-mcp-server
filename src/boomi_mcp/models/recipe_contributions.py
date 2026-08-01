@@ -742,14 +742,49 @@ def _pointer(path: Tuple[Any, ...]) -> str:
     return "/" + "/".join(escaped)
 
 
-def _error_pointer(location: Tuple[Any, ...]) -> str:
-    """Pointer for a pydantic error location, with union tags dropped.
+def _error_pointer(location: Tuple[Any, ...], payload: Any = None) -> str:
+    """Pointer for a pydantic error location, resolved against the PAYLOAD.
 
-    Pydantic prefixes a discriminated-union location with the member's tag, which
-    is a schema fact rather than a position in the authored document. Keeping it
-    would make the pointer unresolvable against the payload the caller sent.
+    Pydantic inserts a discriminated-union member's tag into the location — a
+    schema fact, not a position in the authored document. Keeping it makes the
+    pointer unresolvable against what the caller actually sent: a missing
+    ``operation_ref`` was reported at
+    ``/operations/0/set_process_root/root/body/steps/0/source/operation_ref``,
+    where neither ``set_process_root`` nor ``source`` is a key in the payload —
+    they are the ``op`` and ``kind`` tag VALUES.
+
+    An earlier version dropped segments ending in ``]``, which is pydantic v1's
+    ``Model[tag]`` spelling; v2 emits the bare tag, so the filter matched nothing
+    (issue #145, Codex review).
+
+    Resolved by WALKING: a segment is kept only if it addresses something that
+    exists at that point in the payload. That is exactly the property the pointer
+    claims — RFC 6901 against the submitted document — rather than a guess about
+    which spellings pydantic uses. With no payload to walk, every segment is kept:
+    a possibly-imprecise pointer beats a silently truncated one.
     """
-    parts = [part for part in location if not str(part).endswith("]")]
+    if payload is None:
+        return _pointer(tuple(location))
+
+    parts: List[Any] = []
+    cursor: Any = payload
+    for part in location:
+        if isinstance(cursor, dict) and part in cursor:
+            parts.append(part)
+            cursor = cursor[part]
+        elif isinstance(cursor, (list, tuple)) and isinstance(part, int) and (
+            -len(cursor) <= part < len(cursor)
+        ):
+            parts.append(part)
+            cursor = cursor[part]
+        else:
+            # Unresolvable here: either a union tag pydantic inserted, or the
+            # very key the error says is MISSING. A missing key is the last
+            # segment and has nothing after it, so keeping it is right and the
+            # walk simply ends.
+            if part == location[-1]:
+                parts.append(part)
+            # Otherwise it is a tag — skip it and keep walking from where we are.
     return _pointer(tuple(parts))
 
 
@@ -796,7 +831,7 @@ def parse_recipe_contribution(payload: Any) -> Any:
             tuple(
                 (
                     RECIPE_CONTRIBUTION_INVALID,
-                    _error_pointer(err["loc"]),
+                    _error_pointer(err["loc"], payload),
                     str(err["type"]),
                 )
                 for err in exc.errors()

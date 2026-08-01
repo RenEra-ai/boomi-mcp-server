@@ -1485,7 +1485,9 @@ class ApiToApiSyncArchetype(ArchetypePattern):
     ]
 
     @classmethod
-    def emit_spec(cls, parameters: ApiToApiSyncParameters) -> IntegrationSpecV1:
+    def emit_spec(
+        cls, parameters: ApiToApiSyncParameters, *, recipe_version: Optional[str] = None
+    ) -> IntegrationSpecV1:
         naming = parameters.naming
         source_binding = parameters.source.binding
         target_binding = parameters.target.binding
@@ -1667,6 +1669,7 @@ class ApiToApiSyncArchetype(ArchetypePattern):
             recipe_id=RECIPE_API_TO_API_SYNC,
             components=components,
             process=components[-1],
+            recipe_version=recipe_version,
         )
 
         return IntegrationSpecV1(

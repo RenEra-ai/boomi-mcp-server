@@ -681,7 +681,9 @@ class ApiToDatabaseSyncArchetype(ArchetypePattern):
     ]
 
     @classmethod
-    def emit_spec(cls, parameters: ApiToDatabaseSyncParameters) -> IntegrationSpecV1:
+    def emit_spec(
+        cls, parameters: ApiToDatabaseSyncParameters, *, recipe_version: Optional[str] = None
+    ) -> IntegrationSpecV1:
         naming = parameters.naming
         source_binding = parameters.source.binding
         source_fetch = parameters.source.fetch_request
@@ -842,6 +844,7 @@ class ApiToDatabaseSyncArchetype(ArchetypePattern):
             recipe_id=RECIPE_API_TO_DATABASE_SYNC,
             components=components,
             process=components[-1],
+            recipe_version=recipe_version,
         )
 
         return IntegrationSpecV1(

@@ -89,8 +89,11 @@ class StubMinimalIntegrationArchetype(ArchetypePattern):
 
     @classmethod
     def emit_spec(
-        cls, parameters: StubMinimalIntegrationParameters
+        cls, parameters: StubMinimalIntegrationParameters, *, recipe_version: Optional[str] = None
     ) -> IntegrationSpecV1:
+        # Not migrated to the typed contribution path, so there is no
+        # recipe to pin. Accepted for one uniform contract; ignored here.
+        del recipe_version
         return IntegrationSpecV1(
             version="1.0",
             name=parameters.integration_name,

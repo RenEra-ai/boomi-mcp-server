@@ -147,6 +147,7 @@ def run_and_verify(
     components: Sequence[IntegrationComponentSpec],
     catalog: MaterializationCatalog,
     connector_metadata: Mapping[str, Tuple[Optional[str], Optional[str]]],
+    recipe_version: Optional[str] = None,
 ) -> RecipeRunResultV1:
     """Run the recipe and prove it reassembled exactly the legacy components.
 
@@ -160,6 +161,11 @@ def run_and_verify(
                 recipe_id=recipe_id,
                 invocation_id=invocation_id,
                 raw_input=raw_input,
+                # The PIN, carried all the way to resolution. Without this the
+                # tool accepted a version and then ran the default — a guarantee
+                # in the signature that the execution did not keep (issue #145,
+                # Codex review).
+                recipe_version=recipe_version,
             )
         ],
         catalog=catalog,
@@ -192,6 +198,7 @@ def run_sync_preset_recipe(
     recipe_id: str,
     components: Sequence[IntegrationComponentSpec],
     process: IntegrationComponentSpec,
+    recipe_version: Optional[str] = None,
 ) -> RecipeRunResultV1:
     """Route a ``sync_pipeline`` preset through the typed contribution path.
 
@@ -248,6 +255,7 @@ def run_sync_preset_recipe(
         connector_metadata=connector_metadata_from_requirements(
             legacy.symbol_requirements
         ),
+        recipe_version=recipe_version,
     )
 
 
@@ -256,6 +264,7 @@ def run_fanout_recipe(
     recipe_id: str,
     components: Sequence[IntegrationComponentSpec],
     process: IntegrationComponentSpec,
+    recipe_version: Optional[str] = None,
 ) -> RecipeRunResultV1:
     """Route a composed DB -> transform -> REST fan-out through the recipe path.
 
@@ -335,6 +344,7 @@ def run_fanout_recipe(
         connector_metadata=connector_metadata_from_requirements(
             legacy.symbol_requirements
         ),
+        recipe_version=recipe_version,
     )
 
 

@@ -3658,8 +3658,11 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
 
     @classmethod
     def emit_spec(
-        cls, parameters: DatabaseToApiSyncParameters
+        cls, parameters: DatabaseToApiSyncParameters, *, recipe_version: Optional[str] = None
     ) -> IntegrationSpecV1:
+        # Not migrated to the typed contribution path, so there is no
+        # recipe to pin. Accepted for one uniform contract; ignored here.
+        del recipe_version
         naming = parameters.naming
         source_binding = parameters.source.binding
         target_binding = parameters.target.binding

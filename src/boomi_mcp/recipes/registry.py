@@ -152,23 +152,34 @@ _ENTRY_KINDS_WITH_EXECUTOR = frozenset({"executable_recipe", "constraint_only"})
 #:
 #: STATIC, not a package walk: a scan would make the digest a property of the
 #: filesystem, which is the exact failure mode this layer avoids for discovery.
+#: The IMPORT prefix of the namespace this module was actually loaded under —
+#: ``boomi_mcp`` or ``src.boomi_mcp``. Distinct from ``PACKAGE_NAME``, which is
+#: the DISTRIBUTION name and stays ``boomi_mcp`` in published provenance.
+#:
+#: The repo supports both namespaces (``errors.py`` is stdlib-only for exactly
+#: that reason), and hard-coding the distribution name here made
+#: ``source_digest`` import ``boomi_mcp.*`` from a checkout loaded as
+#: ``src.boomi_mcp.*`` — a ``ModuleNotFoundError`` that took the whole registry
+#: down at first use (issue #145, Codex review).
+_IMPORT_PREFIX = __name__.rsplit(".recipes.registry", 1)[0]
+
 RECIPE_LAYER_MODULES: Tuple[str, ...] = (
-    f"{PACKAGE_NAME}.build_info",
-    f"{PACKAGE_NAME}.models.recipe_contributions",
+    f"{_IMPORT_PREFIX}.build_info",
+    f"{_IMPORT_PREFIX}.models.recipe_contributions",
     # Migrated surfaces — they call the bridge, so they are in the path.
-    f"{PACKAGE_NAME}.patterns.archetypes.api_to_api_sync",
-    f"{PACKAGE_NAME}.patterns.archetypes.api_to_database_sync",
-    f"{PACKAGE_NAME}.patterns.composition",
-    f"{PACKAGE_NAME}.patterns.recipe_bridge",
-    f"{PACKAGE_NAME}.recipes.builtins.catalog",
-    f"{PACKAGE_NAME}.recipes.builtins.fanout",
-    f"{PACKAGE_NAME}.recipes.builtins.sync",
-    f"{PACKAGE_NAME}.recipes.composer",
-    f"{PACKAGE_NAME}.recipes.contracts",
-    f"{PACKAGE_NAME}.recipes.engine",
-    f"{PACKAGE_NAME}.recipes.errors",
-    f"{PACKAGE_NAME}.recipes.materialization",
-    f"{PACKAGE_NAME}.recipes.registry",
+    f"{_IMPORT_PREFIX}.patterns.archetypes.api_to_api_sync",
+    f"{_IMPORT_PREFIX}.patterns.archetypes.api_to_database_sync",
+    f"{_IMPORT_PREFIX}.patterns.composition",
+    f"{_IMPORT_PREFIX}.patterns.recipe_bridge",
+    f"{_IMPORT_PREFIX}.recipes.builtins.catalog",
+    f"{_IMPORT_PREFIX}.recipes.builtins.fanout",
+    f"{_IMPORT_PREFIX}.recipes.builtins.sync",
+    f"{_IMPORT_PREFIX}.recipes.composer",
+    f"{_IMPORT_PREFIX}.recipes.contracts",
+    f"{_IMPORT_PREFIX}.recipes.engine",
+    f"{_IMPORT_PREFIX}.recipes.errors",
+    f"{_IMPORT_PREFIX}.recipes.materialization",
+    f"{_IMPORT_PREFIX}.recipes.registry",
 )
 
 
@@ -542,7 +553,7 @@ class RecipeRegistry:
             # lists every one of them — including the migrated surfaces, which
             # round 3 of live QA found missing from an earlier version of this
             # same sentence.
-            catalog_module = f"{PACKAGE_NAME}.recipes.builtins.catalog"
+            catalog_module = f"{_IMPORT_PREFIX}.recipes.builtins.catalog"
             try:
                 catalog_source = inspect.getsource(
                     importlib.import_module(catalog_module)
@@ -948,7 +959,25 @@ class RecipeRegistry:
                     )
                 )
 
-        live_only = sorted(live_ids - expected_ids)
+        # By (id, VERSION), not id. An id-only subtraction is blind to an extra
+        # VERSION of a known recipe: a live registry carrying x@1.0.0 AND x@2.0.0
+        # reported ``match`` against a fully-hashed expectation naming only
+        # x@1.0.0, which is precisely the parallel-version support this registry
+        # advertises (issue #145, Codex review).
+        expected_pairs = {
+            (entry.recipe_id, entry.recipe_version) for entry in expected.entries
+        }
+        live_only = sorted(
+            f"{recipe_id}@{version}"
+            for recipe_id, version in live
+            if (recipe_id, version) not in expected_pairs
+            # An id absent from the expectation ENTIRELY is not "extra" — the
+            # caller never claimed to know about it, and reporting every version
+            # of it would drown the real finding.
+            and recipe_id in expected_ids
+        ) + sorted(
+            recipe_id for recipe_id in (live_ids - expected_ids)
+        )
         registry_revision_mismatch = bool(
             expected.registry_revision
             and expected.registry_revision != self.registry_revision

@@ -2437,10 +2437,13 @@ if list_integration_archetypes_action:
 
         Args:
             name: Archetype name (see `list_integration_archetypes`).
-            recipe_version: Optional EXACT recipe version to pin. Never falls
-                forward or backward: an unavailable version is
-                RECIPE_VERSION_UNAVAILABLE, and pinning an unmigrated archetype
-                is rejected rather than silently ignored.
+            recipe_version: Optional EXACT version of the EXECUTABLE recipe to
+                pin — the version shown in `recipe_registry.entries`, not the
+                compatibility adapter's. Never falls forward or backward: an
+                unavailable version is RECIPE_VERSION_UNAVAILABLE, and pinning an
+                unmigrated archetype is rejected rather than silently ignored.
+                The response's `recipe_executable_descriptor` reports what the
+                pin resolved to.
         """
         return get_integration_archetype_action(name=name, recipe_version=recipe_version)
 
@@ -2460,9 +2463,13 @@ if list_integration_archetypes_action:
             name: Archetype name (see `list_integration_archetypes`).
             parameters: Dict matching the archetype's parameter_schema.
                 None uses archetype defaults.
-            recipe_version: Optional EXACT recipe version to pin for a migrated
-                archetype. Validated BEFORE the spec is emitted, so a pin that
-                cannot be honoured never returns a spec.
+            recipe_version: Optional EXACT version of the EXECUTABLE recipe to
+                pin for a migrated archetype — the version shown in
+                `recipe_registry.entries`, not the compatibility adapter's.
+                Validated BEFORE the spec is emitted, so a pin that cannot be
+                honoured never returns a spec, and it is carried through to
+                execution: `recipe_provenance.executable` reports the version
+                that actually ran.
         """
         return build_from_archetype_action(
             name=name, parameters=parameters, recipe_version=recipe_version
