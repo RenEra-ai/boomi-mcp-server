@@ -121,10 +121,17 @@ def _resolve_pinned_target(
     # never claimed, and the two would silently diverge the day a second version
     # became the default (issue #145, live QA). Registry construction now
     # requires the declared target to be registered and executable.
-    target = registry.resolve(
-        adapter.adapter_target.recipe_id,
-        recipe_version or adapter.adapter_target.recipe_version,
+    # ``is None``, not truthiness. An explicit ``recipe_version=""`` is a PIN the
+    # caller made, and treating it as absent split the two tools: this one
+    # returned the declared target while ``build_from_archetype`` failed later at
+    # the engine (issue #145, Codex review). An empty version is not registered,
+    # so it now fails here, identically, in both.
+    requested = (
+        recipe_version
+        if recipe_version is not None
+        else adapter.adapter_target.recipe_version
     )
+    target = registry.resolve(adapter.adapter_target.recipe_id, requested)
     return target.public_payload()
 
 
@@ -335,22 +342,29 @@ def build_from_archetype_action(
         ).to_dict()
 
     adapter_id = _ARCHETYPE_ADAPTERS.get(cls.metadata.name)
-    if recipe_version is not None:
-        # Validate the pin BEFORE emitting. A pin that cannot be honoured must
-        # not produce a spec: returning one would be answering a different
-        # question than the caller asked.
-        if adapter_id is None:
-            return PatternError(
-                error_code=INVALID_INPUT,
-                error=(
-                    f"archetype {cls.metadata.name!r} is not migrated to the typed "
-                    "recipe path, so recipe_version cannot be pinned"
-                ),
-                suggestion="Omit recipe_version for this archetype.",
-                retryable=False,
-            ).to_dict()
+    if recipe_version is not None and adapter_id is None:
+        # A pin that cannot be honoured must not produce a spec: returning one
+        # would answer a different question than the caller asked.
+        return PatternError(
+            error_code=INVALID_INPUT,
+            error=(
+                f"archetype {cls.metadata.name!r} is not migrated to the typed "
+                "recipe path, so recipe_version cannot be pinned"
+            ),
+            suggestion="Omit recipe_version for this archetype.",
+            retryable=False,
+        ).to_dict()
+
+    # ONE resolution, resolved BEFORE emission, feeding both the run and the
+    # report. Resolving separately let them disagree: an unpinned call passed
+    # ``None`` to the engine (which runs the DEFAULT) while the response derived
+    # ``recipe_provenance.executable`` from the adapter's DECLARED target, so the
+    # response claimed a version that had not run the moment the two differed
+    # (issue #145, Codex review).
+    resolved_target: dict[str, Any] | None = None
+    if adapter_id is not None:
         try:
-            _resolve_pinned_target(adapter_id, recipe_version)
+            resolved_target = _resolve_pinned_target(adapter_id, recipe_version)
         except RecipeError as exc:
             return recipe_error_envelope(
                 exc, registry_revision=production_registry().registry_revision
@@ -361,8 +375,10 @@ def build_from_archetype_action(
         # ``run_recipes``. Only a migrated archetype has a recipe to pin, and
         # ``adapter_id`` is the same gate that decided the pin was legal at all.
         spec = (
-            cls.emit_spec(params_obj, recipe_version=recipe_version)
-            if adapter_id is not None
+            cls.emit_spec(
+                params_obj, recipe_version=resolved_target["recipe_version"]
+            )
+            if resolved_target is not None
             else cls.emit_spec(params_obj)
         )
     except RecipeError as exc:
@@ -422,14 +438,13 @@ def build_from_archetype_action(
     if hints:
         response["design_doctrine_hints"] = hints
 
-    if adapter_id is not None:
+    if resolved_target is not None:
         response["recipe_provenance"] = {
             "registry_revision": production_registry().registry_revision,
             "adapter": _recipe_descriptor_block(adapter_id),
-            # The version that ACTUALLY ran — the pin if one was given, else the
-            # code-declared default. Reported so a caller can confirm the pin
-            # took effect rather than assume it.
-            "executable": _resolve_pinned_target(adapter_id, recipe_version),
+            # The SAME object that was handed to emit_spec, so this reports the
+            # version that ran rather than a second, independent resolution.
+            "executable": resolved_target,
         }
 
     return response

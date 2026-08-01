@@ -556,11 +556,26 @@ def test_the_pin_is_carried_all_the_way_into_run_recipes(monkeypatch, name):
 
 
 @pytest.mark.parametrize("name", sorted(_PRESET_CASES))
-def test_an_unpinned_build_still_reaches_the_engine_with_no_version(monkeypatch, name):
-    """The negative control: absent pin means the code-declared default."""
+def test_an_unpinned_build_reaches_the_engine_with_the_declared_version(
+    monkeypatch, name
+):
+    """An absent pin still names a version — the adapter's declared target.
+
+    This used to assert ``[None]``, i.e. "let the engine pick the default". That
+    was the defect: the response reported the DECLARED version while the engine
+    ran the DEFAULT, so the two agreed only by coincidence (issue #145, Codex
+    review). The right control is that an unpinned call is explicit, not silent.
+    """
     import boomi_mcp.patterns.recipe_bridge as bridge
+    from boomi_mcp.recipes import production_registry
 
     archetype, index = _PRESET_CASES[name]
+    declared = (
+        production_registry()
+        .resolve(f"boomi.adapter.{archetype}")
+        .adapter_target.recipe_version
+    )
+
     seen = []
     real = bridge.run_recipes
 
@@ -572,7 +587,7 @@ def test_an_unpinned_build_still_reaches_the_engine_with_no_version(monkeypatch,
     build_from_archetype_action(
         archetype, _EXAMPLES[archetype].examples[index].parameters
     )
-    assert seen == [None]
+    assert seen == [declared]
 
 
 def test_an_unmigrated_archetype_still_rejects_a_pin():
@@ -667,3 +682,102 @@ def test_an_unpinned_resolve_uses_the_ADAPTERS_declared_version():
 
     pinned = _resolve_pinned_target("t.adapter", "0.2.0", registry)
     assert pinned["recipe_version"] == "0.2.0", "an explicit pin still wins"
+
+
+# ---------------------------------------------------------------------------
+# Codex re-review regressions (issue #145)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", sorted(_PRESET_CASES))
+def test_an_unpinned_run_and_its_provenance_agree(monkeypatch, name):
+    """One resolution, so the report cannot describe a version that did not run.
+
+    Resolving separately let them disagree: an unpinned call passed ``None`` to
+    the engine (which runs the DEFAULT) while the response derived
+    ``recipe_provenance.executable`` from the adapter's DECLARED target
+    (issue #145, Codex review).
+    """
+    import boomi_mcp.patterns.recipe_bridge as bridge
+
+    archetype, index = _PRESET_CASES[name]
+    seen = []
+    real = bridge.run_recipes
+
+    def spy(requests, **kwargs):
+        seen.extend(r.recipe_version for r in requests)
+        return real(requests, **kwargs)
+
+    monkeypatch.setattr(bridge, "run_recipes", spy)
+    result = build_from_archetype_action(
+        archetype, _EXAMPLES[archetype].examples[index].parameters
+    )
+    assert result["_success"] is True
+    reported = result["recipe_provenance"]["executable"]["recipe_version"]
+    assert seen == [reported], (seen, reported)
+    assert None not in seen, "an unpinned run must still name its version"
+
+
+def test_compose_runs_and_reports_the_same_version(monkeypatch):
+    """``compose_archetypes`` exposes no pin, so there is ONE right answer."""
+    import boomi_mcp.patterns.recipe_bridge as bridge
+
+    seen = []
+    real = bridge.run_recipes
+
+    def spy(requests, **kwargs):
+        seen.extend(r.recipe_version for r in requests)
+        return real(requests, **kwargs)
+
+    monkeypatch.setattr(bridge, "run_recipes", spy)
+    result = _compose("compose_stream")
+    reported = result["recipe_provenance"]["executable"]["recipe_version"]
+    assert seen == [reported], (seen, reported)
+    assert None not in seen
+
+
+@pytest.mark.parametrize("pin", ["", " ", "  "])
+def test_an_explicit_empty_pin_is_rejected_by_both_tools_alike(pin):
+    """An explicit ``recipe_version=""`` is a PIN, not an absence.
+
+    A truthiness fallback treated it as absent, so ``get_integration_archetype``
+    returned the declared target while ``build_from_archetype`` failed later at
+    the engine — the same input accepted by one tool and rejected by the other
+    (issue #145, Codex review).
+    """
+    from boomi_mcp.categories.integration_authoring import (
+        get_integration_archetype_action,
+    )
+
+    described = get_integration_archetype_action("api_to_api_sync", recipe_version=pin)
+    assert described["_success"] is False
+    assert described["error_code"] == "RECIPE_VERSION_UNAVAILABLE"
+
+    built = build_from_archetype_action(
+        "api_to_api_sync",
+        ApiToApiSyncArchetype.examples[0].parameters,
+        recipe_version=pin,
+    )
+    assert built["_success"] is False
+    assert built["error_code"] == "RECIPE_VERSION_UNAVAILABLE"
+    assert "integration_spec" not in built
+
+
+def test_every_archetype_emit_spec_annotation_resolves():
+    """``get_type_hints`` must not ``NameError`` on the widened ABC.
+
+    Two modules used ``Optional`` in the new annotation without importing it —
+    invisible under ``from __future__ import annotations`` until something
+    resolves the hints (issue #145, Codex review).
+    """
+    import typing
+
+    from boomi_mcp.patterns import PatternKind, PatternRegistry
+
+    archetypes = PatternRegistry.from_package("boomi_mcp.patterns").list_patterns(
+        kind=PatternKind.ARCHETYPE
+    )
+    assert len(archetypes) >= 6
+    for cls in archetypes:
+        hints = typing.get_type_hints(cls.emit_spec)
+        assert "recipe_version" in hints, cls.metadata.name

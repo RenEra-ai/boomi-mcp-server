@@ -184,6 +184,23 @@ def run_and_verify(
     return result
 
 
+def declared_target_version(adapter_id: str) -> Optional[str]:
+    """The EXACT version a compatibility adapter declares for its target.
+
+    A surface with no ``recipe_version`` parameter still has one right answer:
+    the version its adapter names. Passing ``None`` instead runs whatever is
+    default, so the moment the two differ the response's
+    ``recipe_provenance.executable`` — which reads the declaration — describes a
+    version that did not run (issue #145, Codex review).
+    """
+    from ..recipes import production_registry
+
+    adapter = production_registry().resolve(adapter_id)
+    if adapter.adapter_target is None:  # pragma: no cover - construction enforces it
+        return None
+    return adapter.adapter_target.recipe_version
+
+
 _SYNC_ROLE_TO_FIELD = {
     "connectoraction_source.connection": "source_connection_ref",
     "connectoraction_source.operation": "source_operation_ref",

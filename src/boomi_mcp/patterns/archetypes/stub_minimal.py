@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ...models.integration_models import IntegrationSpecV1

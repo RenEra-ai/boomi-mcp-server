@@ -79,8 +79,11 @@ from .archetypes.database_to_api_sync import (
     _flatten_payload_profile_leaves,
     _required_simple_leaf_paths,
 )
-from ..recipes.builtins.catalog import RECIPE_DB_REST_FANOUT
-from .recipe_bridge import run_fanout_recipe
+from ..recipes.builtins.catalog import (
+    ADAPTER_COMPOSE_ARCHETYPES,
+    RECIPE_DB_REST_FANOUT,
+)
+from .recipe_bridge import declared_target_version, run_fanout_recipe
 from .base import PrimitiveBuildContext
 from .primitives._helpers import (
     ROLE_REST_CONNECTION,
@@ -1119,6 +1122,9 @@ def compose_archetypes(
         recipe_id=RECIPE_DB_REST_FANOUT,
         components=spec.components,
         process=process,
+        # This surface exposes no pin, so the ONE right answer is the version the
+        # adapter declares — the same value the response reports.
+        recipe_version=declared_target_version(ADAPTER_COMPOSE_ARCHETYPES),
     )
 
     spec.flows.append(
