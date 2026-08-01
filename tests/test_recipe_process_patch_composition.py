@@ -19,7 +19,8 @@ if _src not in sys.path:
 from boomi_mcp.errors import RECIPE_PATCH_CONFLICT, RECIPE_PATCH_TARGET_NOT_FOUND
 from boomi_mcp.models.process_ir import parse_process_ir_v1
 from boomi_mcp.models.recipe_contributions import parse_recipe_contribution
-from boomi_mcp.recipes import RecipeError, build_test_registry
+from boomi_mcp.recipes import RecipeError
+from boomi_mcp.recipes.registry import build_test_registry
 from boomi_mcp.recipes.composer import AttributedContributionV1, compose, order_invocations
 from boomi_mcp.recipes.composer import RecipeInvocationV1
 from boomi_mcp.recipes.contracts import (
@@ -369,10 +370,58 @@ def test_the_final_branch_cardinality_is_still_enforced_by_the_model():
                 invocation=f"i{i}",
             )
         )
-    with pytest.raises(Exception) as exc:
+    with pytest.raises(RecipeError) as exc:
         compose(contributions, _descriptors(("r.one", ("append_root_terminal_leg",))))
-    # A ProcessIR validation failure on re-parse, not a composer conflict.
-    assert not isinstance(exc.value, RecipeError)
+
+    # The cardinality is enforced by the MODEL on re-parse — the composer never
+    # counts legs itself — but what leaves the recipe layer is a recipe
+    # diagnostic. This test previously pinned the opposite (`not isinstance(...,
+    # RecipeError)`), which is how the taxonomy hole survived: ADR §8 says a
+    # canonical rejection never escapes wearing a `PROCESS_IR_*` code, and
+    # `compose` runs BEFORE the engine's `_compile_processes` wrapper, so this
+    # was the one path that contradicted it (issue #145, §6 architect review).
+    diagnostic = exc.value.diagnostics[0]
+    assert diagnostic.code == "RECIPE_CONSTRAINT_FAILED"
+    assert diagnostic.phase == "composition"
+    assert diagnostic.target == f"process:{PROCESS}"
+    # The canonical code rides along as a value-free cause rather than being
+    # swallowed — the caller still learns WHICH rule rejected the result.
+    assert diagnostic.cause_codes
+    assert all(code.startswith("PROCESS_IR_") for code in diagnostic.cause_codes)
+
+
+def test_a_composed_root_that_fails_reparse_never_escapes_as_a_canonical_error():
+    """The taxonomy claim, asserted against the exception TYPE that escapes.
+
+    Distinct from the cardinality test above: that one pins the diagnostic shape
+    for one known rejection, this one pins that NO canonical exception type can
+    leave ``compose`` at all. If a future edit moves the re-parse outside the
+    translation, the cardinality test could still pass on a different rule while
+    this one fails.
+    """
+    from boomi_mcp.models.process_ir import ProcessIRValidationError
+
+    contributions = [
+        _attributed(_root_patch(with_branch=True), recipe_id="r.one", invocation="i1")
+    ]
+    for i in range(24):
+        contributions.append(
+            _attributed(
+                _leg_patch(operation_id=f"op.{i}", index=i),
+                recipe_id="r.one",
+                invocation=f"i{i}",
+            )
+        )
+    try:
+        compose(contributions, _descriptors(("r.one", ("append_root_terminal_leg",))))
+    except ProcessIRValidationError as exc:  # pragma: no cover - the defect
+        raise AssertionError(
+            f"a canonical ProcessIR error escaped the recipe layer: {type(exc).__name__}"
+        )
+    except RecipeError:
+        pass
+    else:  # pragma: no cover - the defect
+        raise AssertionError("25 legs must be rejected")
 
 
 # ---------------------------------------------------------------------------
@@ -489,6 +538,76 @@ def test_a_declared_dependency_orders_before_its_dependent():
         ]
     )
     assert [i.descriptor.recipe_id for i in ordered] == ["r.base", "r.addon"]
+
+
+def test_a_newly_ready_invocation_beats_a_later_independent_one():
+    """The ready set is re-sorted after every placement, not swept once.
+
+    This is the ONE graph shape that tells the two deterministic algorithms
+    apart, which is why the difference survived a suite that already asserted
+    determinism and input-order independence — both hold for either.
+
+    ``r.a`` depends on ``r.b``; ``r.c`` depends on nothing. Sorted-ready Kahn
+    places ``r.b``, at which point ``r.a`` becomes ready and is smaller than
+    ``r.c``, giving ``b, a, c``. A single sorted sweep gives ``b, c, a``: having
+    passed ``r.a`` while it was blocked, the sweep reaches ``r.c`` before it ever
+    looks back. Invocation order decides contribution order, which decides
+    component order and leg-append order, so this reaches the emitted bytes
+    (issue #145, §6 architect review).
+    """
+    registry = build_test_registry(
+        (
+            RecipeRegistrationV1(
+                recipe_id="r.b",
+                recipe_version="1.0.0",
+                entry_kind="executable_recipe",
+                is_default=True,
+                input_model=SyncRecipeInputV1,
+                executor=emit_api_to_api_sync,
+                output_types=("process_ir_patch",),
+                conflict_policy=RecipeConflictPolicyV1(),
+            ),
+            RecipeRegistrationV1(
+                recipe_id="r.a",
+                recipe_version="1.0.0",
+                entry_kind="executable_recipe",
+                is_default=True,
+                input_model=SyncRecipeInputV1,
+                executor=emit_api_to_api_sync,
+                output_types=("process_ir_patch",),
+                prerequisites=(
+                    RecipeDependencyV1(
+                        kind="recipe", recipe_id="r.b", recipe_version="1.0.0"
+                    ),
+                ),
+                conflict_policy=RecipeConflictPolicyV1(),
+            ),
+            RecipeRegistrationV1(
+                recipe_id="r.c",
+                recipe_version="1.0.0",
+                entry_kind="executable_recipe",
+                is_default=True,
+                input_model=SyncRecipeInputV1,
+                executor=emit_api_to_api_sync,
+                output_types=("process_ir_patch",),
+                conflict_policy=RecipeConflictPolicyV1(),
+            ),
+        )
+    )
+    invocations = [
+        _invocation(registry.resolve("r.a"), "i1"),
+        _invocation(registry.resolve("r.b"), "i2"),
+        _invocation(registry.resolve("r.c"), "i3"),
+    ]
+    assert [i.descriptor.recipe_id for i in order_invocations(invocations)] == [
+        "r.b",
+        "r.a",
+        "r.c",
+    ]
+    # ...and still independent of how the caller assembled the list.
+    assert [
+        i.descriptor.recipe_id for i in order_invocations(list(reversed(invocations)))
+    ] == ["r.b", "r.a", "r.c"]
 
 
 def test_the_root_phase_precedes_every_insert_regardless_of_contributor_order():
@@ -633,3 +752,23 @@ def _shared_constraint_executor(inp):
             }
         ),
     )
+
+
+def test_an_internal_bug_in_the_process_parser_propagates_as_itself():
+    """Same narrowing, same reason, on the assembled-root re-parse.
+
+    Translating a canonical rejection is the contract; swallowing a ``TypeError``
+    would report a constraint failure with no cause and send the reader looking
+    for a rule that never fired (issue #145, live QA).
+    """
+    from unittest.mock import patch
+
+    contributions = [
+        _attributed(_root_patch(), recipe_id="r.one", invocation="i1")
+    ]
+    with patch(
+        "boomi_mcp.models.process_ir.parse_process_ir_v1",
+        side_effect=RuntimeError("internal bug"),
+    ):
+        with pytest.raises(RuntimeError, match="internal bug"):
+            compose(contributions, _descriptors(("r.one", ())))

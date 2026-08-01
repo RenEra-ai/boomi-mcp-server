@@ -48,7 +48,14 @@ from .materialization import (
     component_materialization_mode,
     placeholder_component_id,
 )
-from .registry import RecipeRegistry, build_test_registry, production_registry
+# ``build_test_registry`` is deliberately NOT re-exported here. The contract is
+# "no runtime/public registration API exists": production registrations are one
+# immutable tuple, and the only other way to build a registry is a TEST-ONLY
+# factory. Listing that factory in the package surface alongside
+# ``production_registry`` made it read as a normal, supported way to assemble a
+# registry at runtime. Tests import it from ``.registry`` directly, which is
+# where a test-only entry point belongs (issue #145, §6 architect review).
+from .registry import RecipeRegistry, production_registry
 
 __all__ = [
     "AttributedContributionV1",
@@ -72,7 +79,6 @@ __all__ = [
     "RecipeRequestV1",
     "RecipeRunResultV1",
     "build_symbol_table",
-    "build_test_registry",
     "component_materialization_mode",
     "compose",
     "order_invocations",

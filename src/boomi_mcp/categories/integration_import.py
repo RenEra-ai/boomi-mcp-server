@@ -135,8 +135,18 @@ _PRESET_TABLE: Dict[Tuple[str, str], Tuple[str, List[Tuple[str, str]]]] = {
     ),
 }
 
-def _selected_recipe_ref(preset: Optional[str]) -> Optional[Dict[str, str]]:
+def _selected_recipe_ref(preset: Optional[str]) -> Optional[Dict[str, Any]]:
     """The EXACT recipe reference for a migrated preset, else ``None``.
+
+    Two entries, because the preset routes through two: the ADAPTER the preset
+    selects (``boomi.adapter.*``, entry kind ``compatibility_adapter``) and the
+    EXECUTABLE recipe that adapter targets (``boomi.archetype.*``), which is what
+    actually runs. Returning only the adapter made the docstring's word "exact"
+    false in the way that matters — the payload named the entry point and left
+    out the code, so a reader pinning a version from it pinned the wrong one.
+    ``get_integration_archetype`` already publishes both under
+    ``recipe_executable_descriptor``; this is the same fact in the same shape
+    (issue #145, §6 architect review).
 
     Additive metadata only: preset SELECTION, gap analysis and the draft are
     untouched. ``None`` for the three presets not yet migrated — an honest
@@ -154,11 +164,18 @@ def _selected_recipe_ref(preset: Optional[str]) -> Optional[Dict[str, str]]:
         descriptor = production_registry().resolve(adapter_id)
     except Exception:  # noqa: BLE001 — advisory metadata, never load-bearing
         return None
-    return {
+    ref: Dict[str, Any] = {
         "recipe_id": descriptor.recipe_id,
         "recipe_version": descriptor.recipe_version,
         "entry_kind": descriptor.entry_kind,
     }
+    target = descriptor.adapter_target
+    if target is not None:
+        ref["adapter_target"] = {
+            "recipe_id": target.recipe_id,
+            "recipe_version": target.recipe_version,
+        }
+    return ref
 
 
 # Transform kinds the import can express as archetype transform operations.

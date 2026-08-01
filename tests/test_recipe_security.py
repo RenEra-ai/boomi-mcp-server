@@ -52,11 +52,11 @@ from boomi_mcp.recipes import (
     MaterializationCatalog,
     RecipeError,
     RecipeRequestV1,
-    build_test_registry,
     production_registry,
     recipe_error_envelope,
     run_recipes,
 )
+from boomi_mcp.recipes.registry import build_test_registry
 from boomi_mcp.recipes.builtins.catalog import (
     RECIPE_API_TO_API_SYNC,
     RECIPE_DB_REST_FANOUT,

@@ -114,6 +114,42 @@ def test_an_absent_build_revision_is_a_no_op_not_a_build_failure():
     assert 'if [ -n "$BOOMI_BUILD_REVISION" ]; then' in text
 
 
+def test_an_absent_build_revision_deletes_a_context_supplied_file():
+    """The fallback claim is only true if the empty-arg path REMOVES the file.
+
+    ``COPY . .`` copies the whole build context, so a ``BUILD_REVISION`` sitting
+    in a source tree landed at ``/app`` and was read back as this image's
+    provenance — a stale or planted commit id ``build_info`` cannot distinguish
+    from a real one, because the file is the only evidence it has. The
+    Dockerfile's own comment claimed an empty arg falls back to the source
+    digest, which was false whenever the context carried the file
+    (issue #145, §6 architect review).
+    """
+    text = _dockerfile_text()
+    from boomi_mcp.build_info import BUILD_REVISION_PATH
+
+    assert f"rm -f {BUILD_REVISION_PATH}" in text
+    # The deletion belongs to the ELSE branch — deleting unconditionally would
+    # also remove the revision a real build just wrote.
+    guarded = text.split('if [ -n "$BOOMI_BUILD_REVISION" ]; then', 1)[1]
+    else_branch = guarded.split("else", 1)[1]
+    assert f"rm -f {BUILD_REVISION_PATH}" in else_branch
+
+
+def test_the_build_context_never_carries_a_build_revision():
+    """Second, independent guard. The Dockerfile's ``rm`` is the backstop; this
+    keeps the file out of the context in the first place."""
+    ignore = (_REPO_ROOT / ".dockerignore").read_text()
+    entries = {
+        line.strip()
+        for line in ignore.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+    # Accept either the bare name or the ``**/`` form the rest of the file uses;
+    # both exclude the context root, which is what ``COPY . .`` maps to /app.
+    assert {"BUILD_REVISION", "**/BUILD_REVISION"} & entries
+
+
 def test_the_build_revision_path_matches_the_runtime_constant():
     """The Dockerfile and ``build_info`` must agree on ONE path.
 

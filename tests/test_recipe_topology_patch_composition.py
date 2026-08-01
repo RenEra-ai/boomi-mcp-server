@@ -18,7 +18,8 @@ if _src not in sys.path:
 
 from boomi_mcp.errors import RECIPE_PATCH_CONFLICT, RECIPE_PATCH_TARGET_NOT_FOUND
 from boomi_mcp.models.recipe_contributions import parse_recipe_contribution
-from boomi_mcp.recipes import RecipeError, build_test_registry
+from boomi_mcp.recipes import RecipeError
+from boomi_mcp.recipes.registry import build_test_registry
 from boomi_mcp.recipes.composer import AttributedContributionV1, compose
 from boomi_mcp.recipes.contracts import RecipeConflictPolicyV1, RecipeRegistrationV1
 from boomi_mcp.recipes.builtins.sync import SyncRecipeInputV1, emit_api_to_api_sync
@@ -308,6 +309,126 @@ def test_a_repeated_component_key_conflicts_naming_both_producers():
     assert diagnostic.target == "component:same"
 
 
+def test_a_repeated_materializer_slot_conflicts_naming_both_producers():
+    """The slot is a contested resource too, and only the KEY used to be checked.
+
+    Two contributions naming one slot with different component keys are two
+    producers claiming one materialization. That reached the catalog instead,
+    where the slot's header no longer matched the second claimant and it
+    surfaced as ``RECIPE_CONTRIBUTION_INVALID`` attributed to NEITHER recipe — a
+    two-writer conflict wearing a one-writer code, with nothing in the
+    diagnostic to say who disagreed (issue #145, §6 architect review).
+    """
+    with pytest.raises(RecipeError) as exc:
+        compose(
+            [
+                _attributed(
+                    _component("key_one", "c.0", slot="slot.shared"),
+                    recipe_id="r.one",
+                    invocation="i1",
+                ),
+                _attributed(
+                    _component("key_two", "c.1", slot="slot.shared"),
+                    recipe_id="r.two",
+                    invocation="i2",
+                ),
+            ],
+            _descriptors(("r.one", ()), ("r.two", ())),
+        )
+    diagnostic = exc.value.diagnostics[0]
+    assert diagnostic.code == RECIPE_PATCH_CONFLICT
+    assert diagnostic.recipe_ids == ("r.one", "r.two")
+    assert diagnostic.target == "materializer_slot:slot.shared"
+
+
+def test_distinct_slots_for_distinct_keys_still_compose():
+    """The guard is on COLLISION, not on slots existing — the normal case is
+    unaffected, which is what makes the conflict above a real finding rather
+    than a blanket refusal."""
+    composed = compose(
+        [
+            _attributed(_component("key_one", "c.0", slot="slot.one"), index=0),
+            _attributed(_component("key_two", "c.1", slot="slot.two"), index=1),
+        ],
+        _descriptors(("r.one", ())),
+    )
+    assert len(composed.component_slots) == 2
+
+
+# ---------------------------------------------------------------------------
+# Direct topology bases
+# ---------------------------------------------------------------------------
+
+
+def _direct_base(**overrides):
+    """A VALID direct base, so a test can vary exactly one thing.
+
+    An empty ``objects`` list fails topology cardinality on its own, which would
+    make every test below pass without ever exercising the property it names —
+    the "claim wider than the check" failure these tests exist to prevent.
+    """
+    base = {
+        "version": "1",
+        "profile_ref": "qa",
+        "objects": [{"kind": "process", "key": "p1", "component_ref": "$ref:p1_component"}],
+        "relations": [],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_a_valid_direct_topology_base_still_composes():
+    """The control. Without it, the three rejection tests below could all be
+    passing because the fixture itself is malformed."""
+    composed = compose(
+        [], _descriptors(("r.one", ())), direct_topologies={"t1": _direct_base()}
+    )
+    document = dict(composed.topologies)["t1"]
+    assert [obj["key"] for obj in document["objects"]] == ["p1"]
+
+
+def test_a_direct_topology_base_with_a_wrong_version_is_rejected_not_overwritten():
+    """Plan §4 step 1: direct bases are STRICTLY VALIDATED, then composed onto.
+
+    Cherry-picking three keys and stamping ``version: "1"`` accepted whatever
+    arrived: a base declaring another version had that declaration silently
+    replaced with the one the composer wanted. Validating after composition
+    cannot recover this — by then the rewrite has already happened
+    (issue #145, §6 architect review).
+    """
+    with pytest.raises(RecipeError) as exc:
+        compose(
+            [],
+            _descriptors(("r.one", ())),
+            direct_topologies={"t1": _direct_base(version="99")},
+        )
+    assert exc.value.diagnostics[0].target == "direct_topology:t1"
+    assert "TOPOLOGY_SCHEMA_VERSION_UNSUPPORTED" in exc.value.diagnostics[0].cause_codes
+
+
+def test_a_direct_topology_base_with_an_unknown_field_is_rejected_not_dropped():
+    """Unknown fields were SELECTED AWAY by the three-key pick, so nothing
+    downstream could ever see them — silent acceptance, not rejection."""
+    with pytest.raises(RecipeError) as exc:
+        compose(
+            [],
+            _descriptors(("r.one", ())),
+            direct_topologies={"t1": _direct_base(smuggled={"raw_xml": "<x/>"})},
+        )
+    assert exc.value.diagnostics[0].target == "direct_topology:t1"
+    assert "TOPOLOGY_SCHEMA_UNKNOWN_FIELD" in exc.value.diagnostics[0].cause_codes
+
+
+def test_a_direct_topology_base_without_a_profile_ref_is_a_recipe_diagnostic():
+    """Previously a bare ``KeyError`` from a dict subscript — an unattributed
+    crash where the taxonomy promises a diagnostic."""
+    payload = _direct_base()
+    del payload["profile_ref"]
+    with pytest.raises(RecipeError) as exc:
+        compose([], _descriptors(("r.one", ())), direct_topologies={"t1": payload})
+    assert exc.value.diagnostics[0].target == "direct_topology:t1"
+
+
 # ---------------------------------------------------------------------------
 # Constraint requirements
 # ---------------------------------------------------------------------------
@@ -382,3 +503,40 @@ def test_distinct_requirement_ids_compose_in_contribution_order():
         "req.b",
         "req.a",
     ]
+
+
+def test_an_internal_bug_in_the_topology_parser_propagates_as_itself():
+    """The catch is narrowed to the CANONICAL error, and this is why.
+
+    A blanket ``except Exception`` would launder an internal bug — a
+    ``TypeError`` from some future edit — into ``RECIPE_CONSTRAINT_FAILED`` with
+    empty ``cause_codes`` and a remediation reading "fix the condition the cause
+    codes name", which would name nothing. A crash must surface as a crash
+    (issue #145, live QA).
+    """
+    from unittest.mock import patch
+
+    with patch(
+        "boomi_mcp.models.system_topology.parse_system_topology_v1",
+        side_effect=TypeError("internal bug"),
+    ):
+        with pytest.raises(TypeError, match="internal bug"):
+            compose(
+                [],
+                _descriptors(("r.one", ())),
+                direct_topologies={"t1": _direct_base()},
+            )
+
+
+def test_narrowing_the_catch_did_not_let_a_validation_failure_escape_raw():
+    """The risk of narrowing, tested directly.
+
+    A blanket catch also absorbed shapes that never reach the model's own
+    validator — a payload that is not a mapping at all. Those must still arrive
+    as recipe diagnostics, which they do because ``parse_system_topology_v1``
+    converts them itself rather than because a broad ``except`` hid them.
+    """
+    for hostile in (None, "nope", 17, [], {"objects": "nope"}):
+        with pytest.raises(RecipeError) as exc:
+            compose([], _descriptors(("r.one", ())), direct_topologies={"t1": hostile})
+        assert exc.value.diagnostics[0].target == "direct_topology:t1"

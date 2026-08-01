@@ -33,7 +33,8 @@ from boomi_mcp.errors import (
     RECIPE_NOT_FOUND,
     RECIPE_VERSION_UNAVAILABLE,
 )
-from boomi_mcp.recipes import RecipeError, build_test_registry, production_registry
+from boomi_mcp.recipes import RecipeError, RecipeInputBase, production_registry
+from boomi_mcp.recipes.registry import build_test_registry
 from boomi_mcp.recipes import registry as registry_module
 from boomi_mcp.recipes.builtins import catalog
 from boomi_mcp.recipes.builtins.catalog import (
@@ -125,6 +126,53 @@ def test_build_metadata_is_ignored_for_precedence():
 def test_an_invalid_semver_is_rejected_at_construction(bad):
     with pytest.raises(ValueError):
         build_test_registry((_reg(recipe_version=bad),))
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        # Python's `\d` is Unicode by default; the published regex is written for
+        # a dialect where it is ASCII. `[1-9]` takes the ASCII `1`, `\d*` takes
+        # the Arabic-Indic digit, and `int()` happily parses the pair as 12.
+        "1\N{ARABIC-INDIC DIGIT TWO}.0.0",
+        "0.\N{ARABIC-INDIC DIGIT ONE}.0",
+        # Python's `$` also matches just before a trailing newline, so this
+        # registered as a version DISTINCT from "1.2.3" that compared exactly
+        # EQUAL to it — two registry keys, one precedence.
+        "1.2.3\n",
+        "1.2.3-alpha\n",
+    ],
+)
+def test_a_semver_lookalike_from_the_python_regex_dialect_is_rejected(bad):
+    """The two ways a verbatim transcription of the official regex is wrong.
+
+    Both were accepted, and the constant's own comment called itself "the
+    official SemVer 2.0.0 regex" while behaving as neither (issue #145, §6
+    architect review).
+    """
+    with pytest.raises(ValueError):
+        parse_semver(bad)
+    with pytest.raises(ValueError):
+        build_test_registry((_reg(recipe_version=bad),))
+
+
+def test_the_trailing_newline_lookalike_would_have_compared_equal():
+    """Why the newline case is a defect and not a curiosity: it is not merely an
+    odd string, it is an INDISTINGUISHABLE one — same precedence, different key.
+    """
+    assert _SEMVER_RE_UNPATCHED_WOULD_MATCH("1.2.3\n")
+    with pytest.raises(ValueError):
+        parse_semver("1.2.3\n")
+
+
+def _SEMVER_RE_UNPATCHED_WOULD_MATCH(value: str) -> bool:
+    """Rebuild the pre-fix regex to show the guard above is not vacuous."""
+    import re
+
+    from boomi_mcp.recipes.contracts import _SEMVER_RE
+
+    unpatched = re.compile(_SEMVER_RE.pattern.replace(r"\Z", "$"))
+    return unpatched.match(value) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +349,629 @@ def test_an_input_model_must_subclass_recipe_input_base():
         build_test_registry((_reg(input_model=Loose),))
 
 
+def test_a_subclass_that_reopens_extra_is_rejected_despite_correct_ancestry():
+    """Ancestry is not shape. ``extra`` is inherited config — and overridable.
+
+    ``issubclass(..., RecipeInputBase)`` was the whole check, so a model with
+    impeccable ancestry could re-open itself in one line and register unchanged,
+    carrying exactly the unbounded object the recipe input contract forbids
+    (issue #145, §6 architect review).
+    """
+    from pydantic import ConfigDict
+
+    class Reopened(RecipeInputBase):
+        model_config = ConfigDict(extra="allow", frozen=True)
+
+        process_key: str = "p"
+
+    assert issubclass(Reopened, RecipeInputBase)  # the old check still passes
+    with pytest.raises(ValueError, match="not closed"):
+        build_test_registry((_reg(input_model=Reopened),))
+
+
+def test_an_unbounded_dict_field_is_rejected():
+    """``Dict[str, Any]`` is an open object by another route, and closed config
+    does not close it — the field's own schema is what carries
+    ``additionalProperties``."""
+    from typing import Any, Dict
+
+    class WithBag(RecipeInputBase):
+        process_key: str = "p"
+        bag: Dict[str, Any] = {}
+
+    with pytest.raises(ValueError, match="not closed"):
+        build_test_registry((_reg(input_model=WithBag),))
+
+
+def test_a_nested_open_model_is_rejected_even_when_the_top_level_is_closed():
+    """The walk covers ``$defs``. A closed envelope around an open payload is
+    open, and only the nested node says so."""
+    from pydantic import BaseModel, ConfigDict
+
+    class OpenLeaf(BaseModel):
+        model_config = ConfigDict(extra="allow")
+
+        name: str = "x"
+
+    class ClosedEnvelope(RecipeInputBase):
+        process_key: str = "p"
+        leaf: OpenLeaf = OpenLeaf()
+
+    with pytest.raises(ValueError, match="not closed"):
+        build_test_registry((_reg(input_model=ClosedEnvelope),))
+
+
+def test_a_nested_model_with_pydantic_default_config_is_rejected():
+    """The rule is ``is not False``, not ``is True``, and this is why.
+
+    Pydantic's DEFAULT config (``extra="ignore"``) emits NO
+    ``additionalProperties`` key, so a nested model written without
+    ``ConfigDict(extra="forbid")`` — the likeliest way an open shape actually
+    reaches a registration — is caught only by treating absent as open. Every
+    other closedness test uses ``extra="allow"`` or ``Dict[str, Any]``, both of
+    which emit ``additionalProperties: true`` and would be caught by either
+    rule, so nothing pinned the branch that matters most (issue #145, live QA).
+    """
+    from pydantic import BaseModel
+
+    class DefaultConfigLeaf(BaseModel):  # no ConfigDict at all
+        name: str = "x"
+
+    assert "additionalProperties" not in DefaultConfigLeaf.model_json_schema()
+
+    class Envelope(RecipeInputBase):
+        process_key: str = "p"
+        leaf: DefaultConfigLeaf = DefaultConfigLeaf()
+
+    with pytest.raises(ValueError, match="not closed"):
+        build_test_registry((_reg(input_model=Envelope),))
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    ["bare_any", "any_list"],
+)
+def test_an_unconstrained_field_is_rejected(annotation):
+    """An unconstrained FIELD never passes through an object node.
+
+    ``thing: Any`` compiles to a property schema with no ``type``, no ``$ref``
+    and no combinator — it accepts an arbitrary object while presenting nothing
+    for the ``additionalProperties`` rule to test. ``List[Any]`` hides the same
+    schema one level in, under ``items``.
+    """
+    from typing import Any as AnyType
+    from typing import List as ListType
+
+    if annotation == "bare_any":
+
+        class Model(RecipeInputBase):
+            process_key: str = "p"
+            thing: AnyType = None
+
+    else:
+
+        class Model(RecipeInputBase):
+            process_key: str = "p"
+            things: ListType[AnyType] = []
+
+    with pytest.raises(ValueError, match="unconstrained field"):
+        build_test_registry((_reg(input_model=Model),))
+
+
+@pytest.mark.parametrize(
+    "shape",
+    ["tuple_any", "optional_any", "union_any", "ref_to_empty_def"],
+)
+def test_an_unconstrained_schema_is_caught_in_every_position_it_can_hide(shape):
+    """``properties/*`` and ``items`` are not the only places a schema sits.
+
+    An empty schema can also be a ``prefixItems`` member, an ``anyOf`` member, or
+    the ``$defs`` entry a ``$ref`` resolves to. In each of those the PROPERTY
+    itself looks bounded — it carries ``prefixItems`` / ``anyOf`` / ``$ref`` — so
+    a rule that only inspected the property node accepted all four, and
+    ``Optional[Any]`` and pydantic's ``JsonValue`` are ordinary things a
+    developer writes (issue #145, live QA).
+    """
+    from typing import Any as AnyType
+    from typing import Optional as OptionalType
+    from typing import Tuple as TupleType
+    from typing import Union as UnionType
+
+    if shape == "tuple_any":
+
+        class Model(RecipeInputBase):
+            t: TupleType[AnyType, str] = (None, "s")
+
+    elif shape == "optional_any":
+
+        class Model(RecipeInputBase):
+            o: OptionalType[AnyType] = None
+
+    elif shape == "union_any":
+
+        class Model(RecipeInputBase):
+            u: UnionType[AnyType, str] = "s"
+
+    else:
+        from pydantic import JsonValue
+
+        class Model(RecipeInputBase):
+            j: JsonValue = None
+
+    with pytest.raises(ValueError, match="unconstrained"):
+        build_test_registry((_reg(input_model=Model),))
+
+
+@pytest.mark.parametrize(
+    "shape", ["field_named_properties", "default_carrying_type_object", "extra_examples"]
+)
+def test_the_closedness_walk_never_treats_caller_DATA_as_schema(shape):
+    """A JSON Schema document contains data as well as schema.
+
+    ``default``, ``examples`` and ``json_schema_extra`` hold caller VALUES.
+    Recursing over every dict value walked those as if they were schema, which
+    was wrong in both directions at once: a closed model with an ordinary field
+    named ``properties`` crashed the check with ``AttributeError: 'str' object
+    has no attribute 'items'``, and a closed model whose default contained
+    ``{"type": "object"}`` was rejected at ``/default``. A validator whose entire
+    contract is "raise a clear ``ValueError``" must not raise ``AttributeError``
+    instead (issue #145, live QA).
+    """
+    from pydantic import BaseModel, ConfigDict, Field
+
+    if shape == "field_named_properties":
+
+        class Leaf(BaseModel):
+            model_config = ConfigDict(extra="forbid")
+
+            properties: str = "p"  # collides with a schema keyword by name only
+
+        class Model(RecipeInputBase):
+            leaf: Leaf = Leaf()
+
+    elif shape == "default_carrying_type_object":
+
+        class Leaf(BaseModel):
+            model_config = ConfigDict(extra="forbid")
+
+            type: str = "object"  # a VALUE that looks like a schema fragment
+
+        class Model(RecipeInputBase):
+            leaf: Leaf = Leaf()
+
+    else:
+
+        class Model(RecipeInputBase):
+            a: str = Field(
+                "x", json_schema_extra={"examples": [{"properties": "p", "type": "object"}]}
+            )
+
+    # Registers cleanly: no crash, and no spurious rejection.
+    registry = build_test_registry((_reg(input_model=Model),))
+    assert registry.resolve("test.recipe").input_schema_id.endswith("Model")
+
+
+@pytest.mark.parametrize(
+    "keyword,fragment",
+    [
+        ("type", {"type": "string"}),
+        ("$ref", {"$ref": "#/$defs/X"}),
+        ("anyOf", {"anyOf": [{"type": "string"}]}),
+        ("oneOf", {"oneOf": [{"type": "string"}]}),
+        ("allOf", {"allOf": [{"type": "string"}]}),
+        ("enum", {"enum": ["a", "b"]}),
+        ("const", {"const": "a"}),
+        ("properties", {"properties": {"a": {"type": "string"}}}),
+        ("items", {"items": {"type": "string"}}),
+        ("prefixItems", {"prefixItems": [{"type": "string"}]}),
+        ("additionalProperties", {"additionalProperties": {"type": "string"}}),
+    ],
+)
+def test_every_constraining_keyword_bounds_a_subschema_on_its_own(keyword, fragment):
+    """Each member pinned individually, against a fragment carrying ONLY it.
+
+    This is the only level at which the set is observable. In the schemas
+    pydantic emits, nine of the twelve always appear alongside ``type`` — a
+    ``Literal`` is ``{"enum": [...], "type": "string"}``, a tuple is
+    ``{"prefixItems": [...], "type": "array"}`` — so ``type`` alone keeps those
+    models bounded and dropping any of the nine changed nothing any registered
+    model could detect. Removing a keyword makes the check STRICTER, so the
+    defect it would cause is a spurious rejection, and only a fragment WITHOUT
+    ``type`` can catch it (issue #145, live QA).
+    """
+    from boomi_mcp.recipes.registry import _is_bounded_subschema
+
+    assert keyword in fragment
+    assert "type" not in fragment or keyword == "type"
+    assert _is_bounded_subschema(fragment) is True
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        {},
+        {"title": "Thing"},
+        {"default": None, "title": "Thing", "description": "d"},
+        {"examples": [1, 2]},
+        {"deprecated": True},
+    ],
+)
+def test_an_annotation_only_subschema_is_not_bounded(fragment):
+    """Annotations describe; they do not constrain. The negative half of the
+    set — without it every fragment could be "bounded" and the rule vacuous."""
+    from boomi_mcp.recipes.registry import _is_bounded_subschema
+
+    assert _is_bounded_subschema(fragment) is False
+
+
+@pytest.mark.parametrize("value", [None, True, False, "nope", 17, []])
+def test_a_non_mapping_subschema_is_not_bounded(value):
+    """``additionalProperties: true`` is a bool, not a dict — the predicate must
+    answer for non-mappings rather than raise."""
+    from boomi_mcp.recipes.registry import _is_bounded_subschema
+
+    assert _is_bounded_subschema(value) is False
+
+
+def test_not_is_absent_from_the_constraining_set_because_it_bounds_nothing():
+    """``not`` looks like a constraint and is not one.
+
+    ``{"not": {"type": "string"}}`` means "anything except a string", which
+    admits ``{"password": "..."}`` — exactly the unbounded object this check
+    exists to reject. Listing it made an open schema register as bounded, and an
+    earlier version of the predicate test asserted that as a PROPERTY, pinning
+    the unsoundness rather than the rule (issue #145, live QA).
+    """
+    from boomi_mcp.recipes.registry import (
+        _CONSTRAINING_KEYWORDS,
+        _is_bounded_subschema,
+    )
+
+    assert "not" not in _CONSTRAINING_KEYWORDS
+    assert _is_bounded_subschema({"not": {"type": "string"}}) is False
+
+
+@pytest.mark.parametrize(
+    "position,schema,pointer",
+    [
+        (
+            "patternProperties",
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "bag": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "patternProperties": {"^x": {}},
+                    }
+                },
+            },
+            "/properties/bag/patternProperties/^x",
+        ),
+        (
+            "allOf",
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"a": {"allOf": [{}]}},
+            },
+            "/properties/a/allOf/0",
+        ),
+        (
+            "oneOf",
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"a": {"oneOf": [{}, {"type": "string"}]}},
+            },
+            "/properties/a/oneOf/0",
+        ),
+        (
+            "propertyNames",
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "bag": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "propertyNames": {"items": {}},
+                    }
+                },
+            },
+            "/properties/bag/propertyNames/items",
+        ),
+    ],
+)
+def test_the_walker_descends_into_positions_no_model_can_exercise(
+    position, schema, pointer
+):
+    """Some recursion positions cannot be reached through a pydantic model.
+
+    ``patternProperties`` is the clearest case: whenever pydantic emits it, the
+    parent object also lacks ``additionalProperties``, so the OBJECT rule flags
+    the parent and raises before the unconstrained report is ever reached — the
+    nested defect is masked by a coarser one. Driving the walker with a
+    hand-written schema is the only way to observe the descent, exactly as the
+    predicate test is the only way to observe the keyword set (issue #145, live
+    QA).
+    """
+
+    class _StubModel:
+        @staticmethod
+        def model_json_schema():
+            return schema
+
+    with pytest.raises(ValueError) as exc:
+        registry_module._check_input_schema_closed("probe", _StubModel)
+    assert "unconstrained" in str(exc.value)
+    assert pointer in str(exc.value), str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "shape,pointer",
+    [
+        ("discriminated_union", "/$defs/VariantAny/properties/payload"),
+        ("dict_of_any_list", "/properties/bag/additionalProperties/items"),
+    ],
+)
+def test_an_unconstrained_schema_is_caught_in_the_reachable_nested_positions(
+    shape, pointer
+):
+    """TWO positions, pinned through a real model, each WITH its pointer.
+
+    ``dict_of_any_list`` (``Dict[str, List[Any]]``) pins the
+    ``additionalProperties`` descent. ``discriminated_union`` pins the ``$defs``
+    recursion — NOT ``oneOf``, despite the model being a discriminated union:
+    pydantic emits ``oneOf`` members as ``$ref`` strings, so the variant's own
+    schema is reached through ``$defs`` and the pointer says so.
+    ``patternProperties`` is absent for a different reason — whenever pydantic
+    emits it the parent object also lacks ``additionalProperties``, so the
+    coarser object rule flags the parent and raises first. Both live in
+    ``test_the_walker_descends_into_positions_no_model_can_exercise`` instead.
+
+    An earlier version of this docstring claimed three positions including those
+    two, which mutation attribution disproved: their drops die to the stub test,
+    never to this one (issue #145, live QA).
+
+    Asserting the POINTER as well as the failure is what makes these tests
+    position-specific: without it every pointer in the message could be replaced
+    by a constant and nothing would notice.
+    """
+    from typing import Any as AnyType
+    from typing import Dict as DictType
+    from typing import List as ListType
+    from typing import Literal as LiteralType
+    from typing import Union as UnionType
+
+    from pydantic import BaseModel, ConfigDict, Field
+
+    if shape == "discriminated_union":
+
+        class VariantAny(BaseModel):
+            model_config = ConfigDict(extra="forbid")
+
+            kind: LiteralType["any"] = "any"
+            payload: AnyType = None
+
+        class VariantStr(BaseModel):
+            model_config = ConfigDict(extra="forbid")
+
+            kind: LiteralType["str"] = "str"
+            payload: str = ""
+
+        class Model(RecipeInputBase):
+            u: UnionType[VariantAny, VariantStr] = Field(
+                default_factory=VariantStr, discriminator="kind"
+            )
+
+    else:
+
+        class Model(RecipeInputBase):
+            bag: DictType[str, ListType[AnyType]] = {}
+
+    with pytest.raises(ValueError) as exc:
+        build_test_registry((_reg(input_model=Model),))
+    assert "not closed" in str(exc.value)
+    assert pointer in str(exc.value), str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "case,schema",
+    [
+        (
+            "unconstrained inside a negation is not a defect",
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "a": {"type": "string", "not": {"properties": {"z": {}}}}
+                },
+            },
+        ),
+        (
+            "propertyNames is descended into, never flagged",
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "bag": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                        "propertyNames": {"minLength": 1},
+                    }
+                },
+            },
+        ),
+    ],
+)
+def test_the_walker_does_not_flag_what_it_only_descends_into(case, schema):
+    """The other half of two decisions, and both are load-bearing.
+
+    Removing ``not`` from the keyword set was only half of #368; the walk also
+    stopped DESCENDING into it, because an unconstrained subschema inside a
+    negation makes the parent stricter, not looser. Re-adding that descent was
+    invisible to the suite.
+
+    ``propertyNames`` is the mirror image: it bounds KEY names, and its schema
+    is routinely ``{"minLength": 1}`` — which carries no constraining keyword,
+    so flagging instead of descending would REJECT
+    ``Dict[Annotated[str, StringConstraints(min_length=1)], str]``, a perfectly
+    legitimate model. Swapping the descend for a check was invisible too
+    (issue #145, live QA).
+    """
+
+    class _StubModel:
+        @staticmethod
+        def model_json_schema():
+            return schema
+
+    registry_module._check_input_schema_closed("probe", _StubModel)  # must not raise
+
+
+def test_a_constrained_key_mapping_registers():
+    """The model-level half of the ``propertyNames`` case above.
+
+    ``Dict[Annotated[str, StringConstraints(min_length=1)], str]`` is what makes
+    pydantic emit ``propertyNames``, and it must register.
+    """
+    from typing import Dict as DictType
+
+    from pydantic import StringConstraints
+    from typing_extensions import Annotated
+
+    class Model(RecipeInputBase):
+        bag: DictType[Annotated[str, StringConstraints(min_length=1)], str] = {}
+
+    assert "propertyNames" in json.dumps(Model.model_json_schema())
+    registry = build_test_registry((_reg(input_model=Model),))
+    assert registry.resolve("test.recipe").input_schema_id.endswith("Model")
+
+
+def test_an_object_is_recognised_by_its_properties_when_it_declares_no_type():
+    """The object rule is ``type == "object"`` OR ``"properties" in node``.
+
+    Only the first half was pinned. A node carrying ``properties`` without a
+    ``type`` is still an object, and dropping the second half let it through
+    unjudged (issue #145, live QA).
+    """
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {"a": {"properties": {"b": {"type": "string"}}}},
+    }
+
+    class _StubModel:
+        @staticmethod
+        def model_json_schema():
+            return schema
+
+    with pytest.raises(ValueError) as exc:
+        registry_module._check_input_schema_closed("probe", _StubModel)
+    assert "additionalProperties must be false" in str(exc.value)
+    assert "/properties/a" in str(exc.value), str(exc.value)
+
+
+def test_an_open_object_is_reported_at_the_node_that_is_open():
+    """The offender pointer, pinned.
+
+    Every closedness test matched on the message text alone, so both pointer
+    lists could be replaced by a constant ``"/"`` with the suite green — the
+    diagnostic would still fire, and still name the wrong place. A registration
+    error that says "somewhere in this schema" is barely better than none
+    (issue #145, live QA).
+    """
+    from pydantic import BaseModel, ConfigDict
+
+    class OpenLeaf(BaseModel):
+        model_config = ConfigDict(extra="allow")
+
+        name: str = "x"
+
+    class Envelope(RecipeInputBase):
+        process_key: str = "p"
+        leaf: OpenLeaf = OpenLeaf()
+
+    with pytest.raises(ValueError) as exc:
+        build_test_registry((_reg(input_model=Envelope),))
+    message = str(exc.value)
+    assert "additionalProperties must be false" in message
+    # The NESTED model is what is open — not the closed top level.
+    assert "/$defs/OpenLeaf" in message, message
+    assert "['/']" not in message, message
+
+
+def test_a_bounded_mapping_is_not_mistaken_for_an_open_object():
+    """``Dict[str, str]`` renders as ``additionalProperties: {"type": "string"}``.
+
+    That is a SCHEMA, not ``true`` — the mapping is bounded and must register.
+    Without this control the closedness rule could pass every rejection test
+    above by simply refusing everything.
+
+    Deliberately exercises every member of ``_CONSTRAINING_KEYWORDS`` that a real
+    model can produce — ``type``, ``$ref``, ``anyOf``, ``oneOf``, ``enum``,
+    ``const``, ``properties``, ``items``, ``prefixItems``,
+    ``additionalProperties`` — but NOT ``not``, which is deliberately absent from
+    the set because it does not bound anything. Dropping a keyword makes the check
+    STRICTER, so the failure mode is a spurious rejection of a legitimate model;
+    only a bounded shape using that keyword can observe it, and nine of the
+    twelve had no such shape here (issue #145, live QA).
+    """
+    from typing import Dict as DictType
+    from typing import List as ListType
+    from typing import Literal as LiteralType
+    from typing import Optional as OptionalType
+    from typing import Tuple as TupleType
+    from typing import Union as UnionType
+
+    from pydantic import BaseModel, ConfigDict
+
+    class ClosedLeaf(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+        name: str = "x"
+
+    class VariantA(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+        kind: LiteralType["a"] = "a"
+        a: int = 0
+
+    class VariantB(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+        kind: LiteralType["b"] = "b"
+        b: int = 0
+
+    class Bounded(RecipeInputBase):
+        process_key: str = "p"
+        leaf: ClosedLeaf = ClosedLeaf()          # $ref -> $defs
+        names: ListType[str] = []                # items
+        lookup: DictType[str, str] = {}          # additionalProperties as a schema
+        nested_map: DictType[str, ClosedLeaf] = {}
+        maybe: OptionalType[str] = None          # anyOf
+        choice: LiteralType["x", "y"] = "x"      # enum
+        pinned: LiteralType["only"] = "only"     # const
+        pair: TupleType[str, int] = ("a", 1)     # prefixItems
+        variant: UnionType[VariantA, VariantB] = VariantA()
+
+    registry = build_test_registry((_reg(input_model=Bounded),))
+    assert registry.resolve("test.recipe").input_schema_id.endswith("Bounded")
+
+
+def test_every_production_input_model_is_closed():
+    """The check is not vacuous in the direction that matters: it must ACCEPT
+    the models actually shipped, or it would be a build break rather than a
+    guard."""
+    registry = production_registry()
+    closed = [
+        d.recipe_id for d in registry.descriptors() if d.input_schema_id is not None
+    ]
+    assert closed  # some production entry does declare an input model
+    # Constructed above without raising — the assertion is that this line runs.
+
+
 # ---------------------------------------------------------------------------
 # Executor shape
 # ---------------------------------------------------------------------------
@@ -462,6 +1133,124 @@ def test_the_descriptor_hash_excludes_itself():
         build_test_registry((_reg(),)).resolve("test.recipe").provenance.descriptor_sha256
         == descriptor.provenance.descriptor_sha256
     )
+
+
+def test_the_descriptor_hash_covers_derived_provenance():
+    """Excluding derived provenance made the hash blind to the skew it reports.
+
+    ``implementation_sha256`` covers the defining module's source, and nothing
+    else in the body moves when the same source ships from a different commit —
+    so with ``source_revision`` outside the hashed body, two registries built
+    from different builds of identical recipe source produced identical
+    ``descriptor_sha256`` values and compared as "same descriptor". The plan
+    specifies the descriptor hash over the body WITH derived provenance,
+    excluding only the self-referential field (issue #145, §6 architect review).
+    """
+    def _build(revision, monkeypatch):
+        monkeypatch.setattr(registry_module, "source_revision", lambda _mods: revision)
+        return build_test_registry((_reg(),)).resolve("test.recipe")
+
+    with pytest.MonkeyPatch.context() as mp:
+        a = _build("a" * 40, mp)
+    with pytest.MonkeyPatch.context() as mp:
+        b = _build("b" * 40, mp)
+    assert a.provenance.source_revision != b.provenance.source_revision
+    # Same recipe source, so the implementation hash is unmoved...
+    assert a.provenance.implementation_sha256 == b.provenance.implementation_sha256
+    # ...and only the descriptor hash can carry the difference.
+    assert a.provenance.descriptor_sha256 != b.provenance.descriptor_sha256
+
+
+def test_the_descriptor_hash_covers_the_package_version():
+    """The second derived field, pinned separately.
+
+    The ``source_revision`` test alone left this unobserved — removing
+    ``provenance_package_version`` from the hashed body kept the whole suite
+    green — even though the motivating example is precisely "the same recipe
+    source shipped from a different package version" (issue #145, live QA).
+
+    ``provenance_package_name`` gets no such test on purpose: it is
+    ``Literal["boomi_mcp"]`` on ``RecipeProvenanceV1``, so it cannot vary and
+    contributes a constant to every body. It is in the hash for completeness of
+    the record, never to discriminate.
+    """
+    def _build(version, monkeypatch):
+        monkeypatch.setattr(registry_module, "package_version", lambda: version)
+        return build_test_registry((_reg(),)).resolve("test.recipe")
+
+    with pytest.MonkeyPatch.context() as mp:
+        a = _build("1.0.0", mp)
+    with pytest.MonkeyPatch.context() as mp:
+        b = _build("9.9.9", mp)
+    assert a.provenance.package_version != b.provenance.package_version
+    assert a.provenance.implementation_sha256 == b.provenance.implementation_sha256
+    assert a.provenance.descriptor_sha256 != b.provenance.descriptor_sha256
+
+
+def test_the_recipes_package_surface_excludes_the_test_only_factory():
+    """"No runtime/public registration API" is a claim about the SURFACE.
+
+    Re-exporting ``build_test_registry`` beside ``production_registry`` made a
+    test-only factory read as a supported way to assemble a registry at runtime,
+    and re-adding it left the suite green (issue #145, live QA).
+    """
+    import boomi_mcp.recipes as package
+
+    assert "build_test_registry" not in package.__all__
+    assert not hasattr(package, "build_test_registry")
+    # ...and it is still reachable where a test-only entry point belongs.
+    from boomi_mcp.recipes.registry import build_test_registry as factory
+
+    assert callable(factory)
+
+
+def test_declaration_order_does_not_move_the_descriptor_hash():
+    """Prerequisites are a SET of conditions, so their order carries no meaning.
+
+    Carried through verbatim, two registrations declaring the same requirements
+    in a different order hashed differently and a skew comparison reported a
+    mismatch between two registries running identical code (issue #145, §6
+    architect review).
+    """
+    first = RecipeCapabilityRequirementV1(
+        authority="process_ir",
+        subject="generalized_connector_call",
+        required_state="supported",
+    )
+    second = RecipeCapabilityRequirementV1(
+        authority="process_ir",
+        subject="mixed_connector_execution",
+        required_state="supported",
+    )
+    forward = build_test_registry(
+        (_reg(capability_requirements=(first, second)),)
+    ).resolve("test.recipe")
+    backward = build_test_registry(
+        (_reg(capability_requirements=(second, first)),)
+    ).resolve("test.recipe")
+    assert (
+        forward.provenance.descriptor_sha256 == backward.provenance.descriptor_sha256
+    )
+    # Canonicalized on the descriptor itself, not only inside the hash — a
+    # reader of the published descriptor sees the same order the hash saw.
+    assert forward.capability_requirements == backward.capability_requirements
+
+
+def test_a_duplicate_declaration_collapses():
+    """An exactly-repeated requirement is one requirement, and must hash as one."""
+    requirement = RecipeCapabilityRequirementV1(
+        authority="process_ir",
+        subject="generalized_connector_call",
+        required_state="supported",
+    )
+    once = build_test_registry(
+        (_reg(capability_requirements=(requirement,)),)
+    ).resolve("test.recipe")
+    twice = build_test_registry(
+        (_reg(capability_requirements=(requirement, requirement)),)
+    ).resolve("test.recipe")
+    assert len(twice.capability_requirements) == 1
+    assert once.provenance.descriptor_sha256 == twice.provenance.descriptor_sha256
 
 
 def test_source_revision_prefers_the_image_file(tmp_path):

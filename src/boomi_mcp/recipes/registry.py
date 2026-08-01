@@ -25,7 +25,7 @@ import importlib
 import inspect
 import json
 from types import MappingProxyType
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from ..build_info import (
     PACKAGE_NAME,
@@ -187,6 +187,218 @@ def _canonical(value: Any) -> str:
     return json.dumps(value, **_CANONICAL)
 
 
+#: Any ONE of these bounds what a property may hold. A property schema carrying
+#: none of them — only annotations such as ``title``/``default``/``description``
+#: — constrains nothing, which is what a bare ``Any`` compiles to.
+#:
+#: ``not`` is deliberately ABSENT. It looks like a constraint and is not one:
+#: ``{"not": {"type": "string"}}`` means "anything except a string", which admits
+#: ``{"password": "..."}`` — precisely the unbounded object this check exists to
+#: reject. Listing it would have made an open schema register as bounded. Nothing
+#: pydantic emits uses it, so excluding it costs nothing and the check is only
+#: ever stricter for it (issue #145, live QA).
+_CONSTRAINING_KEYWORDS = frozenset(
+    {
+        "type",
+        "$ref",
+        "anyOf",
+        "oneOf",
+        "allOf",
+        "enum",
+        "const",
+        "properties",
+        "items",
+        "prefixItems",
+        "additionalProperties",
+    }
+)
+
+
+def _is_bounded_subschema(subschema: Any) -> bool:
+    """Does this subschema constrain what it may hold at all?
+
+    Module-level, not a closure, because most of the set is only observable HERE.
+    FIVE members are observable through a registered model: ``type``, ``$ref``
+    and ``anyOf`` (which pydantic emits with no sibling ``type``), plus ``oneOf``
+    on a discriminated union and ``enum`` on a mixed-type ``Literal`` such as
+    ``Literal["x", 1]``. The remaining six always co-occur with ``type`` in what
+    pydantic emits — a same-typed ``Literal`` renders as
+    ``{"enum": [...], "type": "string"}``, a tuple as
+    ``{"prefixItems": [...], "type": "array"}`` — so ``type`` alone keeps those
+    models bounded and no registered model can tell whether they are present.
+    (An earlier version of this note said three and nine; live QA measured it.)
+
+    Dropping a member only makes the check STRICTER, so the failure it guards
+    against is a spurious rejection of a schema shape pydantic does not emit
+    today. Testing this predicate against hand-written fragments carrying exactly
+    one keyword and no ``type`` is the only way to pin the whole set.
+    """
+    return isinstance(subschema, dict) and bool(_CONSTRAINING_KEYWORDS & set(subschema))
+
+
+def _check_input_schema_closed(recipe_id: str, model: Any) -> None:
+    """Reject a registered input model that can carry an unbounded object.
+
+    ``issubclass(..., RecipeInputBase)`` proves ancestry, not shape. A subclass
+    inherits ``model_config`` and may override it, and a field typed
+    ``Dict[str, Any]`` is legal on any base — so the forbidden shape the recipe
+    contract exists to exclude ("any unknown field or unbounded
+    ``Dict[str, Any]``/``additionalProperties: true``") could be registered by a
+    model that passes the ancestry check unchanged. The check is on the JSON
+    SCHEMA, not on the config, because that is where the routes to an open
+    object converge: overridden ``extra``, a raw dict field, and a nested model
+    that is itself open all show up as a missing-or-true
+    ``additionalProperties`` on some object node (issue #145, §6 architect
+    review).
+
+    ``is not False``, not ``is True``, and the difference IS the common case.
+    Pydantic's DEFAULT config (``extra="ignore"``) emits no
+    ``additionalProperties`` key at all, so a nested model written without
+    ``ConfigDict(extra="forbid")`` — the likeliest way an open shape actually
+    gets in — is caught only by treating absent as open (issue #145, live QA).
+
+    An unconstrained FIELD is the second route, and it does not pass through an
+    object node at all: ``thing: Any`` compiles to a property schema with no
+    ``type``, no ``$ref`` and no combinator, which accepts an arbitrary object
+    while presenting nothing for the rule above to test. It is rejected here
+    rather than left to the runtime forbidden-shape scan, which searches for
+    known-bad KEY NAMES and so cannot bound a value it has no schema for.
+
+    Walks ``$defs`` too — a closed top level whose nested model is open is
+    exactly as unbounded as an open top level, and only the nested node says so.
+    """
+    schema = model.model_json_schema()
+    offenders: List[str] = []
+    unconstrained: List[str] = []
+
+    seen: set = set()
+    is_bounded = _is_bounded_subschema
+
+    def check(subschema: Any, pointer: str) -> None:
+        """Flag an unconstrained subschema, then descend into it."""
+        if isinstance(subschema, dict) and not is_bounded(subschema):
+            unconstrained.append(pointer)
+        visit(subschema, pointer)
+
+    def visit(node: Any, pointer: str) -> None:
+        """Walk a SCHEMA node — and only ever a schema node.
+
+        Recursion is by named POSITION rather than over every value, because a
+        JSON Schema document contains data as well as schema. ``default``,
+        ``examples`` and ``json_schema_extra`` hold caller values, and walking
+        those as if they were schema was wrong in both directions at once
+        (issue #145, live QA): a model with an ordinary field named
+        ``properties`` crashed the check with ``AttributeError: 'str' object has
+        no attribute 'items'``, and a closed model whose default happened to
+        contain ``{"type": "object"}`` was rejected at ``/default``. Meanwhile
+        the positions that DO carry schema — ``prefixItems``, the
+        ``anyOf``/``oneOf``/``allOf`` members, and the ``$defs`` entry a ``$ref``
+        resolves to — were never examined, so ``Optional[Any]``, ``Union[Any, str]``,
+        ``Tuple[Any, str]`` and pydantic's ``JsonValue`` all registered unchecked.
+        Enumerating the positions fixes both: nothing but schema is visited, and
+        every position PYDANTIC EMITS is.
+
+        That last clause is bounded on purpose. JSON Schema 2020-12 has subschema
+        positions this walk does not visit — ``contains``, ``if``/``then``/``else``,
+        ``dependentSchemas``, ``unevaluatedItems``, ``unevaluatedProperties``,
+        ``additionalItems``. None is emitted by the pydantic version this repo
+        pins, and an input model is always a pydantic model, so they are
+        unreachable rather than overlooked. An earlier version of this sentence
+        claimed EVERY place a schema can hide, which was false (issue #145, live
+        QA).
+        """
+        if not isinstance(node, dict) or id(node) in seen:
+            return
+        seen.add(id(node))
+
+        if node.get("type") == "object" or "properties" in node:
+            additional = node.get("additionalProperties", None)
+            # A SCHEMA here is not openness — ``Dict[str, str]`` renders as
+            # ``additionalProperties: {"type": "string"}`` and is perfectly
+            # bounded. Only ``true``, an empty schema, or an ABSENT key
+            # (pydantic's default ``extra="ignore"``) admits anything.
+            if additional is not False and not is_bounded(additional):
+                offenders.append(pointer or "/")
+
+        for keyword in ("properties", "$defs", "patternProperties"):
+            mapping = node.get(keyword)
+            if isinstance(mapping, dict):
+                for name, child in mapping.items():
+                    check(child, f"{pointer}/{keyword}/{name}")
+
+        for keyword in ("prefixItems", "anyOf", "oneOf", "allOf"):
+            members = node.get(keyword)
+            if isinstance(members, list):
+                for index, child in enumerate(members):
+                    check(child, f"{pointer}/{keyword}/{index}")
+
+        # ``List[Any]`` puts the unconstrained schema in ``items``, not in a
+        # property — same unbounded value, one level further in.
+        if isinstance(node.get("items"), dict):
+            check(node["items"], f"{pointer}/items")
+
+        # Descend WITHOUT flagging: an absent or boolean value here is already
+        # judged by the object rule above, and re-reporting it as an
+        # unconstrained field would name the same defect twice in two
+        # vocabularies.
+        if isinstance(node.get("additionalProperties"), dict):
+            visit(node["additionalProperties"], f"{pointer}/additionalProperties")
+        # ``propertyNames`` bounds KEY names, which are strings; an unconstrained
+        # one is no weaker than the absent case the object rule already judges,
+        # so it is descended into but never flagged. ``not`` is descended into by
+        # NOBODY: an unconstrained subschema inside a negation makes the parent
+        # STRICTER, and flagging it was a false positive (issue #145, live QA).
+        if isinstance(node.get("propertyNames"), dict):
+            visit(node["propertyNames"], f"{pointer}/propertyNames")
+
+    visit(schema, "")
+    if offenders:
+        raise ValueError(
+            f"{recipe_id!r} input_model schema is not closed: "
+            f"additionalProperties must be false at {sorted(set(offenders))}"
+        )
+    if unconstrained:
+        raise ValueError(
+            f"{recipe_id!r} input_model schema is not closed: "
+            f"unconstrained field(s) at {sorted(set(unconstrained))}"
+        )
+
+
+def _canonicalize_declarations(items: Sequence[Any]) -> Tuple[Any, ...]:
+    """Sort a declaration tuple by canonical bytes and drop exact duplicates.
+
+    Sorting on the canonical JSON rather than on a hand-picked field tuple is
+    what makes this total for every declaration shape: prerequisites and
+    capability requirements are both discriminated unions whose variants share
+    no common orderable key, and any field-based key would have to be revisited
+    for each new variant. The bytes exist already — they are what the descriptor
+    hash consumes — so ordering by them is both complete and free.
+
+    Declaration order carries no meaning: these are SETS of conditions the
+    engine must satisfy, and no declaration is privileged over another. That is
+    precisely why re-ordering them may not move a hash.
+
+    Both consumers do short-circuit on the first failure
+    (``engine._preflight_prerequisites``, ``RecipeRegistry.preflight_capabilities``),
+    so WHICH condition a diagnostic names when several are unmet is decided by
+    this order — which is the argument for canonicalizing it, not against:
+    a deterministic order makes that choice reproducible instead of an accident
+    of how the registration was typed (issue #145, live QA).
+    """
+    canonicalized = sorted(
+        ((_canonical(item.model_dump(mode="json")), item) for item in items),
+        key=lambda pair: pair[0],
+    )
+    deduped: List[Any] = []
+    seen: set = set()
+    for payload, item in canonicalized:
+        if payload in seen:
+            continue
+        seen.add(payload)
+        deduped.append(item)
+    return tuple(deduped)
+
+
 # ---------------------------------------------------------------------------
 # Capability authorities
 # ---------------------------------------------------------------------------
@@ -328,6 +540,19 @@ class RecipeRegistry:
 
         self._check_entry_kind(reg)
 
+        # Prerequisites and capability requirements are CANONICALIZED here:
+        # sorted by their own canonical bytes and duplicate-free. Registrations
+        # were previously carried through verbatim, so two registrations that
+        # declare the same requirements in a different order — or one that
+        # declares the same requirement twice — produced different descriptor
+        # bytes and therefore different ``descriptor_sha256`` and
+        # ``registry_revision`` values while being, in every respect that
+        # matters, the same registration. A skew comparison would report a
+        # mismatch between two registries running identical code
+        # (issue #145, §6 architect review).
+        prerequisites = _canonicalize_declarations(reg.prerequisites)
+        capability_requirements = _canonicalize_declarations(reg.capability_requirements)
+
         module, symbol, impl_parts = self._implementation_identity(reg)
         input_schema_id: Optional[str] = None
         input_schema_sha: Optional[str] = None
@@ -350,9 +575,9 @@ class RecipeRegistry:
             "input_schema_id": input_schema_id,
             "input_schema_sha256": input_schema_sha,
             "output_types": list(reg.output_types),
-            "prerequisites": [p.model_dump(mode="json") for p in reg.prerequisites],
+            "prerequisites": [p.model_dump(mode="json") for p in prerequisites],
             "capability_requirements": [
-                c.model_dump(mode="json") for c in reg.capability_requirements
+                c.model_dump(mode="json") for c in capability_requirements
             ],
             "conflict_policy": (
                 reg.conflict_policy.model_dump(mode="json")
@@ -367,6 +592,17 @@ class RecipeRegistry:
             "provenance_module": module,
             "provenance_symbol": symbol,
             "implementation_sha256": implementation_sha256,
+            # DERIVED provenance is part of the hashed body. Excluding it made
+            # ``descriptor_sha256`` blind to exactly the facts a skew comparison
+            # asks it about: the same recipe source shipped from a different
+            # package version, or built at a different commit, hashed identically
+            # and read as "same descriptor". ``implementation_sha256`` covers the
+            # defining module only, so nothing else in the body moved either. The
+            # hash now covers every derived field and excludes only the
+            # self-referential one (issue #145, §6 architect review).
+            "provenance_package_name": PACKAGE_NAME,
+            "provenance_package_version": package_version(),
+            "provenance_source_revision": revision,
         }
         # ``descriptor_sha256`` hashes the body WITHOUT itself. A self-referential
         # hash is not merely awkward to compute — it is unverifiable, because a
@@ -381,8 +617,8 @@ class RecipeRegistry:
             input_schema_id=input_schema_id,
             input_schema_sha256=input_schema_sha,
             output_types=tuple(reg.output_types),
-            prerequisites=tuple(reg.prerequisites),
-            capability_requirements=tuple(reg.capability_requirements),
+            prerequisites=prerequisites,
+            capability_requirements=capability_requirements,
             conflict_policy=reg.conflict_policy,
             adapter_target=reg.adapter_target,
             provenance=RecipeProvenanceV1(
@@ -464,13 +700,15 @@ class RecipeRegistry:
         else:  # pragma: no cover - the Literal already bounds this
             raise ValueError(f"unknown recipe entry kind {kind!r}")
 
-        if has_input and not (
-            isinstance(reg.input_model, type)
-            and issubclass(reg.input_model, RecipeInputBase)
-        ):
-            raise ValueError(
-                f"{reg.recipe_id!r} input_model must subclass RecipeInputBase"
-            )
+        if has_input:
+            if not (
+                isinstance(reg.input_model, type)
+                and issubclass(reg.input_model, RecipeInputBase)
+            ):
+                raise ValueError(
+                    f"{reg.recipe_id!r} input_model must subclass RecipeInputBase"
+                )
+            _check_input_schema_closed(reg.recipe_id, reg.input_model)
 
         if has_executor:
             self._check_executor_shape(reg)

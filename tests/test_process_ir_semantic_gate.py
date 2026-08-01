@@ -321,14 +321,44 @@ def test_the_blocking_action_is_in_apply_plans_fail_fast_set():
 
     Without this, "validation blocks mutation" would rest on an unverified
     assumption about a routing constant three thousand lines away.
+
+    Asserted BEHAVIOURALLY, by spying on the mutation function, rather than by
+    searching the fail-fast expression for the action's name. The name search
+    was passing for a reason that had nothing to do with the property: it
+    confirmed one string appeared in an enumeration, and that same enumeration
+    was silently missing two other blocking actions the planner emits. A source
+    grep cannot tell "this action is refused" from "this action is spelled
+    nearby" — and the gate is now a prefix rule with no names to find at all
+    (issue #145, §6 architect review).
     """
-    source = Path(integration_builder.__file__).read_text()
-    marker = "unresolvable_steps = ["
-    fail_fast = source.split(marker)[1][:1200]
-    assert '"error_process_validation"' in fail_fast
-    # and the set is acted on before execution
-    tail = source.split(marker)[1][:2000]
-    assert "if unresolvable_steps:" in tail
+    from unittest.mock import MagicMock, patch
+
+    def fake_plan(client, cfg, *args, **kwargs):  # noqa: ARG001
+        return {
+            "_success": True,  # "successful" AND blocking, as _build_plan reports it
+            "steps": [
+                {
+                    "planned_action": "error_process_validation",
+                    "key": "main_process",
+                    "name": "P",
+                    "validation_error": {
+                        "error_code": "PROCESS_XML_VALIDATION_FAILED",
+                        "field": "config",
+                    },
+                }
+            ],
+        }
+
+    with patch.object(
+        integration_builder, "_build_plan", side_effect=fake_plan
+    ), patch.object(integration_builder, "_execute_component") as execute_spy:
+        result = integration_builder._apply_plan(
+            MagicMock(), "qa", {"integration_spec": {"name": "x"}, "dry_run": False}
+        )
+
+    assert execute_spy.call_count == 0
+    assert result["_success"] is False
+    assert result["unresolvable_steps"][0]["planned_action"] == "error_process_validation"
 
 
 # ---------------------------------------------------------------------------

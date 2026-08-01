@@ -28,7 +28,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from ..errors import RECIPE_PATCH_CONFLICT, RECIPE_PATCH_TARGET_NOT_FOUND
+from ..errors import (
+    RECIPE_CONSTRAINT_FAILED,
+    RECIPE_PATCH_CONFLICT,
+    RECIPE_PATCH_TARGET_NOT_FOUND,
+)
 from ..models.process_ir import ProcessIRV1
 from ..models.recipe_contributions import canonical_recipe_contribution_json
 from .contracts import RecipeDescriptorV1, RecipeInputBase, parse_semver
@@ -82,12 +86,27 @@ def order_invocations(
 ) -> Tuple[RecipeInvocationV1, ...]:
     """Stable topological order over declared recipe dependencies.
 
-    Kahn's algorithm with a SORTED ready set, so the result depends only on the
-    dependency graph and the tie-break key — never on the order the caller
-    happened to assemble the list in. A dependency on a recipe that is not in
-    this invocation set is not an error here: prerequisites are a descriptor
-    fact the engine preflights, and treating an absent one as a cycle would
-    report the wrong failure.
+    Kahn's algorithm with a SORTED ready set: at every step, take the smallest
+    invocation by ``(recipe_id, parsed_semver, invocation_id)`` among those whose
+    dependencies are ALL already placed, then re-evaluate readiness. The result
+    depends only on the dependency graph and the tie-break key — never on the
+    order the caller happened to assemble the list in.
+
+    Re-evaluating after every placement is the whole algorithm, not a detail. An
+    earlier version sorted once and then swept the list front to back, placing
+    everything it found ready in that pass. That is deterministic too, but it is
+    a LAYERED order, not this one, and the two disagree: for ``r.a`` depending on
+    ``r.b`` plus an independent ``r.c``, the sweep yields ``r.b, r.c, r.a``
+    because ``r.c`` is reached before the pass loops back to the now-ready
+    ``r.a``, while a sorted ready set yields ``r.b, r.a, r.c``. Since invocation
+    order decides contribution order, and contribution order decides component
+    order and Branch-leg append order, the difference is semantic — it reaches
+    the emitted bytes. The docstring named this algorithm; the code now is it
+    (issue #145, §6 architect review).
+
+    A dependency on a recipe that is not in this invocation set is not an error
+    here: prerequisites are a descriptor fact the engine preflights, and treating
+    an absent one as a cycle would report the wrong failure.
     """
     def sort_key(inv: RecipeInvocationV1):
         return (
@@ -106,32 +125,31 @@ def order_invocations(
     ordered: List[RecipeInvocationV1] = []
     placed: set = set()
 
-    while remaining:
-        progressed = False
-        for inv in list(remaining):
-            unmet = False
-            for prerequisite in inv.descriptor.prerequisites:
-                if getattr(prerequisite, "kind", None) != "recipe":
-                    continue
-                dep_key = (prerequisite.recipe_id, prerequisite.recipe_version)
-                if dep_key not in by_id:
-                    continue  # not in this run; the engine preflights it
-                if not all(d.invocation_id in placed for d in by_id[dep_key]):
-                    unmet = True
-                    break
-            if unmet:
+    def is_ready(inv: RecipeInvocationV1) -> bool:
+        for prerequisite in inv.descriptor.prerequisites:
+            if getattr(prerequisite, "kind", None) != "recipe":
                 continue
-            ordered.append(inv)
-            placed.add(inv.invocation_id)
-            remaining.remove(inv)
-            progressed = True
-        if not progressed:
+            dep_key = (prerequisite.recipe_id, prerequisite.recipe_version)
+            if dep_key not in by_id:
+                continue  # not in this run; the engine preflights it
+            if not all(d.invocation_id in placed for d in by_id[dep_key]):
+                return False
+        return True
+
+    while remaining:
+        # ``remaining`` is sorted and stays sorted under removal, so the first
+        # ready element IS the smallest ready element.
+        nxt = next((inv for inv in remaining if is_ready(inv)), None)
+        if nxt is None:
             # A genuine cycle. Fail closed with a deterministic order rather
             # than looping: the caller's registration graph is the defect.
             raise ValueError(
                 "recipe prerequisite cycle among: "
                 + ", ".join(sorted(i.descriptor.recipe_id for i in remaining))
             )
+        ordered.append(nxt)
+        placed.add(nxt.invocation_id)
+        remaining.remove(nxt)
     return tuple(ordered)
 
 
@@ -342,9 +360,42 @@ def _compose_process_roots(
     # frozen model never has to be mutated in place; parsing back is what proves
     # the result is still a valid ProcessIRV1 — cardinality, terminal rules and
     # all — rather than a dict that merely looks like one.
-    from ..models.process_ir import parse_process_ir_v1
+    #
+    # The failure is translated, not propagated. ADR §8 states the rule without
+    # qualification: a canonical rejection never leaves the recipe layer wearing
+    # a ``PROCESS_IR_*`` code, it becomes ``RECIPE_CONSTRAINT_FAILED`` carrying
+    # the canonical codes as value-free causes. This call sits INSIDE ``compose``,
+    # which the engine invokes before the wrapper around ``_compile_processes``,
+    # so an untranslated error here was the one path by which a raw
+    # ``ProcessIRValidationError`` could reach a ``run_recipes`` caller — and
+    # every such caller would then have to know a taxonomy the ADR promises it
+    # never sees (issue #145, §6 architect review).
+    # Catches the CANONICAL error specifically, never a bare ``Exception``. A
+    # blanket catch would launder an internal bug — a ``TypeError`` from a future
+    # edit — into ``RECIPE_CONSTRAINT_FAILED`` with empty ``cause_codes`` and a
+    # remediation reading "fix the condition the cause codes name", which name
+    # nothing. A crash should surface as a crash (issue #145, live QA).
+    from ..models.process_ir import ProcessIRValidationError, parse_process_ir_v1
 
-    return {key: parse_process_ir_v1(payload) for key, payload in roots.items()}
+    parsed: Dict[str, ProcessIRV1] = {}
+    for key, payload in roots.items():
+        try:
+            parsed[key] = parse_process_ir_v1(payload)
+        except ProcessIRValidationError as exc:
+            codes = tuple(
+                getattr(d, "code", "") for d in getattr(exc, "diagnostics", ())
+            )
+            raise RecipeError(
+                (
+                    recipe_diagnostic(
+                        RECIPE_CONSTRAINT_FAILED,
+                        phase="composition",
+                        target=f"process:{key}",
+                        cause_codes=tuple(c for c in codes if c),
+                    ),
+                )
+            ) from None
+    return parsed
 
 
 def _terminal_split_payload(steps: List[Dict[str, Any]]) -> int:
@@ -369,15 +420,51 @@ def _compose_topologies(
     descriptors: Mapping[Tuple[str, str], RecipeDescriptorV1],
     direct_topologies: Dict[str, Dict[str, Any]],
 ) -> Dict[str, Dict[str, Any]]:
-    docs: Dict[str, Dict[str, Any]] = {
-        key: {
-            "version": "1",
-            "profile_ref": payload["profile_ref"],
-            "objects": list(payload.get("objects", [])),
-            "relations": list(payload.get("relations", [])),
+    # A direct base is STRICTLY VALIDATED before anything is composed onto it.
+    # Cherry-picking three keys and stamping ``version: "1"`` accepted whatever
+    # arrived: a base declaring another version had that declaration silently
+    # overwritten with the one the composer wanted, unknown or forbidden fields
+    # were dropped instead of rejected, and a base with no ``profile_ref`` raised
+    # a bare ``KeyError`` out of a dict subscript. Parsing is what turns all
+    # three into one attributed diagnostic, and it has to happen HERE — after
+    # composition the dropped fields are gone, so the later parse in
+    # ``_plan_topologies`` cannot see what was silently normalized away
+    # (issue #145, §6 architect review).
+    # The CANONICAL error only — same reasoning as the ProcessIR re-parse above,
+    # and the same shape ``engine._plan_topologies`` already used. A missing
+    # ``profile_ref`` is now a validation diagnostic rather than a ``KeyError``
+    # because the model requires the field, not because a blanket catch swallows
+    # the subscript.
+    from ..models.system_topology import (
+        SystemTopologyValidationError,
+        parse_system_topology_v1,
+    )
+
+    docs: Dict[str, Dict[str, Any]] = {}
+    for key, payload in direct_topologies.items():
+        try:
+            spec = parse_system_topology_v1(payload)
+        except SystemTopologyValidationError as exc:
+            codes = tuple(
+                getattr(d, "code", "") for d in getattr(exc, "diagnostics", ())
+            )
+            raise RecipeError(
+                (
+                    recipe_diagnostic(
+                        RECIPE_CONSTRAINT_FAILED,
+                        phase="composition",
+                        target=f"direct_topology:{key}",
+                        cause_codes=tuple(c for c in codes if c),
+                    ),
+                )
+            ) from None
+        dumped = spec.model_dump(mode="json")
+        docs[key] = {
+            "version": dumped["version"],
+            "profile_ref": dumped["profile_ref"],
+            "objects": list(dumped.get("objects", [])),
+            "relations": list(dumped.get("relations", [])),
         }
-        for key, payload in direct_topologies.items()
-    }
     profile_writers: Dict[str, Tuple[str, str, str]] = {
         key: (DIRECT_AUTHORING_PRODUCER, "", "") for key in direct_topologies
     }
@@ -478,14 +565,34 @@ def _compose_components(
     items: Sequence[AttributedContributionV1],
     descriptors: Mapping[Tuple[str, str], RecipeDescriptorV1],
 ) -> List[AttributedContributionV1]:
+    """Order component contributions, rejecting two writers for one slot or key.
+
+    Both keys are contested resources, and only one of them used to be checked.
+    A ``materializer_slot`` selects an entry in the private catalog, so two
+    contributions naming the same slot with different component keys are two
+    producers claiming one materialization — the exact shape ``RECIPE_PATCH_CONFLICT``
+    exists to report, naming both. It was reaching materialization instead, where
+    the slot's header no longer matched the second claimant's key and it surfaced
+    as ``RECIPE_CONTRIBUTION_INVALID`` attributed to NEITHER producer: a
+    two-writer conflict wearing a one-writer code, with nothing in the diagnostic
+    to say which recipes disagreed (issue #145, §6 architect review).
+    """
     ordered: List[AttributedContributionV1] = []
     writers: Dict[str, Tuple[str, str, str]] = {}
+    slot_writers: Dict[str, Tuple[str, str, str]] = {}
     for item in items:
         key = item.contribution.component_key
         previous = writers.get(key)
         if previous is not None:
             raise _conflict(previous, _producer(item), target=f"component:{key}")
+        slot = item.contribution.materializer_slot
+        previous_slot = slot_writers.get(slot)
+        if previous_slot is not None:
+            raise _conflict(
+                previous_slot, _producer(item), target=f"materializer_slot:{slot}"
+            )
         writers[key] = _producer(item)
+        slot_writers[slot] = _producer(item)
         ordered.append(item)
     return ordered
 

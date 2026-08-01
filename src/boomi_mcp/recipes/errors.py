@@ -31,7 +31,7 @@ live QA falsified both, and this is the measured statement.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -121,12 +121,55 @@ _REMEDIATIONS: Dict[str, str] = {
 }
 
 
+#: The CLOSED set of codes a recipe diagnostic may carry, derived from the ten
+#: constants this module already imports rather than retyped as string literals —
+#: a second copy is a second thing to forget. ``RecipeDiagnosticV1.code`` was a
+#: bare ``str``, which made the "all ten codes and nothing else" property a
+#: convention held up by ``recipe_diagnostic`` being the only constructor. It was
+#: not: the model is public and directly constructible, so any string was a legal
+#: diagnostic code (issue #145, §6 architect review).
+RECIPE_ERROR_CODES: Tuple[str, ...] = (
+    RECIPE_NOT_FOUND,
+    RECIPE_VERSION_UNAVAILABLE,
+    RECIPE_CAPABILITY_GATED,
+    RECIPE_INPUT_INVALID,
+    RECIPE_CONTRIBUTION_INVALID,
+    RECIPE_PATCH_TARGET_NOT_FOUND,
+    RECIPE_PATCH_CONFLICT,
+    RECIPE_CONSTRAINT_FAILED,
+    RECIPE_OUTPUT_NONDETERMINISTIC,
+    RECIPE_REQUEST_INVALID,
+)
+
+#: ``Literal`` needs its members spelled at type-check time, so the annotation is
+#: written out — and ``_assert_error_codes_match`` below pins it to
+#: ``RECIPE_ERROR_CODES`` at import, so the two can never silently diverge.
+RecipeErrorCode = Literal[
+    "RECIPE_NOT_FOUND",
+    "RECIPE_VERSION_UNAVAILABLE",
+    "RECIPE_CAPABILITY_GATED",
+    "RECIPE_INPUT_INVALID",
+    "RECIPE_CONTRIBUTION_INVALID",
+    "RECIPE_PATCH_TARGET_NOT_FOUND",
+    "RECIPE_PATCH_CONFLICT",
+    "RECIPE_CONSTRAINT_FAILED",
+    "RECIPE_OUTPUT_NONDETERMINISTIC",
+    "RECIPE_REQUEST_INVALID",
+]
+
+if set(get_args(RecipeErrorCode)) != set(RECIPE_ERROR_CODES):  # pragma: no cover
+    raise AssertionError(
+        "RecipeErrorCode and RECIPE_ERROR_CODES disagree; a code was added to "
+        "one and not the other"
+    )
+
+
 class RecipeDiagnosticV1(BaseModel):
     """One deterministic, value-free recipe diagnostic."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    code: str
+    code: RecipeErrorCode
     phase: RecipePhase
     path: str = ""
     target: Optional[str] = None

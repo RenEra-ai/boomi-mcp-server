@@ -63,14 +63,25 @@ RUN mkdir -p /app/kb && chown -R appuser:appuser /app/kb
 # field, so the ONE trustworthy source of "which commit is running here" is a
 # file the build itself writes. Validated here (hex, 7-40 chars) so a malformed
 # value fails the build rather than becoming provenance a skew comparison would
-# then treat as authoritative; an empty arg is a no-op and boomi_mcp.build_info
-# falls back to its source digest.
+# then treat as authoritative.
+#
+# The empty-arg branch DELETES the file rather than doing nothing. `COPY . .`
+# above copies the whole build context, so a BUILD_REVISION left in a source
+# tree would otherwise survive into the image and be read back as this build's
+# provenance — a stale or planted commit id that build_info cannot tell from a
+# real one, because the file is the only evidence it has. Deleting it is what
+# makes the fallback claim true: with no file, boomi_mcp.build_info reports the
+# source digest. .dockerignore also excludes it, so this is belt and braces —
+# two independent guards, because the failure is silent and misattributes
+# provenance (issue #145, §6 architect review).
 ARG BOOMI_BUILD_REVISION=""
 RUN if [ -n "$BOOMI_BUILD_REVISION" ]; then \
         echo "$BOOMI_BUILD_REVISION" | grep -Eq '^[0-9a-f]{7,40}$' \
             || { echo "BOOMI_BUILD_REVISION must be a 7-40 char lowercase hex commit sha" >&2; exit 1; }; \
         printf '%s' "$BOOMI_BUILD_REVISION" > /app/BUILD_REVISION; \
         chmod 0444 /app/BUILD_REVISION; \
+    else \
+        rm -f /app/BUILD_REVISION; \
     fi
 
 # Switch to non-root user

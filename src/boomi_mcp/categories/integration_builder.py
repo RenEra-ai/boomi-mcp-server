@@ -6867,25 +6867,22 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         planned["message"] = "Dry run only. Set dry_run=false to execute."
         return planned
 
-    # Fail-fast: reject plans with unresolvable steps before executing anything
+    # Fail-fast: reject plans with unresolvable steps before executing anything.
+    #
+    # The rule is the PREFIX, not a list of names. An enumeration has to be
+    # extended by whoever adds the next planner error, and twice it was not:
+    # `error_if_exists` (conflict_policy=fail against an existing component) and
+    # `error_wss_validation` (#133) were both emitted by `_build_plan` while
+    # `_build_plan` still returned `_success: True`, and neither appeared here.
+    # The consequence is the one this gate exists to prevent — components
+    # earlier in `execution_order` were created, and only then did apply reach
+    # the blocking step and return `_success: False` with `partial_results`.
+    # `error_*` is the planner's own vocabulary for "this step cannot execute",
+    # so deriving from it cannot drift out of date the way the list did
+    # (issue #145, §6 architect review).
     unresolvable_steps = [
         step for step in planned["steps"]
-        if step["planned_action"] in (
-            "error_ambiguous_match",
-            "error_missing_target",
-            "error_database_validation",
-            "error_rest_validation",
-            "error_soap_validation",
-            "error_process_validation",
-            "error_generated_profile_validation",
-            # Codex r13 P2: unsupported-structured-update planned_action
-            # introduced by r12 P2 must also fail fast — otherwise earlier
-            # components mutate before apply hits the unsupported step.
-            "error_unsupported_structured_update",
-            # Issue #93: a name-governance failure blocks apply before any
-            # mutation (names only — folder/role governance is GUI-only).
-            _NAME_GOVERNANCE_ERROR_ACTION,
-        )
+        if str(step.get("planned_action", "")).startswith("error_")
     ]
     if unresolvable_steps:
         errors = []
@@ -6975,6 +6972,37 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     f"{ve.get('error_code', 'COMPONENT_NAME_GOVERNANCE_FAILED')} "
                     f"on field {ve.get('field')!r}. "
                     f"{ve.get('error', '')}".rstrip()
+                )
+            elif step["planned_action"] == "error_if_exists":
+                # conflict_policy=fail with a component that already exists.
+                # Previously this was caught only when the execute loop REACHED
+                # the step, so anything ordered before it had already been
+                # created (issue #145, §6 architect review).
+                errors.append(
+                    f"Component '{step.get('name') or step['key']}' already "
+                    f"exists and conflict_policy=fail. Use conflict_policy="
+                    f"'reuse' or 'clone', or remove the component from the spec."
+                )
+            elif step["planned_action"] == "error_wss_validation":
+                ve = step.get("validation_error") or {}
+                errors.append(
+                    f"Component '{step.get('name') or step['key']}' failed "
+                    f"web-services listener validation: "
+                    f"{ve.get('error_code', 'WSS_OPERATION_VALIDATION_FAILED')} "
+                    f"on field {ve.get('field')!r}."
+                )
+            else:
+                # The prefix rule admits any planner error, including one added
+                # after this chain was written. A blocking step with no message
+                # would report `_success: False` with an empty `details` and
+                # leave the caller nothing to act on, so the generic branch is
+                # the floor — never a silent entry.
+                ve = step.get("validation_error") or {}
+                errors.append(
+                    f"Component '{step.get('name') or step['key']}' cannot "
+                    f"execute: {step['planned_action']}"
+                    + (f" ({ve['error_code']})" if ve.get("error_code") else "")
+                    + "."
                 )
         return {
             "_success": False,

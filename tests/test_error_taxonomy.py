@@ -606,3 +606,40 @@ def test_issue_145_leaves_the_topology_family_at_fourteen():
     """
     owned = {c for c, s in ERROR_TAXONOMY.items() if s.owner == "#144"}
     assert len(owned) == 14
+
+
+def test_a_recipe_diagnostic_rejects_a_code_outside_the_closed_family():
+    """``RecipeDiagnosticV1.code`` is a closed ``RecipeErrorCode``, not ``str``.
+
+    The model is PUBLIC and directly constructible, so before this the closed
+    family rested entirely on ``recipe_diagnostic`` being the only constructor —
+    which it never was. Nothing observed the type: reverting it to ``str`` left
+    the whole suite green, because every test builds diagnostics through the
+    helper, and the helper only ever passes a listed constant (issue #145, live
+    QA).
+
+    The realistic mistake is a CANONICAL code, not a nonsense string: the recipe
+    layer's whole taxonomy rule is that a ``PROCESS_IR_*`` / ``TOPOLOGY_*`` code
+    rides along as a value-free ``cause_code`` and never becomes the diagnostic's
+    own code.
+    """
+    import pytest
+    from pydantic import ValidationError
+
+    from boomi_mcp.recipes.errors import RECIPE_ERROR_CODES, RecipeDiagnosticV1
+
+    for bad in ("PROCESS_IR_TERMINAL_INVALID", "TOPOLOGY_SCHEMA_UNKNOWN_FIELD", "nope"):
+        with pytest.raises(ValidationError):
+            RecipeDiagnosticV1(
+                code=bad, phase="composition", message="m", remediation="r"
+            )
+
+    # Positive control: every member of the declared family IS accepted, so the
+    # test cannot pass by the model rejecting everything.
+    for good in RECIPE_ERROR_CODES:
+        assert (
+            RecipeDiagnosticV1(
+                code=good, phase="composition", message="m", remediation="r"
+            ).code
+            == good
+        )

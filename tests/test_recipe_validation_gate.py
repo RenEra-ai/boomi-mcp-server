@@ -35,9 +35,9 @@ from boomi_mcp.recipes import (
     MaterializationCatalog,
     RecipeError,
     RecipeRequestV1,
-    build_test_registry,
     run_recipes,
 )
+from boomi_mcp.recipes.registry import build_test_registry
 from boomi_mcp.recipes import engine as engine_module
 from boomi_mcp.recipes.builtins.catalog import (
     RECIPE_API_TO_API_SYNC,
@@ -262,6 +262,70 @@ def _registry_with(executor):
     )
 
 
+def _duplicate_contribution_id_executor(inp):
+    """Two component contributions sharing one ``contribution_id``.
+
+    Distinct component keys AND distinct slots, so every other uniqueness rule
+    in the layer is satisfied — the ONLY thing wrong is the repeated id.
+    """
+    def _component(key):
+        return parse_recipe_contribution(
+            {
+                "contribution_kind": "component_contribution",
+                "version": "1",
+                "contribution_id": "c.same",
+                "component_key": key,
+                "component_type": "process",
+                "materialization_mode": "create",
+                "materializer_slot": f"slot.{key}",
+            }
+        )
+
+    return (_component("one"), _component("two"))
+
+
+def test_a_repeated_contribution_id_within_one_invocation_fails_closed():
+    """``contribution_id`` is required to be unique PER INVOCATION.
+
+    Composition keys components on ``component_key``, so nothing downstream ever
+    compared the ids and two contributions could share one — leaving the field
+    unable to do the single job it exists for, naming one contribution within
+    its invocation. An invocation is exactly one executor's returned tuple,
+    which is why this is the only scope where the rule can be decided
+    (issue #145, §6 architect review).
+    """
+    registry = build_test_registry(
+        (
+            RecipeRegistrationV1(
+                recipe_id="test.recipe",
+                recipe_version="1.0.0",
+                entry_kind="executable_recipe",
+                is_default=True,
+                input_model=SyncRecipeInputV1,
+                executor=_duplicate_contribution_id_executor,
+                output_types=("component_contribution",),
+                conflict_policy=RecipeConflictPolicyV1(),
+            ),
+        )
+    )
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.recipe", invocation_id="i1", raw_input=_VALID_INPUT
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    diagnostic = exc.value.diagnostics[0]
+    assert diagnostic.code == "RECIPE_CONTRIBUTION_INVALID"
+    assert diagnostic.target == "duplicate_contribution_id"
+    # Both offending positions are named, not just the second one — the caller
+    # has to see the pair to know which to renumber.
+    assert diagnostic.contribution_indexes == (0, 1)
+
+
 def test_a_nondeterministic_executor_fails_closed():
     with pytest.raises(RecipeError) as exc:
         run_recipes(
@@ -311,11 +375,69 @@ def test_the_recipe_input_model_is_frozen():
 # ---------------------------------------------------------------------------
 
 
-def test_a_blocking_planned_step_produces_zero_execute_component_calls():
+def _emittable_planner_error_actions():
+    """Every ``error_*`` planned action ``_build_plan`` can actually assign.
+
+    Read off the AST of the planner, not off a list maintained by hand. The
+    hand-maintained list is precisely what failed: the apply gate enumerated the
+    blocking actions, two were added to the planner over time
+    (``error_if_exists`` and ``error_wss_validation``) and never added to the
+    gate, and the test below asserted the general property while exercising one
+    action (issue #145, §6 architect review).
+
+    Covers both forms the planner uses — a plain assignment and the conditional
+    expression at the unsupported-structured-update site — by collecting every
+    string constant assigned to ``planned_action`` anywhere in the module,
+    including the module-level constant it assigns through.
+    """
+    import ast
+
+    import boomi_mcp.categories.integration_builder as builder
+
+    tree = ast.parse(Path(builder.__file__).read_text())
+    found = set()
+
+    def literals(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            yield node.value
+        elif isinstance(node, ast.IfExp):
+            yield from literals(node.body)
+            yield from literals(node.orelse)
+        elif isinstance(node, ast.Name):
+            # e.g. `_NAME_GOVERNANCE_ERROR_ACTION`
+            value = getattr(builder, node.id, None)
+            if isinstance(value, str):
+                yield value
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            name = (
+                target.id
+                if isinstance(target, ast.Name)
+                else target.slice.value
+                if isinstance(target, ast.Subscript)
+                and isinstance(target.slice, ast.Constant)
+                else None
+            )
+            if name == "planned_action":
+                found.update(literals(node.value))
+
+    actions = sorted(a for a in found if a.startswith("error_"))
+    assert len(actions) >= 11, f"the AST walk lost sites: {actions}"
+    return actions
+
+
+@pytest.mark.parametrize("blocking_action", _emittable_planner_error_actions())
+def test_a_blocking_planned_step_produces_zero_execute_component_calls(blocking_action):
     """``_build_plan["_success"]`` alone is NOT a validity verdict.
 
-    An injected blocking ``error_*`` step must stop the apply path dead, and the
-    only way to see that is to spy on the mutation function itself.
+    Every blocking ``error_*`` step must stop the apply path dead, and the only
+    way to see that is to spy on the mutation function itself. Parametrized over
+    the actions DERIVED from the planner, so an action added there without being
+    handled here fails this test rather than silently permitting partial
+    mutation.
     """
     import boomi_mcp.categories.integration_builder as builder
 
@@ -330,7 +452,7 @@ def test_a_blocking_planned_step_produces_zero_execute_component_calls():
             "_success": True,  # deliberately "successful" AND blocking
             "steps": [
                 {
-                    "planned_action": "error_name_governance",
+                    "planned_action": blocking_action,
                     "key": "main_process",
                     "name": "Composed Process",
                     "component_key": "main_process",
@@ -346,10 +468,78 @@ def test_a_blocking_planned_step_produces_zero_execute_component_calls():
     with patch.object(builder, "_build_plan", side_effect=fake_plan) as plan_spy, patch.object(
         builder, "_execute_component"
     ) as execute_spy:
-        builder._apply_plan(MagicMock(), "qa", dict(config, dry_run=False))
+        result = builder._apply_plan(MagicMock(), "qa", dict(config, dry_run=False))
 
     assert plan_spy.called
     assert execute_spy.call_count == 0
+    # ...and the refusal is REPORTED, with a reason. A blocking step that halts
+    # apply but returns an empty `details` leaves the caller nothing to act on,
+    # so the generic branch is the floor for any future `error_*`.
+    assert result["_success"] is False
+    assert result["details"], f"{blocking_action} halted apply with no explanation"
+    assert result["unresolvable_steps"][0]["planned_action"] == blocking_action
+    # ...and the message is the action's OWN, not the catch-all. Asserting only
+    # "details is non-empty" cannot tell a tailored branch from the generic
+    # fallback, so renaming a dedicated guard left the suite green (issue #145,
+    # live QA). The fallback names the raw action; a dedicated branch explains.
+    detail = result["details"][0]
+    generic = f"cannot execute: {blocking_action}" in detail
+    assert not generic, (
+        f"{blocking_action} fell through to the generic message; its dedicated "
+        f"branch is unreachable or misnamed"
+    )
+
+
+@pytest.mark.parametrize(
+    "blocking_action,expected_phrase",
+    [
+        ("error_if_exists", "conflict_policy=fail"),
+        ("error_wss_validation", "web-services listener validation"),
+        ("error_name_governance", "name governance"),
+        ("error_ambiguous_match", "Supply an explicit component_id"),
+    ],
+)
+def test_a_blocking_step_explains_itself_in_its_own_words(
+    blocking_action, expected_phrase
+):
+    """The CONTENT of the refusal, not merely its presence.
+
+    A caller who cannot act on the message has been told the request failed, not
+    why. The two actions this delta added to the gate carry the remediation that
+    resolves them; the two pre-existing ones are here as controls, since the
+    message-content gap spanned the whole chain before this round.
+    """
+    import boomi_mcp.categories.integration_builder as builder
+
+    def fake_plan(client, cfg, *args, **kwargs):  # noqa: ARG001
+        return {
+            "_success": True,
+            "steps": [
+                {
+                    "planned_action": blocking_action,
+                    "key": "main_process",
+                    "name": "Composed Process",
+                    "candidates": [{"component_id": "a"}, {"component_id": "b"}],
+                    "validation_error": {
+                        "error_code": "SOME_CODE",
+                        "field": "config",
+                        "error": "blocked",
+                    },
+                }
+            ],
+        }
+
+    with patch.object(builder, "_build_plan", side_effect=fake_plan), patch.object(
+        builder, "_execute_component"
+    ) as execute_spy:
+        result = builder._apply_plan(
+            MagicMock(), "qa", {"integration_spec": {"name": "x"}, "dry_run": False}
+        )
+
+    assert execute_spy.call_count == 0
+    assert any(expected_phrase in detail for detail in result["details"]), (
+        f"{blocking_action} did not explain itself: {result['details']}"
+    )
 
 
 def test_apply_always_replans_before_executing():
@@ -649,3 +839,150 @@ def test_a_duplicate_invocation_id_is_rejected():
     with pytest.raises(RecipeError) as exc:
         run_recipes([request, request], catalog=catalog)
     assert exc.value.diagnostics[0].target == "duplicate_invocation_id"
+
+
+# ---------------------------------------------------------------------------
+# Topology symbol projection
+# ---------------------------------------------------------------------------
+
+
+def _topology_context(**kwargs):
+    from boomi_mcp.compiler.system_topology.context import TopologyResolutionContextV1
+
+    return TopologyResolutionContextV1(profile="qa", **kwargs)
+
+
+def _composed_with(components, process_keys=()):
+    """A minimal ``ComposedContributionsV1`` carrying only what projection reads."""
+    from boomi_mcp.recipes.composer import ComposedContributionsV1
+
+    # Projection reads only the process KEYS, never the roots, so a placeholder
+    # root keeps the fixture honest about what the function under test consumes.
+    return ComposedContributionsV1(
+        process_roots=tuple((key, None) for key in process_keys),
+        component_slots=(),
+        topologies=(),
+        constraints=(),
+    )
+
+
+def test_the_runs_own_components_become_topology_symbols():
+    """A topology may name a component the SAME RUN contributes.
+
+    Those components are not in the account and not in the caller's snapshot, so
+    without projection the only way to resolve them was for the caller to
+    redundantly assert symbols for components the engine had just decided to
+    build. The plan names ``project_component_plan_symbols`` for exactly this
+    (issue #145, §6 architect review).
+    """
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    components = [
+        IntegrationComponentSpec(key="main_process", type="process", action="create"),
+        IntegrationComponentSpec(key="src_conn", type="connection", action="create"),
+    ]
+    projected = engine_module._project_topology_context(
+        _composed_with(components, process_keys=("main_process",)),
+        components,
+        _topology_context(),
+    )
+    by_key = {s.component_key: s for s in projected.component_plan_symbols}
+    assert set(by_key) == {"main_process", "src_conn"}
+    # ``has_process_ir`` comes from the run's assembled roots, not from config.
+    assert by_key["main_process"].has_process_ir is True
+    assert by_key["src_conn"].has_process_ir is False
+
+
+def test_caller_symbols_for_other_components_survive_projection():
+    from boomi_mcp.compiler.system_topology.context import ComponentPlanSymbolV1
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    caller = ComponentPlanSymbolV1(
+        component_key="pre_existing", component_type="connection"
+    )
+    components = [
+        IntegrationComponentSpec(key="main_process", type="process", action="create")
+    ]
+    projected = engine_module._project_topology_context(
+        _composed_with(components),
+        components,
+        _topology_context(component_plan_symbols=(caller,)),
+    )
+    keys = {s.component_key for s in projected.component_plan_symbols}
+    assert keys == {"main_process", "pre_existing"}
+
+
+def test_the_run_wins_over_a_caller_assertion_about_a_component_it_builds():
+    """The run is the authority on what it materializes; a caller assertion
+    about one of those components is at best a duplicate and at worst stale."""
+    from boomi_mcp.compiler.system_topology.context import ComponentPlanSymbolV1
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    stale = ComponentPlanSymbolV1(
+        component_key="main_process", component_type="connection"
+    )
+    components = [
+        IntegrationComponentSpec(key="main_process", type="process", action="create")
+    ]
+    projected = engine_module._project_topology_context(
+        _composed_with(components, process_keys=("main_process",)),
+        components,
+        _topology_context(component_plan_symbols=(stale,)),
+    )
+    symbols = list(projected.component_plan_symbols)
+    assert len(symbols) == 1
+    assert symbols[0].component_type == "process"  # not the caller's "connection"
+    assert symbols[0].has_process_ir is True
+
+
+def test_plan_topologies_projects_before_planning():
+    """The WIRING, not just the helper.
+
+    ``_plan_topologies`` used to hand the caller's context straight through, so
+    the helper existing proved nothing. Spying on ``plan_system_topology`` is
+    what pins that the projected context is the one the planner actually sees.
+    """
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    components = [
+        IntegrationComponentSpec(key="main_process", type="process", action="create")
+    ]
+    seen = {}
+
+    def fake_plan(spec, context, operation):
+        seen["keys"] = {s.component_key for s in context.component_plan_symbols}
+        raise RuntimeError("stop after capturing the context")
+
+    composed = _composed_with(components)
+    # A VALID assembled topology — an empty `objects` list fails cardinality on
+    # its own and the run would never reach the planner, making the spy below
+    # silently prove nothing.
+    object.__setattr__(
+        composed,
+        "topologies",
+        (
+            (
+                "t1",
+                {
+                    "version": "1",
+                    "profile_ref": "qa",
+                    "objects": [
+                        {
+                            "kind": "process",
+                            "key": "p1",
+                            "component_ref": "$ref:main_process",
+                        }
+                    ],
+                    "relations": [],
+                },
+            ),
+        ),
+    )
+    with patch(
+        "boomi_mcp.compiler.system_topology.pipeline.plan_system_topology",
+        side_effect=fake_plan,
+    ):
+        with pytest.raises(RuntimeError, match="stop after capturing"):
+            engine_module._plan_topologies(composed, components, _topology_context())
+
+    assert seen.get("keys") == {"main_process"}

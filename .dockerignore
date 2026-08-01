@@ -93,3 +93,9 @@ incident-*/
 
 # Diagnostic scripts (not needed in production)
 scripts/diagnose_*
+
+# Build provenance is written BY the build, never copied into it (issue #145).
+# A BUILD_REVISION sitting in a source tree would otherwise land at /app and be
+# read back as this image's commit id. The Dockerfile also deletes it on the
+# empty-arg path; both guards exist because the failure is silent.
+**/BUILD_REVISION

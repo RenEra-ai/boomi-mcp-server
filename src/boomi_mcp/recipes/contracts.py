@@ -68,13 +68,26 @@ from ..models.recipe_contributions import (
 #: The official SemVer 2.0.0 regex (semver.org, "Backus-Naur Form Grammar").
 #: Implemented in-tree rather than pulling in ``packaging``/``semver``: this repo
 #: adds no dependency for one regex plus a comparison tuple.
+#:
+#: ``re.ASCII`` and ``\Z`` are the two edits the port REQUIRES, and neither is
+#: cosmetic. The published regex is written for ECMAScript, where ``\d`` is
+#: ASCII-only and ``$`` matches at the end of input; Python defaults ``\d`` to
+#: every Unicode decimal digit and lets ``$`` match just before a trailing
+#: newline. Transcribed verbatim it therefore accepts two strings SemVer does
+#: not: ``"1\N{ARABIC-INDIC DIGIT TWO}.0.0"`` (``[1-9]`` takes the ASCII ``1``,
+#: then ``\d*`` takes the Arabic-Indic digit, and ``int()`` parses it as 12),
+#: and ``"1.2.3\n"`` — which would register as a version distinct from
+#: ``"1.2.3"`` while comparing exactly equal to it. Calling the constant "the
+#: official regex" is only true once both dialect differences are closed
+#: (issue #145, §6 architect review).
 _SEMVER_RE = re.compile(
     r"^(?P<major>0|[1-9]\d*)"
     r"\.(?P<minor>0|[1-9]\d*)"
     r"\.(?P<patch>0|[1-9]\d*)"
     r"(?:-(?P<prerelease>(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)"
     r"(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?"
-    r"(?:\+(?P<buildmetadata>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
+    r"(?:\+(?P<buildmetadata>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?\Z",
+    re.ASCII,
 )
 
 

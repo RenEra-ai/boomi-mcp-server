@@ -634,7 +634,7 @@ def test_an_unpinned_resolve_uses_the_ADAPTERS_declared_version():
     that can tell the two apart.
     """
     from boomi_mcp.categories.integration_authoring import _resolve_pinned_target
-    from boomi_mcp.recipes import build_test_registry
+    from boomi_mcp.recipes.registry import build_test_registry
     from boomi_mcp.recipes.builtins.sync import SyncRecipeInputV1, emit_api_to_api_sync
     from boomi_mcp.recipes.contracts import (
         RecipeConflictPolicyV1,

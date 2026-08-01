@@ -236,6 +236,29 @@ def _run_executor(
                 contribution_indexes=(index,),
             )
         validated.append(checked)
+
+    # ``contribution_id`` is required to be UNIQUE PER INVOCATION, and this is
+    # the only scope where that can be decided: an invocation is exactly one
+    # executor's returned tuple. Two contributions sharing an id but naming
+    # different component keys used to pass here untouched — composition keys on
+    # ``component_key``, so nothing downstream ever compared the ids — leaving
+    # the id unusable for the one thing it exists for, pointing at a single
+    # contribution within its invocation (issue #145, §6 architect review).
+    seen_ids: Dict[str, int] = {}
+    for index, item in enumerate(validated):
+        contribution_id = getattr(item, "contribution_id", None)
+        if contribution_id is None:
+            continue
+        if contribution_id in seen_ids:
+            raise recipe_error(
+                RECIPE_CONTRIBUTION_INVALID,
+                phase="execution",
+                target="duplicate_contribution_id",
+                recipe_ids=(descriptor.recipe_id,),
+                recipe_versions=(descriptor.recipe_version,),
+                contribution_indexes=(seen_ids[contribution_id], index),
+            )
+        seen_ids[contribution_id] = index
     return tuple(validated)
 
 
@@ -332,7 +355,7 @@ def run_recipes(
 
     components = _resolve_components(composed, catalog)
     process_artifacts = _compile_processes(composed, components, connector_metadata, resolver)
-    topology_plans = _plan_topologies(composed, topology_context)
+    topology_plans = _plan_topologies(composed, components, topology_context)
     _evaluate_constraints(composed, components, active)
 
     return RecipeRunResultV1(
@@ -426,8 +449,53 @@ def _compile_processes(
     return artifacts
 
 
+def _project_topology_context(
+    composed: ComposedContributionsV1,
+    components: Sequence[IntegrationComponentSpec],
+    topology_context: Any,
+) -> Any:
+    """Add THIS RUN's component symbols to the caller's resolution context.
+
+    A topology contributed by a recipe routinely names components contributed by
+    the same run. Those components do not exist in the account yet and are not in
+    the caller's snapshot, so without projection the only way to resolve them was
+    for the caller to redundantly assert symbols for components the run itself
+    had just decided to build — asking the caller to restate what the engine
+    already knows, and to get it right, or the plan reports an unresolvable
+    reference (issue #145, §6 architect review).
+
+    The run's own symbols WIN over a caller-supplied symbol for the same key.
+    The run is the authority on what it materializes; a caller assertion about a
+    component this run is building is at best a duplicate and at worst stale.
+    That is implemented by FILTERING, not by ordering.
+
+    Caller symbols for every other key are preserved, and keep their order
+    relative to one another — but not their position, since they follow the
+    whole projected block. Nothing depends on either: ``prepare_topology_context``
+    sorts ``component_plan_symbols``, so no order this function produces reaches
+    the planner (issue #145, live QA).
+    """
+    from ..compiler.system_topology.context import project_component_plan_symbols
+    from ..models.integration_models import IntegrationSpecV1
+
+    projected = project_component_plan_symbols(
+        IntegrationSpecV1(name="recipe-run", components=list(components)),
+        process_ir_keys=frozenset(key for key, _ in composed.process_roots),
+    )
+    contributed_keys = {symbol.component_key for symbol in projected}
+    existing = tuple(getattr(topology_context, "component_plan_symbols", ()) or ())
+    merged = projected + tuple(
+        symbol
+        for symbol in existing
+        if symbol.component_key not in contributed_keys
+    )
+    return topology_context.model_copy(update={"component_plan_symbols": merged})
+
+
 def _plan_topologies(
-    composed: ComposedContributionsV1, topology_context: Any
+    composed: ComposedContributionsV1,
+    components: Sequence[IntegrationComponentSpec],
+    topology_context: Any,
 ) -> List[Tuple[str, Any]]:
     """Parse and PLAN every assembled topology. Plan only — there is no apply."""
     if not composed.topologies:
@@ -444,6 +512,8 @@ def _plan_topologies(
         SystemTopologyValidationError,
         parse_system_topology_v1,
     )
+
+    topology_context = _project_topology_context(composed, components, topology_context)
 
     plans: List[Tuple[str, Any]] = []
     for topology_id, payload in composed.topologies:

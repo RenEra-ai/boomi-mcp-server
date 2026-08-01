@@ -591,3 +591,47 @@ def test_call_tool_build_database_to_api_sync_minimal_succeeds():
     assert spec["mode"] == "redesign"
     assert spec["validation_rules"]["contract_only"] is False
     assert spec["validation_rules"]["component_count"] == len(spec["components"])
+
+
+# ---------------------------------------------------------------------------
+# Import-path recipe provenance (#145 M12.10)
+# ---------------------------------------------------------------------------
+
+
+def test_the_import_recipe_ref_names_what_actually_executes():
+    """"The EXACT recipe reference" has to include the code that runs.
+
+    A migrated preset routes through TWO registry entries: the adapter it
+    selects (``boomi.adapter.*``, a ``compatibility_adapter``) and the executable
+    recipe that adapter targets (``boomi.archetype.*``). Returning only the
+    adapter named the entry point and omitted the code, so a reader pinning a
+    version from this payload pinned the wrong one
+    (issue #145, §6 architect review).
+    """
+    from boomi_mcp.categories.integration_import import _selected_recipe_ref
+    from boomi_mcp.recipes import production_registry
+
+    ref = _selected_recipe_ref("api_to_api_sync")
+    assert ref is not None
+    assert ref["entry_kind"] == "compatibility_adapter"
+
+    target = ref["adapter_target"]
+    # Not merely present — it must match what the registry would actually run.
+    descriptor = production_registry().resolve(ref["recipe_id"], ref["recipe_version"])
+    assert target["recipe_id"] == descriptor.adapter_target.recipe_id
+    assert target["recipe_version"] == descriptor.adapter_target.recipe_version
+    # ...and it is a DIFFERENT entry from the adapter, which is the whole point.
+    assert target["recipe_id"] != ref["recipe_id"]
+    executable = production_registry().resolve(
+        target["recipe_id"], target["recipe_version"]
+    )
+    assert executable.entry_kind == "executable_recipe"
+
+
+def test_an_unmigrated_preset_still_reports_an_honest_absence():
+    """The addition is additive: presets with no recipe still return ``None``
+    rather than a plausible-looking reference to code they do not use."""
+    from boomi_mcp.categories.integration_import import _selected_recipe_ref
+
+    assert _selected_recipe_ref(None) is None
+    assert _selected_recipe_ref("no_such_preset") is None

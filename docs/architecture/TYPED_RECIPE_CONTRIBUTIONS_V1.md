@@ -400,8 +400,18 @@ a draft, not a claim that collision resolution ran.
 
 ## 8. Error taxonomy
 
-Nine `RECIPE_*` codes, all owned by #145, all category `recipe`. The family is asserted as a
+Ten `RECIPE_*` codes, all owned by #145, all category `recipe`. The family is asserted as a
 biconditional in `tests/test_error_taxonomy.py`.
+
+The design plan specified nine. `RECIPE_REQUEST_INVALID` is the tenth, added during
+implementation and recorded here rather than left as an undocumented extra: a duplicate
+`invocation_id` is a defect in the **request envelope**, not in a recipe's input, and reusing
+`RECIPE_INPUT_INVALID` for it told the caller their input carried "credentials, headers, SQL,
+raw XML" — a misdiagnosis of exactly the kind this taxonomy exists to prevent.
+
+`RecipeDiagnosticV1.code` is typed to this closed set (`RecipeErrorCode`), not to `str`. A
+bare `str` made "all ten and nothing else" a convention resting on `recipe_diagnostic` being
+the only constructor, which the public model never guaranteed.
 
 | Code | Raised at |
 |---|---|
@@ -414,6 +424,7 @@ biconditional in `tests/test_error_taxonomy.py`.
 | `RECIPE_PATCH_CONFLICT` | two writers, one slot, no declared merge |
 | `RECIPE_CONSTRAINT_FAILED` | a canonical validator or a declared requirement rejected the result; canonical codes ride along as sorted `cause_codes` |
 | `RECIPE_OUTPUT_NONDETERMINISTIC` | two runs over identical input produced different canonical bytes |
+| `RECIPE_REQUEST_INVALID` | the request envelope, not a recipe input: a duplicate `invocation_id` |
 
 The recipe layer blames the **recipe layer**. A canonical rejection never becomes a
 `PROCESS_IR_*` or `TOPOLOGY_*` code attributed to #145 — it becomes
@@ -482,7 +493,51 @@ surfaces. Migrating a further archetype means: build its catalog, project a safe
 register the recipe, add it to `RECIPE_LAYER_MODULES`, capture baseline fixtures, and add its
 parity case — the same six steps the three migrated surfaces took.
 
-## 12. Related documents
+## 12. Deviations from the design plan
+
+Recorded here because a deviation nobody wrote down is indistinguishable from a constraint
+that was dropped. Each states what changed and why.
+
+* **`append_root_branch_leg` → `append_root_terminal_leg`.** This is a `Literal` in a public
+  contribution schema, so the rename changes the JSON contract, not just a class name. The
+  operation appends a leg to the root's TERMINAL unit, which is a Branch today; naming it
+  after the branch published a compiler-internal shape word on a public surface, which
+  `test_no_compiler_internal_in_any_schema_template_payload` rejects. The new name describes
+  the position the operation targets, which is the part the contract actually fixes.
+* **Executors receive only their frozen validated input**, not an execution-context object.
+  Context prerequisites became a declaration the ENGINE must satisfy. Removing the channel
+  removes an I/O path and strengthens the double-execution determinism proof.
+* **Two of the five merge rules were removed.** `append_distinct_topology_key` and
+  `append_distinct_component_key` were never consulted: distinct keys compose
+  unconditionally and repeated keys conflict unconditionally, so neither rule had a decision
+  to make.
+* **`contribution_kind` was added** as a shared discriminator, with
+  `RECIPE_CONTRIBUTION_KINDS` derived from the union rather than listed beside it.
+* **`RecipeComponentType` is a pinned copy** of the builder's type set (`models/` may not
+  import `categories/`), deliberately excluding `trading_partner`.
+* **SemVer is implemented in-tree** rather than adding a dependency. The published regex is
+  written for a dialect where `\d` is ASCII and `$` anchors the end of input; the in-tree
+  copy pins both (`re.ASCII`, `\Z`) because Python's defaults differ on each.
+* **`source_revision` covers the recipe layer and its direct callers only.** ~30 downstream
+  compiler modules and the reporting layer are excluded, and the bound is stated at
+  `RECIPE_LAYER_MODULES`.
+
+### Deliberately not implemented
+
+* **`unknown/registry_snapshot_unavailable`.** The plan's fallback describes how a *reader*
+  interprets a response from an older server that predates the snapshot field. No such
+  reader exists in this repo — a new server cannot make an old one answer — so implementing
+  it here would mean writing an unused client path. The two analogues that ARE reachable are
+  implemented: `RecipeRegistrySkewV1` returns `unknown` with a reason when the comparison is
+  partial, and `list_capabilities` reports `recipe_registry: {"status": "unavailable"}` when
+  the local snapshot cannot be built.
+* **Centralizing the advertised server version.** The plan asked `meta_tools` to use "the
+  centralized server version". The string `"1.3"` occurs exactly once, and the only
+  package-level constant is `__version__ = "0.1.0"` — a different fact. There is nothing
+  duplicated to centralize, and wiring the package version in would misreport the server
+  version.
+
+## 13. Related documents
 
 * `docs/architecture/ADR-001` — authority model, §6 (no duplicate authority), §7 (error
   families), §11 (secret boundary)
