@@ -1029,17 +1029,35 @@ def test_the_layer_module_list_covers_the_whole_recipe_package():
     listed = {m for m in RECIPE_LAYER_MODULES if m.startswith("boomi_mcp.recipes.")}
     assert listed == on_disk, listed ^ on_disk
 
-    # ...plus the modules OUTSIDE the package that are still in the path: the
-    # contribution models, the provenance helper, the bridge, and every migrated
-    # surface that calls the bridge.
-    assert set(RECIPE_LAYER_MODULES) - listed == {
-        "boomi_mcp.build_info",
-        "boomi_mcp.models.recipe_contributions",
-        "boomi_mcp.patterns.archetypes.api_to_api_sync",
-        "boomi_mcp.patterns.archetypes.api_to_database_sync",
-        "boomi_mcp.patterns.composition",
-        "boomi_mcp.patterns.recipe_bridge",
-    }
+    # Everything OUTSIDE the package must be claimed by clause 2 (a contract
+    # module) or clause 3 (an engine invoker). Derived, not a literal set: a
+    # hard-coded list would pass even if the RULE covered none of them, which is
+    # exactly the gap live QA found (issue #145).
+    outside = set(RECIPE_LAYER_MODULES) - listed
+    contract_modules = {"boomi_mcp.build_info", "boomi_mcp.models.recipe_contributions"}
+    unclaimed = outside - contract_modules - _engine_invoking_modules()
+    assert unclaimed == set(), unclaimed
+    # ...and neither clause is carrying a module the other already claims.
+    assert contract_modules & _engine_invoking_modules() == set()
+
+
+def test_the_contract_clause_covers_exactly_the_two_modules_it_names():
+    """Clause 2 is a NAMED pair, not an open category.
+
+    If it were open, "a contract module" would become the escape hatch the other
+    two clauses exist to avoid. These two are outside ``recipes/`` only because
+    ``models/`` may not import ``categories/`` and ``build_info`` must stay
+    stdlib-only.
+    """
+    from boomi_mcp.recipes.registry import RECIPE_LAYER_MODULES
+
+    for module in ("boomi_mcp.build_info", "boomi_mcp.models.recipe_contributions"):
+        assert module in RECIPE_LAYER_MODULES, module
+    # Neither is in the recipes package, and neither invokes the engine — which
+    # is precisely why clause 2 has to exist.
+    for module in ("boomi_mcp.build_info", "boomi_mcp.models.recipe_contributions"):
+        assert not module.startswith("boomi_mcp.recipes."), module
+        assert module not in _engine_invoking_modules(), module
 
 
 def test_the_layer_module_list_is_sorted_and_unique():

@@ -186,8 +186,17 @@ wider surface:
 | `source_revision` | Did anything in the recipe layer **or its callers** change? | every module in `RECIPE_LAYER_MODULES` — the recipes package plus every module that invokes the engine |
 
 `RECIPE_LAYER_MODULES` is governed by a rule narrowed until the prose, the list and the test
-are the **same statement**: *the recipe layer's own modules, plus every module that invokes
-the recipe engine*. "Invokes" is mechanical — a call to `run_recipes`,
+are the **same statement**. Three clauses, all mechanically decidable:
+
+1. every module in the `recipes` package;
+2. the two **contract** modules the layer is built out of — `models/recipe_contributions`
+   (the contribution types) and `build_info` (the provenance derivation) — outside the package
+   only because `models/` may not import `categories/` and `build_info` must stay stdlib-only;
+3. every module that **invokes** the recipe engine.
+
+Clause 2 is not a carve-out bolted on to cover two stragglers: it is clause 1's property
+wearing a different directory. Both modules are this issue's own code, both change what a
+recipe run produces, and both would live in `recipes/` if the import rules allowed it. "Invokes" is mechanical — a call to `run_recipes`,
 `run_sync_preset_recipe` or `run_fanout_recipe` — so the test decides it by walking the
 package for DIRECT calls — one level, not the transitive closure — rather than by
 anyone's judgement. Today that is `recipes/*`,

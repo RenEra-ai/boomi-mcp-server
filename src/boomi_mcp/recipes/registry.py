@@ -81,20 +81,37 @@ _ENTRY_KINDS_WITH_EXECUTOR = frozenset({"executable_recipe", "constraint_only"})
 #: The two hashes answer different questions and are scoped accordingly:
 #: ``implementation_sha256`` says WHICH recipe changed (its own defining module);
 #: ``source_revision`` says whether ANYTHING in the layer changed. Live QA found
-#: this list originally covered only the executor modules plus this one — three
-#: files the per-entry digests already covered, plus this one — so a behaviour-changing
-#: edit to ``engine.py`` or ``recipe_bridge.py`` moved nothing at all while both
-#: migrated presets went from a working spec to a hard failure. The backstop was
-#: documented before it existed (issue #145).
+#: this list originally covering only the three executor modules the per-entry
+#: digests already covered, plus this one — which no per-entry digest covers at
+#: all — so a behaviour-changing edit to ``engine.py`` or ``recipe_bridge.py``
+#: moved nothing while both migrated presets went from a working spec to a hard
+#: failure. The backstop was documented before it existed (issue #145).
 #:
 #: The membership rule, narrowed until the prose, the list and the test are the
-#: SAME statement: **the recipe layer's own modules, plus every module that
-#: INVOKES the recipe engine.** "Invokes" is mechanical — a call to
-#: ``run_recipes``, ``run_sync_preset_recipe`` or ``run_fanout_recipe`` — so
-#: ``tests/test_recipe_registry.py`` checks it by walking the package for DIRECT
-#: calls — one level, not the transitive closure — rather than by anyone's
-#: judgement. One level is the line the digest draws: transitively the reporting
-#: layer reaches the engine too, and it is deliberately excluded.
+#: SAME statement. THREE clauses, all three mechanically decidable:
+#:
+#:   1. every module in the ``recipes`` package;
+#:   2. the two CONTRACT modules the layer is built out of —
+#:      ``models.recipe_contributions`` (the contribution types) and
+#:      ``build_info`` (the provenance derivation) — which are outside the
+#:      package only because ``models/`` may not import ``categories/`` and
+#:      ``build_info`` must stay stdlib-only;
+#:   3. every module that INVOKES the recipe engine.
+#:
+#: Clause 2 is not a carve-out bolted on to cover two stragglers: it is the same
+#: property as clause 1 wearing a different directory. Both modules are #145's
+#: own code, both change what a recipe run produces, and both would live in
+#: ``recipes/`` if the import rules allowed it. It is named separately because a
+#: two-clause version of this sentence covered neither, which live QA measured
+#: (issue #145) — the fifth consecutive round in which the prose was narrower or
+#: wider than the list it described.
+#:
+#: "Invokes" is mechanical — a call to ``run_recipes``, ``run_sync_preset_recipe``
+#: or ``run_fanout_recipe`` — so ``tests/test_recipe_registry.py`` checks clause 3
+#: by walking the package for DIRECT calls, one level, not the transitive
+#: closure, rather than by anyone's judgement. One level is the line the digest
+#: draws: transitively the reporting layer reaches the engine too, and it is
+#: deliberately excluded.
 #:
 #: That narrowing is itself the fix for a recurring failure. Four consecutive
 #: rounds of live QA falsified a *broader* sentence than the list backed, each
