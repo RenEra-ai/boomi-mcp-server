@@ -537,7 +537,9 @@ def compose_archetypes_action(
             "registry_revision": production_registry().registry_revision,
             "adapter": _recipe_descriptor_block(ADAPTER_COMPOSE_ARCHETYPES),
             # ``compose_archetypes`` exposes no ``recipe_version`` parameter, so
-            # this is always the default — reported for symmetry with the presets.
+            # this is the version the ADAPTER DECLARES — not the target's own
+            # default, which can differ. ``composition.py`` passes the same value
+            # to the engine, so the two cannot disagree.
             "executable": _resolve_pinned_target(ADAPTER_COMPOSE_ARCHETYPES, None),
         },
     }

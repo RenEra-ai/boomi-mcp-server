@@ -713,9 +713,15 @@ def test_an_unpinned_run_and_its_provenance_agree(monkeypatch, name):
         archetype, _EXAMPLES[archetype].examples[index].parameters
     )
     assert result["_success"] is True
-    reported = result["recipe_provenance"]["executable"]["recipe_version"]
+    provenance = result["recipe_provenance"]
+    reported = provenance["executable"]["recipe_version"]
     assert seen == [reported], (seen, reported)
     assert None not in seen, "an unpinned run must still name its version"
+    # The same field is pinned on ``compose_archetypes`` and was not here — the
+    # one-of-two-identical-surfaces shape this issue keeps hitting (issue #145).
+    from boomi_mcp.recipes import production_registry
+
+    assert provenance["registry_revision"] == production_registry().registry_revision
 
 
 def test_compose_runs_and_reports_the_same_version(monkeypatch):
@@ -774,6 +780,8 @@ def test_every_archetype_emit_spec_annotation_resolves():
 
     from boomi_mcp.patterns import PatternKind, PatternRegistry
 
+    from boomi_mcp.patterns.base import ArchetypePattern
+
     archetypes = PatternRegistry.from_package("boomi_mcp.patterns").list_patterns(
         kind=PatternKind.ARCHETYPE
     )
@@ -781,3 +789,10 @@ def test_every_archetype_emit_spec_annotation_resolves():
     for cls in archetypes:
         hints = typing.get_type_hints(cls.emit_spec)
         assert "recipe_version" in hints, cls.metadata.name
+
+    # The ABC ITSELF. Every concrete archetype overrides ``emit_spec``, so
+    # resolving the overrides never reaches ``base.py`` — breaking the ABC's own
+    # annotation left the suite green while this docstring named it (issue #145,
+    # live QA).
+    base_hints = typing.get_type_hints(ArchetypePattern.emit_spec)
+    assert "recipe_version" in base_hints

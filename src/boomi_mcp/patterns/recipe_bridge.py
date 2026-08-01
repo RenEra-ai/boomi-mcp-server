@@ -196,8 +196,15 @@ def declared_target_version(adapter_id: str) -> Optional[str]:
     from ..recipes import production_registry
 
     adapter = production_registry().resolve(adapter_id)
-    if adapter.adapter_target is None:  # pragma: no cover - construction enforces it
-        return None
+    if adapter.adapter_target is None:
+        # Fail CLOSED. Returning ``None`` would silently reinstate "let the engine
+        # pick the default" — the exact split this function exists to remove — and
+        # only ``compatibility_adapter`` entries carry a target, which this
+        # function never checked (issue #145, live QA note).
+        raise RuntimeError(
+            f"{adapter_id!r} is a {adapter.entry_kind} and declares no adapter "
+            "target, so it has no version to run"
+        )
     return adapter.adapter_target.recipe_version
 
 
