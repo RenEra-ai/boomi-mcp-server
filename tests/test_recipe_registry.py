@@ -1575,25 +1575,111 @@ def test_a_same_id_cross_version_cycle_fails_at_construction():
         )
 
 
-def test_an_acyclic_prerequisite_chain_still_registers():
-    """The non-vacuous control: a legitimate chain must not be rejected."""
+def _depends_on(recipe_id, *targets, **kwargs):
     from boomi_mcp.recipes.contracts import RecipeDependencyV1
 
-    def depends_on(recipe_id, target):
-        return _reg(
-            recipe_id=recipe_id,
-            prerequisites=(
-                RecipeDependencyV1(
-                    kind="recipe", recipe_id=target, recipe_version="1.0.0"
-                ),
-            ),
-        )
+    return _reg(
+        recipe_id=recipe_id,
+        prerequisites=tuple(
+            RecipeDependencyV1(kind="recipe", recipe_id=t, recipe_version="1.0.0")
+            for t in targets
+        ),
+        **kwargs,
+    )
 
+
+def test_an_acyclic_prerequisite_chain_still_registers():
+    """The non-vacuous control: a legitimate chain must not be rejected."""
     registry = build_test_registry(
-        (depends_on("chain.a", "chain.b"), depends_on("chain.b", "chain.c"),
-         _reg(recipe_id="chain.c"))
+        (
+            _depends_on("chain.a", "chain.b"),
+            _depends_on("chain.b", "chain.c"),
+            _reg(recipe_id="chain.c"),
+        )
     )
     assert len(registry.descriptors()) == 3
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2, 3, 4, 5])
+def test_a_diamond_is_not_a_cycle_in_any_registration_order(seed):
+    """The control that pins the TRI-COLOUR marking, not just "no cycle".
+
+    A linear chain never re-visits a node, so it cannot tell tri-colour from a
+    plain ``visited`` set. A DIAMOND does: ``d`` is reached twice, and without
+    marking it BLACK on exit the second visit sees it as GREY and reports a cycle
+    that is not there — rejecting every legitimate diamond, and escaping as a
+    bare ``ValueError`` from ``stack.index`` at that. Live QA measured exactly
+    that mutant surviving the whole suite (issue #145).
+    """
+    registrations = [
+        _depends_on("dia.a", "dia.b", "dia.c"),
+        _depends_on("dia.b", "dia.d"),
+        _depends_on("dia.c", "dia.d"),
+        _reg(recipe_id="dia.d"),
+    ]
+    rng = random.Random(seed)
+    rng.shuffle(registrations)
+    registry = build_test_registry(tuple(registrations))
+    assert len(registry.descriptors()) == 4
+
+
+def test_two_disjoint_cycles_are_both_rejected_deterministically():
+    """Order must not decide WHICH cycle a caller is shown."""
+    registrations = [
+        _depends_on("cyc.a", "cyc.b"),
+        _depends_on("cyc.b", "cyc.a"),
+        _depends_on("cyc.y", "cyc.z"),
+        _depends_on("cyc.z", "cyc.y"),
+    ]
+    messages = set()
+    for seed in range(6):
+        shuffled = list(registrations)
+        random.Random(seed).shuffle(shuffled)
+        with pytest.raises(ValueError) as exc:
+            build_test_registry(tuple(shuffled))
+        messages.add(str(exc.value))
+    assert len(messages) == 1, messages
+
+
+def test_the_cycle_message_names_the_actual_path():
+    """The stated rule — "sorted so the cycle shown does not depend on dict
+    order" — had no check: every test matched only the substring.
+
+    Both halves are pinned here: the deterministic entry point (``sorted(graph)``)
+    and the path slice (``stack.index``), which without it collapses to just the
+    closing edge (issue #145, live QA).
+    """
+    registrations = [
+        _depends_on("cyc.a", "cyc.b"),
+        _depends_on("cyc.b", "cyc.c"),
+        _depends_on("cyc.c", "cyc.a"),
+    ]
+    messages = set()
+    for seed in range(6):
+        shuffled = list(registrations)
+        random.Random(seed).shuffle(shuffled)
+        with pytest.raises(ValueError) as exc:
+            build_test_registry(tuple(shuffled))
+        messages.add(str(exc.value))
+    assert messages == {
+        "recipe prerequisite cycle: cyc.a@1.0.0 -> cyc.b@1.0.0 -> cyc.c@1.0.0 -> cyc.a@1.0.0"
+    }, messages
+
+
+def test_a_cycle_reached_from_an_acyclic_root_reports_only_the_cycle():
+    """The approach node is not part of the cycle and must not be named."""
+    with pytest.raises(ValueError) as exc:
+        build_test_registry(
+            (
+                _depends_on("app.root", "app.a"),
+                _depends_on("app.a", "app.b"),
+                _depends_on("app.b", "app.a"),
+            )
+        )
+    assert "app.root" not in str(exc.value), str(exc.value)
+    assert str(exc.value) == (
+        "recipe prerequisite cycle: app.a@1.0.0 -> app.b@1.0.0 -> app.a@1.0.0"
+    )
 
 
 def test_the_engine_invocation_scan_does_not_skip_package_inits():
@@ -2371,6 +2457,37 @@ raise SystemExit(0 if code == 0 else 1)
         f"registry.py build defects with no test: lines {missed}. "
         "Either add a test or mark the site '# pragma: no cover' with a reason."
     )
+
+    # The ESCAPE HATCH is pinned too. Excluding pragma'd sites and asserting
+    # nothing about them turned "edit a pinned tuple" into "type a comment": a
+    # new untested raise fails above, and adding a pragma to the same line made
+    # it pass silently (issue #145, live QA).
+    pragmad = sorted(line for line, pragma in sites.items() if pragma)
+    assert len(pragmad) == 3, (
+        f"registry.py now has {len(pragmad)} pragma'd raise sites, not 3. "
+        "A pragma is an assertion that the site is unreachable — justify it here."
+    )
+
+
+def test_every_pragma_in_the_registry_states_a_reason():
+    """``# pragma: no cover`` is a claim; a bare one is a claim with no argument.
+
+    One site carried a bare pragma, so the guard's own instruction ("mark it with
+    a reason") was unenforced (issue #145, live QA).
+    """
+    from boomi_mcp.recipes import registry as registry_module
+
+    bare = []
+    for number, line in enumerate(
+        Path(registry_module.__file__).read_text().splitlines(), start=1
+    ):
+        marker = "pragma: no cover"
+        if marker not in line:
+            continue
+        reason = line.split(marker, 1)[1].lstrip(" -\u2014")
+        if not reason.strip():
+            bare.append(number)
+    assert bare == [], f"pragma with no reason at lines {bare}"
 
 
 def test_the_raise_site_matcher_sees_the_bare_spelling():

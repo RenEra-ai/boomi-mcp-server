@@ -582,7 +582,7 @@ class RecipeRegistry:
                 catalog_source = inspect.getsource(
                     importlib.import_module(catalog_module)
                 )
-            except (OSError, TypeError, ImportError) as exc:  # pragma: no cover
+            except (OSError, TypeError, ImportError) as exc:  # pragma: no cover - environment
                 raise ValueError(
                     "recipe provenance requires readable source for "
                     f"{catalog_module}"

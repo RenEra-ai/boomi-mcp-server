@@ -785,7 +785,10 @@ def test_an_unhashable_or_wrong_typed_version_is_a_diagnostic(bad):
     assert exc.value.diagnostics[0][1] == "/version"
 
 
-def test_the_version_gate_rejects_before_the_model_rather_than_through_it():
+@pytest.mark.parametrize(
+    "bad", [_EqualsAnything(), "2", "1.0", ""], ids=["eq_anything", "two", "dotted", "empty"]
+)
+def test_the_version_gate_rejects_before_the_model_rather_than_through_it(bad):
     """The ``isinstance`` gate's ONLY observable effect, pinned.
 
     Every JSON-reachable bad version is caught either way — pydantic's
@@ -796,9 +799,14 @@ def test_the_version_gate_rejects_before_the_model_rather_than_through_it():
     object with a permissive ``__eq__`` through to pydantic's ``literal_error``.
 
     Asserting the reason is the only thing that can tell them apart.
+
+    Parametrized over BOTH halves of the ``if``: ``_EqualsAnything`` exercises the
+    ``isinstance`` clause, and the plain wrong strings exercise the equality
+    clause — which is the half every JSON-reachable bad version goes through and
+    which an earlier version of this test left unpinned (issue #145, live QA).
     """
     payload = dict(_SAMPLES["component_contribution"])
-    payload["version"] = _EqualsAnything()
+    payload["version"] = bad
     with pytest.raises(RecipeContributionValidationError) as exc:
         parse_recipe_contribution(payload)
     assert exc.value.diagnostics == (
