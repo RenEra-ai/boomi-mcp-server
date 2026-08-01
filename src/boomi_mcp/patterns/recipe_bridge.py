@@ -184,7 +184,7 @@ def run_and_verify(
     return result
 
 
-def declared_target_version(adapter_id: str) -> Optional[str]:
+def declared_target_version(adapter_id: str) -> str:
     """The EXACT version a compatibility adapter declares for its target.
 
     A surface with no ``recipe_version`` parameter still has one right answer:
@@ -192,6 +192,10 @@ def declared_target_version(adapter_id: str) -> Optional[str]:
     default, so the moment the two differ the response's
     ``recipe_provenance.executable`` — which reads the declaration — describes a
     version that did not run (issue #145, Codex review).
+
+    Returns ``str``, never ``None``: ``RecipeReferenceV1.recipe_version`` is a
+    non-optional ``SemVerString``, and an entry with no target raises rather than
+    returning a value that would silently mean "let the engine decide".
     """
     from ..recipes import production_registry
 
@@ -202,8 +206,8 @@ def declared_target_version(adapter_id: str) -> Optional[str]:
         # only ``compatibility_adapter`` entries carry a target, which this
         # function never checked (issue #145, live QA note).
         raise RuntimeError(
-            f"{adapter_id!r} is a {adapter.entry_kind} and declares no adapter "
-            "target, so it has no version to run"
+            f"{adapter_id!r} has entry kind {adapter.entry_kind!r} and declares "
+            "no adapter target, so it has no version to run"
         )
     return adapter.adapter_target.recipe_version
 
