@@ -1646,9 +1646,17 @@ def test_the_cycle_message_names_the_actual_path():
     """The stated rule — "sorted so the cycle shown does not depend on dict
     order" — had no check: every test matched only the substring.
 
-    Both halves are pinned here: the deterministic entry point (``sorted(graph)``)
-    and the path slice (``stack.index``), which without it collapses to just the
-    closing edge (issue #145, live QA).
+    This test pins ONE half, the deterministic entry point: ``list(graph)`` in
+    place of ``sorted(graph)`` produces four different messages across these six
+    shuffles. It does NOT pin the path slice — every node here is on the cycle,
+    so ``stack.index`` returns 0 and removing the slice leaves this string
+    unchanged. ``test_a_cycle_reached_from_an_acyclic_root_reports_only_the_cycle``
+    is the one that pins the slice, because its approach node sorts first and is
+    therefore ON the stack when the back-edge is found.
+
+    An earlier version of this docstring claimed both halves, and claimed that
+    removing the slice "collapses to just the closing edge". Both were false —
+    removing it EXPANDS the path — and live QA measured it (issue #145).
     """
     registrations = [
         _depends_on("cyc.a", "cyc.b"),
@@ -2479,11 +2487,25 @@ raise SystemExit(0 if code == 0 else 1)
     # substitution-blind: removing one pragma'd raise and adding a different
     # untested one in the same commit keeps it at 3 and the suite green (issue
     # #145, live QA). The reason text is what makes two exemptions distinct.
-    exempted = _pragma_raise_reasons(registry_module)
+    exempted = _pragma_raise_identities(registry_module)
     assert exempted == (
-        "environment",
-        "environment",
-        "the Literal already bounds this",
+        (
+            "RecipeRegistry._check_entry_kind",
+            "the Literal already bounds this",
+            'raise ValueError(f"unknown recipe entry kind {kind!r}")',
+        ),
+        (
+            "RecipeRegistry._implementation_identity",
+            "environment",
+            'raise ValueError( "recipe provenance requires readable source for "'
+            ' f"{catalog_module}" ) from exc',
+        ),
+        (
+            "RecipeRegistry._implementation_identity",
+            "environment",
+            'raise ValueError( f"recipe provenance requires readable source for "'
+            ' f"{module}.{symbol}" ) from exc',
+        ),
     ), (
         f"registry.py's exempted raise sites changed to {exempted}. "
         "A pragma is an assertion that the site is unreachable — justify it here."
@@ -2505,22 +2527,58 @@ def _pragma_reason(line):
     return tail.strip(" -\u2014\t").strip()
 
 
-def _pragma_raise_reasons(module):
-    """Sorted reasons for every pragma'd ``raise ValueError``. Identity, not count."""
-    lines = Path(module.__file__).read_text().splitlines()
-    sites = _raise_value_error_sites(module)
-    reasons = []
-    for line_number, pragma in sites.items():
+def _enclosing_qualname(tree, lineno):
+    """The dotted name of the function/class enclosing a line."""
+    import ast
+
+    best = []
+    for node in ast.walk(tree):
+        if not isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
+            continue
+        end = getattr(node, "end_lineno", node.lineno)
+        if node.lineno <= lineno <= end:
+            best.append((node.lineno, node.name))
+    return ".".join(name for _, name in sorted(best)) or "<module>"
+
+
+def _pragma_raise_identities(module):
+    """``(enclosing qualname, reason)`` per pragma'd ``raise ValueError``.
+
+    IDENTITY, not a count and not a bare reason multiset. A count is blind to
+    substitution; so is a reason multiset when two exemptions legitimately share
+    a reason string — which two of these three do ("environment"), so deleting
+    one and adding a different untested raise with the same reason kept the tuple
+    equal and the suite green (issue #145, live QA). The enclosing function is
+    what makes two same-reason exemptions distinguishable.
+    """
+    import ast
+
+    source = Path(module.__file__).read_text()
+    tree = ast.parse(source)
+    lines = source.splitlines()
+    by_line = {
+        node.lineno: node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Raise) and node.exc is not None
+    }
+    identities = []
+    for line_number, pragma in _raise_value_error_sites(module).items():
         if not pragma:
             continue
+        reason = ""
         for i in range(max(0, line_number - 3), line_number):
-            reason = _pragma_reason(lines[i])
-            if reason:
-                reasons.append(reason)
-                break
-        else:
-            reasons.append("")
-    return tuple(sorted(reasons))
+            reason = _pragma_reason(lines[i]) or reason
+        # The raise's OWN source too. Two exemptions can share a function AND a
+        # reason — two of these three do — so neither is a discriminator on its
+        # own; the message is what makes them distinct.
+        node = by_line.get(line_number)
+        message = " ".join((ast.get_source_segment(source, node) or "").split())
+        identities.append(
+            (_enclosing_qualname(tree, line_number), reason, message)
+        )
+    return tuple(sorted(identities))
 
 
 def test_every_pragma_in_the_registry_states_a_reason():
@@ -2538,11 +2596,12 @@ def test_every_pragma_in_the_registry_states_a_reason():
         if "pragma: no cover" not in line:
             continue
         reason = _pragma_reason(line)
-        # At least one real WORD. ``- .`` is not a justification, and a
-        # following ``# type: ignore`` is a different directive, not this one's
-        # reason (issue #145, live QA). One word is enough — "environment" says
-        # what it needs to; the bar is "not punctuation", not "verbose".
-        if not re.findall(r"[A-Za-z]{4,}", reason):
+        # At least one real WORD (3+ letters). ``- .`` is not a justification,
+        # and a following ``# type: ignore`` is a different directive, not this
+        # one's reason (issue #145, live QA). One word is enough — "environment"
+        # says what it needs to. 3 rather than 4 so ``- see ADR-001 §5`` passes:
+        # the bar is "not punctuation", not "verbose".
+        if not re.findall(r"[A-Za-z]{3,}", reason):
             bare.append(number)
     assert bare == [], f"pragma with no usable reason at lines {bare}"
 
@@ -2567,3 +2626,46 @@ def test_the_raise_site_matcher_sees_the_bare_spelling():
         assert sites == {3: False}, sites
     finally:
         os.unlink(module.__file__)
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        ("x = 1  # pragma: no cover - environment", "environment"),
+        ("x = 1  # pragma: no cover - see ADR-001 §5", "see ADR-001 §5"),
+        ("x = 1  # pragma: no cover", ""),
+        ("x = 1  # pragma: no cover  # type: ignore", ""),
+        ("x = 1  # pragma: no cover - .", "."),
+        ("x = 1", ""),
+    ],
+)
+def test_the_pragma_reason_parser_stops_at_a_following_directive(line, expected):
+    """``# pragma: no cover  # type: ignore`` has NO reason.
+
+    Consuming the following tool directive as the justification is how a bare
+    exemption passed the lint (issue #145, live QA). The parser had no test of
+    its own — only the lint that uses it — so reverting either half of the fix
+    left the suite green.
+    """
+    assert _pragma_reason(line) == expected
+
+
+@pytest.mark.parametrize(
+    "reason,accepted",
+    [
+        ("environment", True),
+        ("see ADR-001 §5", True),
+        ("Literal-bounded", True),
+        (".", False),
+        ("", False),
+        ("x", False),
+    ],
+)
+def test_the_reason_bar_is_not_punctuation_rather_than_verbose(reason, accepted):
+    """The bar is deliberately loose: one real word is enough.
+
+    A 4-letter minimum rejected ``see ADR-001 §5``, which is a perfectly good
+    justification — so the threshold is 3. ``- .`` is still rejected, which is
+    the case that matters.
+    """
+    assert bool(re.findall(r"[A-Za-z]{3,}", reason)) is accepted
