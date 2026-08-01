@@ -9,6 +9,7 @@ derived from code rather than accepted from anyone.
 import json
 import os
 import random
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -1667,18 +1668,30 @@ def test_the_cycle_message_names_the_actual_path():
 
 
 def test_a_cycle_reached_from_an_acyclic_root_reports_only_the_cycle():
-    """The approach node is not part of the cycle and must not be named."""
+    """The approach node is not part of the cycle and must not be named.
+
+    The NAMES are load-bearing. With an approach node that sorts after the cycle
+    (``app.root`` vs ``app.a``), ``sorted(graph)`` enters the DFS at a cycle
+    member, the approach node never lands on the stack, and ``stack.index``
+    returns 0 — making the slice a no-op and this assertion unfalsifiable. Live
+    QA proved that by asserting ``_i == 0`` inside the product and finding the
+    whole suite still green (issue #145).
+
+    ``app.aaa_root`` sorts FIRST, so the DFS reaches the cycle through it, the
+    stack is three deep when the back-edge is found, and the slice has real work
+    to do.
+    """
     with pytest.raises(ValueError) as exc:
         build_test_registry(
             (
-                _depends_on("app.root", "app.a"),
-                _depends_on("app.a", "app.b"),
-                _depends_on("app.b", "app.a"),
+                _depends_on("app.aaa_root", "app.m"),
+                _depends_on("app.m", "app.n"),
+                _depends_on("app.n", "app.m"),
             )
         )
-    assert "app.root" not in str(exc.value), str(exc.value)
+    assert "aaa_root" not in str(exc.value), str(exc.value)
     assert str(exc.value) == (
-        "recipe prerequisite cycle: app.a@1.0.0 -> app.b@1.0.0 -> app.a@1.0.0"
+        "recipe prerequisite cycle: app.m@1.0.0 -> app.n@1.0.0 -> app.m@1.0.0"
     )
 
 
@@ -2462,11 +2475,52 @@ raise SystemExit(0 if code == 0 else 1)
     # nothing about them turned "edit a pinned tuple" into "type a comment": a
     # new untested raise fails above, and adding a pragma to the same line made
     # it pass silently (issue #145, live QA).
-    pragmad = sorted(line for line, pragma in sites.items() if pragma)
-    assert len(pragmad) == 3, (
-        f"registry.py now has {len(pragmad)} pragma'd raise sites, not 3. "
+    # The ESCAPE HATCH is pinned by IDENTITY, not cardinality. A count is
+    # substitution-blind: removing one pragma'd raise and adding a different
+    # untested one in the same commit keeps it at 3 and the suite green (issue
+    # #145, live QA). The reason text is what makes two exemptions distinct.
+    exempted = _pragma_raise_reasons(registry_module)
+    assert exempted == (
+        "environment",
+        "environment",
+        "the Literal already bounds this",
+    ), (
+        f"registry.py's exempted raise sites changed to {exempted}. "
         "A pragma is an assertion that the site is unreachable — justify it here."
     )
+
+
+def _pragma_reason(line):
+    """The justification text on a ``# pragma: no cover`` line, or ``""``.
+
+    Stops at a following tool directive: ``# pragma: no cover  # type: ignore``
+    has no reason, and consuming the directive as one was how a bare exemption
+    passed (issue #145, live QA).
+    """
+    marker = "pragma: no cover"
+    if marker not in line:
+        return ""
+    tail = line.split(marker, 1)[1]
+    tail = tail.split("#", 1)[0]
+    return tail.strip(" -\u2014\t").strip()
+
+
+def _pragma_raise_reasons(module):
+    """Sorted reasons for every pragma'd ``raise ValueError``. Identity, not count."""
+    lines = Path(module.__file__).read_text().splitlines()
+    sites = _raise_value_error_sites(module)
+    reasons = []
+    for line_number, pragma in sites.items():
+        if not pragma:
+            continue
+        for i in range(max(0, line_number - 3), line_number):
+            reason = _pragma_reason(lines[i])
+            if reason:
+                reasons.append(reason)
+                break
+        else:
+            reasons.append("")
+    return tuple(sorted(reasons))
 
 
 def test_every_pragma_in_the_registry_states_a_reason():
@@ -2481,13 +2535,16 @@ def test_every_pragma_in_the_registry_states_a_reason():
     for number, line in enumerate(
         Path(registry_module.__file__).read_text().splitlines(), start=1
     ):
-        marker = "pragma: no cover"
-        if marker not in line:
+        if "pragma: no cover" not in line:
             continue
-        reason = line.split(marker, 1)[1].lstrip(" -\u2014")
-        if not reason.strip():
+        reason = _pragma_reason(line)
+        # At least one real WORD. ``- .`` is not a justification, and a
+        # following ``# type: ignore`` is a different directive, not this one's
+        # reason (issue #145, live QA). One word is enough — "environment" says
+        # what it needs to; the bar is "not punctuation", not "verbose".
+        if not re.findall(r"[A-Za-z]{4,}", reason):
             bare.append(number)
-    assert bare == [], f"pragma with no reason at lines {bare}"
+    assert bare == [], f"pragma with no usable reason at lines {bare}"
 
 
 def test_the_raise_site_matcher_sees_the_bare_spelling():

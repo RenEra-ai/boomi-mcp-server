@@ -802,8 +802,12 @@ def test_the_version_gate_rejects_before_the_model_rather_than_through_it(bad):
 
     Parametrized over BOTH halves of the ``if``: ``_EqualsAnything`` exercises the
     ``isinstance`` clause, and the plain wrong strings exercise the equality
-    clause — which is the half every JSON-reachable bad version goes through and
-    which an earlier version of this test left unpinned (issue #145, live QA).
+    clause — the half every bad *string* version goes through, and which an
+    earlier version of this test left unpinned.
+
+    "Every JSON-reachable bad version" would be wrong: a dict, list, int, ``None``
+    or bool short-circuits at ``isinstance`` and never evaluates the comparison
+    at all. Live QA measured that by instrumenting ``__ne__`` (issue #145).
     """
     payload = dict(_SAMPLES["component_contribution"])
     payload["version"] = bad
