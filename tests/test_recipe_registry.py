@@ -1999,9 +1999,20 @@ def test_the_layer_module_list_follows_the_ACTIVE_import_namespace():
     import subprocess
     import sys
 
+    # Assert the NEGATIVE first: ``boomi_mcp`` must be unreachable in the child.
+    # ``_clean_env`` shuts PYTHONPATH, but the editable-install ``.pth`` is a
+    # second channel — it only fails to leak today because it points at a stale
+    # path. Depending on which channel happens to be shut is not isolation
+    # (issue #145, live QA).
     probe = (
-        "import sys; sys.path.insert(0, '.');\n"
-        "from src.boomi_mcp.recipes.registry import RECIPE_LAYER_MODULES;\n"
+        "import sys; sys.path.insert(0, '.')\n"
+        "try:\n"
+        "    import boomi_mcp\n"
+        "except ImportError:\n"
+        "    pass\n"
+        "else:\n"
+        "    raise SystemExit('LEAKED: boomi_mcp is importable in the probe')\n"
+        "from src.boomi_mcp.recipes.registry import RECIPE_LAYER_MODULES\n"
         "print(RECIPE_LAYER_MODULES[0])"
     )
     result = subprocess.run(
@@ -2048,6 +2059,12 @@ def test_the_recipe_layer_itself_loads_under_the_src_namespace():
     ]
     probe = (
         "import sys, importlib; sys.path.insert(0, '.')\n"
+        "try:\n"
+        "    import boomi_mcp\n"
+        "except ImportError:\n"
+        "    pass\n"
+        "else:\n"
+        "    raise SystemExit('LEAKED: boomi_mcp is importable in the probe')\n"
         f"for m in {owned!r}: importlib.import_module('src.boomi_mcp.' + m)\n"
         "print('ok')"
     )
@@ -2175,3 +2192,95 @@ def test_a_version_mismatch_is_not_also_reported_as_live_only():
     assert skew.status == "mismatch"
     assert [m.recipe_id for m in skew.version_mismatches] == ["v.one"]
     assert skew.live_only == ()
+
+
+# ---------------------------------------------------------------------------
+# Live-QA regression (issue #145): build defects with no test at all
+# ---------------------------------------------------------------------------
+
+
+def test_an_executable_recipe_without_an_input_model_fails_at_construction():
+    with pytest.raises(ValueError, match="requires both an executor and an input model"):
+        build_test_registry((_reg(input_model=None),))
+
+
+def test_an_executable_recipe_without_an_executor_fails_at_construction():
+    with pytest.raises(ValueError, match="requires both an executor and an input model"):
+        build_test_registry((_reg(executor=None),))
+
+
+def test_an_executable_recipe_naming_an_adapter_target_fails_at_construction():
+    """Only a compatibility adapter adapts TO something."""
+    with pytest.raises(ValueError, match="must not name an adapter target"):
+        build_test_registry(
+            (
+                _reg(
+                    adapter_target=RecipeReferenceV1(
+                        recipe_id="x.y", recipe_version="1.0.0"
+                    )
+                ),
+            )
+        )
+
+
+def test_an_executable_recipe_without_a_conflict_policy_fails_at_construction():
+    """A recipe that can write a contested slot must say what it will merge."""
+    with pytest.raises(ValueError, match="must declare a conflict policy"):
+        build_test_registry((_reg(conflict_policy=None),))
+
+
+def test_a_nested_executor_is_rejected_at_construction():
+    """``<locals>`` in the qualname — a function defined inside another.
+
+    Its source is readable but its enclosing scope is not, so the same
+    provenance argument that rejects closures applies.
+    """
+
+    def outer():
+        def inner(inp):  # pragma: no cover - rejected at registration
+            return ()
+
+        return inner
+
+    with pytest.raises(ValueError, match="module level"):
+        build_test_registry((_reg(executor=outer()),))
+
+
+def test_the_registry_build_defect_census_is_pinned():
+    """Every ``raise ValueError`` in ``registry.py``, counted.
+
+    HONEST BOUND: this is a COUNT, not a reachability proof. A true "every
+    non-pragma raise is executed by a test" assertion needs a coverage tool, and
+    this repo has none — so rather than claim reachability, this fails loudly the
+    moment a raise is added or removed, forcing whoever does it to decide
+    deliberately whether it needs a test.
+
+    It replaces a prose list in the ADR that claimed the test file was the
+    exhaustive enumeration. It was not: four reachable build defects had no test
+    anywhere in the suite (issue #145, live QA), and the four now above this one
+    are those.
+    """
+    import ast
+
+    from boomi_mcp.recipes import registry as registry_module
+
+    source = Path(registry_module.__file__).read_text()
+    lines = source.splitlines()
+    total = pragma = 0
+    for node in ast.walk(ast.parse(source)):
+        if (
+            isinstance(node, ast.Raise)
+            and isinstance(node.exc, ast.Call)
+            and getattr(node.exc.func, "id", None) == "ValueError"
+        ):
+            total += 1
+            if any(
+                "pragma: no cover" in lines[i]
+                for i in range(max(0, node.lineno - 3), node.lineno)
+            ):
+                pragma += 1
+
+    assert (total, pragma) == (31, 3), (
+        f"registry.py has {total} raise ValueError sites ({pragma} pragma'd); "
+        "if you added one, add a test for it and update this census"
+    )

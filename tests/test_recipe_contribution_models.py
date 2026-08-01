@@ -718,17 +718,50 @@ def test_the_discriminator_set_is_derived_not_hand_listed():
 def test_a_value_type_tag_does_not_corrupt_the_pointer():
     """The concrete miss: a ``set_ddp`` source-value error.
 
-    A last-segment ``value_type`` tag was appended verbatim, yielding a pointer
-    whose parent does not resolve.
+    ``property_name`` is PRESENT but blank, so the member's own model validator
+    fires and the ``value_type`` tag lands as the LAST location segment. That
+    placement is the whole test: with the tag mid-path, dropping a segment and
+    skipping a tag are the same operation, and an earlier version of this test
+    passed unchanged against the very commit that had the bug (issue #145, live
+    QA).
     """
     payload = json.loads(json.dumps(_SAMPLES["process_ir_patch"]))
     steps = payload["operations"][0]["root"]["body"]["steps"]
     steps.insert(
-        1, {"kind": "set_ddp", "name": "x", "source_values": [{"value_type": "ddp"}]}
+        1,
+        {
+            "kind": "set_ddp",
+            "name": "x",
+            "source_values": [{"value_type": "ddp", "property_name": "   "}],
+        },
     )
 
     paths = _diagnostic_paths(payload)
+    assert paths, "the payload must actually fail, or this proves nothing"
     for path in paths:
-        assert "/ddp" not in path, path
+        assert not path.endswith("/ddp"), path
         parent = path.rsplit("/", 1)[0] or "/"
         assert _resolves(payload, parent), (path, parent)
+
+
+@pytest.mark.parametrize("bad", [{"a": 1}, ["x"], {"k"}, 3, None, True])
+def test_an_unhashable_or_wrong_typed_contribution_kind_is_a_diagnostic(bad):
+    """``kind not in _KIND_TO_MODEL`` HASHES the caller's value.
+
+    A dict/list/set ``contribution_kind`` raised a bare ``TypeError: unhashable
+    type`` straight through the taxonomy — including through the
+    ``model_construct`` guard, whose whole job is to turn anything a caller can
+    produce into a value-free diagnostic (issue #145, live QA).
+    """
+    with pytest.raises(RecipeContributionValidationError) as exc:
+        parse_recipe_contribution({"contribution_kind": bad, "version": "1"})
+    assert exc.value.diagnostics[0][1] == "/contribution_kind"
+
+
+@pytest.mark.parametrize("bad", [{"a": 1}, ["x"], {"k"}, 1, None])
+def test_an_unhashable_or_wrong_typed_version_is_a_diagnostic(bad):
+    payload = dict(_SAMPLES["component_contribution"])
+    payload["version"] = bad
+    with pytest.raises(RecipeContributionValidationError) as exc:
+        parse_recipe_contribution(payload)
+    assert exc.value.diagnostics[0][1] == "/version"

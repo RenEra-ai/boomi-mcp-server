@@ -137,8 +137,12 @@ Two invariant classes, reported differently:
   report, a self-dependent prerequisite, and an adapter whose `adapter_target` is unregistered
   or not executable — all raise `ValueError` at construction. They are not a caller's problem.
 
-  That list is prose and drifts; `tests/test_recipe_registry.py` is the enumeration that does
-  not.
+  That list is prose and drifts — and the tests are not an exhaustive enumeration either. What
+  does not drift is `test_the_registry_build_defect_census_is_pinned`, which counts every
+  `raise ValueError` in `registry.py` and fails the moment one is added or removed. It is a
+  COUNT, not a reachability proof: asserting "every non-pragma raise is executed by a test"
+  needs a coverage tool this repo does not carry, so the guard forces a deliberate decision
+  rather than claiming coverage it cannot demonstrate.
 * **Caller-facing failures** — unknown id, missing version, gated capability — raise
   `RecipeError` with the taxonomy code and a value-free diagnostic.
 

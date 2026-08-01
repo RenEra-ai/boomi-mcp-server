@@ -874,7 +874,12 @@ def parse_recipe_contribution(payload: Any) -> Any:
         )
 
     kind = payload.get("contribution_kind")
-    if kind not in _KIND_TO_MODEL:
+    # ``isinstance`` FIRST. ``kind not in _KIND_TO_MODEL`` hashes the caller's
+    # value, so a dict/list/set ``contribution_kind`` raised a bare
+    # ``TypeError: unhashable type`` straight through the taxonomy — including
+    # through the ``model_construct`` guard, whose whole job is to turn anything
+    # a caller can produce into a value-free diagnostic (issue #145, live QA).
+    if not isinstance(kind, str) or kind not in _KIND_TO_MODEL:
         raise RecipeContributionValidationError(
             (
                 (
@@ -884,7 +889,8 @@ def parse_recipe_contribution(payload: Any) -> Any:
                 ),
             )
         )
-    if payload.get("version") != RECIPE_CONTRIBUTION_VERSION:
+    version = payload.get("version")
+    if not isinstance(version, str) or version != RECIPE_CONTRIBUTION_VERSION:
         raise RecipeContributionValidationError(
             ((RECIPE_CONTRIBUTION_INVALID, "/version", "unsupported_version"),)
         )
