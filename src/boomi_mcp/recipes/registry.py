@@ -214,7 +214,43 @@ _CONSTRAINING_KEYWORDS = frozenset(
 )
 
 
-def _is_bounded_subschema(subschema: Any) -> bool:
+def _keyword_bounds(keyword: str, value: Any, depth: int = 0) -> bool:
+    """Does this keyword, AT THIS VALUE, actually constrain anything?
+
+    Presence is not constraint. ``{"allOf": []}`` carries a constraining keyword
+    and imposes nothing — an empty conjunction is vacuously true — so a property
+    annotated ``Annotated[Any, WithJsonSchema({"allOf": []})]`` passed a
+    name-only check while accepting arbitrary dicts, lists and scalars. The same
+    holds for every applicator that takes a collection: an empty ``anyOf``,
+    ``oneOf`` or ``prefixItems`` bounds nothing (issue #145, Codex review).
+
+    ``items`` and ``additionalProperties`` recurse, because they bound a value
+    only insofar as THEY are bounded: ``{"items": {}}`` is an array of anything.
+    ``depth`` caps that recursion — schemas from ``model_json_schema`` are trees
+    (``$ref`` is a string, not a cycle), but this also runs against hand-written
+    schemas in tests and must terminate on any input.
+    """
+    if depth > 8:
+        return False
+    if keyword in ("allOf", "anyOf", "oneOf", "prefixItems", "enum"):
+        return isinstance(value, list) and bool(value)
+    if keyword == "properties":
+        return isinstance(value, dict) and bool(value)
+    if keyword == "type":
+        # A str or a non-empty list of type names; an empty list bounds nothing.
+        return bool(value) if isinstance(value, (str, list)) else False
+    if keyword == "$ref":
+        return isinstance(value, str) and bool(value)
+    if keyword == "const":
+        # Any value, including ``None`` and ``False``, is exactly one permitted
+        # value — the tightest bound there is.
+        return True
+    if keyword in ("items", "additionalProperties"):
+        return _is_bounded_subschema(value, depth + 1)
+    return False
+
+
+def _is_bounded_subschema(subschema: Any, depth: int = 0) -> bool:
     """Does this subschema constrain what it may hold at all?
 
     Module-level, not a closure, because most of the set is only observable HERE.
@@ -232,8 +268,76 @@ def _is_bounded_subschema(subschema: Any) -> bool:
     against is a spurious rejection of a schema shape pydantic does not emit
     today. Testing this predicate against hand-written fragments carrying exactly
     one keyword and no ``type`` is the only way to pin the whole set.
+
+    Each keyword is judged AT ITS VALUE via ``_keyword_bounds``, not by presence.
+    Intersecting key names alone accepted ``{"allOf": []}`` — a keyword from the
+    set, bounding nothing (issue #145, Codex review).
     """
-    return isinstance(subschema, dict) and bool(_CONSTRAINING_KEYWORDS & set(subschema))
+    if not isinstance(subschema, dict):
+        return False
+    return any(
+        _keyword_bounds(keyword, subschema[keyword], depth)
+        for keyword in _CONSTRAINING_KEYWORDS & set(subschema)
+    )
+
+
+def _check_input_model_forbids_extras(recipe_id: str, model: Any) -> None:
+    """Assert what the COMPILED VALIDATOR does, by reading what it was built from.
+
+    Separate from the schema walk on purpose, and run AFTER it, because the two
+    read different artifacts. The walk reads the emitted JSON schema; this reads
+    ``__pydantic_core_schema__`` — the description pydantic compiled the
+    validator FROM. Nothing the model publishes or raises can affect it.
+
+    Two earlier mechanisms were tried here and both were wrong in kind, which is
+    worth recording because the reason generalises (issue #145, live QA):
+
+    * Reading ``model_config["extra"]`` is a second DECLARATION, not a fact about
+      the validator. It is a mutable class attribute read at check time while the
+      validator was compiled at class construction, so a post-hoc
+      ``model_config["extra"] = "forbid"``, a wholesale-replaced config dict, or
+      a config mapping whose ``get`` lies all read ``forbid`` and all keep
+      undeclared keys.
+    * Probing with ``model_validate`` and inspecting the resulting error is a
+      predicate over an object the MODEL AUTHOR CONSTRUCTS.
+      ``ValidationError.from_exception_data`` takes an author-chosen ``type`` and
+      an author-chosen ``loc``; checking the type left the loc forgeable, and
+      checking both left nothing else to check. A predicate over an
+      author-constructible object has no terminating move — that is a structural
+      argument, not a tally of the holes found so far.
+
+    The core schema is neither published nor constructed per-call: it is the
+    input to validator compilation, so a model whose validator forbids extras
+    says so here and a model whose validator does not cannot pretend otherwise.
+
+    The walk past wrapper nodes is REQUIRED, not defensive. A model carrying a
+    ``model_validator(mode="after")`` — which ``ComposeDbRestFanoutInputV1``
+    does — has a top-level ``{"type": "function-after", "config": None, "schema":
+    {...}}`` and the model node one level down. Reading only the top level
+    false-rejects it and breaks the build.
+    """
+    node = getattr(model, "__pydantic_core_schema__", None)
+    seen: set = set()
+    while isinstance(node, dict) and id(node) not in seen:
+        seen.add(id(node))
+        config = node.get("config")
+        if isinstance(config, dict) and "extra_fields_behavior" in config:
+            if config["extra_fields_behavior"] == "forbid":
+                return
+            raise ValueError(
+                f"{recipe_id!r} input_model must reject undeclared keys "
+                f"(model_config extra='forbid'); its compiled validator says "
+                f"{config['extra_fields_behavior']!r}"
+            )
+        node = node.get("schema")
+    # FAIL CLOSED. An unreadable core schema means the gate learned nothing, and
+    # "learned nothing" must fail the build rather than pass it — including when
+    # a future pydantic moves or renames this attribute, which should surface as
+    # a loud build break, not a silently weakened guard.
+    raise ValueError(
+        f"{recipe_id!r} input_model closedness could not be determined from its "
+        "compiled core schema"
+    )
 
 
 def _check_input_schema_closed(recipe_id: str, model: Any) -> None:
@@ -266,7 +370,28 @@ def _check_input_schema_closed(recipe_id: str, model: Any) -> None:
 
     Walks ``$defs`` too — a closed top level whose nested model is open is
     exactly as unbounded as an open top level, and only the nested node says so.
+
+    **The boundary of this whole approach, stated rather than discovered again.**
+    It reads the EMITTED SCHEMA and therefore assumes the schema faithfully
+    describes validation. That holds for a model built from ordinary
+    annotations. It does not hold for a model that overrides schema generation:
+    ``json_schema_extra``, ``__get_pydantic_json_schema__``, ``WithJsonSchema``,
+    ``SkipJsonSchema`` and ``Json[...]`` can all publish a schema that says less
+    than the validator accepts, and a check on the published schema cannot see
+    past any of them. The field-level hooks (``WithJsonSchema``,
+    ``SkipJsonSchema``, ``Json[Any]``) are not closable from the schema at all,
+    and ``Json[Any]`` additionally defeats ``scan_forbidden_recipe_shape``, which
+    sees a string and never walks inside it. Registrations are code-owned and
+    immutable, so this is a documented limit of a build-time guard, not an open
+    hole in a caller-facing one (issue #145, live QA).
+
+    The extras gate that runs AFTER this one is not subject to that limit, and
+    for the extras question specifically it is the authority. It reads the
+    COMPILED CORE SCHEMA, so neither a schema-generation hook nor a validation
+    hook can affect its answer: it consults neither what the model publishes nor
+    what the model raises.
     """
+
     schema = model.model_json_schema()
     offenders: List[str] = []
     unconstrained: List[str] = []
@@ -313,12 +438,35 @@ def _check_input_schema_closed(recipe_id: str, model: Any) -> None:
 
         if node.get("type") == "object" or "properties" in node:
             additional = node.get("additionalProperties", None)
-            # A SCHEMA here is not openness — ``Dict[str, str]`` renders as
-            # ``additionalProperties: {"type": "string"}`` and is perfectly
-            # bounded. Only ``true``, an empty schema, or an ABSENT key
-            # (pydantic's default ``extra="ignore"``) admits anything.
-            if additional is not False and not is_bounded(additional):
-                offenders.append(pointer or "/")
+            if "properties" in node:
+                # A MODEL node. ``properties`` is the tell: pydantic emits it for
+                # every model with a fields schema — including a field-less one,
+                # as ``"properties": {}`` — and never for a mapping field.
+                # (``RootModel`` emits none, but a ``RootModel`` cannot be a
+                # ``RecipeInputBase`` at all: pydantic refuses the combination,
+                # and a nested ``RootModel`` over a mapping is correctly
+                # classified as the mapping it is.) Here
+                # ``additionalProperties`` must be exactly
+                # ``False`` — anything else means undeclared keys SURVIVE
+                # validation. A model with ``extra="allow"`` and a typed
+                # ``__pydantic_extra__: Dict[str, str]`` emits
+                # ``additionalProperties: {"type": "string"}``, which the
+                # mapping rule below reads as "bounded" while
+                # ``model_validate`` happily keeps ``{"smuggled": "value"}``.
+                # Bounding the TYPE of an undeclared key's value is not the same
+                # as declaring the key, and only the second is the closed
+                # recipe-input contract (issue #145, Codex review).
+                if additional is not False:
+                    offenders.append(pointer or "/")
+            else:
+                # A MAPPING field — ``Dict[str, str]`` renders as
+                # ``{"additionalProperties": {"type": "string"}, "type": "object"}``
+                # with no ``properties``. Every key is undeclared BY DESIGN here,
+                # so a bounded value schema is the strongest statement available
+                # and is accepted. Only ``true``, an empty schema, or an absent
+                # key (pydantic's default ``extra="ignore"``) admits anything.
+                if additional is not False and not is_bounded(additional):
+                    offenders.append(pointer or "/")
 
         for keyword in ("properties", "$defs", "patternProperties"):
             mapping = node.get(keyword)
@@ -709,6 +857,7 @@ class RecipeRegistry:
                     f"{reg.recipe_id!r} input_model must subclass RecipeInputBase"
                 )
             _check_input_schema_closed(reg.recipe_id, reg.input_model)
+            _check_input_model_forbids_extras(reg.recipe_id, reg.input_model)
 
         if has_executor:
             self._check_executor_shape(reg)

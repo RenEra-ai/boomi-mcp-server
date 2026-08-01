@@ -902,6 +902,480 @@ def test_an_open_object_is_reported_at_the_node_that_is_open():
     assert "['/']" not in message, message
 
 
+def test_a_model_that_allows_typed_extras_is_still_rejected():
+    """Bounding the VALUE type of an undeclared key is not declaring the key.
+
+    ``extra="allow"`` plus a typed ``__pydantic_extra__: Dict[str, str]`` makes
+    pydantic emit ``additionalProperties: {"type": "string"}`` on the MODEL node
+    — the same shape a ``Dict[str, str]`` field emits — so the mapping rule read
+    it as bounded while ``model_validate`` happily preserved
+    ``{"smuggled": "value"}``. Undeclared caller data reaching an executor is
+    exactly what the closed input contract exists to prevent
+    (issue #145, Codex review).
+
+    ``properties`` is the discriminator: pydantic emits it for every model,
+    including a field-less one, and never for a mapping field.
+    """
+    from typing import Dict as DictType
+
+    from pydantic import ConfigDict
+
+    class ExtraAllowed(RecipeInputBase):
+        model_config = ConfigDict(extra="allow", frozen=True)
+        __pydantic_extra__: DictType[str, str]
+
+        process_key: str = "p"
+
+    # The hole was real: validation genuinely keeps the undeclared key.
+    kept = ExtraAllowed.model_validate({"process_key": "p", "smuggled": "value"})
+    assert kept.model_dump()["smuggled"] == "value"
+
+    schema = ExtraAllowed.model_json_schema()
+    assert schema["additionalProperties"] == {"type": "string"}
+    assert "properties" in schema  # ...which is what marks it a model node
+
+    with pytest.raises(ValueError, match="additionalProperties must be false"):
+        build_test_registry((_reg(input_model=ExtraAllowed),))
+
+
+@pytest.mark.parametrize(
+    "keyword,empty_value",
+    [
+        ("allOf", []),
+        ("anyOf", []),
+        ("oneOf", []),
+        ("prefixItems", []),
+        ("enum", []),
+        ("properties", {}),
+        ("items", {}),
+        ("additionalProperties", {}),
+        ("type", ""),
+        ("$ref", ""),
+    ],
+)
+def test_a_constraining_keyword_at_an_empty_value_bounds_nothing(keyword, empty_value):
+    """Presence is not constraint.
+
+    ``{"allOf": []}`` carries a keyword from the set and imposes nothing — an
+    empty conjunction is vacuously true — so
+    ``Annotated[Any, WithJsonSchema({"allOf": []})]`` passed a name-only check
+    while accepting arbitrary dicts, lists and scalars. The predicate now judges
+    each keyword AT ITS VALUE (issue #145, Codex review).
+    """
+    from boomi_mcp.recipes.registry import _is_bounded_subschema
+
+    assert _is_bounded_subschema({keyword: empty_value}) is False
+
+
+def test_an_empty_applicator_on_a_real_field_is_rejected():
+    """The model-level half of the case above, through the real entry point."""
+    from typing import Any as AnyType
+
+    from pydantic import WithJsonSchema
+    from typing_extensions import Annotated
+
+    class Model(RecipeInputBase):
+        process_key: str = "p"
+        thing: Annotated[AnyType, WithJsonSchema({"allOf": []})] = None
+
+    # The hole was real: the field genuinely accepts an arbitrary object.
+    assert Model.model_validate({"thing": {"password": "hunter2"}}).thing == {
+        "password": "hunter2"
+    }
+    with pytest.raises(ValueError, match="unconstrained"):
+        build_test_registry((_reg(input_model=Model),))
+
+
+def test_a_non_empty_applicator_still_bounds():
+    """The control. Without it, judging keywords by value could pass every case
+    above by simply calling everything unbounded."""
+    from boomi_mcp.recipes.registry import _is_bounded_subschema
+
+    assert _is_bounded_subschema({"allOf": [{"type": "string"}]}) is True
+    assert _is_bounded_subschema({"enum": ["a"]}) is True
+    assert _is_bounded_subschema({"items": {"type": "string"}}) is True
+    assert _is_bounded_subschema({"additionalProperties": {"type": "string"}}) is True
+    # ``const`` bounds at ANY value — including None and False, which are single
+    # permitted values, not absent ones.
+    assert _is_bounded_subschema({"const": None}) is True
+    assert _is_bounded_subschema({"const": False}) is True
+
+
+def test_the_bounded_predicate_terminates_on_a_self_referential_schema():
+    """``items``/``additionalProperties`` recurse, so the depth cap is load-bearing
+    for hand-written schemas even though pydantic emits trees."""
+    from boomi_mcp.recipes.registry import _is_bounded_subschema
+
+    cyclic: dict = {}
+    cyclic["items"] = cyclic
+    assert _is_bounded_subschema(cyclic) is False
+
+
+def test_a_mapping_with_no_additional_properties_is_rejected_at_its_own_pointer():
+    """The MAPPING branch of the object rule, which the model/mapping split
+    silently stopped covering.
+
+    Splitting one rule into two branches migrated every existing test to the
+    model branch — they all emit ``properties`` — so the mapping branch was
+    decided by no test at all, and ``is not False`` could be weakened back to
+    ``is True`` with the suite green. That mutant was killed two rounds ago; the
+    split regressed it (issue #145, live QA).
+
+    ``Dict[constr(pattern=...), V]`` is the shape that reaches it: pydantic emits
+    ``patternProperties`` with NO ``additionalProperties``, so keys not matching
+    the pattern are unbounded. Asserting the pointer pins the mapping branch's
+    offender report too, which was likewise unpinned.
+    """
+    from typing import Dict as DictType
+
+    from pydantic import StringConstraints
+    from typing_extensions import Annotated
+
+    class Model(RecipeInputBase):
+        a: DictType[Annotated[str, StringConstraints(pattern=r"^x")], str] = {}
+
+    node = Model.model_json_schema()["properties"]["a"]
+    assert "patternProperties" in node
+    assert "additionalProperties" not in node  # the mapping branch's live case
+    assert "properties" not in node  # ...and it is NOT a model node
+
+    with pytest.raises(ValueError) as exc:
+        build_test_registry((_reg(input_model=Model),))
+    assert "additionalProperties must be false" in str(exc.value)
+    assert "/properties/a" in str(exc.value), str(exc.value)
+
+
+def test_an_input_model_must_forbid_extras_as_a_validation_fact():
+    """A published schema cannot be trusted to describe what validation accepts.
+
+    ``extra="allow"`` plus ``json_schema_extra={"additionalProperties": False}``
+    publishes a closed schema and keeps every undeclared key anyway — the schema
+    walk has nothing to catch, because the schema is not lying about itself, it
+    is lying about the validator. Reading ``model_config`` instead is the only
+    way to see it (issue #145, live QA).
+    """
+    from pydantic import ConfigDict
+
+    class Fabricated(RecipeInputBase):
+        model_config = ConfigDict(
+            extra="allow",
+            frozen=True,
+            json_schema_extra={"additionalProperties": False},
+        )
+
+        process_key: str = "p"
+
+    # The schema looks closed...
+    assert Fabricated.model_json_schema()["additionalProperties"] is False
+    # ...and validation keeps the undeclared key regardless.
+    assert (
+        Fabricated.model_validate({"process_key": "p", "smuggled": "v"}).model_dump()[
+            "smuggled"
+        ]
+        == "v"
+    )
+
+    with pytest.raises(ValueError, match="extra='forbid'"):
+        build_test_registry((_reg(input_model=Fabricated),))
+
+
+def test_a_fabricated_json_schema_hook_cannot_launder_open_extras_either():
+    """The same lie told through ``__get_pydantic_json_schema__``."""
+    from typing import Any as AnyType
+
+    from pydantic import ConfigDict
+
+    class HookFabricated(RecipeInputBase):
+        model_config = ConfigDict(extra="allow", frozen=True)
+
+        process_key: str = "p"
+
+        @classmethod
+        def __get_pydantic_json_schema__(cls, core_schema, handler) -> AnyType:
+            schema = handler(core_schema)
+            schema["additionalProperties"] = False
+            return schema
+
+    assert HookFabricated.model_json_schema()["additionalProperties"] is False
+    with pytest.raises(ValueError, match="extra='forbid'"):
+        build_test_registry((_reg(input_model=HookFabricated),))
+
+
+def test_every_production_input_model_forbids_extras():
+    """The guard must ACCEPT what ships, or it is a build break not a check.
+
+    Drives the GATE rather than re-implementing its predicate. The earlier
+    version asserted ``model_config.get("extra") == "forbid"`` itself, which
+    made it blind twice over: it would not have noticed the gate being deleted,
+    and it restated exactly the declaration the gate no longer trusts
+    (issue #145, live QA).
+    """
+    from boomi_mcp.recipes.builtins.catalog import PRODUCTION_REGISTRATIONS
+
+    checked = 0
+    for registration in PRODUCTION_REGISTRATIONS:
+        if registration.input_model is None:
+            continue
+        registry_module._check_input_model_forbids_extras(
+            registration.recipe_id, registration.input_model
+        )  # must not raise
+        checked += 1
+    # A census pin: a fifth input model must come with a deliberate update here.
+    assert checked == 4
+
+
+@pytest.mark.parametrize("lie", ["post_hoc_edit", "replaced_config", "lying_get"])
+def test_a_config_that_merely_declares_forbid_does_not_satisfy_the_gate(lie):
+    """``model_config["extra"]`` is a DECLARATION, not what the validator does.
+
+    It is a mutable class attribute read at check time, while the validator was
+    compiled at class construction — so an edit after the fact moves the
+    declaration and not the validator. All three of these read ``forbid`` and
+    all three keep undeclared keys. Running one probe key through
+    ``model_validate`` cannot be fooled by any of them (issue #145, live QA).
+    """
+    from pydantic import ConfigDict
+
+    class Base(RecipeInputBase):
+        model_config = ConfigDict(extra="allow", frozen=True)
+
+        process_key: str = "p"
+
+    if lie == "post_hoc_edit":
+        model = Base
+        model.model_config["extra"] = "forbid"  # no model_rebuild()
+    elif lie == "replaced_config":
+        model = Base
+        model.model_config = dict(model.model_config, extra="forbid")
+    else:
+
+        class LyingConfig(dict):
+            def get(self, key, default=None):
+                return "forbid" if key == "extra" else super().get(key, default)
+
+        model = Base
+        model.model_config = LyingConfig(model.model_config)
+
+    # The declaration says closed...
+    assert model.model_config.get("extra") == "forbid"
+    # ...and the validator disagrees.
+    assert "smuggled" in model.model_validate(
+        {"process_key": "p", "smuggled": "v"}
+    ).model_dump()
+
+    with pytest.raises(ValueError, match="must reject undeclared keys"):
+        registry_module._check_input_model_forbids_extras("probe", model)
+
+
+def test_an_open_model_with_a_required_field_is_still_rejected():
+    """A ``ValidationError`` is not itself evidence of closedness.
+
+    The probe payload omits every declared field, so a model with a REQUIRED
+    field raises ``ValidationError`` whatever its ``extra`` setting. Accepting
+    on "an error was raised" would therefore pass an ``extra="allow"`` model
+    purely because it had a required field — the error would be
+    ``missing``, not ``extra_forbidden``. Only the specific error code answers
+    the question being asked (issue #145, live QA).
+    """
+    from pydantic import ConfigDict, ValidationError
+
+    class OpenWithRequired(RecipeInputBase):
+        model_config = ConfigDict(extra="allow", frozen=True)
+
+        needed: str
+
+    # It DOES raise — just not for the reason closedness needs.
+    with pytest.raises(ValidationError) as raised:
+        OpenWithRequired.model_validate({"__closedness_probe__": "x"})
+    codes = {error["type"] for error in raised.value.errors()}
+    assert "missing" in codes
+    assert "extra_forbidden" not in codes
+    # ...and it genuinely keeps undeclared keys.
+    assert "smuggled" in OpenWithRequired.model_validate(
+        {"needed": "n", "smuggled": "v"}
+    ).model_dump()
+
+    with pytest.raises(ValueError, match="must reject undeclared keys"):
+        registry_module._check_input_model_forbids_extras("probe", OpenWithRequired)
+
+
+@pytest.mark.parametrize("where", ["empty_loc", "nested_loc"])
+def test_a_fabricated_extra_forbidden_elsewhere_does_not_satisfy_the_probe(where):
+    """The probe checks the error's LOCATION, not only its code.
+
+    A ``model_validator`` can raise ``PydanticCustomError("extra_forbidden", …)``
+    with an empty or nested ``loc``. Alone that is not a bypass — the schema gate
+    still sees ``extra="allow"``. Combined with a fabricated
+    ``json_schema_extra={"additionalProperties": False}`` it passes BOTH gates
+    while the model keeps every undeclared key: the two gates exist to cover each
+    other, and this is the one arrangement where neither does
+    (issue #145, live QA).
+    """
+    from typing import Any as AnyType
+
+    from pydantic import ConfigDict, model_validator
+    from pydantic_core import PydanticCustomError
+
+    if where == "empty_loc":
+
+        class Composite(RecipeInputBase):
+            model_config = ConfigDict(
+                extra="allow",
+                frozen=True,
+                json_schema_extra={"additionalProperties": False},
+            )
+
+            process_key: str = "p"
+
+            @model_validator(mode="before")
+            @classmethod
+            def _fake(cls, data: AnyType) -> AnyType:
+                if isinstance(data, dict) and "__closedness_probe__" in data:
+                    raise PydanticCustomError("extra_forbidden", "nope")
+                return data
+
+    else:
+
+        class Inner(RecipeInputBase):
+            ok: str = "x"
+
+        class Composite(RecipeInputBase):
+            model_config = ConfigDict(
+                extra="allow",
+                frozen=True,
+                json_schema_extra={"additionalProperties": False},
+            )
+
+            process_key: str = "p"
+
+            @model_validator(mode="before")
+            @classmethod
+            def _fake(cls, data: AnyType) -> AnyType:
+                if isinstance(data, dict) and "__closedness_probe__" in data:
+                    Inner.model_validate({"bogus": 1})  # extra_forbidden, nested loc
+                return data
+
+    # The SCHEMA gate is fooled by the json_schema_extra lie...
+    registry_module._check_input_schema_closed("probe", Composite)  # does not raise
+    # ...and the model really does keep undeclared keys.
+    assert "smuggled" in Composite.model_validate(
+        {"process_key": "p", "smuggled": "v"}
+    ).model_dump()
+    # ...so the extras gate is the only thing standing, and it must hold. It
+    # does so without consulting the forged error at all: the compiled core
+    # schema still says ``extra="allow"``, and no validator can rewrite that.
+    with pytest.raises(ValueError, match="must reject undeclared keys"):
+        registry_module._check_input_model_forbids_extras("probe", Composite)
+
+
+def test_the_gate_accepts_an_honest_model_via_its_compiled_core_schema():
+    """The positive half: an honest model is accepted, and via the core schema.
+
+    Without this, "read the core schema" would be satisfiable by rejecting
+    everything — which is exactly what the naive one-liner did to
+    ``ComposeDbRestFanoutInputV1`` before the wrapper walk was added.
+    """
+    class Honest(RecipeInputBase):
+        process_key: str = "p"
+
+    core = Honest.__pydantic_core_schema__
+    assert core["config"]["extra_fields_behavior"] == "forbid"
+    registry_module._check_input_model_forbids_extras("probe", Honest)  # accepts
+
+
+@pytest.mark.parametrize("behaviour", ["allow", "ignore"])
+def test_only_forbid_satisfies_the_gate(behaviour):
+    """``ignore`` is not ``forbid``, and only ``forbid`` is closed.
+
+    ``extra="ignore"`` DROPS undeclared keys rather than passing them through, so
+    it does not leak — which is precisely why nothing caught that widening the
+    accept condition to ``("forbid", "ignore")`` left the suite green. It is
+    still not the contract: the recipe input surface rejects what it does not
+    declare, so a caller who misspells a field is told, rather than silently
+    getting a default (issue #145, live QA).
+    """
+    from pydantic import ConfigDict
+
+    class Model(RecipeInputBase):
+        model_config = ConfigDict(extra=behaviour, frozen=True)
+
+        process_key: str = "p"
+
+    assert (
+        Model.__pydantic_core_schema__["config"]["extra_fields_behavior"] == behaviour
+    )
+    with pytest.raises(ValueError, match="must reject undeclared keys"):
+        registry_module._check_input_model_forbids_extras("probe", Model)
+
+
+def test_the_gate_walks_past_wrapper_nodes_to_find_the_model_config():
+    """REQUIRED, not defensive — and a production model depends on it.
+
+    A ``model_validator(mode="after")`` wraps the model node in
+    ``{"type": "function-after", "config": None, "schema": {...}}``. Reading only
+    the top level finds ``config: None``, concludes nothing, and fail-closed then
+    REJECTS a legitimate model. ``ComposeDbRestFanoutInputV1`` has exactly this
+    shape, so the naive version is a build break (issue #145, live QA).
+    """
+    from pydantic import model_validator
+
+    class Wrapped(RecipeInputBase):
+        a: str = "x"
+
+        @model_validator(mode="after")
+        def _after(self):
+            return self
+
+    core = Wrapped.__pydantic_core_schema__
+    assert core["type"] == "function-after"
+    assert core.get("config") is None  # the top level says nothing
+    assert core["schema"]["config"]["extra_fields_behavior"] == "forbid"
+    registry_module._check_input_model_forbids_extras("probe", Wrapped)  # accepts
+
+    from boomi_mcp.recipes.builtins.sync import SyncRecipeInputV1  # noqa: F401
+    from boomi_mcp.recipes.builtins.catalog import PRODUCTION_REGISTRATIONS
+
+    wrapped_production = [
+        registration
+        for registration in PRODUCTION_REGISTRATIONS
+        if registration.input_model is not None
+        and registration.input_model.__pydantic_core_schema__.get("config") is None
+    ]
+    assert wrapped_production, "no production model exercises the wrapper walk"
+
+
+def test_an_unreadable_core_schema_fails_closed():
+    """"Learned nothing" must fail the build, not pass it.
+
+    The core schema is a private-ish attribute. If a future pydantic moves or
+    renames it, this gate must break loudly rather than silently start accepting
+    every model — a guard that fails open on an upgrade is worse than no guard,
+    because nothing announces the change.
+    """
+    from unittest.mock import patch
+
+    class Opaque(RecipeInputBase):
+        process_key: str = "p"
+
+    with patch.object(Opaque, "__pydantic_core_schema__", {"type": "nonsense"}):
+        with pytest.raises(ValueError, match="could not be determined"):
+            registry_module._check_input_model_forbids_extras("probe", Opaque)
+
+
+def test_the_extras_gate_accepts_a_model_with_required_fields():
+    """The probe needs no VALID payload.
+
+    A model with a required field still reports ``extra_forbidden`` alongside
+    its missing-field error, which is what makes running the validator usable as
+    a registration-time gate rather than only a runtime one.
+    """
+
+    class Required(RecipeInputBase):
+        needed: str
+
+    registry_module._check_input_model_forbids_extras("probe", Required)  # no raise
+
+
 def test_a_bounded_mapping_is_not_mistaken_for_an_open_object():
     """``Dict[str, str]`` renders as ``additionalProperties: {"type": "string"}``.
 
