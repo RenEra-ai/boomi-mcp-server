@@ -607,3 +607,63 @@ def test_every_archetype_accepts_the_uniform_emit_spec_contract():
         assert "recipe_version" in parameters, cls.metadata.name
         assert parameters["recipe_version"].kind is inspect.Parameter.KEYWORD_ONLY
         assert parameters["recipe_version"].default is None
+
+
+def test_an_unpinned_resolve_uses_the_ADAPTERS_declared_version():
+    """Not the target's own default — those can differ.
+
+    Reverting ``recipe_version or adapter.adapter_target.recipe_version`` left
+    the whole suite green, because every test drove construction and none
+    observed the return value (issue #145, live QA). This builds a registry
+    where the declared version is NOT the default, which is the only arrangement
+    that can tell the two apart.
+    """
+    from boomi_mcp.categories.integration_authoring import _resolve_pinned_target
+    from boomi_mcp.recipes import build_test_registry
+    from boomi_mcp.recipes.builtins.sync import SyncRecipeInputV1, emit_api_to_api_sync
+    from boomi_mcp.recipes.contracts import (
+        RecipeConflictPolicyV1,
+        RecipeReferenceV1,
+        RecipeRegistrationV1,
+    )
+
+    def target(version, default):
+        return RecipeRegistrationV1(
+            recipe_id="t.target",
+            recipe_version=version,
+            entry_kind="executable_recipe",
+            is_default=default,
+            input_model=SyncRecipeInputV1,
+            executor=emit_api_to_api_sync,
+            output_types=(
+                "component_contribution",
+                "constraint_requirement",
+                "process_ir_patch",
+            ),
+            conflict_policy=RecipeConflictPolicyV1(),
+        )
+
+    registry = build_test_registry(
+        (
+            RecipeRegistrationV1(
+                recipe_id="t.adapter",
+                recipe_version="1.0.0",
+                entry_kind="compatibility_adapter",
+                is_default=True,
+                # DECLARES 0.1.0 ...
+                adapter_target=RecipeReferenceV1(
+                    recipe_id="t.target", recipe_version="0.1.0"
+                ),
+            ),
+            target("0.1.0", False),
+            # ... while 0.2.0 is the DEFAULT.
+            target("0.2.0", True),
+        )
+    )
+    assert registry.resolve("t.target").recipe_version == "0.2.0"
+
+    unpinned = _resolve_pinned_target("t.adapter", None, registry)
+    assert unpinned["recipe_version"] == "0.1.0", "must follow the DECLARED version"
+
+    pinned = _resolve_pinned_target("t.adapter", "0.2.0", registry)
+    assert pinned["recipe_version"] == "0.2.0", "an explicit pin still wins"

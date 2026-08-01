@@ -131,9 +131,14 @@ test asserts its absence rather than trusting this sentence.
 
 Two invariant classes, reported differently:
 
-* **Build defects** — duplicate registration, two defaults for one id, an `async`/lambda/
-  partial/bound-method/closure executor, an undeclared output type, an unknown capability
-  subject — raise `ValueError` at construction. They are not a caller's problem.
+* **Build defects** — duplicate registration, two defaults for one id, an
+  `async`/generator/lambda/partial/bound-method/closure executor, an undeclared output type, an
+  unknown capability subject, an `(authority, required_state)` pair the authority can never
+  report, a self-dependent prerequisite, and an adapter whose `adapter_target` is unregistered
+  or not executable — all raise `ValueError` at construction. They are not a caller's problem.
+
+  That list is prose and drifts; `tests/test_recipe_registry.py` is the enumeration that does
+  not.
 * **Caller-facing failures** — unknown id, missing version, gated capability — raise
   `RecipeError` with the taxonomy code and a value-free diagnostic.
 

@@ -676,3 +676,59 @@ def test_a_present_tag_valued_field_is_still_addressable():
 
     paths = _diagnostic_paths(payload)
     assert "/operations/0/root/body/steps/1/map_ref" in paths
+
+
+def test_the_discriminator_set_is_derived_not_hand_listed():
+    """A hand-kept "all the members of X" list has been wrong here repeatedly.
+
+    ``value_type`` (``PropertySourceV1`` / ``DecisionOperandV1``) was the miss:
+    a ``set_ddp`` source-value error emitted a pointer that addressed nothing.
+    The set is now walked out of the compiled core schema, so a sixth
+    discriminator is picked up with no test to remember (issue #145, live QA).
+    """
+    from pydantic import TypeAdapter
+
+    from boomi_mcp.models.recipe_contributions import (
+        _DISCRIMINATOR_FIELDS,
+        RecipeContributionV1,
+    )
+
+    found, seen = set(), set()
+
+    def walk(node):
+        if id(node) in seen:
+            return
+        seen.add(id(node))
+        if isinstance(node, dict):
+            if isinstance(node.get("discriminator"), str):
+                found.add(node["discriminator"])
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, (list, tuple)):
+            for value in node:
+                walk(value)
+
+    walk(TypeAdapter(RecipeContributionV1).core_schema)
+    assert _DISCRIMINATOR_FIELDS == frozenset(found)
+    # The one that was missing, named so a regression is legible.
+    assert "value_type" in _DISCRIMINATOR_FIELDS
+    assert len(_DISCRIMINATOR_FIELDS) == 5
+
+
+def test_a_value_type_tag_does_not_corrupt_the_pointer():
+    """The concrete miss: a ``set_ddp`` source-value error.
+
+    A last-segment ``value_type`` tag was appended verbatim, yielding a pointer
+    whose parent does not resolve.
+    """
+    payload = json.loads(json.dumps(_SAMPLES["process_ir_patch"]))
+    steps = payload["operations"][0]["root"]["body"]["steps"]
+    steps.insert(
+        1, {"kind": "set_ddp", "name": "x", "source_values": [{"value_type": "ddp"}]}
+    )
+
+    paths = _diagnostic_paths(payload)
+    for path in paths:
+        assert "/ddp" not in path, path
+        parent = path.rsplit("/", 1)[0] or "/"
+        assert _resolves(payload, parent), (path, parent)

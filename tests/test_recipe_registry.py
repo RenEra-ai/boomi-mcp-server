@@ -51,6 +51,22 @@ from boomi_mcp.recipes.contracts import (
 from boomi_mcp.recipes.builtins.sync import SyncRecipeInputV1, emit_api_to_api_sync
 
 
+def _clean_env():
+    """The child's environment with ``PYTHONPATH`` REMOVED.
+
+    A bare ``subprocess.run`` inherits it, and this repo is normally driven with
+    ``PYTHONPATH=src`` — so the child could resolve ``boomi_mcp.*`` through the
+    shell and the namespace isolation these probes rely on came from the caller,
+    not from the test. An absolute import added to an owned module passed
+    (issue #145, live QA).
+    """
+    import os
+
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    return env
+
+
 def _reg(**kwargs):
     base = dict(
         recipe_id="test.recipe",
@@ -1993,6 +2009,7 @@ def test_the_layer_module_list_follows_the_ACTIVE_import_namespace():
         cwd=str(_project_root),
         capture_output=True,
         text=True,
+        env=_clean_env(),
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().startswith("src.boomi_mcp."), result.stdout
@@ -2039,6 +2056,7 @@ def test_the_recipe_layer_itself_loads_under_the_src_namespace():
         cwd=str(_project_root),
         capture_output=True,
         text=True,
+        env=_clean_env(),
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ok"

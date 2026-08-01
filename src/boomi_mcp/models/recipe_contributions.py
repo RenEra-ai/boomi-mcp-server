@@ -742,11 +742,47 @@ def _pointer(path: Tuple[Any, ...]) -> str:
     return "/" + "/".join(escaped)
 
 
-#: The discriminator field names used by every tagged union in this module and
-#: in ProcessIR/SystemTopology. A pydantic v2 union location inserts the TAG
-#: VALUE as a segment, and the only way to recognize one is to ask the container
-#: what its discriminator says.
-_DISCRIMINATOR_FIELDS = frozenset({"contribution_kind", "op", "kind", "operation"})
+def _derive_discriminator_fields() -> frozenset:
+    """Every discriminator name reachable from a contribution, DERIVED.
+
+    Pydantic v2 records the discriminator on each tagged-union core-schema node,
+    so the complete set is one walk of the compiled schema. Hand-listing it was
+    wrong by exactly one — ``value_type`` (``PropertySourceV1``,
+    ``DecisionOperandV1``) was missing, so a ``set_ddp`` source-value error
+    emitted a pointer that addressed nothing (issue #145, live QA).
+
+    That miss is the point. A hand-kept list of "all the members of X" has been
+    wrong here repeatedly; the only durable fix is to stop keeping one. This walk
+    picks up a sixth discriminator the day someone adds one, with no test to
+    remember to update.
+    """
+    from pydantic import TypeAdapter
+
+    found: set = set()
+    seen: set = set()
+
+    def walk(node: Any) -> None:
+        if id(node) in seen:
+            return
+        seen.add(id(node))
+        if isinstance(node, dict):
+            discriminator = node.get("discriminator")
+            if isinstance(discriminator, str):
+                found.add(discriminator)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, (list, tuple)):
+            for value in node:
+                walk(value)
+
+    walk(TypeAdapter(RecipeContributionV1).core_schema)
+    return frozenset(found)
+
+
+#: Derived once at import. A pydantic v2 union location inserts the TAG VALUE as
+#: a segment, and recognizing one means asking the container what its
+#: discriminator says.
+_DISCRIMINATOR_FIELDS = _derive_discriminator_fields()
 
 
 def _error_pointer(location: Tuple[Any, ...], payload: Any = None) -> str:
@@ -763,18 +799,21 @@ def _error_pointer(location: Tuple[Any, ...], payload: Any = None) -> str:
     nothing.)
 
     A segment is a TAG when the container's discriminator field holds exactly
-    that value — asked of the payload, not guessed from a name list. At most ONE
-    tag is skipped per container, because pydantic emits exactly one per union
-    level. That bound is load-bearing: ``MapRefNodeV1`` is the one member whose
-    tag value equals one of its own field names (``{"kind": "map_ref",
-    "map_ref": ...}``), so a location can legitimately carry ``map_ref`` twice —
-    first the tag, then the field. Skipping greedily swallowed the field too, and
-    a value-wise "is this the last segment" test kept both (issue #145, live QA).
+    that value — asked of the payload, not guessed from a name list, and the set
+    of discriminator NAMES is itself derived from the compiled schema rather than
+    hand-listed. At most ONE tag is skipped per container, because pydantic emits
+    exactly one per union level. That bound is the load-bearing part:
+    ``MapRefNodeV1`` is the one member (of 61) whose tag value equals one of its
+    own field names (``{"kind": "map_ref", "map_ref": ...}``), so a location can
+    legitimately carry ``map_ref`` twice — first the tag, then the field — and
+    skipping greedily swallowed the field too.
 
     Everything else is resolved by WALKING, which is exactly the property the
     pointer claims: RFC 6901 against the submitted document. The final segment of
-    a ``missing`` error is the absent key itself and is kept unresolved — it is
-    compared by POSITION, never by value.
+    a ``missing`` error is the absent key itself and is kept unresolved. It is
+    identified by POSITION rather than by value — no currently-reachable location
+    distinguishes the two, so this is a correctness choice rather than a fix for
+    an observed defect.
     """
     if payload is None:
         return _pointer(tuple(location))

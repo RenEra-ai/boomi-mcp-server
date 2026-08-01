@@ -87,7 +87,9 @@ def _recipe_descriptor_block(recipe_id: str) -> dict[str, Any] | None:
 
 
 def _resolve_pinned_target(
-    adapter_id: str, recipe_version: str | None
+    adapter_id: str,
+    recipe_version: str | None,
+    registry: Any = None,
 ) -> dict[str, Any] | None:
     """Resolve the EXECUTABLE recipe an adapter targets, honouring a pin.
 
@@ -101,10 +103,15 @@ def _resolve_pinned_target(
     accepted and then ignored — a pin the tool took and the execution did not
     keep (issue #145, Codex review).
 
-    A pin that cannot be honoured RAISES; an absent pin returns the target's
-    default descriptor.
+    A pin that cannot be honoured RAISES; an absent pin returns the target at the
+    version the ADAPTER declares — not the target's own default, which can differ
+    the day a second version becomes default.
     """
-    registry = production_registry()
+    # ``registry`` is injectable so the DECLARED-version behaviour below is
+    # observable. It was not: every test could only drive construction, so
+    # reverting the ``or adapter.adapter_target.recipe_version`` clause left the
+    # whole suite green (issue #145, live QA).
+    registry = registry if registry is not None else production_registry()
     adapter = registry.resolve(adapter_id)
     if adapter.adapter_target is None:  # pragma: no cover - construction enforces it
         return None
