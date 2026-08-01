@@ -517,14 +517,27 @@ def test_a_pin_that_cannot_be_honoured_returns_no_spec():
     assert "integration_spec" not in result
 
 
-def test_the_pin_is_carried_all_the_way_into_run_recipes(monkeypatch):
+@pytest.mark.parametrize("name", sorted(_PRESET_CASES))
+def test_the_pin_is_carried_all_the_way_into_run_recipes(monkeypatch, name):
     """Structural: the version must appear on the RecipeRequestV1 the engine sees.
 
     The response field alone could be reporting an intention; this observes the
     request object the engine actually resolves.
+
+    Parametrized over EVERY migrated preset. Covering only ``api_to_api_sync``
+    left ``api_to_database_sync``'s threading unguarded — dropping the pin from
+    its ``emit_spec`` kept the whole suite green while
+    ``recipe_provenance.executable`` reported a version that did not run
+    (issue #145, live QA).
     """
-    import boomi_mcp.recipes as recipes_pkg
     import boomi_mcp.patterns.recipe_bridge as bridge
+    from boomi_mcp.recipes import production_registry
+
+    archetype, index = _PRESET_CASES[name]
+    registry = production_registry()
+    executable = registry.resolve(
+        registry.resolve(f"boomi.adapter.{archetype}").adapter_target.recipe_id
+    )
 
     seen = []
     real = bridge.run_recipes
@@ -535,17 +548,19 @@ def test_the_pin_is_carried_all_the_way_into_run_recipes(monkeypatch):
 
     monkeypatch.setattr(bridge, "run_recipes", spy)
     build_from_archetype_action(
-        "api_to_api_sync",
-        ApiToApiSyncArchetype.examples[0].parameters,
-        recipe_version="0.1.0",
+        archetype,
+        _EXAMPLES[archetype].examples[index].parameters,
+        recipe_version=executable.recipe_version,
     )
-    assert seen == [("boomi.archetype.api_to_api_sync", "0.1.0")]
+    assert seen == [(executable.recipe_id, executable.recipe_version)]
 
 
-def test_an_unpinned_build_still_reaches_the_engine_with_no_version(monkeypatch):
+@pytest.mark.parametrize("name", sorted(_PRESET_CASES))
+def test_an_unpinned_build_still_reaches_the_engine_with_no_version(monkeypatch, name):
     """The negative control: absent pin means the code-declared default."""
     import boomi_mcp.patterns.recipe_bridge as bridge
 
+    archetype, index = _PRESET_CASES[name]
     seen = []
     real = bridge.run_recipes
 
@@ -555,7 +570,7 @@ def test_an_unpinned_build_still_reaches_the_engine_with_no_version(monkeypatch)
 
     monkeypatch.setattr(bridge, "run_recipes", spy)
     build_from_archetype_action(
-        "api_to_api_sync", ApiToApiSyncArchetype.examples[0].parameters
+        archetype, _EXAMPLES[archetype].examples[index].parameters
     )
     assert seen == [None]
 

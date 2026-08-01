@@ -644,3 +644,35 @@ def test_every_diagnostic_pointer_resolves_against_the_submitted_payload(mutate)
     for path in _diagnostic_paths(payload):
         parent = path.rsplit("/", 1)[0] or "/"
         assert _resolves(payload, parent), (path, parent)
+
+
+def test_a_tag_whose_value_equals_a_field_name_is_disambiguated():
+    """``MapRefNodeV1`` is the one member whose tag VALUE equals a field NAME.
+
+    ``{"kind": "map_ref", "map_ref": ...}`` — so a pydantic location can carry
+    ``map_ref`` twice: first the union tag, then the field. Skipping greedily
+    swallowed the field too, and a value-wise "is this the last segment" test
+    kept both, yielding ``.../steps/1/map_ref/map_ref`` (issue #145, live QA).
+    """
+    payload = json.loads(json.dumps(_SAMPLES["process_ir_patch"]))
+    steps = payload["operations"][0]["root"]["body"]["steps"]
+    steps.insert(1, {"kind": "map_ref", "map_ref": "$ref:m"})
+    del steps[1]["map_ref"]
+
+    paths = _diagnostic_paths(payload)
+    assert "/operations/0/root/body/steps/1/map_ref" in paths
+    assert not any(p.endswith("/map_ref/map_ref") for p in paths), paths
+
+
+def test_a_present_tag_valued_field_is_still_addressable():
+    """The converse: when the field IS present, the pointer must reach it.
+
+    Disambiguation must not swallow a real key that happens to share the tag's
+    spelling — otherwise the fix for one direction breaks the other.
+    """
+    payload = json.loads(json.dumps(_SAMPLES["process_ir_patch"]))
+    steps = payload["operations"][0]["root"]["body"]["steps"]
+    steps.insert(1, {"kind": "map_ref", "map_ref": " leading-space-is-invalid"})
+
+    paths = _diagnostic_paths(payload)
+    assert "/operations/0/root/body/steps/1/map_ref" in paths

@@ -742,49 +742,75 @@ def _pointer(path: Tuple[Any, ...]) -> str:
     return "/" + "/".join(escaped)
 
 
+#: The discriminator field names used by every tagged union in this module and
+#: in ProcessIR/SystemTopology. A pydantic v2 union location inserts the TAG
+#: VALUE as a segment, and the only way to recognize one is to ask the container
+#: what its discriminator says.
+_DISCRIMINATOR_FIELDS = frozenset({"contribution_kind", "op", "kind", "operation"})
+
+
 def _error_pointer(location: Tuple[Any, ...], payload: Any = None) -> str:
     """Pointer for a pydantic error location, resolved against the PAYLOAD.
 
-    Pydantic inserts a discriminated-union member's tag into the location — a
-    schema fact, not a position in the authored document. Keeping it makes the
-    pointer unresolvable against what the caller actually sent: a missing
+    Pydantic v2 inserts a discriminated-union member's TAG VALUE into the
+    location — a schema fact, not a position in the authored document. Keeping it
+    makes the pointer unresolvable against what the caller sent: a missing
     ``operation_ref`` was reported at
     ``/operations/0/set_process_root/root/body/steps/0/source/operation_ref``,
     where neither ``set_process_root`` nor ``source`` is a key in the payload —
-    they are the ``op`` and ``kind`` tag VALUES.
+    they are the ``op`` and ``kind`` values. (A first version dropped segments
+    ending in ``]``, pydantic v1's ``Model[tag]`` spelling, which matched
+    nothing.)
 
-    An earlier version dropped segments ending in ``]``, which is pydantic v1's
-    ``Model[tag]`` spelling; v2 emits the bare tag, so the filter matched nothing
-    (issue #145, Codex review).
+    A segment is a TAG when the container's discriminator field holds exactly
+    that value — asked of the payload, not guessed from a name list. At most ONE
+    tag is skipped per container, because pydantic emits exactly one per union
+    level. That bound is load-bearing: ``MapRefNodeV1`` is the one member whose
+    tag value equals one of its own field names (``{"kind": "map_ref",
+    "map_ref": ...}``), so a location can legitimately carry ``map_ref`` twice —
+    first the tag, then the field. Skipping greedily swallowed the field too, and
+    a value-wise "is this the last segment" test kept both (issue #145, live QA).
 
-    Resolved by WALKING: a segment is kept only if it addresses something that
-    exists at that point in the payload. That is exactly the property the pointer
-    claims — RFC 6901 against the submitted document — rather than a guess about
-    which spellings pydantic uses. With no payload to walk, every segment is kept:
-    a possibly-imprecise pointer beats a silently truncated one.
+    Everything else is resolved by WALKING, which is exactly the property the
+    pointer claims: RFC 6901 against the submitted document. The final segment of
+    a ``missing`` error is the absent key itself and is kept unresolved — it is
+    compared by POSITION, never by value.
     """
     if payload is None:
         return _pointer(tuple(location))
 
     parts: List[Any] = []
     cursor: Any = payload
-    for part in location:
+    last_index = len(location) - 1
+    skipped_tag_here = False
+
+    for index, part in enumerate(location):
+        if (
+            isinstance(cursor, dict)
+            and not skipped_tag_here
+            and any(cursor.get(field) == part for field in _DISCRIMINATOR_FIELDS)
+        ):
+            # A union tag. Skip it and stay on the same container.
+            skipped_tag_here = True
+            continue
+
         if isinstance(cursor, dict) and part in cursor:
             parts.append(part)
             cursor = cursor[part]
+            skipped_tag_here = False
         elif isinstance(cursor, (list, tuple)) and isinstance(part, int) and (
             -len(cursor) <= part < len(cursor)
         ):
             parts.append(part)
             cursor = cursor[part]
-        else:
-            # Unresolvable here: either a union tag pydantic inserted, or the
-            # very key the error says is MISSING. A missing key is the last
-            # segment and has nothing after it, so keeping it is right and the
-            # walk simply ends.
-            if part == location[-1]:
-                parts.append(part)
-            # Otherwise it is a tag — skip it and keep walking from where we are.
+            skipped_tag_here = False
+        elif index == last_index:
+            # The very key the error says is MISSING. Nothing follows it, so
+            # keeping it is right and the walk ends here.
+            parts.append(part)
+        # Anything else is unresolvable mid-path — drop it rather than emit a
+        # pointer that addresses nothing.
+
     return _pointer(tuple(parts))
 
 

@@ -264,6 +264,26 @@ class RecipeRegistry:
         # the caller's platform at preflight — held for six authorities and not
         # the seventh (issue #145, live QA).
         for descriptor in self._descriptors.values():
+            # A compatibility adapter's declared target must name a REGISTERED
+            # (id, version). Nothing required it before, so an adapter could
+            # point at a version that did not exist — and the surfaces that read
+            # ``adapter_target`` would have reported a recipe nobody could run
+            # (issue #145, live QA).
+            if descriptor.adapter_target is not None:
+                target_key = (
+                    descriptor.adapter_target.recipe_id,
+                    descriptor.adapter_target.recipe_version,
+                )
+                if target_key not in self._descriptors:
+                    raise ValueError(
+                        f"{descriptor.recipe_id!r} names unregistered adapter target "
+                        f"{target_key[0]}@{target_key[1]}"
+                    )
+                if self._descriptors[target_key].entry_kind not in _ENTRY_KINDS_WITH_EXECUTOR:
+                    raise ValueError(
+                        f"{descriptor.recipe_id!r} adapter target "
+                        f"{target_key[0]}@{target_key[1]} is not executable"
+                    )
             for prerequisite in descriptor.prerequisites:
                 # A self-dependency builds cleanly and then raises a BARE
                 # ValueError from the composer's cycle guard, outside the
@@ -967,16 +987,26 @@ class RecipeRegistry:
         expected_pairs = {
             (entry.recipe_id, entry.recipe_version) for entry in expected.entries
         }
+        # An id already reported as a VERSION MISMATCH is fully accounted for —
+        # listing its live version again under ``live_only`` reports one fact
+        # twice and makes the two collections disagree about how many findings
+        # there are (issue #145, live QA).
+        mismatched_ids = {m.recipe_id for m in version_mismatches}
         live_only = sorted(
-            f"{recipe_id}@{version}"
-            for recipe_id, version in live
-            if (recipe_id, version) not in expected_pairs
-            # An id absent from the expectation ENTIRELY is not "extra" — the
-            # caller never claimed to know about it, and reporting every version
-            # of it would drown the real finding.
-            and recipe_id in expected_ids
-        ) + sorted(
-            recipe_id for recipe_id in (live_ids - expected_ids)
+            [
+                f"{recipe_id}@{version}"
+                for recipe_id, version in live
+                if (recipe_id, version) not in expected_pairs
+                # An id absent from the expectation ENTIRELY is not "extra" — the
+                # caller never claimed to know about it, and reporting every
+                # version of it would drown the real finding. It appears once,
+                # by id, below.
+                and recipe_id in expected_ids
+                and recipe_id not in mismatched_ids
+            ]
+            # Globally sorted, not two sorted runs concatenated: the collection
+            # contract is "sorted", and a mixed case broke it.
+            + [recipe_id for recipe_id in (live_ids - expected_ids)]
         )
         registry_revision_mismatch = bool(
             expected.registry_revision

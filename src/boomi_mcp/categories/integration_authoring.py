@@ -108,7 +108,16 @@ def _resolve_pinned_target(
     adapter = registry.resolve(adapter_id)
     if adapter.adapter_target is None:  # pragma: no cover - construction enforces it
         return None
-    target = registry.resolve(adapter.adapter_target.recipe_id, recipe_version)
+    # With no pin, the adapter's DECLARED target version — not the target's
+    # default. The adapter names an exact version precisely so the pairing is
+    # fixed; resolving the default instead would report a version the adapter
+    # never claimed, and the two would silently diverge the day a second version
+    # became the default (issue #145, live QA). Registry construction now
+    # requires the declared target to be registered and executable.
+    target = registry.resolve(
+        adapter.adapter_target.recipe_id,
+        recipe_version or adapter.adapter_target.recipe_version,
+    )
     return target.public_payload()
 
 

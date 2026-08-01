@@ -1163,13 +1163,18 @@ def test_an_adapters_hash_depends_on_the_target_it_names():
             entry_kind="compatibility_adapter",
             is_default=True,
             adapter_target=RecipeReferenceV1(
-                recipe_id="boomi.archetype.api_to_api_sync",
-                recipe_version=target_version,
+                recipe_id="test.target", recipe_version=target_version
             ),
         )
 
-    a = build_test_registry((adapter("0.1.0"),)).resolve("test.adapter")
-    b = build_test_registry((adapter("0.2.0"),)).resolve("test.adapter")
+    # The targets must be REGISTERED — construction now rejects an adapter that
+    # names one that is not, so the registry has to carry both versions.
+    def target(version, default):
+        return _reg(recipe_id="test.target", recipe_version=version, is_default=default)
+
+    targets = (target("0.1.0", True), target("0.2.0", False))
+    a = build_test_registry((adapter("0.1.0"), *targets)).resolve("test.adapter")
+    b = build_test_registry((adapter("0.2.0"), *targets)).resolve("test.adapter")
     assert (
         a.provenance.implementation_sha256 != b.provenance.implementation_sha256
     )
@@ -1969,24 +1974,186 @@ def test_a_wholly_unknown_live_id_is_reported_by_id_not_by_version():
 def test_the_layer_module_list_follows_the_ACTIVE_import_namespace():
     """``PACKAGE_NAME`` is the DISTRIBUTION name; the import prefix is not.
 
-    Hard-coding ``boomi_mcp`` made ``source_digest`` import ``boomi_mcp.*`` from a
-    checkout loaded as ``src.boomi_mcp.*`` — a ``ModuleNotFoundError`` that took
-    the registry down at first use (issue #145, Codex review).
+    Run in a SUBPROCESS that loads the registry as ``src.boomi_mcp.*``, because
+    under pytest the active namespace already IS ``boomi_mcp`` — so asserting
+    the derivation in-process passes just as well with the prefix hard-coded,
+    which is how the first version of this test managed to guard nothing
+    (issue #145, live QA).
     """
-    from boomi_mcp.recipes import registry as registry_module
+    import subprocess
+    import sys
 
-    expected_prefix = registry_module.__name__.rsplit(".recipes.registry", 1)[0]
-    for module in registry_module.RECIPE_LAYER_MODULES:
-        assert module.startswith(expected_prefix + "."), module
+    probe = (
+        "import sys; sys.path.insert(0, '.');\n"
+        "from src.boomi_mcp.recipes.registry import RECIPE_LAYER_MODULES;\n"
+        "print(RECIPE_LAYER_MODULES[0])"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=str(_project_root),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().startswith("src.boomi_mcp."), result.stdout
+
     # ...and the DISTRIBUTION name in published provenance is unaffected.
     assert production_registry().descriptors()[0].provenance.package_name == "boomi_mcp"
 
 
+def test_the_recipe_layer_itself_loads_under_the_src_namespace():
+    """The property the prefix exists to guarantee, for the modules #145 owns.
+
+    HONEST BOUND: the three MIGRATED SURFACES (``patterns/composition`` and the
+    two archetypes) do NOT load under ``src.boomi_mcp`` — five pre-existing
+    files, ``connector_builder.py`` among them, use absolute ``boomi_mcp.``
+    imports, and that has been true since long before this issue (verified
+    against the baseline tree). Fixing those is not #145's to do, so this pins
+    what the prefix derivation actually buys: every module the recipe layer owns
+    now resolves under whichever namespace loaded it.
+    """
+    import subprocess
+    import sys
+
+    owned = [
+        "build_info",
+        "models.recipe_contributions",
+        "patterns.recipe_bridge",
+        "recipes.builtins.catalog",
+        "recipes.builtins.fanout",
+        "recipes.builtins.sync",
+        "recipes.composer",
+        "recipes.contracts",
+        "recipes.engine",
+        "recipes.errors",
+        "recipes.materialization",
+        "recipes.registry",
+    ]
+    probe = (
+        "import sys, importlib; sys.path.insert(0, '.')\n"
+        f"for m in {owned!r}: importlib.import_module('src.boomi_mcp.' + m)\n"
+        "print('ok')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=str(_project_root),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
+
+
 def test_every_layer_module_is_importable_under_the_active_namespace():
-    """The property the prefix exists to guarantee, asserted directly."""
+    """Under the namespace pytest actually runs in, ALL of them load."""
     import importlib
 
     from boomi_mcp.recipes.registry import RECIPE_LAYER_MODULES
 
     for module in RECIPE_LAYER_MODULES:
         importlib.import_module(module)
+
+
+def test_an_adapter_naming_an_unregistered_target_fails_at_construction():
+    """An adapter's declared target must name a REGISTERED (id, version).
+
+    Nothing required it before, so an adapter could point at a version that did
+    not exist and every surface reading ``adapter_target`` would report a recipe
+    nobody could run (issue #145, live QA).
+    """
+    with pytest.raises(ValueError, match="unregistered adapter target"):
+        build_test_registry(
+            (
+                RecipeRegistrationV1(
+                    recipe_id="test.adapter",
+                    recipe_version="1.0.0",
+                    entry_kind="compatibility_adapter",
+                    is_default=True,
+                    adapter_target=RecipeReferenceV1(
+                        recipe_id="never.registered", recipe_version="1.0.0"
+                    ),
+                ),
+            )
+        )
+
+
+def test_an_adapter_pointing_at_a_non_executable_entry_fails_at_construction():
+    """Adapting TO an advisory pointer would produce an unrunnable route."""
+    with pytest.raises(ValueError, match="not executable"):
+        build_test_registry(
+            (
+                RecipeRegistrationV1(
+                    recipe_id="test.adapter",
+                    recipe_version="1.0.0",
+                    entry_kind="compatibility_adapter",
+                    is_default=True,
+                    adapter_target=RecipeReferenceV1(
+                        recipe_id="test.advisory", recipe_version="1.0.0"
+                    ),
+                ),
+                RecipeRegistrationV1(
+                    recipe_id="test.advisory",
+                    recipe_version="1.0.0",
+                    entry_kind="advisory",
+                    is_default=True,
+                ),
+            )
+        )
+
+
+def test_every_production_adapter_target_is_registered_and_executable():
+    """The production catalog satisfies the rule it now enforces."""
+    registry = production_registry()
+    by_key = {(d.recipe_id, d.recipe_version): d for d in registry.descriptors()}
+    adapters = [d for d in registry.descriptors() if d.adapter_target is not None]
+    assert len(adapters) == 3
+    for adapter in adapters:
+        key = (adapter.adapter_target.recipe_id, adapter.adapter_target.recipe_version)
+        assert key in by_key, key
+        assert by_key[key].entry_kind == "executable_recipe", key
+
+
+def test_live_only_is_globally_sorted_in_the_mixed_case():
+    """Two sorted runs concatenated is not a sorted collection."""
+    registry = build_test_registry(
+        (
+            _reg(recipe_id="m.known", recipe_version="1.0.0"),
+            _reg(recipe_id="m.known", recipe_version="2.0.0", is_default=False),
+            _reg(recipe_id="a.unknown"),
+            _reg(recipe_id="z.unknown"),
+        )
+    )
+    known = next(
+        d for d in registry.descriptors()
+        if d.recipe_id == "m.known" and d.recipe_version == "1.0.0"
+    )
+    skew = registry.compare(
+        ExpectedRecipeRegistryV1(
+            entries=(
+                ExpectedRecipeEntryV1(
+                    recipe_id="m.known",
+                    recipe_version="1.0.0",
+                    implementation_sha256=known.provenance.implementation_sha256,
+                ),
+            )
+        )
+    )
+    assert skew.status == "mismatch"
+    assert list(skew.live_only) == sorted(skew.live_only), skew.live_only
+    assert set(skew.live_only) == {"a.unknown", "m.known@2.0.0", "z.unknown"}
+
+
+def test_a_version_mismatch_is_not_also_reported_as_live_only():
+    """One fact, one finding. Reporting it twice makes the collections disagree
+    about how many problems there are."""
+    registry = build_test_registry((_reg(recipe_id="v.one", recipe_version="1.0.0"),))
+    skew = registry.compare(
+        ExpectedRecipeRegistryV1(
+            entries=(
+                ExpectedRecipeEntryV1(recipe_id="v.one", recipe_version="9.9.9"),
+            )
+        )
+    )
+    assert skew.status == "mismatch"
+    assert [m.recipe_id for m in skew.version_mismatches] == ["v.one"]
+    assert skew.live_only == ()
