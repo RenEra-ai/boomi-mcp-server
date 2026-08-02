@@ -438,10 +438,22 @@ construction:
   `Tuple[Leaf, ...]` or `Dict[str, Leaf]` was visited but never judged, and a dataclass's fields
   were recursed with no annotation at all — leaving a mapping in a declared `str`, readable at
   `inp.holder.label`.
-* **Anything iterable the walk cannot enumerate is refused.** `Iterable[str]` validates lazily:
+* **Anything the walk cannot enumerate SAFELY is refused** — a value that is not an
+  `abc.Collection`, or that is its own iterator. `Iterable[str]` validates lazily:
   pydantic returns a `ValidatorIterator` without inspecting an element, so a replayable custom
   iterable yielding caller mappings passed untouched — and identically on both determinism runs.
-  Consuming it to look would destroy it, so the only safe answer is to refuse it.
+  Consuming it to look would destroy it, so the only safe answer is to refuse it. The rule is
+  "sized and re-iterable", not a list of concrete types: an earlier version named five container
+  classes and refused everything else, including `range`, `dict_keys`/`values`/`items`,
+  `array.array`, `memoryview` and any custom `abc.Sequence`.
+
+The runtime-class check is scoped to **model and dataclass positions**, which is the only place
+conversion can mislead. A wider version refused every `Any` field — `typing.Any` is a class from
+Python 3.11, so `isinstance(value, Any)` raised — including `Dict[str, Any]`, the very shape §12
+names as the truthful permissive declaration. It was also stricter than the `strict=True` adapter
+one line above it, refusing an `int` literal default in a `float` field while the same field
+passed whenever a caller supplied the value: two halves of one gate disagreeing about "declared
+type", surfacing as an intermittent failure.
 
 Cost after all of that is ~21 µs per invocation against ~2.4 µs for `model_validate`, with
 annotation introspection memoised; the adapters and the unwrapping are both built once per

@@ -11,6 +11,7 @@ appears nowhere on the recipe side. That is stronger than enumerating forbidden
 keys, because it does not depend on having thought of the right key name.
 """
 
+from collections import abc
 from typing import Dict, List, Literal, Tuple
 
 import json
@@ -1921,3 +1922,222 @@ def test_honest_container_and_union_shapes_still_pass():
         }
     )
     _assert_declared_shape(instance)  # must not raise
+
+
+class _HasLeafKeyInputV1(RecipeInputBase):
+    """A model as a mapping KEY. Three of the last four unpinned sub-branches
+    have been on the key path, so it gets its own fixture (issue #145, live QA)."""
+
+    leaves: Dict[_HashableSlot, str] = {}
+
+
+def test_a_mapping_KEY_annotation_is_carried_down():
+    """Pins the key annotation specifically.
+
+    The value path is covered by ``[as_a_mapping_value]``; dropping the KEY
+    annotation left every test green.
+    """
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    _SMUGGLED_RAW.clear()
+
+    # A tuple is hashable, so it can sit where a model key is declared — and it
+    # is not a model, which only the key annotation can notice.
+    instance = _HasLeafKeyInputV1.model_construct(leaves={("not", "a", "model"): "v"})
+    with pytest.raises(Exception):
+        _assert_declared_shape(instance)
+
+    # Control: a real model key passes.
+    honest = _HasLeafKeyInputV1.model_construct(
+        leaves={_HashableSlot.model_construct(label="y"): "v"}
+    )
+    _assert_declared_shape(honest)
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("range", range(3)),
+        ("dict_keys", {"a": 1}.keys()),
+        ("dict_items", {"a": 1}.items()),
+        ("memoryview", memoryview(b"ab")),
+    ],
+)
+def test_a_re_iterable_collection_is_walked_not_refused(name, value):
+    """The refusal is aimed at what cannot be inspected, not at what is unusual.
+
+    A first version listed five concrete container types and refused everything
+    else — which closed the lazy-iterable attack and also refused ``range``,
+    ``dict_keys``/``values``/``items``, ``array.array``, ``memoryview`` and any
+    custom ``abc.Sequence``. An ``abc.Collection`` is sized and re-iterable, so
+    walking it is repeatable and non-destructive (issue #145, live QA).
+    """
+    from typing import Any as AnyType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    model = type(
+        "ReIterableInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": AnyType},
+            "field": None,
+        },
+    )
+    _assert_declared_shape(model.model_construct(field=value))  # must not raise
+
+
+def test_an_any_field_is_never_refused_for_being_any():
+    """``typing.Any`` is a CLASS from Python 3.11.
+
+    A blanket ``isinstance(option, type)`` therefore accepted it as a candidate
+    class and ``isinstance(value, Any)`` raised ``TypeError`` — refusing every
+    ``Any`` field whatever it held, including ``Dict[str, Any]``, which §12's own
+    capability argument recommends as the truthful permissive declaration.
+    """
+    from typing import Any as AnyType, Dict as DictType, Optional as OptionalType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class AnyFieldInputV1(RecipeInputBase):
+        loose: AnyType = None
+        maybe: OptionalType[AnyType] = None
+        bag: DictType[str, AnyType] = {}
+
+    _assert_declared_shape(
+        AnyFieldInputV1.model_validate({"loose": {"a": [1]}, "bag": {"k": {"deep": 1}}})
+    )
+
+
+def test_the_class_check_does_not_disagree_with_the_adapter():
+    """Pydantic's ``strict=True`` accepts an ``int`` for a ``float``.
+
+    A wider class check refused an ``int`` literal default in a ``float`` field
+    while the same field passed whenever a caller supplied the value — two halves
+    of one gate with different notions of "declared type", presenting as an
+    intermittent failure.
+    """
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class RatioInputV1(RecipeInputBase):
+        ratio: float = 0  # an int literal default; pydantic does not validate it
+
+    _assert_declared_shape(RatioInputV1())  # default path
+    _assert_declared_shape(RatioInputV1.model_validate({"ratio": 1}))  # supplied path
+
+
+def test_a_one_shot_iterator_is_refused_without_being_drained():
+    """Isolates the ``iter(v) is v`` rule.
+
+    A re-iterable collection is walked; a ONE-SHOT iterator cannot be, because
+    looking at it consumes the value the executor is about to receive. Reached
+    through an ``Any`` annotation so no element annotation can catch it first —
+    the refusal itself has to be what fires.
+    """
+    from typing import Any as AnyType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    def _gen():
+        yield {"smuggled": "SENTINEL-SQL-SELECT-SECRETS"}
+
+    payload = _gen()
+    model = type(
+        "OneShotInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": AnyType},
+            "field": None,
+        },
+    )
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=payload))
+
+    # The refusal must not have drained it.
+    assert list(payload) == [{"smuggled": "SENTINEL-SQL-SELECT-SECRETS"}]
+
+
+def test_a_re_iterable_non_collection_is_refused():
+    """Isolates the ``abc.Collection`` half of the walkability rule.
+
+    Reached through ``Any`` so no element annotation can catch it instead — the
+    earlier lazy-iterable test declared ``Iterable[str]``, and its element
+    annotation caught the payload even with this check disabled, which left the
+    check itself unpinned.
+    """
+    from typing import Any as AnyType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class Replayable:
+        """Re-iterable, but not sized — so not enumerable in a bounded way."""
+
+        def __init__(self, items):
+            self._items = list(items)
+
+        def __iter__(self):
+            return iter(self._items)
+
+    model = type(
+        "ReIterableNonCollectionInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": AnyType},
+            "field": None,
+        },
+    )
+    payload = Replayable([{"smuggled": "SENTINEL-SQL-SELECT-SECRETS"}])
+    assert not isinstance(payload, abc.Collection)  # the premise
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=payload))
+
+
+def test_a_self_iterating_collection_is_refused():
+    """Isolates the ``iter(v) is v`` half.
+
+    A value can satisfy ``abc.Collection`` — sized, containable — and still BE
+    its own iterator, in which case walking it drains exactly the value the
+    executor is about to receive. Sized is not the same as safe to enumerate.
+    """
+    from typing import Any as AnyType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class SelfIterating:
+        def __init__(self, items):
+            self._items = list(items)
+            self._cursor = iter(self._items)
+
+        def __iter__(self):
+            return self  # its own iterator
+
+        def __next__(self):
+            return next(self._cursor)
+
+        def __len__(self):
+            return len(self._items)
+
+        def __contains__(self, item):
+            return item in self._items
+
+    payload = SelfIterating([{"smuggled": "SENTINEL-SQL-SELECT-SECRETS"}])
+    assert isinstance(payload, abc.Collection)  # the premise
+    assert iter(payload) is payload  # ...and the hazard
+
+    model = type(
+        "SelfIteratingInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": AnyType},
+            "field": None,
+        },
+    )
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=payload))
+
+    # And it was refused without being drained.
+    assert list(payload) == [{"smuggled": "SENTINEL-SQL-SELECT-SECRETS"}]

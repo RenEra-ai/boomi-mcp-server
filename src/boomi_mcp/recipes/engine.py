@@ -34,7 +34,7 @@ would have opened exactly that channel.
 
 from __future__ import annotations
 
-from collections import deque
+from collections import abc, deque
 from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
 from typing import (
     Annotated,
@@ -231,6 +231,13 @@ def _declared_shape_adapter(annotation: Any) -> Any:
 
 
 #: Containers the walk can enumerate without consuming or mutating them.
+#:
+#: An ``abc.Collection`` is re-iterable and sized, so walking it is repeatable and
+#: non-destructive — which is the whole safety requirement. An earlier version
+#: listed five concrete types and refused everything else, which caught the lazy
+#: attack but also refused ``range``, ``dict_keys``/``values``/``items``,
+#: ``array.array``, ``memoryview`` and any custom ``abc.Sequence`` or ``abc.Set``
+#: (issue #145, live QA).
 _WALKABLE_CONTAINERS = (list, tuple, set, frozenset, deque)
 
 
@@ -278,7 +285,26 @@ def _unwrap_annotation_uncached(annotation: Any) -> Tuple[Any, ...]:
 
 
 def _assert_runtime_class(value: Any, annotation: Any) -> None:
-    """If every option the annotation admits is a class, the value must be one."""
+    """A MODEL-typed position must hold a model, not something convertible to one.
+
+    Scoped to model and dataclass positions on purpose. That is exactly where
+    "the adapter accepted it" is misleading: strict mode admits a mapping where a
+    model is declared and then runs that model's validators, which hand the dict
+    straight back — so conversion succeeds and the stored value was never a model.
+    Everywhere else the adapter one line above is the check, and this one has no
+    opinion.
+
+    Two over-fires taught the scoping (issue #145, live QA):
+
+    * ``typing.Any`` is a CLASS from Python 3.11, so a blanket
+      ``isinstance(option, type)`` accepted it into the candidate list and then
+      ``isinstance(value, Any)`` raised ``TypeError`` — refusing every ``Any``
+      field, including ``Dict[str, Any]``, whatever it held.
+    * A wider rule was stricter than the ``strict=True`` adapter it follows: an
+      ``int`` literal default in a ``float`` field was refused, while the same
+      field passed whenever a caller supplied the value. Two halves of one gate
+      disagreeing about "declared type" is worse than either rule alone.
+    """
     options = _unwrap_annotation(annotation)
     if not options:
         return
@@ -288,7 +314,14 @@ def _assert_runtime_class(value: Any, annotation: Any) -> None:
             classes.append(type(None))
             continue
         if get_origin(option) is not None or not isinstance(option, type):
-            return  # a parametrised or unrecognised form; the adapter is the check
+            return  # parametrised or unrecognised; the adapter is the check
+        if not (issubclass(option, BaseModel) or is_dataclass(option)):
+            # Not a position where conversion can mislead. This is also what
+            # makes ``Any`` and ``object`` safe — ``issubclass(Any, BaseModel)``
+            # is ``False``, so both return here. An explicit guard for them was
+            # tried and killed no mutant, which is the signal that the scoping
+            # already covers it.
+            return
         classes.append(option)
     if not any(isinstance(value, cls) for cls in classes):
         raise ValueError("validated input holds a value of an undeclared class")
@@ -330,10 +363,28 @@ def _mapping_annotations(annotation: Any) -> Tuple[Any, Any]:
     return None, None
 
 
+def _is_walkable_collection(value: Any) -> bool:
+    """Re-iterable and sized, so the walk can enumerate it repeatably."""
+    if isinstance(value, (str, bytes, bytearray)):
+        return False
+    if isinstance(value, _WALKABLE_CONTAINERS):
+        return True
+    if isinstance(value, Mapping):
+        return True
+    if not isinstance(value, abc.Collection):
+        return False
+    # ``iter(v) is v`` is the one-shot iterator signature: consuming it to look
+    # would destroy the value the executor is about to receive.
+    try:
+        return iter(value) is not value
+    except Exception:  # noqa: BLE001 — an iter() that raises is not walkable
+        return False
+
+
 def _is_opaque_iterable(value: Any) -> bool:
     if isinstance(value, (str, bytes, bytearray)):
         return False
-    if isinstance(value, _WALKABLE_CONTAINERS) or isinstance(value, Mapping):
+    if _is_walkable_collection(value):
         return False
     return hasattr(value, "__iter__") or hasattr(value, "__next__")
 
@@ -412,7 +463,7 @@ def _assert_declared_shape(value: Any, annotation: Any = None, _seen: Optional[s
     #
     # Element ANNOTATIONS are carried down as well. Without them a dict standing
     # in for a ``Leaf`` inside ``Tuple[Leaf, ...]`` was visited but never judged.
-    if isinstance(value, (list, tuple, set, frozenset, deque)):
+    if _is_walkable_collection(value) and not isinstance(value, Mapping):
         _seen.add(id(value))
         element = _element_annotations(annotation)
         for index, item in enumerate(value):
