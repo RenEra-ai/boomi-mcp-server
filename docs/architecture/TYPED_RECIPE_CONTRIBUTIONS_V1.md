@@ -434,7 +434,16 @@ construction:
   declared, and then runs that model's validators — which hand the dict back. The adapter
   "succeeds", its result is discarded, and the stored value was never a model. So the runtime
   class is checked against what the annotation admits, not against whether conversion worked.
-* **Element and field annotations are carried down.** A dict standing in for a `Leaf` inside
+* **Element annotations come from the union arm whose CONTAINER matches the value.** Taking the
+  first arm that had parameters at all broke both ways: `Union[List[Leaf], List[Other]]` holding
+  `[Other()]` was refused because the `Leaf` arm's parameters were imposed on another arm's
+  value, and `Union[Tuple[Any, ...], Dict[str, Leaf]]` holding a mapping was *accepted* because
+  the tuple arm's `(Any, Ellipsis)` was unreadable as key/value, so both mapping annotations were
+  dropped and a dict standing in for `Leaf` went unjudged. It abstains when no arm matches and
+  when several do — two candidate parameter sets give no basis to prefer one, and guessing is
+  what caused the defect. `Union[Tuple[Any, ...], Tuple[Leaf, ...]]` holding that same dict still
+  passes, correctly: the value genuinely satisfies the `Any` arm.
+* **Field annotations are carried down.** A dict standing in for a `Leaf` inside
   `Tuple[Leaf, ...]` or `Dict[str, Leaf]` was visited but never judged, and a dataclass's fields
   were recursed with no annotation at all — leaving a mapping in a declared `str`, readable at
   `inp.holder.label`.

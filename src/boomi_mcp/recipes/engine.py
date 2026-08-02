@@ -256,7 +256,6 @@ except ImportError:  # pragma: no cover
 #: Annotation introspection is pure and repeats for every value at a position,
 #: so it is memoised. Unhashable annotations fall through and are recomputed.
 _UNWRAP_CACHE: Dict[Any, Tuple[Any, ...]] = {}
-_ELEMENT_CACHE: Dict[Any, Any] = {}
 
 
 def _cached(cache: Dict[Any, Any], key: Any, build):
@@ -399,19 +398,41 @@ def _dataclass_field_types(cls: Any) -> Dict[str, Any]:
         return {field.name: None for field in dataclass_fields(cls)}
 
 
-def _element_annotations(annotation: Any) -> Optional[Tuple[Any, ...]]:
-    return _cached(_ELEMENT_CACHE, annotation, lambda: _element_annotations_uncached(annotation))
+def _element_annotations(annotation: Any, value: Any) -> Optional[Tuple[Any, ...]]:
+    """The element parameters of the union arm whose CONTAINER matches this value.
 
+    An earlier version returned the first option that had args at all, whatever
+    container it belonged to, which broke both ways (issue #145, live QA):
 
-def _element_annotations_uncached(annotation: Any) -> Optional[Tuple[Any, ...]]:
+    * ``Union[List[Leaf], List[Other]]`` holding ``[Other()]`` was REFUSED — the
+      ``Leaf`` arm's parameters were applied to the other arm's value.
+    * ``Union[Tuple[Any, ...], Dict[str, Leaf]]`` holding a mapping was ACCEPTED —
+      the tuple arm's args are ``(Any, Ellipsis)``, so ``_mapping_annotations``
+      saw a shape it could not read as key/value and dropped BOTH annotations,
+      leaving a dict standing in for ``Leaf`` unjudged.
+
+    Abstains when no arm matches, and when several do — with two candidate
+    parameter sets there is no basis to prefer one, and guessing is what caused
+    the defect.
+    """
+    candidates = []
     for option in _unwrap_annotation(annotation):
+        origin = get_origin(option)
         args = get_args(option)
-        if get_origin(option) is not None and args:
-            return args
+        if origin is None or not args:
+            continue
+        try:
+            if isinstance(value, origin):
+                candidates.append(args)
+        except TypeError:  # a non-class origin cannot be matched against a value
+            continue
+    if len(candidates) == 1:
+        return candidates[0]
     return None
 
 
 def _positional(element: Optional[Tuple[Any, ...]], index: int) -> Any:
+    """The annotation for one position of a sequence."""
     if not element:
         return None
     if len(element) == 2 and element[1] is Ellipsis:
@@ -421,8 +442,9 @@ def _positional(element: Optional[Tuple[Any, ...]], index: int) -> Any:
     return element[index] if index < len(element) else None
 
 
-def _mapping_annotations(annotation: Any) -> Tuple[Any, Any]:
-    element = _element_annotations(annotation)
+def _mapping_annotations(annotation: Any, value: Any) -> Tuple[Any, Any]:
+    """The (key, value) annotations for a mapping, or no opinion."""
+    element = _element_annotations(annotation, value)
     if element and len(element) == 2 and element[1] is not Ellipsis:
         return element[0], element[1]
     return None, None
@@ -543,12 +565,12 @@ def _assert_declared_shape(value: Any, annotation: Any = None, _seen: Optional[s
     # in for a ``Leaf`` inside ``Tuple[Leaf, ...]`` was visited but never judged.
     if _is_walkable_collection(value) and not isinstance(value, Mapping):
         _seen.add(id(value))
-        element = _element_annotations(annotation)
+        element = _element_annotations(annotation, value)
         for index, item in enumerate(value):
             _assert_declared_shape(item, _positional(element, index), _seen)
     elif isinstance(value, Mapping):
         _seen.add(id(value))
-        key_annotation, value_annotation = _mapping_annotations(annotation)
+        key_annotation, value_annotation = _mapping_annotations(annotation, value)
         for key, item in value.items():
             _assert_declared_shape(key, key_annotation, _seen)
             _assert_declared_shape(item, value_annotation, _seen)

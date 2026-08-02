@@ -2432,3 +2432,112 @@ def test_a_class_whose_instancecheck_raises_does_not_refuse_every_invocation():
         field: Weird = None  # type: ignore[assignment]
 
     _assert_declared_shape(WeirdInputV1.model_construct(field="anything"))  # must not raise
+
+
+_CONTAINER_UNION_CASES = [
+    # (annotation-factory, value-factory, must_be_refused, id)
+    ("false_rejection_list", False),
+    ("false_rejection_tuple", False),
+    ("miss_tuple_any_arm", True),
+    ("miss_list_any_arm", True),
+    ("correct_pass_tuple_any", False),
+    ("correct_pass_list_any", False),
+]
+
+
+def _container_union_case(name):
+    """Built here rather than at module scope so the union arms stay readable."""
+    from typing import Any as AnyType, Union as UnionType
+
+    class Other(RecipeInputBase):
+        other: str = "y"
+
+    class Honest(RecipeInputBase):
+        ok: str = "x"
+
+    # NOTE: ``_ConvertingLeaf.model_validate`` returns a DICT — that is the whole
+    # point of the fixture. Cases that need a genuine instance must use ``Honest``,
+    # or they assert a refusal that has nothing to do with container matching.
+    converting = _ConvertingLeaf.model_validate({"ok": "y"})
+
+    return {
+        # An arm's parameters were applied to a DIFFERENT arm's value.
+        "false_rejection_list": (
+            UnionType[List[_ConvertingLeaf], List[Other]],
+            [Other()],
+        ),
+        "false_rejection_tuple": (
+            UnionType[Dict[str, Honest], Tuple[Honest, Honest]],
+            (Honest(), Honest()),
+        ),
+        # The tuple/list arm's args are (Any, Ellipsis) / (Any,), so the MAPPING's
+        # key and value annotations were dropped entirely and the dict standing in
+        # for a model was never judged.
+        "miss_tuple_any_arm": (
+            UnionType[Tuple[AnyType, ...], Dict[str, _ConvertingLeaf]],
+            {"k": converting},
+        ),
+        "miss_list_any_arm": (
+            UnionType[List[AnyType], Dict[str, _ConvertingLeaf]],
+            {"k": converting},
+        ),
+        # These pass CORRECTLY — the value genuinely satisfies the ``Any`` arm,
+        # exactly like ``Union[Leaf, Dict[str, str]]``. Distinguishing them from
+        # the two misses above is the whole point of matching on container kind.
+        "correct_pass_tuple_any": (
+            UnionType[Tuple[AnyType, ...], Tuple[_ConvertingLeaf, ...]],
+            (converting,),
+        ),
+        "correct_pass_list_any": (
+            UnionType[List[AnyType], List[_ConvertingLeaf]],
+            [converting],
+        ),
+    }[name]
+
+
+@pytest.mark.parametrize(
+    "name,must_refuse", _CONTAINER_UNION_CASES, ids=[c[0] for c in _CONTAINER_UNION_CASES]
+)
+def test_element_annotations_match_the_values_container_kind(name, must_refuse):
+    """One union arm's element parameters must never be applied to another's value.
+
+    Picking the first option that had args at all broke both ways: honest values
+    refused because a sibling arm's parameters were imposed on them, and a
+    mapping accepted because the tuple arm's ``(Any, Ellipsis)`` made the
+    key/value annotations unreadable and they were dropped (issue #145, live QA).
+    """
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    annotation, value = _container_union_case(name)
+    model = type(
+        "ContainerUnionInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": annotation},
+            "field": None,
+        },
+    )
+    instance = model.model_construct(field=value)
+    if must_refuse:
+        with pytest.raises(Exception):
+            _assert_declared_shape(instance)
+    else:
+        _assert_declared_shape(instance)
+
+
+def test_element_annotations_abstain_when_several_arms_match():
+    """With two candidate parameter sets there is no basis to prefer one, and
+    guessing is exactly what produced the defect."""
+    from typing import List as ListType, Union as UnionType
+
+    from boomi_mcp.recipes.engine import _element_annotations
+
+    class A(RecipeInputBase):
+        a: str = "x"
+
+    class B(RecipeInputBase):
+        b: str = "y"
+
+    assert _element_annotations(UnionType[ListType[A], ListType[B]], [A()]) is None
+    assert _element_annotations(ListType[A], [A()]) == (A,)
