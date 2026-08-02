@@ -373,7 +373,8 @@ names an object key absent after all object additions.
 1. resolve the descriptor at an exact version
 2. preflight declared capability requirements
 3. preflight declared prerequisites — recipe **and** execution-context
-4. forbidden-shape scan, then the strict input model, then **`type(validated) is model`**
+4. forbidden-shape scan, the strict input model, then **`type(validated) is model`** and a
+   **`model_dump(warnings="error")`** sweep of everything below it
 5. run **only** the registered callable — never caller-provided code
 6. re-validate every returned value as a **declared** contribution type
 7. run it a second time and byte-compare — nondeterminism is a hard failure
@@ -399,6 +400,17 @@ ban is not available: `after` is used legitimately by a production input model t
 cross-field rule. The engine therefore checks the **value that came back** rather than
 classifying what ran, and by exact type — a subclass declaring `extra="allow"`, populated via
 `model_construct`, satisfies `isinstance`.
+
+**The root type is only the outermost layer of that boundary.** The same replacement one level
+down — a nested model's `after`, or a `field_validator` — swaps the value at *its* position,
+and pydantic does not re-check it, so the registered outer type survives while an ordinary
+declared field holds the caller's stashed mapping. That one reaches the surfaces an honest
+executor actually reads: `inp.some_field` and `model_dump()` both return it. The sweep asks
+**pydantic's own serializer**, which already knows every declared type in the tree, instead of
+walking `model_fields` and re-deriving Union / Optional / `Tuple[X, ...]` / Literal semantics by
+hand — the program-analysis mistake this gate has already made twice. A *subclass* in a field
+still does not warn, because the declared type's schema serializes it and drops the extras;
+that residue is the attribute-only channel in §12.
 
 This check moves one failure from **build time to first use**, and that is inherent rather than
 an oversight: what a validator returns is a runtime fact and cannot be read off the schema at

@@ -157,6 +157,36 @@ def _validate_input(descriptor: RecipeDescriptorV1, registry: RecipeRegistry, ra
             recipe_ids=(descriptor.recipe_id,),
             recipe_versions=(descriptor.recipe_version,),
         )
+
+    # The root check alone is not the boundary — it is only its outermost layer.
+    # A ``mode="after"`` validator on a NESTED model, or a ``field_validator``,
+    # replaces the value at ITS position and pydantic does not re-check it, so the
+    # registered outer type survives intact while a declared field holds the
+    # caller's stashed mapping. Unlike the attribute-only channels this one lands
+    # on the surfaces an ordinary executor reads: ``inp.some_field`` and
+    # ``model_dump()`` both return it.
+    #
+    # ASK PYDANTIC rather than re-implement it. Its serializer already knows every
+    # declared type in the tree, and ``warnings="error"`` promotes exactly the
+    # "field holds a value its annotation does not describe" case to an exception.
+    # Walking ``model_fields`` and comparing annotations by hand would mean
+    # re-deriving Union, Optional, Tuple[X, ...] and Literal semantics — the
+    # program-analysis mistake this gate has already made twice.
+    #
+    # LIMIT, stated: a SUBCLASS in a field does not warn, because the declared
+    # type's schema serializes it and simply drops the extras. That leaves the
+    # same attribute-only channel documented in §12 — readable only by an
+    # executor reaching for an undeclared name, never via model_dump()
+    # (issue #145, Codex review).
+    try:
+        validated.model_dump(warnings="error")
+    except Exception:  # noqa: BLE001 — the message can echo the offending value
+        raise recipe_error(
+            RECIPE_INPUT_INVALID,
+            phase="input",
+            recipe_ids=(descriptor.recipe_id,),
+            recipe_versions=(descriptor.recipe_version,),
+        ) from None
     return validated
 
 

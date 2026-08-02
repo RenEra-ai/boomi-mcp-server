@@ -11,6 +11,8 @@ appears nowhere on the recipe side. That is stronger than enumerating forbidden
 keys, because it does not depend on having thought of the right key name.
 """
 
+from typing import Tuple
+
 import json
 import logging
 import pickle
@@ -18,7 +20,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from pydantic import ConfigDict, model_validator
+from pydantic import ConfigDict, field_validator, model_validator
 
 _project_root = Path(__file__).resolve().parent.parent
 _src = str(_project_root / "src")
@@ -52,6 +54,7 @@ from boomi_mcp.patterns.recipe_bridge import (
 from boomi_mcp.recipes import (
     MaterializationCatalog,
     RecipeError,
+    RecipeInputBase,
     RecipeRequestV1,
     production_registry,
     recipe_error_envelope,
@@ -458,8 +461,15 @@ class _SubclassBypassInputV1(SyncRecipeInputV1):
 
     @model_validator(mode="after")
     def _return_a_subclass(self):
+        # Field values are copied by REFERENCE, not through ``model_dump()``. A
+        # first version dumped, which turned the nested ``SyncComponentSlotV1``
+        # models into plain dicts — so the SUB-TREE check caught this case
+        # incidentally and the root check was left unpinned. Copying the values
+        # keeps every declared type correct, leaving the root check as the only
+        # thing that can reject it.
         return _OpenSubclassInputV1.model_construct(
-            **self.model_dump(), smuggled="SENTINEL-SQL-SELECT-SECRETS"
+            **{name: getattr(self, name) for name in type(self).model_fields},
+            smuggled="SENTINEL-SQL-SELECT-SECRETS",
         )
 
 
@@ -583,6 +593,157 @@ def test_an_honest_after_validator_is_not_refused():
     # And the guard's own predicate accepts it.
     validated = _HonestAfterInputV1.model_validate(_VALID_INPUT)
     assert type(validated) is _HonestAfterInputV1
+
+
+# ---------------------------------------------------------------------------
+# ...and the same trick one level DOWN
+#
+# A nested model's ``after``, or a ``field_validator``, replaces the value at its
+# own position while the registered outer type survives — so a root-only check
+# passes and a DECLARED field holds the caller's mapping. Unlike the
+# attribute-only channels, this one shows up in ``model_dump()`` and in an
+# ordinary ``inp.field`` read (issue #145, Codex review).
+# ---------------------------------------------------------------------------
+
+
+class _NestedSlot(RecipeInputBase):
+    """Nested model whose ``after`` hands back the stash instead of itself."""
+
+    label: str = "x"
+
+    @model_validator(mode="after")
+    def _return_the_stash(self):
+        return dict(_SMUGGLED_RAW) or {"label": self.label}
+
+
+class _HonestSlot(RecipeInputBase):
+    label: str = "x"
+
+
+def _stash_before(cls, data):
+    if isinstance(data, dict):
+        _SMUGGLED_RAW.clear()
+        _SMUGGLED_RAW.update(data)
+        return {k: v for k, v in data.items() if k in cls.model_fields}
+    return data
+
+
+class _NestedBypassInputV1(RecipeInputBase):
+    """The nested-model form: the declared field ends up holding a raw mapping."""
+
+    slot: _NestedSlot = _NestedSlot()
+
+    _stash = model_validator(mode="before")(classmethod(_stash_before))
+
+
+class _NestedTupleBypassInputV1(RecipeInputBase):
+    """The sequence form. Production input models declare ``Tuple[Model, ...]``,
+    so an element-level replacement is the shape that actually matters here."""
+
+    slots: Tuple[_NestedSlot, ...] = ()
+
+    _stash = model_validator(mode="before")(classmethod(_stash_before))
+
+
+class _FieldSwapInputV1(RecipeInputBase):
+    """The field-validator form: a ``str`` field ends up holding a mapping."""
+
+    label: str = "x"
+
+    _stash = model_validator(mode="before")(classmethod(_stash_before))
+
+    @field_validator("label", mode="after")
+    @classmethod
+    def _swap(cls, value):
+        return dict(_SMUGGLED_RAW) or value
+
+
+class _HonestNestedInputV1(RecipeInputBase):
+    """Firing control: the same shape, honestly implemented."""
+
+    slot: _HonestSlot = _HonestSlot()
+    slots: Tuple[_HonestSlot, ...] = ()
+
+
+_NESTED_CASES = [
+    (_NestedBypassInputV1, {"slot": {"label": "y"}}),
+    (_NestedTupleBypassInputV1, {"slots": [{"label": "y"}]}),
+    (_FieldSwapInputV1, {"label": "y"}),
+]
+
+
+@pytest.mark.parametrize(
+    "model,payload",
+    _NESTED_CASES,
+    ids=["nested_model", "tuple_element", "field_validator"],
+)
+def test_a_replacement_below_the_root_is_rejected(model, payload):
+    _SMUGGLED_RAW.clear()
+    _EXECUTOR_CALLS.clear()
+    registry = _registry_with_input(model, executor=_recording_executor)
+
+    raw = {**payload, "smuggled": "SENTINEL-SQL-SELECT-SECRETS"}
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [RecipeRequestV1(recipe_id="test.recipe", invocation_id="i1", raw_input=raw)],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
+    assert _EXECUTOR_CALLS == []
+    blob = json.dumps([d.model_dump(mode="json") for d in exc.value.diagnostics])
+    assert "SENTINEL-SQL-SELECT-SECRETS" not in blob
+    assert "SENTINEL-SQL-SELECT-SECRETS" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "model,payload",
+    _NESTED_CASES,
+    ids=["nested_model", "tuple_element", "field_validator"],
+)
+def test_the_below_root_cases_defeat_a_root_only_check(model, payload):
+    """Anti-vacuity control.
+
+    Each case must produce the exact registered outer type — otherwise it is
+    caught by the root check and proves nothing about the sub-tree — AND must
+    land the caller's key on a surface an ordinary executor reads.
+    """
+    _SMUGGLED_RAW.clear()
+    raw = {**payload, "smuggled": "SENTINEL-SQL-SELECT-SECRETS"}
+    validated = model.model_validate(raw)
+    assert type(validated) is model, "root check would have caught this"
+
+    import warnings as _warnings
+
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("ignore")
+        dumped = json.dumps(validated.model_dump(), default=str)
+    assert "SENTINEL-SQL-SELECT-SECRETS" in dumped
+
+
+def test_an_honest_nested_model_is_not_refused():
+    """Firing control for the sub-tree check."""
+    _SMUGGLED_RAW.clear()
+    raw = {"slot": {"label": "y"}, "slots": [{"label": "z"}]}
+    validated = _HonestNestedInputV1.model_validate(raw)
+    assert type(validated) is _HonestNestedInputV1
+    validated.model_dump(warnings="error")  # must not raise
+
+    registry = _registry_with_input(_HonestNestedInputV1)
+    try:
+        run_recipes(
+            [RecipeRequestV1(recipe_id="test.recipe", invocation_id="i1", raw_input=raw)],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    except RecipeError as exc:
+        assert exc.diagnostics[0].code != RECIPE_INPUT_INVALID
+
+
+def test_every_production_input_model_survives_the_sub_tree_check():
+    """The live risk of this guard is a false rejection, not a miss."""
+    validated = SyncRecipeInputV1.model_validate(_VALID_INPUT)
+    validated.model_dump(warnings="error")
 
 
 def test_the_production_after_validator_returns_self():
