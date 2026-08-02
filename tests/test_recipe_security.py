@@ -11,7 +11,7 @@ appears nowhere on the recipe side. That is stronger than enumerating forbidden
 keys, because it does not depend on having thought of the right key name.
 """
 
-from typing import Tuple
+from typing import Literal, Tuple
 
 import json
 import logging
@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from pydantic import ConfigDict, field_validator, model_validator
+from pydantic import ConfigDict, ValidationError, field_serializer, field_validator, model_validator
 
 _project_root = Path(__file__).resolve().parent.parent
 _src = str(_project_root / "src")
@@ -40,6 +40,8 @@ from boomi_mcp.categories.meta_tools import (
 from boomi_mcp.errors import RECIPE_CONTRIBUTION_INVALID, RECIPE_INPUT_INVALID
 from boomi_mcp.models.integration_models import IntegrationSpecV1
 from boomi_mcp.models.recipe_contributions import (
+    ProcessIRPatchV1,
+    RecipeComponentKey,
     RecipeContributionValidationError,
     canonical_recipe_contributions_json,
     parse_recipe_contribution,
@@ -738,6 +740,251 @@ def test_an_honest_nested_model_is_not_refused():
         )
     except RecipeError as exc:
         assert exc.diagnostics[0].code != RECIPE_INPUT_INVALID
+
+
+class _MaskedSwapInputV1(RecipeInputBase):
+    """A ``field_serializer`` that hides a swapped mapping from the sweep."""
+
+    label: str = "x"
+
+    _stash = model_validator(mode="before")(classmethod(_stash_before))
+
+    @field_validator("label", mode="after")
+    @classmethod
+    def _swap(cls, value):
+        return dict(_SMUGGLED_RAW) or value
+
+    @field_serializer("label")
+    def _ser(self, value):
+        return "benign"
+
+
+class _ConstraintLieInputV1(RecipeInputBase):
+    """Declares ``Literal["a"]`` and stores something else — same runtime type."""
+
+    label: Literal["a"] = "a"
+
+    _stash = model_validator(mode="before")(classmethod(_stash_before))
+
+    @field_validator("label", mode="after")
+    @classmethod
+    def _swap(cls, value):
+        return json.dumps(_SMUGGLED_RAW) if _SMUGGLED_RAW else value
+
+
+class _HonestlyPermissiveInputV1(RecipeInputBase):
+    """The CONTROL. Declares a plain ``str`` and stores caller JSON in it.
+
+    Nothing is bypassed here — the value matches its annotation exactly. No gate
+    can refuse this, and none should: a model author is entitled to declare a
+    permissive field. It exists to measure what the constraint lie above actually
+    gains over a truthful declaration.
+    """
+
+    label: str = "x"
+
+    _stash = model_validator(mode="before")(classmethod(_stash_before))
+
+    @field_validator("label", mode="after")
+    @classmethod
+    def _swap(cls, value):
+        return json.dumps(_SMUGGLED_RAW) if _SMUGGLED_RAW else value
+
+
+def _leak_surfaces(model):
+    """Where does the caller's key end up, for one model?"""
+    _SMUGGLED_RAW.clear()
+    raw = {"label": "a", "smuggled": "SENTINEL-SQL-SELECT-SECRETS"}
+    validated = model.model_validate(raw)
+    try:
+        validated.model_dump(warnings="error")
+        caught = False
+    except Exception:
+        caught = True
+    import warnings as _warnings
+
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("ignore")
+        dumped = json.dumps(validated.model_dump(), default=str)
+    return {
+        "caught": caught,
+        "attribute": "SENTINEL-SQL-SELECT-SECRETS" in str(validated.label),
+        "model_dump": "SENTINEL-SQL-SELECT-SECRETS" in dumped,
+    }
+
+
+def test_a_masking_field_serializer_keeps_model_dump_clean():
+    """Encodes a DECISION, not an aspiration (see §12).
+
+    A custom ``field_serializer`` returning a benign value suppresses the warning
+    the sweep keys on, so a swapped mapping is not caught. What makes that the
+    already-documented attribute-only residue rather than a new hole is the
+    second assertion: it never reaches ``model_dump()``, so no executor reading
+    its declared input sees it — only one reaching for the attribute directly.
+    """
+    surfaces = _leak_surfaces(_MaskedSwapInputV1)
+    assert surfaces["caught"] is False
+    assert surfaces["attribute"] is True
+    assert surfaces["model_dump"] is False, (
+        "a masking serializer now leaks to model_dump() — this is no longer the "
+        "attribute-only residue documented in §12 and must be re-adjudicated"
+    )
+
+
+def test_a_constraint_lie_gains_nothing_over_an_honest_permissive_field():
+    """The evidence for NOT re-checking constraints, kept executable.
+
+    A ``field_validator`` returning a different ``str`` for a ``Literal["a"]``
+    field is not caught — serialization compares types, not constraints. The
+    reason that is accepted rather than fixed is the control: a model that simply
+    declares ``label: str`` reaches the identical surfaces, and no gate can refuse
+    a truthful declaration of a permissive field.
+
+    If these two ever diverge, the trade-off argued in §12 no longer holds and the
+    decision has to be re-made rather than inherited.
+    """
+    lie = _leak_surfaces(_ConstraintLieInputV1)
+    control = _leak_surfaces(_HonestlyPermissiveInputV1)
+
+    assert lie == control, (lie, control)
+    assert control["model_dump"] is True  # the control genuinely leaks...
+    assert control["caught"] is False  # ...and is genuinely not catchable
+
+
+class _RefLieInputV1(SyncRecipeInputV1):
+    """Lies about a constrained value that DOES flow onward into a contribution."""
+
+    @field_validator("process_key", mode="after")
+    @classmethod
+    def _lie(cls, value):
+        return "  padded key  "
+
+
+class _InertLieInputV1(SyncRecipeInputV1):
+    """Lies about a constrained value that nothing downstream reads."""
+
+    @field_validator("version", mode="after")
+    @classmethod
+    def _lie(cls, value):
+        return "2"
+
+
+def _sync_executor(inp):
+    from boomi_mcp.recipes.builtins.sync import _contributions
+
+    return _contributions(inp)
+
+
+def _lying_registry(model):
+    return build_test_registry(
+        (
+            RecipeRegistrationV1(
+                recipe_id="test.recipe",
+                recipe_version="1.0.0",
+                entry_kind="executable_recipe",
+                is_default=True,
+                input_model=model,
+                executor=_sync_executor,
+                output_types=(
+                    "component_contribution",
+                    "constraint_requirement",
+                    "process_ir_patch",
+                ),
+                conflict_policy=RecipeConflictPolicyV1(),
+            ),
+        )
+    )
+
+
+def test_a_constraint_lie_that_flows_onward_is_caught_by_the_contribution_layer():
+    """The CONTAINMENT half of the §12 argument, kept executable.
+
+    The input gate deliberately does not re-check constraints. It does not need
+    to for any value that matters: the contribution models re-validate every
+    constrained value that crosses into composition, independently of the input
+    model, so the lie dies at ``_run_executor``.
+
+    If this ever stops holding, the §12 decision loses its primary justification
+    and has to be re-made — which is the point of asserting it here rather than
+    describing it in prose.
+    """
+    from boomi_mcp.recipes.engine import _run_executor
+
+    # Drive the contribution layer DIRECTLY. A first version used ``run_recipes``
+    # with an empty ``MaterializationCatalog``, which raises
+    # ``RECIPE_CONTRIBUTION_INVALID`` on its own for a missing slot — so the test
+    # passed with the lie removed and proved nothing. The control below is what
+    # makes this one mean something.
+    registry = _lying_registry(_RefLieInputV1)
+    descriptor = registry.resolve("test.recipe", "1.0.0")
+
+    # CONTROL: the honest input passes this layer cleanly.
+    honest = SyncRecipeInputV1.model_validate(_VALID_INPUT)
+    _run_executor(descriptor, registry, honest)
+
+    # The lie survives the INPUT gate...
+    lying = _RefLieInputV1.model_validate(_VALID_INPUT)
+    assert lying.process_key == "  padded key  "
+    lying.model_dump(warnings="error")  # the sub-tree sweep does not object
+
+    # ...and dies at the independent contribution gate.
+    #
+    # WHICH gate, precisely: the contribution model refuses the value at
+    # CONSTRUCTION, inside the executor — not the post-return
+    # ``validate_contribution_object`` sweep, which is never reached. That matters
+    # for the next reader, and it matters for this test: ``_run_executor`` emits
+    # ``RECIPE_CONTRIBUTION_INVALID`` from a broad ``except Exception``, so the
+    # assertion below is satisfied by ANY executor crash. The direct construction
+    # assertion is what makes this discriminate — it names the model and the
+    # field, and no unrelated failure can satisfy it (issue #145, live QA).
+    from pydantic import TypeAdapter
+
+    assert ProcessIRPatchV1.model_fields["process_key"].annotation is not None
+    key_adapter = TypeAdapter(RecipeComponentKey)
+    with pytest.raises(ValidationError):
+        key_adapter.validate_python("  padded key  ")
+    # Isolation control: same characters, no PADDING — accepted. So the refusal
+    # is the surrounding whitespace, not the space and not the content.
+    assert key_adapter.validate_python("padded key") == "padded key"
+
+    with pytest.raises(RecipeError) as exc:
+        _run_executor(descriptor, registry, lying)
+    assert exc.value.diagnostics[0].code == RECIPE_CONTRIBUTION_INVALID
+
+
+def test_a_constraint_lie_nothing_reads_is_inert_rather_than_corrupt():
+    """The other half: the one survivor changes nothing.
+
+    ``version`` violating its ``^1$`` constraint is not caught anywhere — and
+    produces a run identical to the truthful one. A survivor that alters no
+    artifact is the reason "not caught" is acceptable here, so it is asserted
+    rather than assumed.
+    """
+    # The lie is real and no gate refuses it...
+    lying = _InertLieInputV1.model_validate(_VALID_INPUT)
+    assert lying.version == "2", "the lie did not take effect; the test proves nothing"
+    lying.model_dump(warnings="error")  # the sub-tree sweep does not object either
+
+    try:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.recipe",
+                    invocation_id="i1",
+                    raw_input=_VALID_INPUT,
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=_lying_registry(_InertLieInputV1),
+        )
+    except RecipeError as exc:  # an empty catalog objects later; input must not
+        assert exc.diagnostics[0].code != RECIPE_INPUT_INVALID
+
+    # ...and it changes nothing the recipe produces.
+    honest = SyncRecipeInputV1.model_validate(_VALID_INPUT)
+    assert canonical_recipe_contributions_json(
+        list(_sync_executor(lying))
+    ) == canonical_recipe_contributions_json(list(_sync_executor(honest)))
 
 
 def test_every_production_input_model_survives_the_sub_tree_check():

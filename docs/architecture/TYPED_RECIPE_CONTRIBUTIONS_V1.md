@@ -567,11 +567,49 @@ that was dropped. Each states what changed and why.
   package-level constant is `__version__ = "0.1.0"` — a different fact. There is nothing
   duplicated to centralize, and wiring the package version in would misreport the server
   version.
-* **Closing the author-cooperation side channels.** Three measured channels move caller data
-  past every check, and all three are left open deliberately:
+* **Re-checking field CONSTRAINTS after validation.** `model_dump(warnings="error")` compares a
+  stored value against its declared *type*, not against its constraints, so a
+  `field_validator(mode="after")` that returns another `str` for a `Literal["a"]` or
+  pattern-constrained field is not caught. Three measurements say leave it:
+
+  **Containment — the check would be redundant where it matters.** The contribution models
+  re-validate every constrained value that crosses into the composition layer, independently of
+  the input model. A lie about a component key or a ref is rejected at `_run_executor` with
+  `RECIPE_CONTRIBUTION_INVALID` — measured for a padded `process_key`, one carrying a control
+  character, and an emptied `source_connection_ref`. The only survivor found was `version`
+  violating `^1$`, and it survives precisely because nothing downstream reads it: inert, not
+  corrupt. So the re-check would duplicate an existing gate for the values that flow and cover
+  only values that do not.
+
+  **Capability — the lie reaches nothing a truthful declaration cannot.** The sub-tree sweep
+  confines any replacement to the declared *runtime type*, and every runtime type has a
+  truthful permissive declaration that passes both registration gates. Across eight constraint
+  families (`Literal` on `str` and on `int`, pattern, `MinLen`, `conlist` min and max, `Set`,
+  `Tuple[str, ...]`) there was no payload whose only carrier was a violated constraint.
+
+  **Cost — it would cost false rejections and buy blindness.** Per-field re-validation misfires
+  on `Json[...]`: the stored value is the parsed object, while the annotation re-validates
+  against the JSON string, so an honest field is refused. (`TypeAdapter(field.annotation)` alone
+  does *not* misfire, because `Json` lives in `field.metadata` and is stripped — but every form
+  that preserves the metadata, including the obvious `Annotated[ann, *metadata]`, rejects with
+  `json_type`.) And on nested-model fields it would not work anyway: `revalidate_instances`
+  defaults to `'never'`, so re-validating a stored model instance **accepts it unexamined** — a
+  nested instance whose fields have been corrupted passes. Both production input models carry
+  nested models (`SyncRecipeInputV1.component_slots`, `ComposeDbRestFanoutInputV1.targets`), so
+  that blind spot is exactly where the check would be expected to earn its keep.
+
+  What remains is a **transparency** gap, not a containment one: such a model lies about the
+  schema `get_schema_template` publishes. No machinery is misled — nothing in `src/` validates a
+  value against a published schema, and the skew comparison is schema-to-schema, so a lying
+  model's hash is stable and compares correctly. The misled party is a human reader, who has the
+  validator in front of them in the same class.
+* **Closing the author-cooperation side channels.** Four measured channels move caller data
+  past every check, and all four are left open deliberately:
   a `mode="before"` validator stashing the raw mapping in a module global; an `after`
   validator writing it to `__pydantic_extra__`; the same via `object.__setattr__` on
-  `__dict__`. In each case the returned object is exactly the registered type, `model_dump()`
+  `__dict__`; and a custom `field_serializer` that returns a benign string for a field whose
+  validator swapped in a mapping, which suppresses the serializer warning the sub-tree sweep
+  keys on. In each case the returned object is exactly the registered type, `model_dump()`
   and the declared fields are clean, and the data is readable only by an executor that goes
   looking for it under a name the model author chose. **Both halves are registered code,
   authored by the same person and hashed into `implementation_sha256`** — this is a covert
