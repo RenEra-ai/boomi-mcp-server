@@ -52,6 +52,7 @@ from typing import (
     get_args,
     get_origin,
     get_type_hints,
+    is_typeddict,
 )
 
 from pydantic import BaseModel, TypeAdapter
@@ -392,28 +393,42 @@ def _assert_runtime_class(value: Any, annotation: Any) -> None:
 
 
 def _dataclass_field_types(cls: Any) -> Dict[str, Any]:
+    """Resolved field types, or a refusal.
+
+    An earlier version fell back to ``{name: None}``, which walked every field of
+    that dataclass with NO annotation — fail-open, and reachable without exotica:
+    ``from __future__ import annotations`` plus a ``TYPE_CHECKING``-only import
+    leaves ``get_type_hints`` unable to resolve. A pydantic dataclass cannot get
+    here (pydantic refuses to build one), but a stdlib dataclass can, and the walk
+    handles both. "Learned nothing" fails closed everywhere else in this contract
+    (issue #145, live QA).
+    """
     try:
         return dict(get_type_hints(cls))
-    except Exception:  # noqa: BLE001 — unresolvable hints must not pass silently
-        return {field.name: None for field in dataclass_fields(cls)}
+    except Exception:  # noqa: BLE001 — see above
+        raise ValueError(
+            "validated input holds a dataclass whose field types cannot be resolved"
+        )
 
 
-def _element_annotations(annotation: Any, value: Any) -> Optional[Tuple[Any, ...]]:
-    """The element parameters of the union arm whose CONTAINER matches this value.
+def _element_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Any, ...], ...]:
+    """Every union arm whose CONTAINER matches this value, not just one.
 
-    An earlier version returned the first option that had args at all, whatever
-    container it belonged to, which broke both ways (issue #145, live QA):
+    Two wrong answers preceded this (issue #145, live QA):
 
-    * ``Union[List[Leaf], List[Other]]`` holding ``[Other()]`` was REFUSED — the
-      ``Leaf`` arm's parameters were applied to the other arm's value.
-    * ``Union[Tuple[Any, ...], Dict[str, Leaf]]`` holding a mapping was ACCEPTED —
-      the tuple arm's args are ``(Any, Ellipsis)``, so ``_mapping_annotations``
-      saw a shape it could not read as key/value and dropped BOTH annotations,
-      leaving a dict standing in for ``Leaf`` unjudged.
+    * Returning the FIRST arm with parameters applied one arm's element types to
+      another arm's value — refusing ``Union[List[Leaf], List[Other]]`` holding
+      ``[Other()]``, and accepting a mapping whose only matching arm had been
+      passed over.
+    * Returning a single arm and ABSTAINING when several matched judged nothing
+      at all for every same-origin union — ``Union[List[Leaf], List[Other]]``
+      then accepted a converting dict, and the false-rejection case above started
+      passing for the wrong reason.
 
-    Abstains when no arm matches, and when several do — with two candidate
-    parameter sets there is no basis to prefer one, and guessing is what caused
-    the defect.
+    Abstention is only safe where something else judges the value. For membership
+    it is: ``_assert_runtime_class`` falls through to its last-chance loop. For
+    element parameters nothing else looks, so the arms are judged DISJUNCTIVELY
+    by the caller — an element is acceptable if ANY matching arm admits it.
     """
     candidates = []
     for option in _unwrap_annotation(annotation):
@@ -426,9 +441,34 @@ def _element_annotations(annotation: Any, value: Any) -> Optional[Tuple[Any, ...
                 candidates.append(args)
         except TypeError:  # a non-class origin cannot be matched against a value
             continue
-    if len(candidates) == 1:
-        return candidates[0]
-    return None
+        # KNOWN SURVIVOR, stated rather than left to look load-bearing: dropping
+        # this container match kills no test, because the adapter above validates
+        # the container itself — a list can never reach a ``Dict`` arm's
+        # parameters, since ``TypeAdapter(Union[...])`` rejects the whole value
+        # first. It is kept because it makes the disjunction below reason over
+        # arms that could actually apply, and because the alternative is
+        # re-deriving that adapter guarantee by hand (issue #145).
+    return tuple(candidates)
+
+
+def _assert_any_candidate(value: Any, annotations: Sequence[Any], _seen: set) -> None:
+    """Accept if ANY of these annotations admits the value; refuse if none does.
+
+    Trials run against a COPY of the cycle guard, so a candidate that walks part
+    of the tree before failing cannot mark nodes seen and make a later candidate
+    skip them. The accepted annotation is then walked for real.
+    """
+    if not annotations:
+        _assert_declared_shape(value, None, _seen)
+        return
+    for annotation in annotations:
+        try:
+            _assert_declared_shape(value, annotation, set(_seen))
+        except Exception:  # noqa: BLE001 — this arm simply does not admit it
+            continue
+        _assert_declared_shape(value, annotation, _seen)
+        return
+    raise ValueError("validated input holds an element no declared arm admits")
 
 
 def _positional(element: Optional[Tuple[Any, ...]], index: int) -> Any:
@@ -442,12 +482,32 @@ def _positional(element: Optional[Tuple[Any, ...]], index: int) -> Any:
     return element[index] if index < len(element) else None
 
 
-def _mapping_annotations(annotation: Any, value: Any) -> Tuple[Any, Any]:
-    """The (key, value) annotations for a mapping, or no opinion."""
-    element = _element_annotations(annotation, value)
-    if element and len(element) == 2 and element[1] is not Ellipsis:
-        return element[0], element[1]
-    return None, None
+def _mapping_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Any, Any], ...]:
+    """The (key, value) annotations of every matching mapping arm."""
+    pairs = []
+    for element in _element_candidates(annotation, value):
+        if len(element) == 2 and element[1] is not Ellipsis:
+            pairs.append((element[0], element[1]))
+    return tuple(pairs)
+
+
+def _typed_dict_hints(annotation: Any) -> Optional[Dict[str, Any]]:
+    """Per-KEY annotations for a ``TypedDict``, which has no ``get_origin``.
+
+    Without this a ``TypedDict`` field was judged by nothing at all: the class
+    check correctly abstains because it cannot be instance-checked, and the
+    mapping branch found no parametrised arm — unjudged in both dimensions, for a
+    field type that registers perfectly well (issue #145, live QA).
+    """
+    for option in _unwrap_annotation(annotation):
+        if is_typeddict(option):
+            try:
+                return dict(get_type_hints(option))
+            except Exception:  # noqa: BLE001 — unresolvable hints fail closed
+                raise ValueError(
+                    "validated input declares a TypedDict whose hints cannot be resolved"
+                )
+    return None
 
 
 #: Types whose iteration is KNOWN to be independent and bounded. Enumerated, not
@@ -565,15 +625,23 @@ def _assert_declared_shape(value: Any, annotation: Any = None, _seen: Optional[s
     # in for a ``Leaf`` inside ``Tuple[Leaf, ...]`` was visited but never judged.
     if _is_walkable_collection(value) and not isinstance(value, Mapping):
         _seen.add(id(value))
-        element = _element_annotations(annotation, value)
+        candidates = _element_candidates(annotation, value)
         for index, item in enumerate(value):
-            _assert_declared_shape(item, _positional(element, index), _seen)
+            _assert_any_candidate(
+                item, [_positional(args, index) for args in candidates], _seen
+            )
     elif isinstance(value, Mapping):
         _seen.add(id(value))
-        key_annotation, value_annotation = _mapping_annotations(annotation, value)
+        # A ``TypedDict`` names its keys individually and has no ``get_origin``,
+        # so it is read from its hints rather than from container parameters.
+        per_key = _typed_dict_hints(annotation)
+        pairs = _mapping_candidates(annotation, value)
         for key, item in value.items():
-            _assert_declared_shape(key, key_annotation, _seen)
-            _assert_declared_shape(item, value_annotation, _seen)
+            _assert_any_candidate(key, [k for k, _ in pairs], _seen)
+            if per_key is not None and key in per_key:
+                _assert_declared_shape(item, per_key[key], _seen)
+            else:
+                _assert_any_candidate(item, [v for _, v in pairs], _seen)
     elif _is_opaque_iterable(value):
         # FAIL CLOSED on anything iterable the walk cannot enumerate safely.
         # ``Iterable[str]`` validates LAZILY — pydantic hands back a

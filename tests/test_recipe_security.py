@@ -2526,18 +2526,121 @@ def test_element_annotations_match_the_values_container_kind(name, must_refuse):
         _assert_declared_shape(instance)
 
 
-def test_element_annotations_abstain_when_several_arms_match():
-    """With two candidate parameter sets there is no basis to prefer one, and
-    guessing is exactly what produced the defect."""
-    from typing import List as ListType, Union as UnionType
+def test_same_origin_union_arms_are_judged_disjunctively():
+    """Abstaining when several arms match judged NOTHING.
 
-    from boomi_mcp.recipes.engine import _element_annotations
+    Every same-origin union matches more than one arm, so the r43 rule silently
+    disabled the element check for all of them — and made the false-rejection
+    case it was written for pass for the wrong reason. Abstention is only safe
+    where something else judges the value; for element parameters nothing else
+    looks (issue #145, live QA).
+    """
+    from typing import List as ListType, Tuple as TupleType, Union as UnionType
 
-    class A(RecipeInputBase):
-        a: str = "x"
+    from boomi_mcp.recipes.engine import _assert_declared_shape, _element_candidates
 
-    class B(RecipeInputBase):
-        b: str = "y"
+    class Other(RecipeInputBase):
+        other: str = "y"
 
-    assert _element_annotations(UnionType[ListType[A], ListType[B]], [A()]) is None
-    assert _element_annotations(ListType[A], [A()]) == (A,)
+    converting = _ConvertingLeaf.model_validate({"ok": "y"})
+    assert isinstance(converting, dict)  # the premise
+
+    annotation = UnionType[ListType[_ConvertingLeaf], ListType[Other]]
+    assert len(_element_candidates(annotation, [Other()])) == 2  # both arms match
+
+    def _model(name, ann, default):
+        return type(
+            name,
+            (RecipeInputBase,),
+            {
+                "model_config": ConfigDict(extra="forbid", frozen=True),
+                "__annotations__": {"field": ann},
+                "field": default,
+            },
+        )
+
+    listed = _model("SameOriginListInputV1", annotation, None)
+    _assert_declared_shape(listed.model_construct(field=[Other()]))  # ANY arm admits
+    with pytest.raises(Exception):  # NO arm admits
+        _assert_declared_shape(listed.model_construct(field=[converting]))
+
+    tupled = _model(
+        "SameOriginTupleInputV1",
+        UnionType[TupleType[_ConvertingLeaf, ...], TupleType[Other, ...]],
+        (),
+    )
+    _assert_declared_shape(tupled.model_construct(field=(Other(),)))
+    with pytest.raises(Exception):
+        _assert_declared_shape(tupled.model_construct(field=(converting,)))
+
+    mapped = _model(
+        "SameOriginMappingInputV1",
+        UnionType[Dict[str, _ConvertingLeaf], Dict[str, Other]],
+        {},
+    )
+    _assert_declared_shape(mapped.model_construct(field={"k": Other()}))
+    with pytest.raises(Exception):
+        _assert_declared_shape(mapped.model_construct(field={"k": converting}))
+
+
+def test_a_dataclass_with_unresolvable_hints_fails_closed():
+    """Falling back to ``{name: None}`` walked every field unjudged.
+
+    Reachable without exotica — ``from __future__ import annotations`` plus a
+    ``TYPE_CHECKING``-only import. A pydantic dataclass cannot get here, but a
+    stdlib one can, and the walk handles both.
+    """
+    import dataclasses
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape, _dataclass_field_types
+
+    @dataclasses.dataclass
+    class BrokenHints:
+        member: "DefinitelyNotImportable" = None  # noqa: F821
+
+    with pytest.raises(Exception):
+        _dataclass_field_types(BrokenHints)
+    with pytest.raises(Exception):
+        _assert_declared_shape(BrokenHints(member={"smuggled": "SENTINEL-HOSTNAME"}))
+
+    @dataclasses.dataclass
+    class GoodHints:
+        member: str = "x"
+
+    _assert_declared_shape(GoodHints(member="x"))  # control: judged, not refused
+    with pytest.raises(Exception):
+        _assert_declared_shape(GoodHints(member={"smuggled": "SENTINEL-HOSTNAME"}))
+
+
+def test_a_typed_dict_field_is_judged_by_its_per_key_hints():
+    """A ``TypedDict`` was unjudged in BOTH dimensions.
+
+    The class check abstains because it cannot be instance-checked (r42), and the
+    mapping branch found no parametrised arm because ``get_origin`` is None — so
+    nothing looked at it at all, for a field type that registers fine.
+    """
+    from typing import TypedDict as TypedDictType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    # DECLARED-KEYS-ONLY, so the adapter above cannot reject it on an extra key —
+    # otherwise the test passes without the per-key hints ever being consulted.
+    class TD(TypedDictType):
+        member: _DeclaredKeysOnlyLeaf
+
+    class TypedDictFieldInputV1(RecipeInputBase):
+        field: TD = {"member": _DeclaredKeysOnlyLeaf()}
+
+    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
+    assert isinstance(converting, dict)  # the premise
+    assert set(converting) == {"ok"}  # ...and nothing an extra-key check can see
+
+    _assert_declared_shape(
+        TypedDictFieldInputV1.model_construct(
+            field={"member": _DeclaredKeysOnlyLeaf.model_construct(ok="y")}
+        )
+    )
+    with pytest.raises(Exception):
+        _assert_declared_shape(
+            TypedDictFieldInputV1.model_construct(field={"member": converting})
+        )

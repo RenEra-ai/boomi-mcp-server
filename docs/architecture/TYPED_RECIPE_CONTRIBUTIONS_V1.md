@@ -440,9 +440,20 @@ construction:
   value, and `Union[Tuple[Any, ...], Dict[str, Leaf]]` holding a mapping was *accepted* because
   the tuple arm's `(Any, Ellipsis)` was unreadable as key/value, so both mapping annotations were
   dropped and a dict standing in for `Leaf` went unjudged. It abstains when no arm matches and
-  when several do — two candidate parameter sets give no basis to prefer one, and guessing is
-  what caused the defect. `Union[Tuple[Any, ...], Tuple[Leaf, ...]]` holding that same dict still
+  when no arm matches. When SEVERAL match it judges them **disjunctively** — an element is
+  acceptable if any matching arm admits it. Abstaining there was a second, worse bug: every
+  same-origin union (`Union[List[Leaf], List[Other]]`) matches more than one arm, so abstention
+  disabled the element check for all of them, and the false-rejection case above began passing
+  because *nothing* was consulted. **Abstention is only safe where something else judges the
+  value** — for membership the last-chance loop does; for element parameters nothing does. `Union[Tuple[Any, ...], Tuple[Leaf, ...]]` holding that same dict still
   passes, correctly: the value genuinely satisfies the `Any` arm.
+* **A `TypedDict` field is read from its per-key hints.** It has no `get_origin`, so no
+  parametrised arm matched it, and it cannot be instance-checked, so the class check abstains —
+  leaving it unjudged in *both* dimensions for a field type that registers perfectly well.
+* **A dataclass whose hints cannot be resolved is refused, not walked blind.** Falling back to
+  `{name: None}` walked every field with no annotation, and it is reachable without exotica:
+  `from __future__ import annotations` plus a `TYPE_CHECKING`-only import. A pydantic dataclass
+  cannot get there; a stdlib one can, and the walk handles both.
 * **Field annotations are carried down.** A dict standing in for a `Leaf` inside
   `Tuple[Leaf, ...]` or `Dict[str, Leaf]` was visited but never judged, and a dataclass's fields
   were recursed with no annotation at all — leaving a mapping in a declared `str`, readable at
