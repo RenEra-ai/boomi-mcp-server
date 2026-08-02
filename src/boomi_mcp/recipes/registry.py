@@ -289,9 +289,6 @@ def _is_bounded_subschema(subschema: Any, depth: int = 0) -> bool:
 #: both measured, neither can stop extras being rejected.
 _BYPASS_CAPABLE_NODES = frozenset({"function-wrap", "function-plain"})
 
-#: Core-schema node types that ARE a model's own validation.
-_MODEL_NODES = frozenset({"model", "model-fields"})
-
 #: Keys whose values are not schema and must not be walked as if they were.
 #:
 #: ``default`` is the one that bites. A ``{"type": "default", "schema": {...},
@@ -309,14 +306,12 @@ _NON_SCHEMA_KEYS = frozenset(
 def _resolve_core_ref(node: Any, definitions: Mapping[str, Any], budget: int = 16) -> Any:
     """Follow ``definition-ref`` hops to the node they name.
 
-    DEFENSIVE, and stated as such rather than left to look load-bearing. Both of
-    its callers currently reach their target without it: the walk descends into
-    the ``definitions`` ARRAY generically, and in every recursive and mutually
-    recursive shape measured, pydantic puts the model node directly under a
-    wrapper rather than behind a reference. It is kept because the alternative —
-    deleting a guard because no constructed case needed it — is how the next
-    finding arrives, and because a mis-resolved ref here would fail CLOSED
-    (a rejected valid model), which is loud rather than silent (issue #145).
+    DEFENSIVE, and stated as such rather than left to look load-bearing. The walk
+    descends into the ``definitions`` ARRAY generically, so every recursive and
+    mutually recursive shape measured reaches its model node without this. It is
+    kept because a mis-resolved ref would fail CLOSED — a rejected valid model,
+    which is loud — and because deleting a guard on the grounds that no
+    constructed case needed it is how the next finding arrives (issue #145).
     """
     while (
         isinstance(node, dict)
@@ -326,27 +321,6 @@ def _resolve_core_ref(node: Any, definitions: Mapping[str, Any], budget: int = 1
         node = definitions.get(node.get("schema_ref"))
         budget -= 1
     return node
-
-
-def _wraps_a_model(node: Mapping[str, Any], definitions: Mapping[str, Any]) -> bool:
-    """Does this wrapper sit over a MODEL's validation, or over a field's?
-
-    The distinction decides whether the wrapper can neutralise extras rejection.
-    ``field_validator(mode="wrap")`` also compiles to ``function-wrap`` — over
-    ``{"type": "str"}`` or whatever the field is — and cannot affect the model's
-    own extras handling at all. Rejecting every ``function-wrap`` would refuse a
-    perfectly ordinary field validator (issue #145).
-    """
-    inner = _resolve_core_ref(node.get("schema"), definitions)
-    hops = 0
-    while (
-        isinstance(inner, dict)
-        and str(inner.get("type", "")).startswith("function-")
-        and hops < 8
-    ):
-        inner = _resolve_core_ref(inner.get("schema"), definitions)
-        hops += 1
-    return isinstance(inner, dict) and inner.get("type") in _MODEL_NODES
 
 
 def _check_input_model_forbids_extras(recipe_id: str, model: Any) -> None:
@@ -388,10 +362,19 @@ def _check_input_model_forbids_extras(recipe_id: str, model: Any) -> None:
 
     Three node classes are judged, and each for its own reason:
 
-    * ``function-wrap`` / ``function-plain`` OVER A MODEL — fails closed.
-      Whether the handler is invoked is a fact about arbitrary Python, not about
-      the schema. Over a FIELD the same node types are ordinary
-      ``field_validator(mode="wrap")`` machinery and are accepted.
+    * ``function-wrap`` / ``function-plain`` ANYWHERE — rejected outright. An
+      earlier version tried to reject only those sitting OVER A MODEL, on the
+      grounds that the same node types are ordinary ``field_validator`` machinery
+      over a field. That classification is not decidable from the schema, and
+      four separate shapes defeated it: a ``function-plain`` carrying
+      ``json_schema_input_schema`` and NO ``schema`` key at all; a wrapper whose
+      immediate child is ``nullable``/``list``/``dict``/union rather than the
+      model beneath it; a hop budget that returned "not a model" instead of
+      "cannot tell" when it expired; and the container-key collision below.
+      Asking "does this wrapper reach a model" is a program-analysis question;
+      asking "is there a wrapper" is a lookup. A recipe input model is already
+      frozen, closed and bounded, and no production input model uses either mode,
+      so the decidable rule costs nothing real (issue #145, Codex review).
     * every model config — must say ``forbid``.
     * ``definition-ref`` — resolved, not refused. A recursive input model parks
       itself in ``definitions`` behind a reference, and dead-ending there turned
@@ -427,14 +410,13 @@ def _check_input_model_forbids_extras(recipe_id: str, model: Any) -> None:
                 stack.append(_resolve_core_ref(node, definitions))
                 continue
 
-            if node_type in _BYPASS_CAPABLE_NODES and _wraps_a_model(
-                node, definitions
-            ):
+            if node_type in _BYPASS_CAPABLE_NODES:
                 raise ValueError(
-                    f"{recipe_id!r} input_model wraps model validation in a "
-                    f"{node_type!r} validator, which may return without "
-                    "invoking its handler; closedness cannot be determined from "
-                    "the compiled schema. Use mode='before' or mode='after'."
+                    f"{recipe_id!r} input_model uses a {node_type!r} validator "
+                    "(mode='wrap' or mode='plain'); a recipe input model may not, "
+                    "because such a validator may return without invoking its "
+                    "handler and closedness then cannot be determined from the "
+                    "compiled schema. Use mode='before' or mode='after'."
                 )
 
         config = node.get("config")
@@ -447,8 +429,16 @@ def _check_input_model_forbids_extras(recipe_id: str, model: Any) -> None:
                     f"{config['extra_fields_behavior']!r}"
                 )
 
+        # The exclusion list applies ONLY to schema nodes. In a user-keyed
+        # CONTAINER — ``fields`` maps a field's name to its node — those same
+        # strings are field names, so filtering here pruned the entire subtree of
+        # any field called ``config``, ``metadata`` or ``default``, and a nested
+        # handler-skipping validator under such a field was never seen. A node is
+        # identified by having a string ``type``; anything else is a container
+        # and every value in it is walked (issue #145, Codex review).
+        is_schema_node = isinstance(node_type, str)
         for key, value in node.items():
-            if key in _NON_SCHEMA_KEYS:
+            if is_schema_node and key in _NON_SCHEMA_KEYS:
                 continue
             if isinstance(value, dict):
                 stack.append(value)

@@ -1376,7 +1376,7 @@ def test_a_wrap_validator_that_can_skip_its_handler_fails_closed():
     assert isinstance(escaped, dict)
     assert escaped["smuggled"] == "value"
 
-    with pytest.raises(ValueError, match="may return without invoking its handler"):
+    with pytest.raises(ValueError, match="mode='wrap' or mode='plain'"):
         build_test_registry((_reg(input_model=WrapBypass),))
 
 
@@ -1453,7 +1453,7 @@ def test_a_wrap_validator_is_caught_wherever_it_sits(placement):
 
     # The ROOT config is impeccable — which is why a spine walk accepted it.
     assert Model.__pydantic_core_schema__["config"]["extra_fields_behavior"] == "forbid"
-    with pytest.raises(ValueError, match="wraps model validation"):
+    with pytest.raises(ValueError, match="mode='wrap' or mode='plain'"):
         build_test_registry((_reg(input_model=Model),))
 
 
@@ -1487,19 +1487,26 @@ def test_the_nested_wrap_hole_is_invisible_to_the_schema_gate():
     assert isinstance(leaked, dict)
     assert leaked["smuggled"] == "v"
     # ...so only the extras gate stands between this and an executor.
-    with pytest.raises(ValueError, match="wraps model validation"):
+    with pytest.raises(ValueError, match="mode='wrap' or mode='plain'"):
         registry_module._check_input_model_forbids_extras("probe", Model)
 
 
 @pytest.mark.parametrize("mode", ["wrap", "plain"])
-def test_a_field_validator_of_the_same_mode_is_not_rejected(mode):
-    """``function-wrap`` over a FIELD is ordinary machinery, not a bypass.
+def test_a_field_validator_of_a_bypass_capable_mode_is_also_rejected(mode):
+    """The rule is "is there a wrapper", not "does this wrapper reach a model".
 
-    ``field_validator(mode="wrap")`` compiles to the same node type as
-    ``model_validator(mode="wrap")`` — over ``{"type": "str"}`` rather than over
-    a model. It cannot affect the model's extras handling at all, so rejecting
-    every ``function-wrap`` node would refuse a perfectly ordinary validator.
-    The rule is the node's TARGET, not its type (issue #145).
+    An earlier version rejected only wrappers sitting OVER A MODEL, so that an
+    ordinary ``field_validator(mode="wrap")`` over a ``str`` would still be
+    allowed. That classification is not decidable from the schema, and four
+    separate shapes defeated it — a ``function-plain`` with no ``schema`` key at
+    all, a wrapper whose immediate child is ``nullable``/``list``/``dict``/union
+    rather than the model beneath it, an expiring hop budget that answered "not a
+    model" instead of "cannot tell", and a container-key collision that pruned
+    whole subtrees. "Is there a wrapper" is a lookup; "does it reach a model" is
+    program analysis (issue #145, Codex review).
+
+    The cost is real but small and measured: no production input model uses
+    either mode, and a recipe input model is already frozen, closed and bounded.
     """
     from pydantic import field_validator
 
@@ -1523,12 +1530,92 @@ def test_a_field_validator_of_the_same_mode_is_not_rejected(mode):
             def _check(cls, value):
                 return str(value)
 
-    # The dangerous node type IS present in the compiled schema...
-    assert f"function-{mode}" in str(Model.__pydantic_core_schema__)
-    # ...over a field, so extras are still rejected and the model registers.
-    with pytest.raises(Exception):
-        Model.model_validate({"a": "x", "smuggled": "v"})
-    registry_module._check_input_model_forbids_extras("probe", Model)
+    # The EXTRAS gate is the one asserting the mode rule...
+    with pytest.raises(ValueError, match="mode='wrap' or mode='plain'"):
+        registry_module._check_input_model_forbids_extras("probe", Model)
+    # ...and registration fails either way. For mode="plain" the SCHEMA gate
+    # happens to reject first, because a plain validator erases the field's
+    # published type and the field becomes unconstrained — a different rule
+    # catching the same model, which is what two independent gates are for.
+    with pytest.raises(ValueError):
+        build_test_registry((_reg(input_model=Model),))
+
+
+@pytest.mark.parametrize("field_name", ["config", "metadata", "default", "serialization"])
+def test_a_field_named_like_an_excluded_key_is_still_walked(field_name):
+    """The exclusion list applies to SCHEMA NODES, not to user-keyed containers.
+
+    ``fields`` maps a field's name to its node, so filtering those same strings
+    there pruned the entire subtree of any field called ``config``, ``metadata``
+    or ``default`` — and a handler-skipping validator under such a field was
+    never seen at all. A node is identified by having a string ``type``;
+    anything else is a container and every value in it is walked
+    (issue #145, Codex review).
+    """
+    from typing import Any as AnyType
+
+    from pydantic import create_model, model_validator
+
+    class InnerWrap(RecipeInputBase):
+        b: str = "y"
+
+        @model_validator(mode="wrap")
+        @classmethod
+        def _wrap(cls, data: AnyType, handler) -> AnyType:
+            return data
+
+    Model = create_model(
+        "Colliding", __base__=RecipeInputBase, **{field_name: (InnerWrap, InnerWrap())}
+    )
+    with pytest.raises(ValueError, match="mode='wrap' or mode='plain'"):
+        build_test_registry((_reg(input_model=Model),))
+
+
+@pytest.mark.parametrize(
+    "shape", ["plain_without_schema_key", "wrap_over_optional_model"]
+)
+def test_a_wrapper_that_defeats_target_classification_is_still_rejected(shape):
+    """The two shapes that broke "does this wrapper reach a model".
+
+    ``field_validator(mode="plain", json_schema_input_type=...)`` emits a
+    ``function-plain`` node carrying ``json_schema_input_schema`` and NO
+    ``schema`` key, so a target lookup found nothing and concluded "not a model".
+    A wrapper over ``Optional[Model]`` has ``nullable`` as its immediate child
+    for the same reason. Both leaked the caller's raw mapping
+    (issue #145, Codex review).
+    """
+    from typing import Any as AnyType
+    from typing import Optional as OptionalType
+
+    from pydantic import BaseModel, ConfigDict, field_validator
+
+    class ClosedLeaf(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+        n: str = "x"
+
+    if shape == "plain_without_schema_key":
+
+        class Model(RecipeInputBase):
+            leaf: AnyType = None
+
+            @field_validator("leaf", mode="plain", json_schema_input_type=ClosedLeaf)
+            @classmethod
+            def _check(cls, value):
+                return value
+
+    else:
+
+        class Model(RecipeInputBase):
+            maybe: OptionalType[ClosedLeaf] = None
+
+            @field_validator("maybe", mode="wrap")
+            @classmethod
+            def _check(cls, value, handler):
+                return value  # handler skipped
+
+    with pytest.raises(ValueError, match="mode='wrap' or mode='plain'"):
+        build_test_registry((_reg(input_model=Model),))
 
 
 @pytest.mark.parametrize("colliding_name", ["type", "schema", "config", "definitions"])
@@ -1539,17 +1626,15 @@ def test_a_field_named_like_a_schema_keyword_does_not_break_the_core_walk(
 
     ``fields`` maps a field's name to its node, so a model with a field called
     ``type`` makes ``container["type"]`` a dict — and a membership test on a dict
-    raises ``TypeError: unhashable type``. This is the same defect the
-    JSON-schema walk was fixed for one gate over, made a second time in a second
-    walk: a schema document contains DATA and CONTAINERS as well as nodes, and
-    only nodes may be read as nodes (issue #145).
+    raises ``TypeError: unhashable type``. The same defect the JSON-schema walk
+    was fixed for one gate over, made a second time in a second walk: a schema
+    document contains DATA and CONTAINERS as well as nodes (issue #145).
     """
     from pydantic import create_model
 
     Model = create_model(
         "Colliding", __base__=RecipeInputBase, **{colliding_name: (str, "x")}
     )
-    # Registers cleanly: no crash, no spurious rejection.
     registry_module._check_input_model_forbids_extras("probe", Model)
     build_test_registry((_reg(input_model=Model),))
 
@@ -1570,6 +1655,23 @@ def test_a_default_value_that_looks_like_a_schema_is_not_walked():
 
     class Model(RecipeInputBase):
         leaf: Leaf = Leaf()
+
+    registry_module._check_input_model_forbids_extras("probe", Model)
+    build_test_registry((_reg(input_model=Model),))
+
+
+def test_a_default_value_naming_a_banned_node_type_is_not_a_rejection():
+    """Excluding ``default`` from the walk is load-bearing, not decoration.
+
+    Now that a bare ``function-wrap`` anywhere is rejected outright, walking DATA
+    would read a caller's default value as a node — so an ordinary closed field
+    whose default happens to contain ``{"type": "function-wrap"}`` would be
+    refused. The string is a value, not a node kind (issue #145).
+    """
+    from typing import Dict as DictType
+
+    class Model(RecipeInputBase):
+        settings: DictType[str, str] = {"type": "function-wrap"}
 
     registry_module._check_input_model_forbids_extras("probe", Model)
     build_test_registry((_reg(input_model=Model),))
