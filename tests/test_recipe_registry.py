@@ -4366,3 +4366,325 @@ def test_the_reason_bar_is_not_punctuation_rather_than_verbose(reason, accepted)
     the case that matters.
     """
     assert bool(re.findall(r"[A-Za-z]{3,}", reason)) is accepted
+
+
+# ---------------------------------------------------------------------------
+# The walk must not mistake DATA for a schema node
+#
+# Fourth appearance of one class. The first three were patched one constructed
+# counter-example at a time; this round enumerates the position class from
+# pydantic's own declarations and pins the enumeration with a tripwire
+# (issue #145, Codex review).
+# ---------------------------------------------------------------------------
+
+
+def test_a_type_legal_custom_error_context_is_not_read_as_a_validator():
+    """``custom_error_context`` is declared ``dict[str, str | int | float]``, so
+    ``{"type": "function-wrap"}`` is a perfectly legal value — a flat mapping of
+    strings. Walking it as a node refused a genuinely closed, frozen model."""
+    from typing import Annotated, Literal, Union
+
+    from pydantic import ConfigDict, Discriminator, Tag
+
+    class Cat(RecipeInputBase):
+        kind: Literal["cat"] = "cat"
+
+    class Dog(RecipeInputBase):
+        kind: Literal["dog"] = "dog"
+
+    def _pick(value: object) -> str:
+        return "cat"
+
+    class Holder(RecipeInputBase):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+
+        pet: Annotated[
+            Union[Annotated[Cat, Tag("cat")], Annotated[Dog, Tag("dog")]],
+            Discriminator(
+                _pick,
+                custom_error_type="bad_pet",
+                custom_error_message="bad pet",
+                custom_error_context={"type": "function-wrap"},
+            ),
+        ] = Cat()
+
+    # The poisoned value really is where the walk would reach it...
+    found = []
+    stack = [Holder.__pydantic_core_schema__]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            if node.get("custom_error_context"):
+                found.append(node["custom_error_context"])
+            stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
+        elif isinstance(node, list):
+            stack.extend(v for v in node if isinstance(v, (dict, list)))
+    assert {"type": "function-wrap"} in found
+
+    # ...and the gates accept the model anyway.
+    registry_module._check_input_schema_closed("probe", Holder)
+    registry_module._check_input_model_forbids_extras("probe", Holder)
+
+    # Control: the model is genuinely closed.
+    with pytest.raises(Exception):
+        Holder.model_validate({"pet": {"kind": "cat"}, "smuggled": 1})
+
+
+@pytest.mark.parametrize("mode", ["wrap", "plain"])
+def test_a_wrap_or_plain_field_serializer_is_not_refused(mode):
+    """``serialization`` is excluded for the BAN's sake, not only for data safety.
+
+    ``@field_serializer(mode="wrap"|"plain")`` compiles to a SER-schema node whose
+    ``type`` is the string ``function-wrap``/``function-plain`` — byte-identical to
+    the validator node types the ban keys on. Serializers run on output and cannot
+    affect extras rejection, so they are excluded rather than banned. Drop the
+    exclusion and every model carrying a wrap serializer is refused.
+    """
+    from typing import Any as AnyType
+
+    from pydantic import ConfigDict, field_serializer
+
+    if mode == "wrap":
+
+        class Model(RecipeInputBase):
+            model_config = ConfigDict(extra="forbid", frozen=True)
+            name: str = "x"
+
+            @field_serializer("name", mode="wrap")
+            def _ser(self, value: AnyType, nxt: AnyType) -> AnyType:
+                return nxt(value)
+
+    else:
+
+        class Model(RecipeInputBase):
+            model_config = ConfigDict(extra="forbid", frozen=True)
+            name: str = "x"
+
+            @field_serializer("name", mode="plain")
+            def _ser(self, value: AnyType) -> AnyType:
+                return value
+
+    # The collision is real — the node is there, under ``serialization``.
+    found = []
+    stack = [(Model.__pydantic_core_schema__, "root")]
+    while stack:
+        node, path = stack.pop()
+        if isinstance(node, dict):
+            if node.get("type") in ("function-wrap", "function-plain"):
+                found.append(path)
+            stack.extend(
+                (v, f"{path}/{k}") for k, v in node.items() if isinstance(v, (dict, list))
+            )
+        elif isinstance(node, list):
+            stack.extend((v, path) for v in node if isinstance(v, (dict, list)))
+    assert found, "expected a ser-schema node carrying the banned type string"
+    assert all(p.endswith("/serialization") for p in found), found
+
+    # And the gate accepts the model regardless.
+    registry_module._check_input_model_forbids_extras("probe", Model)
+
+
+def test_non_schema_keys_covers_every_declared_free_form_position():
+    """Tripwire, so the exclusion list fails LOUDLY when pydantic moves.
+
+    Re-derives from ``pydantic_core.core_schema`` every key that its own
+    TypedDicts say can hold a container but can never (transitively) hold a
+    ``CoreSchema``. Those are exactly the positions where a walk-everything
+    traversal can mistake data for a node.
+
+    LIMIT, stated rather than implied: this reads DECLARATIONS, and the compiled
+    form is not always the declared one — ``function`` is annotated ``Callable``
+    yet compiles to a ``{"type": "with-info", ...}`` dict, which is why it is
+    excluded by measurement below rather than by this derivation. A new position
+    of that kind would not be caught here.
+    """
+    import typing
+
+    from pydantic_core import core_schema as cs
+
+    typed_dicts = {
+        name: obj
+        for name in dir(cs)
+        if typing.is_typeddict(obj := getattr(cs, name))
+    }
+    assert len(typed_dicts) > 40, "core_schema TypedDicts not introspectable"
+
+    def annotations_of(td):
+        try:
+            return typing.get_type_hints(td, include_extras=False)
+        except Exception:  # pragma: no cover - a pydantic move, not a repo defect
+            return dict(getattr(td, "__annotations__", {}))
+
+    def bears_schema(ann, depth=0):
+        if depth > 6:
+            return True  # unknown -> assume schema-bearing, i.e. keep walking
+        if ann is cs.CoreSchema:
+            return True
+        if typing.is_typeddict(ann):
+            return any(bears_schema(v, depth + 1) for v in annotations_of(ann).values())
+        text = str(ann)
+        if "CoreSchema" in text and "CoreSchemaType" not in text:
+            return True
+        args = typing.get_args(ann)
+        return any(bears_schema(a, depth + 1) for a in args) if args else False
+
+    def admits_mapping(ann, depth=0):
+        """Can a value here be a MAPPING, or a sequence containing one?
+
+        Only those can be mistaken for a node: the walk pushes ``dict`` values and
+        the ``dict`` items of a ``list``, and nothing else. A ``set[int|str]``
+        (``include``/``exclude``) or a ``list[str]`` (``allowed_schemes``,
+        ``alias``, ``discriminator``) is never walked, so flagging it would be
+        noise that trains the next reader to widen the exclusion list for nothing.
+        """
+        if depth > 6:
+            return True
+        origin = typing.get_origin(ann)
+        # A class object, a callable, or a literal VALUE is never a walked node.
+        if origin in (type, typing.Literal) or "Callable" in str(origin):
+            return False
+        if origin in (dict, typing.Mapping):
+            return True
+        text = str(ann).replace("typing.", "")
+        if text in ("Any", "<class 'object'>"):
+            return True
+        if origin in (list, tuple, set, frozenset):
+            return any(admits_mapping(a, depth + 1) for a in typing.get_args(ann))
+        args = typing.get_args(ann)
+        return any(admits_mapping(a, depth + 1) for a in args) if args else False
+
+    ever, never = set(), set()
+    for td in typed_dicts.values():
+        for key, ann in annotations_of(td).items():
+            (ever if bears_schema(ann) else never).add(key)
+    never -= ever
+
+    walkable = {
+        key
+        for td in typed_dicts.values()
+        for key, ann in annotations_of(td).items()
+        if key in never and admits_mapping(ann)
+    }
+    assert walkable, "derivation produced nothing — it has stopped measuring"
+
+    uncovered = walkable - registry_module._NON_SCHEMA_KEYS
+    assert not uncovered, (
+        "pydantic declares free-form container position(s) the walk still treats "
+        f"as schema: {sorted(uncovered)}. Add them to _NON_SCHEMA_KEYS, or justify "
+        "each one in the comment above it."
+    )
+
+
+def test_the_function_position_is_safe_to_walk():
+    """Why ``function`` is NOT in the exclusion list.
+
+    Its annotation is ``Callable``, but the compiled node stores a dict
+    (``{"type": "with-info", "function": <callable>}``) that the walk descends
+    into as though it were a node — so it looks like a data-as-schema position
+    and was a candidate for exclusion. It was left out: excluding a key means
+    never walking its subtree, which is the one mistake here that fails OPEN, and
+    this payload cannot be mistaken for anything. Dropping it into the list
+    changed no test, and an entry no test can miss is an entry that buys nothing.
+    """
+    from pydantic import ConfigDict, field_validator, model_validator
+
+    class Model(RecipeInputBase):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        name: str = "x"
+
+        @field_validator("name", mode="after")
+        @classmethod
+        def _f(cls, value: str) -> str:
+            return value
+
+        @model_validator(mode="before")
+        @classmethod
+        def _m(cls, data):
+            return data
+
+    seen = []
+    stack = [Model.__pydantic_core_schema__]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            payload = node.get("function")
+            if isinstance(payload, dict):
+                seen.append(payload)
+            stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
+        elif isinstance(node, list):
+            stack.extend(v for v in node if isinstance(v, (dict, list)))
+
+    assert seen, "no compiled `function` payload found — the shape has changed"
+    for payload in seen:
+        assert set(payload) <= {"type", "function", "field_name"}, payload
+        assert payload.get("type") in ("with-info", "no-info"), payload
+        assert not any(isinstance(v, (dict, list)) for v in payload.values()), payload
+
+
+def test_resolve_core_ref_follows_a_reference_and_bounds_its_hops():
+    """Direct cover for the ref resolver.
+
+    It is documented as defensive — the generic descent into ``definitions``
+    reaches the same node — so nothing in the suite exercised it and a mutant that
+    removed it survived. Defensive is not the same as untested: a resolver that
+    silently returned the wrong node would fail CLOSED, which is loud but wrong.
+    """
+    target = {"type": "model", "config": {"extra_fields_behavior": "forbid"}}
+    definitions = {
+        "a": {"type": "definition-ref", "schema_ref": "b"},
+        "b": target,
+    }
+
+    # Follows a chain to the node it names.
+    assert (
+        registry_module._resolve_core_ref(
+            {"type": "definition-ref", "schema_ref": "a"}, definitions
+        )
+        is target
+    )
+
+    # A cycle terminates instead of spinning, and returns a node (never None).
+    cyclic = {"x": {"type": "definition-ref", "schema_ref": "y"}}
+    cyclic["y"] = {"type": "definition-ref", "schema_ref": "x"}
+    resolved = registry_module._resolve_core_ref(
+        {"type": "definition-ref", "schema_ref": "x"}, cyclic, budget=4
+    )
+    assert isinstance(resolved, dict)
+
+    # An unresolvable ref yields ``None`` rather than raising, and the walk drops
+    # a non-dict. That is safe HERE only because the walk also descends into the
+    # ``definitions`` array generically, so the target is reached by the other
+    # route — pinned below rather than asserted in prose.
+    dangling = {"type": "definition-ref", "schema_ref": "missing"}
+    assert registry_module._resolve_core_ref(dangling, {}) is None
+
+
+def test_a_recursive_open_model_is_still_rejected_when_its_ref_dead_ends():
+    """The property that makes the resolver's ``None`` return safe.
+
+    A recursive model parks itself in ``definitions`` behind a reference. If the
+    walk depended on resolving that reference, a dead end would silently skip the
+    model — fail-OPEN. It does not: the ``definitions`` array is walked directly,
+    so the open model is caught either way (issue #145, live QA).
+    """
+    from typing import List, Optional
+
+    from pydantic import ConfigDict
+
+    class RecursiveOpen(RecipeInputBase):
+        model_config = ConfigDict(extra="allow", frozen=True)
+        name: str = "n"
+        children: Optional[List["RecursiveOpen"]] = None
+
+    RecursiveOpen.model_rebuild()
+
+    with pytest.raises(ValueError, match="reject undeclared keys"):
+        registry_module._check_input_model_forbids_extras("probe", RecursiveOpen)
+
+    class RecursiveClosed(RecipeInputBase):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        name: str = "n"
+        children: Optional[List["RecursiveClosed"]] = None
+
+    RecursiveClosed.model_rebuild()
+    registry_module._check_input_model_forbids_extras("probe", RecursiveClosed)

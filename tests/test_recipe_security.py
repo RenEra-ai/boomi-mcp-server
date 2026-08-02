@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from pydantic import ConfigDict, model_validator
 
 _project_root = Path(__file__).resolve().parent.parent
 _src = str(_project_root / "src")
@@ -398,6 +399,204 @@ def _run(registry):
         catalog=MaterializationCatalog({}),
         registry=registry,
     )
+
+
+# ---------------------------------------------------------------------------
+# A validator that returns something other than the model
+#
+# Both registration gates read the compiled schema, which records that a
+# validator RUNS somewhere but never what it RETURNS. ``mode="after"`` receives
+# the model and its return value IS the result, so a model carrying no banned
+# node at all delivered the caller's undeclared keys to the executor. The engine
+# closes it by inspecting the value that came back (issue #145, live QA).
+# ---------------------------------------------------------------------------
+
+
+_SMUGGLED_RAW: dict = {}
+
+#: Module level, not a closure — the registry refuses an executor that closes
+#: over state, because a closure is invisible to ``implementation_sha256``.
+_EXECUTOR_CALLS: list = []
+
+
+def _recording_executor(inp):
+    _EXECUTOR_CALLS.append(inp)
+    return _undeclared_output_executor(inp)
+
+
+class _BypassInputV1(SyncRecipeInputV1):
+    """Frozen, ``extra='forbid'``, and free of every banned node — and it leaks.
+
+    ``before`` stashes the raw mapping and hands validation only the declared
+    keys, so validation genuinely succeeds; ``after`` then discards the validated
+    model and returns the stash. Both node types are ones the ban ALLOWS.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _stash(cls, data):
+        if isinstance(data, dict):
+            _SMUGGLED_RAW.clear()
+            _SMUGGLED_RAW.update(data)
+            return {k: v for k, v in data.items() if k in cls.model_fields}
+        return data
+
+    @model_validator(mode="after")
+    def _return_the_stash(self):
+        return dict(_SMUGGLED_RAW)
+
+
+class _SubclassBypassInputV1(SyncRecipeInputV1):
+    """Returns a SUBCLASS instance, which ``isinstance(validated, model)`` allows.
+
+    The returned class must descend from the REGISTERED one or ``isinstance``
+    rejects it on its own and the test proves nothing — a first version returned
+    a sibling and was silently vacuous, which the ``isinstance`` mutant caught.
+    ``model_construct`` is what makes it reachable: it skips revalidation, so the
+    undeclared keys are never re-checked against ``extra='forbid'``.
+    """
+
+    @model_validator(mode="after")
+    def _return_a_subclass(self):
+        return _OpenSubclassInputV1.model_construct(
+            **self.model_dump(), smuggled="SENTINEL-SQL-SELECT-SECRETS"
+        )
+
+
+class _OpenSubclassInputV1(_SubclassBypassInputV1):
+    """The ``isinstance`` defeat: a subclass of the registered model that accepts
+    undeclared keys. Never registered itself, so no gate ever inspects it."""
+
+    model_config = ConfigDict(extra="allow", frozen=True)
+
+
+class _HonestAfterInputV1(SyncRecipeInputV1):
+    """The firing control: ``mode='after'`` used the way it is meant to be."""
+
+    @model_validator(mode="after")
+    def _check_something(self):
+        if not self.process_key:
+            raise ValueError("process_key is required")
+        return self
+
+
+def _registry_with_input(model, executor=None):
+    return build_test_registry(
+        (
+            RecipeRegistrationV1(
+                recipe_id="test.recipe",
+                recipe_version="1.0.0",
+                entry_kind="executable_recipe",
+                is_default=True,
+                input_model=model,
+                executor=executor or _undeclared_output_executor,
+                output_types=("constraint_requirement",),
+                conflict_policy=RecipeConflictPolicyV1(),
+            ),
+        )
+    )
+
+
+#: Each case pairs a bypassing model with the raw input that REACHES its bypass.
+#:
+#: The pairing is load-bearing and was wrong once. The subclass model has no
+#: ``before`` validator, so sending it an input carrying ``smuggled`` is refused
+#: by ordinary ``extra='forbid'`` handling long before the guard runs — the test
+#: then passed with the guard deleted entirely. It must be given CLEAN input; the
+#: model injects the undeclared key itself, from inside the validator.
+_BYPASS_CASES = [
+    (_BypassInputV1, "poisoned"),
+    (_SubclassBypassInputV1, "clean"),
+]
+
+
+@pytest.mark.parametrize(
+    "model,raw_kind",
+    _BYPASS_CASES,
+    ids=["returns_a_raw_dict", "returns_an_open_subclass"],
+)
+def test_a_validator_that_returns_a_foreign_object_is_rejected(model, raw_kind):
+    """The registration gates PASS these models — that is the point of the test.
+
+    Asserts all three consequences at once: the run is refused, the diagnostic is
+    value-free, and the executor is never handed the object.
+    """
+    _SMUGGLED_RAW.clear()
+    _EXECUTOR_CALLS.clear()
+    registry = _registry_with_input(model, executor=_recording_executor)
+
+    raw = dict(_VALID_INPUT)
+    if raw_kind == "poisoned":
+        raw["smuggled"] = "SENTINEL-SQL-SELECT-SECRETS"
+
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [RecipeRequestV1(recipe_id="test.recipe", invocation_id="i1", raw_input=raw)],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
+    assert _EXECUTOR_CALLS == []
+    blob = json.dumps([d.model_dump(mode="json") for d in exc.value.diagnostics])
+    assert "SENTINEL-SQL-SELECT-SECRETS" not in blob
+    assert "SENTINEL-SQL-SELECT-SECRETS" not in str(exc.value)
+
+
+def test_the_subclass_case_actually_reaches_the_guard():
+    """Anti-vacuity control for the pairing above.
+
+    Pins that the subclass model's CLEAN input validates successfully and yields
+    an object that ``isinstance`` accepts and exact-type rejects — so the case
+    genuinely exercises the guard rather than ordinary extras rejection.
+    """
+    validated = _SubclassBypassInputV1.model_validate(dict(_VALID_INPUT))
+    assert isinstance(validated, _SubclassBypassInputV1)
+    assert type(validated) is not _SubclassBypassInputV1
+    assert getattr(validated, "smuggled", None) == "SENTINEL-SQL-SELECT-SECRETS"
+
+
+def test_an_honest_after_validator_is_not_refused():
+    """Firing control.
+
+    A guard that refused every ``mode='after'`` would pass the three tests above
+    while breaking a production input model. ``ComposeDbRestFanoutInputV1`` uses
+    ``after`` to enforce a cross-field rule that no field validator can express,
+    which is exactly why the fix is a check on the returned VALUE rather than one
+    more node type on the ban list.
+    """
+    registry = _registry_with_input(_HonestAfterInputV1)
+    try:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.recipe",
+                    invocation_id="i1",
+                    raw_input=_VALID_INPUT,
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    except RecipeError as exc:  # a later phase may object; input must not
+        assert exc.diagnostics[0].code != RECIPE_INPUT_INVALID
+
+    # And the guard's own predicate accepts it.
+    validated = _HonestAfterInputV1.model_validate(_VALID_INPUT)
+    assert type(validated) is _HonestAfterInputV1
+
+
+def test_the_production_after_validator_returns_self():
+    """Pins the premise of the paragraph above: ``after`` is used legitimately,
+    so banning the node type is not an available fix."""
+    from boomi_mcp.recipes.builtins.fanout import ComposeDbRestFanoutInputV1
+
+    model = ComposeDbRestFanoutInputV1.model_construct(
+        version="1",
+        process_key="p",
+        targets=(),
+        component_slots=(),
+    )
+    assert ComposeDbRestFanoutInputV1._cache_rules(model) is model
 
 
 def test_an_executor_exception_message_never_reaches_the_caller():

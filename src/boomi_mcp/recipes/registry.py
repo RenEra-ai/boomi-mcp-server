@@ -298,8 +298,42 @@ _BYPASS_CAPABLE_NODES = frozenset({"function-wrap", "function-plain"})
 #: ``TypeError: unhashable type: 'dict'``. The same mistake in the same shape,
 #: made twice: a walk over "every value" is a walk over data too, and a schema
 #: document contains both (issue #145).
+#:
+#: The membership is DERIVED, not guessed — it is every position that
+#: ``pydantic_core.core_schema`` itself declares can hold a container but can
+#: never (transitively) hold a ``CoreSchema``. Three rounds of this gate added
+#: one key per constructed counter-example; the fourth enumerated the position
+#: class instead, and ``test_non_schema_keys_covers_every_free_form_position``
+#: re-derives the set on every run so a pydantic upgrade that opens a new one
+#: fails loudly here rather than silently at a caller's build (issue #145).
+#:
+#: Every entry EARNS its place by preventing a demonstrated false rejection, and
+#: the bar is deliberate: excluding a key means never walking its subtree, so an
+#: unjustified entry is the one kind of mistake here that fails OPEN. ``function``
+#: was a candidate — its compiled payload is a dict the walk descends into — and
+#: was left OUT, because that payload holds a node kind the ban does not name and
+#: no container at all, so excluding it would have bought nothing while adding
+#: fail-open surface. ``test_the_function_position_is_safe_to_walk`` pins that.
+#:
+#: ``serialization`` is load-bearing for the BAN, not merely for data safety:
+#: ``@field_serializer(mode="wrap"|"plain")`` compiles to a SER-schema node whose
+#: ``type`` is the string ``function-wrap``/``function-plain`` — identical to the
+#: validator node types below. Serializers run on output and cannot affect
+#: extras rejection, so they are excluded rather than banned; dropping this key
+#: would refuse every model carrying a wrap serializer.
 _NON_SCHEMA_KEYS = frozenset(
-    {"metadata", "serialization", "cls", "config", "ref", "default", "default_factory"}
+    {
+        "cls",
+        "config",
+        "custom_error_context",
+        "default",
+        "default_factory",
+        "expected",
+        "members",
+        "metadata",
+        "ref",
+        "serialization",
+    }
 )
 
 
@@ -379,6 +413,18 @@ def _check_input_model_forbids_extras(recipe_id: str, model: Any) -> None:
     * ``definition-ref`` — resolved, not refused. A recursive input model parks
       itself in ``definitions`` behind a reference, and dead-ending there turned
       fail-closed into fail-WRONG: a perfectly closed model could not register.
+
+    **This gate is no longer the last line of defence, and should not be read as
+    one.** Banning node types is a classification, and a classification can be
+    one node short: ``model_validator(mode="after")`` is NOT passive — it
+    receives the model and its return value becomes the result — so a model with
+    no banned node at all still handed the caller's undeclared keys to the
+    executor. ``after`` cannot simply be added to the ban, because a production
+    input model uses it legitimately. What closes that class is a check on the
+    VALUE rather than on the schema: ``engine._validate_input`` requires
+    ``type(validated) is model``. Keep both — this one names the defect at
+    registration, where the author can act on it, and it is the only one of the
+    two that runs before a recipe is ever invoked (issue #145, live QA).
     """
     root = getattr(model, "__pydantic_core_schema__", None)
     definitions: Dict[str, Any] = {}

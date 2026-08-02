@@ -373,7 +373,7 @@ names an object key absent after all object additions.
 1. resolve the descriptor at an exact version
 2. preflight declared capability requirements
 3. preflight declared prerequisites — recipe **and** execution-context
-4. forbidden-shape scan, then the strict input model
+4. forbidden-shape scan, then the strict input model, then **`type(validated) is model`**
 5. run **only** the registered callable — never caller-provided code
 6. re-validate every returned value as a **declared** contribution type
 7. run it a second time and byte-compare — nondeterminism is a hard failure
@@ -388,6 +388,25 @@ names an object key absent after all object additions.
 parameter that could carry one.** That is what makes "a recipe cannot bypass semantic
 validation" a structural fact rather than a convention: the legacy exemptions exist and are
 reachable, but not from here.
+
+Step 4's third clause is not redundant with the second. Two registration-time gates prove a
+recipe input model is *declared* closed and *compiled* closed, both by reading the schema —
+and the schema records that a validator runs at a position, never what it **returns**.
+`model_validator(mode="after")` receives the constructed model and its return value becomes
+the result, so a model that is frozen, `extra="forbid"`, and free of every banned node still
+handed the caller's undeclared keys to the executor as a plain dict. Widening the node-type
+ban is not available: `after` is used legitimately by a production input model to enforce a
+cross-field rule. The engine therefore checks the **value that came back** rather than
+classifying what ran, and by exact type — a subclass declaring `extra="allow"`, populated via
+`model_construct`, satisfies `isinstance`.
+
+This check moves one failure from **build time to first use**, and that is inherent rather than
+an oversight: what a validator returns is a runtime fact and cannot be read off the schema at
+registration. A bypass-shaped input model therefore registers successfully, is advertised by
+`list_capabilities` and `get_schema_template`, and is refused only when someone invokes it. The
+trade is accepted because registrations are code-owned and the production set is covered by
+tests — but *when* the failure surfaces is different from every other gate here, which is worth
+knowing before it is discovered.
 
 Step 7 is why **executors receive their validated input and nothing else** — no context
 object, no catalog. Handing an executor a context would reopen an I/O channel and make the
@@ -418,7 +437,7 @@ the only constructor, which the public model never guaranteed.
 | `RECIPE_NOT_FOUND` | registry lookup: the id is absent |
 | `RECIPE_VERSION_UNAVAILABLE` | the id exists, the exact version does not; the diagnostic lists sorted available versions |
 | `RECIPE_CAPABILITY_GATED` | descriptor preflight: an authority subject is absent, gated, guidance-only, unsupported, or weaker than required |
-| `RECIPE_INPUT_INVALID` | the forbidden-shape scan or the strict input model |
+| `RECIPE_INPUT_INVALID` | the forbidden-shape scan, the strict input model, or a validator that returned something other than that model |
 | `RECIPE_CONTRIBUTION_INVALID` | undeclared output type, forbidden field, invalid schema, duplicate operation id, header mismatch, missing catalog slot, or an executor exception |
 | `RECIPE_PATCH_TARGET_NOT_FOUND` | a closed slot does not resolve after composition |
 | `RECIPE_PATCH_CONFLICT` | two writers, one slot, no declared merge |
@@ -536,6 +555,21 @@ that was dropped. Each states what changed and why.
   package-level constant is `__version__ = "0.1.0"` — a different fact. There is nothing
   duplicated to centralize, and wiring the package version in would misreport the server
   version.
+* **Closing the author-cooperation side channels.** Three measured channels move caller data
+  past every check, and all three are left open deliberately:
+  a `mode="before"` validator stashing the raw mapping in a module global; an `after`
+  validator writing it to `__pydantic_extra__`; the same via `object.__setattr__` on
+  `__dict__`. In each case the returned object is exactly the registered type, `model_dump()`
+  and the declared fields are clean, and the data is readable only by an executor that goes
+  looking for it under a name the model author chose. **Both halves are registered code,
+  authored by the same person and hashed into `implementation_sha256`** — this is a covert
+  channel between two cooperating pieces of trusted code, not a caller reaching the executor.
+  It is also not closable in general: the module-global stash leaves no trace on the object
+  at all, so any amount of object inspection would still miss it, and adding checks that
+  close two of three would buy the appearance of a boundary rather than a boundary. What the
+  guard does promise, and keeps, is narrower and checkable: **the executor receives exactly
+  the declared model type**, so caller-controlled undeclared keys never arrive on a surface
+  an honest executor reads.
 
 ## 13. Related documents
 

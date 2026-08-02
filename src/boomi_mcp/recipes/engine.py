@@ -121,7 +121,7 @@ def _validate_input(descriptor: RecipeDescriptorV1, registry: RecipeRegistry, ra
         )
     model = registry.input_model_for(descriptor)
     try:
-        return model.model_validate(dict(raw))
+        validated = model.model_validate(dict(raw))
     except Exception:  # noqa: BLE001 — pydantic text can echo an authored value
         raise recipe_error(
             RECIPE_INPUT_INVALID,
@@ -129,6 +129,35 @@ def _validate_input(descriptor: RecipeDescriptorV1, registry: RecipeRegistry, ra
             recipe_ids=(descriptor.recipe_id,),
             recipe_versions=(descriptor.recipe_version,),
         ) from None
+
+    # INSPECT WHAT CAME BACK, rather than classify what ran.
+    #
+    # Both registration gates read the compiled schema, and the schema faithfully
+    # records that a validator runs at a position — but never what it RETURNS,
+    # which is a fact about arbitrary Python. ``model_validator(mode="after")``
+    # receives the constructed model and its return value IS the result, so it
+    # can hand back anything; combined with a ``mode="before"`` that stashes the
+    # raw mapping, a model that is genuinely frozen, closed and free of every
+    # banned node still delivered the caller's undeclared keys — ``smuggled``,
+    # ``password`` — to the executor as a plain dict.
+    #
+    # Widening the node-type ban is not the fix: ``after`` cannot be banned (a
+    # production input model uses it, legitimately, and to enforce a cross-field
+    # rule), and each ban is one more classification that the next shape gets to
+    # be one node short of. This check is mechanism-independent and closes the
+    # class, including the wrap/plain form the ban already covers.
+    #
+    # EXACT TYPE, not ``isinstance``: a subclass declaring ``extra="allow"``,
+    # populated via ``model_construct`` to skip revalidation, satisfies
+    # ``isinstance`` while carrying the smuggled keys (issue #145, live QA).
+    if type(validated) is not model:
+        raise recipe_error(
+            RECIPE_INPUT_INVALID,
+            phase="input",
+            recipe_ids=(descriptor.recipe_id,),
+            recipe_versions=(descriptor.recipe_version,),
+        )
+    return validated
 
 
 def _pointer(path: Tuple[Any, ...]) -> str:
