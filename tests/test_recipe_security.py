@@ -11,7 +11,7 @@ appears nowhere on the recipe side. That is stronger than enumerating forbidden
 keys, because it does not depend on having thought of the right key name.
 """
 
-from typing import Literal, Tuple
+from typing import Dict, List, Literal, Tuple
 
 import json
 import logging
@@ -37,7 +37,11 @@ from boomi_mcp.categories.meta_tools import (
     get_schema_template_action,
     plan_integration_design_action,
 )
-from boomi_mcp.errors import RECIPE_CONTRIBUTION_INVALID, RECIPE_INPUT_INVALID
+from boomi_mcp.errors import (
+    RECIPE_CONSTRAINT_FAILED,
+    RECIPE_CONTRIBUTION_INVALID,
+    RECIPE_INPUT_INVALID,
+)
 from boomi_mcp.models.integration_models import IntegrationSpecV1
 from boomi_mcp.models.recipe_contributions import (
     ProcessIRPatchV1,
@@ -813,22 +817,453 @@ def _leak_surfaces(model):
     }
 
 
-def test_a_masking_field_serializer_keeps_model_dump_clean():
-    """Encodes a DECISION, not an aspiration (see §12).
+def test_a_masking_serializer_no_longer_helps():
+    """The serializer BAN was removed, and this is why that is safe.
 
-    A custom ``field_serializer`` returning a benign value suppresses the warning
-    the sweep keys on, so a swapped mapping is not caught. What makes that the
-    already-documented attribute-only residue rather than a new hole is the
-    second assertion: it never reaches ``model_dump()``, so no executor reading
-    its declared input sees it — only one reaching for the attribute directly.
+    A masking ``field_serializer`` still suppresses ``model_dump()`` — but the
+    engine no longer asks the model's serializer anything. It validates each
+    stored value with an adapter it built itself, so what the author's serializer
+    would have said is irrelevant.
+
+    Removing the ban also removed six false rejections. ``SecretStr``,
+    ``AnyUrl``, ``IPv4Address``, ``IPv4Network``, ``re.Pattern``, ``deque`` and
+    ``Path`` all carry built-in ser schemas and were refused by it — and
+    ``SecretStr`` is the type an author *should* reach for, so refusing it pushed
+    them toward plain ``str`` (issue #145, live QA).
     """
+    _SMUGGLED_RAW.clear()
+    _EXECUTOR_CALLS.clear()
+    registry = _registry_with_input(_MaskedSwapInputV1, executor=_recording_executor)
+
+    # It registers now — the ban is gone.
+    raw = {"label": "a", "smuggled": "SENTINEL-SQL-SELECT-SECRETS"}
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [RecipeRequestV1(recipe_id="test.recipe", invocation_id="i1", raw_input=raw)],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
+    assert _EXECUTOR_CALLS == []
+
+    # ...and the masking is real, which is what makes the catch meaningful.
     surfaces = _leak_surfaces(_MaskedSwapInputV1)
-    assert surfaces["caught"] is False
     assert surfaces["attribute"] is True
-    assert surfaces["model_dump"] is False, (
-        "a masking serializer now leaks to model_dump() — this is no longer the "
-        "attribute-only residue documented in §12 and must be re-adjudicated"
+    assert surfaces["model_dump"] is False
+
+
+@pytest.mark.parametrize("name", ["SecretStr", "Path"])
+def test_the_types_the_serializer_ban_refused_now_register(name):
+    """Removing the ban restored these two.
+
+    ``SecretStr`` is the one that mattered: it is the type an author *should*
+    reach for on a sensitive input, so refusing it pushed them toward plain
+    ``str`` — a security-negative outcome from a security check.
+
+    SEPARATE, MEASURED, AND STILL OPEN: ``AnyUrl``, ``IPv4Address``,
+    ``IPv4Network``, ``re.Pattern`` and ``deque`` are still refused — by the
+    wrap/plain VALIDATOR ban, not this one, since each compiles to a
+    ``function-plain``/``function-wrap`` validator node. That over-fire predates
+    this change and is not fixed by it (issue #145, live QA).
+    """
+    from pathlib import PurePosixPath
+
+    from pydantic import SecretStr
+
+    annotation, default = {
+        "SecretStr": (SecretStr, SecretStr("s")),
+        "Path": (PurePosixPath, PurePosixPath("/tmp")),
+    }[name]
+    model = type(
+        f"Honest{name}InputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": annotation},
+            "field": default,
+        },
     )
+    _registry_with_input(model)  # must not raise
+
+
+@pytest.mark.parametrize("name", ["AnyUrl", "IPv4Address", "IPv4Network", "Pattern"])
+def test_the_wrap_ban_still_over_fires_on_these(name):
+    """Records a defect rather than hiding it.
+
+    These are honest stdlib/pydantic types that a recipe input might reasonably
+    declare, and the wrap/plain validator ban refuses all four because they
+    compile to ``function-plain``/``function-wrap`` VALIDATOR nodes. Asserting the
+    current behaviour keeps the cost visible and makes this test fail — loudly,
+    and in the right place — the moment the ban is narrowed or removed.
+
+    ``deque`` was listed here once and does NOT belong: it is refused by the
+    CLOSEDNESS gate, a different check, so crediting it to the wrap ban would have
+    left this test passing by accident after the ban was removed.
+    """
+    import ipaddress
+    import re
+    from typing import Optional
+
+    from pydantic import AnyUrl
+
+    annotation, default = {
+        "AnyUrl": (Optional[AnyUrl], None),
+        "IPv4Address": (ipaddress.IPv4Address, ipaddress.IPv4Address("1.2.3.4")),
+        "IPv4Network": (ipaddress.IPv4Network, ipaddress.IPv4Network("10.0.0.0/8")),
+        "Pattern": (Optional[re.Pattern], None),
+    }[name]
+    model = type(
+        f"Refused{name}InputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": annotation},
+            "field": default,
+        },
+    )
+    with pytest.raises(ValueError, match="validator"):
+        _registry_with_input(model)
+
+
+class _DeepSlot(RecipeInputBase):
+    """A VALID slot instance whose own field was swapped.
+
+    The outer ``Tuple[_DeepSlot, ...]`` annotation cannot catch this — every
+    element really is a ``_DeepSlot``. Only walking into the elements does.
+    """
+
+    label: str = "x"
+
+    @field_validator("label", mode="after")
+    @classmethod
+    def _swap(cls, value):
+        return dict(_SMUGGLED_RAW) or value
+
+
+class _DeepTupleInputV1(RecipeInputBase):
+    slots: Tuple[_DeepSlot, ...] = ()
+
+    _stash = model_validator(mode="before")(classmethod(_stash_before))
+
+
+def test_a_swap_inside_a_valid_sequence_element_is_caught():
+    """Pins the element walk specifically.
+
+    Removing it leaves every other test green — the tuple case elsewhere is
+    caught one level up, by the element's own type. This is the shape that needs
+    the walk, and it is the production shape: ``component_slots`` is a tuple of
+    models (issue #145).
+    """
+    _SMUGGLED_RAW.clear()
+    _EXECUTOR_CALLS.clear()
+    registry = _registry_with_input(_DeepTupleInputV1, executor=_recording_executor)
+
+    raw = {"slots": [{"label": "y"}], "smuggled": "SENTINEL-SQL-SELECT-SECRETS"}
+
+    # Anti-vacuity: the elements really are valid instances of the declared type,
+    # so nothing above the element level can object.
+    validated = _DeepTupleInputV1.model_validate(dict(raw))
+    assert all(type(s) is _DeepSlot for s in validated.slots)
+    assert "SENTINEL-SQL-SELECT-SECRETS" in str(validated.slots[0].label)
+
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [RecipeRequestV1(recipe_id="test.recipe", invocation_id="i1", raw_input=raw)],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
+    assert _EXECUTOR_CALLS == []
+
+
+class _DeepDictInputV1(RecipeInputBase):
+    """A model behind a MAPPING value. The mapping branch had no fixture at all,
+    so deleting it whole changed nothing (issue #145, live QA)."""
+
+    slots: Dict[str, _DeepSlot] = {}
+
+    _stash = model_validator(mode="before")(classmethod(_stash_before))
+
+
+class _NestedContainerInputV1(RecipeInputBase):
+    """A model at container depth TWO — the shape the one-level walk missed."""
+
+    slots: Tuple[Tuple[_DeepSlot, ...], ...] = ()
+
+    _stash = model_validator(mode="before")(classmethod(_stash_before))
+
+
+class _DictOfListInputV1(RecipeInputBase):
+    """``Dict[str, List[Model]]`` — an ordinary shape, and it walked straight
+    through the one-level version."""
+
+    slots: Dict[str, List[_DeepSlot]] = {}
+
+    _stash = model_validator(mode="before")(classmethod(_stash_before))
+
+
+_DEEP_CASES = [
+    (_DeepDictInputV1, {"slots": {"a": {"label": "y"}}}),
+    (_NestedContainerInputV1, {"slots": [[{"label": "y"}]]}),
+    (_DictOfListInputV1, {"slots": {"a": [{"label": "y"}]}}),
+]
+
+
+@pytest.mark.parametrize(
+    "model,payload",
+    _DEEP_CASES,
+    ids=["dict_value", "tuple_of_tuple", "dict_of_list"],
+)
+def test_a_swap_below_one_container_level_is_caught(model, payload):
+    """The elements of a container are not the leaves of the walk.
+
+    Each element here is a genuinely valid model, so nothing above it can object —
+    only recursing through the container into the element, and then into the
+    element's own fields, sees the swap.
+    """
+    _SMUGGLED_RAW.clear()
+    _EXECUTOR_CALLS.clear()
+    registry = _registry_with_input(model, executor=_recording_executor)
+    raw = {**payload, "smuggled": "SENTINEL-SQL-SELECT-SECRETS"}
+
+    # Anti-vacuity: the swap really happened, and really is behind valid models.
+    validated = model.model_validate(dict(raw))
+    assert "SENTINEL-SQL-SELECT-SECRETS" in str(validated.model_dump())
+
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [RecipeRequestV1(recipe_id="test.recipe", invocation_id="i1", raw_input=raw)],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
+    assert _EXECUTOR_CALLS == []
+
+
+class _HashableSlot(RecipeInputBase):
+    """Usable as a mapping KEY, and lies with a value that stays hashable.
+
+    A dict swap is unreachable here — it would make the frozen model unhashable —
+    so the lie is a tuple in a ``str`` field, which is both a type lie and
+    hashable (issue #145, live QA).
+    """
+
+    label: str = "x"
+
+    @field_validator("label", mode="after")
+    @classmethod
+    def _swap(cls, value):
+        return tuple(_SMUGGLED_RAW.items()) or value
+
+
+class _ModelKeyInputV1(RecipeInputBase):
+    slots: Dict[_HashableSlot, str] = {}
+
+    _stash = model_validator(mode="before")(classmethod(_stash_before))
+
+
+def test_a_swap_in_a_mapping_KEY_is_caught():
+    """Mapping keys are walked, and this is the only thing that says so.
+
+    The key branch was added from a report without a fixture — the third time a
+    branch in this walk arrived untested — so deleting it changed nothing.
+
+    Built with ``model_construct`` rather than through ``run_recipes``: a raw
+    payload cannot express a model-keyed mapping at all, because the key would
+    have to be an unhashable dict. That is also why this shape is exotic — but
+    the branch exists, so it is pinned.
+    """
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    _SMUGGLED_RAW.clear()
+    _SMUGGLED_RAW.update({"smuggled": "SENTINEL-SQL-SELECT-SECRETS"})
+
+    honest_key = _HashableSlot.model_construct(label="y")
+    lying_key = _HashableSlot.model_validate({"label": "y"})
+
+    # Anti-vacuity: the key is a valid model, and the lie is on the KEY only.
+    assert type(lying_key) is _HashableSlot
+    assert "SENTINEL-SQL-SELECT-SECRETS" in str(lying_key.label)
+
+    # Control: the honest key passes.
+    _assert_declared_shape(_ModelKeyInputV1.model_construct(slots={honest_key: "v"}))
+
+    with pytest.raises(Exception):
+        _assert_declared_shape(_ModelKeyInputV1.model_construct(slots={lying_key: "v"}))
+
+
+def test_a_generator_in_a_sequence_field_is_refused_and_not_consumed():
+    """Strict mode, and why it is strict.
+
+    Lax coercion turned a stored generator into a tuple, reported no mismatch,
+    and left the field holding an exhausted generator — a miss and a destructive
+    side effect at once. The second assertion is the one that matters: the check
+    must not damage what it inspects.
+    """
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    def _gen():
+        yield from ("a", "b", "c")
+
+    class SeqInputV1(RecipeInputBase):
+        seq: Tuple[str, ...] = ()
+
+    instance = SeqInputV1.model_construct(seq=_gen())
+    with pytest.raises(Exception):
+        _assert_declared_shape(instance)
+    assert list(instance.seq) == ["a", "b", "c"], "the check consumed the value"
+
+
+@pytest.mark.parametrize(
+    "annotation,stored",
+    [
+        (int, "5"),
+        (Tuple[str, ...], ["a"]),
+        (bool, "true"),
+    ],
+    # ``float`` from ``int`` is deliberately absent: strict mode permits that
+    # widening, and it carries no payload capacity.
+    ids=["int_from_str", "tuple_from_list", "bool_from_str"],
+)
+def test_a_coercible_type_lie_is_still_a_lie(annotation, stored):
+    """After validation a stored value should already BE its declared type.
+
+    Lax mode re-permits the coercion pydantic already did at ``model_validate``
+    time, which is exactly how these passed before.
+    """
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    model = type(
+        "CoercibleInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": annotation},
+            "field": stored,
+        },
+    )
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=stored))
+
+
+def test_a_swap_behind_a_pydantic_dataclass_is_caught():
+    """A dataclass is neither a ``BaseModel`` nor a container.
+
+    An earlier walk had exactly two branches — model and container — so a model
+    reached through a dataclass field was never entered (issue #145, live QA).
+    """
+    from pydantic.dataclasses import dataclass as pydantic_dataclass
+
+    @pydantic_dataclass(frozen=True, config=ConfigDict(extra="forbid"))
+    class Holder:
+        slot: _DeepSlot = _DeepSlot()
+
+    class DataclassInputV1(RecipeInputBase):
+        holder: Holder = Holder()
+
+        _stash = model_validator(mode="before")(classmethod(_stash_before))
+
+    _SMUGGLED_RAW.clear()
+    _EXECUTOR_CALLS.clear()
+    registry = _registry_with_input(DataclassInputV1, executor=_recording_executor)
+    raw = {"holder": {"slot": {"label": "y"}}, "smuggled": "SENTINEL-SQL-SELECT-SECRETS"}
+
+    # Anti-vacuity: the dataclass really is in the way, and the swap really happened.
+    validated = DataclassInputV1.model_validate(dict(raw))
+    assert not isinstance(validated.holder, RecipeInputBase)
+    assert "SENTINEL-SQL-SELECT-SECRETS" in str(validated.holder.slot.label)
+
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [RecipeRequestV1(recipe_id="test.recipe", invocation_id="i1", raw_input=raw)],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
+    assert _EXECUTOR_CALLS == []
+
+
+def test_a_swapped_core_schema_does_not_reopen_the_extras_gate():
+    """The bypass that retired every registration-time attribute read.
+
+    ``__pydantic_core_schema__`` is a plain writable class attribute, and
+    registration runs after class creation — so assigning a closed twin's schema
+    makes an ``extra="allow"`` model pass all three registration gates while its
+    compiled validator goes on accepting undeclared keys. The instance it
+    produces cannot lie about what it is carrying (issue #145, live QA).
+    """
+
+    class ClosedTwinInputV1(RecipeInputBase):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        label: str = "x"
+
+    class OpenInputV1(RecipeInputBase):
+        model_config = ConfigDict(extra="allow", frozen=True)
+        label: str = "x"
+
+    OpenInputV1.__pydantic_core_schema__ = ClosedTwinInputV1.__pydantic_core_schema__
+
+    # The registration gates are fooled — that is the premise, so assert it.
+    registry = _registry_with_input(OpenInputV1, executor=_recording_executor)
+
+    # ...and the model really does still accept undeclared keys.
+    smuggled = OpenInputV1.model_validate({"label": "a", "smuggled": "S"})
+    assert getattr(smuggled, "smuggled", None) == "S"
+
+    # The engine refuses it anyway, at the value.
+    _EXECUTOR_CALLS.clear()
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.recipe",
+                    invocation_id="i1",
+                    raw_input={"label": "a", "smuggled": "SENTINEL-SQL-SELECT-SECRETS"},
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
+    assert _EXECUTOR_CALLS == []
+
+
+def test_a_swapped_serializer_does_not_hide_a_declared_field_swap():
+    """The same class, aimed at the sweep instead of the extras gate."""
+    from pydantic_core import SchemaSerializer, core_schema
+
+    class SwappedSerInputV1(RecipeInputBase):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        label: str = "x"
+
+        _stash = model_validator(mode="before")(classmethod(_stash_before))
+
+        @field_validator("label", mode="after")
+        @classmethod
+        def _swap(cls, value):
+            return dict(_SMUGGLED_RAW) or value
+
+    SwappedSerInputV1.__pydantic_serializer__ = SchemaSerializer(
+        core_schema.any_schema()
+    )
+
+    _SMUGGLED_RAW.clear()
+    _EXECUTOR_CALLS.clear()
+    registry = _registry_with_input(SwappedSerInputV1, executor=_recording_executor)
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.recipe",
+                    invocation_id="i1",
+                    raw_input={"label": "a", "smuggled": "SENTINEL-SQL-SELECT-SECRETS"},
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
+    assert _EXECUTOR_CALLS == []
 
 
 def test_a_constraint_lie_gains_nothing_over_an_honest_permissive_field():
@@ -985,6 +1420,78 @@ def test_a_constraint_lie_nothing_reads_is_inert_rather_than_corrupt():
     assert canonical_recipe_contributions_json(
         list(_sync_executor(lying))
     ) == canonical_recipe_contributions_json(list(_sync_executor(honest)))
+
+
+class _OmissionLieInputV1(SyncRecipeInputV1):
+    """Lies by OMISSION: returns ``()`` for a ``min_length=1`` tuple.
+
+    Nothing is smuggled — this is the case contribution re-validation structurally
+    cannot cover, because there is no value crossing into composition to re-check.
+    """
+
+    @field_validator("component_slots", mode="after")
+    @classmethod
+    def _omit(cls, value):
+        return ()
+
+
+def test_an_omission_lie_is_caught_by_the_declared_constraints_not_by_revalidation():
+    """The second half of the §12 containment claim.
+
+    Re-validating returned contributions cannot see a contribution that was never
+    returned, so an omission needs a different gate — the declared
+    ``ConstraintRequirement``s, evaluated after composition. Asserted here because
+    the §12 argument named only the first mechanism, which does not reach this
+    case (issue #145, Codex review).
+    """
+    lying = _OmissionLieInputV1.model_validate(_VALID_INPUT)
+    assert lying.component_slots == ()  # the lie took effect...
+    lying.model_dump(warnings="error")  # ...and the sub-tree sweep cannot see it
+
+    # The executor happily emits FEWER contributions — nothing invalid to re-check.
+    #
+    # COUNTS, not a set of kinds. A set-of-kinds assertion is blind to a PARTIAL
+    # omission (drop some slots, keep one), which is the more likely real defect;
+    # it only discriminates here because ``_VALID_INPUT`` happens to carry exactly
+    # one slot (issue #145, live QA).
+    honest = SyncRecipeInputV1.model_validate(_VALID_INPUT)
+    produced = _sync_executor(lying)
+    expected = _sync_executor(honest)
+    assert len(produced) < len(expected), (len(produced), len(expected))
+    assert "component_contribution" not in {c.contribution_kind for c in produced}
+
+    # The full funnel still refuses it, at the constraint stage.
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.recipe",
+                    invocation_id="i1",
+                    raw_input=_VALID_INPUT,
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=_lying_registry(_OmissionLieInputV1),
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_CONSTRAINT_FAILED
+
+    # EXPLICIT CONTROL. The honest input also fails against this empty catalog —
+    # with a DIFFERENT code. That difference is the only thing making the
+    # assertion above depend on the lie, and it was previously left implicit,
+    # which is how the earlier version of this fixture produced a false pass.
+    with pytest.raises(RecipeError) as control:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.recipe",
+                    invocation_id="i1",
+                    raw_input=_VALID_INPUT,
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=_lying_registry(SyncRecipeInputV1),
+        )
+    assert control.value.diagnostics[0].code != RECIPE_CONSTRAINT_FAILED
 
 
 def test_every_production_input_model_survives_the_sub_tree_check():

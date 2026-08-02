@@ -4688,3 +4688,30 @@ def test_a_recursive_open_model_is_still_rejected_when_its_ref_dead_ends():
 
     RecursiveClosed.model_rebuild()
     registry_module._check_input_model_forbids_extras("probe", RecursiveClosed)
+
+
+def test_the_shared_walker_reaches_nested_and_sequence_positions():
+    """Both compiled-schema gates depend on this one traversal, so it is pinned
+    directly rather than only through the checks that use it."""
+    from typing import Tuple as TupleType
+
+    from pydantic import ConfigDict
+
+    class Leaf(RecipeInputBase):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        marker: str = "x"
+
+    class Model(RecipeInputBase):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        one: Leaf = Leaf()
+        many: TupleType[Leaf, ...] = ()
+
+    nodes = list(registry_module._iter_core_schema_nodes(Model))
+    assert nodes, "the walker yielded nothing"
+    # Every field container in the tree, including the ones below the root.
+    field_names = set()
+    for node in nodes:
+        fields = node.get("fields")
+        if isinstance(fields, dict):
+            field_names.update(fields)
+    assert {"one", "many", "marker"} <= field_names, sorted(field_names)

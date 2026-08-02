@@ -25,7 +25,7 @@ import importlib
 import inspect
 import json
 from types import MappingProxyType
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from ..build_info import (
     PACKAGE_NAME,
@@ -281,12 +281,22 @@ def _is_bounded_subschema(subschema: Any, depth: int = 0) -> bool:
     )
 
 
-#: Core-schema node types that REPLACE the validation they wrap rather than
-#: running alongside it. ``mode="wrap"`` receives the handler and may simply not
-#: call it; ``mode="plain"`` never had one. ``before`` and ``after`` are absent
-#: on purpose: a before-validator folds into the model node and model validation
-#: still runs after it, and an after-validator runs once validation already has —
-#: both measured, neither can stop extras being rejected.
+
+#: Core-schema node types whose validator may return WITHOUT invoking the handler,
+#: so what the model actually does with extras cannot be read off the schema.
+#:
+#: RETIREMENT PENDING, and deliberately not done in this change: live QA drove ten
+#: wrap/plain attacks end-to-end with this set emptied and the engine's value-first
+#: check caught every one, so the ban is redundant — and it false-rejects
+#: ``AnyUrl``, ``IPv4Address``, ``IPv4Network`` and ``re.Pattern``, which compile to
+#: these node types for entirely honest reasons. Removing it deletes roughly
+#: fifteen tests that encode four review rounds of findings, so it belongs in its
+#: own delta with its own review rather than riding along on an unrelated fix.
+#:
+#: SOON rather than eventually, though: the workaround an author reaches for is
+#: plain ``str``, and for ``SecretStr`` that silently loses repr redaction as well
+#: as validation — a security check pushing authors off the secure type
+#: (issue #145, live QA r37/r38).
 _BYPASS_CAPABLE_NODES = frozenset({"function-wrap", "function-plain"})
 
 #: Keys whose values are not schema and must not be walked as if they were.
@@ -355,6 +365,55 @@ def _resolve_core_ref(node: Any, definitions: Mapping[str, Any], budget: int = 1
         node = definitions.get(node.get("schema_ref"))
         budget -= 1
     return node
+
+
+def _iter_core_schema_nodes(model: Any) -> Iterator[Any]:
+    """Every node in a model's compiled core schema, once.
+
+    Shared by both compiled-schema gates ON PURPOSE. They ask different questions
+    but need the identical traversal, and that traversal has been wrong three
+    separate times — walking data as schema, pruning the ``fields`` container,
+    dead-ending on a ``definition-ref``. A second hand-rolled copy would be a
+    fourth chance to get it wrong, in a place where getting it wrong is silent
+    (issue #145).
+
+    Two rules earn their keep here:
+
+    * ``type`` is a NODE KIND only when this dict is a schema node. ``fields``
+      maps a user-chosen field NAME to its node, so a field literally called
+      ``type`` makes ``node["type"]`` a dict; guard the checks, never the descent.
+    * ``_NON_SCHEMA_KEYS`` applies only to schema nodes, for the same reason.
+    """
+    root = getattr(model, "__pydantic_core_schema__", None)
+    definitions: Dict[str, Any] = {}
+    if isinstance(root, dict):
+        for entry in root.get("definitions") or ():
+            if isinstance(entry, dict) and isinstance(entry.get("ref"), str):
+                definitions[entry["ref"]] = entry
+
+    seen: set = set()
+    stack: List[Any] = [root]
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict) or id(node) in seen:
+            continue
+        seen.add(id(node))
+
+        node_type = node.get("type")
+        if isinstance(node_type, str) and node_type == "definition-ref":
+            stack.append(_resolve_core_ref(node, definitions))
+            continue
+
+        yield node
+
+        is_schema_node = isinstance(node_type, str)
+        for key, value in node.items():
+            if is_schema_node and key in _NON_SCHEMA_KEYS:
+                continue
+            if isinstance(value, dict):
+                stack.append(value)
+            elif isinstance(value, list):
+                stack.extend(item for item in value if isinstance(item, dict))
 
 
 def _check_input_model_forbids_extras(recipe_id: str, model: Any) -> None:
@@ -426,44 +485,17 @@ def _check_input_model_forbids_extras(recipe_id: str, model: Any) -> None:
     registration, where the author can act on it, and it is the only one of the
     two that runs before a recipe is ever invoked (issue #145, live QA).
     """
-    root = getattr(model, "__pydantic_core_schema__", None)
-    definitions: Dict[str, Any] = {}
-    if isinstance(root, dict):
-        for entry in root.get("definitions") or ():
-            if isinstance(entry, dict) and isinstance(entry.get("ref"), str):
-                definitions[entry["ref"]] = entry
-
-    seen: set = set()
-    stack: List[Any] = [root]
     learned = False
-    while stack:
-        node = stack.pop()
-        if not isinstance(node, dict) or id(node) in seen:
-            continue
-        seen.add(id(node))
-
-        # ``type`` is only a NODE KIND when this dict is a schema node. Some of
-        # the dicts here are CONTAINERS keyed by user-controlled names —
-        # ``fields`` maps field name to field node — so a model with a field
-        # literally called ``type`` makes ``node["type"]`` a dict, and a
-        # membership test on it raises ``TypeError: unhashable type``. Guard the
-        # CHECKS, never the descent: an earlier version returned early here and
-        # silently pruned every field subtree, which is precisely where the
-        # nested-wrap case lives (issue #145).
+    for node in _iter_core_schema_nodes(model):
         node_type = node.get("type")
-        if isinstance(node_type, str):
-            if node_type == "definition-ref":
-                stack.append(_resolve_core_ref(node, definitions))
-                continue
-
-            if node_type in _BYPASS_CAPABLE_NODES:
-                raise ValueError(
-                    f"{recipe_id!r} input_model uses a {node_type!r} validator "
-                    "(mode='wrap' or mode='plain'); a recipe input model may not, "
-                    "because such a validator may return without invoking its "
-                    "handler and closedness then cannot be determined from the "
-                    "compiled schema. Use mode='before' or mode='after'."
-                )
+        if isinstance(node_type, str) and node_type in _BYPASS_CAPABLE_NODES:
+            raise ValueError(
+                f"{recipe_id!r} input_model uses a {node_type!r} validator "
+                "(mode='wrap' or mode='plain'); a recipe input model may not, "
+                "because such a validator may return without invoking its "
+                "handler and closedness then cannot be determined from the "
+                "compiled schema. Use mode='before' or mode='after'."
+            )
 
         config = node.get("config")
         if isinstance(config, dict) and "extra_fields_behavior" in config:
@@ -474,22 +506,6 @@ def _check_input_model_forbids_extras(recipe_id: str, model: Any) -> None:
                     f"(model_config extra='forbid'); its compiled validator says "
                     f"{config['extra_fields_behavior']!r}"
                 )
-
-        # The exclusion list applies ONLY to schema nodes. In a user-keyed
-        # CONTAINER — ``fields`` maps a field's name to its node — those same
-        # strings are field names, so filtering here pruned the entire subtree of
-        # any field called ``config``, ``metadata`` or ``default``, and a nested
-        # handler-skipping validator under such a field was never seen. A node is
-        # identified by having a string ``type``; anything else is a container
-        # and every value in it is walked (issue #145, Codex review).
-        is_schema_node = isinstance(node_type, str)
-        for key, value in node.items():
-            if is_schema_node and key in _NON_SCHEMA_KEYS:
-                continue
-            if isinstance(value, dict):
-                stack.append(value)
-            elif isinstance(value, list):
-                stack.extend(item for item in value if isinstance(item, dict))
 
     if not learned:
         # FAIL CLOSED. An unreadable core schema means the gate learned nothing,

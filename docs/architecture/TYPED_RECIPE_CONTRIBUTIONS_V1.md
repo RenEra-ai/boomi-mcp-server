@@ -373,8 +373,9 @@ names an object key absent after all object additions.
 1. resolve the descriptor at an exact version
 2. preflight declared capability requirements
 3. preflight declared prerequisites — recipe **and** execution-context
-4. forbidden-shape scan, the strict input model, then **`type(validated) is model`** and a
-   **`model_dump(warnings="error")`** sweep of everything below it
+4. forbidden-shape scan, the strict input model, then **`type(validated) is model`**, no
+   instance extras, and every stored value checked against its declared annotation by an
+   adapter **the engine built**
 5. run **only** the registered callable — never caller-provided code
 6. re-validate every returned value as a **declared** contribution type
 7. run it a second time and byte-compare — nondeterminism is a hard failure
@@ -404,13 +405,58 @@ classifying what ran, and by exact type — a subclass declaring `extra="allow"`
 **The root type is only the outermost layer of that boundary.** The same replacement one level
 down — a nested model's `after`, or a `field_validator` — swaps the value at *its* position,
 and pydantic does not re-check it, so the registered outer type survives while an ordinary
-declared field holds the caller's stashed mapping. That one reaches the surfaces an honest
-executor actually reads: `inp.some_field` and `model_dump()` both return it. The sweep asks
-**pydantic's own serializer**, which already knows every declared type in the tree, instead of
-walking `model_fields` and re-deriving Union / Optional / `Tuple[X, ...]` / Literal semantics by
-hand — the program-analysis mistake this gate has already made twice. A *subclass* in a field
-still does not warn, because the declared type's schema serializes it and drops the extras;
-that residue is the attribute-only channel in §12.
+declared field holds the caller's stashed mapping. That reaches the surface an honest executor
+actually reads: every production executor consumes its input by attribute
+(`inp.source_connection_ref`).
+
+So the engine walks the **values**, not the schema: each stored value is validated against its
+declared annotation by a `TypeAdapter` **the engine built**, and any instance carrying
+`__pydantic_extra__` is refused.
+
+The walk recurses into *any* element of a container, not only the ones that are already models,
+because the elements of a container are not the leaves. A first version tested
+`isinstance(item, BaseModel)` there and so stopped at one level: `Tuple[Model, ...]` was covered
+while `Dict[str, List[Model]]` and `Tuple[Tuple[Model, ...], ...]` were not, and a model used as
+a mapping **key** was never examined at all. Pydantic dataclasses get their own branch — one is
+neither a `BaseModel` nor a container, so a model reached through a dataclass field was walked
+straight past (`is_dataclass` covers stdlib dataclasses too).
+
+Each value is checked **strictly**, because the walk runs *after* validation: pydantic already
+did any coercion, so a stored value should already BE its declared type. Lax mode re-permitted
+that coercion and accepted `"5"` for an `int`, a list for a `Tuple[str, ...]`, and an ISO string
+for a `datetime` — and worse, it *consumed* a generator stored in a sequence field, reporting no
+mismatch and leaving the field exhausted. A check must not damage what it inspects. Cost is ~10 µs per invocation against ~2.5 µs for `model_validate` — 4x the
+validation it guards, and ~7x the `model_dump` sweep it replaced.
+
+That the adapters are the engine's own is the whole design, and it is the conclusion of five
+retired checks rather than a preference:
+
+| retired check | defeated by |
+|---|---|
+| `model_config["extra"]` | a mutable class attribute, read at check time, validator compiled at class creation |
+| `ValidationError.from_exception_data` | a predicate over an object the author constructs — `type` and `loc` are both author-chosen |
+| classify `function-wrap` by whether it reaches a model | undecidable from the schema; defeated four ways |
+| `ser["function"].__module__` | a plain writable attribute; also matches third-party `pydantic_*` modules |
+| ban any ser schema, read from `__pydantic_core_schema__` | that attribute is itself writable — assigning a closed twin's schema after class creation passes every registration gate while the compiled validator still accepts extras |
+
+**The class is exhausted: every attribute of the author's class is writable, and registration
+runs after class creation.** What an author cannot reach into is an adapter the engine
+constructs from the declared annotation, applied to the value that actually arrived. A masking
+serializer no longer matters, because nothing asks it anything.
+
+Removing the serializer ban also removed false rejections it had introduced — `SecretStr` and
+`pathlib.Path` register again, and `SecretStr` mattered: it is the type an author *should* reach
+for on a sensitive input, so refusing it pushed them toward plain `str`.
+
+**Known, measured, still open:** the wrap/plain *validator* ban refuses `AnyUrl`,
+`IPv4Address`, `IPv4Network`, `re.Pattern` and `deque`, because each compiles to a
+`function-plain`/`function-wrap` validator node. That over-fire predates the value-first check
+and is not fixed by it. The value-first check appears to subsume what that ban guards — an
+object of exactly the registered type, with no extras, whose every field matches its
+annotation, is indistinguishable from an honestly validated one — but removing a gate that took
+four review rounds to get right is a separate decision with its own evidence, not a side effect
+of this one. `test_the_wrap_ban_still_over_fires_on_these` pins the current cost so it stays
+visible.
 
 This check moves one failure from **build time to first use**, and that is inherent rather than
 an oversight: what a validator returns is a runtime fact and cannot be read off the schema at
@@ -567,19 +613,30 @@ that was dropped. Each states what changed and why.
   package-level constant is `__version__ = "0.1.0"` — a different fact. There is nothing
   duplicated to centralize, and wiring the package version in would misreport the server
   version.
-* **Re-checking field CONSTRAINTS after validation.** `model_dump(warnings="error")` compares a
+* **Re-checking field CONSTRAINTS after validation.** The step-4 check compares a
   stored value against its declared *type*, not against its constraints, so a
   `field_validator(mode="after")` that returns another `str` for a `Literal["a"]` or
   pattern-constrained field is not caught. Three measurements say leave it:
 
-  **Containment — the check would be redundant where it matters.** The contribution models
-  re-validate every constrained value that crosses into the composition layer, independently of
-  the input model. A lie about a component key or a ref is rejected at `_run_executor` with
+  **Containment — the check would be redundant where it matters.** Two later gates already
+  cover it, and they cover different things:
+
+  *Values that flow* are re-validated by the contribution models, independently of the input
+  model. A lie about a component key or a ref is rejected at `_run_executor` with
   `RECIPE_CONTRIBUTION_INVALID` — measured for a padded `process_key`, one carrying a control
-  character, and an emptied `source_connection_ref`. The only survivor found was `version`
-  violating `^1$`, and it survives precisely because nothing downstream reads it: inert, not
-  corrupt. So the re-check would duplicate an existing gate for the values that flow and cover
-  only values that do not.
+  character, and an emptied `source_connection_ref`.
+
+  *Values that do not flow* are outside that gate by construction: re-validating what a recipe
+  returned cannot see what it never returned. A `component_slots` validator returning `()` — a
+  `min_length=1` lie — passes the sub-tree sweep (an empty tuple is the right type) and produces
+  a run with every `component_contribution` missing. What refuses it is the declared
+  `ConstraintRequirement`s at funnel step 12: `RECIPE_CONSTRAINT_FAILED`. Naming only the first
+  mechanism here overstated what re-validation does; both are needed to make the claim true.
+
+  The only survivor found across both is `version` violating `^1$`, and it survives precisely
+  because nothing downstream reads it: inert, not corrupt. So the re-check would duplicate an
+  existing gate for the values that flow, a different gate for the ones that do not, and cover
+  only values with no consequence.
 
   **Capability — the lie reaches nothing a truthful declaration cannot.** The sub-tree sweep
   confines any replacement to the declared *runtime type*, and every runtime type has a
@@ -603,13 +660,11 @@ that was dropped. Each states what changed and why.
   value against a published schema, and the skew comparison is schema-to-schema, so a lying
   model's hash is stable and compares correctly. The misled party is a human reader, who has the
   validator in front of them in the same class.
-* **Closing the author-cooperation side channels.** Four measured channels move caller data
-  past every check, and all four are left open deliberately:
+* **Closing the author-cooperation side channels.** Three measured channels move caller data
+  past every check, and all three are left open deliberately:
   a `mode="before"` validator stashing the raw mapping in a module global; an `after`
   validator writing it to `__pydantic_extra__`; the same via `object.__setattr__` on
-  `__dict__`; and a custom `field_serializer` that returns a benign string for a field whose
-  validator swapped in a mapping, which suppresses the serializer warning the sub-tree sweep
-  keys on. In each case the returned object is exactly the registered type, `model_dump()`
+  `__dict__`. In each case the returned object is exactly the registered type, `model_dump()`
   and the declared fields are clean, and the data is readable only by an executor that goes
   looking for it under a name the model author chose. **Both halves are registered code,
   authored by the same person and hashed into `implementation_sha256`** — this is a covert

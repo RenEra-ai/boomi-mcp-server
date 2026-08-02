@@ -34,8 +34,11 @@ would have opened exactly that channel.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+from pydantic import BaseModel, TypeAdapter
 
 from ..errors import (
     RECIPE_CONSTRAINT_FAILED,
@@ -162,24 +165,31 @@ def _validate_input(descriptor: RecipeDescriptorV1, registry: RecipeRegistry, ra
     # A ``mode="after"`` validator on a NESTED model, or a ``field_validator``,
     # replaces the value at ITS position and pydantic does not re-check it, so the
     # registered outer type survives intact while a declared field holds the
-    # caller's stashed mapping. Unlike the attribute-only channels this one lands
-    # on the surfaces an ordinary executor reads: ``inp.some_field`` and
-    # ``model_dump()`` both return it.
+    # caller's stashed mapping. That lands on the surfaces an ordinary executor
+    # reads: ``inp.some_field`` returns it directly.
     #
-    # ASK PYDANTIC rather than re-implement it. Its serializer already knows every
-    # declared type in the tree, and ``warnings="error"`` promotes exactly the
-    # "field holds a value its annotation does not describe" case to an exception.
-    # Walking ``model_fields`` and comparing annotations by hand would mean
-    # re-deriving Union, Optional, Tuple[X, ...] and Literal semantics — the
-    # program-analysis mistake this gate has already made twice.
+    # This check uses the ENGINE'S OWN adapters, and that is the whole point.
     #
-    # LIMIT, stated: a SUBCLASS in a field does not warn, because the declared
-    # type's schema serializes it and simply drops the extras. That leaves the
-    # same attribute-only channel documented in §12 — readable only by an
-    # executor reaching for an undeclared name, never via model_dump()
-    # (issue #145, Codex review).
+    # An earlier version asked ``model_dump(warnings="error")`` — delegating the
+    # question to the model's serializer. Live QA then defeated it three ways, and
+    # the third is the one that settles the design: assigning
+    # ``__pydantic_serializer__`` (or ``__pydantic_core_schema__``) AFTER class
+    # creation defeats every registration-time gate, because registration runs
+    # later and those attributes are plain writable class attributes. Four checks
+    # in this issue were retired for the same reason — ``model_config["extra"]``,
+    # ``ValidationError.from_exception_data``, ``function.__module__``, and the
+    # serializer ban itself. **The class of "read an attribute of the author's
+    # class" is exhausted; every one of them is writable.** What is not writable
+    # is the value the caller's data actually landed in, checked by an adapter the
+    # engine builds. Nothing an input model declares can reach into that.
+    #
+    # It is checked against ``field.annotation`` WITHOUT its constraint metadata,
+    # deliberately: type confusion is the threat here, constraint re-checking is
+    # covered by later gates (§12), and re-attaching metadata reintroduces the
+    # ``Json[...]`` misfire where the stored value is the parsed object rather than
+    # the JSON string the annotation expects (issue #145, live QA).
     try:
-        validated.model_dump(warnings="error")
+        _assert_declared_shape(validated)
     except Exception:  # noqa: BLE001 — the message can echo the offending value
         raise recipe_error(
             RECIPE_INPUT_INVALID,
@@ -188,6 +198,90 @@ def _validate_input(descriptor: RecipeDescriptorV1, registry: RecipeRegistry, ra
             recipe_versions=(descriptor.recipe_version,),
         ) from None
     return validated
+
+
+#: Adapters the ENGINE built, keyed by annotation. Never an adapter the input
+#: model supplied, and never one derived from a class attribute an author can
+#: reassign after class creation.
+_DECLARED_SHAPE_ADAPTERS: Dict[Any, Any] = {}
+
+
+def _declared_shape_adapter(annotation: Any) -> Any:
+    try:
+        cached = _DECLARED_SHAPE_ADAPTERS.get(annotation)
+    except TypeError:  # an unhashable annotation cannot be cached; build each time
+        return TypeAdapter(annotation)
+    if cached is None:
+        cached = TypeAdapter(annotation)
+        _DECLARED_SHAPE_ADAPTERS[annotation] = cached
+    return cached
+
+
+def _assert_declared_shape(value: Any, annotation: Any = None, _seen: Optional[set] = None) -> None:
+    """Every value in the tree is what its declaration says, checked value-first.
+
+    VALUE-FIRST, not schema-first, is the load-bearing choice. Walking the model's
+    schema means reading something the author can rewrite after the class exists;
+    walking the values reads what the caller's data actually landed in.
+
+    Raises anything at all on a mismatch — the caller converts it to a value-free
+    diagnostic, because a pydantic message can echo the offending value.
+    """
+    if _seen is None:
+        _seen = set()
+
+    if annotation is not None:
+        # STRICT, because this runs AFTER validation. Every stored value should
+        # already BE its declared type — pydantic did any coercion at
+        # ``model_validate`` time — so re-permitting coercion here only re-opens
+        # the door: lax mode accepted ``"5"`` for an ``int``, a list for a
+        # ``Tuple[str, ...]``, and an ISO string for a ``datetime``.
+        #
+        # It also stops the check from DAMAGING the value it inspects. Lax mode
+        # coerced a generator stored in a ``Tuple[str, ...]`` field into a tuple,
+        # reported no mismatch, and left the field holding an exhausted
+        # generator — a miss and a destructive side effect in one. Strict refuses
+        # it and leaves it unread (issue #145, live QA).
+        _declared_shape_adapter(annotation).validate_python(value, strict=True)
+
+    if id(value) in _seen:
+        return
+
+    if isinstance(value, BaseModel):
+        _seen.add(id(value))
+        # Undeclared keys on the INSTANCE. A model whose compiled validator allows
+        # extras can be made to look closed at registration by assigning a closed
+        # twin's ``__pydantic_core_schema__``; the instance it produces cannot lie
+        # about what it is carrying (issue #145, live QA).
+        if getattr(value, "__pydantic_extra__", None):
+            raise ValueError("validated input carries undeclared keys")
+        for name, field in type(value).model_fields.items():
+            _assert_declared_shape(getattr(value, name, None), field.annotation, _seen)
+        return
+
+    # A pydantic dataclass is neither a ``BaseModel`` nor a container, so an
+    # earlier version walked straight past one holding a model.
+    if is_dataclass(value) and not isinstance(value, type):
+        _seen.add(id(value))
+        for field in dataclass_fields(value):
+            _assert_declared_shape(getattr(value, field.name, None), None, _seen)
+        return
+
+    # RECURSE INTO ANY ELEMENT, not only the ones that are already models. An
+    # earlier version tested ``isinstance(item, BaseModel)`` here, which stopped
+    # at ONE container level: ``Tuple[Model, ...]`` was covered but
+    # ``Dict[str, List[Model]]`` and ``Tuple[Tuple[Model, ...], ...]`` were not,
+    # and neither was a model used as a mapping KEY. The elements of a container
+    # are not the leaves of the walk (issue #145, live QA).
+    if isinstance(value, (list, tuple, set, frozenset, deque)):
+        _seen.add(id(value))
+        for item in value:
+            _assert_declared_shape(item, None, _seen)
+    elif isinstance(value, Mapping):
+        _seen.add(id(value))
+        for key, item in value.items():
+            _assert_declared_shape(key, None, _seen)
+            _assert_declared_shape(item, None, _seen)
 
 
 def _pointer(path: Tuple[Any, ...]) -> str:
