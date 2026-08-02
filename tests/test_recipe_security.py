@@ -1763,3 +1763,161 @@ def test_the_recipe_secret_list_detects_everything_processir_does():
 
     for token in _FORBIDDEN_SECRET_KEY_SUBSTRINGS:
         assert any(mine in token for mine in _FORBIDDEN_KEY_SUBSTRINGS), token
+
+
+# ---------------------------------------------------------------------------
+# Three ways a value can be wrong that "the adapter accepted it" does not see
+# (issue #145, Codex review)
+# ---------------------------------------------------------------------------
+
+
+class _DeclaredKeysOnlyLeaf(RecipeInputBase):
+    """Returns a dict of ONLY declared keys, so the adapter happily accepts it."""
+
+    ok: str = "x"
+
+    @model_validator(mode="after")
+    def _to_dict(self):
+        return {"ok": self.ok}
+
+
+class _HasLeafInputV1(RecipeInputBase):
+    leaf: _DeclaredKeysOnlyLeaf = _DeclaredKeysOnlyLeaf()
+
+
+class _HasLeafTupleInputV1(RecipeInputBase):
+    leaves: Tuple[_DeclaredKeysOnlyLeaf, ...] = ()
+
+
+class _HasLeafDictInputV1(RecipeInputBase):
+    leaves: Dict[str, _DeclaredKeysOnlyLeaf] = {}
+
+
+@pytest.mark.parametrize(
+    "model,payload",
+    [
+        (_HasLeafInputV1, {"leaf": {"ok": "y"}}),
+        (_HasLeafTupleInputV1, {"leaves": [{"ok": "y"}]}),
+        (_HasLeafDictInputV1, {"leaves": {"k": {"ok": "y"}}}),
+    ],
+    ids=["field", "inside_a_tuple", "as_a_mapping_value"],
+)
+def test_a_mapping_standing_in_for_a_model_is_refused(model, payload):
+    """Successful conversion is not proof.
+
+    Strict mode still admits a mapping where a model is declared, and then runs
+    that model's validators — which return the dict again. The adapter therefore
+    "succeeds", its result is discarded, and the stored value was never a model.
+    The tuple case additionally needs the element annotation to be carried down.
+    """
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    instance = model.model_validate(dict(payload))
+    if hasattr(instance, "leaf"):
+        stored = instance.leaf
+    elif isinstance(instance.leaves, dict):
+        stored = next(iter(instance.leaves.values()))
+    else:
+        stored = instance.leaves[0]
+    assert isinstance(stored, dict), "fixture drifted; nothing is being smuggled"
+
+    with pytest.raises(Exception):
+        _assert_declared_shape(instance)
+
+
+def test_a_dataclass_field_is_checked_against_its_declared_type():
+    """The dataclass branch recursed with ``annotation=None``, so its fields were
+    visited and never judged — a mapping sat in a ``str`` field, readable at
+    ``inp.holder.label``."""
+    from pydantic.dataclasses import dataclass as pydantic_dataclass
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    @pydantic_dataclass(frozen=True, config=ConfigDict(extra="forbid"))
+    class Holder:
+        label: str = "x"
+
+        @field_validator("label", mode="after")
+        @classmethod
+        def _swap(cls, value):
+            return dict(_SMUGGLED_RAW) or value
+
+    class DataclassFieldInputV1(RecipeInputBase):
+        holder: Holder = Holder()
+
+        _stash = model_validator(mode="before")(classmethod(_stash_before))
+
+    _SMUGGLED_RAW.clear()
+    raw = {"holder": {"label": "y"}, "smuggled": "SENTINEL-SQL-SELECT-SECRETS"}
+    instance = DataclassFieldInputV1.model_validate(dict(raw))
+
+    # Anti-vacuity: the caller's key really is sitting in a declared ``str``.
+    assert "SENTINEL-SQL-SELECT-SECRETS" in str(instance.holder.label)
+
+    with pytest.raises(Exception):
+        _assert_declared_shape(instance)
+
+
+def test_a_lazy_iterable_is_refused_rather_than_consumed():
+    """``Iterable[str]`` validates LAZILY.
+
+    Pydantic returns a ``ValidatorIterator`` without inspecting an element, so a
+    replayable custom iterable yielding caller mappings reached the executor
+    untouched — and identically on both determinism runs. Consuming it to look
+    would destroy it, so the gate refuses what it cannot inspect.
+    """
+    from typing import Iterable
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class Replayable:
+        def __init__(self, items):
+            self._items = list(items)
+
+        def __iter__(self):
+            return iter(self._items)
+
+    class LazyInputV1(RecipeInputBase):
+        seq: Iterable[str] = ()
+
+    payload = Replayable([{"smuggled": "SENTINEL-SQL-SELECT-SECRETS"}])
+    instance = LazyInputV1.model_construct(seq=payload)
+
+    with pytest.raises(Exception):
+        _assert_declared_shape(instance)
+
+    # And it was refused WITHOUT being drained.
+    assert list(payload) == [{"smuggled": "SENTINEL-SQL-SELECT-SECRETS"}]
+
+
+def test_honest_container_and_union_shapes_still_pass():
+    """Firing control for the annotation carrying, which is the newest machinery
+    and the one most likely to over-fire."""
+    from typing import Optional, Union
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class Leaf(RecipeInputBase):
+        ok: str = "x"
+
+    class HonestInputV1(RecipeInputBase):
+        one: Leaf = Leaf()
+        many: Tuple[Leaf, ...] = ()
+        pair: Tuple[str, int] = ("a", 1)
+        mapping: Dict[str, Leaf] = {}
+        listed: List[Leaf] = []
+        maybe: Optional[Leaf] = None
+        either: Union[str, int] = "a"
+
+    instance = HonestInputV1.model_validate(
+        {
+            "one": {"ok": "a"},
+            "many": [{"ok": "b"}],
+            "pair": ("a", 1),
+            "mapping": {"k": {"ok": "c"}},
+            "listed": [{"ok": "d"}],
+            "maybe": {"ok": "e"},
+            "either": 3,
+        }
+    )
+    _assert_declared_shape(instance)  # must not raise

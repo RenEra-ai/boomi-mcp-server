@@ -36,7 +36,20 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import (
+    Annotated,
+    Any,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from pydantic import BaseModel, TypeAdapter
 
@@ -217,6 +230,114 @@ def _declared_shape_adapter(annotation: Any) -> Any:
     return cached
 
 
+#: Containers the walk can enumerate without consuming or mutating them.
+_WALKABLE_CONTAINERS = (list, tuple, set, frozenset, deque)
+
+
+#: Annotation introspection is pure and repeats for every value at a position,
+#: so it is memoised. Unhashable annotations fall through and are recomputed.
+_UNWRAP_CACHE: Dict[Any, Tuple[Any, ...]] = {}
+_ELEMENT_CACHE: Dict[Any, Any] = {}
+
+
+def _cached(cache: Dict[Any, Any], key: Any, build):
+    try:
+        hit = cache.get(key, _MISSING)
+    except TypeError:
+        return build()
+    if hit is _MISSING:
+        hit = build()
+        cache[key] = hit
+    return hit
+
+
+_MISSING = object()
+
+
+def _unwrap_annotation(annotation: Any) -> Tuple[Any, ...]:
+    return _cached(_UNWRAP_CACHE, annotation, lambda: _unwrap_annotation_uncached(annotation))
+
+
+def _unwrap_annotation_uncached(annotation: Any) -> Tuple[Any, ...]:
+    """The concrete options an annotation admits, through ``Annotated`` and unions.
+
+    Deliberately small. This is structural introspection of a DECLARATION — total
+    and deterministic for the forms in use — not the "does this validator reach a
+    model" question that proved undecidable. Anything it does not recognise is
+    returned as-is, and the caller treats unrecognised as "no opinion".
+    """
+    if get_origin(annotation) is Annotated:
+        args = get_args(annotation)
+        return _unwrap_annotation(args[0]) if args else ()
+    if get_origin(annotation) is Union:
+        options: List[Any] = []
+        for arg in get_args(annotation):
+            options.extend(_unwrap_annotation(arg))
+        return tuple(options)
+    return (annotation,)
+
+
+def _assert_runtime_class(value: Any, annotation: Any) -> None:
+    """If every option the annotation admits is a class, the value must be one."""
+    options = _unwrap_annotation(annotation)
+    if not options:
+        return
+    classes: List[type] = []
+    for option in options:
+        if option is type(None):
+            classes.append(type(None))
+            continue
+        if get_origin(option) is not None or not isinstance(option, type):
+            return  # a parametrised or unrecognised form; the adapter is the check
+        classes.append(option)
+    if not any(isinstance(value, cls) for cls in classes):
+        raise ValueError("validated input holds a value of an undeclared class")
+
+
+def _dataclass_field_types(cls: Any) -> Dict[str, Any]:
+    try:
+        return dict(get_type_hints(cls))
+    except Exception:  # noqa: BLE001 — unresolvable hints must not pass silently
+        return {field.name: None for field in dataclass_fields(cls)}
+
+
+def _element_annotations(annotation: Any) -> Optional[Tuple[Any, ...]]:
+    return _cached(_ELEMENT_CACHE, annotation, lambda: _element_annotations_uncached(annotation))
+
+
+def _element_annotations_uncached(annotation: Any) -> Optional[Tuple[Any, ...]]:
+    for option in _unwrap_annotation(annotation):
+        args = get_args(option)
+        if get_origin(option) is not None and args:
+            return args
+    return None
+
+
+def _positional(element: Optional[Tuple[Any, ...]], index: int) -> Any:
+    if not element:
+        return None
+    if len(element) == 2 and element[1] is Ellipsis:
+        return element[0]
+    if len(element) == 1:
+        return element[0]
+    return element[index] if index < len(element) else None
+
+
+def _mapping_annotations(annotation: Any) -> Tuple[Any, Any]:
+    element = _element_annotations(annotation)
+    if element and len(element) == 2 and element[1] is not Ellipsis:
+        return element[0], element[1]
+    return None, None
+
+
+def _is_opaque_iterable(value: Any) -> bool:
+    if isinstance(value, (str, bytes, bytearray)):
+        return False
+    if isinstance(value, _WALKABLE_CONTAINERS) or isinstance(value, Mapping):
+        return False
+    return hasattr(value, "__iter__") or hasattr(value, "__next__")
+
+
 def _assert_declared_shape(value: Any, annotation: Any = None, _seen: Optional[set] = None) -> None:
     """Every value in the tree is what its declaration says, checked value-first.
 
@@ -244,6 +365,15 @@ def _assert_declared_shape(value: Any, annotation: Any = None, _seen: Optional[s
         # it and leaves it unread (issue #145, live QA).
         _declared_shape_adapter(annotation).validate_python(value, strict=True)
 
+        # SUCCESSFUL CONVERSION IS NOT PROOF. Strict mode still admits a mapping
+        # where a model is declared, and it then runs that model's validators —
+        # so a nested ``after`` returning a dict of only DECLARED keys made the
+        # adapter "succeed" and hand back a dict. The adapter's result is
+        # discarded, so nothing noticed that the stored value was never a model.
+        # What the annotation admits is a fact about the declaration; check it
+        # against the runtime class (issue #145, Codex review).
+        _assert_runtime_class(value, annotation)
+
     if id(value) in _seen:
         return
 
@@ -260,11 +390,17 @@ def _assert_declared_shape(value: Any, annotation: Any = None, _seen: Optional[s
         return
 
     # A pydantic dataclass is neither a ``BaseModel`` nor a container, so an
-    # earlier version walked straight past one holding a model.
+    # earlier version walked straight past one holding a model. Its fields carry
+    # DECLARED TYPES too — recursing with ``None`` checked nothing, and left a
+    # mapping sitting in a ``str`` field reachable at ``inp.holder.label``
+    # (issue #145, Codex review).
     if is_dataclass(value) and not isinstance(value, type):
         _seen.add(id(value))
+        hints = _dataclass_field_types(type(value))
         for field in dataclass_fields(value):
-            _assert_declared_shape(getattr(value, field.name, None), None, _seen)
+            _assert_declared_shape(
+                getattr(value, field.name, None), hints.get(field.name), _seen
+            )
         return
 
     # RECURSE INTO ANY ELEMENT, not only the ones that are already models. An
@@ -273,15 +409,29 @@ def _assert_declared_shape(value: Any, annotation: Any = None, _seen: Optional[s
     # ``Dict[str, List[Model]]`` and ``Tuple[Tuple[Model, ...], ...]`` were not,
     # and neither was a model used as a mapping KEY. The elements of a container
     # are not the leaves of the walk (issue #145, live QA).
+    #
+    # Element ANNOTATIONS are carried down as well. Without them a dict standing
+    # in for a ``Leaf`` inside ``Tuple[Leaf, ...]`` was visited but never judged.
     if isinstance(value, (list, tuple, set, frozenset, deque)):
         _seen.add(id(value))
-        for item in value:
-            _assert_declared_shape(item, None, _seen)
+        element = _element_annotations(annotation)
+        for index, item in enumerate(value):
+            _assert_declared_shape(item, _positional(element, index), _seen)
     elif isinstance(value, Mapping):
         _seen.add(id(value))
+        key_annotation, value_annotation = _mapping_annotations(annotation)
         for key, item in value.items():
-            _assert_declared_shape(key, None, _seen)
-            _assert_declared_shape(item, None, _seen)
+            _assert_declared_shape(key, key_annotation, _seen)
+            _assert_declared_shape(item, value_annotation, _seen)
+    elif _is_opaque_iterable(value):
+        # FAIL CLOSED on anything iterable the walk cannot enumerate safely.
+        # ``Iterable[str]`` validates LAZILY — pydantic hands back a
+        # ``ValidatorIterator`` without inspecting a single element — so a
+        # replayable custom iterable yielding caller mappings reached the
+        # executor untouched, twice, identically enough to pass the determinism
+        # compare. Consuming it here to look would also destroy it, so the only
+        # safe answer is to refuse it (issue #145, Codex review).
+        raise ValueError("validated input holds an iterable the gate cannot inspect")
 
 
 def _pointer(path: Tuple[Any, ...]) -> str:

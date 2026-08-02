@@ -425,7 +425,27 @@ Each value is checked **strictly**, because the walk runs *after* validation: py
 did any coercion, so a stored value should already BE its declared type. Lax mode re-permitted
 that coercion and accepted `"5"` for an `int`, a list for a `Tuple[str, ...]`, and an ISO string
 for a `datetime` — and worse, it *consumed* a generator stored in a sequence field, reporting no
-mismatch and leaving the field exhausted. A check must not damage what it inspects. Cost is ~10 µs per invocation against ~2.5 µs for `model_validate` — 4x the
+mismatch and leaving the field exhausted. A check must not damage what it inspects.
+
+Three more things the adapter alone does not settle, each found by review rather than by
+construction:
+
+* **Successful conversion is not proof.** Strict mode still admits a mapping where a model is
+  declared, and then runs that model's validators — which hand the dict back. The adapter
+  "succeeds", its result is discarded, and the stored value was never a model. So the runtime
+  class is checked against what the annotation admits, not against whether conversion worked.
+* **Element and field annotations are carried down.** A dict standing in for a `Leaf` inside
+  `Tuple[Leaf, ...]` or `Dict[str, Leaf]` was visited but never judged, and a dataclass's fields
+  were recursed with no annotation at all — leaving a mapping in a declared `str`, readable at
+  `inp.holder.label`.
+* **Anything iterable the walk cannot enumerate is refused.** `Iterable[str]` validates lazily:
+  pydantic returns a `ValidatorIterator` without inspecting an element, so a replayable custom
+  iterable yielding caller mappings passed untouched — and identically on both determinism runs.
+  Consuming it to look would destroy it, so the only safe answer is to refuse it.
+
+Cost after all of that is ~21 µs per invocation against ~2.4 µs for `model_validate`, with
+annotation introspection memoised; the adapters and the unwrapping are both built once per
+annotation. Cost is ~10 µs per invocation against ~2.5 µs for `model_validate` — 4x the
 validation it guards, and ~7x the `model_dump` sweep it replaced.
 
 That the adapters are the engine's own is the whole design, and it is the conclusion of five
