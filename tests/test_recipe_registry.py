@@ -1344,6 +1344,338 @@ def test_the_gate_walks_past_wrapper_nodes_to_find_the_model_config():
     assert wrapped_production, "no production model exercises the wrapper walk"
 
 
+def test_a_wrap_validator_that_can_skip_its_handler_fails_closed():
+    """A wrapper is not automatically passive, and this one is not.
+
+    ``mode="wrap"`` receives the handler and may simply not call it. Pydantic
+    still compiles the inner model node with ``extra_fields_behavior="forbid"``,
+    so reading the inner config accepts the model — while validation never runs,
+    ``model_validate`` returns the RAW MAPPING instead of an instance, and every
+    undeclared key reaches the executor. Whether the handler is invoked is a fact
+    about arbitrary Python, not about the schema, so the only sound answer is
+    "cannot determine" (issue #145, Codex review).
+    """
+    from typing import Any as AnyType
+
+    from pydantic import model_validator
+
+    class WrapBypass(RecipeInputBase):
+        a: str = "x"
+
+        @model_validator(mode="wrap")
+        @classmethod
+        def _wrap(cls, data: AnyType, handler) -> AnyType:
+            return data  # handler deliberately not invoked
+
+    # The inner config still says forbid — which is exactly why reading it is
+    # not enough.
+    inner = WrapBypass.__pydantic_core_schema__["schema"]
+    assert inner["config"]["extra_fields_behavior"] == "forbid"
+    # ...and the hole is real: not even a model instance comes back.
+    escaped = WrapBypass.model_validate({"a": "x", "smuggled": "value"})
+    assert isinstance(escaped, dict)
+    assert escaped["smuggled"] == "value"
+
+    with pytest.raises(ValueError, match="may return without invoking its handler"):
+        build_test_registry((_reg(input_model=WrapBypass),))
+
+
+@pytest.mark.parametrize(
+    "placement", ["nested", "two_deep", "in_list", "in_dict", "optional", "in_union"]
+)
+def test_a_wrap_validator_is_caught_wherever_it_sits(placement):
+    """The gate walks the WHOLE tree, not the root spine.
+
+    Walking only ``schema`` from the root stops at the first model config and
+    never looks at fields — so a NESTED model carrying a handler-skipping
+    ``mode="wrap"`` validator passed both gates while its field came back as a
+    raw mapping with every undeclared key intact. The JSON-schema gate cannot
+    catch it either: the nested model still publishes
+    ``additionalProperties: false``, because it really is declared closed. What
+    is bypassed is the validation, not the declaration (issue #145, Codex
+    review).
+    """
+    from typing import Any as AnyType
+    from typing import Dict as DictType
+    from typing import List as ListType
+    from typing import Optional as OptionalType
+
+    from pydantic import model_validator
+
+    class InnerWrap(RecipeInputBase):
+        b: str = "y"
+
+        @model_validator(mode="wrap")
+        @classmethod
+        def _wrap(cls, data: AnyType, handler) -> AnyType:
+            return data  # handler deliberately not invoked
+
+    if placement == "nested":
+
+        class Model(RecipeInputBase):
+            leaf: InnerWrap = InnerWrap()
+
+    elif placement == "two_deep":
+
+        class Middle(RecipeInputBase):
+            leaf: InnerWrap = InnerWrap()
+
+        class Model(RecipeInputBase):
+            holder: Middle = Middle()
+
+    elif placement == "in_list":
+
+        class Model(RecipeInputBase):
+            items: ListType[InnerWrap] = []
+
+    elif placement == "in_dict":
+
+        class Model(RecipeInputBase):
+            mapping: DictType[str, InnerWrap] = {}
+
+    elif placement == "optional":
+
+        class Model(RecipeInputBase):
+            maybe: OptionalType[InnerWrap] = None
+
+    else:
+        # A union parks the wrap in ``choices[1]`` — a LIST position. Every other
+        # placement above reaches it through dicts only, so without this case the
+        # walk's list descent is unexercised and can be deleted with the suite
+        # green (issue #145).
+        from typing import Union as UnionType
+
+        class Plain(RecipeInputBase):
+            c: str = "z"
+
+        class Model(RecipeInputBase):
+            u: UnionType[Plain, InnerWrap] = Plain()
+
+    # The ROOT config is impeccable — which is why a spine walk accepted it.
+    assert Model.__pydantic_core_schema__["config"]["extra_fields_behavior"] == "forbid"
+    with pytest.raises(ValueError, match="wraps model validation"):
+        build_test_registry((_reg(input_model=Model),))
+
+
+def test_the_nested_wrap_hole_is_invisible_to_the_schema_gate():
+    """Why the extras gate has to carry this one alone.
+
+    The nested model is genuinely declared ``extra="forbid"``, so its published
+    schema says ``additionalProperties: false`` and the schema walk has nothing
+    to object to. Only the compiled schema shows that a wrapper sits over its
+    validation.
+    """
+    from typing import Any as AnyType
+
+    from pydantic import model_validator
+
+    class InnerWrap(RecipeInputBase):
+        b: str = "y"
+
+        @model_validator(mode="wrap")
+        @classmethod
+        def _wrap(cls, data: AnyType, handler) -> AnyType:
+            return data
+
+    class Model(RecipeInputBase):
+        leaf: InnerWrap = InnerWrap()
+
+    # The schema gate passes...
+    registry_module._check_input_schema_closed("probe", Model)
+    # ...and the leak is real: the nested field is a raw mapping, not a model.
+    leaked = Model.model_validate({"leaf": {"b": "y", "smuggled": "v"}}).leaf
+    assert isinstance(leaked, dict)
+    assert leaked["smuggled"] == "v"
+    # ...so only the extras gate stands between this and an executor.
+    with pytest.raises(ValueError, match="wraps model validation"):
+        registry_module._check_input_model_forbids_extras("probe", Model)
+
+
+@pytest.mark.parametrize("mode", ["wrap", "plain"])
+def test_a_field_validator_of_the_same_mode_is_not_rejected(mode):
+    """``function-wrap`` over a FIELD is ordinary machinery, not a bypass.
+
+    ``field_validator(mode="wrap")`` compiles to the same node type as
+    ``model_validator(mode="wrap")`` — over ``{"type": "str"}`` rather than over
+    a model. It cannot affect the model's extras handling at all, so rejecting
+    every ``function-wrap`` node would refuse a perfectly ordinary validator.
+    The rule is the node's TARGET, not its type (issue #145).
+    """
+    from pydantic import field_validator
+
+    if mode == "wrap":
+
+        class Model(RecipeInputBase):
+            a: str = "x"
+
+            @field_validator("a", mode="wrap")
+            @classmethod
+            def _check(cls, value, handler):
+                return handler(value)
+
+    else:
+
+        class Model(RecipeInputBase):
+            a: str = "x"
+
+            @field_validator("a", mode="plain")
+            @classmethod
+            def _check(cls, value):
+                return str(value)
+
+    # The dangerous node type IS present in the compiled schema...
+    assert f"function-{mode}" in str(Model.__pydantic_core_schema__)
+    # ...over a field, so extras are still rejected and the model registers.
+    with pytest.raises(Exception):
+        Model.model_validate({"a": "x", "smuggled": "v"})
+    registry_module._check_input_model_forbids_extras("probe", Model)
+
+
+@pytest.mark.parametrize("colliding_name", ["type", "schema", "config", "definitions"])
+def test_a_field_named_like_a_schema_keyword_does_not_break_the_core_walk(
+    colliding_name,
+):
+    """The core-schema walk descends through CONTAINERS keyed by field NAME.
+
+    ``fields`` maps a field's name to its node, so a model with a field called
+    ``type`` makes ``container["type"]`` a dict — and a membership test on a dict
+    raises ``TypeError: unhashable type``. This is the same defect the
+    JSON-schema walk was fixed for one gate over, made a second time in a second
+    walk: a schema document contains DATA and CONTAINERS as well as nodes, and
+    only nodes may be read as nodes (issue #145).
+    """
+    from pydantic import create_model
+
+    Model = create_model(
+        "Colliding", __base__=RecipeInputBase, **{colliding_name: (str, "x")}
+    )
+    # Registers cleanly: no crash, no spurious rejection.
+    registry_module._check_input_model_forbids_extras("probe", Model)
+    build_test_registry((_reg(input_model=Model),))
+
+
+def test_a_default_value_that_looks_like_a_schema_is_not_walked():
+    """``default`` holds a caller VALUE, not schema.
+
+    A ``{"type": "default", "schema": {...}, "default": <value>}`` node carries
+    whatever the author wrote, and walking it as schema crashed this gate on a
+    default containing a ``type`` key.
+    """
+    from pydantic import BaseModel, ConfigDict
+
+    class Leaf(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+        type: str = "object"  # a VALUE that looks like a node kind
+
+    class Model(RecipeInputBase):
+        leaf: Leaf = Leaf()
+
+    registry_module._check_input_model_forbids_extras("probe", Model)
+    build_test_registry((_reg(input_model=Model),))
+
+
+def test_mutually_recursive_input_models_resolve():
+    """Two models referring to each other still resolve through ``definitions``."""
+    from typing import Optional as OptionalType
+
+    class MutA(RecipeInputBase):
+        a: str = "x"
+        b: OptionalType["MutB"] = None
+
+    class MutB(RecipeInputBase):
+        b: str = "y"
+        a: OptionalType["MutA"] = None
+
+    MutA.model_rebuild()
+    MutB.model_rebuild()
+
+    registry_module._check_input_model_forbids_extras("probe", MutA)
+    registry_module._check_input_model_forbids_extras("probe", MutB)
+
+
+@pytest.mark.parametrize("mode", ["before", "after"])
+def test_passive_wrappers_are_not_rejected(mode):
+    """``before`` and ``after`` cannot skip model validation, so they must pass.
+
+    Without this the wrap rule could be "reject every wrapper", which would
+    false-reject ``ComposeDbRestFanoutInputV1`` — a production model carrying a
+    ``mode="after"`` validator.
+    """
+    from typing import Any as AnyType
+
+    from pydantic import model_validator
+
+    if mode == "before":
+
+        class Model(RecipeInputBase):
+            a: str = "x"
+
+            @model_validator(mode="before")
+            @classmethod
+            def _hook(cls, data: AnyType) -> AnyType:
+                return data
+
+    else:
+
+        class Model(RecipeInputBase):
+            a: str = "x"
+
+            @model_validator(mode="after")
+            def _hook(self):
+                return self
+
+    # Model validation still runs, so extras are still rejected.
+    with pytest.raises(Exception):
+        Model.model_validate({"a": "x", "smuggled": "v"})
+    registry_module._check_input_model_forbids_extras("probe", Model)  # accepts
+
+
+def test_a_recursive_input_model_is_resolved_not_refused():
+    """A recursive model parks itself in ``definitions`` behind a ref.
+
+    The top-level node is ``definitions`` and its ``schema`` is a
+    ``definition-ref``; following ``schema`` alone dead-ends at the reference, and
+    fail-closed then rejects a perfectly closed model. Resolving the ref is what
+    keeps fail-closed from becoming fail-wrong (issue #145, Codex review).
+    """
+    from typing import Optional as OptionalType
+
+    class Recursive(RecipeInputBase):
+        name: str = "n"
+        child: OptionalType["Recursive"] = None
+
+    Recursive.model_rebuild()
+
+    core = Recursive.__pydantic_core_schema__
+    assert core["type"] == "definitions"
+    assert core["schema"]["type"] == "definition-ref"  # the dead end
+    # It genuinely is closed...
+    with pytest.raises(Exception):
+        Recursive.model_validate({"name": "n", "smuggled": "v"})
+    # ...so it must register.
+    registry_module._check_input_model_forbids_extras("probe", Recursive)
+
+
+def test_a_recursive_input_model_that_allows_extras_is_still_rejected():
+    """Resolving the ref must not become a way of skipping the check."""
+    from typing import Optional as OptionalType
+
+    from pydantic import ConfigDict
+
+    class RecursiveOpen(RecipeInputBase):
+        model_config = ConfigDict(extra="allow", frozen=True)
+
+        name: str = "n"
+        child: OptionalType["RecursiveOpen"] = None
+
+    RecursiveOpen.model_rebuild()
+
+    assert RecursiveOpen.__pydantic_core_schema__["type"] == "definitions"
+    with pytest.raises(ValueError, match="must reject undeclared keys"):
+        registry_module._check_input_model_forbids_extras("probe", RecursiveOpen)
+
+
 def test_an_unreadable_core_schema_fails_closed():
     """"Learned nothing" must fail the build, not pass it.
 

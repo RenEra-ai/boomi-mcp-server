@@ -281,6 +281,74 @@ def _is_bounded_subschema(subschema: Any, depth: int = 0) -> bool:
     )
 
 
+#: Core-schema node types that REPLACE the validation they wrap rather than
+#: running alongside it. ``mode="wrap"`` receives the handler and may simply not
+#: call it; ``mode="plain"`` never had one. ``before`` and ``after`` are absent
+#: on purpose: a before-validator folds into the model node and model validation
+#: still runs after it, and an after-validator runs once validation already has —
+#: both measured, neither can stop extras being rejected.
+_BYPASS_CAPABLE_NODES = frozenset({"function-wrap", "function-plain"})
+
+#: Core-schema node types that ARE a model's own validation.
+_MODEL_NODES = frozenset({"model", "model-fields"})
+
+#: Keys whose values are not schema and must not be walked as if they were.
+#:
+#: ``default`` is the one that bites. A ``{"type": "default", "schema": {...},
+#: "default": <CALLER VALUE>}`` node holds an arbitrary authored value, and
+#: walking it as schema is the exact defect the JSON-schema walk was fixed for
+#: one gate over — a default containing a ``type`` key crashed this walk with
+#: ``TypeError: unhashable type: 'dict'``. The same mistake in the same shape,
+#: made twice: a walk over "every value" is a walk over data too, and a schema
+#: document contains both (issue #145).
+_NON_SCHEMA_KEYS = frozenset(
+    {"metadata", "serialization", "cls", "config", "ref", "default", "default_factory"}
+)
+
+
+def _resolve_core_ref(node: Any, definitions: Mapping[str, Any], budget: int = 16) -> Any:
+    """Follow ``definition-ref`` hops to the node they name.
+
+    DEFENSIVE, and stated as such rather than left to look load-bearing. Both of
+    its callers currently reach their target without it: the walk descends into
+    the ``definitions`` ARRAY generically, and in every recursive and mutually
+    recursive shape measured, pydantic puts the model node directly under a
+    wrapper rather than behind a reference. It is kept because the alternative —
+    deleting a guard because no constructed case needed it — is how the next
+    finding arrives, and because a mis-resolved ref here would fail CLOSED
+    (a rejected valid model), which is loud rather than silent (issue #145).
+    """
+    while (
+        isinstance(node, dict)
+        and node.get("type") == "definition-ref"
+        and budget > 0
+    ):
+        node = definitions.get(node.get("schema_ref"))
+        budget -= 1
+    return node
+
+
+def _wraps_a_model(node: Mapping[str, Any], definitions: Mapping[str, Any]) -> bool:
+    """Does this wrapper sit over a MODEL's validation, or over a field's?
+
+    The distinction decides whether the wrapper can neutralise extras rejection.
+    ``field_validator(mode="wrap")`` also compiles to ``function-wrap`` — over
+    ``{"type": "str"}`` or whatever the field is — and cannot affect the model's
+    own extras handling at all. Rejecting every ``function-wrap`` would refuse a
+    perfectly ordinary field validator (issue #145).
+    """
+    inner = _resolve_core_ref(node.get("schema"), definitions)
+    hops = 0
+    while (
+        isinstance(inner, dict)
+        and str(inner.get("type", "")).startswith("function-")
+        and hops < 8
+    ):
+        inner = _resolve_core_ref(inner.get("schema"), definitions)
+        hops += 1
+    return isinstance(inner, dict) and inner.get("type") in _MODEL_NODES
+
+
 def _check_input_model_forbids_extras(recipe_id: str, model: Any) -> None:
     """Assert what the COMPILED VALIDATOR does, by reading what it was built from.
 
@@ -303,41 +371,100 @@ def _check_input_model_forbids_extras(recipe_id: str, model: Any) -> None:
       ``ValidationError.from_exception_data`` takes an author-chosen ``type`` and
       an author-chosen ``loc``; checking the type left the loc forgeable, and
       checking both left nothing else to check. A predicate over an
-      author-constructible object has no terminating move — that is a structural
-      argument, not a tally of the holes found so far.
+      author-constructible object has no terminating move.
 
     The core schema is neither published nor constructed per-call: it is the
     input to validator compilation, so a model whose validator forbids extras
     says so here and a model whose validator does not cannot pretend otherwise.
 
-    The walk past wrapper nodes is REQUIRED, not defensive. A model carrying a
-    ``model_validator(mode="after")`` — which ``ComposeDbRestFanoutInputV1``
-    does — has a top-level ``{"type": "function-after", "config": None, "schema":
-    {...}}`` and the model node one level down. Reading only the top level
-    false-rejects it and breaks the build.
+    **It is the WHOLE tree, not the root spine.** Walking only ``schema`` from
+    the root stops at the first model config and never looks at fields — so a
+    nested model carrying a handler-skipping ``mode="wrap"`` validator passed
+    both gates while ``leaf`` came back as a raw mapping with every undeclared
+    key intact. The JSON-schema gate cannot catch that either: the nested model
+    still publishes ``additionalProperties: false``, because it really is
+    declared closed; what is bypassed is the validation, not the declaration
+    (issue #145, Codex review).
+
+    Three node classes are judged, and each for its own reason:
+
+    * ``function-wrap`` / ``function-plain`` OVER A MODEL — fails closed.
+      Whether the handler is invoked is a fact about arbitrary Python, not about
+      the schema. Over a FIELD the same node types are ordinary
+      ``field_validator(mode="wrap")`` machinery and are accepted.
+    * every model config — must say ``forbid``.
+    * ``definition-ref`` — resolved, not refused. A recursive input model parks
+      itself in ``definitions`` behind a reference, and dead-ending there turned
+      fail-closed into fail-WRONG: a perfectly closed model could not register.
     """
-    node = getattr(model, "__pydantic_core_schema__", None)
+    root = getattr(model, "__pydantic_core_schema__", None)
+    definitions: Dict[str, Any] = {}
+    if isinstance(root, dict):
+        for entry in root.get("definitions") or ():
+            if isinstance(entry, dict) and isinstance(entry.get("ref"), str):
+                definitions[entry["ref"]] = entry
+
     seen: set = set()
-    while isinstance(node, dict) and id(node) not in seen:
+    stack: List[Any] = [root]
+    learned = False
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict) or id(node) in seen:
+            continue
         seen.add(id(node))
+
+        # ``type`` is only a NODE KIND when this dict is a schema node. Some of
+        # the dicts here are CONTAINERS keyed by user-controlled names —
+        # ``fields`` maps field name to field node — so a model with a field
+        # literally called ``type`` makes ``node["type"]`` a dict, and a
+        # membership test on it raises ``TypeError: unhashable type``. Guard the
+        # CHECKS, never the descent: an earlier version returned early here and
+        # silently pruned every field subtree, which is precisely where the
+        # nested-wrap case lives (issue #145).
+        node_type = node.get("type")
+        if isinstance(node_type, str):
+            if node_type == "definition-ref":
+                stack.append(_resolve_core_ref(node, definitions))
+                continue
+
+            if node_type in _BYPASS_CAPABLE_NODES and _wraps_a_model(
+                node, definitions
+            ):
+                raise ValueError(
+                    f"{recipe_id!r} input_model wraps model validation in a "
+                    f"{node_type!r} validator, which may return without "
+                    "invoking its handler; closedness cannot be determined from "
+                    "the compiled schema. Use mode='before' or mode='after'."
+                )
+
         config = node.get("config")
         if isinstance(config, dict) and "extra_fields_behavior" in config:
-            if config["extra_fields_behavior"] == "forbid":
-                return
-            raise ValueError(
-                f"{recipe_id!r} input_model must reject undeclared keys "
-                f"(model_config extra='forbid'); its compiled validator says "
-                f"{config['extra_fields_behavior']!r}"
-            )
-        node = node.get("schema")
-    # FAIL CLOSED. An unreadable core schema means the gate learned nothing, and
-    # "learned nothing" must fail the build rather than pass it — including when
-    # a future pydantic moves or renames this attribute, which should surface as
-    # a loud build break, not a silently weakened guard.
-    raise ValueError(
-        f"{recipe_id!r} input_model closedness could not be determined from its "
-        "compiled core schema"
-    )
+            learned = True
+            if config["extra_fields_behavior"] != "forbid":
+                raise ValueError(
+                    f"{recipe_id!r} input_model must reject undeclared keys "
+                    f"(model_config extra='forbid'); its compiled validator says "
+                    f"{config['extra_fields_behavior']!r}"
+                )
+
+        for key, value in node.items():
+            if key in _NON_SCHEMA_KEYS:
+                continue
+            if isinstance(value, dict):
+                stack.append(value)
+            elif isinstance(value, list):
+                stack.extend(item for item in value if isinstance(item, dict))
+
+    if not learned:
+        # FAIL CLOSED. An unreadable core schema means the gate learned nothing,
+        # and "learned nothing" must fail the build rather than pass it —
+        # including when a future pydantic moves or renames this attribute,
+        # which should surface as a loud build break, not a silently weakened
+        # guard.
+        raise ValueError(
+            f"{recipe_id!r} input_model closedness could not be determined from "
+            "its compiled core schema"
+        )
 
 
 def _check_input_schema_closed(recipe_id: str, model: Any) -> None:
