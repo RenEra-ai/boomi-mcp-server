@@ -2311,3 +2311,38 @@ def test_a_collection_sharing_one_iterator_is_refused_not_drained():
         _assert_declared_shape(model.model_construct(field=payload))
 
     assert list(payload) == [{"smuggled": "SENTINEL-SQL-SELECT-SECRETS"}], "drained"
+
+
+def test_a_typed_dict_field_does_not_fail_every_invocation():
+    """Not every class supports ``isinstance``.
+
+    A bounded ``TypedDict`` passes both registration gates and pydantic correctly
+    stores a ``dict`` for it — but ``isinstance(value, SomeTypedDict)`` raises
+    ``TypeError``, which the engine turned into ``RECIPE_INPUT_INVALID``, failing
+    EVERY invocation of an otherwise valid recipe.
+
+    Second instance of the class after ``typing.Any``, which is why the guard is
+    general rather than a ``TypedDict`` special case (issue #145, Codex review).
+    """
+    from typing import TypedDict as TypedDictType, Union as UnionType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class Bounded(TypedDictType):
+        a: str
+
+    class TypedDictInputV1(RecipeInputBase):
+        field: Bounded = {"a": "x"}
+
+    # It registers — that is the premise of the bug.
+    _registry_with_input(TypedDictInputV1)
+    _assert_declared_shape(TypedDictInputV1.model_validate({"field": {"a": "y"}}))
+
+    # And a MIXED union with one unjudgeable option is not false-rejected either.
+    class Leaf(RecipeInputBase):
+        ok: str = "x"
+
+    class MixedInputV1(RecipeInputBase):
+        field: UnionType[Leaf, Bounded] = {"a": "x"}
+
+    _assert_declared_shape(MixedInputV1.model_validate({"field": {"a": "y"}}))

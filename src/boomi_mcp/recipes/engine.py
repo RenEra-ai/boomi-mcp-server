@@ -328,7 +328,26 @@ def _assert_runtime_class(value: Any, annotation: Any) -> None:
 
     if not class_options:
         return
-    if any(isinstance(value, cls) for cls in class_options):
+
+    # NOT EVERY CLASS SUPPORTS ``isinstance``. A ``TypedDict`` is a class, passes
+    # both registration gates, and pydantic correctly stores a ``dict`` for it —
+    # but ``isinstance(value, SomeTypedDict)`` raises ``TypeError``, which
+    # ``_validate_input`` turned into ``RECIPE_INPUT_INVALID``, failing EVERY
+    # invocation of an otherwise valid recipe.
+    #
+    # This is the second time a "class" that cannot be instance-checked broke the
+    # check — ``typing.Any`` was the first — so the guard is general rather than a
+    # ``TypedDict`` special case. If any option cannot be judged, the whole
+    # annotation yields no opinion and the adapter above is the check: dropping
+    # only the unusable option would false-reject a legitimate value in a mixed
+    # union like ``Union[Leaf, SomeTypedDict]`` (issue #145, Codex review).
+    verdicts = []
+    for cls in class_options:
+        try:
+            verdicts.append(isinstance(value, cls))
+        except TypeError:
+            return  # structural or otherwise non-runtime; cannot decide here
+    if any(verdicts):
         return
     for cls in class_options:
         if isinstance(value, _PERMITTED_WIDENINGS.get(cls, ())):

@@ -468,6 +468,14 @@ keeps `Union[Leaf, Dict[str, str]]` honest.
 Strict mode **converts**; it does not merely check. That is the sentence the whole design turns
 on.
 
+A class that cannot be instance-checked yields no opinion for the whole annotation. A bounded
+`TypedDict` is a class, passes both registration gates, and is correctly stored as a `dict` — but
+`isinstance(value, SomeTypedDict)` raises `TypeError`, which failed *every* invocation of an
+otherwise valid recipe. That is the second such class after `typing.Any`, so the guard is general
+rather than a `TypedDict` special case, and it abstains for the whole annotation rather than
+dropping the unusable option — otherwise `Union[Leaf, SomeTypedDict]` would false-reject a
+legitimate dict.
+
 Cost after all of that is ~21 µs per invocation against ~2.4 µs for `model_validate`, with
 annotation introspection memoised; the adapters and the unwrapping are both built once per
 annotation. Cost is ~10 µs per invocation against ~2.5 µs for `model_validate` — 4x the
