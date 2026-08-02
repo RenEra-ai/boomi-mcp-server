@@ -34,8 +34,11 @@ would have opened exactly that channel.
 
 from __future__ import annotations
 
-from collections import abc, deque
+import array
+from collections import deque
 from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
+from decimal import Decimal
+from fractions import Fraction
 from typing import (
     Annotated,
     Any,
@@ -230,17 +233,6 @@ def _declared_shape_adapter(annotation: Any) -> Any:
     return cached
 
 
-#: Containers the walk can enumerate without consuming or mutating them.
-#:
-#: An ``abc.Collection`` is re-iterable and sized, so walking it is repeatable and
-#: non-destructive — which is the whole safety requirement. An earlier version
-#: listed five concrete types and refused everything else, which caught the lazy
-#: attack but also refused ``range``, ``dict_keys``/``values``/``items``,
-#: ``array.array``, ``memoryview`` and any custom ``abc.Sequence`` or ``abc.Set``
-#: (issue #145, live QA).
-_WALKABLE_CONTAINERS = (list, tuple, set, frozenset, deque)
-
-
 #: Annotation introspection is pure and repeats for every value at a position,
 #: so it is memoised. Unhashable annotations fall through and are recomputed.
 _UNWRAP_CACHE: Dict[Any, Tuple[Any, ...]] = {}
@@ -284,54 +276,74 @@ def _unwrap_annotation_uncached(annotation: Any) -> Tuple[Any, ...]:
     return (annotation,)
 
 
+#: Widenings ``strict=True`` permits where ``isinstance`` is False, enumerated by
+#: sweeping twelve scalar annotations against thirteen values. Exempted so the two
+#: halves of this gate agree about "declared type" — an earlier version refused an
+#: ``int`` literal default in a ``float`` field while the same field passed when a
+#: caller supplied the value, which reads as intermittent (issue #145, live QA).
+_PERMITTED_WIDENINGS: Dict[type, Tuple[type, ...]] = {
+    float: (int, Decimal, Fraction),
+    complex: (int, float, Decimal, Fraction),
+}
+
+
 def _assert_runtime_class(value: Any, annotation: Any) -> None:
-    """A MODEL-typed position must hold a model, not something convertible to one.
+    """A stored value must BE one of the classes its annotation admits.
 
-    Scoped to model and dataclass positions on purpose. That is exactly where
-    "the adapter accepted it" is misleading: strict mode admits a mapping where a
-    model is declared and then runs that model's validators, which hand the dict
-    straight back — so conversion succeeds and the stored value was never a model.
-    Everywhere else the adapter one line above is the check, and this one has no
-    opinion.
+    This is where "the adapter accepted it" is misleading. Strict mode still
+    CONVERTS: it admits a mapping where a model is declared and then runs that
+    model's validators, and it builds a ``SecretStr`` from a raw ``str``. Either
+    way conversion succeeds, the adapter's result is discarded, and the stored
+    value is not what the field declares.
 
-    Two over-fires taught the scoping (issue #145, live QA):
+    Exemptions are ENUMERATED rather than inferred, because two attempts to infer
+    them both failed (issue #145, Codex review + live QA):
 
-    * ``typing.Any`` is a CLASS from Python 3.11, so a blanket
-      ``isinstance(option, type)`` accepted it into the candidate list and then
-      ``isinstance(value, Any)`` raised ``TypeError`` — refusing every ``Any``
-      field, including ``Dict[str, Any]``, whatever it held.
-    * A wider rule was stricter than the ``strict=True`` adapter it follows: an
-      ``int`` literal default in a ``float`` field was refused, while the same
-      field passed whenever a caller supplied the value. Two halves of one gate
-      disagreeing about "declared type" is worse than either rule alone.
+    * A blanket rule tripped over ``typing.Any`` being a CLASS from Python 3.11 —
+      ``isinstance(value, Any)`` raises ``TypeError``, refusing every ``Any``
+      field whatever it held, including ``Dict[str, Any]``.
+    * Scoping to MODEL positions fixed that but reopened the very bypass this
+      check exists for: in ``Union[Leaf, str]`` the ``str`` option made the whole
+      check return, discarding the ``Leaf`` already collected, and a dict
+      carrying ``smuggled`` reached the executor again.
+
+    So: every class-typed option is checked; ``Any``/``object`` and the numeric
+    widenings are named exceptions; and a value matching none of the classes is
+    given one last chance against the annotation's NON-class options, which is
+    what keeps ``Union[Leaf, Dict[str, str]]`` honest.
     """
     options = _unwrap_annotation(annotation)
     if not options:
         return
-    classes: List[type] = []
+
+    class_options: List[type] = []
+    other_options: List[Any] = []
     for option in options:
-        if option is type(None):
-            classes.append(type(None))
-            continue
-        if get_origin(option) is not None or not isinstance(option, type):
-            return  # parametrised or unrecognised; the adapter is the check
-        if not issubclass(option, BaseModel):
-            # Not a position where conversion can mislead. This is also what
-            # makes ``Any`` and ``object`` safe — ``issubclass(Any, BaseModel)``
-            # is ``False``, so both return here. An explicit guard for them was
-            # tried and killed no mutant, which is the signal that the scoping
-            # already covers it.
-            #
-            # DATACLASSES are deliberately absent, having been tried: strict mode
-            # already REJECTS a mapping at a dataclass position, pydantic and
-            # stdlib flavours alike. The "conversion succeeds and hands the dict
-            # straight back" behaviour this whole check exists for is specific to
-            # MODELS, so a dataclass arm could never be the discriminating test —
-            # it killed no mutant because no value can reach it (issue #145).
+        if option is Any or option is object:
+            return  # admits everything; no opinion to have
+        if get_origin(option) is None and isinstance(option, type):
+            class_options.append(option)
+        else:
+            other_options.append(option)
+
+    if not class_options:
+        return
+    if any(isinstance(value, cls) for cls in class_options):
+        return
+    for cls in class_options:
+        if isinstance(value, _PERMITTED_WIDENINGS.get(cls, ())):
             return
-        classes.append(option)
-    if not any(isinstance(value, cls) for cls in classes):
-        raise ValueError("validated input holds a value of an undeclared class")
+
+    # A mixed union: the value may legitimately be one of the parametrised
+    # options. Judged with the ENGINE'S adapter, never the model's.
+    for option in other_options:
+        try:
+            _declared_shape_adapter(option).validate_python(value, strict=True)
+            return
+        except Exception:  # noqa: BLE001 — this option simply does not match
+            continue
+
+    raise ValueError("validated input holds a value of an undeclared class")
 
 
 def _dataclass_field_types(cls: Any) -> Dict[str, Any]:
@@ -370,22 +382,35 @@ def _mapping_annotations(annotation: Any) -> Tuple[Any, Any]:
     return None, None
 
 
+#: Types whose iteration is KNOWN to be independent and bounded. Enumerated, not
+#: inferred: ``abc.Collection`` guarantees only ``__len__``, ``__contains__`` and
+#: ``__iter__``, and none of those promises a fresh iterator — a custom collection
+#: returning one shared internal iterator passes ``iter(v) is not v`` and is
+#: DRAINED by the walk before the executor sees it, and a finite ``__len__`` does
+#: not stop ``__iter__`` yielding forever. An interface that does not guarantee
+#: replayability is not proof of it (issue #145, Codex review).
+_REPLAYABLE_TYPES: Tuple[type, ...] = (
+    list,
+    tuple,
+    set,
+    frozenset,
+    deque,
+    range,
+    array.array,
+    memoryview,
+    type({}.keys()),
+    type({}.values()),
+    type({}.items()),
+)
+
+
 def _is_walkable_collection(value: Any) -> bool:
-    """Re-iterable and sized, so the walk can enumerate it repeatably."""
+    """Known-replayable, so the walk can enumerate it without destroying it."""
     if isinstance(value, (str, bytes, bytearray)):
         return False
-    if isinstance(value, _WALKABLE_CONTAINERS):
-        return True
     if isinstance(value, Mapping):
         return True
-    if not isinstance(value, abc.Collection):
-        return False
-    # ``iter(v) is v`` is the one-shot iterator signature: consuming it to look
-    # would destroy the value the executor is about to receive.
-    try:
-        return iter(value) is not value
-    except Exception:  # noqa: BLE001 — an iter() that raises is not walkable
-        return False
+    return isinstance(value, _REPLAYABLE_TYPES)
 
 
 def _is_opaque_iterable(value: Any) -> bool:

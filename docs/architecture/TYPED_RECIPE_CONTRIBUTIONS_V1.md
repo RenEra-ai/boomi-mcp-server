@@ -438,8 +438,12 @@ construction:
   `Tuple[Leaf, ...]` or `Dict[str, Leaf]` was visited but never judged, and a dataclass's fields
   were recursed with no annotation at all — leaving a mapping in a declared `str`, readable at
   `inp.holder.label`.
-* **Anything the walk cannot enumerate SAFELY is refused** — a value that is not an
-  `abc.Collection`, or that is its own iterator. `Iterable[str]` validates lazily:
+* **Anything not KNOWN to be replayable is refused.** Walkability is an enumerated list of
+  types — the builtin containers, `range`, the dict views, `array.array`, `memoryview` — not an
+  inference from an interface. `abc.Collection` guarantees `__len__`, `__contains__` and
+  `__iter__`, and none of those promises a *fresh* iterator: a collection handing out one shared
+  internal iterator passes `iter(v) is not v` and is drained by the walk before the executor sees
+  it, and a finite `__len__` does not stop `__iter__` yielding forever. `Iterable[str]` validates lazily:
   pydantic returns a `ValidatorIterator` without inspecting an element, so a replayable custom
   iterable yielding caller mappings passed untouched — and identically on both determinism runs.
   Consuming it to look would destroy it, so the only safe answer is to refuse it. The rule is
@@ -447,13 +451,22 @@ construction:
   classes and refused everything else, including `range`, `dict_keys`/`values`/`items`,
   `array.array`, `memoryview` and any custom `abc.Sequence`.
 
-The runtime-class check is scoped to **model and dataclass positions**, which is the only place
-conversion can mislead. A wider version refused every `Any` field — `typing.Any` is a class from
-Python 3.11, so `isinstance(value, Any)` raised — including `Dict[str, Any]`, the very shape §12
-names as the truthful permissive declaration. It was also stricter than the `strict=True` adapter
-one line above it, refusing an `int` literal default in a `float` field while the same field
-passed whenever a caller supplied the value: two halves of one gate disagreeing about "declared
-type", surfacing as an intermittent failure.
+The runtime-class check applies to **every class-typed option**, with exemptions **enumerated
+rather than inferred** — because both attempts to infer them failed. A blanket rule tripped over
+`typing.Any` being a class from Python 3.11, so `isinstance(value, Any)` raised and every `Any`
+field was refused, `Dict[str, Any]` included. Scoping to *model* positions fixed that and reopened
+the bypass: in `Union[Leaf, str]` the `str` option made the check return, discarding the `Leaf`
+already collected, and a dict carrying the caller's key reached a declared field again. It also
+missed conversion-capable wrappers — `TypeAdapter(SecretStr).validate_python("plain", strict=True)`
+*succeeds*, building a new `SecretStr` whose result is discarded, so a raw string survived in a
+`SecretStr` field with the redaction gone.
+
+The exemptions are therefore a list: `Any` and `object`, and the five numeric widenings. A value
+matching no class gets one last check against the annotation's non-class options, which is what
+keeps `Union[Leaf, Dict[str, str]]` honest.
+
+Strict mode **converts**; it does not merely check. That is the sentence the whole design turns
+on.
 
 Cost after all of that is ~21 µs per invocation against ~2.4 µs for `model_validate`, with
 annotation introspection memoised; the adapters and the unwrapping are both built once per

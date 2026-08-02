@@ -2189,3 +2189,125 @@ def test_a_subclass_at_a_model_position_is_ACCEPTED():
     leaky = OpenLeaf.model_construct(ok="x", smuggled="SENTINEL-SQL-SELECT-SECRETS")
     with pytest.raises(Exception):
         _assert_declared_shape(HolderInputV1.model_construct(one=leaky))
+
+
+class _ConvertingLeaf(RecipeInputBase):
+    """Filters extras on the way in, then hands the mapping back on the way out.
+
+    Validation genuinely succeeds, so the strict adapter accepts it — the lie is
+    the runtime class, not the data (issue #145, Codex review).
+    """
+
+    ok: str = "x"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _keep_declared(cls, data):
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if k in cls.model_fields}
+        return data
+
+    @model_validator(mode="after")
+    def _hand_it_back(self):
+        return {"ok": self.ok, "smuggled": "SENTINEL-SQL-SELECT-SECRETS"}
+
+
+def test_a_mixed_union_does_not_discard_the_model_check():
+    """Scoping the class check to model positions reopened the bypass.
+
+    In ``Union[Leaf, str]`` the ``str`` option made the whole check return,
+    discarding the ``Leaf`` already collected — so a dict carrying the caller's
+    key reached the executor again through a declared field.
+    """
+    from typing import Union as UnionType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class MixedUnionInputV1(RecipeInputBase):
+        field: UnionType[_ConvertingLeaf, str] = "x"
+
+    instance = MixedUnionInputV1.model_validate({"field": {"ok": "y"}})
+    assert isinstance(instance.field, dict)  # the premise
+    assert "SENTINEL-SQL-SELECT-SECRETS" in str(instance.field)
+
+    with pytest.raises(Exception):
+        _assert_declared_shape(instance)
+
+
+def test_a_union_that_genuinely_admits_a_mapping_still_passes():
+    """Firing control for the mixed-union fix: the last-chance pass against the
+    non-class options is what keeps this honest shape working."""
+    from typing import Union as UnionType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class HonestUnionInputV1(RecipeInputBase):
+        field: UnionType[_ConvertingLeaf, Dict[str, str]] = {}
+
+    _assert_declared_shape(HonestUnionInputV1.model_construct(field={"a": "b"}))
+
+
+def test_a_conversion_capable_wrapper_keeps_its_type():
+    """``TypeAdapter(SecretStr).validate_python("plain", strict=True)`` SUCCEEDS —
+    it builds a new ``SecretStr`` and the result is discarded.
+
+    So a raw ``str`` left in a ``SecretStr`` field reaches the executor with the
+    redaction and the API of the declared type both gone. Strict mode converts;
+    it does not merely check.
+    """
+    from pydantic import SecretStr
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class SecretInputV1(RecipeInputBase):
+        field: SecretStr = SecretStr("s")
+
+    _assert_declared_shape(SecretInputV1.model_construct(field=SecretStr("s")))  # control
+    with pytest.raises(Exception):
+        _assert_declared_shape(SecretInputV1.model_construct(field="plain"))
+
+
+def test_a_collection_sharing_one_iterator_is_refused_not_drained():
+    """``abc.Collection`` is not proof of replayability.
+
+    It guarantees ``__len__``, ``__contains__`` and ``__iter__`` — none of which
+    promises a FRESH iterator. A collection handing out one shared internal
+    iterator passes ``iter(v) is not v`` and is drained by the walk before the
+    executor sees it, so walkability is now an enumerated list of known-safe
+    types rather than an inference from an interface.
+    """
+    from typing import Any as AnyType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class SharedIterator:
+        def __init__(self, items):
+            self._items = list(items)
+            self._shared = iter(self._items)
+
+        def __iter__(self):
+            return self._shared  # NOT self, and NOT fresh
+
+        def __len__(self):
+            return len(self._items)
+
+        def __contains__(self, item):
+            return item in self._items
+
+    payload = SharedIterator([{"smuggled": "SENTINEL-SQL-SELECT-SECRETS"}])
+    assert isinstance(payload, abc.Collection)  # the premise
+    assert iter(payload) is not payload  # ...and why the old rule passed it
+
+    model = type(
+        "SharedIterInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": AnyType},
+            "field": None,
+        },
+    )
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=payload))
+
+    assert list(payload) == [{"smuggled": "SENTINEL-SQL-SELECT-SECRETS"}], "drained"
