@@ -490,24 +490,21 @@ def _dataclass_field_types(cls: Any) -> Dict[str, Any]:
         )
 
 
-def _element_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Any, ...], ...]:
-    """Every union arm whose CONTAINER matches this value, not just one.
+def _element_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Tuple[Any, ...], ...], bool]:
+    """Element parameters, and whether any arm MATCHED the value's container.
 
-    Two wrong answers preceded this (issue #145, live QA):
+    Returns ``(arms, matched)``. When ``matched`` is true the arms are the ones
+    whose origin the value is an instance of. When it is false the arms are every
+    parametrised option, and the CALLER decides what its own shape can make of
+    them — a sequence can only use a single parameter, while a mapping can read
+    one as the value type or two as key and value.
 
-    * Returning the FIRST arm with parameters applied one arm's element types to
-      another arm's value — refusing ``Union[List[Leaf], List[Other]]`` holding
-      ``[Other()]``, and accepting a mapping whose only matching arm had been
-      passed over.
-    * Returning a single arm and ABSTAINING when several matched judged nothing
-      at all for every same-origin union — ``Union[List[Leaf], List[Other]]``
-      then accepted a converting dict, and the false-rejection case above started
-      passing for the wrong reason.
-
-    Abstention is only safe where something else judges the value. For membership
-    it is: ``_assert_runtime_class`` falls through to its last-chance loop. For
-    element parameters nothing else looks, so the arms are judged DISJUNCTIVELY
-    by the caller — an element is acceptable if ANY matching arm admits it.
+    That split is deliberate. Returning raw args and letting the sequence walk
+    read them positionally allowed a list-backed ``SecondItems[str, SecretStr]``
+    to check index 0 against ``str`` while its schema used the SECOND argument,
+    leaving an unwrapped secret in the field (issue #145, Codex review). And
+    returning nothing at all would be the "no arm matched means nothing to say"
+    conflation this layer kept re-learning.
     """
     candidates = []
     parametrised = []
@@ -527,20 +524,40 @@ def _element_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Any, ...], .
             # was already fixed for (issue #145, Codex review).
             continue
     if candidates:
-        return tuple(candidates)
-    # ARMS EXIST BUT NONE MATCHED BY CONTAINER — which is NOT the same as "this
-    # annotation says nothing", and conflating them was the ninth instance of
-    # abstention-read-as-permission. A custom generic whose core schema is a list
-    # (``MyList[Leaf]``) stores a plain ``list``, which is never an instance of
-    # ``MyList``, so no arm matched and every element was walked unjudged while
-    # the adapter converted happily.
-    #
-    # Falling back to every parametrised arm is safe because ONE arm must cover
-    # the whole container: an arm that does not fit simply fails. The container
-    # match above still earns its place — live QA killed the mutant that removes
-    # it with ``Union[Dict[Any, Any], List[Leaf]]`` — it is just consulted only
-    # when at least one arm matches (issue #145, the r49 site census).
-    return tuple(parametrised)
+        return tuple(candidates), True
+    return tuple(parametrised), False
+
+
+def _sequence_arms(annotation: Any, value: Any) -> Tuple[Tuple[Any, ...], ...]:
+    """Arms a SEQUENCE can use, or a refusal when their meaning is underivable."""
+    arms, matched = _element_candidates(annotation, value)
+    if matched or not arms:
+        return arms
+    usable = tuple(args for args in arms if len(args) == 1)
+    if usable:
+        return usable
+    raise ValueError("element semantics of this annotation cannot be derived")
+
+
+def _mapping_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Any, Any], ...]:
+    """The (key, value) annotations of every arm a MAPPING can use.
+
+    A mapping recovers where a sequence cannot: two parameters read as key and
+    value, one as the value type — which is what a dict-shaped custom generic
+    means by its single parameter. If some generic ever parametrises its KEY
+    instead, its honest values are refused rather than accepted, which is the
+    wrong-way-safe direction (issue #145, live QA site census).
+    """
+    arms, matched = _element_candidates(annotation, value)
+    pairs = []
+    for element in arms:
+        if len(element) == 2 and element[1] is not Ellipsis:
+            pairs.append((element[0], element[1]))
+        elif len(element) == 1:
+            pairs.append((None, element[0]))
+    if not matched and arms and not pairs:
+        raise ValueError("mapping semantics of this annotation cannot be derived")
+    return tuple(pairs)
 
 
 def _assert_one_arm_covers(
@@ -559,7 +576,11 @@ def _assert_one_arm_covers(
     nodes marked and let a later arm short-circuit past them.
     """
     if not arms:
-        walk(None)
+        # The enclosing journal MUST travel: a nested container with no arms of
+        # its own, walked inside an outer trial that later fails, would otherwise
+        # leave its marks in the shared cycle guard unrecorded — and the next
+        # outer arm would skip those nodes (issue #145, Codex review).
+        walk(None, _journal)
         return
     for arm in arms:
         journal: List[int] = []
@@ -586,28 +607,6 @@ def _positional(element: Optional[Tuple[Any, ...]], index: int) -> Any:
     return element[index] if index < len(element) else None
 
 
-def _mapping_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Any, Any], ...]:
-    """The (key, value) annotations of every matching mapping arm."""
-    pairs = []
-    for element in _element_candidates(annotation, value):
-        if len(element) == 2 and element[1] is not Ellipsis:
-            pairs.append((element[0], element[1]))
-        elif len(element) == 1:
-            # A ONE-PARAMETER arm. ``Dict[K, V]`` has two, but a custom generic
-            # whose core schema is a dict — ``MyDict[Leaf]`` —  has one, and the
-            # arity filter discarded it, so the mapping was walked unjudged while
-            # the sequence path with the same shape was refused. The sibling of
-            # the ninth site, and the eleventh instance of abstention read as
-            # permission (issue #145, live QA site census).
-            #
-            # The parameter is read as the VALUE type, which is what a dict-shaped
-            # generic means by it. If some generic ever parametrises its KEY
-            # instead, its honest values are refused rather than accepted — loud
-            # and wrong-way-safe, unlike leaving the arm out.
-            pairs.append((None, element[0]))
-    return tuple(pairs)
-
-
 def _typed_dict_arms(annotation: Any) -> Tuple[Dict[str, Any], ...]:
     """Per-KEY annotations for EVERY ``TypedDict`` option, not just the first.
 
@@ -632,6 +631,21 @@ def _typed_dict_arms(annotation: Any) -> Tuple[Dict[str, Any], ...]:
     return tuple(arms)
 
 
+#: The most elements the walk will enumerate in one container.
+#:
+#: Removing an eager ``list(value)`` stopped ``range(10**9)`` allocating a billion
+#: entries — and left it WALKING a billion instead, which ends the process just as
+#: surely, only slower. Bounded work is the actual requirement; not copying was
+#: only half of it.
+#:
+#: Over the limit the container is REFUSED, not truncated: walking a prefix and
+#: accepting the rest unexamined is the abstention-read-as-permission mistake this
+#: layer spent a dozen findings removing. The bound is far above any legitimate
+#: recipe input — the largest production container holds a handful of component
+#: slots — so it is a guard against a manufactured value, not a real limit
+#: (issue #145, Codex review).
+_MAX_WALKED_ELEMENTS = 10_000
+
 #: Types whose iteration is KNOWN to be independent and bounded. Enumerated, not
 #: inferred: ``abc.Collection`` guarantees only ``__len__``, ``__contains__`` and
 #: ``__iter__``, and none of those promises a fresh iterator — a custom collection
@@ -652,6 +666,16 @@ _REPLAYABLE_TYPES: Tuple[type, ...] = (
     type({}.values()),
     type({}.items()),
 )
+
+
+def _assert_walkable_size(value: Any) -> None:
+    """Refuse a container too large to enumerate, rather than truncating it."""
+    try:
+        size = len(value)
+    except Exception:  # noqa: BLE001 — unsized values never reach here
+        return
+    if size > _MAX_WALKED_ELEMENTS:
+        raise ValueError("validated input holds a container too large to inspect")
 
 
 def _is_walkable_collection(value: Any) -> bool:
@@ -760,10 +784,14 @@ def _assert_declared_shape(
     # in for a ``Leaf`` inside ``Tuple[Leaf, ...]`` was visited but never judged.
     if _is_walkable_collection(value) and not isinstance(value, Mapping):
         _mark(value)
-        items = list(value)
+        _assert_walkable_size(value)
 
         def _walk_sequence(arm, journal=None):
-            for index, item in enumerate(items):
+            # Iterate the ORIGINAL. ``_REPLAYABLE_TYPES`` exists precisely to
+            # guarantee re-iteration is safe, so snapshotting was redundant — and
+            # ``range(10**9)`` is a walkable value that a snapshot turns into a
+            # billion-element allocation (issue #145, Codex review).
+            for index, item in enumerate(value):
                 element = _positional(arm, index) if arm is not None else None
                 if arm is not None and element is None:
                     # This arm is shorter than the value, so it does not describe
@@ -773,14 +801,14 @@ def _assert_declared_shape(
                 _assert_declared_shape(item, element, _seen, journal)
 
         _assert_one_arm_covers(
-            _walk_sequence, _element_candidates(annotation, value), _seen, _journal
+            _walk_sequence, _sequence_arms(annotation, value), _seen, _journal
         )
     elif isinstance(value, Mapping):
         _mark(value)
-        entries = list(value.items())
+        _assert_walkable_size(value)
 
         def _walk_mapping(arm, journal=None):
-            for key, item in entries:
+            for key, item in value.items():
                 if isinstance(arm, dict):  # per-key hints from a TypedDict arm
                     if key not in arm:
                         raise ValueError("arm does not declare this key")

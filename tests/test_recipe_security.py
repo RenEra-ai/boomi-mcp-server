@@ -3226,3 +3226,142 @@ def test_a_one_parameter_custom_generic_is_judged_in_both_shapes(shape):
     with pytest.raises(Exception):
         _assert_declared_shape(model.model_construct(field=poisoned))
     _assert_declared_shape(model.model_construct(field=clean))
+
+
+def test_a_multi_argument_generic_is_not_read_positionally():
+    """Falling back to raw ``get_args`` let a sequence read them as tuple positions.
+
+    A list-backed ``SecondItems[str, SecretStr]`` whose schema uses its SECOND
+    argument had index 0 checked against ``str``, so an after-validator could
+    leave an unwrapped secret in the field. One parameter is unambiguous; more
+    than one has no defined positional meaning for a container whose own origin
+    did not match, so it is refused (issue #145, Codex review).
+    """
+    from typing import Generic, TypeVar
+
+    from pydantic import GetCoreSchemaHandler, SecretStr
+    from pydantic_core import core_schema
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    T = TypeVar("T")
+    U = TypeVar("U")
+
+    class SecondItems(Generic[T, U]):
+        @classmethod
+        def __get_pydantic_core_schema__(cls, source, handler: GetCoreSchemaHandler):
+            args = getattr(source, "__args__", None)
+            inner = (
+                handler.generate_schema(args[1])
+                if args and len(args) > 1
+                else core_schema.any_schema()
+            )
+            return core_schema.list_schema(inner)
+
+    model = type(
+        "SecondItemsInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": SecondItems[str, SecretStr]},
+            "field": None,
+        },
+    )
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=["SENTINEL-CREDENTIAL-REF"]))
+
+
+def test_an_oversized_container_is_refused_not_truncated_or_walked():
+    """Not copying the sequence was only half the requirement.
+
+    Removing the eager ``list(value)`` stopped ``range(10**9)`` allocating a
+    billion entries and left it WALKING a billion — which ends the process just as
+    surely, only slower. Refusing rather than truncating, because walking a prefix
+    and accepting the rest unexamined is the abstention-read-as-permission mistake
+    this layer spent a dozen findings removing (issue #145, Codex review).
+    """
+    import time
+    from typing import Any as AnyType
+
+    from boomi_mcp.recipes.engine import _MAX_WALKED_ELEMENTS, _assert_declared_shape
+
+    model = type(
+        "OversizedInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": AnyType},
+            "field": None,
+        },
+    )
+    started = time.monotonic()
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=range(10**9)))
+    # It must be refused on the SIZE, not by walking to the end.
+    assert time.monotonic() - started < 1.0
+
+    # A container comfortably under the bound is still walked.
+    _assert_declared_shape(model.model_construct(field=list(range(100))))
+    assert _MAX_WALKED_ELEMENTS >= 10_000  # far above any real recipe input
+
+
+def test_a_nested_no_arm_walk_carries_the_enclosing_journal():
+    """``walk(None)`` dropped the outer journal.
+
+    A nested container with no arms of its own, walked inside an outer trial that
+    later fails, left its marks in the shared cycle guard unrecorded — so the
+    outer rollback could not remove them and the next arm skipped those nodes
+    (issue #145, Codex review).
+    """
+    import inspect
+
+    from boomi_mcp.recipes import engine
+
+    source = inspect.getsource(engine._assert_one_arm_covers)
+    assert "walk(None, _journal)" in source, source
+
+
+def test_a_mapping_arm_with_underivable_arity_is_refused():
+    """A mapping recovers one and two parameters; three has no reading.
+
+    One parameter is the value type, two are key and value — but a dict-backed
+    generic with three has no defined mapping semantics, and returning no pairs
+    would put it back on the "nothing to say" path that accepts unjudged
+    (issue #145, Codex review).
+    """
+    from typing import Generic, TypeVar
+
+    from pydantic import GetCoreSchemaHandler
+    from pydantic_core import core_schema
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    T = TypeVar("T")
+    U = TypeVar("U")
+    V = TypeVar("V")
+
+    class ThreeParamMapping(Generic[T, U, V]):
+        @classmethod
+        def __get_pydantic_core_schema__(cls, source, handler: GetCoreSchemaHandler):
+            args = getattr(source, "__args__", None)
+            inner = (
+                handler.generate_schema(args[2])
+                if args and len(args) > 2
+                else core_schema.any_schema()
+            )
+            return core_schema.dict_schema(core_schema.str_schema(), inner)
+
+    model = type(
+        "ThreeParamInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {
+                "field": ThreeParamMapping[str, str, _DeclaredKeysOnlyLeaf]
+            },
+            "field": None,
+        },
+    )
+    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field={"k": converting}))
