@@ -458,6 +458,15 @@ construction:
   resolved the alias perfectly well. "I do not recognise this" and "there is nothing to check
   here" must not be the same value; that is the same defect as a `None` element annotation, and
   it is the third place it appeared.
+
+  Unwrapping has to preserve the alias's own namespace: the raw `__value__` of `type X =
+  list['Leaf']` carries a `ForwardRef` that reaches an adapter with no namespace and refuses
+  every invocation, so it is resolved against the module the alias was written in. A
+  *subscripted* alias (`A[Leaf]` where `type A[T] = list[T]`) is not a `TypeAliasType` and has no
+  `__value__` at all — its origin is the alias, and its parameters have to be substituted before
+  its elements are judgeable. `__supertype__` is unwrapped only for a real `NewType`; reading it
+  unguarded refused honest instances of any class that happens to carry the attribute and is a
+  usable field type.
 * **A `TypedDict` field is read from its per-key hints** — via `typing_extensions.is_typeddict`,
   because `typing.is_typeddict` returns False for a `typing_extensions.TypedDict` subclass and
   both spellings are usable field types. A `TypedDict` has no `get_origin`, so no

@@ -35,6 +35,7 @@ would have opened exactly that channel.
 from __future__ import annotations
 
 import array
+import sys
 from collections import deque
 from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
 from decimal import Decimal
@@ -53,6 +54,8 @@ from typing import (
     get_origin,
     get_type_hints,
 )
+
+from typing import _eval_type  # noqa: PLC2701 — the only way to resolve a ForwardRef
 
 from pydantic import BaseModel, TypeAdapter
 
@@ -278,6 +281,28 @@ def _cached(cache: Dict[Any, Any], key: Any, build):
 _MISSING = object()
 
 
+def _resolved_alias_value(alias: Any) -> Any:
+    """An alias's ``__value__``, with its forward references resolved.
+
+    Unwrapping alone was a REGRESSION: it exposed the raw ``__value__``, so a
+    ``ForwardRef`` inside ``type X = list['Leaf']`` reached an adapter with no
+    namespace and raised ``PydanticUserError: not fully defined`` — refusing every
+    invocation of an otherwise valid recipe. Closing one miss opened a false
+    rejection of exactly the shape the ``Any`` blocker had (issue #145, live QA).
+
+    The alias records the module it was written in, which is the namespace its own
+    forward references were written against.
+    """
+    value = getattr(alias, "__value__", _MISSING)
+    if value is _MISSING:
+        return alias
+    namespace = getattr(sys.modules.get(getattr(alias, "__module__", ""), None), "__dict__", {})
+    try:
+        return _eval_type(value, namespace, namespace)
+    except Exception:  # noqa: BLE001 — unresolved is better than raising here
+        return value
+
+
 def _unwrap_annotation(annotation: Any) -> Tuple[Any, ...]:
     return _cached(_UNWRAP_CACHE, annotation, lambda: _unwrap_annotation_uncached(annotation))
 
@@ -302,12 +327,30 @@ def _unwrap_annotation_uncached(annotation: Any) -> Tuple[Any, ...]:
     #
     # ``type X = ...`` is the modern spelling and pydantic accepts it as a field
     # annotation; both attributes below are public and documented.
-    value = getattr(annotation, "__value__", None)
-    if value is not None and type(annotation).__name__ == "TypeAliasType":
-        return _unwrap_annotation(value)
-    supertype = getattr(annotation, "__supertype__", None)
-    if supertype is not None:
-        return _unwrap_annotation(supertype)
+    if type(annotation).__name__ == "TypeAliasType":
+        return _unwrap_annotation(_resolved_alias_value(annotation))
+    # A SUBSCRIPTED alias — ``A[Leaf]`` where ``type A[T] = list[T]`` — is not a
+    # ``TypeAliasType`` itself and carries no ``__value__``; its origin is the
+    # alias. Substituting the arguments for the parameters is what makes its
+    # elements judgeable at all (issue #145, live QA).
+    origin = get_origin(annotation)
+    if type(origin).__name__ == "TypeAliasType":
+        resolved = _resolved_alias_value(origin)
+        parameters = getattr(origin, "__type_params__", ())
+        arguments = get_args(annotation)
+        if parameters and arguments:
+            try:
+                resolved = resolved[arguments] if len(arguments) > 1 else resolved[arguments[0]]
+            except Exception:  # noqa: BLE001 — leave it unsubstituted rather than guess
+                pass
+        return _unwrap_annotation(resolved)
+    if type(annotation).__name__ == "NewType":
+        # GUARDED the same way ``TypeAliasType`` is. An unguarded
+        # ``__supertype__`` read unwrapped any object that happened to carry the
+        # attribute — including a class that is a perfectly usable field type via
+        # ``__get_pydantic_core_schema__``, whose honest instances were then
+        # refused (issue #145, live QA).
+        return _unwrap_annotation(annotation.__supertype__)
 
     if get_origin(annotation) in _UNION_ORIGINS:
         options: List[Any] = []

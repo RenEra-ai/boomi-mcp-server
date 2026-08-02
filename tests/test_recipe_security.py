@@ -28,6 +28,7 @@ _src = str(_project_root / "src")
 if _src not in sys.path:
     sys.path.insert(0, _src)
 sys.path.insert(0, str(_project_root / "tests" / "patterns"))
+sys.path.insert(0, str(_project_root / "tests"))
 
 from boomi_mcp.categories.integration_authoring import (
     build_from_archetype_action,
@@ -2848,3 +2849,73 @@ def test_both_typed_dict_spellings_are_judged(module):
             field={"member": _DeclaredKeysOnlyLeaf.model_construct(ok="a")}
         )
     )
+
+
+@pytest.mark.parametrize(
+    "holder", ["ForwardAliasInputV1", "SubscriptedAliasInputV1"], ids=["forward_ref", "subscripted"]
+)
+def test_an_alias_is_unwrapped_without_breaking_its_forward_references(holder):
+    """Unwrapping alone was a REGRESSION.
+
+    It exposed the alias's raw ``__value__``, so a ``ForwardRef`` inside
+    ``type X = list['Leaf']`` reached an adapter with no namespace and raised
+    ``PydanticUserError: not fully defined`` — refusing every invocation of an
+    otherwise valid recipe. Closing one miss opened a false rejection of exactly
+    the shape the ``Any`` blocker had.
+
+    The subscripted case is the other half: ``A[Leaf]`` where ``type A[T] =
+    list[T]`` is not a ``TypeAliasType`` and carries no ``__value__``, so its
+    elements were unjudged until the parameters were substituted.
+
+    Uses a REAL module — an ``exec``-built alias has ``__module__ = None`` and
+    resolves for the wrong reason (issue #145, live QA).
+    """
+    from fixtures_alias import alias_forward_ref as fixture
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    model = getattr(fixture, holder)
+    honest = fixture.AliasLeaf.model_construct(ok="a")
+    converting = fixture.AliasLeaf.model_validate({"ok": "y"})
+    assert isinstance(converting, dict)  # the premise
+
+    _assert_declared_shape(model.model_construct(field=[honest]))
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=[converting]))
+
+
+def test_supertype_is_unwrapped_only_for_a_real_NewType():
+    """One branch guarded, one not, in the function whose job is introspection.
+
+    An unguarded ``__supertype__`` read unwrapped any object carrying the
+    attribute — including a class that is a usable field type via
+    ``__get_pydantic_core_schema__``, whose honest instances were then refused.
+    """
+    from pydantic_core import core_schema
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape, _unwrap_annotation
+
+    class UsableSupertype:
+        __supertype__ = str
+
+        @classmethod
+        def __get_pydantic_core_schema__(cls, source, handler):
+            return core_schema.is_instance_schema(cls)
+
+    assert _unwrap_annotation(UsableSupertype) == (UsableSupertype,)
+
+    model = type(
+        "SupertypeInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": UsableSupertype},
+            "field": None,
+        },
+    )
+    _assert_declared_shape(model.model_construct(field=UsableSupertype()))
+
+    # Control: a genuine NewType still unwraps.
+    from typing import NewType
+
+    assert _unwrap_annotation(NewType("Real", str)) == (str,)
