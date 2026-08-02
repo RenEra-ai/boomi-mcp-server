@@ -592,6 +592,19 @@ def _mapping_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Any, Any], .
     for element in _element_candidates(annotation, value):
         if len(element) == 2 and element[1] is not Ellipsis:
             pairs.append((element[0], element[1]))
+        elif len(element) == 1:
+            # A ONE-PARAMETER arm. ``Dict[K, V]`` has two, but a custom generic
+            # whose core schema is a dict — ``MyDict[Leaf]`` —  has one, and the
+            # arity filter discarded it, so the mapping was walked unjudged while
+            # the sequence path with the same shape was refused. The sibling of
+            # the ninth site, and the eleventh instance of abstention read as
+            # permission (issue #145, live QA site census).
+            #
+            # The parameter is read as the VALUE type, which is what a dict-shaped
+            # generic means by it. If some generic ever parametrises its KEY
+            # instead, its honest values are refused rather than accepted — loud
+            # and wrong-way-safe, unlike leaving the arm out.
+            pairs.append((None, element[0]))
     return tuple(pairs)
 
 

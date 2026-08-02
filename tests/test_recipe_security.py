@@ -3170,3 +3170,59 @@ def test_the_shipped_sources_parse_on_the_oldest_supported_python():
 
     # This very test file too — it is where the offending `exec` lived.
     ast.parse(Path(__file__).read_text(), feature_version=oldest)
+
+
+@pytest.mark.parametrize("shape", ["sequence", "mapping"])
+def test_a_one_parameter_custom_generic_is_judged_in_both_shapes(shape):
+    """The ninth site's fix landed on the sequence path only.
+
+    ``_mapping_candidates`` kept arms of arity 2 (``Dict[K, V]``) and discarded
+    the one-parameter arm a dict-shaped custom generic produces — so the fallback
+    reached the sequence walk and was filtered out of the mapping walk. The
+    eleventh instance of abstention read as permission, and the second time in
+    two rounds that a fix landed where the defect was FOUND rather than at its
+    sibling path (issue #145, live QA site census).
+
+    Parametrised over both shapes so the sibling cannot be forgotten again.
+    """
+    from typing import Generic, TypeVar
+
+    from pydantic import GetCoreSchemaHandler
+    from pydantic_core import core_schema
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    T = TypeVar("T")
+
+    class CustomSequence(Generic[T]):
+        @classmethod
+        def __get_pydantic_core_schema__(cls, source, handler: GetCoreSchemaHandler):
+            args = getattr(source, "__args__", None)
+            inner = handler.generate_schema(args[0]) if args else core_schema.any_schema()
+            return core_schema.list_schema(inner)
+
+    class CustomMapping(Generic[T]):
+        @classmethod
+        def __get_pydantic_core_schema__(cls, source, handler: GetCoreSchemaHandler):
+            args = getattr(source, "__args__", None)
+            inner = handler.generate_schema(args[0]) if args else core_schema.any_schema()
+            return core_schema.dict_schema(core_schema.str_schema(), inner)
+
+    generic = CustomSequence if shape == "sequence" else CustomMapping
+    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
+    honest = _DeclaredKeysOnlyLeaf.model_construct(ok="a")
+    poisoned = [converting] if shape == "sequence" else {"k": converting}
+    clean = [honest] if shape == "sequence" else {"k": honest}
+
+    model = type(
+        f"CustomGeneric{shape}InputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": generic[_DeclaredKeysOnlyLeaf]},
+            "field": None,
+        },
+    )
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=poisoned))
+    _assert_declared_shape(model.model_construct(field=clean))
