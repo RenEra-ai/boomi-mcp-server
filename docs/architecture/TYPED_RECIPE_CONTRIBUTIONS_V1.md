@@ -478,6 +478,26 @@ construction:
   unguarded refused honest instances of any class that happens to carry the attribute and is a
   usable field type.
 **The annotation forms the walk RECOGNISES are enumerated, and that list is the boundary.**
+Outside it, coverage degrades to what the adapter alone provides — and the adapter *converts*, so
+that is strictly weaker. Three paths refuse instead of degrading: an iterable the walk cannot
+enumerate safely, a dataclass or `TypedDict` whose hints will not resolve, and an alias that names
+something undefined.
+
+This is a **coverage** boundary, not a residue like the author-cooperation channels in §12, and
+the distinction is load-bearing in both directions. A gap here puts caller data in a *declared*
+field an ordinary executor reads — the same criterion that made a masking serializer a defeated
+guard rather than acceptable residue — whereas every §12 channel needs a name the author invented.
+And this one is closable in principle: §12's channels are not. Roughly a dozen defects were found
+in this layer and only two needed an unusual annotation; the rest used `Dict[str, Any]`, a plain
+`TypedDict`, `Union[List[A], List[B]]`, a stdlib dataclass under PEP 563, `NewType` and friends.
+Three of them refused *every invocation of an honest recipe*.
+
+What closed it was not the absence of findings — that measures the attacker's repertoire, not the
+code — but a census: two named failure modes (*abstention read as permission*, *one arm's answer
+used for another arm's value*) graded against every site that chooses among union arms or returns
+a no-information value. Every blocking finding from the last nine review rounds landed in one of
+those sites, and the census found two more that judgement-based sweeps had missed.
+
 `Annotated`; both union spellings (`typing.Union` and `X | Y`); `TypeAliasType`, subscripted and
 not; `NewType`; `TypedDict` from either `typing` or `typing_extensions`; parametrised containers
 and mappings; dataclasses, pydantic and stdlib. Anything else abstains, and abstention is safe
