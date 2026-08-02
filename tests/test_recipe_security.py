@@ -2644,3 +2644,124 @@ def test_a_typed_dict_field_is_judged_by_its_per_key_hints():
         _assert_declared_shape(
             TypedDictFieldInputV1.model_construct(field={"member": converting})
         )
+
+
+def test_a_short_fixed_length_arm_does_not_accept_by_abstaining():
+    """``_positional`` returns ``None`` for "no opinion at this index".
+
+    ``_assert_declared_shape(value, None)`` succeeds unconditionally, so one
+    ``None`` anywhere in the candidate list accepted the element unjudged.
+    ``Union[Tuple[str, str], Tuple[str, str, Leaf]]`` at index 2 produced
+    ``[None, Leaf]`` and the ``None`` was tried first (issue #145, live QA).
+
+    Needs an arm with at least TWO fixed parameters that is shorter than the
+    value — with a single parameter ``_positional`` returns that parameter rather
+    than ``None``, and the leak does not appear.
+    """
+    from typing import Tuple as TupleType, Union as UnionType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
+
+    def _model(name, annotation):
+        return type(
+            name,
+            (RecipeInputBase,),
+            {
+                "model_config": ConfigDict(extra="forbid", frozen=True),
+                "__annotations__": {"field": annotation},
+                "field": None,
+            },
+        )
+
+    leaky = _model(
+        "ShortArmInputV1",
+        UnionType[
+            TupleType[str, str], TupleType[str, str, _DeclaredKeysOnlyLeaf]
+        ],
+    )
+    with pytest.raises(Exception):
+        _assert_declared_shape(leaky.model_construct(field=("a", "b", converting)))
+
+    # Control: the discriminating arm alone refuses it too.
+    control = _model(
+        "ShortArmControlInputV1", TupleType[str, str, _DeclaredKeysOnlyLeaf]
+    )
+    with pytest.raises(Exception):
+        _assert_declared_shape(control.model_construct(field=("a", "b", converting)))
+
+
+def test_a_failed_trial_does_not_mark_nodes_seen_for_the_next_one():
+    """The rollback is load-bearing, and needs a value BOTH arms get past.
+
+    A candidate that walks part of the tree before failing would otherwise leave
+    nodes marked in the shared cycle guard and let a later candidate
+    short-circuit past them — a false accept manufactured by the disjunction.
+
+    The union must be over CONTAINERS: ``List[Union[A, B]]`` yields a single
+    candidate and never exercises the disjunction at all (issue #145, live QA).
+    """
+    from typing import List as ListType, Union as UnionType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class A(RecipeInputBase):
+        payload: _DeclaredKeysOnlyLeaf = _DeclaredKeysOnlyLeaf()
+
+    class B(RecipeInputBase):
+        payload: _DeclaredKeysOnlyLeaf = _DeclaredKeysOnlyLeaf()
+
+    class Both(A, B):
+        pass
+
+    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
+    assert isinstance(converting, dict)  # the premise
+
+    model = type(
+        "RollbackInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": UnionType[ListType[A], ListType[B]]},
+            "field": None,
+        },
+    )
+    element = Both.model_construct(payload=converting)
+    assert isinstance(element, A) and isinstance(element, B)  # both trials proceed
+
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=[element]))
+
+
+def test_the_container_match_is_load_bearing():
+    """Y4, which looked unkillable and is not.
+
+    ``_element_candidates`` is a purely SYNTACTIC pass over the arms, so the
+    adapter accepting the value through one arm does not stop another arm's
+    PARAMETERS being consulted: ``_positional((Any, Any), 0)`` yields ``Any``,
+    which admits anything.
+
+    Needs ``Dict[Any, Any]`` and a ONE-element list — ``Dict[Any, str]`` rejects
+    at index 1 and hides the effect (issue #145, live QA).
+    """
+    from typing import Any as AnyType, Dict as DictType, List as ListType, Union as UnionType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    model = type(
+        "ContainerMatchInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {
+                "field": UnionType[
+                    DictType[AnyType, AnyType], ListType[_DeclaredKeysOnlyLeaf]
+                ]
+            },
+            "field": None,
+        },
+    )
+    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=[converting]))

@@ -445,7 +445,12 @@ construction:
   same-origin union (`Union[List[Leaf], List[Other]]`) matches more than one arm, so abstention
   disabled the element check for all of them, and the false-rejection case above began passing
   because *nothing* was consulted. **Abstention is only safe where something else judges the
-  value** — for membership the last-chance loop does; for element parameters nothing does. `Union[Tuple[Any, ...], Tuple[Leaf, ...]]` holding that same dict still
+  value** — for membership the last-chance loop does; for element parameters nothing does. For the
+  same reason a `None` element annotation (a fixed-length arm running off the end) is dropped from
+  the candidate list rather than tried: `_assert_declared_shape(value, None)` succeeds
+  unconditionally, so one `None` accepted the element unjudged. Failed trials roll back by
+  journal — a candidate that walks part of the tree before failing would otherwise leave nodes
+  marked in the shared cycle guard and let a later candidate short-circuit past them. `Union[Tuple[Any, ...], Tuple[Leaf, ...]]` holding that same dict still
   passes, correctly: the value genuinely satisfies the `Any` arm.
 * **A `TypedDict` field is read from its per-key hints.** It has no `get_origin`, so no
   parametrised arm matched it, and it cannot be instance-checked, so the class check abstains —

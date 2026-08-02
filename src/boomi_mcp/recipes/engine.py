@@ -451,22 +451,54 @@ def _element_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Any, ...], .
     return tuple(candidates)
 
 
-def _assert_any_candidate(value: Any, annotations: Sequence[Any], _seen: set) -> None:
+def _assert_any_candidate(
+    value: Any,
+    annotations: Sequence[Any],
+    _seen: set,
+    _journal: Optional[List[int]] = None,
+) -> None:
     """Accept if ANY of these annotations admits the value; refuse if none does.
 
-    Trials run against a COPY of the cycle guard, so a candidate that walks part
-    of the tree before failing cannot mark nodes seen and make a later candidate
-    skip them. The accepted annotation is then walked for real.
+    ``None`` entries are DROPPED first. ``_positional`` returns ``None`` to mean
+    "this arm has no opinion at this index" — a fixed-length arm running off the
+    end — and ``_assert_declared_shape(value, None)`` succeeds unconditionally, so
+    a single ``None`` anywhere in the list accepted the element without judging
+    it. ``Union[Tuple[str, str], Tuple[str, str, Leaf]]`` at index 2 produced
+    ``[None, Leaf]`` and the ``None`` was tried first (issue #145, live QA).
+
+    If everything was ``None`` the empty list falls through to the same
+    abstention as "no arm matched", which is the behaviour that was intended.
+
+    Failed trials are rolled back by JOURNAL rather than by copying the cycle
+    guard. A candidate that walks part of the tree before failing would otherwise
+    leave nodes marked seen and let a later candidate short-circuit past them —
+    a false accept manufactured by the disjunction itself — but copying the set
+    per candidate per element made the walk quadratic in tree size. The journal is
+    O(nodes added by the trial).
     """
+    annotations = [annotation for annotation in annotations if annotation is not None]
     if not annotations:
-        _assert_declared_shape(value, None, _seen)
+        _assert_declared_shape(value, None, _seen, _journal)
+        return
+    if len(annotations) == 1:
+        # A PERFORMANCE path, not a correctness one — removing it kills no test.
+        # With no sibling to be polluted by there is nothing to roll back, and
+        # this is the overwhelmingly common case, so it avoids a journal
+        # allocation per element on every ordinary container (issue #145).
+        _assert_declared_shape(value, annotations[0], _seen, _journal)
         return
     for annotation in annotations:
+        journal: List[int] = []
         try:
-            _assert_declared_shape(value, annotation, set(_seen))
+            _assert_declared_shape(value, annotation, _seen, journal)
         except Exception:  # noqa: BLE001 — this arm simply does not admit it
+            for marker in journal:
+                _seen.discard(marker)
             continue
-        _assert_declared_shape(value, annotation, _seen)
+        # The accepted trial's marks are real; hand them to any OUTER journal so
+        # an enclosing rollback can still undo them.
+        if _journal is not None:
+            _journal.extend(journal)
         return
     raise ValueError("validated input holds an element no declared arm admits")
 
@@ -549,7 +581,12 @@ def _is_opaque_iterable(value: Any) -> bool:
     return hasattr(value, "__iter__") or hasattr(value, "__next__")
 
 
-def _assert_declared_shape(value: Any, annotation: Any = None, _seen: Optional[set] = None) -> None:
+def _assert_declared_shape(
+    value: Any,
+    annotation: Any = None,
+    _seen: Optional[set] = None,
+    _journal: Optional[List[int]] = None,
+) -> None:
     """Every value in the tree is what its declaration says, checked value-first.
 
     VALUE-FIRST, not schema-first, is the load-bearing choice. Walking the model's
@@ -561,6 +598,14 @@ def _assert_declared_shape(value: Any, annotation: Any = None, _seen: Optional[s
     """
     if _seen is None:
         _seen = set()
+
+    def _mark(node: Any) -> None:
+        marker = id(node)
+        if marker not in _seen:
+            _seen.add(marker)
+            if _journal is not None:
+                _journal.append(marker)
+
 
     if annotation is not None:
         # STRICT, because this runs AFTER validation. Every stored value should
@@ -589,7 +634,7 @@ def _assert_declared_shape(value: Any, annotation: Any = None, _seen: Optional[s
         return
 
     if isinstance(value, BaseModel):
-        _seen.add(id(value))
+        _mark(value)
         # Undeclared keys on the INSTANCE. A model whose compiled validator allows
         # extras can be made to look closed at registration by assigning a closed
         # twin's ``__pydantic_core_schema__``; the instance it produces cannot lie
@@ -597,7 +642,7 @@ def _assert_declared_shape(value: Any, annotation: Any = None, _seen: Optional[s
         if getattr(value, "__pydantic_extra__", None):
             raise ValueError("validated input carries undeclared keys")
         for name, field in type(value).model_fields.items():
-            _assert_declared_shape(getattr(value, name, None), field.annotation, _seen)
+            _assert_declared_shape(getattr(value, name, None), field.annotation, _seen, _journal)
         return
 
     # A pydantic dataclass is neither a ``BaseModel`` nor a container, so an
@@ -606,11 +651,11 @@ def _assert_declared_shape(value: Any, annotation: Any = None, _seen: Optional[s
     # mapping sitting in a ``str`` field reachable at ``inp.holder.label``
     # (issue #145, Codex review).
     if is_dataclass(value) and not isinstance(value, type):
-        _seen.add(id(value))
+        _mark(value)
         hints = _dataclass_field_types(type(value))
         for field in dataclass_fields(value):
             _assert_declared_shape(
-                getattr(value, field.name, None), hints.get(field.name), _seen
+                getattr(value, field.name, None), hints.get(field.name), _seen, _journal
             )
         return
 
@@ -624,24 +669,24 @@ def _assert_declared_shape(value: Any, annotation: Any = None, _seen: Optional[s
     # Element ANNOTATIONS are carried down as well. Without them a dict standing
     # in for a ``Leaf`` inside ``Tuple[Leaf, ...]`` was visited but never judged.
     if _is_walkable_collection(value) and not isinstance(value, Mapping):
-        _seen.add(id(value))
+        _mark(value)
         candidates = _element_candidates(annotation, value)
         for index, item in enumerate(value):
             _assert_any_candidate(
-                item, [_positional(args, index) for args in candidates], _seen
+                item, [_positional(args, index) for args in candidates], _seen, _journal
             )
     elif isinstance(value, Mapping):
-        _seen.add(id(value))
+        _mark(value)
         # A ``TypedDict`` names its keys individually and has no ``get_origin``,
         # so it is read from its hints rather than from container parameters.
         per_key = _typed_dict_hints(annotation)
         pairs = _mapping_candidates(annotation, value)
         for key, item in value.items():
-            _assert_any_candidate(key, [k for k, _ in pairs], _seen)
+            _assert_any_candidate(key, [k for k, _ in pairs], _seen, _journal)
             if per_key is not None and key in per_key:
-                _assert_declared_shape(item, per_key[key], _seen)
+                _assert_declared_shape(item, per_key[key], _seen, _journal)
             else:
-                _assert_any_candidate(item, [v for _, v in pairs], _seen)
+                _assert_any_candidate(item, [v for _, v in pairs], _seen, _journal)
     elif _is_opaque_iterable(value):
         # FAIL CLOSED on anything iterable the walk cannot enumerate safely.
         # ``Iterable[str]`` validates LAZILY — pydantic hands back a
