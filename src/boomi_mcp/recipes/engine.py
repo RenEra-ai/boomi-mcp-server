@@ -299,7 +299,14 @@ def _resolved_alias_value(alias: Any) -> Any:
     namespace = getattr(sys.modules.get(getattr(alias, "__module__", ""), None), "__dict__", {})
     try:
         return _eval_type(value, namespace, namespace)
-    except Exception:  # noqa: BLE001 — unresolved is better than raising here
+    except Exception:  # noqa: BLE001 — see below
+        # Returning the raw value does NOT save the walk: an unresolved
+        # ``ForwardRef`` inside it still reaches the adapter and raises there.
+        # That is acceptable rather than accidental — every case where this fires
+        # is one where the annotation is genuinely unresolvable, and refusing an
+        # annotation nobody can resolve is the fail-closed answer. Stated because
+        # an earlier comment here claimed the fallback avoided raising, which it
+        # does not (issue #145, live QA).
         return value
 
 

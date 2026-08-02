@@ -467,6 +467,20 @@ construction:
   its elements are judgeable. `__supertype__` is unwrapped only for a real `NewType`; reading it
   unguarded refused honest instances of any class that happens to carry the attribute and is a
   usable field type.
+**The annotation forms the walk RECOGNISES are enumerated, and that list is the boundary.**
+`Annotated`; both union spellings (`typing.Union` and `X | Y`); `TypeAliasType`, subscripted and
+not; `NewType`; `TypedDict` from either `typing` or `typing_extensions`; parametrised containers
+and mappings; dataclasses, pydantic and stdlib. Anything else abstains, and abstention is safe
+here **only because the adapter runs first** — that sentence is the whole safety argument for this
+layer.
+
+The list is a boundary rather than a completeness claim, because the input language keeps
+growing: every defect found in this layer came from a declaration form, and PEP 604 unions, PEP
+695 aliases, the second `TypedDict` spelling and subscripted generic aliases were each one such
+form arriving. A form a later Python adds is therefore a *documented* gap a reader can check
+against, not a silent one to be rediscovered — the same move §12 makes for the author-cooperation
+channels.
+
 * **A `TypedDict` field is read from its per-key hints** — via `typing_extensions.is_typeddict`,
   because `typing.is_typeddict` returns False for a `typing_extensions.TypedDict` subclass and
   both spellings are usable field types. A `TypedDict` has no `get_origin`, so no
