@@ -3092,3 +3092,81 @@ def test_new_type_is_recognised_by_identity_not_by_class_name():
 
     # Control: a genuine NewType still unwraps.
     assert _unwrap_annotation(RealNewType("Genuine", str)) == (str,)
+
+
+def test_arms_that_exist_but_match_no_container_are_still_applied():
+    """"No arm matched" is not "this annotation says nothing".
+
+    A custom generic whose core schema is a list — ``MyList[Leaf]`` — stores a
+    plain ``list``, which is never an instance of ``MyList``, so no arm matched by
+    container and every element was walked unjudged while the adapter converted
+    happily. Ninth instance of abstention-read-as-permission, and the one the r49
+    site census was run to find (issue #145).
+    """
+    from typing import Generic, TypeVar
+
+    from pydantic import GetCoreSchemaHandler
+    from pydantic_core import core_schema
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    T = TypeVar("T")
+
+    class MyList(Generic[T]):
+        @classmethod
+        def __get_pydantic_core_schema__(cls, source, handler: GetCoreSchemaHandler):
+            args = getattr(source, "__args__", None)
+            inner = (
+                handler.generate_schema(args[0]) if args else core_schema.any_schema()
+            )
+            return core_schema.list_schema(inner)
+
+    model = type(
+        "CustomGenericInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": MyList[_DeclaredKeysOnlyLeaf]},
+            "field": None,
+        },
+    )
+    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=[converting]))
+
+    _assert_declared_shape(
+        model.model_construct(field=[_DeclaredKeysOnlyLeaf.model_construct(ok="a")])
+    )
+
+
+def test_the_shipped_sources_parse_on_the_oldest_supported_python():
+    """The suite runs on ONE interpreter, so a syntax break on another is
+    invisible to every gate.
+
+    PEP 695 ``type X = ...`` in a test fixture was a ``SyntaxError`` on 3.11 —
+    which both Docker stages use — and would have failed at import before any
+    test ran. Nothing that executes code could have caught it; only parsing under
+    the older grammar does (issue #145, Codex review).
+    """
+    import ast
+
+    oldest = (3, 11)
+    roots = [
+        _project_root / "src" / "boomi_mcp" / "recipes",
+        _project_root / "tests" / "fixtures_alias",
+    ]
+    checked = 0
+    for root in roots:
+        for path in sorted(root.rglob("*.py")):
+            checked += 1
+            try:
+                ast.parse(path.read_text(), feature_version=oldest)
+            except SyntaxError as exc:  # pragma: no cover - the failure IS the point
+                raise AssertionError(
+                    f"{path.relative_to(_project_root)} does not parse on "
+                    f"Python {oldest[0]}.{oldest[1]}: {exc.msg}"
+                ) from None
+    assert checked > 5, checked
+
+    # This very test file too — it is where the offending `exec` lived.
+    ast.parse(Path(__file__).read_text(), feature_version=oldest)

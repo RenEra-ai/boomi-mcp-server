@@ -510,11 +510,13 @@ def _element_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Any, ...], .
     by the caller — an element is acceptable if ANY matching arm admits it.
     """
     candidates = []
+    parametrised = []
     for option in _unwrap_annotation(annotation):
         origin = get_origin(option)
         args = get_args(option)
         if origin is None or not args:
             continue
+        parametrised.append(args)
         try:
             if isinstance(value, origin):
                 candidates.append(args)
@@ -524,14 +526,21 @@ def _element_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Any, ...], .
             # invocation, the same false rejection ``_assert_runtime_class``
             # was already fixed for (issue #145, Codex review).
             continue
-        # KNOWN SURVIVOR, stated rather than left to look load-bearing: dropping
-        # this container match kills no test, because the adapter above validates
-        # the container itself — a list can never reach a ``Dict`` arm's
-        # parameters, since ``TypeAdapter(Union[...])`` rejects the whole value
-        # first. It is kept because it makes the disjunction below reason over
-        # arms that could actually apply, and because the alternative is
-        # re-deriving that adapter guarantee by hand (issue #145).
-    return tuple(candidates)
+    if candidates:
+        return tuple(candidates)
+    # ARMS EXIST BUT NONE MATCHED BY CONTAINER — which is NOT the same as "this
+    # annotation says nothing", and conflating them was the ninth instance of
+    # abstention-read-as-permission. A custom generic whose core schema is a list
+    # (``MyList[Leaf]``) stores a plain ``list``, which is never an instance of
+    # ``MyList``, so no arm matched and every element was walked unjudged while
+    # the adapter converted happily.
+    #
+    # Falling back to every parametrised arm is safe because ONE arm must cover
+    # the whole container: an arm that does not fit simply fails. The container
+    # match above still earns its place — live QA killed the mutant that removes
+    # it with ``Union[Dict[Any, Any], List[Leaf]]`` — it is just consulted only
+    # when at least one arm matches (issue #145, the r49 site census).
+    return tuple(parametrised)
 
 
 def _assert_one_arm_covers(

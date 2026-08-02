@@ -449,6 +449,11 @@ construction:
   element 1 the `B` arm, so the stored list matched neither declared arm, while the adapter
   accepted it via `List[A]` (because `A` converts a `B`) and discarded the conversion. An arm
   that is shorter than the value fails rather than abstaining at the indices it does not reach.
+* **"No arm matched" is not "this annotation says nothing".** A custom generic whose core schema
+  is a list stores a plain `list`, which is never an instance of that generic, so no arm matched
+  by container and its elements were walked unjudged. When arms exist but none matches, every
+  parametrised arm is applied instead — safe precisely because one arm must cover the whole
+  container, so an arm that does not fit simply fails.
 * **Abstention is only safe where something else judges the
   value** — for membership the last-chance loop does; for element parameters nothing does. For the
   same reason a `None` element annotation (a fixed-length arm running off the end) is dropped from
