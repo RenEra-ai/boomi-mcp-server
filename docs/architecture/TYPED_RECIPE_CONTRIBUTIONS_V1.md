@@ -692,6 +692,15 @@ that was dropped. Each states what changed and why.
   value against a published schema, and the skew comparison is schema-to-schema, so a lying
   model's hash is stable and compares correctly. The misled party is a human reader, who has the
   validator in front of them in the same class.
+* **Re-checking the numeric tower.** Scoping the runtime-class check to model positions gives up
+  exactly five widenings, enumerated by sweeping twelve scalar annotations against thirteen
+  values for "strict accepts *and* `isinstance` is False": `float` from `int`, `Decimal` or
+  `Fraction`, and `complex` from `int` or `float`. Capacity is not quite nil — a `Decimal` in a
+  `float` field carries arbitrary-precision digits, so it is a narrow encoding channel — but
+  closing it means disagreeing with pydantic's own `strict=True` about what a `float` field
+  admits, which is the inconsistency that made an `int` literal default refused on the default
+  path and accepted on the supplied path. Two halves of one gate with different notions of
+  "declared type" is a worse defect than the channel.
 * **Closing the author-cooperation side channels.** Three measured channels move caller data
   past every check, and all three are left open deliberately:
   a `mode="before"` validator stashing the raw mapping in a module global; an `after`

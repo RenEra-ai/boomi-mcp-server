@@ -315,12 +315,19 @@ def _assert_runtime_class(value: Any, annotation: Any) -> None:
             continue
         if get_origin(option) is not None or not isinstance(option, type):
             return  # parametrised or unrecognised; the adapter is the check
-        if not (issubclass(option, BaseModel) or is_dataclass(option)):
+        if not issubclass(option, BaseModel):
             # Not a position where conversion can mislead. This is also what
             # makes ``Any`` and ``object`` safe — ``issubclass(Any, BaseModel)``
             # is ``False``, so both return here. An explicit guard for them was
             # tried and killed no mutant, which is the signal that the scoping
             # already covers it.
+            #
+            # DATACLASSES are deliberately absent, having been tried: strict mode
+            # already REJECTS a mapping at a dataclass position, pydantic and
+            # stdlib flavours alike. The "conversion succeeds and hands the dict
+            # straight back" behaviour this whole check exists for is specific to
+            # MODELS, so a dataclass arm could never be the discriminating test —
+            # it killed no mutant because no value can reach it (issue #145).
             return
         classes.append(option)
     if not any(isinstance(value, cls) for cls in classes):

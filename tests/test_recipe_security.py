@@ -2141,3 +2141,51 @@ def test_a_self_iterating_collection_is_refused():
 
     # And it was refused without being drained.
     assert list(payload) == [{"smuggled": "SENTINEL-SQL-SELECT-SECRETS"}]
+
+
+def test_a_subclass_at_a_model_position_is_ACCEPTED():
+    """An ACCEPTANCE pin, which this suite is short of.
+
+    Every other fixture here is an attack, so an over-tightening mutant survives
+    by construction — the r39 ``Any`` blocker was exactly that shape, a check made
+    too strict with no test able to see it. Mutating a guard toward *stricter*,
+    not only toward *absent*, is what finds them (issue #145, live QA).
+
+    The asymmetry pinned here is deliberate: the ROOT is checked by exact type
+    (r30 — a subclass with ``extra="allow"`` and ``model_construct`` defeats
+    ``isinstance`` there), while positions BELOW the root use ``isinstance``, so
+    ordinary subclass usage keeps working. A future reader "fixing the
+    inconsistency" in the wrong direction would break honest models silently.
+    """
+    from typing import Optional as OptionalType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class Leaf(RecipeInputBase):
+        ok: str = "x"
+
+    class RicherLeaf(Leaf):
+        extra_field: str = "y"
+
+    class HolderInputV1(RecipeInputBase):
+        one: Leaf = Leaf()
+        many: Tuple[Leaf, ...] = ()
+        mapped: Dict[str, Leaf] = {}
+        maybe: OptionalType[Leaf] = None
+
+    subclass = RicherLeaf()
+    instance = HolderInputV1.model_construct(
+        one=subclass,
+        many=(subclass,),
+        mapped={"k": subclass},
+        maybe=subclass,
+    )
+    _assert_declared_shape(instance)  # must not raise
+
+    # ...and allowing subclasses did NOT reopen the extras door.
+    class OpenLeaf(Leaf):
+        model_config = ConfigDict(extra="allow", frozen=True)
+
+    leaky = OpenLeaf.model_construct(ok="x", smuggled="SENTINEL-SQL-SELECT-SECRETS")
+    with pytest.raises(Exception):
+        _assert_declared_shape(HolderInputV1.model_construct(one=leaky))
