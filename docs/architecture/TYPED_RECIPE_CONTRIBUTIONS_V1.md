@@ -468,11 +468,22 @@ keeps `Union[Leaf, Dict[str, str]]` honest.
 Strict mode **converts**; it does not merely check. That is the sentence the whole design turns
 on.
 
+**Both union spellings are flattened.** `get_origin(Leaf | str)` is `types.UnionType`, not
+`typing.Union`, so an earlier version left the PEP 604 spelling as one opaque option — the class
+list came out empty and the check was simply off under the ordinary modern syntax. The two are
+`==` *and* hash-equal, so the memo returned whichever was computed first for both: a model written
+`Optional[SecretStr]` lost its check whenever another model in the process used `SecretStr | None`
+earlier. Import-order-dependent security behaviour, fixed by making both flatten to the same
+result rather than by keying the cache differently.
+
 A class that cannot be instance-checked yields no opinion for the whole annotation. A bounded
 `TypedDict` is a class, passes both registration gates, and is correctly stored as a `dict` — but
 `isinstance(value, SomeTypedDict)` raises `TypeError`, which failed *every* invocation of an
-otherwise valid recipe. That is the second such class after `typing.Any`, so the guard is general
-rather than a `TypedDict` special case, and it abstains for the whole annotation rather than
+otherwise valid recipe. That is the second such class after `typing.Any`. The stdlib list is closed at three usable
+members — `Any`, and both `TypedDict` flavours — but the general case is not: `__instancecheck__`
+is arbitrary user code and a class carrying `__get_pydantic_core_schema__` is a legal field type,
+so a metaclass raising `ValueError` is reachable. The guard therefore catches **any** exception
+from the attempt rather than enumerating the forms, and it abstains for the whole annotation rather than
 dropping the unusable option — otherwise `Union[Leaf, SomeTypedDict]` would false-reject a
 legitimate dict.
 

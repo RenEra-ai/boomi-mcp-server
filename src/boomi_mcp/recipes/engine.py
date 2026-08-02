@@ -233,6 +233,26 @@ def _declared_shape_adapter(annotation: Any) -> Any:
     return cached
 
 
+#: Both union spellings. ``get_origin(Leaf | str)`` is ``types.UnionType``, NOT
+#: ``typing.Union`` — so an earlier version flattened ``Union[Leaf, str]`` and left
+#: ``Leaf | str`` as a single opaque option, emptying the class list and disabling
+#: the runtime-class check under the ordinary modern spelling.
+#:
+#: The two are ``==`` and hash-equal, which made it worse than a miss: the memo
+#: below returned whichever spelling was computed FIRST for both, so a model
+#: written with ``Optional[SecretStr]`` lost its class check whenever some other
+#: model in the process used ``SecretStr | None`` earlier. Import-order-dependent
+#: security behaviour. Flattening both to the same result is what makes the shared
+#: cache entry correct rather than merely consistent (issue #145, live QA).
+_UNION_ORIGINS: Tuple[Any, ...]
+try:  # pragma: no cover - the fallback is for Python < 3.10
+    from types import UnionType as _PEP604Union
+
+    _UNION_ORIGINS = (Union, _PEP604Union)
+except ImportError:  # pragma: no cover
+    _UNION_ORIGINS = (Union,)
+
+
 #: Annotation introspection is pure and repeats for every value at a position,
 #: so it is memoised. Unhashable annotations fall through and are recomputed.
 _UNWRAP_CACHE: Dict[Any, Tuple[Any, ...]] = {}
@@ -268,7 +288,7 @@ def _unwrap_annotation_uncached(annotation: Any) -> Tuple[Any, ...]:
     if get_origin(annotation) is Annotated:
         args = get_args(annotation)
         return _unwrap_annotation(args[0]) if args else ()
-    if get_origin(annotation) is Union:
+    if get_origin(annotation) in _UNION_ORIGINS:
         options: List[Any] = []
         for arg in get_args(annotation):
             options.extend(_unwrap_annotation(arg))
@@ -345,8 +365,15 @@ def _assert_runtime_class(value: Any, annotation: Any) -> None:
     for cls in class_options:
         try:
             verdicts.append(isinstance(value, cls))
-        except TypeError:
-            return  # structural or otherwise non-runtime; cannot decide here
+        except Exception:  # noqa: BLE001 — see below
+            # ANY failure, not just ``TypeError``. ``__instancecheck__`` is
+            # arbitrary user code and a class carrying
+            # ``__get_pydantic_core_schema__`` is a legal field type, so a
+            # metaclass raising ``ValueError`` reached this and refused every
+            # invocation. Enumerating the non-checkable forms is open-ended;
+            # attempting the check and catching is the only way to confirm one
+            # positively (issue #145, live QA).
+            return
     if any(verdicts):
         return
     for cls in class_options:

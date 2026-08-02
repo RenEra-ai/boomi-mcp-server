@@ -2346,3 +2346,89 @@ def test_a_typed_dict_field_does_not_fail_every_invocation():
         field: UnionType[Leaf, Bounded] = {"a": "x"}
 
     _assert_declared_shape(MixedInputV1.model_validate({"field": {"a": "y"}}))
+
+
+def test_a_pep604_union_gets_the_same_class_check_as_typing_union():
+    """``get_origin(Leaf | str)`` is ``types.UnionType``, NOT ``typing.Union``.
+
+    An earlier version flattened only the ``typing`` spelling, so ``X | Y`` left a
+    single opaque option, the class list came out empty, and the runtime-class
+    check was disabled under the ordinary modern spelling — reopening the
+    ``SecretStr`` leak (issue #145, live QA).
+    """
+    from typing import Optional as OptionalType
+
+    from pydantic import SecretStr
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape, _unwrap_annotation
+
+    # Both spellings must flatten identically...
+    assert len(_unwrap_annotation(SecretStr | None)) == len(
+        _unwrap_annotation(OptionalType[SecretStr])
+    ) == 2
+
+    # ...and both must refuse a raw str left in the field.
+    for annotation in (SecretStr | None, OptionalType[SecretStr]):
+        model = type(
+            "Pep604InputV1",
+            (RecipeInputBase,),
+            {
+                "model_config": ConfigDict(extra="forbid", frozen=True),
+                "__annotations__": {"token": annotation},
+                "token": None,
+            },
+        )
+        with pytest.raises(Exception):
+            _assert_declared_shape(model.model_construct(token="SENTINEL-CREDENTIAL-REF"))
+
+
+def test_the_annotation_cache_cannot_differ_by_spelling():
+    """``Leaf | str == Union[Leaf, str]`` AND they hash equal.
+
+    So one memo entry serves both, and whichever spelling was computed first used
+    to decide the other's behaviour — a security guard that depended on import
+    order. Flattening both to the same result is what makes the shared entry
+    correct rather than merely consistent.
+    """
+    from typing import Union as UnionType
+
+    from boomi_mcp.recipes.engine import _UNWRAP_CACHE, _unwrap_annotation
+
+    class Leaf(RecipeInputBase):
+        ok: str = "x"
+
+    assert (Leaf | str) == UnionType[Leaf, str]
+    assert hash(Leaf | str) == hash(UnionType[Leaf, str])
+
+    for first, second in ((Leaf | str, UnionType[Leaf, str]), (UnionType[Leaf, str], Leaf | str)):
+        _UNWRAP_CACHE.clear()
+        assert _unwrap_annotation(first) == _unwrap_annotation(second)
+        assert len(_unwrap_annotation(second)) == 2
+
+
+def test_a_class_whose_instancecheck_raises_does_not_refuse_every_invocation():
+    """``__instancecheck__`` is arbitrary user code.
+
+    Narrowing the guard to ``TypeError`` covered ``Any`` and ``TypedDict`` but not
+    a metaclass raising anything else — and a class carrying
+    ``__get_pydantic_core_schema__`` is a legal field type, so it is reachable.
+    Enumerating non-checkable forms is open-ended; attempting and catching is the
+    only positive confirmation.
+    """
+    from pydantic_core import core_schema
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class RaisingMeta(type):
+        def __instancecheck__(cls, instance):
+            raise ValueError("deliberately not a TypeError")
+
+    class Weird(metaclass=RaisingMeta):
+        @classmethod
+        def __get_pydantic_core_schema__(cls, source, handler):
+            return core_schema.any_schema()
+
+    class WeirdInputV1(RecipeInputBase):
+        field: Weird = None  # type: ignore[assignment]
+
+    _assert_declared_shape(WeirdInputV1.model_construct(field="anything"))  # must not raise
