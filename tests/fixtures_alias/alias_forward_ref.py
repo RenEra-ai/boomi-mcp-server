@@ -1,11 +1,21 @@
 """Aliases with forward references, in a REAL module.
 
-`exec`-built aliases get ``__module__ = None`` and resolve for the wrong reason,
-which is how a fixture can produce the expected verdict without exercising the
-namespace lookup at all (issue #145, live QA).
+Two constraints shape this file:
+
+* ``exec``-built aliases get ``__module__ = None`` and resolve for the wrong
+  reason, so the namespace lookup is never exercised — the alias has to live in a
+  real module (issue #145, live QA).
+* PEP 695 ``type X = ...`` syntax is a **SyntaxError on Python 3.11**, which both
+  Docker stages use, so the aliases are built with
+  ``typing_extensions.TypeAliasType`` instead. That is the same object the walk
+  recognises — the check is on the type name, which both the ``typing`` and
+  ``typing_extensions`` spellings share (issue #145, Codex review).
 """
 
+from typing import List, TypeVar
+
 from pydantic import ConfigDict, model_validator
+from typing_extensions import TypeAliasType
 
 from boomi_mcp.recipes import RecipeInputBase
 
@@ -30,8 +40,13 @@ class AliasLeaf(RecipeInputBase):
         return {"ok": self.ok}
 
 
-type ForwardAlias = list['AliasLeaf']
-type ParameterisedAlias[T] = list[T]
+#: The forward reference is the point — it must resolve in THIS module's namespace.
+ForwardAlias = TypeAliasType("ForwardAlias", List["AliasLeaf"])
+
+_T = TypeVar("_T")
+ParameterisedAlias = TypeAliasType(
+    "ParameterisedAlias", List[_T], type_params=(_T,)
+)
 
 
 class ForwardAliasInputV1(RecipeInputBase):

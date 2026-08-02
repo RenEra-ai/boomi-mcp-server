@@ -444,7 +444,12 @@ construction:
   acceptable if any matching arm admits it. Abstaining there was a second, worse bug: every
   same-origin union (`Union[List[Leaf], List[Other]]`) matches more than one arm, so abstention
   disabled the element check for all of them, and the false-rejection case above began passing
-  because *nothing* was consulted. **Abstention is only safe where something else judges the
+  because *nothing* was consulted. **ONE arm must cover the whole container.** Judging elements independently let a
+  heterogeneous `[A(), B()]` satisfy `Union[List[A], List[B]]` — element 0 chose the `A` arm and
+  element 1 the `B` arm, so the stored list matched neither declared arm, while the adapter
+  accepted it via `List[A]` (because `A` converts a `B`) and discarded the conversion. An arm
+  that is shorter than the value fails rather than abstaining at the indices it does not reach.
+* **Abstention is only safe where something else judges the
   value** — for membership the last-chance loop does; for element parameters nothing does. For the
   same reason a `None` element annotation (a fixed-length arm running off the end) is dropped from
   the candidate list rather than tried: `_assert_declared_shape(value, None)` succeeds
@@ -532,7 +537,11 @@ list came out empty and the check was simply off under the ordinary modern synta
 earlier. Import-order-dependent security behaviour, fixed by making both flatten to the same
 result rather than by keying the cache differently.
 
-A class that cannot be instance-checked yields no opinion for the whole annotation. A bounded
+A class that cannot be instance-checked yields no opinion **for that option**, which is then
+judged by the adapter. Abstaining for the whole annotation cancelled checks that had already
+failed: in `Union[SecretStr, SomeTypedDict]` the uncheckable `TypedDict` suppressed the failed
+`SecretStr` check and a raw secret reached the executor. The adapter can still say a `str` is not
+a `TypedDict`. A bounded
 `TypedDict` is a class, passes both registration gates, and is correctly stored as a `dict` — but
 `isinstance(value, SomeTypedDict)` raises `TypeError`, which failed *every* invocation of an
 otherwise valid recipe. That is the second such class after `typing.Any`. The stdlib list is closed at three usable

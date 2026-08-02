@@ -55,7 +55,7 @@ from typing import (
     get_type_hints,
 )
 
-from typing import _eval_type  # noqa: PLC2701 — the only way to resolve a ForwardRef
+from typing import NewType, _eval_type  # noqa: PLC2701 — resolving a ForwardRef
 
 from pydantic import BaseModel, TypeAdapter
 
@@ -351,7 +351,7 @@ def _unwrap_annotation_uncached(annotation: Any) -> Tuple[Any, ...]:
             except Exception:  # noqa: BLE001 — leave it unsubstituted rather than guess
                 pass
         return _unwrap_annotation(resolved)
-    if type(annotation).__name__ == "NewType":
+    if isinstance(annotation, NewType):
         # GUARDED the same way ``TypeAliasType`` is. An unguarded
         # ``__supertype__`` read unwrapped any object that happened to carry the
         # attribute — including a class that is a perfectly usable field type via
@@ -444,7 +444,15 @@ def _assert_runtime_class(value: Any, annotation: Any) -> None:
             # invocation. Enumerating the non-checkable forms is open-ended;
             # attempting the check and catching is the only way to confirm one
             # positively (issue #145, live QA).
-            return
+            #
+            # It abstains for THAT OPTION ONLY, by handing it to the adapter loop
+            # below. Returning outright suppressed the whole union: in
+            # ``Union[SecretStr, SomeTypedDict]`` the uncheckable ``TypedDict``
+            # cancelled the FAILED ``SecretStr`` check and a raw secret string
+            # reached the executor. The adapter can still say whether the value
+            # is plausibly that option — a ``str`` is not a ``TypedDict``
+            # (issue #145, Codex review).
+            other_options.append(cls)
     if any(verdicts):
         return
     for cls in class_options:
@@ -510,7 +518,11 @@ def _element_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Any, ...], .
         try:
             if isinstance(value, origin):
                 candidates.append(args)
-        except TypeError:  # a non-class origin cannot be matched against a value
+        except Exception:  # noqa: BLE001 — a non-class origin, or a metaclass
+            # whose ``__instancecheck__`` raises. Catching only ``TypeError``
+            # left a legal parametrised custom generic refused on every
+            # invocation, the same false rejection ``_assert_runtime_class``
+            # was already fixed for (issue #145, Codex review).
             continue
         # KNOWN SURVIVOR, stated rather than left to look load-bearing: dropping
         # this container match kills no test, because the adapter above validates
@@ -522,66 +534,36 @@ def _element_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Any, ...], .
     return tuple(candidates)
 
 
-def _assert_any_candidate(
-    value: Any,
-    annotations: Sequence[Any],
-    _seen: set,
-    _journal: Optional[List[int]] = None,
+def _assert_one_arm_covers(
+    walk: Any, arms: Sequence[Any], _seen: set, _journal: Optional[List[int]] = None
 ) -> None:
-    """Accept if ANY of these annotations admits the value; refuse if none does.
+    """ONE arm must describe the WHOLE container, not one arm per element.
 
-    ``None`` entries are DROPPED first. ``_positional`` returns ``None`` to mean
-    "this arm has no opinion at this index" — a fixed-length arm running off the
-    end — and ``_assert_declared_shape(value, None)`` succeeds unconditionally, so
-    a single ``None`` anywhere in the list accepted the element without judging
-    it. ``Union[Tuple[str, str], Tuple[str, str, Leaf]]`` at index 2 produced
-    ``[None, Leaf]`` and the ``None`` was tried first (issue #145, live QA).
+    Judging elements independently let a heterogeneous ``[A(), B()]`` satisfy
+    ``Union[List[A], List[B]]`` — element 0 chose the ``A`` arm and element 1 the
+    ``B`` arm, so the stored value matched neither declared arm while both the
+    adapter (which converts, and discards the conversion) and the walk accepted
+    it (issue #145, Codex review).
 
-    If everything was ``None`` the empty list falls through to the same
-    abstention as "no arm matched", which is the behaviour that was intended.
-
-    Failed trials are rolled back by JOURNAL rather than by copying the cycle
-    guard. A candidate that walks part of the tree before failing would otherwise
-    leave nodes marked seen and let a later candidate short-circuit past them —
-    a false accept manufactured by the disjunction itself — but copying the set
-    per candidate per element made the walk quadratic in tree size. The journal is
-    O(nodes added by the trial).
+    ``walk`` is called with one arm and must raise if that arm does not cover the
+    container. Failed arms roll back by journal, so a partial walk cannot leave
+    nodes marked and let a later arm short-circuit past them.
     """
-    annotations = [annotation for annotation in annotations if annotation is not None]
-    if not annotations:
-        _assert_declared_shape(value, None, _seen, _journal)
+    if not arms:
+        walk(None)
         return
-    if len(annotations) == 1:
-        # A PERFORMANCE path, not a correctness one — removing it kills no test.
-        # With no sibling to be polluted by there is nothing to roll back, and
-        # this is the overwhelmingly common case, so it avoids a journal
-        # allocation per element on every ordinary container (issue #145).
-        _assert_declared_shape(value, annotations[0], _seen, _journal)
-        return
-    for annotation in annotations:
+    for arm in arms:
         journal: List[int] = []
         try:
-            _assert_declared_shape(value, annotation, _seen, journal)
-        except Exception:  # noqa: BLE001 — this arm simply does not admit it
+            walk(arm, journal)
+        except Exception:  # noqa: BLE001 — this arm does not cover the container
             for marker in journal:
                 _seen.discard(marker)
             continue
-        # The accepted trial's marks are real; hand them to any OUTER journal so
-        # an enclosing rollback can still undo them.
-        #
-        # KNOWN SURVIVOR: removing this line kills no test. The mechanism it
-        # guards is a nested disjunction that SUCCEEDS inside an outer trial that
-        # later FAILS — its markers would stay in the cycle guard unrecorded, the
-        # outer rollback would leave them, and a subsequent outer candidate would
-        # skip those nodes. That is the copy bug one nesting level in. Live QA and
-        # I each built a candidate witness and neither discriminated, so it is
-        # kept on the mechanism rather than on a measurement, and labelled so the
-        # next reader does not mistake an untested line for a load-bearing one
-        # (issue #145).
         if _journal is not None:
             _journal.extend(journal)
         return
-    raise ValueError("validated input holds an element no declared arm admits")
+    raise ValueError("validated input matches no declared arm of its annotation")
 
 
 def _positional(element: Optional[Tuple[Any, ...]], index: int) -> Any:
@@ -604,23 +586,28 @@ def _mapping_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Any, Any], .
     return tuple(pairs)
 
 
-def _typed_dict_hints(annotation: Any) -> Optional[Dict[str, Any]]:
-    """Per-KEY annotations for a ``TypedDict``, which has no ``get_origin``.
+def _typed_dict_arms(annotation: Any) -> Tuple[Dict[str, Any], ...]:
+    """Per-KEY annotations for EVERY ``TypedDict`` option, not just the first.
 
-    Without this a ``TypedDict`` field was judged by nothing at all: the class
-    check correctly abstains because it cannot be instance-checked, and the
-    mapping branch found no parametrised arm — unjudged in both dimensions, for a
-    field type that registers perfectly well (issue #145, live QA).
+    A ``TypedDict`` has no ``get_origin``, so without this it is judged by nothing
+    at all — the class check abstains because it cannot be instance-checked, and
+    no parametrised arm matches.
+
+    Returning only the first option's hints was its own leak: in
+    ``Union[MetadataTD, SecretTD]`` a value matching the SECOND arm was measured
+    against the first, its keys were absent from those hints, and it was walked
+    unannotated (issue #145, Codex review).
     """
+    arms = []
     for option in _unwrap_annotation(annotation):
         if is_typeddict(option):
             try:
-                return dict(get_type_hints(option))
+                arms.append(dict(get_type_hints(option)))
             except Exception:  # noqa: BLE001 — unresolvable hints fail closed
                 raise ValueError(
                     "validated input declares a TypedDict whose hints cannot be resolved"
                 )
-    return None
+    return tuple(arms)
 
 
 #: Types whose iteration is KNOWN to be independent and bounded. Enumerated, not
@@ -751,23 +738,42 @@ def _assert_declared_shape(
     # in for a ``Leaf`` inside ``Tuple[Leaf, ...]`` was visited but never judged.
     if _is_walkable_collection(value) and not isinstance(value, Mapping):
         _mark(value)
-        candidates = _element_candidates(annotation, value)
-        for index, item in enumerate(value):
-            _assert_any_candidate(
-                item, [_positional(args, index) for args in candidates], _seen, _journal
-            )
+        items = list(value)
+
+        def _walk_sequence(arm, journal=None):
+            for index, item in enumerate(items):
+                element = _positional(arm, index) if arm is not None else None
+                if arm is not None and element is None:
+                    # This arm is shorter than the value, so it does not describe
+                    # it. Previously a ``None`` here meant "no opinion" and the
+                    # element was accepted unjudged.
+                    raise ValueError("arm does not cover this index")
+                _assert_declared_shape(item, element, _seen, journal)
+
+        _assert_one_arm_covers(
+            _walk_sequence, _element_candidates(annotation, value), _seen, _journal
+        )
     elif isinstance(value, Mapping):
         _mark(value)
-        # A ``TypedDict`` names its keys individually and has no ``get_origin``,
-        # so it is read from its hints rather than from container parameters.
-        per_key = _typed_dict_hints(annotation)
-        pairs = _mapping_candidates(annotation, value)
-        for key, item in value.items():
-            _assert_any_candidate(key, [k for k, _ in pairs], _seen, _journal)
-            if per_key is not None and key in per_key:
-                _assert_declared_shape(item, per_key[key], _seen, _journal)
-            else:
-                _assert_any_candidate(item, [v for _, v in pairs], _seen, _journal)
+        entries = list(value.items())
+
+        def _walk_mapping(arm, journal=None):
+            for key, item in entries:
+                if isinstance(arm, dict):  # per-key hints from a TypedDict arm
+                    if key not in arm:
+                        raise ValueError("arm does not declare this key")
+                    _assert_declared_shape(item, arm[key], _seen, journal)
+                    continue
+                key_annotation, value_annotation = arm if arm else (None, None)
+                _assert_declared_shape(key, key_annotation, _seen, journal)
+                _assert_declared_shape(item, value_annotation, _seen, journal)
+
+        _assert_one_arm_covers(
+            _walk_mapping,
+            _typed_dict_arms(annotation) + _mapping_candidates(annotation, value),
+            _seen,
+            _journal,
+        )
     elif _is_opaque_iterable(value):
         # FAIL CLOSED on anything iterable the walk cannot enumerate safely.
         # ``Iterable[str]`` validates LAZILY — pydantic hands back a

@@ -2783,13 +2783,13 @@ def test_an_unrecognised_annotation_form_is_unwrapped_not_waved_through(spelling
     from boomi_mcp.recipes.engine import _assert_declared_shape
 
     if spelling == "type_alias":
-        namespace: dict = {}
-        exec(  # noqa: S102 - `type X = ...` is 3.12 syntax; exec keeps the file parseable
-            "type AliasOfList = list[leaf]",
-            {"leaf": _DeclaredKeysOnlyLeaf},
-            namespace,
+        # ``TypeAliasType``, not ``type X = ...``: PEP 695 syntax is a SyntaxError
+        # on Python 3.11, which both Docker stages use (issue #145, Codex review).
+        from typing_extensions import TypeAliasType
+
+        annotation = TypeAliasType(
+            "AliasOfList", ListType[_DeclaredKeysOnlyLeaf]
         )
-        annotation = namespace["AliasOfList"]
     else:
         annotation = NewType("AliasOfList", ListType[_DeclaredKeysOnlyLeaf])
 
@@ -2919,3 +2919,176 @@ def test_supertype_is_unwrapped_only_for_a_real_NewType():
     from typing import NewType
 
     assert _unwrap_annotation(NewType("Real", str)) == (str,)
+
+
+def test_an_uncheckable_union_arm_does_not_cancel_a_failed_one():
+    """Abstaining for the WHOLE union suppressed a failed check.
+
+    In ``Union[SecretStr, SomeTypedDict]`` the ``TypedDict`` cannot be
+    instance-checked, and returning outright cancelled the ``SecretStr`` check
+    that had already failed — a raw secret string reached the executor. The
+    uncheckable option now abstains for itself only, judged by the adapter, which
+    can still say a ``str`` is not a ``TypedDict`` (issue #145, Codex review).
+    """
+    from typing import TypedDict as TypedDictType, Union as UnionType
+
+    from pydantic import SecretStr
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class Shaped(TypedDictType):
+        a: str
+
+    model = type(
+        "UncheckableArmInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": UnionType[SecretStr, Shaped]},
+            "field": None,
+        },
+    )
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field="SENTINEL-CREDENTIAL-REF"))
+
+    # Both honest arms still pass — the abstention is per-option, not blanket.
+    _assert_declared_shape(model.model_construct(field={"a": "x"}))
+    _assert_declared_shape(model.model_construct(field=SecretStr("s")))
+
+
+def test_one_union_arm_must_cover_the_whole_container():
+    """Per-element choice let a value satisfy no declared arm at all.
+
+    ``[A(), B()]`` under ``Union[List[A], List[B]]``: element 0 chose the ``A``
+    arm and element 1 the ``B`` arm, so the stored list matched neither — while
+    the adapter accepted it via ``List[A]`` (``A`` converts a ``B``) and discarded
+    the conversion (issue #145, Codex review).
+    """
+    from typing import List as ListType, Union as UnionType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class ArmB(RecipeInputBase):
+        v: str = "b"
+
+    class ArmA(RecipeInputBase):
+        v: str = "a"
+
+        @model_validator(mode="before")
+        @classmethod
+        def _from_b(cls, data):
+            return {"v": data.v} if isinstance(data, ArmB) else data
+
+    model = type(
+        "OneArmInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": UnionType[ListType[ArmA], ListType[ArmB]]},
+            "field": None,
+        },
+    )
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=[ArmA(), ArmB()]))
+
+    # Either arm, held consistently, is fine.
+    _assert_declared_shape(model.model_construct(field=[ArmA(), ArmA()]))
+    _assert_declared_shape(model.model_construct(field=[ArmB(), ArmB()]))
+
+
+def test_every_typed_dict_arm_is_tried_not_only_the_first():
+    """A value matching the SECOND ``TypedDict`` arm was measured against the first.
+
+    Its keys were absent from those hints, so it was walked unannotated and
+    accepted after adapter conversion (issue #145, Codex review).
+    """
+    from typing import TypedDict as TypedDictType, Union as UnionType
+
+    from pydantic import SecretStr
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class MetadataTD(TypedDictType):
+        meta: str
+
+    class SecretTD(TypedDictType):
+        member: SecretStr
+
+    model = type(
+        "TypedDictArmInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": UnionType[MetadataTD, SecretTD]},
+            "field": None,
+        },
+    )
+    with pytest.raises(Exception):
+        _assert_declared_shape(
+            model.model_construct(field={"member": "SENTINEL-CREDENTIAL-REF"})
+        )
+
+    _assert_declared_shape(model.model_construct(field={"member": SecretStr("s")}))
+    _assert_declared_shape(model.model_construct(field={"meta": "x"}))
+
+
+def test_a_parametrised_generic_with_a_raising_instancecheck_is_not_refused():
+    """``_element_candidates`` caught only ``TypeError``.
+
+    ``_assert_runtime_class`` had already been widened to catch any exception; the
+    same reachable false rejection was left in the element path for a legal
+    parametrised custom generic (issue #145, Codex review).
+    """
+    from typing import Generic, TypeVar
+
+    from pydantic_core import core_schema
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    T = TypeVar("T")
+
+    class RaisingMeta(type(Generic)):
+        def __instancecheck__(cls, instance):
+            raise ValueError("deliberately not a TypeError")
+
+    class Parametrised(Generic[T], metaclass=RaisingMeta):
+        @classmethod
+        def __get_pydantic_core_schema__(cls, source, handler):
+            return core_schema.list_schema(core_schema.any_schema())
+
+    model = type(
+        "GenericInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": Parametrised[int]},
+            "field": None,
+        },
+    )
+    _assert_declared_shape(model.model_construct(field=[1, 2]))  # must not raise
+
+
+def test_new_type_is_recognised_by_identity_not_by_class_name():
+    """A pydantic annotation MARKER can be an instance of a user class named
+    ``NewType`` carrying ``__supertype__``; a name-only check unwrapped it to the
+    supertype and refused its otherwise valid instances."""
+    from typing import NewType as RealNewType
+
+    from pydantic_core import core_schema
+
+    from boomi_mcp.recipes.engine import _unwrap_annotation
+
+    class NewType:  # deliberately shadows the name
+        def __init__(self):
+            self.__supertype__ = str
+
+        @classmethod
+        def __get_pydantic_core_schema__(cls, source, handler):
+            return core_schema.is_instance_schema(cls)
+
+    marker = NewType()
+    assert type(marker).__name__ == "NewType"  # the premise
+    assert _unwrap_annotation(marker) == (marker,)  # NOT unwrapped to str
+
+    # Control: a genuine NewType still unwraps.
+    assert _unwrap_annotation(RealNewType("Genuine", str)) == (str,)
