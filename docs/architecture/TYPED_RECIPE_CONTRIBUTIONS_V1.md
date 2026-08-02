@@ -452,7 +452,15 @@ construction:
   journal — a candidate that walks part of the tree before failing would otherwise leave nodes
   marked in the shared cycle guard and let a later candidate short-circuit past them. `Union[Tuple[Any, ...], Tuple[Leaf, ...]]` holding that same dict still
   passes, correctly: the value genuinely satisfies the `Any` arm.
-* **A `TypedDict` field is read from its per-key hints.** It has no `get_origin`, so no
+* **An annotation form the walk does not recognise is UNWRAPPED, not waved through.** A 3.12
+  `type X = ...` alias and a `NewType` were each returned as their own single option, so no
+  element parameters were found and the contents were walked unjudged — while the adapter
+  resolved the alias perfectly well. "I do not recognise this" and "there is nothing to check
+  here" must not be the same value; that is the same defect as a `None` element annotation, and
+  it is the third place it appeared.
+* **A `TypedDict` field is read from its per-key hints** — via `typing_extensions.is_typeddict`,
+  because `typing.is_typeddict` returns False for a `typing_extensions.TypedDict` subclass and
+  both spellings are usable field types. A `TypedDict` has no `get_origin`, so no
   parametrised arm matched it, and it cannot be instance-checked, so the class check abstains —
   leaving it unjudged in *both* dimensions for a field type that registers perfectly well.
 * **A dataclass whose hints cannot be resolved is refused, not walked blind.** Falling back to

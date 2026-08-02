@@ -2765,3 +2765,86 @@ def test_the_container_match_is_load_bearing():
     converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
     with pytest.raises(Exception):
         _assert_declared_shape(model.model_construct(field=[converting]))
+
+
+@pytest.mark.parametrize("spelling", ["type_alias", "new_type"])
+def test_an_unrecognised_annotation_form_is_unwrapped_not_waved_through(spelling):
+    """"I do not recognise this" was the same value as "nothing to check here".
+
+    ``_unwrap_annotation`` returned an unrecognised form as its own single
+    option, so ``_element_candidates`` found no ``get_origin`` and the elements
+    were walked unjudged — while the adapter resolved the alias perfectly well and
+    validation succeeded. Same defect as a ``None`` element annotation one level
+    up (issue #145, live QA).
+    """
+    from typing import List as ListType, NewType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    if spelling == "type_alias":
+        namespace: dict = {}
+        exec(  # noqa: S102 - `type X = ...` is 3.12 syntax; exec keeps the file parseable
+            "type AliasOfList = list[leaf]",
+            {"leaf": _DeclaredKeysOnlyLeaf},
+            namespace,
+        )
+        annotation = namespace["AliasOfList"]
+    else:
+        annotation = NewType("AliasOfList", ListType[_DeclaredKeysOnlyLeaf])
+
+    model = type(
+        "AliasInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": annotation},
+            "field": None,
+        },
+    )
+    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=[converting]))
+
+    # Control: an honest element passes, so the alias is unwrapped rather than
+    # simply refused.
+    _assert_declared_shape(
+        model.model_construct(field=[_DeclaredKeysOnlyLeaf.model_construct(ok="a")])
+    )
+
+
+@pytest.mark.parametrize("module", ["typing", "typing_extensions"])
+def test_both_typed_dict_spellings_are_judged(module):
+    """``typing.is_typeddict`` is False for a ``typing_extensions.TypedDict``.
+
+    The r44 fix worked for the spelling its fixture used and not the other — and
+    an earlier census had already recorded BOTH as usable field types. When a
+    census says N spellings are reachable, the fix gets verified against all N
+    (issue #145, live QA).
+    """
+    import typing
+
+    import typing_extensions
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    base = typing.TypedDict if module == "typing" else typing_extensions.TypedDict
+    TD = base("TD", {"member": _DeclaredKeysOnlyLeaf})
+
+    model = type(
+        f"TypedDict{module}InputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": TD},
+            "field": None,
+        },
+    )
+    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field={"member": converting}))
+
+    _assert_declared_shape(
+        model.model_construct(
+            field={"member": _DeclaredKeysOnlyLeaf.model_construct(ok="a")}
+        )
+    )

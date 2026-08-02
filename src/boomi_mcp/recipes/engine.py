@@ -52,10 +52,15 @@ from typing import (
     get_args,
     get_origin,
     get_type_hints,
-    is_typeddict,
 )
 
 from pydantic import BaseModel, TypeAdapter
+
+# ``typing.is_typeddict`` returns False for a ``typing_extensions.TypedDict``
+# subclass, and the r42 census recorded BOTH spellings as usable field types — so
+# the ``typing`` import judged one and left the other unexamined. The
+# ``typing_extensions`` version recognises both (issue #145, live QA).
+from typing_extensions import is_typeddict
 
 from ..errors import (
     RECIPE_CONSTRAINT_FAILED,
@@ -288,6 +293,22 @@ def _unwrap_annotation_uncached(annotation: Any) -> Tuple[Any, ...]:
     if get_origin(annotation) is Annotated:
         args = get_args(annotation)
         return _unwrap_annotation(args[0]) if args else ()
+    # A form this function does not RECOGNISE used to be returned as its own
+    # single option — and then ``_element_candidates`` found no ``get_origin``,
+    # returned nothing, and the elements were walked unjudged while the adapter
+    # resolved the alias perfectly well. "I do not recognise this" and "there is
+    # nothing to check here" were the same value, which is the same defect as a
+    # ``None`` element annotation one level up (issue #145, live QA).
+    #
+    # ``type X = ...`` is the modern spelling and pydantic accepts it as a field
+    # annotation; both attributes below are public and documented.
+    value = getattr(annotation, "__value__", None)
+    if value is not None and type(annotation).__name__ == "TypeAliasType":
+        return _unwrap_annotation(value)
+    supertype = getattr(annotation, "__supertype__", None)
+    if supertype is not None:
+        return _unwrap_annotation(supertype)
+
     if get_origin(annotation) in _UNION_ORIGINS:
         options: List[Any] = []
         for arg in get_args(annotation):
@@ -497,6 +518,16 @@ def _assert_any_candidate(
             continue
         # The accepted trial's marks are real; hand them to any OUTER journal so
         # an enclosing rollback can still undo them.
+        #
+        # KNOWN SURVIVOR: removing this line kills no test. The mechanism it
+        # guards is a nested disjunction that SUCCEEDS inside an outer trial that
+        # later FAILS — its markers would stay in the cycle guard unrecorded, the
+        # outer rollback would leave them, and a subsequent outer candidate would
+        # skip those nodes. That is the copy bug one nesting level in. Live QA and
+        # I each built a candidate witness and neither discriminated, so it is
+        # kept on the mechanism rather than on a measurement, and labelled so the
+        # next reader does not mistake an untested line for a load-bearing one
+        # (issue #145).
         if _journal is not None:
             _journal.extend(journal)
         return
