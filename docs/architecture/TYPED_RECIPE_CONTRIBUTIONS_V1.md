@@ -487,16 +487,33 @@ This is a **coverage** boundary, not a residue like the author-cooperation chann
 the distinction is load-bearing in both directions. A gap here puts caller data in a *declared*
 field an ordinary executor reads — the same criterion that made a masking serializer a defeated
 guard rather than acceptable residue — whereas every §12 channel needs a name the author invented.
-And this one is closable in principle: §12's channels are not. Roughly a dozen defects were found
+And this one is closable in principle: §12's channels are not. Around twenty defects were found
 in this layer and only two needed an unusual annotation; the rest used `Dict[str, Any]`, a plain
 `TypedDict`, `Union[List[A], List[B]]`, a stdlib dataclass under PEP 563, `NewType` and friends.
-Three of them refused *every invocation of an honest recipe*.
+Five of them refused *every invocation of an honest recipe*.
 
-What closed it was not the absence of findings — that measures the attacker's repertoire, not the
-code — but a census: two named failure modes (*abstention read as permission*, *one arm's answer
-used for another arm's value*) graded against every site that chooses among union arms or returns
-a no-information value. Every blocking finding from the last nine review rounds landed in one of
-those sites, and the census found two more that judgement-based sweeps had missed.
+The instrument that found most of them was a census rather than an absence of findings — an
+absence measures the attacker's repertoire, not the code. Two named failure modes (*abstention
+read as permission*, *one arm's answer used for another arm's value*) were graded against every
+site that chooses among union arms or returns a no-information value, and every blocking finding
+from nine consecutive review rounds landed in one of those sites.
+
+**The census did not end it, and that is the more useful fact.** Four further defects arrived
+after it reported clean, all of them inside sites it had already graded. Two were *introduced by
+the fixes for the previous round* — a refusal added to one arm-building helper fired before its
+result was concatenated with a second source of arms, refusing a `Union[Tuple[X, ...], SomeTypedDict]`
+outright; and removing an eager copy to bound a walk let each union arm re-iterate a container that
+could answer differently the second time. The other two were one rule applied at one of its two
+consumers. A census grades sites against modes it already knows; it cannot grade a mode that a fix
+introduces, and it does not re-grade a site the fix has changed. **Re-run the instrument on the
+patch, not only on the code the patch was written against.**
+
+The round after that made the same point a third time, and more sharply: the fix for the
+re-iteration defect introduced a guard that asked `getattr(cls, ...)` whether a container still
+enumerated like its base — reaching, unprompted, for the one surface this section had already
+written off as exhausted. It was defeated three ways within a round. **When a fix needs to know
+something about an author-supplied class, the answer is to read the value through a base the
+author does not own, not to ask the class a better question.**
 
 `Annotated`; both union spellings (`typing.Union` and `X | Y`); `TypeAliasType`, subscripted and
 not; `NewType`; `TypedDict` from either `typing` or `typing_extensions`; parametrised containers
@@ -520,6 +537,18 @@ channels.
   `{name: None}` walked every field with no annotation, and it is reachable without exotica:
   `from __future__ import annotations` plus a `TYPE_CHECKING`-only import. A pydantic dataclass
   cannot get there; a stdlib one can, and the walk handles both.
+* **Type arguments are read POSITIONALLY only for a matched `tuple`.** Everywhere else an arm is
+  usable only when its arguments are *uniform* — one argument, or the `Tuple[X, ...]` spelling —
+  and an arm nobody can read is refused rather than applied. A list-backed generic whose schema
+  uses its SECOND argument had index 0 judged against the FIRST, which accepted a plaintext string
+  where a `SecretStr` was declared and rejected the correctly wrapped value, both at once. The
+  `matched` qualifier is load-bearing in its own right: reading an *unmatched* `Tuple[str,
+  SecretStr]` arm positionally would index into a list that arm does not describe. A mapping
+  recovers more — two arguments as key and value, one as the value type — but three has no
+  reading, and yielding no pairs there once meant every entry was walked unjudged. This rule has
+  two consumers, the sequence walk and the mapping walk, and the first version of it was applied
+  at only one; a generic that *subclasses* its backing container matches by origin and so took the
+  unguarded path. **A rule with N consumers is not fixed until it is fixed at all N.**
 * **Field annotations are carried down.** A dict standing in for a `Leaf` inside
   `Tuple[Leaf, ...]` or `Dict[str, Leaf]` was visited but never judged, and a dataclass's fields
   were recursed with no annotation at all — leaving a mapping in a declared `str`, readable at
@@ -536,6 +565,54 @@ channels.
   "sized and re-iterable", not a list of concrete types: an earlier version named five container
   classes and refused everything else, including `range`, `dict_keys`/`values`/`items`,
   `array.array`, `memoryview` and any custom `abc.Sequence`.
+
+  **Membership in that list is by exact type, or by a subclass that has not rewritten how it
+  enumerates itself.** Testing it with `isinstance` alone re-opened the hole the enumeration
+  exists to close, because a subclass can override the very method being vouched for: a `list`
+  subclass with a one-shot `__iter__` was drained by the first union arm, after which the second
+  walked zero elements, raised nothing, and was accepted as covering the container; one whose
+  `__iter__` disagrees with its own storage let the walk judge clean elements while a subscripting
+  reader gets the payload. Snapshotting the container answers neither — a snapshot is *built by
+  iterating*, so it inherits the same lie.
+
+  **How that check asks is as load-bearing as what it asks.** The first version compared
+  `getattr(cls, name)` against the base's method — which is reading an attribute of the author's
+  class, the surface this section already records as exhausted, and it fell to three bypasses: a
+  metaclass `__getattribute__` answering with `list.__iter__` while the `tp_iter` slot kept the
+  override; the same lie hiding a `__len__` that under-reported, so a 15,000-element value passed a
+  10,000 bound; and an *instance* attribute (`self.items = ...`) shadowing `dict.items` for the
+  ordinary lookup the walk performed, which needs no metaclass at all. The class is therefore read
+  through `type`'s own descriptors and the instance through `object`'s, and **the walk consumes
+  through the base** — `dict.items(value)`, `list.__iter__(value)` — which no override can
+  redirect. Those two mechanisms are deliberately redundant: reading through the base fixes what
+  the *walk* sees, refusing a redefinition is what stops an ordinary *executor* seeing something
+  the walk never judged, and mutating either alone survives the suite because the other covers it.
+
+  **A name-based scan also has to catch what supplies an accessor without wearing its name.** A
+  class-level `__getattribute__` answering `values`/`keys`/`get` appears under none of the checked
+  names, and what it returns is read by neither the adapter nor the walk — so unlike a shadowed
+  `items` it is not even confined to shapes the declared type would accept. `__getattr__` and
+  `__missing__` join it: the last MANUFACTURES a value on subscript of an absent key from an
+  author-supplied factory, which is why `defaultdict` is refused, correctly rather than as a
+  casualty. Reading the *instance* dict needed the same treatment one level down: `object.__getattribute__(value, "__dict__")` bypasses a class `__getattribute__` but still performs descriptor
+  lookup, so a `__dict__` **property** wins and hands the guard an empty mapping while the real
+  shadow stays live. Naming `__dict__` in the checked names is not the remedy — `type.__new__` puts
+  a `__dict__` getset descriptor in every subclass without `__slots__`, which would refuse some two
+  hundred ordinary classes — so what discriminates is the descriptor's *type*: compiler-generated,
+  or author-supplied.
+
+  The names checked are split by shape — `__iter__`, `__len__` and `__getitem__` for a sequence,
+  plus `items`, `keys`, `values` and `get` for a mapping. A single combined list refused a
+  `NamedTuple` carrying a field called `keys`, on ordinary caller input with no validator involved,
+  and the sequence walk never calls `.keys()`. The mapping check is applied only to `dict`
+  subclasses, since a non-`dict` `Mapping` has no enumerated base to compare against and refusing
+  every such implementation would be a false rejection far wider than the hole. `OrderedDict` is
+  an enumerated known mapping rather than a suspicious `dict` subclass, because refusing it — it
+  legitimately overrides four accessors — bought nothing.
+
+  **Stated boundary:** the size bound asks for the value's `len()` through its base, so an
+  overriding `__len__` cannot shrink it; an *unsized* value abstains and is bounded only by the
+  walk itself.
 
 The runtime-class check applies to **every class-typed option**, with exemptions **enumerated
 rather than inferred** — because both attempts to infer them failed. A blanket rule tripped over

@@ -36,10 +36,11 @@ from __future__ import annotations
 
 import array
 import sys
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
 from decimal import Decimal
 from fractions import Fraction
+from types import GetSetDescriptorType
 from typing import (
     Annotated,
     Any,
@@ -490,21 +491,25 @@ def _dataclass_field_types(cls: Any) -> Dict[str, Any]:
         )
 
 
-def _element_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Tuple[Any, ...], ...], bool]:
-    """Element parameters, and whether any arm MATCHED the value's container.
+def _element_candidates(
+    annotation: Any, value: Any
+) -> Tuple[Tuple[Tuple[Any, Tuple[Any, ...]], ...], bool]:
+    """``(origin, args)`` per parametrised arm, and whether any arm MATCHED.
 
     Returns ``(arms, matched)``. When ``matched`` is true the arms are the ones
-    whose origin the value is an instance of. When it is false the arms are every
-    parametrised option, and the CALLER decides what its own shape can make of
-    them — a sequence can only use a single parameter, while a mapping can read
-    one as the value type or two as key and value.
+    whose origin the value is an instance of; when it is false they are every
+    parametrised option. Either way the CALLER decides what its own shape can
+    make of them — which is why the ORIGIN travels with the arguments rather
+    than being discarded here.
 
-    That split is deliberate. Returning raw args and letting the sequence walk
-    read them positionally allowed a list-backed ``SecondItems[str, SecretStr]``
-    to check index 0 against ``str`` while its schema used the SECOND argument,
-    leaving an unwrapped secret in the field (issue #145, Codex review). And
-    returning nothing at all would be the "no arm matched means nothing to say"
-    conflation this layer kept re-learning.
+    Discarding it was the defect. A sequence may read arguments POSITIONALLY
+    only for a real ``tuple``; for anything else two arguments have no defined
+    positional meaning. Handing bare argument tuples to the caller left it
+    unable to tell the two apart, so a list-backed ``SecondItems[str, SecretStr]``
+    had index 0 checked against ``str`` while its schema used the SECOND
+    argument, leaving an unwrapped secret in the field (issue #145, Codex
+    review). Returning nothing at all would instead be the "no arm matched means
+    nothing to say" conflation this layer kept re-learning.
     """
     candidates = []
     parametrised = []
@@ -513,10 +518,10 @@ def _element_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Tuple[Any, .
         args = get_args(option)
         if origin is None or not args:
             continue
-        parametrised.append(args)
+        parametrised.append((origin, args))
         try:
             if isinstance(value, origin):
-                candidates.append(args)
+                candidates.append((origin, args))
         except Exception:  # noqa: BLE001 — a non-class origin, or a metaclass
             # whose ``__instancecheck__`` raises. Catching only ``TypeError``
             # left a legal parametrised custom generic refused on every
@@ -529,35 +534,72 @@ def _element_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Tuple[Any, .
 
 
 def _sequence_arms(annotation: Any, value: Any) -> Tuple[Tuple[Any, ...], ...]:
-    """Arms a SEQUENCE can use, or a refusal when their meaning is underivable."""
+    """Arms a SEQUENCE can use, or a refusal when their meaning is underivable.
+
+    An arm is usable only where its arguments have a derivable element meaning:
+
+    * ONE argument — every element is that type, whatever the container is;
+    * ``Tuple[X, ...]`` — the same uniform statement, spelled with an ellipsis;
+    * a MATCHED ``tuple`` — the only origin whose arguments really are positions.
+
+    ``matched`` gates the third clause and nothing else. Reading an *unmatched*
+    ``Tuple[str, SecretStr]`` arm positionally would index into a value that arm
+    does not describe — one arm's answer used for another arm's value.
+
+    The first version of this rule guarded only the unmatched path, on the
+    assumption that a matched arm is self-evidently applicable. It is not: a
+    generic that SUBCLASSES its backing list is an instance of its own origin,
+    so it matched, skipped the rule entirely, and was read positionally anyway —
+    accepting the plaintext secret this rule exists to refuse while rejecting the
+    correctly wrapped value (issue #145, live QA #359). A rule with two consumers
+    has to be applied at both.
+    """
     arms, matched = _element_candidates(annotation, value)
-    if matched or not arms:
-        return arms
-    usable = tuple(args for args in arms if len(args) == 1)
+    if not arms:
+        return ()
+    usable = tuple(
+        args
+        for origin, args in arms
+        if len(args) == 1
+        or (len(args) == 2 and args[1] is Ellipsis)
+        or (matched and origin is tuple)
+    )
     if usable:
         return usable
     raise ValueError("element semantics of this annotation cannot be derived")
 
 
-def _mapping_candidates(annotation: Any, value: Any) -> Tuple[Tuple[Any, Any], ...]:
-    """The (key, value) annotations of every arm a MAPPING can use.
+def _mapping_arms(annotation: Any, value: Any) -> Tuple[Any, ...]:
+    """EVERY arm a mapping can be judged against: TypedDict arms, then pairs.
 
     A mapping recovers where a sequence cannot: two parameters read as key and
     value, one as the value type — which is what a dict-shaped custom generic
     means by its single parameter. If some generic ever parametrises its KEY
     instead, its honest values are refused rather than accepted, which is the
     wrong-way-safe direction (issue #145, live QA site census).
+
+    Building the two arm sources TOGETHER is load-bearing, and splitting them was
+    two defects at once. The refusal below used to live in the pair helper, so it
+    fired before the caller could concatenate the ``TypedDict`` arms — and a
+    ``Union[Tuple[X, ...], SomeTypedDict]`` was refused on every invocation even
+    though the ``TypedDict`` arm described the value exactly (live QA #357). It
+    was also suppressed whenever an arm matched by container, so a matched
+    3-parameter dict subclass yielded no pairs, raised nothing, and had every
+    entry walked unjudged (live QA #360). "I cannot read this arm" does not
+    depend on whether the arm matched; it depends on whether anything usable came
+    out of the whole annotation.
     """
-    arms, matched = _element_candidates(annotation, value)
+    typed = _typed_dict_arms(annotation)
+    arms, _matched = _element_candidates(annotation, value)
     pairs = []
-    for element in arms:
+    for _origin, element in arms:
         if len(element) == 2 and element[1] is not Ellipsis:
             pairs.append((element[0], element[1]))
         elif len(element) == 1:
             pairs.append((None, element[0]))
-    if not matched and arms and not pairs:
+    if arms and not pairs and not typed:
         raise ValueError("mapping semantics of this annotation cannot be derived")
-    return tuple(pairs)
+    return typed + tuple(pairs)
 
 
 def _assert_one_arm_covers(
@@ -597,7 +639,13 @@ def _assert_one_arm_covers(
 
 
 def _positional(element: Optional[Tuple[Any, ...]], index: int) -> Any:
-    """The annotation for one position of a sequence."""
+    """The annotation for one position of a sequence.
+
+    The final branch — reading argument ``index`` — is reachable only for an arm
+    ``_sequence_arms`` certified as genuinely positional, which today means a
+    MATCHED ``tuple``. Every other multi-argument arm is refused there rather
+    than indexed here (issue #145, live QA #359).
+    """
     if not element:
         return None
     if len(element) == 2 and element[1] is Ellipsis:
@@ -668,13 +716,167 @@ _REPLAYABLE_TYPES: Tuple[type, ...] = (
 )
 
 
+#: Mapping types whose enumeration is KNOWN safe, same rationale as above.
+#: ``OrderedDict`` is here rather than treated as a suspicious ``dict`` subclass
+#: because it IS an enumerated known type — refusing it was a false rejection
+#: with nothing bought (issue #145, live QA #365).
+_REPLAYABLE_MAPPINGS: Tuple[type, ...] = (dict, OrderedDict)
+
+#: What the walk reads, and what an ordinary reader of the same value reads.
+#: Split by SHAPE. A single combined list refused a ``NamedTuple`` carrying a
+#: field called ``keys`` — on ordinary caller input, with no validator involved —
+#: because the generated field descriptor is not ``tuple``'s ``keys``, of which
+#: there is none. The sequence walk never calls ``.keys()``, so nothing was
+#: bought for it (issue #145, live QA #366).
+#: Hooks that supply an accessor WITHOUT appearing under its name. A class-level
+#: ``__getattribute__`` answering ``values``/``get`` passed a scan that only
+#: looked for those names, and the payload it returned was read by neither the
+#: adapter nor the walk — so it was not even confined to shapes the declared type
+#: would accept (issue #145, live QA #368). ``__missing__`` is here for the same
+#: reason one level along: it MANUFACTURES a value on subscript of an absent key,
+#: from a factory the author supplies. That is what refuses ``defaultdict``,
+#: which is a correct refusal and not a casualty.
+_ATTRIBUTE_HOOKS = ("__getattribute__", "__getattr__", "__missing__")
+
+_SEQUENCE_ENUMERATION = ("__iter__", "__len__", "__getitem__") + _ATTRIBUTE_HOOKS
+_MAPPING_ENUMERATION = (
+    "__iter__",
+    "__len__",
+    "__getitem__",
+    "items",
+    "keys",
+    "values",
+    "get",
+) + _ATTRIBUTE_HOOKS
+
+#: Read the class's OWN storage, bypassing any ``__getattribute__`` the author
+#: put on its metaclass. ``getattr(cls, name)`` is answerable by author code;
+#: these descriptors are fetched from ``type``, which is not.
+_CLASS_VARS = type.__dict__["__dict__"].__get__
+_CLASS_MRO = type.__dict__["__mro__"].__get__
+
+
+def _instance_vars(value: Any) -> Optional[Mapping[str, Any]]:
+    """The instance ``__dict__``, or ``None`` if the class redefined how it is READ.
+
+    ``object.__getattribute__(value, "__dict__")`` bypasses a class-level
+    ``__getattribute__`` but still performs descriptor lookup — so a ``__dict__``
+    PROPERTY in the class body is a data descriptor that wins and hands back an
+    empty mapping, while the real instance dict is untouched and its shadowed
+    accessor stays live for every reader (issue #145, live QA #369).
+
+    Naming ``__dict__`` in the checked names is NOT the remedy: ``type.__new__``
+    puts a ``__dict__`` getset descriptor in every subclass without ``__slots__``,
+    so that would refuse ~200 ordinary classes. The descriptor's TYPE is what
+    discriminates — compiler-generated, or author-supplied — which is the same
+    "read something the author does not own" move ``_CLASS_VARS`` already makes,
+    one level down.
+    """
+    for klass in _CLASS_MRO(type(value)):
+        descriptor = _CLASS_VARS(klass).get("__dict__")
+        if descriptor is None:
+            continue
+        if type(descriptor) is not GetSetDescriptorType:
+            return None
+        try:
+            return descriptor.__get__(value)
+        except Exception:  # noqa: BLE001 — an unreadable dict is not a readable one
+            return None
+    return {}  # ``__slots__`` with no instance dict: nothing can be shadowed
+
+
+def _redefines_enumeration(value: Any, bases: Tuple[type, ...], names: Tuple[str, ...]) -> bool:
+    """True when ``value``'s type, or ``value`` itself, rewrote how it enumerates.
+
+    ``_REPLAYABLE_TYPES`` enumerates types whose iteration is KNOWN independent
+    and bounded, but membership was tested with ``isinstance``, which admits
+    subclasses — and a subclass may replace the very method being vouched for. A
+    ``list`` subclass with a one-shot ``__iter__`` was drained by the first union
+    arm, after which the second walked zero elements and "covered" the container;
+    one whose ``__iter__`` disagrees with its own storage let the walk judge clean
+    elements while a subscripting reader got the payload (issue #145, live QA
+    #358).
+
+    The FIRST attempt at this asked ``getattr(cls, name)`` whether the method was
+    still the base's — and that is reading an attribute of the author's class,
+    the surface §7 records as exhausted. Three bypasses, all measured: a metaclass
+    ``__getattribute__`` answers with ``list.__iter__`` while the ``tp_iter`` slot
+    keeps the override; the same lie hides a ``__len__`` that under-reports, so a
+    15,000-element value passed a 10,000 bound; and an INSTANCE attribute
+    (``self.items = ...``) shadows ``dict.items`` for the ordinary lookup the walk
+    performs, needing no metaclass at all (issue #145, live QA #364).
+
+    So the class is read through ``type``'s own descriptors and the instance
+    through ``object``'s, and the MRO is scanned to the first known-safe base
+    rather than compared method by method.
+    """
+    cls = type(value)
+    for klass in _CLASS_MRO(cls):
+        if klass in bases:
+            break
+        if any(name in _CLASS_VARS(klass) for name in names):
+            return True
+    instance_vars = _instance_vars(value)
+    if instance_vars is None:  # the class redefined how its own dict is READ
+        return True
+    return any(name in instance_vars for name in names)
+
+
+def _assert_mapping_enumeration(value: Any) -> None:
+    """Refuse a ``dict`` subclass that rewrote how it enumerates itself.
+
+    The sequence walk gets this from ``_is_walkable_collection``; the mapping
+    branch cannot, because every ``Mapping`` is walkable there by construction.
+
+    Only ``dict`` subclasses are checked. A non-``dict`` ``Mapping`` has no
+    enumerated base to compare against, and refusing every such implementation
+    would be a false rejection far wider than the hole it closes.
+    """
+    if type(value) in _REPLAYABLE_MAPPINGS:
+        return
+    if isinstance(value, dict) and _redefines_enumeration(
+        value, _REPLAYABLE_MAPPINGS, _MAPPING_ENUMERATION
+    ):
+        raise ValueError("validated input holds a mapping that redefines its enumeration")
+
+
+def _replayable_base(value: Any) -> Optional[type]:
+    """The enumerated type whose implementation the walk reads THROUGH.
+
+    Reading through the base is what makes the walk's view unforgeable: a
+    subclass override, or an instance attribute shadowing one, cannot change what
+    ``list.__iter__`` or ``dict.items`` return for the object's real storage.
+
+    DELIBERATELY REDUNDANT with ``_redefines_enumeration``, and the redundancy is
+    not dead code. The two answer different readers: reading through the base
+    fixes what the WALK sees, while refusing a redefinition is what keeps an
+    ordinary EXECUTOR from seeing something the walk never judged. Mutating either
+    one alone therefore survives the suite — each is masked by the other — and
+    only the PAIRED mutants (``P1``-``P3`` in the round's battery) are killed.
+    Every enumeration of forms in this layer has eventually proved incomplete, so
+    the second mechanism stays as the bound on the first one's next gap.
+    """
+    for base in _REPLAYABLE_TYPES:
+        if isinstance(value, base):
+            return base
+    return None
+
+
+def _walkable_length(value: Any) -> Optional[int]:
+    """``len`` read through the base, so an overriding ``__len__`` cannot lie."""
+    base = dict if isinstance(value, dict) else _replayable_base(value)
+    try:
+        if base is not None:
+            return base.__len__(value)  # type: ignore[attr-defined]
+        return len(value)
+    except Exception:  # noqa: BLE001 — unsized values never reach here
+        return None
+
+
 def _assert_walkable_size(value: Any) -> None:
     """Refuse a container too large to enumerate, rather than truncating it."""
-    try:
-        size = len(value)
-    except Exception:  # noqa: BLE001 — unsized values never reach here
-        return
-    if size > _MAX_WALKED_ELEMENTS:
+    size = _walkable_length(value)
+    if size is not None and size > _MAX_WALKED_ELEMENTS:
         raise ValueError("validated input holds a container too large to inspect")
 
 
@@ -684,7 +886,11 @@ def _is_walkable_collection(value: Any) -> bool:
         return False
     if isinstance(value, Mapping):
         return True
-    return isinstance(value, _REPLAYABLE_TYPES)
+    if type(value) in _REPLAYABLE_TYPES:
+        return True
+    return isinstance(value, _REPLAYABLE_TYPES) and not _redefines_enumeration(
+        value, _REPLAYABLE_TYPES, _SEQUENCE_ENUMERATION
+    )
 
 
 def _is_opaque_iterable(value: Any) -> bool:
@@ -786,12 +992,24 @@ def _assert_declared_shape(
         _mark(value)
         _assert_walkable_size(value)
 
+        sequence_base = _replayable_base(value)
+
         def _walk_sequence(arm, journal=None):
-            # Iterate the ORIGINAL. ``_REPLAYABLE_TYPES`` exists precisely to
-            # guarantee re-iteration is safe, so snapshotting was redundant — and
-            # ``range(10**9)`` is a walkable value that a snapshot turns into a
-            # billion-element allocation (issue #145, Codex review).
-            for index, item in enumerate(value):
+            # Iterate the ORIGINAL, THROUGH ITS BASE. ``_REPLAYABLE_TYPES`` exists
+            # precisely to guarantee re-iteration is safe, so snapshotting was
+            # redundant — and ``range(10**9)`` is a walkable value that a snapshot
+            # turns into a billion-element allocation (issue #145, Codex review).
+            #
+            # Through the base, because ``iter(value)`` reads a slot the author's
+            # subclass can replace: what the walk judged then differed from what
+            # the executor read. ``list.__iter__(value)`` cannot be redirected
+            # (issue #145, live QA #364).
+            iterator = (
+                sequence_base.__iter__(value)  # type: ignore[union-attr]
+                if sequence_base is not None
+                else iter(value)
+            )
+            for index, item in enumerate(iterator):
                 element = _positional(arm, index) if arm is not None else None
                 if arm is not None and element is None:
                     # This arm is shorter than the value, so it does not describe
@@ -805,10 +1023,17 @@ def _assert_declared_shape(
         )
     elif isinstance(value, Mapping):
         _mark(value)
+        _assert_mapping_enumeration(value)
         _assert_walkable_size(value)
 
         def _walk_mapping(arm, journal=None):
-            for key, item in value.items():
+            # ``dict.items(value)``, not ``value.items()``: ordinary attribute
+            # lookup finds an INSTANCE attribute before the class's method, so
+            # ``self.items = ...`` in an author's validator showed the walk clean
+            # pairs while the real storage kept the payload — no metaclass needed
+            # (issue #145, live QA #364).
+            entries = dict.items(value) if isinstance(value, dict) else value.items()
+            for key, item in entries:
                 if isinstance(arm, dict):  # per-key hints from a TypedDict arm
                     if key not in arm:
                         raise ValueError("arm does not declare this key")
@@ -819,10 +1044,7 @@ def _assert_declared_shape(
                 _assert_declared_shape(item, value_annotation, _seen, journal)
 
         _assert_one_arm_covers(
-            _walk_mapping,
-            _typed_dict_arms(annotation) + _mapping_candidates(annotation, value),
-            _seen,
-            _journal,
+            _walk_mapping, _mapping_arms(annotation, value), _seen, _journal
         )
     elif _is_opaque_iterable(value):
         # FAIL CLOSED on anything iterable the walk cannot enumerate safely.
