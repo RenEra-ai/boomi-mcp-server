@@ -1082,6 +1082,17 @@ class RecipeRegistry:
                 raise ValueError(
                     f"{reg.recipe_id!r} input_model must subclass RecipeInputBase"
                 )
+            # REBUILD FIRST. pydantic caches the compiled schema, so a field
+            # whose annotation was rewritten after the class body — the whole of
+            # ``leaf: Any`` spelled one line later — left the gate reading a stale
+            # schema and passing a model it exists to refuse (issue #145, live QA
+            # #390). Rebuilding costs one schema build per registration, at import.
+            try:
+                reg.input_model.model_rebuild(force=True)
+            except Exception:  # noqa: BLE001 — a model that cannot rebuild is a defect
+                raise ValueError(
+                    f"{reg.recipe_id!r} input_model cannot be rebuilt for validation"
+                ) from None
             _check_input_schema_closed(reg.recipe_id, reg.input_model)
             _check_input_model_forbids_extras(reg.recipe_id, reg.input_model)
             self._declared_shape.update(_snapshot_declared_shape(reg.input_model))

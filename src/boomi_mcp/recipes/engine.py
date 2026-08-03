@@ -171,9 +171,8 @@ def _validate_input(descriptor: RecipeDescriptorV1, registry: RecipeRegistry, ra
     # at once. What closes it is comparing against the annotations recorded when
     # the gates actually ran.
     try:
-        _assert_declared_shape_unchanged(registry.declared_shape())
-        _check_input_model_forbids_extras(descriptor.recipe_id, model)
-    except Exception:  # noqa: BLE001 — a build-defect message names the author's class
+        validated = model.model_validate(dict(raw))
+    except Exception:  # noqa: BLE001 — pydantic text can echo an authored value
         raise recipe_error(
             RECIPE_INPUT_INVALID,
             phase="input",
@@ -181,9 +180,15 @@ def _validate_input(descriptor: RecipeDescriptorV1, registry: RecipeRegistry, ra
             recipe_versions=(descriptor.recipe_version,),
         ) from None
 
+    # AFTER ``model_validate``, not before. Asserted first, this was a
+    # time-of-check-time-of-use bug of its own: a ``mode="before"`` validator runs
+    # DURING validation, so it could rewrite the annotation after the pin had
+    # already passed and the walk below still read the live class
+    # (issue #145, live QA #389).
     try:
-        validated = model.model_validate(dict(raw))
-    except Exception:  # noqa: BLE001 — pydantic text can echo an authored value
+        _assert_declared_shape_unchanged(registry.declared_shape())
+        _check_input_model_forbids_extras(descriptor.recipe_id, model)
+    except Exception:  # noqa: BLE001 — a build-defect message names the author's class
         raise recipe_error(
             RECIPE_INPUT_INVALID,
             phase="input",

@@ -1205,12 +1205,30 @@ def test_a_swapped_core_schema_does_not_reopen_the_extras_gate():
 
     OpenInputV1.__pydantic_core_schema__ = ClosedTwinInputV1.__pydantic_core_schema__
 
-    # The registration gates are fooled — that is the premise, so assert it.
-    registry = _registry_with_input(OpenInputV1, executor=_recording_executor)
-
-    # ...and the model really does still accept undeclared keys.
+    # The model really does still accept undeclared keys: the swap changes what the
+    # gates READ, never what the compiled validator DOES.
     smuggled = OpenInputV1.model_validate({"label": "a", "smuggled": "S"})
     assert getattr(smuggled, "smuggled", None) == "S"
+
+    # REGISTRATION NOW REFUSES IT. The schema gate rebuilds before reading, so the
+    # swapped attribute is regenerated from the live annotations and the model's
+    # real, open shape is what the gate sees. Before that rebuild the swap fooled
+    # every registration gate and only the value walk caught it
+    # (issue #145, live QA #390).
+    with pytest.raises(ValueError, match="not closed"):
+        _registry_with_input(OpenInputV1, executor=_recording_executor)
+
+    # The value walk is still the backstop for a model that registers cleanly and
+    # is opened afterwards, which no registration-time gate can see at all.
+    class LateOpenInputV1(RecipeInputBase):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        label: str = "x"
+
+    registry = _registry_with_input(LateOpenInputV1, executor=_recording_executor)
+    LateOpenInputV1.model_config = ConfigDict(extra="allow", frozen=True)
+    LateOpenInputV1.__pydantic_core_schema__ = OpenInputV1.__pydantic_core_schema__
+    LateOpenInputV1.model_rebuild(force=True)
+    OpenInputV1 = LateOpenInputV1  # the rest of this test drives the late-opened one
 
     # The engine refuses it anyway, at the value.
     _EXECUTOR_CALLS.clear()

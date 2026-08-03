@@ -4715,3 +4715,27 @@ def test_the_shared_walker_reaches_nested_and_sequence_positions():
         if isinstance(fields, dict):
             field_names.update(fields)
     assert {"one", "many", "marker"} <= field_names, sorted(field_names)
+
+
+def test_an_input_model_that_cannot_rebuild_is_a_build_defect():
+    """The schema gate rebuilds before reading, and a rebuild can fail.
+
+    Rebuilding is what stops a swapped ``__pydantic_core_schema__`` from fooling
+    the gate (issue #145, live QA #390) — so a model whose schema cannot be
+    regenerated has no readable shape to gate at all, and that is a build defect
+    rather than something to pass over silently.
+    """
+    from pydantic import ConfigDict
+
+    from boomi_mcp.recipes.contracts import RecipeInputBase
+
+    class UnrebuildableInputV1(RecipeInputBase):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        version: str = "1"
+
+        @classmethod
+        def model_rebuild(cls, **kwargs):
+            raise RuntimeError("no schema for you")
+
+    with pytest.raises(ValueError, match="cannot be rebuilt"):
+        build_test_registry((_reg(input_model=UnrebuildableInputV1),))
