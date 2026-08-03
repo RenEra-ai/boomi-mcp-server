@@ -621,13 +621,20 @@ channels.
   rather than left untested — leaving it would invite the next round to harden it again.
 
   **Other guards defend only residue and were kept, which needs its own reason.**
-  `_assert_no_attribute_hooks`, `_assert_fields_are_not_intercepted` and the read-back check all
-  stop author class machinery too. The distinction is FALSE-REJECTION COST, measured rather than
-  assumed: the container-enumeration guards refused three ordinary Python types and had to be
-  widened four times to keep doing so, while these three refuse nothing in a 407-class sweep of this
-  package. A residue guard that costs nothing is defence in depth; one that refuses supported Python
-  to keep its coverage is a bad trade, and that is the line — not the residue classification alone. What
-  follows records why the guard existed, so the reasoning is not rediscovered from scratch.
+  `_assert_no_attribute_hooks` and the read-back check stop author class machinery too. The
+  distinction is FALSE-REJECTION COST, measured rather than assumed: the container-enumeration
+  guards refused three ordinary Python types and had to be widened four times to keep doing so,
+  while these two refuse nothing in a 407-class sweep of this package. A residue guard that costs
+  nothing is defence in depth; one that refuses supported Python to keep its coverage is a bad
+  trade, and that is the line — not the residue classification alone.
+
+  **A third guard was on that list and failed the same test**: `_assert_fields_are_not_intercepted`
+  refused any descriptor sitting under a declared field's name, which is also how Python spells an
+  ordinary descriptor-typed dataclass field — so it refused every value of one. It is removed. What
+  it was protecting is unaffected: whatever an ordinary read returns is judged against the declared
+  annotation, so a class attribute holding a raw mapping where a model is declared is refused by the
+  annotation rather than by a ban on descriptors. What follows records why these guards exist, so
+  the reasoning is not rediscovered from scratch.
 
   **Was: membership by EXACT TYPE, with the instance carrying no state of its own.** Testing it
   with `isinstance` re-opened the hole the enumeration exists to close, because a subclass may
@@ -668,11 +675,18 @@ channels.
   no container, no validator and no unusual annotation — it is author code, so it returns the
   honest value while the walk looks and the caller's mapping to every read afterwards. So field
   values and `__pydantic_extra__` are read out of instance storage, and a class carrying
-  `__getattribute__` or `__getattr__` is refused. Those two hooks are closed by the language, but
-  they are not the only author code an ordinary read can run: a **descriptor installed under a
-  declared field's own name** intercepts that field while wearing neither hook's name, and is
-  refused for the same reason. `_check_input_schema_closed` sees none of this — it reads the
-  emitted JSON schema, and all three are statements about the class body.
+  `__getattribute__` or `__getattr__` is refused. Those two hooks are closed by the language, and
+  `_check_input_schema_closed` sees neither — it reads the emitted JSON schema, and both are
+  statements about the class body.
+
+  They are not the only author code an ordinary read can run: a **descriptor under a declared
+  field's own name** intercepts that field while wearing neither hook's name. That one is
+  **accepted residue**, not refused. Banning it also refused every value of an ordinary
+  descriptor-typed dataclass field, and at the moment the ban fired a descriptor returning exactly
+  what was stored is indistinguishable from a plain attribute. A field whose value does not live in
+  the instance dictionary at all — a descriptor-backed field, or a stdlib dataclass field declared
+  `field(init=False, default=...)`, which the generated `__init__` never assigns — is therefore read
+  the ordinary way and judged against its annotation like any other value.
 
   **Three further reads had to stop asking the class, and the pattern in them is worth stating.**
   `type(value).model_fields` is ordinary attribute access, so a *metaclass* `__getattribute__`
