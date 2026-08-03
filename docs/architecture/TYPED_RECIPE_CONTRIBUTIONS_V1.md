@@ -139,10 +139,17 @@ signal a change of threat model. In-process Python can construct a `RecipeRegist
 `RecipeRegistrationV1` are both exported — and pass it to `run_recipes(..., registry=...)`. That is
 an injection and test seam, not a supported extension point, and it presupposes arbitrary code
 execution, so it does not widen the boundary; but a tripwire pointing at a door that is already open
-is not a tripwire. **A registry is also now sealed after construction**: `_register` raises on a
-built registry, so the "immutable set of registered recipe versions" its own docstring promises is
-enforced rather than assumed — previously it stayed callable and mutated the live mappings after
-`registry_revision` had been computed, leaving a revision that no longer described the registry.
+is not a tripwire. **A registry is also sealed after construction**: `_register` raises on a built
+registry and its backing mappings — descriptors, executors, input models, the declared-shape record
+— are replaced with read-only views, so `registry_revision` keeps describing what the registry
+actually resolves. Previously `_register` stayed callable and, even once guarded, the mappings
+themselves remained plain writable dicts.
+
+**That is defence against ordinary misuse, not tamper-proofing.** `_sealed` is an attribute and
+in-process Python can reach around any of this; nothing inside a process can be made tamper-proof
+against code running in the same process. Saying so plainly is the point — it is the same actor §7
+places outside the boundary, and a guard described as stronger than it is becomes the tripwire
+nobody re-examines.
 
 Two invariant classes, reported differently:
 
@@ -843,8 +850,15 @@ the comparison unable to see the thing it exists to catch: `frozen=True` refuses
 field and says nothing about the contents of one, so a declared `List[str]` stays appendable, and a
 nondeterministic executor that stashed run one's answer there replayed it on run two and emitted
 identical bytes. The check confirmed a determinism the executor had made unobservable. Rebuilding
-costs a second pass of the input gate per invocation — the walk runs twice — which is the price of
-the property being real (§6 architect review).
+costs a second FULL pass of the input gate per invocation — the forbidden-shape scan, pydantic
+validation and the value walk, not the walk alone — which is the price of the property being real.
+
+**What the double execution is, precisely.** Defence in depth against ACCIDENTAL nondeterminism in
+trusted executors: a clock read, an iteration order, a cached first result. It is **not** a proof
+against cooperating registered code. An executor may consult a module global, an import or I/O, and
+§7 places those channels outside this boundary rather than claiming to close them; covering them
+would mean isolating executions, which is a different architecture. The engine passes no context or
+catalog object, which closes the channel this design *can* close (§6 architect review).
 
 Step 7 is why **executors receive their validated input and nothing else** — no context
 object, no catalog. Handing an executor a context would reopen an I/O channel and make the

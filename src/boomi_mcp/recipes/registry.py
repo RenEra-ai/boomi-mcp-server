@@ -936,6 +936,21 @@ class RecipeRegistry:
         # looked for ``register``/``add``/``install`` and this method is
         # ``_register`` (issue #145, §6 architect review).
         self._sealed = True
+        # FROZEN, not merely guarded. Blocking ``_register`` stopped the ordinary
+        # re-registration path and left ``_descriptors``/``_executors``/
+        # ``_input_models``/``_declared_shape`` as plain writable dicts, so a
+        # direct assignment still changed what the registry resolved — and
+        # ``registry_revision``, computed above, no longer described it
+        # (issue #145, §6 architect review).
+        #
+        # This is defence against ORDINARY MISUSE, not tamper-proofing: nothing
+        # in-process can be made tamper-proof against in-process Python, which is
+        # exactly why §7 places that actor outside the boundary rather than
+        # pretending to exclude it.
+        self._descriptors = MappingProxyType(self._descriptors)
+        self._executors = MappingProxyType(self._executors)
+        self._input_models = MappingProxyType(self._input_models)
+        self._declared_shape = MappingProxyType(self._declared_shape)
 
     # -- construction ------------------------------------------------------
 
@@ -1512,7 +1527,12 @@ class RecipeRegistry:
         return model
 
     def declared_shape(self) -> Mapping[type, Mapping[str, Any]]:
-        """Field annotations as they stood when the registration gates ran."""
+        """Field annotations as they stood when the registration gates ran.
+
+        A read-only view: this used to hand back the live mapping, so a caller
+        could rewrite the very record the engine compares against
+        (issue #145, §6 architect review).
+        """
         return self._declared_shape
 
     # -- capability preflight ---------------------------------------------

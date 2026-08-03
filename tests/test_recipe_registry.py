@@ -4839,3 +4839,47 @@ def test_a_built_registry_refuses_further_registration():
     # ...and the registration really did not land.
     with pytest.raises(Exception):
         registry.resolve("test.other", "1.0.0")
+
+
+def test_no_mcp_surface_constructs_or_accepts_a_registry():
+    """The boundary claim is "no MCP-ACCESSIBLE registrar", so test THAT.
+
+    A name-based scan for ``register``/``add``/``install`` cannot see a future
+    tool that constructs ``RecipeRegistry(...)`` directly or forwards a
+    ``registry=`` argument — both public. This asserts the reachability the
+    architecture actually claims (issue #145, §6 architect review).
+    """
+    import re
+
+    src = _project_root / "src" / "boomi_mcp"
+    offenders = []
+    for path in sorted(src.rglob("*.py")):
+        relative = path.relative_to(src).as_posix()
+        if relative.startswith("recipes/"):
+            continue  # the layer itself may name its own types
+        text = path.read_text()
+        if re.search(r"\bRecipeRegistry\s*\(", text):
+            offenders.append(f"{relative}: constructs RecipeRegistry")
+        if re.search(r"\brun_recipes\s*\([^)]*\bregistry\s*=", text, re.S):
+            offenders.append(f"{relative}: passes registry= to run_recipes")
+        if re.search(r"\bbuild_test_registry\b", text):
+            offenders.append(f"{relative}: uses the test-only registry factory")
+    assert offenders == [], offenders
+
+
+def test_a_built_registry_exposes_no_writable_mappings():
+    """Blocking ``_register`` left the backing dictionaries plain and writable.
+
+    A direct assignment still changed what the registry resolved, while
+    ``registry_revision`` — computed during construction — went on describing
+    something else (issue #145, §6 architect review).
+    """
+    registry = build_test_registry((_reg(),))
+    for attr in ("_descriptors", "_executors", "_input_models", "_declared_shape"):
+        mapping = getattr(registry, attr)
+        with pytest.raises(TypeError):
+            mapping["x"] = "y"  # type: ignore[index]
+
+    # ...and the published view is read-only too.
+    with pytest.raises(TypeError):
+        registry.declared_shape()["x"] = {}  # type: ignore[index]

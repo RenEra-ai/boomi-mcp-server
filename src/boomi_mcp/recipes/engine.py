@@ -25,11 +25,16 @@ is no parameter anywhere in this module that could carry one.** That is what mak
 convention: the legacy exemptions exist and are reachable, but not from here, and
 a test asserts the signature has no seam to add one through.
 
-Step 7 is why executors get nothing but their frozen input. A recipe that read a
-clock, an environment variable, or a mutable module global would produce different
-bytes on the second run and fail closed — but only if there is no legitimate
-channel through which state could differ. Handing an executor a context object
-would have opened exactly that channel.
+Step 7 is why executors get nothing but their input, and the second run gets its
+OWN input, rebuilt from a snapshot of the caller's raw mapping taken before either
+execution. A recipe that read a clock or an iteration order produces different
+bytes on the second run and fails closed.
+
+It is defence in depth, not a proof. A recipe that caches in a MODULE GLOBAL can
+still replay its first answer, and §7 places that channel outside this boundary
+rather than claiming to close it — covering it would mean isolating executions,
+which is a different architecture. Handing an executor a context object would
+have opened a channel this design does close.
 """
 
 from __future__ import annotations
@@ -1466,7 +1471,7 @@ def _execute_deterministically(
     descriptor: RecipeDescriptorV1,
     registry: RecipeRegistry,
     validated_input: Any,
-    rebuild_input: Optional[Any] = None,
+    rebuild_input: Any,
 ) -> Tuple[Any, ...]:
     """Run twice and byte-compare — against two INDEPENDENT inputs.
 
@@ -1480,10 +1485,21 @@ def _execute_deterministically(
     Rebuilding the input from the caller's raw mapping is what restores the
     property: the second run cannot see anything the first one wrote, so
     memoization shows up as the difference it is.
+
+    **What this is, precisely.** Defence in depth against ACCIDENTAL
+    nondeterminism in trusted executors — a clock read, an iteration order, a
+    cached first result. It is NOT a proof against cooperating registered code:
+    an executor may consult a module global, an import or I/O, and §7 places
+    those channels outside this boundary rather than claiming to close them.
+    Isolating executions would be required to cover them, and that is a different
+    architecture (issue #145, §6 architect review).
     """
     first = _run_executor(descriptor, registry, validated_input)
-    second_input = validated_input if rebuild_input is None else rebuild_input()
-    second = _run_executor(descriptor, registry, second_input)
+    # MANDATORY, not optional. An ``Optional[...] = None`` fallback that reused
+    # ``validated_input`` sat directly under a docstring promising two
+    # INDEPENDENT inputs, so the promise had a default that broke it
+    # (issue #145, §6 architect review).
+    second = _run_executor(descriptor, registry, rebuild_input())
     if canonical_recipe_contributions_json(first) != canonical_recipe_contributions_json(
         second
     ):
@@ -1574,7 +1590,7 @@ def run_recipes(
             invocation.descriptor,
             active,
             invocation.validated_input,
-            rebuild_input=_rebuilders.get(invocation.invocation_id),
+            rebuild_input=_rebuilders[invocation.invocation_id],
         )
         for index, contribution in enumerate(contributions):
             attributed.append(

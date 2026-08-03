@@ -338,10 +338,13 @@ class RecipeDescriptorV1(_RecipeModel):
 class RecipeInputBase(BaseModel):
     """Strict, frozen base every registered recipe input model must subclass.
 
-    Frozen matters more than it looks: the engine runs each executor TWICE over
-    the same input object and byte-compares the results. A mutable input would
-    let the first run change what the second run sees, turning a
-    nondeterminism check into a tautology.
+    Frozen refuses assignment to a field. It does NOT freeze the contents of one,
+    so a declared ``List[str]`` stays appendable — and the engine used to run both
+    executions over the same object, which let the first run change what the
+    second one saw and turned the nondeterminism check into a tautology. The
+    engine now builds the second input independently, from a snapshot of the
+    caller's raw mapping taken before either run; ``frozen`` is the shallow half
+    of that and never was the whole of it (issue #145, §6 architect review).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
