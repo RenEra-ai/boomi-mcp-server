@@ -770,7 +770,8 @@ _REPLAYABLE_TYPES: Tuple[type, ...] = (
 #: A guard here refused a container whose class or instance had rewritten its own
 #: enumeration. Every attack it stopped needs author class machinery, which §7
 #: classifies as accepted residue — dominated by the module-global channel §12
-#: declares open — and the guard's cost was five refusals of ordinary Python.
+#: declares open — and the guard's cost was three refusals of ordinary Python:
+#: ``OrderedDict``, a ``NamedTuple`` field and ``Counter``.
 #: It is DELETED rather than left untested: a guard defending residue asserts a
 #: property this layer does not claim, and keeping it invites the next round to
 #: harden it again (issue #145, live QA #400).
@@ -1084,10 +1085,12 @@ def _replayable_base(value: Any) -> Optional[type]:
     subclass override, or an instance attribute shadowing one, cannot change what
     ``list.__iter__`` or ``dict.items`` return for the object's real storage.
 
-    Kept after the exact-type rule made it strictly redundant — the base of an
-    exact type IS that type — because it costs nothing and it is the half of the
-    old pair that never needed an enumeration to be right. It bounds the damage
-    if a future edit ever loosens ``_is_walkable_collection`` again.
+    LOAD-BEARING, and it was not always. Under the exact-type rule the base of an
+    exact type WAS that type, so this was redundant and said so. That rule is gone —
+    ``_is_walkable_collection`` is an ``isinstance`` test again — so a subclass now
+    reaches the walk and reading through the base is the only thing keeping the
+    walk's view of it independent of the class. Mutating any of the four
+    base-reads here fails the suite (issue #145, live QA #400).
     """
     for base in _REPLAYABLE_TYPES:
         if isinstance(value, base):

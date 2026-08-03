@@ -3832,14 +3832,16 @@ def test_a_container_cannot_lie_about_its_own_enumeration():
 def test_ordinary_container_types_are_walked_and_judged():
     """Refusing supported Python ranks above closing residue (§7).
 
-    An exact-type rule closed the whole subclass-divergence family at once, and
-    refused a ``NamedTuple`` field, ``Counter``, ``defaultdict`` and every
-    ``__slots__`` dataclass on the way — five refusals of ordinary Python, three
-    of them introduced by hardening against attacks that need author class
+    An exact-type rule closed the whole subclass-divergence family at once and
+    refused ``OrderedDict``, a ``NamedTuple`` field and ``Counter`` on the way —
+    three refusals of ordinary Python, to close attacks that need author class
     machinery and are dominated by the module-global channel §12 already accepts.
+    (``__slots__`` dataclasses and ``cached_property`` were refused by two other
+    guards, which are still present; a container guard never saw them.)
 
-    Each of these is walked, and each is genuinely judged: the walk is defence in
-    depth against malformed caller data, which is what it is for.
+    Each case here is walked AND judged — a container that walks zero entries
+    would satisfy the first half vacuously, so every fixture carries at least one
+    entry (issue #145, live QA #400).
     """
     from collections import Counter, OrderedDict, defaultdict
     from typing import Dict as DictType, NamedTuple
@@ -3866,16 +3868,22 @@ def test_ordinary_container_types_are_walked_and_judged():
         )
 
     mapping_model = _model("OrdinaryMapInputV1", DictType[str, _DeclaredKeysOnlyLeaf])
+    # NON-EMPTY, every one of them: an empty container walks no entries, so it
+    # would pass whatever the element rule said. ``Counter`` and ``defaultdict``
+    # appear here as walked VALUES under a ``Dict[str, Leaf]`` declaration — the
+    # ``Counter[K]`` ANNOTATION has its own test, and ``DefaultDict[...]`` cannot
+    # register at all because the wrap/plain validator ban rejects it (§7).
     for built in (
         dict({"k": honest}),
         OrderedDict({"k": honest}),
-        Counter(),
+        Counter({"k": honest}),
         defaultdict(list, {"k": honest}),
     ):
         _assert_declared_shape(mapping_model.model_construct(field=built))
     for poisoned in (
         dict({"k": converting}),
         OrderedDict({"k": converting}),
+        Counter({"k": converting}),
         defaultdict(list, {"k": converting}),
     ):
         with pytest.raises(Exception):

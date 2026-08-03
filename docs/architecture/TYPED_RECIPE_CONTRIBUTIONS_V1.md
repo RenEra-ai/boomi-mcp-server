@@ -506,8 +506,8 @@ machinery — a metaclass, a descriptor or plain class attribute under a field n
 `__instancecheck__` or `__hash__` that writes? If yes it is residue. If the payload arrives through
 an honest declaration and caller data alone, it is a bug. **Refusing ordinary supported Python is
 always a bug, and ranks above both** — this layer shipped five such refusals (`OrderedDict`, a
-`NamedTuple` field, `Counter` and `defaultdict`, every `__slots__` dataclass, `cached_property`),
-three of them introduced by hardening against residue and two hitting this repository's own types.
+`NamedTuple` field, `Counter`, `defaultdict`, every `__slots__` dataclass, `cached_property`), three
+of them introduced by hardening against residue and two hitting this repository's own types.
 The exact-type container rule that caused the last of them was relaxed back to an `isinstance` test:
 a subclass overriding its own enumeration is residue, and refusing supported Python to close residue
 is the wrong trade in both directions.
@@ -522,8 +522,9 @@ parametrises its KEY instead" named a hypothetical that turned out to be in the 
 
 **`defaultdict` is still refused, and by a different gate**: `DefaultDict[str, str]` compiles to a
 `function-plain`/`function-wrap` validator node, so the wrap/plain validator ban rejects it at
-REGISTRATION, exactly as it rejects `Sequence[str]`, `Deque[str]`, `AnyUrl`, `re.Pattern` and the
-four `ipaddress` types — nine of thirty-nine ordinary annotations in a measured census. That ban is
+REGISTRATION, exactly as it rejects `Sequence[str]`, `Deque[str]`, `AnyUrl`, `re.Pattern`, `Fraction` and all
+SIX `ipaddress` types (`IPv4Address`/`Network`/`Interface` and their v6 counterparts) — twelve
+annotations, and the list is the family rather than a sample of it. That ban is
 recorded below as known, measured and still open; it is named here too because a reader checking
 "is `defaultdict` supported?" should not have to find the answer two subsections away.
 
@@ -610,10 +611,22 @@ channels.
   `array.array`, `memoryview` and any custom `abc.Sequence`.
 
   **Membership is by `isinstance`, and the enumeration-policing guards are gone.** They were added
-  to close subclass divergence, widened four times across three rounds, and cost five refusals of
-  ordinary Python; every attack they stopped needs author class machinery and is therefore residue.
+  to close subclass divergence, widened four times across three rounds, and cost three refusals of
+  ordinary Python — `OrderedDict`, a `NamedTuple` field and `Counter`. (The `__slots__` dataclass and
+  `cached_property` refusals belong to two OTHER guards, `_is_slot_descriptor` and
+  `_unexpected_storage`, which are still present and still credited with them; a container guard
+  could never have seen a non-container.) Every attack they stopped needs author class machinery and
+  is therefore residue.
   A guard that defends only residue asserts a property this layer does not claim, so it was deleted
-  rather than left untested — leaving it would invite the next round to harden it again. What
+  rather than left untested — leaving it would invite the next round to harden it again.
+
+  **Other guards defend only residue and were kept, which needs its own reason.**
+  `_assert_no_attribute_hooks`, `_assert_fields_are_not_intercepted` and the read-back check all
+  stop author class machinery too. The distinction is FALSE-REJECTION COST, measured rather than
+  assumed: the container-enumeration guards refused three ordinary Python types and had to be
+  widened four times to keep doing so, while these three refuse nothing in a 407-class sweep of this
+  package. A residue guard that costs nothing is defence in depth; one that refuses supported Python
+  to keep its coverage is a bad trade, and that is the line — not the residue classification alone. What
   follows records why the guard existed, so the reasoning is not rediscovered from scratch.
 
   **Was: membership by EXACT TYPE, with the instance carrying no state of its own.** Testing it
@@ -776,9 +789,10 @@ Removing the serializer ban also removed false rejections it had introduced — 
 `pathlib.Path` register again, and `SecretStr` mattered: it is the type an author *should* reach
 for on a sensitive input, so refusing it pushed them toward plain `str`.
 
-**Known, measured, still open:** the wrap/plain *validator* ban refuses `AnyUrl`,
-`IPv4Address`, `IPv4Network`, `re.Pattern` and `deque`, because each compiles to a
-`function-plain`/`function-wrap` validator node. That over-fire predates the value-first check
+**Known, measured, still open:** the wrap/plain *validator* ban refuses `Sequence[str]`,
+`Deque[str]`, `DefaultDict[str, str]`, `AnyUrl`, `re.Pattern`, `Fraction` and all six `ipaddress`
+types, because each compiles to a `function-plain`/`function-wrap` validator node — and the ban
+cannot tell an author's wrap validator from one pydantic emits itself. That over-fire predates the value-first check
 and is not fixed by it. The value-first check appears to subsume what that ban guards — an
 object of exactly the registered type, with no extras, whose every field matches its
 annotation, is indistinguishable from an honestly validated one — but removing a gate that took
