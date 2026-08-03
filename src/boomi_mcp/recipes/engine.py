@@ -40,6 +40,7 @@ from collections import OrderedDict, deque
 from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
 from decimal import Decimal
 from fractions import Fraction
+from functools import cached_property
 from types import GetSetDescriptorType, MemberDescriptorType
 from typing import (
     Annotated,
@@ -94,7 +95,12 @@ from .materialization import (
     build_symbol_table,
     placeholder_component_id,
 )
-from .registry import RecipeRegistry, production_registry
+from .registry import (
+    RecipeRegistry,
+    _check_input_model_forbids_extras,
+    _check_input_schema_closed,
+    production_registry,
+)
 
 
 @dataclass(frozen=True)
@@ -149,6 +155,31 @@ def _validate_input(descriptor: RecipeDescriptorV1, registry: RecipeRegistry, ra
             recipe_versions=(descriptor.recipe_version,),
         )
     model = registry.input_model_for(descriptor)
+
+    # THE REGISTRATION-TIME SHAPE IS RE-ASSERTED, HERE. They were designed as build-time
+    # checks over a class that had just been created — but every artifact they
+    # read is writable afterwards, and a registered model whose
+    # ``__pydantic_fields__[name].annotation`` is rewritten to ``Any`` keeps an
+    # identical field NAME set, so the storage cross-check sees nothing wrong and
+    # the walk then judges the caller's raw mapping against ``Any``
+    # (issue #145, live QA #382).
+    #
+    # Re-running the SCHEMA gate does not catch it: pydantic caches the compiled
+    # schema, so the forgery stays invisible there until something forces a
+    # rebuild — while the walk reads ``FieldInfo.annotation`` directly and sees it
+    # at once. What closes it is comparing against the annotations recorded when
+    # the gates actually ran.
+    try:
+        _assert_declared_shape_unchanged(registry.declared_shape())
+        _check_input_model_forbids_extras(descriptor.recipe_id, model)
+    except Exception:  # noqa: BLE001 — a build-defect message names the author's class
+        raise recipe_error(
+            RECIPE_INPUT_INVALID,
+            phase="input",
+            recipe_ids=(descriptor.recipe_id,),
+            recipe_versions=(descriptor.recipe_version,),
+        ) from None
+
     try:
         validated = model.model_validate(dict(raw))
     except Exception:  # noqa: BLE001 — pydantic text can echo an authored value
@@ -726,6 +757,9 @@ _REPLAYABLE_MAPPINGS: Tuple[type, ...] = (dict, OrderedDict)
 #: Read the class's OWN storage, bypassing any ``__getattribute__`` the author
 #: put on its metaclass. ``getattr(cls, name)`` is answerable by author code;
 #: these descriptors are fetched from ``type``, which is not.
+#: Sentinel for "an ordinary read raised", distinct from a stored ``None``.
+_UNSET = object()
+
 _CLASS_VARS = type.__dict__["__dict__"].__get__
 _CLASS_MRO = type.__dict__["__mro__"].__get__
 
@@ -750,6 +784,99 @@ def _is_slot_descriptor(attribute: Any, owner: type) -> bool:
         type(attribute) is MemberDescriptorType
         and getattr(attribute, "__objclass__", None) is owner
     )
+
+
+def _dataclass_field_map(value: Any) -> Optional[Mapping[str, Any]]:
+    """``__dataclass_fields__`` read from the class BODY, or ``None`` if absent.
+
+    ``dataclasses.is_dataclass`` is ``hasattr(type(obj), "__dataclass_fields__")``
+    — class-level attribute access, which a metaclass answers. Raising
+    ``AttributeError`` for that one name skipped the dataclass branch ENTIRELY,
+    and with it every guard inside that branch, leaving the value walked by
+    nothing (issue #145, live QA #385).
+
+    A branch-selection predicate the author can answer disables everything the
+    branch would have done, so it is read the same unforgeable way as the
+    branch's own contents.
+    """
+    for klass in _CLASS_MRO(type(value)):
+        fields = _CLASS_VARS(klass).get("__dataclass_fields__")
+        if fields is not None:
+            return fields
+    return None
+
+
+def _unexpected_storage(
+    value: Any, stored: Mapping[str, Any], declared: Mapping[str, Any]
+) -> set:
+    """Storage keys that are not declared fields, and are not legitimately there.
+
+    Two ordinary idioms put a non-field key in a model's own ``__dict__`` and
+    must not be mistaken for a hidden field: a ``functools.cached_property`` once
+    anything has read it — which makes the refusal STATE-DEPENDENT, the
+    reads-as-intermittent failure this module already warns about — and
+    ``object.__setattr__(self, "_priv", v)`` in a frozen model's validator.
+    Pydantic cannot declare a field whose name starts with an underscore, so a
+    hidden field can never wear one (issue #145, live QA #387).
+    """
+    unexpected = set()
+    for name in set(stored) - set(declared):
+        if name.startswith("_"):
+            continue
+        attribute = None
+        for klass in _CLASS_MRO(type(value)):
+            attribute = _CLASS_VARS(klass).get(name)
+            if attribute is not None:
+                break
+        if type(attribute) is cached_property:
+            continue
+        unexpected.add(name)
+    return unexpected
+
+
+def _assert_reads_back_as_stored(value: Any, names: Sequence[str], stored: Any) -> None:
+    """An ordinary read of every declared field must return what the walk judged.
+
+    This is deliberately NOT an enumeration of interception mechanisms. Three
+    rounds of naming them — ``__getattribute__``, ``__getattr__``, a descriptor
+    under a field's name, a metaclass answering ``model_fields``, a forged
+    ``__dataclass_fields__`` — each closed one shape and left the next. A PLAIN
+    class attribute under a field name, with the instance's own storage popped,
+    is neither a hook nor a descriptor, so every one of those checks passed it
+    while Python's ordinary lookup still returned the caller's mapping
+    (issue #145, live QA #383).
+
+    Comparing the two reads tests the property the layer actually needs — what
+    the executor sees is what the gate judged — instead of the ever-growing list
+    of ways it could fail to hold. It runs AFTER the hook ban, so ``getattr``
+    here cannot itself be author code.
+    """
+    for name in names:
+        try:
+            read = getattr(value, name)
+        except AttributeError:
+            read = _UNSET
+        if read is not _stored_attribute(value, name, stored):
+            raise ValueError("validated input's fields do not read back as stored")
+
+
+def _assert_declared_shape_unchanged(shape: Mapping[type, Mapping[str, Any]]) -> None:
+    """Every registered class still declares what it declared at registration."""
+    for cls, recorded in shape.items():
+        fields = None
+        for klass in _CLASS_MRO(cls):
+            fields = _CLASS_VARS(klass).get("__pydantic_fields__")
+            if fields is not None:
+                break
+        if fields is not None:
+            live = {name: field.annotation for name, field in fields.items()}
+        else:
+            declared = _CLASS_VARS(cls).get("__dataclass_fields__")
+            if declared is None:
+                continue
+            live = {name: field.type for name, field in declared.items()}
+        if live != recorded:
+            raise ValueError("a registered input model no longer declares what it registered")
 
 
 def _declared_fields(value: Any) -> Mapping[str, Any]:
@@ -1087,9 +1214,10 @@ def _assert_declared_shape(
         # against what the instance actually holds: a forged ``__pydantic_fields__``
         # that omits a field would otherwise mean that field is never visited
         # (issue #145, live QA #377).
-        if set(stored) - set(declared):
+        if _unexpected_storage(value, stored, declared):
             raise ValueError("validated input stores values it does not declare")
         _assert_fields_are_not_intercepted(value, tuple(declared))
+        _assert_reads_back_as_stored(value, tuple(declared), stored)
         for name, field in declared.items():
             _assert_declared_shape(
                 _stored_attribute(value, name, stored), field.annotation, _seen, _journal
@@ -1101,20 +1229,24 @@ def _assert_declared_shape(
     # DECLARED TYPES too — recursing with ``None`` checked nothing, and left a
     # mapping sitting in a ``str`` field reachable at ``inp.holder.label``
     # (issue #145, Codex review).
-    if is_dataclass(value) and not isinstance(value, type):
+    dataclass_field_map = (
+        None if isinstance(value, type) else _dataclass_field_map(value)
+    )
+    if dataclass_field_map is not None:
         _mark(value)
         _assert_no_attribute_hooks(value)
         hints = _dataclass_field_types(type(value))
-        _assert_fields_are_not_intercepted(
-            value, tuple(f.name for f in dataclass_fields(value))
-        )
         stored = _instance_vars(value)
-        for field in dataclass_fields(value):
+        # The same cross-check the model branch got. A rule with two consumers is
+        # not fixed until it is fixed at both, which this file has now re-learned
+        # three times (issue #145, live QA #384).
+        if stored is not None and _unexpected_storage(value, stored, dataclass_field_map):
+            raise ValueError("validated input stores values it does not declare")
+        _assert_fields_are_not_intercepted(value, tuple(dataclass_field_map))
+        _assert_reads_back_as_stored(value, tuple(dataclass_field_map), stored)
+        for name in dataclass_field_map:
             _assert_declared_shape(
-                _stored_attribute(value, field.name, stored),
-                hints.get(field.name),
-                _seen,
-                _journal,
+                _stored_attribute(value, name, stored), hints.get(name), _seen, _journal
             )
         return
 

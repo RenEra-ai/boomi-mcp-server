@@ -21,11 +21,13 @@ Two invariant classes, deliberately reported differently:
 
 from __future__ import annotations
 
+import dataclasses
+
 import importlib
 import inspect
 import json
 from types import MappingProxyType
-from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple, get_args
 
 from ..build_info import (
     PACKAGE_NAME,
@@ -519,6 +521,47 @@ def _check_input_model_forbids_extras(recipe_id: str, model: Any) -> None:
         )
 
 
+def _snapshot_declared_shape(model: Any) -> Dict[type, Mapping[str, Any]]:
+    """Every model/dataclass reachable from ``model``, with its field annotations.
+
+    Taken at REGISTRATION, immediately after the gates pass, because every
+    artifact those gates read stays writable afterwards. Rewriting
+    ``__pydantic_fields__[name].annotation`` to ``Any`` leaves the field NAME set
+    identical — so a cross-check on names sees nothing — and the walk then judged
+    the caller's raw mapping against ``Any`` (issue #145, live QA #382).
+
+    Re-deriving the emitted schema at invocation does not close it on its own:
+    pydantic caches the compiled schema, so the forgery is invisible there until
+    something forces a rebuild, while the walk reads ``FieldInfo.annotation``
+    directly and sees it immediately.
+    """
+    seen: Dict[type, Mapping[str, Any]] = {}
+    pending = [model]
+    while pending:
+        current = pending.pop()
+        if not isinstance(current, type) or current in seen:
+            continue
+        fields = getattr(current, "__pydantic_fields__", None)
+        if fields is not None:
+            annotations = {name: field.annotation for name, field in fields.items()}
+        elif dataclasses.is_dataclass(current):
+            annotations = {f.name: f.type for f in dataclasses.fields(current)}
+        else:
+            continue
+        seen[current] = annotations
+        for annotation in annotations.values():
+            pending.extend(_referenced_types(annotation))
+    return seen
+
+
+def _referenced_types(annotation: Any) -> Tuple[Any, ...]:
+    """Every class mentioned by an annotation, however deeply parametrised."""
+    found = [annotation] if isinstance(annotation, type) else []
+    for argument in get_args(annotation):
+        found.extend(_referenced_types(argument))
+    return tuple(found)
+
+
 def _check_input_schema_closed(recipe_id: str, model: Any) -> None:
     """Reject a registered input model that can carry an unbounded object.
 
@@ -778,6 +821,10 @@ class RecipeRegistry:
         self._descriptors: Dict[Tuple[str, str], RecipeDescriptorV1] = {}
         self._executors: Dict[Tuple[str, str], RecipeExecutorV1] = {}
         self._input_models: Dict[Tuple[str, str], type] = {}
+        #: ``{class: {field: annotation}}`` as it stood WHEN THE GATES RAN.
+        #: Everything the gates read is writable afterwards, so the walk reads
+        #: this instead of the live class (issue #145, live QA #382).
+        self._declared_shape: Dict[type, Mapping[str, Any]] = {}
         self._defaults: Dict[str, str] = {}
 
         # The WHOLE layer, plus any executor module a test registry brought with
@@ -1037,6 +1084,7 @@ class RecipeRegistry:
                 )
             _check_input_schema_closed(reg.recipe_id, reg.input_model)
             _check_input_model_forbids_extras(reg.recipe_id, reg.input_model)
+            self._declared_shape.update(_snapshot_declared_shape(reg.input_model))
 
         if has_executor:
             self._check_executor_shape(reg)
@@ -1409,6 +1457,10 @@ class RecipeRegistry:
                 recipe_versions=(descriptor.recipe_version,),
             )
         return model
+
+    def declared_shape(self) -> Mapping[type, Mapping[str, Any]]:
+        """Field annotations as they stood when the registration gates ran."""
+        return self._declared_shape
 
     # -- capability preflight ---------------------------------------------
 

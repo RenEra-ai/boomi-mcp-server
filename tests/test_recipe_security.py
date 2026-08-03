@@ -4908,3 +4908,189 @@ def test_a_borrowed_slot_descriptor_is_not_mistaken_for_the_compiler_s():
     )
     with pytest.raises(Exception):
         _assert_declared_shape(model.model_construct(field=Thief.__new__(Thief)))
+
+
+def test_a_plain_class_attribute_under_a_field_name_is_refused():
+    """Neither a hook nor a descriptor, and Python's lookup still returns it.
+
+    The descriptor ban asks "is it a descriptor?" and the storage read asks "is it
+    in storage?". A PLAIN class attribute under a field name, with the instance's
+    own entry popped, is neither — so every enumerated check passed it while an
+    ordinary read returned the caller's mapping (issue #145, live QA #383).
+
+    What refuses it is not another entry on that list: the walk now compares an
+    ordinary read against what it judged, which tests the property the layer
+    needs instead of the ways it can fail to hold.
+    """
+    from typing import Optional as OptionalType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
+    assert isinstance(converting, dict)  # the premise
+
+    class PlainAttr(RecipeInputBase):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        leaf: OptionalType[_DeclaredKeysOnlyLeaf] = None
+
+    value = PlainAttr.model_construct(leaf=_DeclaredKeysOnlyLeaf.model_construct(ok="a"))
+    object.__getattribute__(value, "__dict__").pop("leaf")
+    PlainAttr.leaf = converting  # a plain dict: not a descriptor, not a hook
+    assert not hasattr(type(PlainAttr.__dict__["leaf"]), "__get__")  # the premise
+    assert value.leaf is converting
+    with pytest.raises(Exception):
+        _assert_declared_shape(value)
+
+
+def test_the_dataclass_branch_cannot_be_switched_off_or_truncated():
+    """``is_dataclass`` is class-level attribute access, so a metaclass answers it.
+
+    Raising ``AttributeError`` for ``__dataclass_fields__`` skipped the whole
+    branch — including its own hook scan — leaving the value walked by nothing. A
+    branch-selection predicate the author can answer disables every guard inside
+    that branch (issue #145, live QA #385). And the branch itself had no storage
+    cross-check, so a truncated ``__dataclass_fields__`` hid a field
+    (live QA #384).
+    """
+    from dataclasses import dataclass as std_dataclass
+    from typing import Any as AnyType, Optional as OptionalType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
+    assert isinstance(converting, dict)  # the premise
+
+    class DeniesBeingADataclass(type):
+        def __getattribute__(cls, name):
+            if name == "__dataclass_fields__":
+                raise AttributeError(name)
+            return type.__getattribute__(cls, name)
+
+    @std_dataclass
+    class Hidden(metaclass=DeniesBeingADataclass):
+        leaf: OptionalType[_DeclaredKeysOnlyLeaf] = None
+
+        def __getattribute__(self, name):
+            if name == "leaf":
+                return converting
+            return object.__getattribute__(self, name)
+
+    import dataclasses as _dc
+
+    hidden = Hidden(leaf=_DeclaredKeysOnlyLeaf.model_construct(ok="a"))
+    assert _dc.is_dataclass(hidden) is False  # the premise: the lie works
+    holder = type(
+        "HiddenDcInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": AnyType},
+            "field": None,
+        },
+    )
+    with pytest.raises(Exception):
+        _assert_declared_shape(holder.model_construct(field=hidden))
+
+    @std_dataclass
+    class Truncated:
+        leaf: OptionalType[_DeclaredKeysOnlyLeaf] = None
+        other: str = "x"
+
+    truncated = Truncated(leaf=converting, other="x")
+    Truncated.__dataclass_fields__ = {
+        k: v for k, v in Truncated.__dataclass_fields__.items() if k != "leaf"
+    }
+    trunc_holder = type(
+        "TruncDcInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": Truncated},
+            "field": None,
+        },
+    )
+    with pytest.raises(Exception):
+        _assert_declared_shape(trunc_holder.model_construct(field=truncated))
+
+
+def test_two_ordinary_idioms_are_not_read_as_hidden_fields():
+    """``cached_property`` and a private attribute both land in a model's dict.
+
+    The first makes the refusal STATE-DEPENDENT — untouched accepts, warmed
+    refuses — which is the reads-as-intermittent failure this module already
+    warns about; the second is the canonical way to stash a private value on a
+    frozen model. Neither can be a hidden field: pydantic cannot declare a field
+    whose name starts with an underscore (issue #145, live QA #387).
+    """
+    from functools import cached_property
+
+    from pydantic import model_validator
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class WithCached(RecipeInputBase):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        label: str = "x"
+
+        @cached_property
+        def total(self) -> int:
+            return len(self.label)
+
+    warmed = WithCached.model_construct(label="abc")
+    _assert_declared_shape(warmed)
+    assert warmed.total == 3  # populates ``total`` in the instance dict
+    assert "total" in object.__getattribute__(warmed, "__dict__")  # the premise
+    _assert_declared_shape(warmed)
+
+    class WithPrivate(RecipeInputBase):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        label: str = "x"
+
+        @model_validator(mode="after")
+        def _stash(self):
+            object.__setattr__(self, "_priv", "internal")
+            return self
+
+    stashed = WithPrivate.model_validate({"label": "a"})
+    assert "_priv" in object.__getattribute__(stashed, "__dict__")  # the premise
+    _assert_declared_shape(stashed)
+
+
+def test_a_registered_model_cannot_change_what_it_declared():
+    """Everything the registration gates read stays writable afterwards.
+
+    Rewriting ``__pydantic_fields__[name].annotation`` to ``Any`` leaves the field
+    NAME set identical, so a cross-check on names sees nothing — and re-running
+    the SCHEMA gate does not catch it either, because pydantic caches the
+    compiled schema while the walk reads ``FieldInfo.annotation`` directly
+    (issue #145, live QA #382).
+    """
+    from typing import Any as AnyType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape_unchanged
+    from boomi_mcp.recipes.registry import production_registry
+
+    shape = production_registry().declared_shape()
+    assert shape, "the premise: registration recorded a shape at all"
+    _assert_declared_shape_unchanged(shape)
+
+    cls = next(iter(shape))
+    name = next(iter(shape[cls]))
+    original = cls.__pydantic_fields__[name].annotation
+    try:
+        cls.__pydantic_fields__[name].annotation = AnyType
+        with pytest.raises(Exception):
+            _assert_declared_shape_unchanged(shape)
+    finally:
+        cls.__pydantic_fields__[name].annotation = original
+    _assert_declared_shape_unchanged(shape)
+
+    # Dropping a field from the class body is caught by the same comparison.
+    fields = cls.__pydantic_fields__
+    try:
+        cls.__pydantic_fields__ = {k: v for k, v in fields.items() if k != name}
+        with pytest.raises(Exception):
+            _assert_declared_shape_unchanged(shape)
+    finally:
+        cls.__pydantic_fields__ = fields
+    _assert_declared_shape_unchanged(shape)

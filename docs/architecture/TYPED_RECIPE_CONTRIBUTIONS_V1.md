@@ -625,6 +625,30 @@ channels.
   storage the gate reads is refused outright, and the declared field list is cross-checked against
   what the instance actually stores — because a class body can be written to as well as read from.
 
+  **Three rounds of naming interception mechanisms ended the way the container rounds did.** A
+  PLAIN class attribute under a field name — with the instance's own entry popped — is neither a
+  hook, nor a descriptor, nor storage, so every enumerated check passed it while Python's ordinary
+  lookup returned the caller's mapping. What closes that class is not a fourth entry on the list:
+  the walk now **compares an ordinary read against what it judged**, which tests the property the
+  layer actually needs rather than the ever-growing list of ways it can fail to hold. Two further
+  reads were forgeable the same way and are read unforgeably now — `is_dataclass` is class-level
+  attribute access, so a metaclass could deny it and skip the entire dataclass branch *including
+  that branch's own guards*, and `__dataclass_fields__` could be truncated because only the model
+  branch had a cross-check.
+
+  **And the registration gates now leave a record, because everything they read stays writable.**
+  Rewriting `__pydantic_fields__[name].annotation` to `Any` leaves the field *name* set identical,
+  so a cross-check on names sees nothing, and the walk then judges the caller's mapping against
+  `Any`. Re-running the schema gate does not catch it either: pydantic caches the compiled schema,
+  so the forgery is invisible there until something forces a rebuild, while the walk reads
+  `FieldInfo.annotation` directly and sees it at once. The registry therefore records each
+  registered class's annotations at the moment its gates pass, and the engine asserts they are
+  unchanged. **Coverage boundary:** that record covers the *registered* input graph, which is the
+  only graph that reaches the engine.
+
+  **Not walked, and stated rather than discovered:** private attributes and computed fields. They
+  are attributes on an object the gate has certified, so an executor must not read them as data.
+
   The `__slots__` allowance is the mirror-image lesson. Treating every descriptor under a field
   name as interception refused fifteen slotted dataclasses on honest input — eight of them this
   repository's own process-IR types — on *every* invocation, because `__slots__` puts a
