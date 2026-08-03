@@ -4841,32 +4841,22 @@ def test_a_built_registry_refuses_further_registration():
         registry.resolve("test.other", "1.0.0")
 
 
-def test_no_mcp_surface_constructs_or_accepts_a_registry():
-    """The boundary claim is "no MCP-ACCESSIBLE registrar", so test THAT.
+def _registry_call_offenders(sources):
+    """Report any construction of a registry, or any ``registry=`` forwarding.
 
-    A name-based scan for ``register``/``add``/``install`` cannot see a future
-    tool that constructs ``RecipeRegistry(...)`` or forwards ``registry=`` — both
-    public. The first version of this test used a REGEX, which was worse than no
-    test: ``run_recipes(make_requests(), registry=r)`` slipped through because
-    ``[^)]*`` cannot cross a nested call, and an ``import ... as`` alias defeated
-    the name match entirely. False confidence, in the one place the architecture
-    points at as its tripwire (issue #145, §6 architect review round 3).
-
-    So the scan is an AST walk that resolves import aliases.
+    ONE scanner, used both on the repository and on the test's own probe. The
+    previous version had a separate mini-scanner inside its self-check, so the
+    branches that matter — alias resolution, ``**kwargs`` smuggling — could be
+    deleted from the real scanner while the self-check went on passing
+    (issue #145, §6 architect review round 4).
     """
     import ast
 
     watched = {"RecipeRegistry", "build_test_registry", "run_recipes"}
-    src = _project_root / "src" / "boomi_mcp"
     offenders = []
+    for label, text in sources:
+        tree = ast.parse(text)
 
-    for path in sorted(src.rglob("*.py")):
-        relative = path.relative_to(src).as_posix()
-        if relative.startswith("recipes/"):
-            continue  # the layer may name its own types
-        tree = ast.parse(path.read_text())
-
-        # Local name -> canonical name, so ``as`` aliases cannot hide a call.
         aliases = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
@@ -4874,7 +4864,6 @@ def test_no_mcp_surface_constructs_or_accepts_a_registry():
                     if name.name in watched:
                         aliases[name.asname or name.name] = name.name
             elif isinstance(node, ast.Assign):
-                # ``RR = RecipeRegistry`` — rebinding a watched callable
                 value = node.value
                 if isinstance(value, ast.Name) and value.id in aliases:
                     for target in node.targets:
@@ -4890,35 +4879,66 @@ def test_no_mcp_surface_constructs_or_accepts_a_registry():
             )
             canonical = aliases.get(local, local)
             if canonical in ("RecipeRegistry", "build_test_registry"):
-                offenders.append(f"{relative}:{node.lineno}: constructs {canonical}")
-            if canonical == "run_recipes":
-                # Any keyword, INCLUDING ``**{"registry": ...}`` which carries no arg name.
-                if any(kw.arg == "registry" or kw.arg is None for kw in node.keywords):
-                    offenders.append(f"{relative}:{node.lineno}: passes registry= to run_recipes")
+                offenders.append(f"{label}:{node.lineno}: constructs {canonical}")
+            elif canonical == "run_recipes" and any(
+                kw.arg == "registry" or kw.arg is None for kw in node.keywords
+            ):
+                offenders.append(f"{label}:{node.lineno}: passes registry= to run_recipes")
+    return offenders
 
-    assert offenders == [], offenders
 
-    # The test must be able to SEE the thing it forbids, or it proves nothing.
-    probe = ast.parse(
+def test_no_mcp_surface_constructs_or_accepts_a_registry():
+    """The boundary claim is "no MCP-ACCESSIBLE registrar", so test THAT.
+
+    Two earlier versions of this test were weaker than they looked. A regex could
+    not cross a nested call, so ``run_recipes(make_requests(), registry=r)``
+    slipped through. Then the AST version scanned only ``src/boomi_mcp`` — while
+    the fifty ``@mcp.tool`` functions that ARE the MCP surface live in the root
+    ``server.py``, so a registrar added there would have passed
+    (issue #145, §6 architect review rounds 3 and 4).
+
+    A tripwire that does not watch the door is worse than no tripwire.
+    """
+    sources = []
+    server = _project_root / "server.py"
+    assert server.is_file(), server
+    server_text = server.read_text()
+    # The premise: this file really is the MCP registration surface.
+    assert server_text.count("@mcp.tool") > 10
+    sources.append(("server.py", server_text))
+
+    src = _project_root / "src" / "boomi_mcp"
+    for path in sorted(src.rglob("*.py")):
+        relative = path.relative_to(src).as_posix()
+        if relative.startswith("recipes/"):
+            continue  # the layer may name its own types
+        sources.append((relative, path.read_text()))
+
+    # ASSERT THE FILE SET, not only the verdict. A scan with no offenders passes
+    # whether or not it opened the file that matters, so dropping ``server.py``
+    # from ``sources`` would otherwise be invisible.
+    scanned = [label for label, _ in sources]
+    assert "server.py" in scanned, scanned
+    assert any(label.startswith("categories/") for label in scanned), scanned[:10]
+
+    assert _registry_call_offenders(sources) == [], _registry_call_offenders(sources)
+
+
+def test_the_registry_reachability_scanner_sees_what_it_forbids():
+    """Guard the guard, through the SAME function the repository scan uses."""
+    probe = (
         "from boomi_mcp.recipes import RecipeRegistry as RR, run_recipes\n"
-        "r = RR(())\n"
+        "alias = RR\n"
+        "r = alias(())\n"
         "run_recipes(make_requests(), registry=r)\n"
+        "run_recipes(make_requests(), **{'registry': r})\n"
     )
-    seen = {"alias_construct": False, "nested_call_kwarg": False}
-    alias = {}
-    for node in ast.walk(probe):
-        if isinstance(node, ast.ImportFrom):
-            for name in node.names:
-                if name.name in watched:
-                    alias[name.asname or name.name] = name.name
-    for node in ast.walk(probe):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            canonical = alias.get(node.func.id, node.func.id)
-            if canonical == "RecipeRegistry":
-                seen["alias_construct"] = True
-            if canonical == "run_recipes" and any(kw.arg == "registry" for kw in node.keywords):
-                seen["nested_call_kwarg"] = True
-    assert all(seen.values()), seen
+    found = _registry_call_offenders([("probe.py", probe)])
+    assert any("constructs RecipeRegistry" in item for item in found), found
+    assert sum("passes registry=" in item for item in found) == 2, found
+
+    # ...and it stays quiet on an honest call.
+    assert _registry_call_offenders([("clean.py", "run_recipes(reqs, catalog=c)\n")]) == []
 
 
 def test_a_built_registry_exposes_no_writable_mappings():

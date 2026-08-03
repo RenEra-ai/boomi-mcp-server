@@ -348,7 +348,7 @@ def test_a_nondeterministic_executor_fails_closed():
 
 
 def test_every_executor_is_run_exactly_twice():
-    """The determinism proof is a re-run, so the count IS the mechanism.
+    """The double-execution CHECK is a re-run, so the count IS the mechanism.
 
     Registration rejects a closure, so the counter lives in module state and the
     registered function stays a plain module-level def — the same shape
