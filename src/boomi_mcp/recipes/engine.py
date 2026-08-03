@@ -946,7 +946,17 @@ def _stored_attribute(value: Any, name: str, stored: Optional[Mapping[str, Any]]
                 return descriptor.__get__(value)
             except AttributeError:  # an unset slot
                 return None
-    return None
+    # NOT IN INSTANCE STORAGE AT ALL, which is ordinary rather than suspicious:
+    # a stdlib dataclass field declared ``field(init=False, default=2)`` lives on
+    # the CLASS, and a descriptor-typed field keeps its value under a name of the
+    # descriptor's choosing. Returning ``None`` for those made the read-back
+    # check refuse every request that omitted the field (issue #145, Codex
+    # review). The ordinary read is then judged against the declared annotation
+    # like any other value, which is what actually protects the position.
+    try:
+        return getattr(value, name)
+    except AttributeError:
+        return None
 
 
 def _instance_vars(value: Any) -> Optional[Mapping[str, Any]]:
@@ -982,9 +992,6 @@ def _instance_vars(value: Any) -> Optional[Mapping[str, Any]]:
 #: by the language: Python routes ordinary access through ``__getattribute__``,
 #: and ``__getattr__`` only for lookups that failed.
 #:
-#: They are not the whole story, and the missing piece is ``_assert_fields_are_not_intercepted``
-#: below — a descriptor under a single field's own name intercepts that field
-#: while wearing neither of these names.
 _ATTRIBUTE_HOOKS = ("__getattribute__", "__getattr__")
 
 #: Engine-critical slots pydantic owns. An author redefining one is not shadowing
@@ -997,29 +1004,20 @@ _ATTRIBUTE_HOOKS = ("__getattribute__", "__getattr__")
 _RESERVED_MODEL_SLOTS = ("__pydantic_extra__", "__pydantic_private__")
 
 
-def _assert_fields_are_not_intercepted(value: Any, names: Sequence[str]) -> None:
-    """Refuse a class that answers a DECLARED FIELD's read with a descriptor.
-
-    Banning the two attribute hooks left a narrower form of the same thing: a
-    ``property`` installed under a field's own name runs author code for that
-    field and nothing else. Measured — the walk read the honest model out of
-    instance storage while ``inp.leaf`` returned the caller's mapping, and the
-    gate accepted (issue #145).
-
-    Pydantic removes field names from the class body during model construction,
-    and a dataclass leaves only a plain default there, so a descriptor sitting
-    under a field name is never the ordinary case.
-    """
-    for klass in _CLASS_MRO(type(value)):
-        if klass in _TRUSTED_CLASS_BASES:
-            continue
-        class_vars = _CLASS_VARS(klass)
-        for name in names:
-            attribute = class_vars.get(name)
-            if attribute is None or _is_slot_descriptor(attribute, klass):
-                continue
-            if hasattr(type(attribute), "__get__"):
-                raise ValueError("validated input intercepts a declared field's read")
+#: REMOVED: a ban on any descriptor sitting under a declared field's name.
+#:
+#: It was added because a ``property`` under a field name runs author code for
+#: that field alone, wearing neither attribute hook's name. But "a descriptor
+#: under a field name" is also how Python spells a perfectly ordinary
+#: descriptor-typed dataclass field, so the ban refused every value of one — and
+#: a descriptor that returns exactly what was stored is indistinguishable from a
+#: plain attribute at the point the ban fired (issue #145, Codex review).
+#:
+#: What it was really protecting is unaffected: whatever an ordinary read
+#: returns is still judged against the declared annotation, so a class attribute
+#: holding a raw mapping where a model is declared is refused by the annotation,
+#: not by this ban. Refusing supported Python to close residue is the trade §7
+#: rejects.
 
 
 def _assert_no_attribute_hooks(value: Any) -> None:
@@ -1105,7 +1103,13 @@ def _walkable_length(value: Any) -> Optional[int]:
         if base is not None:
             return base.__len__(value)  # type: ignore[attr-defined]
         return len(value)
-    except Exception:  # noqa: BLE001 — unsized values never reach here
+    except OverflowError:
+        # A length beyond ``Py_ssize_t`` — ``range(10**100)``. Reporting this as
+        # "unsized" let the walk enumerate it forever; the eager ``list(value)``
+        # this replaced failed immediately, so removing the copy turned a fast
+        # failure into a hang (issue #145, Codex review).
+        return _MAX_WALKED_ELEMENTS + 1
+    except Exception:  # noqa: BLE001 — genuinely unsized; bounded by the walk itself
         return None
 
 
@@ -1210,7 +1214,6 @@ def _assert_declared_shape(
         # (issue #145, live QA #377).
         if _unexpected_storage(value, stored, declared):
             raise ValueError("validated input stores values it does not declare")
-        _assert_fields_are_not_intercepted(value, tuple(declared))
         _assert_reads_back_as_stored(value, tuple(declared), stored)
         for name, field in declared.items():
             _assert_declared_shape(
@@ -1236,7 +1239,6 @@ def _assert_declared_shape(
         # three times (issue #145, live QA #384).
         if stored is not None and _unexpected_storage(value, stored, dataclass_field_map):
             raise ValueError("validated input stores values it does not declare")
-        _assert_fields_are_not_intercepted(value, tuple(dataclass_field_map))
         _assert_reads_back_as_stored(value, tuple(dataclass_field_map), stored)
         for name in dataclass_field_map:
             _assert_declared_shape(
@@ -1275,6 +1277,14 @@ def _assert_declared_shape(
                 else iter(value)
             )
             for index, item in enumerate(iterator):
+                # BOUNDED HERE TOO, not only by ``_assert_walkable_size``. That
+                # guard asks the value for its length, so a value that cannot
+                # report one at all still has to terminate (issue #145, Codex
+                # review).
+                if index >= _MAX_WALKED_ELEMENTS:
+                    raise ValueError(
+                        "validated input holds a container too large to inspect"
+                    )
                 element = _positional(arm, index) if arm is not None else None
                 if arm is not None and element is None:
                     # This arm is shorter than the value, so it does not describe

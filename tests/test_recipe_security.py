@@ -4178,13 +4178,18 @@ def test_a_model_with_a_forged_instance_dict_is_refused_not_read_as_empty():
         _assert_declared_shape(forged)
 
 
-def test_a_descriptor_under_a_field_name_is_refused():
-    """Banning the two attribute hooks left a narrower form of the same thing.
+def test_a_descriptor_under_a_field_name_is_judged_by_what_it_returns():
+    """A descriptor under a field name is refused by the ANNOTATION, not by a ban.
 
-    A ``property`` installed under a declared field's own name runs author code
-    for that field and nothing else, wearing neither ``__getattribute__`` nor
-    ``__getattr__``. The walk reads instance storage and sees the honest value;
-    ``inp.leaf`` returns the caller's mapping (issue #145).
+    A ``property`` there runs author code for that field alone, wearing neither
+    attribute hook's name, and a ban on "any descriptor under a field name" was
+    added for it. That ban also refused every value of an ordinary
+    descriptor-typed dataclass field, so it was removed (issue #145, Codex
+    review) — and nothing was lost, because whatever the ordinary read returns is
+    judged against the declared annotation regardless of how it got there.
+
+    Asserted in both directions here: the payload is still refused, and a
+    descriptor returning exactly what was stored is now accepted.
     """
     from dataclasses import dataclass as std_dataclass
     from typing import Optional as OptionalType
@@ -4206,6 +4211,19 @@ def test_a_descriptor_under_a_field_name_is_refused():
     assert inst.leaf is converting  # ...an ordinary read is not
     with pytest.raises(Exception):
         _assert_declared_shape(inst)
+
+    # ...and a descriptor that returns exactly what was stored is ACCEPTED, which
+    # the ban could not express: at the point it fired the two are identical.
+    class Faithful(RecipeInputBase):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        leaf: OptionalType[_DeclaredKeysOnlyLeaf] = None
+
+    faithful = Faithful.model_construct(leaf=honest)
+    Faithful.leaf = property(
+        lambda self: object.__getattribute__(self, "__dict__")["leaf"]
+    )
+    assert faithful.leaf is honest  # the premise: it returns the stored value
+    _assert_declared_shape(faithful)
 
     # The descriptor can sit on a BASE, so the scan must walk the whole MRO.
     class Base(RecipeInputBase):
@@ -4708,3 +4726,116 @@ def test_a_classvar_is_not_walked_as_a_dataclass_field():
         },
     )
     _assert_declared_shape(model.model_construct(field=value))
+
+
+def test_a_length_beyond_py_ssize_t_is_oversized_not_unsized():
+    """``len(range(10**100))`` raises ``OverflowError``.
+
+    Reporting that as "unsized" let the walk enumerate the container forever —
+    and the eager ``list(value)`` this replaced failed immediately, so removing
+    the copy turned a fast failure into a hang. The walk is now bounded twice:
+    an overflow counts as oversized, and the enumeration stops at the bound
+    whatever the value claims its length is (issue #145, Codex review).
+    """
+    import time
+    from typing import Any as AnyType
+
+    from boomi_mcp.recipes.engine import (
+        _MAX_WALKED_ELEMENTS,
+        _assert_declared_shape,
+        _walkable_length,
+    )
+
+    huge = range(10**100)
+    with pytest.raises(OverflowError):  # the premise
+        len(huge)
+    assert _walkable_length(huge) > _MAX_WALKED_ELEMENTS
+
+    model = type(
+        "OverflowInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": AnyType},
+            "field": None,
+        },
+    )
+    started = time.monotonic()
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=huge))
+    assert time.monotonic() - started < 1.0  # refused on the bound, not by walking
+
+    # A value that cannot report a length at all is still bounded, by the walk.
+    class Unsized(list):
+        def __len__(self):  # pragma: no cover - raising is the point
+            raise TypeError("no length here")
+
+    unsized = Unsized(range(_MAX_WALKED_ELEMENTS + 5))
+    assert _walkable_length(unsized) is None or _walkable_length(unsized) > 0
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=unsized))
+
+
+def test_a_dataclass_field_not_in_instance_storage_is_read_the_ordinary_way():
+    """Two ordinary layouts keep a field's value off the instance dict.
+
+    ``field(init=False, default=2)`` leaves the value on the CLASS — the
+    generated ``__init__`` never assigns it — and a descriptor-typed field keeps
+    it under a name of the descriptor's choosing. Treating "absent from storage"
+    as ``None`` made the read-back check refuse every request that omitted the
+    field (issue #145, Codex review).
+    """
+    from dataclasses import dataclass as std_dataclass, field as dc_field
+    from typing import Optional as OptionalType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape, _stored_attribute
+
+    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
+    assert isinstance(converting, dict)  # the premise
+    honest = _DeclaredKeysOnlyLeaf.model_construct(ok="a")
+
+    @std_dataclass
+    class ClassDefault:
+        x: int = 1
+        y: int = dc_field(init=False, default=2)
+
+    value = ClassDefault()
+    stored = object.__getattribute__(value, "__dict__")
+    assert "y" not in stored  # the premise: it lives on the class
+    assert value.y == 2
+    assert _stored_attribute(value, "y", stored) == 2
+
+    def _model(name, ann):
+        return type(
+            name,
+            (RecipeInputBase,),
+            {
+                "model_config": ConfigDict(extra="forbid", frozen=True),
+                "__annotations__": {"field": ann},
+                "field": None,
+            },
+        )
+
+    _assert_declared_shape(_model("ClassDefaultInputV1", ClassDefault).model_construct(field=value))
+
+    class Passthrough:
+        """Returns exactly what was stored, under a name of its own choosing."""
+
+        def __set_name__(self, owner, name):
+            self._name = "_" + name
+
+        def __get__(self, obj, owner=None):
+            return self if obj is None else object.__getattribute__(obj, self._name)
+
+        def __set__(self, obj, value):
+            object.__setattr__(obj, self._name, value)
+
+    @std_dataclass
+    class DescriptorBacked:
+        leaf: OptionalType[_DeclaredKeysOnlyLeaf] = Passthrough()
+
+    holder = _model("DescriptorBackedInputV1", DescriptorBacked)
+    _assert_declared_shape(holder.model_construct(field=DescriptorBacked(leaf=honest)))
+    # ...and the value behind the descriptor is genuinely judged.
+    with pytest.raises(Exception):
+        _assert_declared_shape(holder.model_construct(field=DescriptorBacked(leaf=converting)))
