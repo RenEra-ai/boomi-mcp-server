@@ -5,7 +5,10 @@ scans a package at import, keys on a bare name with no version selector, and
 carries no provenance — every property this issue needs is one it lacks, and
 retrofitting them would change discovery for the six existing archetypes as a
 side effect. This registry is a static tuple: a recipe exists because a line of
-code registers it, and there is no runtime registration API to call.
+code registers it, and no MCP tool can register or replace one. In-process
+Python can still construct a registry and pass it to ``run_recipes`` — an
+injection/test seam that presupposes arbitrary code execution, not an extension
+point — and a built registry is SEALED against further registration (§5).
 
 Two invariant classes, deliberately reported differently:
 
@@ -1794,7 +1797,7 @@ def build_test_registry(
 
     Deliberately a separate factory rather than a ``register()`` method on the
     production registry: a mutation method would exist in production too, and
-    "there is no runtime registration API" is a property a test asserts by
+    "there is no MCP-accessible registrar" is a property a test asserts by
     checking the module, not one anybody can promise in a docstring.
     """
     return RecipeRegistry(registrations)

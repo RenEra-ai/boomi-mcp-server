@@ -44,7 +44,6 @@ from boomi_mcp.recipes import (
     RecipeRequestV1,
     run_recipes,
 )
-from boomi_mcp.recipes.contracts import RecipeConflictPolicyV1, RecipeRegistrationV1
 from boomi_mcp.recipes.registry import build_test_registry
 from boomi_mcp.recipes import engine as engine_module
 from boomi_mcp.recipes.builtins.catalog import (
@@ -1078,3 +1077,78 @@ def test_the_determinism_check_uses_two_independent_inputs():
             registry=registry,
         )
     assert exc.value.diagnostics[0].code == RECIPE_OUTPUT_NONDETERMINISTIC
+
+
+class _NestedChildV1(RecipeInputBase):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    slots: List[str] = []
+
+
+class _NestedInputV1(RecipeInputBase):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    version: str = "1"
+    child: _NestedChildV1 = _NestedChildV1()
+
+
+def _nested_memoizing_executor(validated):
+    """Same hidden nondeterminism, one level down inside a nested model."""
+    memoized = [slot for slot in validated.child.slots if slot.startswith("id-")]
+    if memoized:
+        chosen = memoized[0]
+    else:
+        _MEMO_RUNS["n"] += 1
+        chosen = f"id-{_MEMO_RUNS['n']}"
+        validated.child.slots.append(chosen)
+    return (
+        ConstraintRequirementV1(
+            contribution_kind="constraint_requirement",
+            version="1",
+            requirement_id=f"req.{chosen}",
+            requirement=RequireProcessV1(kind="process", process_key="p.nested"),
+        ),
+    )
+
+
+def test_the_second_input_is_isolated_even_from_a_prevalidated_nested_model():
+    """Re-validating the raw mapping is NOT enough on its own.
+
+    ``_validate_input`` shallow-copies the mapping, and pydantic REUSES an
+    already-validated nested model instance rather than rebuilding it — so a raw
+    mapping carrying one handed both validations the same child, and the second
+    run replayed what the first had written into it. Deep-copying the mapping
+    afterwards would not help either: it would copy a child the first run had
+    already mutated. The snapshot has to be taken before either run
+    (issue #145, §6 architect review).
+    """
+    _MEMO_RUNS["n"] = 0
+    child = _NestedChildV1.model_validate({"slots": ["a"]})
+    raw = {"version": "1", "child": child}
+
+    registry = build_test_registry(
+        (
+            RecipeRegistrationV1(
+                recipe_id="test.nested",
+                recipe_version="1.0.0",
+                entry_kind="executable_recipe",
+                is_default=True,
+                input_model=_NestedInputV1,
+                executor=_nested_memoizing_executor,
+                output_types=("constraint_requirement",),
+                conflict_policy=RecipeConflictPolicyV1(),
+            ),
+        )
+    )
+
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.nested", invocation_id="i1", raw_input=raw
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_OUTPUT_NONDETERMINISTIC
+    # Two GENUINE computations: the runs shared nothing.
+    assert _MEMO_RUNS["n"] == 2

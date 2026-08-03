@@ -35,10 +35,11 @@ would have opened exactly that channel.
 from __future__ import annotations
 
 import array
+import copy
 import sys
-from collections import Counter, OrderedDict, deque
+from collections import Counter, deque
 import dataclasses
-from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
+from dataclasses import dataclass
 from decimal import Decimal
 from fractions import Fraction
 from functools import cached_property
@@ -99,7 +100,6 @@ from .materialization import (
 from .registry import (
     RecipeRegistry,
     _check_input_model_forbids_extras,
-    _check_input_schema_closed,
     production_registry,
 )
 
@@ -1535,11 +1535,20 @@ def run_recipes(
         descriptor = active.resolve(request.recipe_id, request.recipe_version)
         active.preflight_capabilities(descriptor)
         _preflight_prerequisites(descriptor, active, catalog, topology_context)
+        # SNAPSHOT FIRST, and deeply. ``_validate_input`` only shallow-copies the
+        # mapping, and pydantic REUSES an already-validated nested model instance
+        # rather than rebuilding it — so a raw mapping carrying one handed both
+        # validations the same child, and re-validating later would have copied a
+        # child the first run had already mutated. The snapshot is taken here,
+        # before any executor runs (issue #145, §6 architect review).
+        pristine = copy.deepcopy(request.raw_input)
         validated_input = _validate_input(descriptor, active, request.raw_input)
         # A thunk per invocation, so the determinism check can build a SECOND
         # input that shares nothing with the first.
         _rebuilders[request.invocation_id] = (
-            lambda d=descriptor, raw=request.raw_input: _validate_input(d, active, raw)
+            lambda d=descriptor, raw=pristine: _validate_input(
+                d, active, copy.deepcopy(raw)
+            )
         )
         invocations.append(
             RecipeInvocationV1(

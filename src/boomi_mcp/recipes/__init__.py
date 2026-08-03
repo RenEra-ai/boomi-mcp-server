@@ -49,7 +49,7 @@ from .materialization import (
     placeholder_component_id,
 )
 # ``build_test_registry`` is deliberately NOT re-exported here. The contract is
-# "no runtime/public registration API exists": production registrations are one
+# "no MCP-ACCESSIBLE registrar exists": production registrations are one
 # immutable tuple, and the only other way to build a registry is a TEST-ONLY
 # factory. Listing that factory in the package surface alongside
 # ``production_registry`` made it read as a normal, supported way to assemble a
