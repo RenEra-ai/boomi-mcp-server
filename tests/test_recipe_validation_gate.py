@@ -18,9 +18,11 @@ import inspect
 import json
 import sys
 from pathlib import Path
+from typing import List
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ConfigDict
 
 _project_root = Path(__file__).resolve().parent.parent
 _src = str(_project_root / "src")
@@ -30,13 +32,19 @@ sys.path.insert(0, str(_project_root / "tests" / "patterns"))
 
 from boomi_mcp.errors import RECIPE_CONSTRAINT_FAILED, RECIPE_OUTPUT_NONDETERMINISTIC
 from boomi_mcp.models.integration_models import IntegrationSpecV1
-from boomi_mcp.models.recipe_contributions import parse_recipe_contribution
+from boomi_mcp.models.recipe_contributions import (
+    ConstraintRequirementV1,
+    RequireProcessV1,
+    parse_recipe_contribution,
+)
 from boomi_mcp.recipes import (
     MaterializationCatalog,
     RecipeError,
+    RecipeInputBase,
     RecipeRequestV1,
     run_recipes,
 )
+from boomi_mcp.recipes.contracts import RecipeConflictPolicyV1, RecipeRegistrationV1
 from boomi_mcp.recipes.registry import build_test_registry
 from boomi_mcp.recipes import engine as engine_module
 from boomi_mcp.recipes.builtins.catalog import (
@@ -986,3 +994,87 @@ def test_plan_topologies_projects_before_planning():
             engine_module._plan_topologies(composed, components, _topology_context())
 
     assert seen.get("keys") == {"main_process"}
+
+
+class _MemoInputV1(RecipeInputBase):
+    """A declared ``List[str]``: frozen refuses assignment, not mutation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    version: str = "1"
+    slots: List[str] = []
+
+
+#: Counts genuinely fresh computations, so the executor below is NONDETERMINISTIC.
+_MEMO_RUNS = {"n": 0}
+
+
+def _memoizing_executor(validated):
+    """Nondeterministic, but it HIDES that by caching run one's answer.
+
+    Each genuine computation yields a different id. Stashing the first one in the
+    input — which ``frozen=True`` does not prevent, because it is a ``list`` —
+    lets a second run over the SAME object replay it and emit identical bytes.
+    That is what made the double execution unable to see the nondeterminism.
+    """
+    memoized = [slot for slot in validated.slots if slot.startswith("id-")]
+    if memoized:
+        chosen = memoized[0]
+    else:
+        _MEMO_RUNS["n"] += 1
+        chosen = f"id-{_MEMO_RUNS['n']}"
+        validated.slots.append(chosen)
+    return (
+        ConstraintRequirementV1(
+            contribution_kind="constraint_requirement",
+            version="1",
+            requirement_id=f"req.{chosen}",
+            requirement=RequireProcessV1(kind="process", process_key="p.memo"),
+        ),
+    )
+
+
+def test_the_determinism_check_uses_two_independent_inputs():
+    """``frozen=True`` is shallow, so one shared input made the check vacuous.
+
+    An executor that cached its first-run state in a declared ``List[str]`` read
+    the cache back on the second run and produced identical bytes, so the
+    byte-compare confirmed a determinism it had itself made impossible to
+    observe. Rebuilding the input for the second run turns memoization back into
+    the difference it is (issue #145, §6 architect review).
+    """
+    _MEMO_RUNS["n"] = 0
+    # The premise: the field cannot be REPLACED, but its contents can change.
+    probe = _MemoInputV1.model_validate({"version": "1", "slots": ["a"]})
+    with pytest.raises(Exception):
+        probe.slots = ["b"]
+    probe.slots.append("mutated")
+    assert probe.slots == ["a", "mutated"]
+
+    registry = build_test_registry(
+        (
+            RecipeRegistrationV1(
+                recipe_id="test.memo",
+                recipe_version="1.0.0",
+                entry_kind="executable_recipe",
+                is_default=True,
+                input_model=_MemoInputV1,
+                executor=_memoizing_executor,
+                output_types=("constraint_requirement",),
+                conflict_policy=RecipeConflictPolicyV1(),
+            ),
+        )
+    )
+
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.memo",
+                    invocation_id="i1",
+                    raw_input={"version": "1", "slots": ["a"]},
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_OUTPUT_NONDETERMINISTIC

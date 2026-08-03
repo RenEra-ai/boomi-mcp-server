@@ -924,10 +924,23 @@ class RecipeRegistry:
 
         self._registry_revision = self._compute_registry_revision()
         self._source_revision = revision
+        # SEALED. "An immutable set of registered recipe versions" was the class's
+        # own first line and was not true: ``_register`` stayed callable on the
+        # finished object, so a later call mutated the live mappings AFTER
+        # ``_registry_revision`` had been computed and AFTER the constructor's
+        # cross-registration checks had run — leaving a registry whose revision no
+        # longer describes it. The name-based test could not see this, because it
+        # looked for ``register``/``add``/``install`` and this method is
+        # ``_register`` (issue #145, §6 architect review).
+        self._sealed = True
 
     # -- construction ------------------------------------------------------
 
     def _register(self, reg: RecipeRegistrationV1, revision: str) -> None:
+        if getattr(self, "_sealed", False):
+            raise ValueError(
+                "this registry is sealed: registrations are fixed at construction"
+            )
         key = (reg.recipe_id, reg.recipe_version)
         if key in self._descriptors:
             raise ValueError(

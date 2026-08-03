@@ -1466,9 +1466,24 @@ def _execute_deterministically(
     descriptor: RecipeDescriptorV1,
     registry: RecipeRegistry,
     validated_input: Any,
+    rebuild_input: Optional[Any] = None,
 ) -> Tuple[Any, ...]:
+    """Run twice and byte-compare — against two INDEPENDENT inputs.
+
+    ``frozen=True`` is shallow. It refuses assignment to a field and does nothing
+    about the contents of one, so a declared ``List[str]`` stays appendable and
+    both runs previously received the SAME object. An executor that cached its
+    first-run state in that list then read the cache back on the second run and
+    produced identical bytes — so the comparison confirmed determinism it had
+    itself made impossible to observe (issue #145, §6 architect review).
+
+    Rebuilding the input from the caller's raw mapping is what restores the
+    property: the second run cannot see anything the first one wrote, so
+    memoization shows up as the difference it is.
+    """
     first = _run_executor(descriptor, registry, validated_input)
-    second = _run_executor(descriptor, registry, validated_input)
+    second_input = validated_input if rebuild_input is None else rebuild_input()
+    second = _run_executor(descriptor, registry, second_input)
     if canonical_recipe_contributions_json(first) != canonical_recipe_contributions_json(
         second
     ):
@@ -1512,11 +1527,20 @@ def run_recipes(
         seen_invocations.add(request.invocation_id)
 
     invocations: List[RecipeInvocationV1] = []
+    #: ``{invocation_id: () -> validated input}``. Kept beside the invocations
+    #: rather than on ``RecipeInvocationV1``, which is the composer's contract and
+    #: has no business carrying a caller's raw mapping.
+    _rebuilders: Dict[str, Any] = {}
     for request in requests:
         descriptor = active.resolve(request.recipe_id, request.recipe_version)
         active.preflight_capabilities(descriptor)
         _preflight_prerequisites(descriptor, active, catalog, topology_context)
         validated_input = _validate_input(descriptor, active, request.raw_input)
+        # A thunk per invocation, so the determinism check can build a SECOND
+        # input that shares nothing with the first.
+        _rebuilders[request.invocation_id] = (
+            lambda d=descriptor, raw=request.raw_input: _validate_input(d, active, raw)
+        )
         invocations.append(
             RecipeInvocationV1(
                 invocation_id=request.invocation_id,
@@ -1538,7 +1562,10 @@ def run_recipes(
             (invocation.descriptor.recipe_id, invocation.descriptor.recipe_version)
         ] = invocation.descriptor
         contributions = _execute_deterministically(
-            invocation.descriptor, active, invocation.validated_input
+            invocation.descriptor,
+            active,
+            invocation.validated_input,
+            rebuild_input=_rebuilders.get(invocation.invocation_id),
         )
         for index, contribution in enumerate(contributions):
             attributed.append(

@@ -4817,3 +4817,25 @@ def test_the_owner_check_compares_packages_not_modules():
     _stranger.__module__ = "boomi_mcp.other.package.executors"
     with pytest.raises(ValueError, match="must ship in one package"):
         _check_input_owner_shared(_reg(executor=_stranger))
+
+
+def test_a_built_registry_refuses_further_registration():
+    """"An immutable set of registered recipe versions" has to be true.
+
+    ``_register`` stayed callable on the finished object, so a later call mutated
+    the live mappings AFTER ``_registry_revision`` was computed and AFTER the
+    constructor's cross-registration checks ran — leaving a registry whose
+    revision no longer describes it. The existing surface test could not see this:
+    it looks for ``register``/``add``/``install``/``unregister``/``clear``, and
+    this method is ``_register`` (issue #145, §6 architect review).
+    """
+    registry = build_test_registry((_reg(),))
+    revision_before = registry.registry_revision
+
+    with pytest.raises(ValueError, match="sealed"):
+        registry._register(_reg(recipe_id="test.other"), "rev")
+
+    assert registry.registry_revision == revision_before
+    # ...and the registration really did not land.
+    with pytest.raises(Exception):
+        registry.resolve("test.other", "1.0.0")

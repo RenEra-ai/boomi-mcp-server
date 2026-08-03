@@ -126,8 +126,23 @@ Two rules are **stricter than direct ProcessIR authoring**:
 `src/boomi_mcp/recipes/registry.py`. Deliberately **not** an extension of
 `PatternRegistry`: that one scans a package at import and keys on a bare name with no
 version selector or provenance. Here a recipe exists because a line in
-`recipes/builtins/catalog.py` registers it. There is no runtime registration API, and a
-test asserts its absence rather than trusting this sentence.
+`recipes/builtins/catalog.py` registers it.
+
+**There is no MCP-ACCESSIBLE registrar, and that is the precise claim.** No tool accepts a
+registry, executor, model, class or callable; `run_recipes` is reachable from `src/` only through
+`patterns/recipe_bridge.py`, whose three callers choose the recipe id themselves. A test asserts
+the absence of `register`/`add`/`install`/`unregister`/`clear` on both the module and the class.
+
+The claim used to read "there is no runtime registration API", which was **false** and mattered
+more than a wording slip, because §7's threat-model decision uses it as the tripwire that would
+signal a change of threat model. In-process Python can construct a `RecipeRegistry` — the class and
+`RecipeRegistrationV1` are both exported — and pass it to `run_recipes(..., registry=...)`. That is
+an injection and test seam, not a supported extension point, and it presupposes arbitrary code
+execution, so it does not widen the boundary; but a tripwire pointing at a door that is already open
+is not a tripwire. **A registry is also now sealed after construction**: `_register` raises on a
+built registry, so the "immutable set of registered recipe versions" its own docstring promises is
+enforced rather than assumed — previously it stayed callable and mutated the live mappings after
+`registry_revision` had been computed, leaving a revision that no longer described the registry.
 
 Two invariant classes, reported differently:
 
@@ -378,7 +393,8 @@ names an object key absent after all object additions.
    adapter **the engine built**
 5. run **only** the registered callable — never caller-provided code
 6. re-validate every returned value as a **declared** contribution type
-7. run it a second time and byte-compare — nondeterminism is a hard failure
+7. run it a second time, **against an independently rebuilt input**, and byte-compare —
+   nondeterminism is a hard failure
 8. order and compose the closed operations
 9. resolve component slots against the private catalog, **verifying headers**
 10. `parse_process_ir_v1` → `compile_process_ir_v1(..., validation_policy=None)` →
@@ -821,6 +837,14 @@ registration. A bypass-shaped input model therefore registers successfully, is a
 trade is accepted because registrations are code-owned and the production set is covered by
 tests — but *when* the failure surfaces is different from every other gate here, which is worth
 knowing before it is discovered.
+
+**The second run gets its own input, built from the caller's raw mapping.** Sharing one object made
+the comparison unable to see the thing it exists to catch: `frozen=True` refuses assignment to a
+field and says nothing about the contents of one, so a declared `List[str]` stays appendable, and a
+nondeterministic executor that stashed run one's answer there replayed it on run two and emitted
+identical bytes. The check confirmed a determinism the executor had made unobservable. Rebuilding
+costs a second pass of the input gate per invocation — the walk runs twice — which is the price of
+the property being real (§6 architect review).
 
 Step 7 is why **executors receive their validated input and nothing else** — no context
 object, no catalog. Handing an executor a context would reopen an I/O channel and make the
