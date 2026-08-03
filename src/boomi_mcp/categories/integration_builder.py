@@ -7735,18 +7735,29 @@ def _components_were_written(result: Dict[str, Any]) -> bool:
     the `AUTHORING_APPLY_VALIDATION_REQUIRED` that would have told the caller
     the failure was retry-safe.
 
-    Unknown statuses count as WRITTEN, deliberately. The two error directions
-    are not symmetric: over-reporting costs a retry-safety hint, while
-    under-reporting tells an agent nothing needs cleaning up when something
-    does — and then invites a retry that duplicates under `clone`. A status this
-    function has not seen before should fail toward the recoverable mistake.
+    A returned component id is NOT required either. The builder records the
+    failing step too, with a writing status and ``component_id: None`` — which
+    is precisely the AMBIGUOUS case: the create reached Boomi, the response was
+    lost or failed to parse, and the write may already be committed. Demanding
+    an id skipped exactly those entries and certified that nothing was written
+    when something may well have been.
+
+    So the predicate is the step's STATUS alone. Only a `reused` step is a
+    confirmed non-write; every other recorded step is an attempted one, and
+    `_apply_plan` records a step only once it has tried it.
+
+    Unknown statuses count as WRITTEN for the same reason. The two error
+    directions are not symmetric: over-reporting costs a retry-safety hint,
+    while under-reporting tells an agent nothing needs cleaning up when
+    something does — and then invites a retry that duplicates under `clone`.
+    Everything uncertain fails toward the recoverable mistake.
     """
     for bucket in ("results", "partial_results"):
         entries = result.get(bucket)
         if not isinstance(entries, dict):
             continue
         for entry in entries.values():
-            if not isinstance(entry, dict) or not entry.get("component_id"):
+            if not isinstance(entry, dict):
                 continue
             if str(entry.get("status", "")) not in _NON_WRITING_STEP_STATUSES:
                 return True

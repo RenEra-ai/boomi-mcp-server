@@ -974,3 +974,41 @@ def test_an_unknown_step_status_fails_toward_reporting_a_write():
     assert _components_were_written(
         {"partial_results": {"a": {"status": "some_future_status", "component_id": "c"}}}
     ) is True
+
+
+def test_an_attempted_write_with_no_returned_id_counts_as_a_possible_mutation():
+    """Codex review (round 2), P1. The builder records the FAILING step too,
+    with a writing status and `component_id: None` — the ambiguous case where
+    the create reached Boomi but the response was lost or failed to parse.
+    Demanding an id skipped exactly those and certified that nothing was
+    written when something may well have been."""
+    from boomi_mcp.categories.integration_builder import (
+        _components_were_written,
+        _decorate_typed_apply,
+    )
+
+    ambiguous = {
+        "_success": False,
+        "error": "Failed at step 'a'",
+        "partial_results": {
+            "a": {"status": "created", "component_id": None, "result": {"_success": False}}
+        },
+    }
+    assert _components_were_written(ambiguous) is True
+    _decorate_typed_apply(ambiguous, {})
+    assert ambiguous["mutation_performed"] is True
+    # ...and crucially NOT the retry-oriented code, which would advise an action
+    # that duplicates under conflict_policy="clone".
+    assert "error_code" not in ambiguous
+
+
+def test_a_reused_step_is_still_the_only_confirmed_non_write():
+    """The conservative widening must not swallow the one case we KNOW wrote
+    nothing — otherwise every failure would claim a mutation."""
+    from boomi_mcp.categories.integration_builder import _components_were_written
+
+    assert _components_were_written(
+        {"partial_results": {"a": {"status": "reused", "component_id": "pre-existing"}}}
+    ) is False
+    # A plan/dry-run envelope carries no results at all.
+    assert _components_were_written({"_success": True, "dry_run": True, "steps": []}) is False
