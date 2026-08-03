@@ -3887,13 +3887,6 @@ def test_ordinary_container_types_are_walked_and_judged():
         )
     )
 
-    # An instance carrying its own state is still refused: it costs honest code
-    # nothing, since none of these types populates an instance dict.
-    shadowed = OrderedDict({"k": honest})
-    object.__setattr__(shadowed, "items", lambda: iter([("k", converting)]))
-    with pytest.raises(Exception):
-        _assert_declared_shape(mapping_model.model_construct(field=shadowed))
-
 def test_a_tuple_subclass_generic_is_not_read_positionally():
     """``origin is tuple``, not ``issubclass(origin, tuple)``.
 
@@ -3954,45 +3947,6 @@ def test_a_tuple_subclass_generic_is_not_read_positionally():
     )
     with pytest.raises(Exception):
         _assert_declared_shape(model.model_construct(field=poisoned))
-
-
-
-def test_an_instance_attribute_cannot_shadow_a_mapping_accessor():
-    """Storage clean, ``items`` shadowed dirty — only the instance check refuses.
-
-    The walk reads ``dict.items(value)``, so it sees the honest storage and would
-    accept. What an ordinary executor calls is ``value.items()``, which finds the
-    INSTANCE attribute first and hands back the payload. The two mechanisms cover
-    different readers and neither subsumes the other (issue #145, live QA #364).
-    """
-    from typing import Dict as DictType
-
-    from boomi_mcp.recipes.engine import _assert_declared_shape
-
-    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
-    assert isinstance(converting, dict)  # the premise
-
-    class ShadowMap(dict):
-        pass
-
-    shadow = ShadowMap({"k": _DeclaredKeysOnlyLeaf.model_construct(ok="a")})
-    object.__setattr__(shadow, "items", lambda: iter([("k", converting)]))
-    # STORAGE IS CLEAN — so reading through the base cannot catch this one.
-    assert type(dict.__getitem__(shadow, "k")) is _DeclaredKeysOnlyLeaf
-    assert [type(v) for _, v in shadow.items()] == [dict]  # ...the shadow is not
-
-    model = type(
-        "ShadowCleanStorageInputV1",
-        (RecipeInputBase,),
-        {
-            "model_config": ConfigDict(extra="forbid", frozen=True),
-            "__annotations__": {"field": DictType[str, _DeclaredKeysOnlyLeaf]},
-            "field": None,
-        },
-    )
-    with pytest.raises(Exception):
-        _assert_declared_shape(model.model_construct(field=shadow))
-
 
 
 
@@ -4671,3 +4625,78 @@ def test_a_registered_model_cannot_change_what_it_declared():
     finally:
         cls.__pydantic_fields__ = fields
     _assert_declared_shape_unchanged(shape)
+
+
+def test_a_counter_annotation_is_read_with_its_value_type():
+    """``Counter[K]`` parametrises its KEY; its value is always ``int``.
+
+    Reading a single-parameter mapping generic's parameter as the VALUE type is
+    right for a dict-shaped generic and wrong here, so ``counts: Counter[str]``
+    was refused on every honest invocation with ordinary caller input — a
+    declaration-plus-caller-data failure, which is the highest class of bug this
+    layer has (§7). The helper's own docstring named this generic as a
+    hypothetical; it is in the standard library (issue #145, live QA #396).
+    """
+    import typing
+    from collections import Counter
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape, _mapping_arms
+
+    assert _mapping_arms(typing.Counter[str], Counter({"a": 1})) == ((str, int),)
+
+    model = type(
+        "CounterInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"counts": typing.Counter[str]},
+            "counts": None,
+        },
+    )
+    # Ordinary caller JSON, no class machinery anywhere.
+    _assert_declared_shape(model.model_validate({"counts": {"a": 1, "b": 2}}))
+
+    # ...and the entries are genuinely judged, in both slots.
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(counts=Counter({1: 1})))
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(counts={"a": "not-an-int"}))
+
+
+def test_a_classvar_is_not_walked_as_a_dataclass_field():
+    """``__dataclass_fields__`` is unfiltered; ``dataclasses.fields()`` is not.
+
+    Reading the raw mapping let ``ClassVar`` and ``InitVar`` pseudo-fields into
+    the walk, and neither is in instance storage — so an honest dataclass was
+    refused on every invocation. Pinned here because the filter that fixes it
+    reverted cleanly with the whole suite green (issue #145, live QA #393, #398).
+    """
+    from dataclasses import InitVar, dataclass as std_dataclass
+    from typing import ClassVar
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape, _dataclass_field_map
+
+    @std_dataclass
+    class WithPseudoFields:
+        label: str = "x"
+        KIND: ClassVar[str] = "k"
+        seed: InitVar[int] = 1
+
+        def __post_init__(self, seed):  # pragma: no cover - construction only
+            pass
+
+    value = WithPseudoFields()
+    # The premise: the raw class-body mapping carries all three names.
+    assert set(WithPseudoFields.__dataclass_fields__) == {"label", "KIND", "seed"}
+    assert set(_dataclass_field_map(value)) == {"label"}
+
+    model = type(
+        "PseudoFieldInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": WithPseudoFields},
+            "field": None,
+        },
+    )
+    _assert_declared_shape(model.model_construct(field=value))

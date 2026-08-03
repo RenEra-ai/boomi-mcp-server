@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import array
 import sys
-from collections import OrderedDict, deque
+from collections import Counter, OrderedDict, deque
 import dataclasses
 from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
 from decimal import Decimal
@@ -611,9 +611,11 @@ def _mapping_arms(annotation: Any, value: Any) -> Tuple[Any, ...]:
 
     A mapping recovers where a sequence cannot: two parameters read as key and
     value, one as the value type — which is what a dict-shaped custom generic
-    means by its single parameter. If some generic ever parametrises its KEY
-    instead, its honest values are refused rather than accepted, which is the
-    wrong-way-safe direction (issue #145, live QA site census).
+    means by its single parameter. The generic that "parametrises its KEY
+    instead" was predicted here as a hypothetical and is in fact ``Counter`` —
+    handled above. Wrong-way-safe is still the direction for any other such
+    generic, but note what wrong-way-safe COSTS: it refuses every honest value of
+    that annotation (issue #145, live QA #396).
 
     Building the two arm sources TOGETHER is load-bearing, and splitting them was
     two defects at once. The refusal below used to live in the pair helper, so it
@@ -629,11 +631,21 @@ def _mapping_arms(annotation: Any, value: Any) -> Tuple[Any, ...]:
     typed = _typed_dict_arms(annotation)
     arms, _matched = _element_candidates(annotation, value)
     pairs = []
-    for _origin, element in arms:
+    for origin, element in arms:
         if len(element) == 2 and element[1] is not Ellipsis:
             pairs.append((element[0], element[1]))
         elif len(element) == 1:
-            pairs.append((None, element[0]))
+            # ``Counter[K]`` parametrises its KEY, and its value is always ``int``.
+            # Reading the single parameter as the VALUE type — right for a
+            # dict-shaped generic — refused ``counts: typing.Counter[str]`` on
+            # every honest invocation with ordinary caller input, which is a bug of
+            # the highest class here (§7). The docstring below predicted exactly
+            # this generic and it turned out to be a stdlib one
+            # (issue #145, live QA #396).
+            if origin is Counter:
+                pairs.append((element[0], int))
+            else:
+                pairs.append((None, element[0]))
     if arms and not pairs and not typed:
         raise ValueError("mapping semantics of this annotation cannot be derived")
     return typed + tuple(pairs)
@@ -753,11 +765,15 @@ _REPLAYABLE_TYPES: Tuple[type, ...] = (
 )
 
 
-#: Mapping types whose enumeration is KNOWN safe, same rationale as above.
-#: ``OrderedDict`` is here rather than treated as a suspicious ``dict`` subclass
-#: because it IS an enumerated known type — refusing it was a false rejection
-#: with nothing bought (issue #145, live QA #365).
-_REPLAYABLE_MAPPINGS: Tuple[type, ...] = (dict, OrderedDict)
+#: What the container walk USED to police, kept as a record of a decision.
+#:
+#: A guard here refused a container whose class or instance had rewritten its own
+#: enumeration. Every attack it stopped needs author class machinery, which §7
+#: classifies as accepted residue — dominated by the module-global channel §12
+#: declares open — and the guard's cost was five refusals of ordinary Python.
+#: It is DELETED rather than left untested: a guard defending residue asserts a
+#: property this layer does not claim, and keeping it invites the next round to
+#: harden it again (issue #145, live QA #400).
 
 #: What the walk reads, and what an ordinary reader of the same value reads.
 #: Read the class's OWN storage, bypassing any ``__getattribute__`` the author
@@ -1059,54 +1075,6 @@ def _model_extra(value: Any) -> Any:
         return None
 
 
-def _carries_instance_state(value: Any) -> bool:
-    """True when a container instance has attribute storage of its own, or hides it.
-
-    An exact ``dict``/``list``/``tuple`` instance cannot carry attributes at all,
-    so this only ever fires for a type that permits them — ``OrderedDict`` being
-    the one such member of the enumerated sets. That is not hypothetical: the
-    exemption added for ``OrderedDict`` short-circuited the instance check, and a
-    shadowed ``items`` on one reached the executor while the identical shadow on a
-    plain ``dict`` subclass was refused (issue #145, live QA #371).
-    """
-    instance_vars = _instance_vars(value)
-    return instance_vars is None or bool(instance_vars)
-
-
-def _assert_mapping_enumeration(value: Any) -> None:
-    """A mapping the walk will read must be an EXACT known type carrying no state.
-
-    This replaces a scan for redefined accessor names, and replacing it is the
-    point. That scan was widened four times in three review rounds — one-shot
-    ``__iter__``, an under-reporting ``__len__``, an instance-shadowed ``items``,
-    a class-level ``__getattribute__`` supplying ``values``/``get`` under no name
-    at all — and a census then found it guarding **7 of the 19** reads through
-    which a ``dict`` or ``list`` subclass can hand back author data. ``copy``,
-    ``popitem``, ``setdefault``, ``pop``, ``update``, ``fromkeys``, ``__or__``,
-    ``__eq__``, ``__reversed__``, ``__contains__`` were all unguarded, and every
-    method a future Python adds would join them (issue #145, live QA #372).
-
-    An enumeration of mechanisms cannot be completed, so the rule stops
-    enumerating. ``type(value)`` is unforgeable — a metaclass cannot change what
-    ``type()`` returns — and an exact known type has no author code on it to run.
-    Every accessor, present and future, becomes irrelevant at once.
-
-    The cost was measured before it was accepted: across the whole suite the walk
-    sees only exact ``tuple``, ``dict``, ``list``, ``range``, ``OrderedDict``,
-    ``dict_keys``, ``dict_items`` and ``memoryview``; every subclass observed is a
-    test fixture, and all five container-typed fields in ``PRODUCTION_REGISTRATIONS``
-    are ``Tuple[Model, ...]`` holding an exact ``tuple``. What it does refuse is
-    stated in §7: ``Counter``, ``defaultdict`` and a ``NamedTuple`` field are all
-    fail-closed, loudly, rather than admitted on a guarantee this layer could not
-    keep.
-    """
-    if not isinstance(value, dict):
-        # A non-``dict`` ``Mapping`` has no enumerated base to compare against.
-        # It is also unreachable: the strict adapter refuses one for both
-        # ``Dict[...]`` and ``Mapping[...]`` before the walk is entered.
-        return
-    if _carries_instance_state(value):
-        raise ValueError("validated input holds a mapping that redefines its enumeration")
 
 
 def _replayable_base(value: Any) -> Optional[type]:
@@ -1157,7 +1125,7 @@ def _is_walkable_collection(value: Any) -> bool:
     # and ranks above closing residue (§7). A subclass that overrides its own
     # enumeration is now accepted residue: it needs author class machinery, and it
     # is dominated by the module-global channel §12 already declares open.
-    return isinstance(value, _REPLAYABLE_TYPES) and not _carries_instance_state(value)
+    return isinstance(value, _REPLAYABLE_TYPES)
 
 
 def _is_opaque_iterable(value: Any) -> bool:
@@ -1317,7 +1285,6 @@ def _assert_declared_shape(
         )
     elif isinstance(value, Mapping):
         _mark(value)
-        _assert_mapping_enumeration(value)
         _assert_walkable_size(value)
 
         def _walk_mapping(arm, journal=None):

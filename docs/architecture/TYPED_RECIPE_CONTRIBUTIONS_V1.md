@@ -508,9 +508,24 @@ an honest declaration and caller data alone, it is a bug. **Refusing ordinary su
 always a bug, and ranks above both** — this layer shipped five such refusals (`OrderedDict`, a
 `NamedTuple` field, `Counter` and `defaultdict`, every `__slots__` dataclass, `cached_property`),
 three of them introduced by hardening against residue and two hitting this repository's own types.
-**All five are accepted again**, and the exact-type container rule that caused the last of them was
-relaxed back to an `isinstance` test: a subclass overriding its own enumeration is residue, and
-refusing supported Python to close residue is the wrong trade in both directions.
+The exact-type container rule that caused the last of them was relaxed back to an `isinstance` test:
+a subclass overriding its own enumeration is residue, and refusing supported Python to close residue
+is the wrong trade in both directions.
+
+**Measured per item, because "all of them are fixed now" was published here once and was false.**
+`OrderedDict`, a `NamedTuple` field, every `__slots__` dataclass and `cached_property` are accepted
+and judged. `Counter` needed a second fix and got one: `_mapping_arms` read its single parameter as
+the VALUE type, which is right for a dict-shaped generic and wrong for `Counter[K]`, where the
+parameter is the KEY and the value is always `int` — so `counts: typing.Counter[str]` was refused on
+every honest invocation with ordinary caller input. The docstring that reads "if some generic ever
+parametrises its KEY instead" named a hypothetical that turned out to be in the standard library.
+
+**`defaultdict` is still refused, and by a different gate**: `DefaultDict[str, str]` compiles to a
+`function-plain`/`function-wrap` validator node, so the wrap/plain validator ban rejects it at
+REGISTRATION, exactly as it rejects `Sequence[str]`, `Deque[str]`, `AnyUrl`, `re.Pattern` and the
+four `ipaddress` types — nine of thirty-nine ordinary annotations in a measured census. That ban is
+recorded below as known, measured and still open; it is named here too because a reader checking
+"is `defaultdict` supported?" should not have to find the answer two subsections away.
 
 Why residue is the right disposition rather than a defeat: **every one of those attacks is dominated
 by a channel §12 already accepts.** A registered model that stashes the caller's raw mapping in a
@@ -594,7 +609,14 @@ channels.
   classes and refused everything else, including `range`, `dict_keys`/`values`/`items`,
   `array.array`, `memoryview` and any custom `abc.Sequence`.
 
-  **Membership is by EXACT TYPE, and the instance must carry no state of its own.** Testing it
+  **Membership is by `isinstance`, and the enumeration-policing guards are gone.** They were added
+  to close subclass divergence, widened four times across three rounds, and cost five refusals of
+  ordinary Python; every attack they stopped needs author class machinery and is therefore residue.
+  A guard that defends only residue asserts a property this layer does not claim, so it was deleted
+  rather than left untested — leaving it would invite the next round to harden it again. What
+  follows records why the guard existed, so the reasoning is not rediscovered from scratch.
+
+  **Was: membership by EXACT TYPE, with the instance carrying no state of its own.** Testing it
   with `isinstance` re-opened the hole the enumeration exists to close, because a subclass may
   replace the very method being vouched for — a one-shot `__iter__` drained by the first union arm
   leaves the second walking nothing and "covering" the container; an `__iter__` that disagrees with

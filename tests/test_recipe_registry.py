@@ -4764,3 +4764,56 @@ def test_a_split_owner_registration_is_a_build_defect():
     _foreign_executor.__module__ = "some.other.package"
     with pytest.raises(ValueError, match="must ship in one package"):
         _check_input_owner_shared(_reg(executor=_foreign_executor))
+
+
+def test_the_owner_check_runs_over_the_shipped_catalogue():
+    """The assertion must be WIRED, not merely present.
+
+    `_check_input_owner_shared` is called from `production_registry`; a test that
+    only calls the function directly leaves the loop deletable with the whole
+    suite green, which is the same gap that left a pin's only call site
+    unobserved (issue #145, live QA #399).
+    """
+    import boomi_mcp.recipes.registry as registry_module
+    from boomi_mcp.recipes.builtins.catalog import PRODUCTION_REGISTRATIONS
+
+    expected = sum(
+        1
+        for reg in PRODUCTION_REGISTRATIONS
+        if reg.input_model is not None and reg.executor is not None
+    )
+    assert expected > 0  # the premise: there is something to check
+
+    seen = []
+    original = registry_module._check_input_owner_shared
+    registry_module._check_input_owner_shared = lambda reg: seen.append(reg.recipe_id)
+    try:
+        registry_module._PRODUCTION_REGISTRY = None
+        registry_module.production_registry()
+    finally:
+        registry_module._check_input_owner_shared = original
+        registry_module._PRODUCTION_REGISTRY = None
+    assert len(seen) == expected, seen
+
+
+def test_the_owner_check_compares_packages_not_modules():
+    """Sibling modules in one package are one owner; separate packages are not.
+
+    Every shipped pair happens to sit in the SAME module, so a comparison of full
+    module names would pass the catalogue while rejecting a legitimate split
+    across `pkg/models.py` and `pkg/executors.py` (issue #145, live QA #399).
+    """
+    from boomi_mcp.recipes.registry import _check_input_owner_shared
+
+    def _sibling_executor(inp):  # pragma: no cover - never invoked
+        return ()
+
+    _sibling_executor.__module__ = "boomi_mcp.recipes.builtins.executors"
+    _check_input_owner_shared(_reg(executor=_sibling_executor))  # same package: fine
+
+    def _stranger(inp):  # pragma: no cover - never invoked
+        return ()
+
+    _stranger.__module__ = "boomi_mcp.other.package.executors"
+    with pytest.raises(ValueError, match="must ship in one package"):
+        _check_input_owner_shared(_reg(executor=_stranger))
