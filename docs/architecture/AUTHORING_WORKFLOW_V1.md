@@ -42,8 +42,11 @@ No sixth tool is introduced. `compile` is an additive action on `build_integrati
 | 7 | `build_integration(action="apply", …)` | **yes** — the first phase that may |
 
 A typed apply always answers in the typed envelope: `action`, `mutation_performed`, and — when it
-refused before writing anything — an `error_code`. `mutation_performed` is derived from EVIDENCE (a
-component id in `results`/`partial_results`), not from `_success`: a dry run succeeds having written
+refused before writing anything — an `error_code`. `mutation_performed` is derived from EVIDENCE — a component id on a step whose status is not
+`reused` — not from `_success`. A component id alone is not enough: a `reused` step carries the id of
+a component it merely bound. An unrecognized status counts as written, deliberately: over-reporting
+costs a retry-safety hint, while under-reporting tells a caller nothing needs cleanup when something
+does: a dry run succeeds having written
 nothing, and a partial failure fails having already written something. Once mutation has begun the
 legacy `BUILD_*` failure stands and no `AUTHORING_*` code is attached, because that family's
 remediation means "nothing was mutated, re-plan and retry" — advice that would compound damage

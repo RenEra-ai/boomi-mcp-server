@@ -928,3 +928,49 @@ def test_a_post_mutation_failure_is_not_labelled_as_needing_revalidation():
     _decorate_typed_apply(pre_mutation, {})
     assert pre_mutation["mutation_performed"] is False
     assert pre_mutation["error_code"] == AUTHORING_APPLY_VALIDATION_REQUIRED
+
+
+def test_a_reused_step_is_not_evidence_of_a_write():
+    """Bug #420. A `reused` step carries the id of a component it merely BOUND,
+    so "has a component_id" reported a mutation that never happened — and,
+    because the error-code gate keys off the same value, simultaneously lost the
+    AUTHORING_APPLY_VALIDATION_REQUIRED that marks the failure retry-safe."""
+    from boomi_mcp.categories.integration_builder import (
+        _components_were_written,
+        _decorate_typed_apply,
+    )
+
+    reused_only = {
+        "_success": False,
+        "error": "later step failed",
+        "partial_results": {"a": {"status": "reused", "component_id": "pre-existing"}},
+    }
+    assert _components_were_written(reused_only) is False
+    _decorate_typed_apply(reused_only, {})
+    assert reused_only["mutation_performed"] is False
+    assert reused_only["error_code"] == AUTHORING_APPLY_VALIDATION_REQUIRED
+
+    for writing_status in ("created", "updated"):
+        wrote = {
+            "_success": False,
+            "partial_results": {"a": {"status": writing_status, "component_id": "c1"}},
+        }
+        assert _components_were_written(wrote) is True, writing_status
+        _decorate_typed_apply(wrote, {})
+        assert wrote["mutation_performed"] is True
+        assert "error_code" not in wrote
+
+
+def test_an_unknown_step_status_fails_toward_reporting_a_write():
+    """The two error directions are not symmetric.
+
+    Over-reporting costs a retry-safety hint; under-reporting tells an agent
+    nothing needs cleanup when something does, and then invites a retry that
+    duplicates under `clone`. An unseen status must fail toward the recoverable
+    mistake.
+    """
+    from boomi_mcp.categories.integration_builder import _components_were_written
+
+    assert _components_were_written(
+        {"partial_results": {"a": {"status": "some_future_status", "component_id": "c"}}}
+    ) is True

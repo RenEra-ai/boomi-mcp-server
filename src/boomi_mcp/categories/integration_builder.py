@@ -7715,22 +7715,40 @@ def _compile_authoring(
 
 
 
+#: The one step status that carries a component id WITHOUT having written
+#: anything: `conflict_policy="reuse"` (or a reference-only component) binds an
+#: existing component. `created` and `updated` both mutate.
+_NON_WRITING_STEP_STATUSES = frozenset({"reused"})
+
+
 def _components_were_written(result: Dict[str, Any]) -> bool:
     """Did this apply actually create or update anything?
 
-    Read from EVIDENCE — a component id in `results` or `partial_results` — not
-    from `_success`. Deriving it from `_success` was wrong in both directions: a
-    dry run succeeds having written nothing, and a partial failure fails having
-    already written something. Both matter, and the second one matters most: an
-    agent told `mutation_performed: false` after a real create has no reason to
-    clean up.
+    Read from EVIDENCE, not from `_success`. Deriving it from `_success` was
+    wrong in both directions: a dry run succeeds having written nothing, and a
+    partial failure fails having already written something.
+
+    A component id ALONE is not that evidence. A `reused` step carries the id of
+    a component it merely bound, so "has an id" reported a mutation that never
+    happened — and because the error-code gate keys off this same value, one
+    mis-read corrupted both fields at once: the apply claimed a write AND lost
+    the `AUTHORING_APPLY_VALIDATION_REQUIRED` that would have told the caller
+    the failure was retry-safe.
+
+    Unknown statuses count as WRITTEN, deliberately. The two error directions
+    are not symmetric: over-reporting costs a retry-safety hint, while
+    under-reporting tells an agent nothing needs cleaning up when something
+    does — and then invites a retry that duplicates under `clone`. A status this
+    function has not seen before should fail toward the recoverable mistake.
     """
     for bucket in ("results", "partial_results"):
         entries = result.get(bucket)
         if not isinstance(entries, dict):
             continue
         for entry in entries.values():
-            if isinstance(entry, dict) and entry.get("component_id"):
+            if not isinstance(entry, dict) or not entry.get("component_id"):
+                continue
+            if str(entry.get("status", "")) not in _NON_WRITING_STEP_STATUSES:
                 return True
     return False
 
