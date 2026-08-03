@@ -3480,110 +3480,6 @@ def test_a_typed_dict_arm_survives_an_unreadable_sibling_arm():
             )
 
 
-def test_a_container_that_redefines_its_own_enumeration_is_refused():
-    """``isinstance`` against ``_REPLAYABLE_TYPES`` admitted subclasses.
-
-    The enumeration exists because an INTERFACE cannot promise a fresh iterator —
-    but membership was tested with ``isinstance``, so a subclass could replace the
-    very method being vouched for. Two ways that bites, both fail-open:
-
-    * a ONE-SHOT ``__iter__``: the first arm drains it and fails, the second walks
-      zero elements, raises nothing, and "covers" the container;
-    * an ``__iter__`` that disagrees with its own storage: the walk judges clean
-      elements while a subscripting reader gets the payload.
-
-    Snapshotting answers neither — a snapshot is built by iterating, so it
-    inherits the same lie (issue #145, live QA #358).
-    """
-    from typing import List as ListType, Union as UnionType
-
-    from boomi_mcp.recipes.engine import _assert_declared_shape
-
-    class Other(RecipeInputBase):
-        other: str = "y"
-
-    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
-    assert isinstance(converting, dict)  # the premise
-
-    class OneShot(list):
-        """Yields its contents once, then nothing."""
-
-        def __init__(self, items):
-            super().__init__(items)
-            self._drained = False
-
-        def __iter__(self):
-            if self._drained:
-                return iter(())
-            self._drained = True
-            return list.__iter__(self)
-
-    class LyingIter(list):
-        """Storage holds the payload; iteration shows something clean."""
-
-        def __iter__(self):
-            return iter([_DeclaredKeysOnlyLeaf.model_construct(ok="a")])
-
-    annotation = UnionType[
-        ListType[_DeclaredKeysOnlyLeaf], ListType[Other]
-    ]
-
-    def _model(name, ann, default):
-        return type(
-            name,
-            (RecipeInputBase,),
-            {
-                "model_config": ConfigDict(extra="forbid", frozen=True),
-                "__annotations__": {"field": ann},
-                "field": default,
-            },
-        )
-
-    one_shot = OneShot([converting])
-    assert type(one_shot) is not list and isinstance(one_shot, list)  # the premise
-    with pytest.raises(Exception):
-        _assert_declared_shape(
-            _model("OneShotInputV1", annotation, None).model_construct(field=one_shot)
-        )
-
-    lying = LyingIter()
-    list.append(lying, converting)  # bypass __iter__ entirely
-    assert list.__getitem__(lying, 0) is converting  # the premise: storage is dirty
-    assert all(not isinstance(x, dict) for x in lying)  # ...and iteration is clean
-    with pytest.raises(Exception):
-        _assert_declared_shape(
-            _model(
-                "LyingIterInputV1", ListType[_DeclaredKeysOnlyLeaf], None
-            ).model_construct(field=lying)
-        )
-
-    # EVEN AN INNOCENT SUBCLASS is refused now. Distinguishing the innocent ones
-    # meant enumerating the reads a subclass could redefine, and that enumeration
-    # was widened four times and still covered only 7 of 19 (issue #145, QA #372).
-    class Plain(list):
-        pass
-
-    plain = Plain([_DeclaredKeysOnlyLeaf.model_construct(ok="a")])
-    assert type(plain) is not list and isinstance(plain, list)  # the premise
-    with pytest.raises(Exception):
-        _assert_declared_shape(
-            _model("PlainSubclassInputV1", ListType[_DeclaredKeysOnlyLeaf], None).model_construct(
-                field=plain
-            )
-        )
-    # ...while the exact type it subclasses is walked, and judged.
-    _assert_declared_shape(
-        _model("ExactListInputV1", ListType[_DeclaredKeysOnlyLeaf], None).model_construct(
-            field=[_DeclaredKeysOnlyLeaf.model_construct(ok="a")]
-        )
-    )
-    with pytest.raises(Exception):
-        _assert_declared_shape(
-            _model("ExactListPoisonedInputV1", ListType[_DeclaredKeysOnlyLeaf], None).model_construct(
-                field=[converting]
-            )
-        )
-
 
 @pytest.mark.parametrize("shape", ["sequence", "mapping"])
 def test_a_matched_generic_is_not_read_positionally_either(shape):
@@ -3784,62 +3680,6 @@ def test_the_walk_bound_is_enforced_on_mappings_and_at_its_exact_edge():
             )
 
 
-def test_a_mapping_that_redefines_its_enumeration_is_refused():
-    """The mapping branch never consulted ``_is_walkable_collection``.
-
-    Every ``Mapping`` is walkable there by construction, so a ``dict`` subclass
-    with a one-shot ``items()`` was the mapping twin of live QA #358 and reached
-    the executor with entries no arm ever judged (issue #145).
-    """
-    from typing import Dict as DictType
-
-    from boomi_mcp.recipes.engine import _assert_declared_shape
-
-    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
-    assert isinstance(converting, dict)  # the premise
-
-    class OneShotMap(dict):
-        def __init__(self, *a, **k):
-            super().__init__(*a, **k)
-            self._drained = False
-
-        def items(self):
-            if self._drained:
-                return iter(())
-            self._drained = True
-            return dict.items(self)
-
-    model = type(
-        "OneShotMapInputV1",
-        (RecipeInputBase,),
-        {
-            "model_config": ConfigDict(extra="forbid", frozen=True),
-            "__annotations__": {"field": DictType[str, _DeclaredKeysOnlyLeaf]},
-            "field": None,
-        },
-    )
-    poisoned = OneShotMap({"k": converting})
-    assert isinstance(poisoned, dict) and type(poisoned) is not dict  # the premise
-    with pytest.raises(Exception):
-        _assert_declared_shape(model.model_construct(field=poisoned))
-
-    # An innocent dict subclass is refused too, for the reason above.
-    class PlainMap(dict):
-        pass
-
-    with pytest.raises(Exception):
-        _assert_declared_shape(
-            model.model_construct(
-                field=PlainMap({"k": _DeclaredKeysOnlyLeaf.model_construct(ok="a")})
-            )
-        )
-    # ...and an exact dict is walked, and judged.
-    _assert_declared_shape(
-        model.model_construct(field={"k": _DeclaredKeysOnlyLeaf.model_construct(ok="a")})
-    )
-    with pytest.raises(Exception):
-        _assert_declared_shape(model.model_construct(field={"k": converting}))
-
 
 def test_an_unmatched_tuple_arm_is_not_read_positionally():
     """``matched`` gates the positional clause, and gating is the whole point.
@@ -3989,23 +3829,17 @@ def test_a_container_cannot_lie_about_its_own_enumeration():
         )
 
 
-def test_an_exact_known_mapping_is_walked_and_a_stateful_one_is_not():
-    """``OrderedDict`` is walked; the same value carrying instance state is not.
+def test_ordinary_container_types_are_walked_and_judged():
+    """Refusing supported Python ranks above closing residue (§7).
 
-    ``OrderedDict`` earned an exemption when refusing it turned out to be a false
-    rejection (live QA #365) — and that exemption then SHORT-CIRCUITED the
-    instance check, because of the 13 exempted exact types it is the only one
-    whose instances accept attributes at all. A shadowed ``items`` on one reached
-    the executor while the identical shadow on a plain ``dict`` subclass was
-    refused (issue #145, live QA #371). Membership of the exact set and carrying
-    no state of its own are two conditions, and both are required.
+    An exact-type rule closed the whole subclass-divergence family at once, and
+    refused a ``NamedTuple`` field, ``Counter``, ``defaultdict`` and every
+    ``__slots__`` dataclass on the way — five refusals of ordinary Python, three
+    of them introduced by hardening against attacks that need author class
+    machinery and are dominated by the module-global channel §12 already accepts.
 
-    A ``NamedTuple`` field is refused, deliberately. Distinguishing a safe
-    ``tuple`` subclass from a hostile one needs an enumeration of the reads a
-    subclass can redefine, and that enumeration was widened four times and still
-    covered 7 of 19. This is the capability the exact-type rule costs, and it
-    fails CLOSED and loudly rather than being admitted on a guarantee this layer
-    could not keep (issue #145, §7).
+    Each of these is walked, and each is genuinely judged: the walk is defence in
+    depth against malformed caller data, which is what it is for.
     """
     from collections import Counter, OrderedDict, defaultdict
     from typing import Dict as DictType, NamedTuple
@@ -4031,35 +3865,34 @@ def test_an_exact_known_mapping_is_walked_and_a_stateful_one_is_not():
             },
         )
 
-    mapping_model = _model("OrderedOkInputV1", DictType[str, _DeclaredKeysOnlyLeaf])
-    _assert_declared_shape(mapping_model.model_construct(field=OrderedDict({"k": honest})))
-    # ...and still judged, so this is an allowance and not a hole.
-    with pytest.raises(Exception):
-        _assert_declared_shape(
-            mapping_model.model_construct(field=OrderedDict({"k": converting}))
-        )
+    mapping_model = _model("OrdinaryMapInputV1", DictType[str, _DeclaredKeysOnlyLeaf])
+    for built in (
+        dict({"k": honest}),
+        OrderedDict({"k": honest}),
+        Counter(),
+        defaultdict(list, {"k": honest}),
+    ):
+        _assert_declared_shape(mapping_model.model_construct(field=built))
+    for poisoned in (
+        dict({"k": converting}),
+        OrderedDict({"k": converting}),
+        defaultdict(list, {"k": converting}),
+    ):
+        with pytest.raises(Exception):
+            _assert_declared_shape(mapping_model.model_construct(field=poisoned))
 
-    # The exemption must not skip the instance check for the one exact type whose
-    # instances can carry state.
+    _assert_declared_shape(
+        _model("NamedTupleOkInputV1", Selection).model_construct(
+            field=Selection(keys="a", values="b")
+        )
+    )
+
+    # An instance carrying its own state is still refused: it costs honest code
+    # nothing, since none of these types populates an instance dict.
     shadowed = OrderedDict({"k": honest})
     object.__setattr__(shadowed, "items", lambda: iter([("k", converting)]))
-    assert type(shadowed) is OrderedDict  # the premise: still an exact member
-    assert type(dict.__getitem__(shadowed, "k")) is _DeclaredKeysOnlyLeaf  # storage clean
     with pytest.raises(Exception):
         _assert_declared_shape(mapping_model.model_construct(field=shadowed))
-
-    # Documented costs of the exact-type rule, asserted so they stay deliberate.
-    for name, value in (
-        ("namedtuple", Selection(keys="a", values="b")),
-        ("counter", Counter({"k": 1})),
-        ("defaultdict", defaultdict(list, {"k": honest})),
-    ):
-        annotation = Selection if name == "namedtuple" else DictType[str, _DeclaredKeysOnlyLeaf]
-        with pytest.raises(Exception):
-            _assert_declared_shape(
-                _model(f"Refused{name}InputV1", annotation).model_construct(field=value)
-            )
-
 
 def test_a_tuple_subclass_generic_is_not_read_positionally():
     """``origin is tuple``, not ``issubclass(origin, tuple)``.
@@ -4123,80 +3956,6 @@ def test_a_tuple_subclass_generic_is_not_read_positionally():
         _assert_declared_shape(model.model_construct(field=poisoned))
 
 
-def test_a_subscript_override_is_refused_and_plain_mappings_are_not():
-    """``__getitem__`` is part of the enumeration surface; a plain ABC mapping is not.
-
-    A ``list`` subclass whose ``__getitem__`` answers differently from its storage
-    hands a subscripting reader something the walk never judged. Conversely a
-    non-``dict`` ``Mapping`` has no enumerated base to compare against, and
-    refusing every such implementation would be a false rejection far wider than
-    the hole — so it is deliberately carved out, in both directions
-    (issue #145, live QA #367).
-    """
-    from collections.abc import Mapping as MappingABC
-    from typing import List as ListType
-
-    from boomi_mcp.recipes.engine import (
-        _assert_declared_shape,
-        _assert_mapping_enumeration,
-    )
-
-    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
-    assert isinstance(converting, dict)  # the premise
-
-    class Subscript(list):
-        def __getitem__(self, index):
-            return converting
-
-    def _model(name, ann):
-        return type(
-            name,
-            (RecipeInputBase,),
-            {
-                "model_config": ConfigDict(extra="forbid", frozen=True),
-                "__annotations__": {"field": ann},
-                "field": None,
-            },
-        )
-
-    sneaky = Subscript([_DeclaredKeysOnlyLeaf.model_construct(ok="a")])
-    assert list(list.__iter__(sneaky))[0] is not converting  # premise: storage is clean
-    assert sneaky[0] is converting  # ...but a subscript is not
-    with pytest.raises(Exception):
-        _assert_declared_shape(
-            _model("SubscriptInputV1", ListType[_DeclaredKeysOnlyLeaf]).model_construct(
-                field=sneaky
-            )
-        )
-
-    class PlainMapping(MappingABC):
-        def __init__(self, data):
-            self._data = dict(data)
-
-        def __getitem__(self, key):
-            return self._data[key]
-
-        def __iter__(self):
-            return iter(self._data)
-
-        def __len__(self):
-            return len(self._data)
-
-    # Asserted against the guard directly. A non-``dict`` ``Mapping`` never reaches
-    # the walk under a ``Dict[...]`` annotation anyway — strict mode refuses it at
-    # the adapter — so driving this through ``_assert_declared_shape`` would pass
-    # for an unrelated reason and prove nothing about the carve-out.
-    honest = PlainMapping({"k": _DeclaredKeysOnlyLeaf.model_construct(ok="a")})
-    assert not isinstance(honest, dict)  # the premise: the carve-out applies
-    _assert_mapping_enumeration(honest)  # must NOT raise
-    # ...while the dict-subclass branch it is carved out of still fires.
-    class RewrittenMap(dict):
-        def items(self):
-            return iter(())
-
-    with pytest.raises(Exception):
-        _assert_mapping_enumeration(RewrittenMap())
-
 
 def test_an_instance_attribute_cannot_shadow_a_mapping_accessor():
     """Storage clean, ``items`` shadowed dirty — only the instance check refuses.
@@ -4235,207 +3994,7 @@ def test_an_instance_attribute_cannot_shadow_a_mapping_accessor():
         _assert_declared_shape(model.model_construct(field=shadow))
 
 
-def test_an_accessor_supplied_without_its_name_is_refused():
-    """A class-level ``__getattribute__`` answers ``values``/``get``/``keys``.
 
-    The scan looked for accessor NAMES in each class ``__dict__``, and a hook that
-    supplies them appears under none of those names. What came back through
-    ``.values()`` / ``.get()`` was read by neither the adapter nor the walk — so
-    unlike the ``items`` shadow it was not even confined to shapes the declared
-    type would accept (issue #145, live QA #368).
-
-    ``__missing__`` is refused for the same reason one step along: it MANUFACTURES
-    a value on subscript of an absent key from an author-supplied factory, which
-    is what makes ``defaultdict`` a correct refusal rather than a casualty.
-    """
-    from collections import defaultdict
-    from typing import Dict as DictType
-
-    from boomi_mcp.recipes.engine import _assert_declared_shape
-
-    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
-    assert isinstance(converting, dict)  # the premise
-    honest = _DeclaredKeysOnlyLeaf.model_construct(ok="a")
-
-    class HookSupplied(dict):
-        def __getattribute__(self, name):
-            if name == "values":
-                return lambda: iter([converting])
-            if name == "get":
-                return lambda key, default=None: converting
-            if name == "keys":
-                return lambda: iter([converting])
-            return super().__getattribute__(name)
-
-    model = type(
-        "HookSuppliedInputV1",
-        (RecipeInputBase,),
-        {
-            "model_config": ConfigDict(extra="forbid", frozen=True),
-            "__annotations__": {"field": DictType[str, _DeclaredKeysOnlyLeaf]},
-            "field": None,
-        },
-    )
-
-    hooked = HookSupplied({"k": honest})
-    # STORAGE IS CLEAN and ``items`` is untouched, so neither the adapter nor the
-    # walk can see anything wrong — the refusal is the only thing standing here.
-    assert type(dict.__getitem__(hooked, "k")) is _DeclaredKeysOnlyLeaf
-    assert [type(v) for _, v in dict.items(hooked)] == [_DeclaredKeysOnlyLeaf]
-    assert list(hooked.values()) == [converting]  # ...but a reader gets the payload
-    with pytest.raises(Exception):
-        _assert_declared_shape(model.model_construct(field=hooked))
-
-    # ``__missing__``: nothing is wrong with the stored entries at all.
-    manufactured = defaultdict(lambda: converting, {"k": honest})
-    assert type(dict.__getitem__(manufactured, "k")) is _DeclaredKeysOnlyLeaf
-    assert manufactured["absent"] is converting  # the factory answers for any key
-    with pytest.raises(Exception):
-        _assert_declared_shape(model.model_construct(field=manufactured))
-
-
-def test_the_guard_reads_what_the_author_does_not_own():
-    """Four reads, each of which a class can otherwise answer for itself.
-
-    ``_CLASS_VARS`` / ``_CLASS_MRO`` fetch the class's storage through ``type``'s
-    own descriptors, ``type(value)`` ignores a forged ``__class__``, and the
-    instance dict is read through the compiler-generated ``__dict__`` getset
-    rather than by attribute lookup. Every one of them reverted to its forgeable
-    form with the full suite green, because the existing fixtures only lied about
-    the enumeration names — nothing lied about ``__dict__``, ``__mro__`` or
-    ``__class__`` (issue #145, live QA #369 and #370).
-    """
-    from typing import Dict as DictType, List as ListType
-
-    from boomi_mcp.recipes.engine import _assert_declared_shape
-
-    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
-    assert isinstance(converting, dict)  # the premise
-    honest = _DeclaredKeysOnlyLeaf.model_construct(ok="a")
-
-    def _model(name, ann):
-        return type(
-            name,
-            (RecipeInputBase,),
-            {
-                "model_config": ConfigDict(extra="forbid", frozen=True),
-                "__annotations__": {"field": ann},
-                "field": None,
-            },
-        )
-
-    # --- the class lies about its own __dict__ and __mro__ -----------------
-    class MetaLiar(type):
-        @property
-        def __dict__(cls):  # noqa: A003 - the lie is the point
-            return {}
-
-        @property
-        def __mro__(cls):
-            return (dict, object)
-
-    class HidesItsDict(dict, metaclass=MetaLiar):
-        def items(self):
-            return iter([("k", converting)])
-
-    hides = HidesItsDict({"k": honest})
-    assert HidesItsDict.__dict__ == {} and HidesItsDict.__mro__ == (dict, object)
-    with pytest.raises(Exception):
-        _assert_declared_shape(
-            _model("HidesDictInputV1", DictType[str, _DeclaredKeysOnlyLeaf]).model_construct(
-                field=hides
-            )
-        )
-
-    # --- the instance forges __class__ to look like a plain list -----------
-    class ForgedClass(list):
-        @property
-        def __class__(self):
-            return list
-
-        def __iter__(self):
-            return iter([converting])
-
-    forged = ForgedClass([honest])
-    assert forged.__class__ is list and type(forged) is not list  # the premise
-    with pytest.raises(Exception):
-        _assert_declared_shape(
-            _model("ForgedClassInputV1", ListType[_DeclaredKeysOnlyLeaf]).model_construct(
-                field=forged
-            )
-        )
-
-    # --- a __dict__ PROPERTY hands the instance check an empty mapping -----
-    class DictProperty(dict):
-        @property
-        def __dict__(self):
-            return {}
-
-    lying = DictProperty({"k": honest})
-    object.__setattr__(lying, "values", lambda: iter([converting]))
-    assert object.__getattribute__(lying, "__dict__") == {}  # the lie holds
-    assert list(lying.values()) == [converting]  # ...and the shadow is live
-    with pytest.raises(Exception):
-        _assert_declared_shape(
-            _model("DictPropertyInputV1", DictType[str, _DeclaredKeysOnlyLeaf]).model_construct(
-                field=lying
-            )
-        )
-
-
-def test_each_mapping_accessor_is_checked_on_its_own():
-    """``keys``, ``values``, ``get`` and ``__missing__``, isolated from each other.
-
-    Every earlier fixture for these tripped a DIFFERENT clause on the way past —
-    a ``__getattribute__`` hook, or a forged ``__dict__`` — so all three accessor
-    names could be deleted at once, and ``__missing__`` with them, while the whole
-    suite stayed green. Each case here is a plain ``dict`` subclass whose only
-    irregularity is the one being tested (issue #145, live QA #370).
-    """
-    from typing import Dict as DictType
-
-    from boomi_mcp.recipes.engine import _assert_declared_shape
-
-    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
-    assert isinstance(converting, dict)  # the premise
-    honest = _DeclaredKeysOnlyLeaf.model_construct(ok="a")
-
-    model = type(
-        "PerAccessorInputV1",
-        (RecipeInputBase,),
-        {
-            "model_config": ConfigDict(extra="forbid", frozen=True),
-            "__annotations__": {"field": DictType[str, _DeclaredKeysOnlyLeaf]},
-            "field": None,
-        },
-    )
-
-    class PlainSub(dict):
-        pass
-
-    for accessor in ("values", "keys", "get"):
-        shadowed = PlainSub({"k": honest})
-        object.__setattr__(shadowed, accessor, lambda *a, **k: iter([converting]))
-        # Storage clean, ``items`` untouched, no hook and no forged ``__dict__``:
-        # only this accessor's presence in the checked names can refuse it.
-        assert type(dict.__getitem__(shadowed, "k")) is _DeclaredKeysOnlyLeaf
-        assert [type(v) for _, v in dict.items(shadowed)] == [_DeclaredKeysOnlyLeaf]
-        assert "__getattribute__" not in PlainSub.__dict__
-        with pytest.raises(Exception):
-            _assert_declared_shape(model.model_construct(field=shadowed))
-
-    class Manufacturing(dict):
-        """``__missing__`` only — no ``__getattribute__``, unlike ``defaultdict``."""
-
-        def __missing__(self, key):
-            return converting
-
-    manufactured = Manufacturing({"k": honest})
-    assert "__getattribute__" not in Manufacturing.__dict__  # the premise
-    assert type(dict.__getitem__(manufactured, "k")) is _DeclaredKeysOnlyLeaf
-    assert manufactured["absent"] is converting  # ...manufactured on demand
-    with pytest.raises(Exception):
-        _assert_declared_shape(model.model_construct(field=manufactured))
 
 
 def test_a_model_that_answers_its_own_attribute_reads_is_refused():

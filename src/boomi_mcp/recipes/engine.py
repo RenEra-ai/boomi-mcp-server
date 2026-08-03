@@ -1105,7 +1105,7 @@ def _assert_mapping_enumeration(value: Any) -> None:
         # It is also unreachable: the strict adapter refuses one for both
         # ``Dict[...]`` and ``Mapping[...]`` before the walk is entered.
         return
-    if type(value) not in _REPLAYABLE_MAPPINGS or _carries_instance_state(value):
+    if _carries_instance_state(value):
         raise ValueError("validated input holds a mapping that redefines its enumeration")
 
 
@@ -1151,7 +1151,13 @@ def _is_walkable_collection(value: Any) -> bool:
         return False
     if isinstance(value, Mapping):
         return True
-    return type(value) in _REPLAYABLE_TYPES and not _carries_instance_state(value)
+    # ``isinstance``, not exact type. The exact-type rule closed the whole
+    # subclass-divergence family at once — and refused a ``NamedTuple`` field,
+    # ``Counter`` and ``defaultdict``, which is refusing ordinary supported Python
+    # and ranks above closing residue (§7). A subclass that overrides its own
+    # enumeration is now accepted residue: it needs author class machinery, and it
+    # is dominated by the module-global channel §12 already declares open.
+    return isinstance(value, _REPLAYABLE_TYPES) and not _carries_instance_state(value)
 
 
 def _is_opaque_iterable(value: Any) -> bool:

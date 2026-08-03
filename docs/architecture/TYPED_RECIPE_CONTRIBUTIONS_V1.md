@@ -506,8 +506,11 @@ machinery — a metaclass, a descriptor or plain class attribute under a field n
 `__instancecheck__` or `__hash__` that writes? If yes it is residue. If the payload arrives through
 an honest declaration and caller data alone, it is a bug. **Refusing ordinary supported Python is
 always a bug, and ranks above both** — this layer shipped five such refusals (`OrderedDict`, a
-`NamedTuple` field named `keys`, `Counter`, every `__slots__` dataclass, `cached_property`), three of
-them introduced by hardening against residue, two of them hitting this repository's own types.
+`NamedTuple` field, `Counter` and `defaultdict`, every `__slots__` dataclass, `cached_property`),
+three of them introduced by hardening against residue and two hitting this repository's own types.
+**All five are accepted again**, and the exact-type container rule that caused the last of them was
+relaxed back to an `isinstance` test: a subclass overriding its own enumeration is residue, and
+refusing supported Python to close residue is the wrong trade in both directions.
 
 Why residue is the right disposition rather than a defeat: **every one of those attacks is dominated
 by a channel §12 already accepts.** A registered model that stashes the caller's raw mapping in a
