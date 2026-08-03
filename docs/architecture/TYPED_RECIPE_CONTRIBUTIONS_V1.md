@@ -862,7 +862,7 @@ catalog object, which closes the channel this design *can* close (§6 architect 
 
 Step 7 is why **executors receive their validated input and nothing else** — no context
 object, no catalog. Handing an executor a context would reopen an I/O channel and make the
-determinism proof weaker. `ExecutionContextPrerequisite` is a declaration the *engine* must
+double-execution check weaker. `ExecutionContextPrerequisite` is a declaration the *engine* must
 satisfy, not something the executor is given.
 
 No recipe path calls `_build_plan`, `_apply_plan`, `_execute_component`, or any topology
@@ -969,6 +969,30 @@ parity case — the same six steps the three migrated surfaces took.
 Recorded here because a deviation nobody wrote down is indistinguishable from a constraint
 that was dropped. Each states what changed and why.
 
+**`.codex/plans/issue-145.md` is deliberately NOT edited to match.** That file is the architect's
+design plan as written before implementation; rewriting it to agree with the outcome would destroy
+the only record of what was originally intended and make every future "did we deviate?" question
+unanswerable. This section is the reconciliation surface instead — where the plan and the shipped
+system differ, the difference is recorded HERE. Two such differences are recorded immediately below,
+both raised by the §6 architect review; the plan's own wording at `:297`, `:384` and `:568` stands
+as the historical statement it is.
+
+* **The plan says "no runtime/public registration API exists"; the shipped claim is "no
+  MCP-ACCESSIBLE registrar".** `RecipeRegistry`, `RecipeRegistrationV1` and
+  `run_recipes(..., registry=...)` are public, so in-process Python can supply an alternate
+  registry. No MCP tool does, and an AST-based reachability test now fails the suite if one ever
+  starts. A built registry is sealed and its mappings — descriptors, executors, input models,
+  defaults, and the per-class annotation records — are read-only views. None of that is
+  tamper-proofing against in-process code, which §7 places outside the boundary; it is defence
+  against ordinary misuse plus a tripwire that watches the boundary actually claimed.
+* **The plan says both executions receive "the same immutable validated input"; they now receive
+  two independently built ones.** `frozen=True` is shallow, so one shared object let a
+  nondeterministic executor cache its first answer and replay it. The second input is rebuilt from a
+  deep snapshot of the caller's raw mapping taken before either run. The cost is a second full
+  input-gate pass — scan, validation and walk — plus two deep-copy traversals, and `pristine` is
+  retained until execution. The check is defence in depth against accidental nondeterminism, not a
+  determinism proof: module globals, imports and I/O remain open to registered code by §7.
+
 * **`append_root_branch_leg` → `append_root_terminal_leg`.** This is a `Literal` in a public
   contribution schema, so the rename changes the JSON contract, not just a class name. The
   operation appends a leg to the root's TERMINAL unit, which is a Branch today; naming it
@@ -977,7 +1001,8 @@ that was dropped. Each states what changed and why.
   the position the operation targets, which is the part the contract actually fixes.
 * **Executors receive only their frozen validated input**, not an execution-context object.
   Context prerequisites became a declaration the ENGINE must satisfy. Removing the channel
-  removes an I/O path and strengthens the double-execution determinism proof.
+  removes an I/O path and strengthens the double-execution check — which is defence in depth
+  against accidental nondeterminism, not a determinism proof (see §7).
 * **Two of the five merge rules were removed.** `append_distinct_topology_key` and
   `append_distinct_component_key` were never consulted: distinct keys compose
   unconditionally and repeated keys conflict unconditionally, so neither rule had a decision

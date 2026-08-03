@@ -136,6 +136,30 @@ class RecipeRunResultV1:
         return None
 
 
+def _snapshot_raw(descriptor: RecipeDescriptorV1, raw: Any) -> Any:
+    """A private, deep copy of the caller's mapping — or a clean refusal.
+
+    ``raw_input`` is annotated ``Mapping[str, Any]``, which admits more than
+    ``deepcopy`` handles: a ``MappingProxyType`` cannot be pickled, so a
+    perfectly valid read-only mapping started raising a bare ``TypeError`` one
+    line before validation. That was a regression this snapshot introduced — the
+    same input worked before it (issue #145, §6 architect review round 3).
+
+    ``dict(raw)`` first, because the OUTER type is the engine's business and only
+    the contents need preserving; anything still uncopyable is refused as invalid
+    input rather than escaping as a raw exception.
+    """
+    try:
+        return copy.deepcopy(dict(raw)) if isinstance(raw, Mapping) else copy.deepcopy(raw)
+    except Exception:  # noqa: BLE001 — a copier is author code and can raise anything
+        raise recipe_error(
+            RECIPE_INPUT_INVALID,
+            phase="input",
+            recipe_ids=(descriptor.recipe_id,),
+            recipe_versions=(descriptor.recipe_version,),
+        ) from None
+
+
 def _validate_input(descriptor: RecipeDescriptorV1, registry: RecipeRegistry, raw: Mapping[str, Any]):
     """Forbidden-shape scan, THEN the strict model.
 
@@ -1557,13 +1581,13 @@ def run_recipes(
         # validations the same child, and re-validating later would have copied a
         # child the first run had already mutated. The snapshot is taken here,
         # before any executor runs (issue #145, §6 architect review).
-        pristine = copy.deepcopy(request.raw_input)
+        pristine = _snapshot_raw(descriptor, request.raw_input)
         validated_input = _validate_input(descriptor, active, request.raw_input)
         # A thunk per invocation, so the determinism check can build a SECOND
         # input that shares nothing with the first.
         _rebuilders[request.invocation_id] = (
             lambda d=descriptor, raw=pristine: _validate_input(
-                d, active, copy.deepcopy(raw)
+                d, active, _snapshot_raw(d, raw)
             )
         )
         invocations.append(

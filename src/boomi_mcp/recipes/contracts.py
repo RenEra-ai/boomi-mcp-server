@@ -26,11 +26,17 @@ executed even if one tried.
 
 **Executors receive their validated input and NOTHING else.** The issue's design
 sketch had an execution-context prerequisite handed to the executor; that reopens
-an I/O channel and weakens the determinism proof, which re-runs each executor and
-byte-compares its output. Here a context prerequisite is a declaration the ENGINE
-must satisfy — it must hold that catalog before it will run the recipe — not an
-object the executor is given. Strictly stronger, and it costs the built-ins
-nothing: both need only their projected safe input.
+an I/O channel and weakens the double-execution CHECK, which re-runs each executor
+against an independently rebuilt input and byte-compares its output. Here a context
+prerequisite is a declaration the ENGINE must satisfy — it must hold that catalog
+before it will run the recipe — not an object the executor is given. Strictly
+stronger, and it costs the built-ins nothing: both need only their projected safe
+input.
+
+That check is defence in depth against ACCIDENTAL nondeterminism in trusted
+executors, not a proof. A module global, an import or I/O remains available to
+registered code, and §7 places those channels outside this boundary rather than
+claiming to close them (issue #145, §6 architect review).
 """
 
 from __future__ import annotations

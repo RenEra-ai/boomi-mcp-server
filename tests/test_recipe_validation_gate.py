@@ -1152,3 +1152,39 @@ def test_the_second_input_is_isolated_even_from_a_prevalidated_nested_model():
     assert exc.value.diagnostics[0].code == RECIPE_OUTPUT_NONDETERMINISTIC
     # Two GENUINE computations: the runs shared nothing.
     assert _MEMO_RUNS["n"] == 2
+
+
+def test_a_read_only_raw_mapping_is_still_accepted():
+    """The snapshot must not narrow what ``raw_input`` accepts.
+
+    ``RecipeRequestV1.raw_input`` is annotated ``Mapping[str, Any]``, which
+    admits a ``MappingProxyType`` — and ``deepcopy`` cannot pickle one, so the
+    snapshot raised a bare ``TypeError`` one line before validation for an input
+    that worked before it (issue #145, §6 architect review round 3).
+    """
+    from types import MappingProxyType
+
+    from boomi_mcp.recipes.engine import _snapshot_raw
+
+    # The premise: a direct deepcopy of this value is what used to fail.
+    import copy
+
+    with pytest.raises(TypeError):
+        copy.deepcopy(MappingProxyType({"a": 1}))
+
+    class _Descriptor:
+        recipe_id = "test.recipe"
+        recipe_version = "1.0.0"
+
+    snapshot = _snapshot_raw(_Descriptor(), MappingProxyType({"a": [1, 2]}))
+    assert snapshot == {"a": [1, 2]}
+    snapshot["a"].append(3)  # a private copy: mutating it cannot reach the caller
+
+    # An input that genuinely cannot be copied is a clean refusal, not a raw raise.
+    class Uncopyable:
+        def __deepcopy__(self, memo):
+            raise RuntimeError("no copies")
+
+    with pytest.raises(RecipeError) as exc:
+        _snapshot_raw(_Descriptor(), {"a": Uncopyable()})
+    assert "INPUT_INVALID" in str(exc.value.diagnostics[0].code).upper()

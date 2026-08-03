@@ -950,7 +950,16 @@ class RecipeRegistry:
         self._descriptors = MappingProxyType(self._descriptors)
         self._executors = MappingProxyType(self._executors)
         self._input_models = MappingProxyType(self._input_models)
-        self._declared_shape = MappingProxyType(self._declared_shape)
+        self._defaults = MappingProxyType(self._defaults)
+        # NESTED TOO. Freezing only the outer mapping left each per-class
+        # annotation dict writable, so the record the engine compares against
+        # could still be edited — and ``_defaults`` was missed entirely, which is
+        # the one that decides which VERSION a bare recipe id resolves to: moving
+        # it changed what ran while ``registry_revision`` stayed byte-identical
+        # (issue #145, §6 architect review round 3).
+        self._declared_shape = MappingProxyType(
+            {cls: MappingProxyType(dict(fields)) for cls, fields in self._declared_shape.items()}
+        )
 
     # -- construction ------------------------------------------------------
 
