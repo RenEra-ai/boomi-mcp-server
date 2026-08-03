@@ -723,32 +723,6 @@ _REPLAYABLE_TYPES: Tuple[type, ...] = (
 _REPLAYABLE_MAPPINGS: Tuple[type, ...] = (dict, OrderedDict)
 
 #: What the walk reads, and what an ordinary reader of the same value reads.
-#: Split by SHAPE. A single combined list refused a ``NamedTuple`` carrying a
-#: field called ``keys`` — on ordinary caller input, with no validator involved —
-#: because the generated field descriptor is not ``tuple``'s ``keys``, of which
-#: there is none. The sequence walk never calls ``.keys()``, so nothing was
-#: bought for it (issue #145, live QA #366).
-#: Hooks that supply an accessor WITHOUT appearing under its name. A class-level
-#: ``__getattribute__`` answering ``values``/``get`` passed a scan that only
-#: looked for those names, and the payload it returned was read by neither the
-#: adapter nor the walk — so it was not even confined to shapes the declared type
-#: would accept (issue #145, live QA #368). ``__missing__`` is here for the same
-#: reason one level along: it MANUFACTURES a value on subscript of an absent key,
-#: from a factory the author supplies. That is what refuses ``defaultdict``,
-#: which is a correct refusal and not a casualty.
-_ATTRIBUTE_HOOKS = ("__getattribute__", "__getattr__", "__missing__")
-
-_SEQUENCE_ENUMERATION = ("__iter__", "__len__", "__getitem__") + _ATTRIBUTE_HOOKS
-_MAPPING_ENUMERATION = (
-    "__iter__",
-    "__len__",
-    "__getitem__",
-    "items",
-    "keys",
-    "values",
-    "get",
-) + _ATTRIBUTE_HOOKS
-
 #: Read the class's OWN storage, bypassing any ``__getattribute__`` the author
 #: put on its metaclass. ``getattr(cls, name)`` is answerable by author code;
 #: these descriptors are fetched from ``type``, which is not.
@@ -785,58 +759,119 @@ def _instance_vars(value: Any) -> Optional[Mapping[str, Any]]:
     return {}  # ``__slots__`` with no instance dict: nothing can be shadowed
 
 
-def _redefines_enumeration(value: Any, bases: Tuple[type, ...], names: Tuple[str, ...]) -> bool:
-    """True when ``value``'s type, or ``value`` itself, rewrote how it enumerates.
+#: The two ways a class can answer EVERY attribute read with author code. Closed
+#: by the language: Python routes ordinary access through ``__getattribute__``,
+#: and ``__getattr__`` only for lookups that failed.
+#:
+#: They are not the whole story, and the missing piece is ``_assert_fields_are_not_intercepted``
+#: below — a descriptor under a single field's own name intercepts that field
+#: while wearing neither of these names.
+_ATTRIBUTE_HOOKS = ("__getattribute__", "__getattr__")
 
-    ``_REPLAYABLE_TYPES`` enumerates types whose iteration is KNOWN independent
-    and bounded, but membership was tested with ``isinstance``, which admits
-    subclasses — and a subclass may replace the very method being vouched for. A
-    ``list`` subclass with a one-shot ``__iter__`` was drained by the first union
-    arm, after which the second walked zero elements and "covered" the container;
-    one whose ``__iter__`` disagrees with its own storage let the walk judge clean
-    elements while a subscripting reader got the payload (issue #145, live QA
-    #358).
 
-    The FIRST attempt at this asked ``getattr(cls, name)`` whether the method was
-    still the base's — and that is reading an attribute of the author's class,
-    the surface §7 records as exhausted. Three bypasses, all measured: a metaclass
-    ``__getattribute__`` answers with ``list.__iter__`` while the ``tp_iter`` slot
-    keeps the override; the same lie hides a ``__len__`` that under-reports, so a
-    15,000-element value passed a 10,000 bound; and an INSTANCE attribute
-    (``self.items = ...``) shadows ``dict.items`` for the ordinary lookup the walk
-    performs, needing no metaclass at all (issue #145, live QA #364).
+def _assert_fields_are_not_intercepted(value: Any, names: Sequence[str]) -> None:
+    """Refuse a class that answers a DECLARED FIELD's read with a descriptor.
 
-    So the class is read through ``type``'s own descriptors and the instance
-    through ``object``'s, and the MRO is scanned to the first known-safe base
-    rather than compared method by method.
+    Banning the two attribute hooks left a narrower form of the same thing: a
+    ``property`` installed under a field's own name runs author code for that
+    field and nothing else. Measured — the walk read the honest model out of
+    instance storage while ``inp.leaf`` returned the caller's mapping, and the
+    gate accepted (issue #145).
+
+    Pydantic removes field names from the class body during model construction,
+    and a dataclass leaves only a plain default there, so a descriptor sitting
+    under a field name is never the ordinary case.
     """
-    cls = type(value)
-    for klass in _CLASS_MRO(cls):
-        if klass in bases:
+    for klass in _CLASS_MRO(type(value)):
+        if klass in (BaseModel, object):
             break
-        if any(name in _CLASS_VARS(klass) for name in names):
-            return True
+        class_vars = _CLASS_VARS(klass)
+        for name in names:
+            attribute = class_vars.get(name)
+            if attribute is not None and hasattr(type(attribute), "__get__"):
+                raise ValueError("validated input intercepts a declared field's read")
+
+
+def _assert_no_attribute_hooks(value: Any) -> None:
+    """Refuse a model or dataclass whose class answers attribute reads itself.
+
+    The container walk got this treatment first, and the model walk needed it just
+    as badly — it read every field with ``getattr``. A REGISTERED ROOT input model
+    defining ``__getattribute__`` needs no container, no validator and no unusual
+    annotation: it returns the honest value while the walk looks and the caller's
+    mapping to everything afterwards, because it is author code and can simply
+    count the reads. The gate passed and the executor read a raw dict at a
+    position declared as a model (issue #145, live QA #373).
+
+    ``_check_input_schema_closed`` cannot see this: it reads the emitted JSON
+    schema, and a hook is a statement about the class body.
+
+    Reading the fields out of instance storage is the other half — it fixes what
+    the WALK sees — but only refusing the hook keeps an ordinary executor's
+    ``inp.field`` returning what the walk actually judged.
+    """
+    for klass in _CLASS_MRO(type(value)):
+        if klass in (BaseModel, object):
+            break
+        if any(hook in _CLASS_VARS(klass) for hook in _ATTRIBUTE_HOOKS):
+            raise ValueError("validated input answers its own attribute reads")
+
+
+def _model_extra(value: Any) -> Any:
+    """``__pydantic_extra__`` read so the class cannot answer for it."""
+    try:
+        return object.__getattribute__(value, "__pydantic_extra__")
+    except AttributeError:
+        return None
+
+
+def _carries_instance_state(value: Any) -> bool:
+    """True when a container instance has attribute storage of its own, or hides it.
+
+    An exact ``dict``/``list``/``tuple`` instance cannot carry attributes at all,
+    so this only ever fires for a type that permits them — ``OrderedDict`` being
+    the one such member of the enumerated sets. That is not hypothetical: the
+    exemption added for ``OrderedDict`` short-circuited the instance check, and a
+    shadowed ``items`` on one reached the executor while the identical shadow on a
+    plain ``dict`` subclass was refused (issue #145, live QA #371).
+    """
     instance_vars = _instance_vars(value)
-    if instance_vars is None:  # the class redefined how its own dict is READ
-        return True
-    return any(name in instance_vars for name in names)
+    return instance_vars is None or bool(instance_vars)
 
 
 def _assert_mapping_enumeration(value: Any) -> None:
-    """Refuse a ``dict`` subclass that rewrote how it enumerates itself.
+    """A mapping the walk will read must be an EXACT known type carrying no state.
 
-    The sequence walk gets this from ``_is_walkable_collection``; the mapping
-    branch cannot, because every ``Mapping`` is walkable there by construction.
+    This replaces a scan for redefined accessor names, and replacing it is the
+    point. That scan was widened four times in three review rounds — one-shot
+    ``__iter__``, an under-reporting ``__len__``, an instance-shadowed ``items``,
+    a class-level ``__getattribute__`` supplying ``values``/``get`` under no name
+    at all — and a census then found it guarding **7 of the 19** reads through
+    which a ``dict`` or ``list`` subclass can hand back author data. ``copy``,
+    ``popitem``, ``setdefault``, ``pop``, ``update``, ``fromkeys``, ``__or__``,
+    ``__eq__``, ``__reversed__``, ``__contains__`` were all unguarded, and every
+    method a future Python adds would join them (issue #145, live QA #372).
 
-    Only ``dict`` subclasses are checked. A non-``dict`` ``Mapping`` has no
-    enumerated base to compare against, and refusing every such implementation
-    would be a false rejection far wider than the hole it closes.
+    An enumeration of mechanisms cannot be completed, so the rule stops
+    enumerating. ``type(value)`` is unforgeable — a metaclass cannot change what
+    ``type()`` returns — and an exact known type has no author code on it to run.
+    Every accessor, present and future, becomes irrelevant at once.
+
+    The cost was measured before it was accepted: across the whole suite the walk
+    sees only exact ``tuple``, ``dict``, ``list``, ``range``, ``OrderedDict``,
+    ``dict_keys``, ``dict_items`` and ``memoryview``; every subclass observed is a
+    test fixture, and all five container-typed fields in ``PRODUCTION_REGISTRATIONS``
+    are ``Tuple[Model, ...]`` holding an exact ``tuple``. What it does refuse is
+    stated in §7: ``Counter``, ``defaultdict`` and a ``NamedTuple`` field are all
+    fail-closed, loudly, rather than admitted on a guarantee this layer could not
+    keep.
     """
-    if type(value) in _REPLAYABLE_MAPPINGS:
+    if not isinstance(value, dict):
+        # A non-``dict`` ``Mapping`` has no enumerated base to compare against.
+        # It is also unreachable: the strict adapter refuses one for both
+        # ``Dict[...]`` and ``Mapping[...]`` before the walk is entered.
         return
-    if isinstance(value, dict) and _redefines_enumeration(
-        value, _REPLAYABLE_MAPPINGS, _MAPPING_ENUMERATION
-    ):
+    if type(value) not in _REPLAYABLE_MAPPINGS or _carries_instance_state(value):
         raise ValueError("validated input holds a mapping that redefines its enumeration")
 
 
@@ -847,14 +882,10 @@ def _replayable_base(value: Any) -> Optional[type]:
     subclass override, or an instance attribute shadowing one, cannot change what
     ``list.__iter__`` or ``dict.items`` return for the object's real storage.
 
-    DELIBERATELY REDUNDANT with ``_redefines_enumeration``, and the redundancy is
-    not dead code. The two answer different readers: reading through the base
-    fixes what the WALK sees, while refusing a redefinition is what keeps an
-    ordinary EXECUTOR from seeing something the walk never judged. Mutating either
-    one alone therefore survives the suite — each is masked by the other — and
-    only the PAIRED mutants (``P1``-``P3`` in the round's battery) are killed.
-    Every enumeration of forms in this layer has eventually proved incomplete, so
-    the second mechanism stays as the bound on the first one's next gap.
+    Kept after the exact-type rule made it strictly redundant — the base of an
+    exact type IS that type — because it costs nothing and it is the half of the
+    old pair that never needed an enumeration to be right. It bounds the damage
+    if a future edit ever loosens ``_is_walkable_collection`` again.
     """
     for base in _REPLAYABLE_TYPES:
         if isinstance(value, base):
@@ -886,11 +917,7 @@ def _is_walkable_collection(value: Any) -> bool:
         return False
     if isinstance(value, Mapping):
         return True
-    if type(value) in _REPLAYABLE_TYPES:
-        return True
-    return isinstance(value, _REPLAYABLE_TYPES) and not _redefines_enumeration(
-        value, _REPLAYABLE_TYPES, _SEQUENCE_ENUMERATION
-    )
+    return type(value) in _REPLAYABLE_TYPES and not _carries_instance_state(value)
 
 
 def _is_opaque_iterable(value: Any) -> bool:
@@ -955,14 +982,19 @@ def _assert_declared_shape(
 
     if isinstance(value, BaseModel):
         _mark(value)
+        _assert_no_attribute_hooks(value)
         # Undeclared keys on the INSTANCE. A model whose compiled validator allows
         # extras can be made to look closed at registration by assigning a closed
         # twin's ``__pydantic_core_schema__``; the instance it produces cannot lie
         # about what it is carrying (issue #145, live QA).
-        if getattr(value, "__pydantic_extra__", None):
+        if _model_extra(value):
             raise ValueError("validated input carries undeclared keys")
+        stored = _instance_vars(value)
+        if stored is None:
+            raise ValueError("validated input redefines how its own fields are read")
+        _assert_fields_are_not_intercepted(value, tuple(type(value).model_fields))
         for name, field in type(value).model_fields.items():
-            _assert_declared_shape(getattr(value, name, None), field.annotation, _seen, _journal)
+            _assert_declared_shape(stored.get(name), field.annotation, _seen, _journal)
         return
 
     # A pydantic dataclass is neither a ``BaseModel`` nor a container, so an
@@ -972,11 +1004,19 @@ def _assert_declared_shape(
     # (issue #145, Codex review).
     if is_dataclass(value) and not isinstance(value, type):
         _mark(value)
+        _assert_no_attribute_hooks(value)
         hints = _dataclass_field_types(type(value))
+        _assert_fields_are_not_intercepted(
+            value, tuple(f.name for f in dataclass_fields(value))
+        )
+        stored = _instance_vars(value)
         for field in dataclass_fields(value):
-            _assert_declared_shape(
-                getattr(value, field.name, None), hints.get(field.name), _seen, _journal
+            read = (
+                stored.get(field.name)
+                if stored is not None
+                else getattr(value, field.name, None)  # ``__slots__``: no dict to read
             )
+            _assert_declared_shape(read, hints.get(field.name), _seen, _journal)
         return
 
     # RECURSE INTO ANY ELEMENT, not only the ones that are already models. An

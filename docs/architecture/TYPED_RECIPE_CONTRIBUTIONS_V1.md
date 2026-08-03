@@ -566,49 +566,50 @@ channels.
   classes and refused everything else, including `range`, `dict_keys`/`values`/`items`,
   `array.array`, `memoryview` and any custom `abc.Sequence`.
 
-  **Membership in that list is by exact type, or by a subclass that has not rewritten how it
-  enumerates itself.** Testing it with `isinstance` alone re-opened the hole the enumeration
-  exists to close, because a subclass can override the very method being vouched for: a `list`
-  subclass with a one-shot `__iter__` was drained by the first union arm, after which the second
-  walked zero elements, raised nothing, and was accepted as covering the container; one whose
-  `__iter__` disagrees with its own storage let the walk judge clean elements while a subscripting
-  reader gets the payload. Snapshotting the container answers neither — a snapshot is *built by
-  iterating*, so it inherits the same lie.
+  **Membership is by EXACT TYPE, and the instance must carry no state of its own.** Testing it
+  with `isinstance` re-opened the hole the enumeration exists to close, because a subclass may
+  replace the very method being vouched for — a one-shot `__iter__` drained by the first union arm
+  leaves the second walking nothing and "covering" the container; an `__iter__` that disagrees with
+  its own storage lets the walk judge clean elements while a subscripting reader gets the payload.
+  Snapshotting answers neither: a snapshot is *built by iterating*, so it inherits the same lie.
 
-  **How that check asks is as load-bearing as what it asks.** The first version compared
-  `getattr(cls, name)` against the base's method — which is reading an attribute of the author's
-  class, the surface this section already records as exhausted, and it fell to three bypasses: a
-  metaclass `__getattribute__` answering with `list.__iter__` while the `tp_iter` slot kept the
-  override; the same lie hiding a `__len__` that under-reported, so a 15,000-element value passed a
-  10,000 bound; and an *instance* attribute (`self.items = ...`) shadowing `dict.items` for the
-  ordinary lookup the walk performed, which needs no metaclass at all. The class is therefore read
-  through `type`'s own descriptors and the instance through `object`'s, and **the walk consumes
-  through the base** — `dict.items(value)`, `list.__iter__(value)` — which no override can
-  redirect. Those two mechanisms are deliberately redundant: reading through the base fixes what
-  the *walk* sees, refusing a redefinition is what stops an ordinary *executor* seeing something
-  the walk never judged, and mutating either alone survives the suite because the other covers it.
+  What replaced `isinstance` first was a scan for redefined accessor names, and **that approach was
+  abandoned on evidence.** It was widened four times across three review rounds — one-shot
+  `__iter__`, an under-reporting `__len__`, an instance-shadowed `items`, a class-level
+  `__getattribute__` supplying `values`/`get` under no name at all — and a census then found it
+  guarding **7 of the 19** reads through which a `dict` or `list` subclass can hand back author
+  data: `copy`, `popitem`, `setdefault`, `pop`, `update`, `fromkeys`, `__or__`, `__eq__`,
+  `__reversed__` and `__contains__` were all unguarded, and every method a future Python adds would
+  join them. An enumeration of mechanisms cannot be completed, so the rule stops enumerating.
+  `type(value)` is unforgeable — a metaclass cannot change what `type()` returns — and an exact
+  known type has no author code on it to run, which makes every accessor irrelevant at once.
 
-  **A name-based scan also has to catch what supplies an accessor without wearing its name.** A
-  class-level `__getattribute__` answering `values`/`keys`/`get` appears under none of the checked
-  names, and what it returns is read by neither the adapter nor the walk — so unlike a shadowed
-  `items` it is not even confined to shapes the declared type would accept. `__getattr__` and
-  `__missing__` join it: the last MANUFACTURES a value on subscript of an absent key from an
-  author-supplied factory, which is why `defaultdict` is refused, correctly rather than as a
-  casualty. Reading the *instance* dict needed the same treatment one level down: `object.__getattribute__(value, "__dict__")` bypasses a class `__getattribute__` but still performs descriptor
-  lookup, so a `__dict__` **property** wins and hands the guard an empty mapping while the real
-  shadow stays live. Naming `__dict__` in the checked names is not the remedy — `type.__new__` puts
-  a `__dict__` getset descriptor in every subclass without `__slots__`, which would refuse some two
-  hundred ordinary classes — so what discriminates is the descriptor's *type*: compiler-generated,
-  or author-supplied.
+  The cost was measured before it was accepted. Across the whole suite the walk sees only exact
+  `tuple`, `dict`, `list`, `range`, `OrderedDict`, `dict_keys`, `dict_items` and `memoryview`;
+  every subclass observed is a test fixture, and all five container-typed fields in
+  `PRODUCTION_REGISTRATIONS` are `Tuple[Model, ...]` holding an exact `tuple`. **What it refuses is
+  a real capability loss, stated rather than hidden:** a `NamedTuple` field, `Counter`, and
+  `defaultdict` are all fail-closed now. `defaultdict` is a *correct* refusal — its `__missing__`
+  manufactures a value from an author-supplied factory on subscript of an absent key — but the
+  `NamedTuple` is simply a supported Python shape this layer no longer accepts, because
+  distinguishing a safe `tuple` subclass from a hostile one is the enumeration that just failed.
 
-  The names checked are split by shape — `__iter__`, `__len__` and `__getitem__` for a sequence,
-  plus `items`, `keys`, `values` and `get` for a mapping. A single combined list refused a
-  `NamedTuple` carrying a field called `keys`, on ordinary caller input with no validator involved,
-  and the sequence walk never calls `.keys()`. The mapping check is applied only to `dict`
-  subclasses, since a non-`dict` `Mapping` has no enumerated base to compare against and refusing
-  every such implementation would be a false rejection far wider than the hole. `OrderedDict` is
-  an enumerated known mapping rather than a suspicious `dict` subclass, because refusing it — it
-  legitimately overrides four accessors — bought nothing.
+  `OrderedDict` is an exact member, and the second condition is what makes that safe. Of the
+  thirteen exempted types it is the only one whose instances accept attributes at all, and the
+  exemption added for it originally short-circuited the instance check: a shadowed `items` on an
+  `OrderedDict` reached the executor while the identical shadow on a plain `dict` subclass was
+  refused. Exact membership and carrying no state are two conditions and both are required.
+
+  **The same reasoning had to be applied to the MODEL walk, which no container rule touches.** It
+  read every field with `getattr`. A registered ROOT input model defining `__getattribute__` needs
+  no container, no validator and no unusual annotation — it is author code, so it returns the
+  honest value while the walk looks and the caller's mapping to every read afterwards. So field
+  values and `__pydantic_extra__` are read out of instance storage, and a class carrying
+  `__getattribute__` or `__getattr__` is refused. Those two hooks are closed by the language, but
+  they are not the only author code an ordinary read can run: a **descriptor installed under a
+  declared field's own name** intercepts that field while wearing neither hook's name, and is
+  refused for the same reason. `_check_input_schema_closed` sees none of this — it reads the
+  emitted JSON schema, and all three are statements about the class body.
 
   **Stated boundary:** the size bound asks for the value's `len()` through its base, so an
   overriding `__len__` cannot shrink it; an *unsized* value abstains and is bounded only by the
