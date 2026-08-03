@@ -37,6 +37,7 @@ from __future__ import annotations
 import array
 import sys
 from collections import OrderedDict, deque
+import dataclasses
 from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
 from decimal import Decimal
 from fractions import Fraction
@@ -801,8 +802,19 @@ def _dataclass_field_map(value: Any) -> Optional[Mapping[str, Any]]:
     """
     for klass in _CLASS_MRO(type(value)):
         fields = _CLASS_VARS(klass).get("__dataclass_fields__")
-        if fields is not None:
-            return fields
+        if fields is None:
+            continue
+        # FILTER TO REAL FIELDS. ``dataclasses.fields()`` does this and the raw
+        # mapping does not, so ``ClassVar`` and ``InitVar`` pseudo-fields entered
+        # the walk: neither is in instance storage, so the read-back compared a
+        # live ``getattr`` against ``None`` and refused an honest dataclass on
+        # every invocation (issue #145, live QA #393). Reading the mapping from
+        # the class body stays unforgeable; only the filtering is restored.
+        return {
+            name: field
+            for name, field in fields.items()
+            if getattr(field, "_field_type", None) is dataclasses._FIELD
+        }
     return None
 
 
