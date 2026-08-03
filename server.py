@@ -2327,16 +2327,46 @@ if build_integration_action:
 
         Args:
             profile: Boomi profile name (required)
-            action: One of: plan, apply, verify
+            action: One of: plan, compile, apply, verify
             config: JSON string with action-specific payload
+
+        Typed authoring (issue #146, OPT-IN — legacy requests are unchanged):
+            Put an AuthoringRequestV1 under config.authoring_request to author
+            ProcessIR, a topology adjunct, or typed recipe invocations directly.
+            Fetch its exact schema with
+            get_schema_template(schema_name="AuthoringRequestV1").
+
+            Additional config keys, all optional except on a typed apply:
+                authoring_request           - the typed intent
+                expected_capability_revision - REQUIRED for a typed apply
+                expected_compile_hash        - REQUIRED for a typed apply
+                expected_plan_hash           - optional staleness check
+
+            config.authoring_request is mutually exclusive with the legacy
+            integration_spec / source_description / components roots; sending
+            both is rejected rather than silently resolved by precedence.
 
         Actions:
             plan:
+                - Performs ZERO remote mutation
                 - Normalize and validate integration spec
                 - Build deterministic execution order
                 - Resolve current component existence for conflict handling
+                - With config.authoring_request: semantic validation, resolved
+                  references, capability gaps, required decisions, and the
+                  IntegrationSpecV1 ComponentPlan preview
                 Example:
                     config='{"mode":"lift_shift","components":[{"key":"conn","type":"connector-settings","name":"HTTP API","action":"create","config":{"connector_type":"http","component_name":"HTTP API","url":"https://api.example.com"}}]}'
+
+            compile:
+                - Performs ZERO remote mutation, and returns NO build_id
+                  (nothing is created, so there is no build to identify)
+                - Requires config.authoring_request
+                - Canonically compiles every authored process and returns the
+                  normalized intent, deterministic artifact fingerprints, the
+                  validation report, and the compile hash an apply must bind to
+                Example:
+                    config='{"authoring_request":{"contract_version":"1","intent":{"intent_kind":"process_ir","integration_name":"Order Sync","component_key":"proc","process_ir":{...},"components":[...]}}}'
 
             apply:
                 - Execute plan in dependency order
@@ -2351,8 +2381,17 @@ if build_integration_action:
                   verification[<process_key>].process_graph
                   ({errors, warnings, shapes_checked}); graph errors fail
                   verification, GUI/runtime attribute lints are warnings only
+                - For builds created through the typed path, adds
+                  authoring_provenance with the revision binding, artifact
+                  fingerprints, and a live comparison that reports revision skew
+                  separately from component drift. Absent for legacy builds.
                 Example:
                     config='{"build_id":"<uuid-from-apply>"}'
+
+        Mutation boundary: plan and compile never write to Boomi. apply is the
+        first phase that can, and a TYPED apply re-parses the raw request,
+        recompiles it in this profile, and compares the binding before its first
+        write — a stale or mismatched binding mutates nothing.
         """
         config_data = {}
         if config:
@@ -3098,7 +3137,14 @@ if get_schema_template_action:
             standard: For trading_partner create: x12, edifact, hl7, rosettanet, tradacoms, odette, custom
             component_type: For component: process, connector-settings, transform.map, etc.
             protocol: For trading_partner protocols: http, as2, ftp, sftp, disk, mllp, oftp
-            schema_name: Authoring schema selector — 'IntegrationSpecV1' (full JSON schema), 'archetype:<name>' (parameter schema + metadata), 'workflow_sequences' (all recommended workflows), 'workflow:<name>' (one workflow)
+            schema_name: Authoring schema selector — 'IntegrationSpecV1' (full JSON schema), 'archetype:<name>' (parameter schema + metadata), 'workflow_sequences' (all recommended workflows), 'workflow:<name>' (one workflow).
+                Issue #146 adds the typed authoring contracts, all generated from the runtime models so they match wrapper validation exactly:
+                'ProcessIRV1', 'SystemTopologySpecV1', 'validation_report',
+                'AuthoringRequestV1', 'AuthoringPlanResultV1', 'AuthoringCompileResultV1',
+                'AuthoringRevisionBindingV1', 'AuthoringBuildProvenanceV1', and
+                'authoring_workflow' (the eight-step sequence and which phases may mutate).
+                An optional '@<version>' suffix pins the schema version; an unserved version
+                returns AUTHORING_SCHEMA_VERSION_UNAVAILABLE with the supported list.
 
         Examples:
             get_schema_template("trading_partner") → overview of all actions/standards
@@ -3262,7 +3308,7 @@ if invoke_api:
 # --- List Capabilities ---
 if list_capabilities_action:
     @mcp.tool(annotations={"readOnlyHint": True})
-    async def list_capabilities():
+    async def list_capabilities(expected_capability_revision: str = None):
         """List all available MCP tools and their capabilities.
 
         Returns summary of:
@@ -3271,18 +3317,33 @@ if list_capabilities_action:
         - Workflow suggestions for common multi-step tasks
         - Coverage statistics (SDK example coverage)
         - Quick-start hints
+        - authoring_contract: the served authoring actions, schema selectors,
+          capability states, archetypes and revisions (issue #146)
 
-        No parameters needed. Call this to understand what operations are possible.
+        Args:
+            expected_capability_revision: Optional. The capability revision you
+                believe this server is running. Supply it to get a real
+                comparison in authoring_contract.capability_comparison; omit it
+                and the status is "not_requested" — this server never reports
+                parity you did not ask it to check. The live catalog is returned
+                either way, so a mismatch is diagnosable and not just flagged.
+
+        Call with no arguments to understand what operations are possible.
 
         Helps AI agent:
         - Select the right tool for any user request
         - Understand multi-step workflows (e.g., create → package → deploy → monitor)
         - Know when to use invoke_boomi_api for uncovered APIs
         - Find the right get_schema_template call before creating resources
+        - Detect that a deployed server is older than the schemas it is being
+          asked to honor, BEFORE authoring against it
         """
         try:
             registered = {t.name for t in await mcp.list_tools()}
-            return list_capabilities_action(available_tools=registered)
+            return list_capabilities_action(
+                available_tools=registered,
+                expected_capability_revision=expected_capability_revision,
+            )
         except Exception as e:
             return {"_success": False, "error": str(e)}
 

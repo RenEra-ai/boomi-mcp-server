@@ -3156,6 +3156,11 @@ def test_no_listed_module_lies_outside_the_layer_this_issue_owns():
         "boomi_mcp.patterns.archetypes.api_to_database_sync",
         "boomi_mcp.patterns.composition",
         "boomi_mcp.patterns.recipe_bridge",
+        # #146 (M12.11): the typed recipe authoring intent invokes the engine
+        # directly, so the engine-invoker scan REQUIRES it in the digest. Both
+        # pins have to name it, and that pairing is the point — a new surface
+        # joins the layer only by a deliberate edit in two places.
+        "boomi_mcp.authoring.workflow",
     }
     for module in RECIPE_LAYER_MODULES:
         assert (

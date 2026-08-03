@@ -221,7 +221,11 @@ from .components.builders.transform_function_wrapper_builder import (
     get_transform_function_wrapper_builder,
 )
 from .components.component_update_preservation import merge_for_update
-from ..errors import LEGACY_ADAPTER_AUTHORITY_CONFLICT
+from ..errors import (
+    AUTHORING_LIVE_DEPLOYMENT_DRIFT,
+    INVALID_INPUT,
+    LEGACY_ADAPTER_AUTHORITY_CONFLICT,
+)
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
 from .components.trading_partners import create_trading_partner, update_trading_partner
@@ -6859,6 +6863,51 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
 
 def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Dict[str, Any]:
     dry_run = bool(config.get("dry_run", True))
+
+    # --- Typed apply gate (issue #146) ---------------------------------------
+    # FIRST, before the dry-run shortcut and before any planning: a typed apply
+    # that cannot reproduce its compile binding must not proceed even as far as
+    # describing what it would do under a binding it failed to validate.
+    #
+    # The preflight re-parses the RAW payload and recompiles in THIS profile. It
+    # returns a bundle only when every comparison passes, and the bundle's spec
+    # is what the materialization loop below consumes — so there is no path from
+    # a typed request to a create/update call that skips this.
+    authoring_bundle = None
+    _typed_payload = _authoring_payload(config)
+    if _typed_payload is _AUTHORING_PAYLOAD_MALFORMED:
+        return _reject_malformed_authoring_request(_typed_payload, "apply")
+    if _typed_payload is not None:
+        from ..authoring.workflow import (
+            AuthoringWorkflowError,
+            preflight_typed_apply_v1,
+        )
+
+        ambiguous = _reject_ambiguous_authoring_request(config)
+        if ambiguous:
+            return ambiguous
+        try:
+            authoring_bundle = preflight_typed_apply_v1(
+                _typed_payload,
+                boomi_client=boomi_client,
+                profile=profile,
+                account_id=_client_account_id(boomi_client),
+            )
+        except AuthoringWorkflowError as exc:
+            return _authoring_error_envelope(exc, "apply")
+
+        # Hand the VALIDATED spec to the unchanged legacy plan/apply machinery,
+        # so build-id generation, results and execution_order keep their exact
+        # existing shape. The caller's raw payload is not consulted again.
+        config = {
+            key: value
+            for key, value in config.items()
+            if key not in ("authoring_request",) and key not in _LEGACY_SPEC_ROOTS
+        }
+        config["integration_spec"] = authoring_bundle.integration_spec.model_dump(
+            mode="json"
+        )
+
     planned = _build_plan(boomi_client, config)
     if not planned.get("_success"):
         return planned
@@ -7153,13 +7202,21 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             }
 
     build_id = str(uuid4())
-    _BUILD_REGISTRY[build_id] = {
+    build_record: Dict[str, Any] = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "profile": profile,
         "spec": spec.model_dump(),
         "results": results,
         "execution_order": execution_order,
     }
+    # Provenance is recorded ONLY for a typed build, under one optional key. A
+    # legacy record keeps exactly its five original keys, so nothing that reads
+    # an existing build sees a new shape.
+    if authoring_bundle is not None:
+        build_record["authoring"] = _authoring_build_provenance(
+            boomi_client, authoring_bundle, results
+        )
+    _BUILD_REGISTRY[build_id] = build_record
 
     apply_result = {
         "_success": True,
@@ -7168,6 +7225,11 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         "execution_order": execution_order,
         "results": results,
     }
+    if authoring_bundle is not None:
+        apply_result["mutation_performed"] = True
+        apply_result["authoring_provenance"] = build_record["authoring"][
+            "provenance"
+        ]
     # Forward the plan's advisory output (build-basics warnings, connection
     # aliases) onto the apply envelope so a real apply does not silently drop it
     # (Codex review).
@@ -7176,6 +7238,60 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     if planned.get("connection_aliases"):
         apply_result["connection_aliases"] = planned["connection_aliases"]
     return apply_result
+
+
+def _live_component_digest(boomi_client: Boomi, component_id: str) -> Optional[str]:
+    """Hash the component's live XML. The XML itself never leaves this function.
+
+    Used at apply time to record what was created and at verify time to see
+    whether it still matches. Those two are the comparable pair: both are
+    Boomi's own bytes. A compile-time digest is a different quantity entirely
+    and comparing it to live XML would report drift on every healthy build.
+    """
+    from ..authoring.revisions import sha256_fingerprint
+
+    try:
+        data = component_get_xml(boomi_client, component_id)
+    except Exception:  # noqa: BLE001 — provenance is best-effort, never fatal
+        return None
+    if isinstance(data, dict):
+        xml = data.get("xml")
+    elif isinstance(data, str):
+        xml = data
+    else:
+        xml = None
+    if not isinstance(xml, str) or not xml:
+        return None
+    return sha256_fingerprint({"component_xml": xml})
+
+
+def _authoring_build_provenance(
+    boomi_client: Boomi, bundle, results: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Record what a typed apply produced, for verify to compare against later."""
+    from ..models.authoring_workflow import AuthoringBuildProvenanceV1
+
+    compile_result = bundle.compile_result
+    provenance = AuthoringBuildProvenanceV1(
+        revision_binding=compile_result.revision_binding,
+        artifact_fingerprints=compile_result.artifact_fingerprints,
+        resolved_references=compile_result.resolved_references,
+    )
+
+    live: Dict[str, Any] = {}
+    for key, step in sorted(results.items()):
+        component_id = step.get("component_id") if isinstance(step, dict) else None
+        if not component_id:
+            continue
+        digest = _live_component_digest(boomi_client, component_id)
+        if digest:
+            live[key] = {"component_id": component_id, "digest": digest}
+
+    return {
+        "provenance": provenance.model_dump(mode="json"),
+        "revision_binding": compile_result.revision_binding.model_dump(mode="json"),
+        "live_component_fingerprints": live,
+    }
 
 
 def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -7193,6 +7309,9 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
     verification: Dict[str, Any] = {"components": {}, "dependency_issues": []}
     verified_count = 0
     failed_count = 0
+    #: component key -> digest of the XML observed during THIS verify. Populated
+    #: only for typed builds; a legacy build has no apply-time baseline.
+    observed_digests: Dict[str, str] = {}
 
     for comp in spec.components:
         step = results.get(comp.key)
@@ -7234,6 +7353,15 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
                     data_type = None
                     process_xml = None
                 record: Dict[str, Any] = {"verified": True, "component_id": component_id}
+                # Issue #146: hash the XML this verify ALREADY fetched, rather
+                # than fetching it a second time. Typed builds only — a legacy
+                # build has nothing recorded to compare against.
+                if build.get("authoring") is not None and isinstance(process_xml, str):
+                    from ..authoring.revisions import sha256_fingerprint
+
+                    observed_digests[comp.key] = sha256_fingerprint(
+                        {"component_xml": process_xml}
+                    )
                 is_process = comp.type == "process" or data_type == "process"
                 if is_process:
                     # Always graph-verify a detected process. If its XML could
@@ -7278,13 +7406,252 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
                     f"Component '{comp.key}' depends on '{dep}', but '{dep}' was not resolved to a component_id."
                 )
 
-    return {
+    result = {
         "_success": failed_count == 0 and not verification["dependency_issues"],
         "build_id": build_id,
         "verified_components": verified_count,
         "failed_components": failed_count,
         "dependency_issues": verification["dependency_issues"] or None,
         "verification": verification["components"],
+    }
+
+    # Issue #146: additive provenance for typed builds only. The key is ABSENT
+    # (not null) for a legacy build, so no existing verify assertion changes.
+    # Revision skew and component drift are reported separately — an upgraded
+    # server and an out-of-band component edit need different remedies.
+    authoring = build.get("authoring")
+    if authoring is not None:
+        from ..authoring.workflow import compare_live_build_provenance
+
+        comparison = compare_live_build_provenance(authoring, observed_digests)
+        result["authoring_provenance"] = {
+            **authoring["provenance"],
+            "live_comparison": comparison.model_dump(mode="json"),
+        }
+        if comparison.status == "drift":
+            result["_success"] = False
+            # A top-level error channel, like every other typed failure on this
+            # surface. Without it a caller keying on `error_code` saw nothing at
+            # all, because the code lived only inside the nested comparison
+            # (issue #146 QA, bug #411).
+            result["error_code"] = AUTHORING_LIVE_DEPLOYMENT_DRIFT
+            result["error"] = (
+                "One or more build-owned components no longer match the "
+                "fingerprint recorded when this build applied them."
+            )
+
+    return result
+
+
+def _client_account_id(boomi_client: Any) -> Optional[str]:
+    """The Boomi account this client addresses, for the authoring scope hash.
+
+    Read from the SDK client rather than the profile name: the profile is an
+    alias, and a binding must be scoped to the ACCOUNT it was produced against
+    (issue #146 QA, bug #408). Returns ``None`` if the SDK does not expose it,
+    in which case the scope falls back to the profile name and says so.
+    """
+    for attribute in ("_base_url_account_id", "account_id"):
+        value = getattr(boomi_client, attribute, None)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _valid_actions() -> tuple:
+    """The action list, from the one #146 contract registry.
+
+    Read rather than hard-coded so this hint, the capability catalog, the
+    workflow schema and the wrapper docstring cannot disagree about what this
+    tool accepts.
+    """
+    try:
+        from ..authoring.contract import AUTHORING_ACTIONS
+
+        return tuple(AUTHORING_ACTIONS)
+    except Exception:  # noqa: BLE001 — the hint is advisory
+        return ("plan", "compile", "apply", "verify")
+
+
+#: Legacy roots that cannot coexist with a typed ``authoring_request``. Supplying
+#: both is rejected rather than resolved by precedence: a precedence rule means
+#: one of the two payloads is silently ignored, and the caller who wrote it has
+#: no way to tell which.
+#:
+#: The list is every root that DEMONSTRABLY changes the legacy plan on its own —
+#: measured, not guessed. ``name``, ``mode`` and ``conflict_policy`` were missing
+#: from the first version and were silently dropped when paired with a typed
+#: request; ``conflict_policy`` is the consequential one, because a caller who
+#: sets ``"fail"`` at the config root had that safety intent silently replaced by
+#: the typed intent's default ``reuse`` (issue #146 QA, bug #405).
+_LEGACY_SPEC_ROOTS = (
+    "components",
+    "conflict_policy",
+    "integration_spec",
+    "mode",
+    "name",
+    "source_description",
+)
+
+#: Sentinel: the caller supplied ``authoring_request``, but not as an object.
+_AUTHORING_PAYLOAD_MALFORMED = object()
+
+
+def _authoring_payload(cfg: Dict[str, Any]):
+    """The typed request, ``None`` for a legacy request, or the malformed sentinel.
+
+    Selection is by PRESENCE, not by dict-ness. Keying on dict-ness meant a
+    mis-serialised typed request — a JSON string, a list, a scalar — was treated
+    as absent, so the LEGACY planner ran instead and returned ``_success: true``
+    for an empty spec. The caller got a successful-looking plan and no indication
+    their typed request had been discarded (issue #146 QA, bug #404).
+
+    ``None`` is still treated as absent: an explicit null is fairly read as "no
+    typed request", and it is the one non-dict value that says so.
+    """
+    if "authoring_request" not in cfg:
+        return None
+    payload = cfg["authoring_request"]
+    if payload is None:
+        return None
+    if isinstance(payload, dict):
+        return payload
+    return _AUTHORING_PAYLOAD_MALFORMED
+
+
+def _reject_malformed_authoring_request(payload, action: str) -> Dict[str, Any]:
+    """One envelope for a present-but-unparseable typed request."""
+    return {
+        "_success": False,
+        "action": action,
+        "mutation_performed": False,
+        "error_code": INVALID_INPUT,
+        "error": (
+            "config.authoring_request must be a JSON object (an "
+            "AuthoringRequestV1), not a bare string, list, or scalar."
+        ),
+        "hint": (
+            "Fetch the schema with "
+            "get_schema_template(schema_name='AuthoringRequestV1')."
+        ),
+    }
+
+
+def _reject_ambiguous_authoring_request(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Refuse a config carrying BOTH a typed and a legacy authoring root."""
+    conflicting = sorted(root for root in _LEGACY_SPEC_ROOTS if root in cfg)
+    if not conflicting:
+        return None
+    return {
+        "_success": False,
+        "error_code": INVALID_INPUT,
+        "error": (
+            "config carries both 'authoring_request' and the legacy root(s) "
+            f"{conflicting}. They are mutually exclusive."
+        ),
+        "hint": (
+            "Send the typed request alone, or drop 'authoring_request' to use "
+            "the legacy path unchanged."
+        ),
+    }
+
+
+def _authoring_error_envelope(exc, action: str) -> Dict[str, Any]:
+    """One shape for every blocking authoring failure, ordered and value-free."""
+    return {
+        "_success": False,
+        "action": action,
+        "mutation_performed": False,
+        "error_code": exc.code,
+        "error": exc.diagnostics[0].message if exc.diagnostics else exc.code,
+        "authoring_diagnostics": [
+            diagnostic.model_dump(mode="json") for diagnostic in exc.diagnostics
+        ],
+    }
+
+
+def _plan_authoring(
+    boomi_client: Boomi, profile: str, cfg: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Typed read-only plan. Calls no create/update/execute/deploy helper."""
+    from ..authoring.workflow import AuthoringWorkflowError, plan_authoring_request_v1
+    from ..models.authoring_workflow import AuthoringRequestV1
+
+    payload = _authoring_payload(cfg)
+    if payload is _AUTHORING_PAYLOAD_MALFORMED:
+        return _reject_malformed_authoring_request(payload, "plan")
+
+    ambiguous = _reject_ambiguous_authoring_request(cfg)
+    if ambiguous:
+        return ambiguous
+
+    try:
+        request = AuthoringRequestV1.model_validate(payload)
+        result, _internals = plan_authoring_request_v1(
+            request,
+            boomi_client=boomi_client,
+            profile=profile,
+            account_id=_client_account_id(boomi_client),
+        )
+    except AuthoringWorkflowError as exc:
+        return _authoring_error_envelope(exc, "plan")
+
+    return {
+        "_success": True,
+        "action": "plan",
+        "mutation_performed": False,
+        # The legacy echo, for a caller that reads plan output generically.
+        "integration_spec": result.integration_spec_preview.model_dump(mode="json"),
+        "authoring_result": result.model_dump(mode="json"),
+    }
+
+
+def _compile_authoring(
+    boomi_client: Boomi, profile: str, cfg: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Typed read-only compile. Creates nothing, so it returns no build_id."""
+    from ..authoring.workflow import (
+        AuthoringWorkflowError,
+        compile_authoring_request_v1,
+    )
+    from ..models.authoring_workflow import AuthoringRequestV1
+
+    payload = _authoring_payload(cfg)
+    if payload is _AUTHORING_PAYLOAD_MALFORMED:
+        return _reject_malformed_authoring_request(payload, "compile")
+    if payload is None:
+        return {
+            "_success": False,
+            "action": "compile",
+            "mutation_performed": False,
+            "error_code": INVALID_INPUT,
+            "error": "action='compile' requires config.authoring_request.",
+            "hint": (
+                "Fetch the schema with "
+                "get_schema_template(schema_name='AuthoringRequestV1')."
+            ),
+        }
+
+    ambiguous = _reject_ambiguous_authoring_request(cfg)
+    if ambiguous:
+        return ambiguous
+
+    try:
+        request = AuthoringRequestV1.model_validate(payload)
+        result, _internals = compile_authoring_request_v1(
+            request,
+            boomi_client=boomi_client,
+            profile=profile,
+            account_id=_client_account_id(boomi_client),
+        )
+    except AuthoringWorkflowError as exc:
+        return _authoring_error_envelope(exc, "compile")
+
+    return {
+        "_success": True,
+        "action": "compile",
+        "mutation_performed": False,
+        "authoring_result": result.model_dump(mode="json"),
     }
 
 
@@ -7294,7 +7661,12 @@ def build_integration_action(
     action: str,
     config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Route integration builder actions."""
+    """Route integration builder actions.
+
+    Issue #146 adds ``compile`` — additively. ``plan``, ``apply`` and ``verify``
+    keep their existing contracts, and a request with no ``authoring_request``
+    key stays on the legacy branches unchanged.
+    """
     cfg = config or {}
     if not isinstance(cfg, dict):
         return {"_success": False, "error": "config must be a JSON object"}
@@ -7302,7 +7674,19 @@ def build_integration_action(
     try:
         normalized_action = action.strip().lower()
         if normalized_action == "plan":
-            result = _build_plan(boomi_client, cfg)
+            # The typed path is selected ONLY by an explicit authoring_request.
+            # A legacy request is never reinterpreted as a typed one.
+            payload = _authoring_payload(cfg)
+            if payload is _AUTHORING_PAYLOAD_MALFORMED:
+                result = _reject_malformed_authoring_request(payload, "plan")
+            elif payload is not None:
+                result = _plan_authoring(boomi_client, profile, cfg)
+            else:
+                result = _build_plan(boomi_client, cfg)
+            result["profile"] = profile
+            return result
+        if normalized_action == "compile":
+            result = _compile_authoring(boomi_client, profile, cfg)
             result["profile"] = profile
             return result
         if normalized_action == "apply":
@@ -7316,7 +7700,7 @@ def build_integration_action(
         return {
             "_success": False,
             "error": f"Unknown action '{action}'",
-            "hint": "Valid actions are: plan, apply, verify",
+            "hint": "Valid actions are: " + ", ".join(_valid_actions()),
         }
     except ValueError as exc:
         return {

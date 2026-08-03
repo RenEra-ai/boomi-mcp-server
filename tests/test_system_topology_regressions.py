@@ -196,20 +196,74 @@ def test_importing_the_topology_planner_does_not_change_build_integration():
     ]
 
 
-def test_no_existing_category_module_imports_the_topology_planner():
-    """#144 wires itself to nothing; #146 owns the wiring."""
+def test_no_category_module_reaches_the_topology_planner_directly():
+    """#144 wired itself to nothing; #146 owns the wiring — through ONE seam.
+
+    The original form of this pin also forbade the NAME ``SystemTopologySpecV1``
+    in ``categories/``, which was the correct shape while #144 shipped dark: with
+    no consumer at all, any mention was a leak. #146 is the issue that pin named
+    as its successor, and it publishes the topology SCHEMA through
+    ``get_schema_template`` — so the name legitimately appears in ``meta_tools``
+    as a selector.
+
+    What must NOT change is the boundary underneath it: the planner is a compiler
+    internal (ADR-001 §6), and the only module allowed to reach it is
+    ``boomi_mcp.authoring.workflow``. A category module importing it directly
+    would put planning behind an MCP surface with no read-only orchestration in
+    between — which is the coupling this test has always existed to prevent, and
+    is the half that survives.
+    """
     categories = _project_root / "src" / "boomi_mcp" / "categories"
     for path in sorted(categories.rglob("*.py")):
         source = path.read_text()
         assert "compiler.system_topology" not in source, path.name
         assert "plan_system_topology" not in source, path.name
-        assert "SystemTopologySpecV1" not in source, path.name
 
 
-def test_the_server_module_does_not_mention_topology():
+def test_the_set_of_modules_reaching_the_topology_planner_is_pinned():
+    """The consumer set is CLOSED and enumerated, so a new one must be reviewed.
+
+    Derived by scanning the package rather than spot-checking the modules we
+    already know: a pin that only looked at ``authoring/workflow.py`` would stay
+    green while a second, unreviewed consumer appeared elsewhere.
+
+    ``models/__init__.py`` is in the set for a comment explaining why it does
+    NOT export the planner — matched because this scan is textual, and a scan
+    that tried to tell a comment from an import would be a parser with its own
+    blind spots. Keeping it listed is cheaper and cannot go stale silently.
+    """
+    package = _project_root / "src" / "boomi_mcp"
+    importers = set()
+    for path in sorted(package.rglob("*.py")):
+        if "compiler/system_topology" in path.as_posix():
+            continue  # the planner's own package
+        source = path.read_text()
+        if "compiler.system_topology" in source or "plan_system_topology" in source:
+            importers.add(path.relative_to(package).as_posix())
+    assert importers == {
+        # #145: the recipe engine plans topology contributions.
+        "recipes/engine.py",
+        # #145: the registry reads the topology CAPABILITY manifest, not the planner.
+        "recipes/registry.py",
+        # #144: a comment recording why the planner is deliberately not exported.
+        "models/__init__.py",
+        # #146: the one MCP-facing seam. Category modules and server.py reach the
+        # planner only through this, never directly.
+        "authoring/workflow.py",
+    }, importers
+
+
+def test_the_server_module_does_not_reach_the_topology_planner():
+    """``server.py`` may NAME the schema selector; it may not reach the planner.
+
+    ``SystemTopologySpecV1`` is now a documented ``get_schema_template``
+    selector (#146), so the wrapper docstring names it. The planner stays
+    unreachable from the tool layer.
+    """
     source = (_project_root / "server.py").read_text()
     assert "system_topology" not in source
-    assert "SystemTopology" not in source
+    assert "plan_system_topology" not in source
+    assert "TopologyResolutionContextV1" not in source
 
 
 # ---------------------------------------------------------------------------

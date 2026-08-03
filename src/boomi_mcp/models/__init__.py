@@ -163,6 +163,43 @@ from .recipe_contributions import (
     validate_contribution_object,
 )
 
+# MCP authoring contracts (issue #146). Same rule as the three families above:
+# this is the authored-CONTRACT surface, so the request/result models and their
+# schema helpers are exported and the ORCHESTRATION — boomi_mcp.authoring, which
+# resolves references, runs recipes and calls the compiler — deliberately is NOT.
+from .authoring_workflow import (
+    AUTHORING_ACTIONS,
+    AUTHORING_CONTRACT_VERSION,
+    AUTHORING_INTENT_KINDS,
+    ArtifactFingerprintV1,
+    AuthoringBuildProvenanceV1,
+    AuthoringCompileResultV1,
+    AuthoringDiagnosticV1,
+    AuthoringPlanResultV1,
+    AuthoringRequestV1,
+    AuthoringRevisionBindingV1,
+    CapabilityGapV1,
+    ComponentDependencyEdgeV1,
+    DecisionResolutionV1,
+    IntegrationSpecAuthoringIntentV1,
+    LiveDeploymentComparisonV1,
+    ProcessCfgSummaryV1,
+    ProcessIRAuthoringIntentV1,
+    RecipeAuthoringIntentV1,
+    RecipeInvocationRequestV1,
+    RequiredDecisionV1,
+    ResolvedReferenceSummaryV1,
+    TopologyRelationSummaryV1,
+    ValidationReportSummaryV1,
+    authoring_build_provenance_v1_json_schema,
+    authoring_compile_result_v1_json_schema,
+    authoring_plan_result_v1_json_schema,
+    authoring_request_v1_json_schema,
+    authoring_revision_binding_v1_json_schema,
+    canonical_authoring_json,
+    sort_authoring_diagnostics,
+)
+
 __all__ = [
     'IntegrationSpecV1',
     'IntegrationComponentSpec',
@@ -308,4 +345,37 @@ __all__ = [
     'recipe_contribution_v1_json_schema',
     'scan_forbidden_recipe_shape',
     'validate_contribution_object',
+    # MCP authoring contracts (issue #146) — the typed request, the two
+    # read-only results, and their schema helpers. The boomi_mcp.authoring
+    # orchestration package is deliberately not exported here.
+    'AUTHORING_ACTIONS',
+    'AUTHORING_CONTRACT_VERSION',
+    'AUTHORING_INTENT_KINDS',
+    'ArtifactFingerprintV1',
+    'AuthoringBuildProvenanceV1',
+    'AuthoringCompileResultV1',
+    'AuthoringDiagnosticV1',
+    'AuthoringPlanResultV1',
+    'AuthoringRequestV1',
+    'AuthoringRevisionBindingV1',
+    'CapabilityGapV1',
+    'ComponentDependencyEdgeV1',
+    'DecisionResolutionV1',
+    'IntegrationSpecAuthoringIntentV1',
+    'LiveDeploymentComparisonV1',
+    'ProcessCfgSummaryV1',
+    'ProcessIRAuthoringIntentV1',
+    'RecipeAuthoringIntentV1',
+    'RecipeInvocationRequestV1',
+    'RequiredDecisionV1',
+    'ResolvedReferenceSummaryV1',
+    'TopologyRelationSummaryV1',
+    'ValidationReportSummaryV1',
+    'authoring_build_provenance_v1_json_schema',
+    'authoring_compile_result_v1_json_schema',
+    'authoring_plan_result_v1_json_schema',
+    'authoring_request_v1_json_schema',
+    'authoring_revision_binding_v1_json_schema',
+    'canonical_authoring_json',
+    'sort_authoring_diagnostics',
 ]

@@ -216,6 +216,12 @@ Summaries and inspection views (including the derived `spec.pipeline` view of §
 
 **The "two things" above are the process-compiler inputs; structured (recipe) authoring adds typed contributions to other authorities.** A composition recipe (#145) does not widen the **process-compiler** input surface: it emits closed, versioned **typed contributions** — `ProcessIRPatch`, `ComponentContribution`, `SystemTopologyPatch`, and `ConstraintRequirement` — each normalized and validated *exactly as direct authoring* and routed to the authority that owns it. Of the four, only the `ProcessIRPatch` targets the process AST — but it is **not itself a process-compiler input**: a patch carries closed operations and targets that first pass through #145's deterministic **composition/conflict phase**, which produces a validated **`ProcessIRV1` root**; *that root* (the two primitives above — **semantic nodes**, §3's convergent lanes) is the compiler input. The compiler never ingests patch operations directly — that would be a second patch language — so §3's one-root boundary holds: composition happens **before** the compiler boundary, exactly as adapters normalize legacy configs into one root before it. The other three contributions author to **their own authorities**, not the process compiler: a `ComponentContribution` feeds the `IntegrationSpecV1` component/materialization plan and its compiler-produced **ComponentPlan** (§3); a `SystemTopologyPatch` feeds the capability-gated `SystemTopologySpecV1` planning authority (#144), which never feeds the process compiler; a `ConstraintRequirement` is a requirement evaluated by the canonical validators — a recipe cannot mark its own violation safe. These are **not** reducible to "semantic nodes + opaque references" — component-plan data and topology relations are distinct authored objects. What holds **across all four** — the invariant §6 actually enforces — is that **none authors a compiler internal** (no CFG edge, stable/shape ID, layout, or XML view), and each passes the same strict validators/compiler as direct input. #145 is therefore compatible with §6: it neither widens the process-compiler input surface nor lets any contribution author a compiler-owned form.
 
+**Implementation note (#146, M12.11).** The canonical ProcessIR authority is now exposed through the **existing** `build_integration` lifecycle; no sixth tool is introduced. `plan_integration_design` remains advisory and MUST NOT interpret prose as executable intent. `build_integration(action="plan")` is the read-only semantic and component-planning phase. `build_integration(action="compile")` — additive to the frozen `plan|apply|verify` set — is the distinct read-only canonical compilation phase; it returns no `build_id`, because it creates nothing. `build_integration(action="apply")` is the first phase permitted to mutate Boomi, and `action="verify"` remains read-only live verification.
+
+`IntegrationSpecV1` is the compiler's component/materialization plan and is **not** a second semantic authority: process semantics remain authoritative in `ProcessIRV1`, while topology relations and typed recipe contributions constrain or contribute to compilation without replacing that authority. Plan and compile results bind the normalized semantic intent to the public schema revision, capability revision, compiler revision, an opaque account-scope hash, the resolved-reference evidence, the required user decisions, and the deterministic artifact fingerprints. A typed apply **reproduces and compares that binding before its first mutation** — there is no server-side plan cache, because a cached token is authoritative only on the instance that minted it. A capability mismatch, stale plan, missing decision, or fatal validation result terminates before mutation, and a capability mismatch takes precedence over staleness (see §7). Legacy `IntegrationSpec` plan/apply/verify requests remain supported with no binding, and are never reinterpreted as typed requests.
+
+One capability is refused rather than omitted, and the refusal follows from this section: a **direct `ProcessIRV1` intent can be planned and compiled but not applied.** Process materialization emits XML from the component plan, so applying one would create an artifact the compile hash does not describe — the compiler's own output stops at the deterministic emission plan, and promoting its emitter to a production component writer is a §9 byte-parity cutover owned by a separate issue. Publishing `authoring.typed_apply.process_materialization` as `unsupported` keeps the binding's claim true; a silent divergence between what was compiled and what was built would not. Public terminology distinguishes `pipeline_stages`, `process_cfg`, `component_dependencies`, and `topology_relations`; the frozen `IntegrationSpecV1.flows` and `flow_sequence` names are unchanged (§9). See [AUTHORING_WORKFLOW_V1](AUTHORING_WORKFLOW_V1.md).
+
 ## 7. Error-Family Ownership (Reserved)
 
 The following ten error-code families are **reserved by this ADR — no runtime codes ship in #135**. Each family is introduced across one or more owning issues; the *introducers* below are taken from each child issue's declared contract (a family's codes are introduced by every issue listed, not a single first-owner). **#146 does not first-own any of the eight core `PROCESS_IR_*` / `TOPOLOGY_*` / `LEGACY_ADAPTER_*` / `RECIPE_*` families** — it surfaces those established diagnostics through its MCP authoring/planning/compile/verify contracts — but it **does** own its own MCP-surface `AUTHORING_*` family (its declared taxonomy, e.g. `AUTHORING_SCHEMA_VERSION_UNAVAILABLE`, `AUTHORING_COMPILE_BLOCKED`):
@@ -258,6 +264,25 @@ had — the generic codes cover only the roles those do not. Semantic authority 
 TRUSTED CAPABILITY METADATA (compiler context, never authored fields — §6); the validation output is
 `ValidationReportV1`; and emitted-XML verification remains a separate post-emission oracle. See
 [PROCESS_IR_SEMANTIC_VALIDATION_V1](./PROCESS_IR_SEMANTIC_VALIDATION_V1.md).
+
+**Implementation note (#146, M12.11).** #146 registers the `AUTHORING_*` family reserved above, with
+exactly the seven codes this section names: `AUTHORING_SCHEMA_VERSION_UNAVAILABLE`,
+`AUTHORING_CAPABILITY_REVISION_MISMATCH`, `AUTHORING_LIVE_DEPLOYMENT_DRIFT`,
+`AUTHORING_REQUIRED_DECISION_MISSING`, `AUTHORING_COMPILE_BLOCKED`, `AUTHORING_PLAN_STALE`,
+`AUTHORING_APPLY_VALIDATION_REQUIRED` — all `category="authoring_surface"`, `retryable=False`,
+`owner="#146"`. #146 introduces **no** new code in any other family: it surfaces the established
+ProcessIR, topology and recipe diagnostics through its MCP contracts rather than re-diagnosing them,
+carrying their codes verbatim as value-free `cause_codes` on an `AUTHORING_*` diagnostic. That keeps
+each canonical taxonomy authoritative about its own domain while still telling the caller which
+PHASE refused. Ownership is asserted as the same biconditional #144 and #145 carry — every code above
+is owned by #146, and every `AUTHORING_`-prefixed key in `ERROR_TAXONOMY` is owned by #146.
+
+Two precedence rules are load-bearing. `AUTHORING_CAPABILITY_REVISION_MISMATCH` **outranks**
+`AUTHORING_PLAN_STALE`: when the server's own contract moved, every downstream hash is expected to
+differ, and reporting staleness would send the caller to re-plan against a surface they have not
+rediscovered. `AUTHORING_LIVE_DEPLOYMENT_DRIFT` reports component drift **separately** from revision
+skew, because an upgraded server and an out-of-band component edit need different remedies. See
+[AUTHORING_WORKFLOW_V1](AUTHORING_WORKFLOW_V1.md).
 
 ## 8. Capability and Non-Goal Matrix
 

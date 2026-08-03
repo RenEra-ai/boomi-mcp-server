@@ -6122,6 +6122,21 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
     }
 
 
+def _authoring_actions() -> tuple:
+    """The ``build_integration`` action set, from the one contract registry.
+
+    Falls back to the legacy three only if the contract cannot be imported: a
+    catalog that advertised ``compile`` on a runtime whose dispatcher could not
+    serve it would be worse than one that under-reports.
+    """
+    try:
+        from ..authoring.contract import AUTHORING_ACTIONS
+
+        return tuple(AUTHORING_ACTIONS)
+    except Exception:  # noqa: BLE001 — the catalog is advisory here
+        return ("plan", "apply", "verify")
+
+
 def _valid_schema_names() -> list:
     """All accepted get_schema_template(schema_name=...) values.
 
@@ -6143,7 +6158,20 @@ def _valid_schema_names() -> list:
         # Issue #145 M12.10 — typed recipe contributions.
         "recipe_contributions",
         "recipe_registry",
+        # Issue #146 M12.11 — the typed MCP authoring surface. Sourced from the
+        # ONE contract registry rather than listed here, so this catalog and the
+        # dispatcher below cannot advertise different selectors.
     ]
+    try:
+        # Call-time import, same constraint as the archetype/recipe discovery
+        # below: the authoring contract reaches the pattern registry, which
+        # imports categories.components.builders.
+        from ..authoring.contract import authoring_schema_selectors
+
+        names += list(authoring_schema_selectors())
+        names.append("authoring_workflow")
+    except Exception:  # noqa: BLE001 — discovery is advisory here
+        pass
     names += [f"workflow:{key}" for key in _authoring_workflow_sequences()]
     # design_doctrine / account_governance are stdlib-only static modules —
     # import-safe, so no try/except guard (unlike the archetype registry
@@ -6552,11 +6580,185 @@ def _recipe_descriptor_schema(reference: str) -> Dict[str, Any]:
     return payload
 
 
+def _authoring_contract_schema(schema_name: str) -> Optional[Dict[str, Any]]:
+    """Serve one #146 authoring selector from the runtime models themselves.
+
+    Generated, never hand-copied: a hand-written schema is a second source of
+    truth for what the wrapper enforces, and the two drift silently. Accepts an
+    optional ``@<version>`` suffix; an unknown version is
+    ``AUTHORING_SCHEMA_VERSION_UNAVAILABLE`` with the served versions listed, and
+    a bare selector stays valid exactly as before.
+    """
+    from ..authoring.contract import (
+        get_authoring_revisions,
+        schema_builder,
+        schema_version_for,
+        supported_schema_versions,
+    )
+    from ..authoring.revisions import sha256_fingerprint
+    from ..errors import AUTHORING_SCHEMA_VERSION_UNAVAILABLE
+
+    selector, _, requested_version = schema_name.partition("@")
+    builder = schema_builder(selector)
+    if builder is None:
+        return None
+
+    served_version = schema_version_for(selector)
+    if requested_version and requested_version != served_version:
+        return {
+            "_success": False,
+            "error_code": AUTHORING_SCHEMA_VERSION_UNAVAILABLE,
+            "schema_name": schema_name,
+            "requested_version": requested_version,
+            "supported_versions": list(supported_schema_versions(selector)),
+            "error": (
+                f"Schema '{selector}' is not served at version "
+                f"'{requested_version}' by this server."
+            ),
+            "suggestion": (
+                "Call list_capabilities() to discover the served schema and "
+                "capability revisions, then request a supported version."
+            ),
+        }
+
+    revisions = get_authoring_revisions()
+    json_schema = builder()
+    return {
+        "_success": True,
+        "schema_name": selector,
+        "surface": "MCP authoring contract (issue #146 M12.11)",
+        "read_only": True,
+        "raw_xml_exposed": False,
+        "boomi_mutation": False,
+        "schema_version": served_version,
+        "schema_hash": sha256_fingerprint(json_schema),
+        "revision_binding": revisions,
+        "json_schema": json_schema,
+    }
+
+
+def _authoring_workflow_schema() -> Dict[str, Any]:
+    """The eight-step typed authoring sequence, and what each phase may do.
+
+    Published as a schema selector because the phase boundary is the contract
+    this issue adds: which calls may mutate is not a detail a caller should have
+    to infer from a tool name.
+    """
+    from ..authoring.contract import build_authoring_contract_manifest
+
+    manifest = build_authoring_contract_manifest()
+    return {
+        "_success": True,
+        "schema_name": "authoring_workflow",
+        "surface": "MCP authoring workflow (issue #146 M12.11)",
+        "read_only": True,
+        "raw_xml_exposed": False,
+        "boomi_mutation": False,
+        "revision_binding": {
+            "contract_version": manifest["contract_version"],
+            "schema_revision": manifest["schema_revision"],
+            "capability_revision": manifest["capability_revision"],
+            "compiler_revision": manifest["compiler_revision"],
+        },
+        "phases": [
+            {
+                "step": 1,
+                "call": "list_capabilities()",
+                "purpose": "Discover served actions, selectors and revisions.",
+                "mutates_boomi": False,
+            },
+            {
+                "step": 2,
+                "call": "get_schema_template(schema_name='AuthoringRequestV1')",
+                "purpose": "Obtain the exact strict request schema.",
+                "mutates_boomi": False,
+            },
+            {
+                "step": 3,
+                "call": "plan_integration_design(...)",
+                "purpose": (
+                    "ADVISORY doctrine, gaps and typed next steps. Prose is "
+                    "never compiled or executed."
+                ),
+                "mutates_boomi": False,
+            },
+            {
+                "step": 4,
+                "call": "build_from_archetype(...) or author ProcessIR / recipes",
+                "purpose": "Produce typed semantic intent.",
+                "mutates_boomi": False,
+            },
+            {
+                "step": 5,
+                "call": "build_integration(action='plan', config={'authoring_request': ...})",
+                "purpose": (
+                    "Semantic validation, resolved references, gaps, decisions, "
+                    "and the IntegrationSpecV1 ComponentPlan preview."
+                ),
+                "mutates_boomi": False,
+            },
+            {
+                "step": 6,
+                "call": "build_integration(action='compile', config={'authoring_request': ...})",
+                "purpose": (
+                    "Canonical compilation: normalized intent, deterministic "
+                    "artifact fingerprints, and the compile hash. Returns no "
+                    "build_id, because no build exists."
+                ),
+                "mutates_boomi": False,
+            },
+            {
+                "step": 7,
+                "call": "build_integration(action='apply', ...)",
+                "purpose": (
+                    "The FIRST phase permitted to mutate. A typed apply must "
+                    "carry expected_capability_revision and expected_compile_hash; "
+                    "the server recomputes and compares both before its first write."
+                ),
+                "mutates_boomi": True,
+            },
+            {
+                "step": 8,
+                "call": "build_integration(action='verify', config={'build_id': ...})",
+                "purpose": (
+                    "Component/dependency verification, plus compiler and "
+                    "artifact provenance for typed builds."
+                ),
+                "mutates_boomi": False,
+            },
+        ],
+        "actions": list(manifest["actions"]),
+        "intent_kinds": list(manifest["intent_kinds"]),
+        "terminology": {
+            "pipeline_stages": "The inert PipelineSpec echo (ADR-001 §5).",
+            "process_cfg": "The compiler's semantic control-flow graph.",
+            "component_dependencies": "ComponentPlan materialization edges.",
+            "topology_relations": "SystemTopologySpecV1 relations.",
+        },
+        "authoring_note": (
+            "Plan and compile perform ZERO remote mutation. Apply cannot proceed "
+            "from a fatal validation report or a stale/mismatched revision "
+            "binding. Legacy plan/apply/verify requests are unchanged and need "
+            "no binding."
+        ),
+    }
+
+
 def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
     """Dispatch get_schema_template(schema_name=...) requests (issue #10).
 
     Read-only reference data — never calls Boomi, never emits raw XML.
     """
+    if schema_name == "authoring_workflow":
+        return _authoring_workflow_schema()
+
+    # Issue #146 M12.11. Checked before the named selectors below so an
+    # "@version" suffix reaches the version check rather than falling through to
+    # the unknown-schema envelope.
+    _authoring = _authoring_contract_schema(schema_name)
+    if _authoring is not None:
+        return _authoring
+
     if schema_name == "recipe_contributions":
         return _recipe_contributions_schema()
 
@@ -8821,6 +9023,14 @@ PLAN_INTEGRATION_DESIGN_OUTPUT_SCHEMA: Dict[str, Any] = {
         "error": {"type": "string"},
         "error_code": {"type": "string"},
         "valid_archetypes": {"type": "array", "items": {"type": "string"}},
+        # Issue #146: ADVISORY typed hand-off. Deliberately NOT in `required` —
+        # adding a required property is a breaking change for every existing
+        # caller validating against this schema, and neither field is something
+        # a caller must have.
+        "revision_binding": {"type": "object", "additionalProperties": True},
+        "typed_next_steps": {
+            "type": "array", "items": {"$ref": "#/$defs/typed_next_step"}
+        },
     },
     "required": [
         "_success", "tool", "mode", "read_only", "boomi_mutation",
@@ -8898,6 +9108,20 @@ PLAN_INTEGRATION_DESIGN_OUTPUT_SCHEMA: Dict[str, Any] = {
                 "arguments": {"type": "object", "additionalProperties": True},
             },
             "required": ["tool", "purpose", "arguments"],
+        },
+        # Issue #146: a POINTER to the typed surface — a tool, an action and a
+        # schema selector. Never a payload: this tool is advisory, and handing
+        # back executable material is the boundary it exists to hold.
+        "typed_next_step": {
+            "type": "object",
+            "properties": {
+                "order": {"type": "integer"},
+                "tool": {"type": "string"},
+                "action": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                "schema_selector": {"type": "string"},
+                "why": {"type": "string"},
+            },
+            "required": ["order", "tool", "action", "schema_selector", "why"],
         },
     },
 }
@@ -9363,10 +9587,65 @@ def plan_integration_design_action(
         except Exception:  # noqa: BLE001 — advisory, never load-bearing
             recommended_recipes = []
 
+    # --- Typed hand-off (issue #146) -----------------------------------------
+    # ADVISORY ONLY. This names the exact schema selector and action a caller
+    # should use next; it does NOT build an AuthoringRequestV1, because this
+    # tool's whole contract is that prose is never turned into executable
+    # intent. Deterministically ordered, and additive: nothing here is in the
+    # output schema's `required` list, so existing callers are unaffected.
+    try:
+        from ..authoring.contract import get_authoring_revisions
+
+        revision_binding = get_authoring_revisions()
+    except Exception:  # noqa: BLE001 — advisory block, never fatal
+        revision_binding = {"status": "unavailable"}
+
+    typed_next_steps = [
+        {
+            "order": 1,
+            "tool": "get_schema_template",
+            "action": None,
+            "schema_selector": "AuthoringRequestV1",
+            "why": "Fetch the exact strict schema for typed authoring intent.",
+        },
+        {
+            "order": 2,
+            "tool": "build_integration",
+            "action": "plan",
+            "schema_selector": "AuthoringPlanResultV1",
+            "why": (
+                "Validate the typed intent and preview its IntegrationSpecV1 "
+                "ComponentPlan. Performs zero remote mutation."
+            ),
+        },
+        {
+            "order": 3,
+            "tool": "build_integration",
+            "action": "compile",
+            "schema_selector": "AuthoringCompileResultV1",
+            "why": (
+                "Canonically compile and obtain the compile hash to bind apply "
+                "to. Performs zero remote mutation."
+            ),
+        },
+        {
+            "order": 4,
+            "tool": "build_integration",
+            "action": "apply",
+            "schema_selector": "AuthoringRevisionBindingV1",
+            "why": (
+                "Materialize, carrying expected_capability_revision and "
+                "expected_compile_hash. This is the first mutating phase."
+            ),
+        },
+    ]
+
     return {
         "_success": True,
         "tool": "plan_integration_design",
         "mode": mode,
+        "revision_binding": revision_binding,
+        "typed_next_steps": typed_next_steps,
         "recommended_recipes": recommended_recipes,
         "archetype": archetype if archetype_provided else None,
         "intent_flags": flags,
@@ -9390,7 +9669,10 @@ def plan_integration_design_action(
     }
 
 
-def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
+def list_capabilities_action(
+    available_tools: set = None,
+    expected_capability_revision: str = None,
+) -> Dict[str, Any]:
     """Return full catalog of MCP tools, actions, and workflows.
 
     Zero API calls — returns static metadata about this MCP server.
@@ -9400,6 +9682,12 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             When provided, the returned catalog is filtered to only tools actually
             registered in the current runtime (e.g., local-only credential tools
             are excluded in production mode).
+        expected_capability_revision: Optional revision a caller believes this
+            server is running (issue #146). Supplying it turns
+            ``authoring_contract.capability_comparison`` into a real comparison;
+            omitting it yields ``not_requested`` — never a claim of parity the
+            caller did not ask for. The live catalog is returned either way, so a
+            mismatch is diagnosable rather than merely reported.
     """
 
     tools = {
@@ -10126,12 +10414,25 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "package -> deploy -> bind the runtime (then optional schedule/test) in one call. "
                 "Use orchestrate_deploy(dry_run=true) to preview that deploy plan, dry_run=false to execute."
             ),
-            "actions": ["plan", "apply", "verify"],
+            # Sourced from the ONE contract registry (issue #146) so this
+            # catalog, the dispatcher, the workflow schema and the wrapper
+            # docstring cannot advertise different action lists — which is the
+            # class of drift this milestone exists to close.
+            "actions": list(_authoring_actions()),
             "read_only": False,
             "parameters": {
                 "profile": "str (required)",
-                "action": "str (required) — plan | apply | verify",
-                "config": "JSON str (optional) — IntegrationSpecV1 payload and execution options",
+                "action": "str (required) — plan | compile | apply | verify",
+                "config": (
+                    "JSON str (optional) — IntegrationSpecV1 payload and execution "
+                    "options. Issue #146 adds the opt-in typed authoring keys: "
+                    "'authoring_request' (an AuthoringRequestV1 — get its exact "
+                    "schema from get_schema_template(schema_name='AuthoringRequestV1')), "
+                    "plus 'expected_capability_revision', 'expected_plan_hash' and "
+                    "'expected_compile_hash'. A typed apply REQUIRES "
+                    "expected_capability_revision and expected_compile_hash; "
+                    "legacy requests need none of them and are unchanged."
+                ),
             },
             "authority_versions": _AUTHORITY_VERSIONS,
             "examples": [
@@ -10911,11 +11212,30 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             "status": "unavailable",
         }
 
+    # --- MCP authoring contract (issue #146 — revisions + honest drift) ---
+    # The live service once reported four archetypes while the checkout had six,
+    # and no client could tell. This block publishes the runtime's own archetype
+    # list, served selectors, action set and revisions, so a caller can COMPARE
+    # rather than assume. Same best-effort discipline as the blocks above.
+    try:
+        from ..authoring.contract import (
+            build_authoring_contract_manifest,
+            compare_capability_revision,
+        )
+
+        authoring_contract = dict(build_authoring_contract_manifest())
+        authoring_contract["capability_comparison"] = compare_capability_revision(
+            expected_capability_revision
+        )
+    except Exception:  # noqa: BLE001 — the catalog is advisory here
+        authoring_contract = {"manifest_version": "1", "status": "unavailable"}
+
     return {
         "_success": True,
         "server_name": "Boomi MCP Server",
         "server_version": "1.3",
         "recipe_registry": recipe_registry,
+        "authoring_contract": authoring_contract,
         "total_tools": len(tools),
         "implemented_count": len(implemented),
         "not_implemented_count": len(not_implemented),

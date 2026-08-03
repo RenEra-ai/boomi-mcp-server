@@ -1650,3 +1650,94 @@ Census: **9 new, 0 re-homed, 0 delegated, 0 unchanged.**
 - `tests/test_recipe_validation_gate.py::test_compile_is_always_called_with_no_validation_policy`
 - `tests/test_recipe_validation_gate.py::test_a_blocking_planned_step_produces_zero_execute_component_calls`
 - `tests/patterns/test_recipe_preset_parity.py::test_l4_legacy_cache_arm_still_requires_its_exemption`
+
+---
+
+# 10. Issue #146 (M12.11) — MCP authoring, planning, compile and verify surfaces
+
+## 10.1 Public surfaces touched
+
+| Surface | Change | Compatibility |
+|---|---|---|
+| `server.py:build_integration` | docstring only | signature **byte-identical** — `(profile, action, config=None)`. The typed input rides inside the existing `config` JSON precisely so this stays true. |
+| `server.py:list_capabilities` | one trailing optional param `expected_capability_revision=None` | additive; a no-argument call is unchanged |
+| `server.py:get_schema_template` | docstring only | selectors are additive |
+| `server.py:plan_integration_design` | unchanged signature | two additive response fields, neither `required` |
+| `server.py:build_from_archetype` | unchanged | — |
+| `build_integration_action` | new `compile` branch; typed `plan`/`apply` branches | selected **only** by an explicit `config.authoring_request`; a legacy request never enters the typed path |
+
+## 10.2 Frozen behavior preserved
+
+- `plan`, `apply`, `verify` keep their existing request and response contracts. `compile` is additive.
+- `_build_plan`, `_apply_plan` and `_verify_build` legacy bodies are untouched for legacy requests.
+- Legacy build records keep exactly their five original keys (`created_at`, `profile`, `spec`,
+  `results`, `execution_order`). Typed builds add one optional `authoring` key.
+- `verify` gains `authoring_provenance` **only** for typed builds; the key is ABSENT (not null) for
+  legacy builds, so no existing assertion changes.
+- `PLAN_INTEGRATION_DESIGN_OUTPUT_SCHEMA["required"]` is unchanged — the two new properties are
+  optional, because adding a required property is a breaking change for every validating caller.
+- Existing `get_schema_template` selectors return structurally identical payloads; the new
+  `schema_hash` / `revision_binding` metadata rides on **new** selectors only.
+
+## 10.3 New selectors and capabilities
+
+Selectors: `ProcessIRV1`, `SystemTopologySpecV1`, `validation_report`, `AuthoringRequestV1`,
+`AuthoringPlanResultV1`, `AuthoringCompileResultV1`, `AuthoringRevisionBindingV1`,
+`AuthoringBuildProvenanceV1`, `authoring_workflow`. An optional `@<version>` suffix is accepted; a
+bare selector stays valid.
+
+Capabilities published as `unsupported` rather than omitted (an absent capability is
+indistinguishable from one the client forgot to ask about):
+
+| Capability | Reason code |
+|---|---|
+| `authoring.system_topology.deploy` | `TOPOLOGY_APPLY_NOT_SUPPORTED` |
+| `authoring.typed_apply.process_materialization` | `PROCESS_KIND_REQUIRED` |
+
+## 10.4 Dark-shipping pins retired
+
+`SystemTopologySpecV1` shipped DARK in #144 behind two pins whose own docstring named this issue as
+their successor (*"#144 wires itself to nothing; #146 owns the wiring"*). #146 retires the half that
+has done its job and **keeps the half that has not**: category modules and `server.py` may now NAME
+the topology schema selector, but must still not reach the planner. The consumer set is now pinned as
+a closed, enumerated list (`recipes/engine.py`, `recipes/registry.py`, `models/__init__.py`,
+`authoring/workflow.py`) so a new unreviewed consumer fails.
+
+## 10.5 Error-code census
+
+| Code | Status |
+|---|---|
+| `AUTHORING_SCHEMA_VERSION_UNAVAILABLE` | new |
+| `AUTHORING_CAPABILITY_REVISION_MISMATCH` | new |
+| `AUTHORING_LIVE_DEPLOYMENT_DRIFT` | new |
+| `AUTHORING_REQUIRED_DECISION_MISSING` | new |
+| `AUTHORING_COMPILE_BLOCKED` | new |
+| `AUTHORING_PLAN_STALE` | new |
+| `AUTHORING_APPLY_VALIDATION_REQUIRED` | new |
+
+Census: **7 new, 0 re-homed, 0 delegated, 0 unchanged.** #146 introduces no code in any other
+family — canonical ProcessIR / topology / recipe codes travel verbatim as value-free `cause_codes`.
+
+## 10.6 Known limits recorded rather than hidden
+
+- A **direct `ProcessIRV1` intent is plan/compile-only.** Process materialization emits XML from the
+  component plan, so applying one would create an artifact the compile hash does not describe.
+  Refused by intent kind, reported as a capability gap at plan time.
+- Artifact fingerprints describe the canonical **emission plan**, not emitted XML. Live drift is a
+  separate comparison of apply-time vs verify-time live component XML.
+- `_BUILD_REGISTRY` remains session-scoped; provenance inherits that limit. The binding does not
+  depend on it — apply recomputes rather than looking anything up.
+- An unresolvable `$ref` passes semantic validation (reference resolution is not one of its phases)
+  and is caught at compile. A typed apply runs through compile, so it cannot reach a mutation.
+
+## 10.7 Evidence
+
+- `tests/test_m12_11_wrapper_contracts.py` — signature freeze + four-surface action parity
+- `tests/test_m12_11_schema_templates.py` — served schema == runtime model schema, version selection
+- `tests/test_m12_11_capabilities.py` — six-archetype reporting, `not_requested` honesty, simulated
+  four-vs-six mismatch
+- `tests/test_m12_11_authoring_plan.py` — zero-mutation spies, hash stability under key reordering
+- `tests/test_m12_11_authoring_compile.py` — #143 gate not bypassable, no XML in any response
+- `tests/test_m12_11_revision_binding.py` — every stale/mismatched/replayed binding refused, zero mutation
+- `tests/test_m12_11_apply_verify.py` — preflight-before-materializer ordering, provenance, drift
+- `tests/test_m12_11_diagnostics_security.py` — ordering, secret exclusion, terminology

@@ -328,6 +328,27 @@ RECIPE_CONSTRAINT_FAILED = "RECIPE_CONSTRAINT_FAILED"
 RECIPE_OUTPUT_NONDETERMINISTIC = "RECIPE_OUTPUT_NONDETERMINISTIC"
 RECIPE_REQUEST_INVALID = "RECIPE_REQUEST_INVALID"
 
+# --- MCP authoring surface (M12.11 / issue #146; ADR-001 §7) ------------------
+# #146 is the SOLE introducer of the ``AUTHORING_*`` family, so the guard test
+# asserts the same biconditional #144 and #145 carry: every code below is owned
+# by #146 AND every ``AUTHORING_``-prefixed key in the taxonomy is owned by #146.
+#
+# Every one of these blames the MCP AUTHORING SURFACE — the contract a caller
+# addressed, the revision it bound to, or the phase ordering it skipped. None of
+# them replaces a canonical validator's own code: when the strict ProcessIR
+# compiler, the topology planner, or the recipe layer rejects an artifact, the
+# authoring surface reports ``AUTHORING_COMPILE_BLOCKED`` and carries the
+# underlying canonical codes as value-free causative diagnostics. The canonical
+# taxonomies stay authoritative about their own domains while the caller still
+# learns which phase it must re-run.
+AUTHORING_SCHEMA_VERSION_UNAVAILABLE = "AUTHORING_SCHEMA_VERSION_UNAVAILABLE"
+AUTHORING_CAPABILITY_REVISION_MISMATCH = "AUTHORING_CAPABILITY_REVISION_MISMATCH"
+AUTHORING_LIVE_DEPLOYMENT_DRIFT = "AUTHORING_LIVE_DEPLOYMENT_DRIFT"
+AUTHORING_REQUIRED_DECISION_MISSING = "AUTHORING_REQUIRED_DECISION_MISSING"
+AUTHORING_COMPILE_BLOCKED = "AUTHORING_COMPILE_BLOCKED"
+AUTHORING_PLAN_STALE = "AUTHORING_PLAN_STALE"
+AUTHORING_APPLY_VALIDATION_REQUIRED = "AUTHORING_APPLY_VALIDATION_REQUIRED"
+
 
 @dataclass(frozen=True)
 class ErrorCodeSpec:
@@ -1355,6 +1376,76 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "produced different canonical contributions."
             ),
             owner="#145",
+        ),
+        ErrorCodeSpec(
+            code=AUTHORING_SCHEMA_VERSION_UNAVAILABLE,
+            category="authoring_surface",
+            retryable=False,
+            summary=(
+                "A known schema selector was requested at a version this server "
+                "does not serve, or a typed payload declared one."
+            ),
+            owner="#146",
+        ),
+        ErrorCodeSpec(
+            code=AUTHORING_CAPABILITY_REVISION_MISMATCH,
+            category="authoring_surface",
+            retryable=False,
+            summary=(
+                "The caller's expected capability revision differs from the "
+                "running service's; rediscover before authoring."
+            ),
+            owner="#146",
+        ),
+        ErrorCodeSpec(
+            code=AUTHORING_LIVE_DEPLOYMENT_DRIFT,
+            category="authoring_surface",
+            retryable=False,
+            summary=(
+                "A build-owned live component no longer matches the fingerprint "
+                "recorded when the build applied it."
+            ),
+            owner="#146",
+        ),
+        ErrorCodeSpec(
+            code=AUTHORING_REQUIRED_DECISION_MISSING,
+            category="authoring_surface",
+            retryable=False,
+            summary=(
+                "A required user decision has no resolution, or names an option "
+                "the decision does not offer."
+            ),
+            owner="#146",
+        ),
+        ErrorCodeSpec(
+            code=AUTHORING_COMPILE_BLOCKED,
+            category="authoring_surface",
+            retryable=False,
+            summary=(
+                "Canonical compilation refused the typed intent; the causative "
+                "canonical diagnostics are carried value-free."
+            ),
+            owner="#146",
+        ),
+        ErrorCodeSpec(
+            code=AUTHORING_PLAN_STALE,
+            category="authoring_surface",
+            retryable=False,
+            summary=(
+                "The recomputed plan hash differs from the one the caller bound "
+                "to; re-plan and recompile."
+            ),
+            owner="#146",
+        ),
+        ErrorCodeSpec(
+            code=AUTHORING_APPLY_VALIDATION_REQUIRED,
+            category="authoring_surface",
+            retryable=False,
+            summary=(
+                "A typed apply omitted or could not reproduce its compile "
+                "binding; nothing was mutated."
+            ),
+            owner="#146",
         ),
     )
 }

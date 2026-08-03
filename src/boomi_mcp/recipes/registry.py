@@ -169,6 +169,9 @@ _ENTRY_KINDS_WITH_EXECUTOR = frozenset({"executable_recipe", "constraint_only"})
 _IMPORT_PREFIX = __name__.rsplit(".recipes.registry", 1)[0]
 
 RECIPE_LAYER_MODULES: Tuple[str, ...] = (
+    # The MCP authoring surface (#146) invokes the engine directly for a typed
+    # recipe intent, so it is in the execution path and must move the digest.
+    f"{_IMPORT_PREFIX}.authoring.workflow",
     f"{_IMPORT_PREFIX}.build_info",
     f"{_IMPORT_PREFIX}.models.recipe_contributions",
     # Migrated surfaces — they call the bridge, so they are in the path.

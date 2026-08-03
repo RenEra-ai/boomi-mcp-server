@@ -1433,15 +1433,57 @@ def test_models_package_exports_are_pinned():
         "scan_forbidden_recipe_shape",
         "validate_contribution_object",
     }
+    # The #146 (M12.11) MCP authoring surface, ENUMERATED for the same reason as
+    # the two sets above: an "Authoring*" prefix allowance would leave a
+    # namespace open, and this pin exists to catch a widening surface.
+    _ISSUE_146_EXPORTS = {
+        "AUTHORING_ACTIONS",
+        "AUTHORING_CONTRACT_VERSION",
+        "AUTHORING_INTENT_KINDS",
+        "ArtifactFingerprintV1",
+        "AuthoringBuildProvenanceV1",
+        "AuthoringCompileResultV1",
+        "AuthoringDiagnosticV1",
+        "AuthoringPlanResultV1",
+        "AuthoringRequestV1",
+        "AuthoringRevisionBindingV1",
+        "CapabilityGapV1",
+        "ComponentDependencyEdgeV1",
+        "DecisionResolutionV1",
+        "IntegrationSpecAuthoringIntentV1",
+        "LiveDeploymentComparisonV1",
+        "ProcessCfgSummaryV1",
+        "ProcessIRAuthoringIntentV1",
+        "RecipeAuthoringIntentV1",
+        "RecipeInvocationRequestV1",
+        "RequiredDecisionV1",
+        "ResolvedReferenceSummaryV1",
+        "TopologyRelationSummaryV1",
+        "ValidationReportSummaryV1",
+        "authoring_build_provenance_v1_json_schema",
+        "authoring_compile_result_v1_json_schema",
+        "authoring_plan_result_v1_json_schema",
+        "authoring_request_v1_json_schema",
+        "authoring_revision_binding_v1_json_schema",
+        "canonical_authoring_json",
+        "sort_authoring_diagnostics",
+    }
     non_topology = (
-        set(models.__all__) - expected - _PRE_144_EXPORTS - _ISSUE_145_EXPORTS
+        set(models.__all__)
+        - expected
+        - _PRE_144_EXPORTS
+        - _ISSUE_145_EXPORTS
+        - _ISSUE_146_EXPORTS
     )
     assert non_topology == set(), non_topology
     assert expected <= set(models.__all__), expected - set(models.__all__)
     assert _ISSUE_145_EXPORTS <= set(models.__all__), _ISSUE_145_EXPORTS - set(
         models.__all__
     )
-    for name in expected | _ISSUE_145_EXPORTS:
+    assert _ISSUE_146_EXPORTS <= set(models.__all__), _ISSUE_146_EXPORTS - set(
+        models.__all__
+    )
+    for name in expected | _ISSUE_145_EXPORTS | _ISSUE_146_EXPORTS:
         assert hasattr(models, name), name
 
 

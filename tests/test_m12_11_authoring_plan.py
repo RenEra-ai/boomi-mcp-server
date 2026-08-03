@@ -1,0 +1,406 @@
+"""#146 (M12.11): the read-only semantic plan performs ZERO remote mutation.
+
+"Plan performs zero remote mutation" is an acceptance criterion, and the only
+honest way to test a negative is to make the forbidden call explode. Every test
+here installs :class:`MutationSpy` over the builder's write helpers, so a plan
+that reached one fails loudly rather than passing quietly.
+"""
+
+import sys
+from pathlib import Path
+
+import pytest
+
+_src = str(Path(__file__).resolve().parent.parent / "src")
+if _src not in sys.path:
+    sys.path.insert(0, _src)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _m12_11_support import (  # noqa: E402
+    UNRESOLVABLE_IR_DOC,
+    MutationSpy,
+    components,
+    integration_spec_request,
+    process_ir_request,
+)
+from boomi_mcp.authoring.workflow import (  # noqa: E402
+    AuthoringWorkflowError,
+    plan_authoring_request_v1,
+)
+from boomi_mcp.errors import (  # noqa: E402
+    AUTHORING_CAPABILITY_REVISION_MISMATCH,
+    AUTHORING_PLAN_STALE,
+    AUTHORING_REQUIRED_DECISION_MISSING,
+)
+from boomi_mcp.models.authoring_workflow import (  # noqa: E402
+    AuthoringRequestV1,
+    DecisionResolutionV1,
+    RecipeAuthoringIntentV1,
+    RecipeInvocationRequestV1,
+)
+
+
+@pytest.fixture
+def spy(monkeypatch):
+    return MutationSpy().install(monkeypatch)
+
+
+def _plan(request):
+    result, _internals = plan_authoring_request_v1(
+        request, profile="qa_profile", account_id="qa_account"
+    )
+    return result
+
+
+def test_a_process_ir_plan_validates_and_previews_without_mutating(spy):
+    result = _plan(process_ir_request())
+    assert result.mutation_performed is False
+    assert result.validation_report.is_valid is True
+    assert result.errors == ()
+    assert result.integration_spec_preview.name == "M12.11 Integration"
+    assert {c.key for c in result.integration_spec_preview.components} == {
+        c.key for c in components()
+    }
+    assert spy.calls == []
+
+
+def test_an_integration_spec_plan_reports_its_capability_gap_honestly(spy):
+    """A ProcessIR root is not derivable from every legacy process_kind.
+
+    The honest answer is a named gap plus a working preview — not a silent
+    success that implies the process was semantically validated when it was not.
+    """
+    result = _plan(integration_spec_request())
+    assert result.mutation_performed is False
+    gaps = [gap.capability_id for gap in result.capability_gaps]
+    assert gaps == ["authoring.integration_spec_intent.wrapper_subprocess"]
+    assert result.capability_gaps[0].state == "unsupported"
+    assert result.capability_gaps[0].reason_code == "PROCESS_IR_ROOT_NOT_DERIVABLE"
+    assert spy.calls == []
+
+
+def test_a_topology_adjunct_is_validated_but_never_deployed(spy):
+    from boomi_mcp.models.system_topology import parse_system_topology_v1
+
+    topology = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "qa_profile",
+            "objects": [
+                {"kind": "process", "key": "p1", "component_ref": "$ref:proc"}
+            ],
+            "relations": [],
+        }
+    )
+    request = process_ir_request()
+    request = AuthoringRequestV1(intent=request.intent, topology_spec=topology)
+    result = _plan(request)
+    assert result.mutation_performed is False
+    # Relations are reported under their OWN name, never as a generic "flow".
+    assert result.topology_relations == ()
+    assert spy.calls == []
+
+
+def test_the_component_plan_preview_is_an_integration_spec_v1(spy):
+    """The issue asks for IntegrationSpecV1 EXPLICITLY as the component plan."""
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+
+    result = _plan(process_ir_request())
+    assert isinstance(result.integration_spec_preview, IntegrationSpecV1)
+
+
+def test_semantic_and_plan_hashes_are_stable_across_key_insertion_order(spy):
+    """A hash that depends on dict ordering is not a fingerprint."""
+    first = _plan(process_ir_request())
+
+    reordered_doc = {
+        "body": {
+            "steps": [
+                {
+                    "operation_ref": "$ref:db_op",
+                    "kind": "source",
+                    "connection_ref": "$ref:db_conn",
+                },
+                {"text": "hello", "kind": "message"},
+                {
+                    "operation_ref": "$ref:api_op",
+                    "connection_ref": "$ref:api_conn",
+                    "kind": "target",
+                },
+                {"kind": "stop"},
+            ],
+            "kind": "sequence",
+        },
+        "version": "1",
+    }
+    second = _plan(process_ir_request(reordered_doc))
+
+    assert (
+        first.revision_binding.semantic_hash == second.revision_binding.semantic_hash
+    )
+    assert first.revision_binding.plan_hash == second.revision_binding.plan_hash
+
+
+def test_an_unresolvable_reference_passes_PLAN_and_is_caught_at_COMPILE(spy):
+    """Where the gate actually is — measured, not assumed.
+
+    Reference resolution is NOT one of the semantic-validation phases:
+    ``validate_process_ir`` returns a clean report for a ``$ref`` no component
+    declares. The unresolvable reference is caught when the emission plan is
+    built, i.e. at COMPILE.
+
+    That is still safe, and this test exists to pin why: a typed apply runs
+    through compile (``preflight_typed_apply_v1`` calls
+    ``compile_authoring_request_v1``), so an unresolvable reference cannot reach
+    a mutation. What it must NOT do is make plan claim more than it checked —
+    hence the explicit assertion that plan reports itself valid here rather than
+    a wishful assertion that it catches everything.
+    """
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+    from boomi_mcp.errors import AUTHORING_COMPILE_BLOCKED
+
+    result = _plan(process_ir_request(UNRESOLVABLE_IR_DOC))
+    assert result.mutation_performed is False
+    assert result.validation_report.is_valid is True
+    assert result.errors == ()
+
+    with pytest.raises(AuthoringWorkflowError) as excinfo:
+        compile_authoring_request_v1(
+            process_ir_request(UNRESOLVABLE_IR_DOC),
+            profile="qa_profile",
+            account_id="qa_account",
+        )
+    assert excinfo.value.code == AUTHORING_COMPILE_BLOCKED
+    # The compiler's own code travels verbatim as a value-free causative.
+    causes = {c for d in excinfo.value.diagnostics for c in d.cause_codes}
+    assert causes, "the causative canonical codes must travel"
+    assert spy.calls == []
+
+
+def test_diagnostics_are_ordered_deterministically(spy):
+    from boomi_mcp.models.authoring_workflow import (
+        AuthoringDiagnosticV1,
+        sort_authoring_diagnostics,
+    )
+
+    shuffled = (
+        AuthoringDiagnosticV1(code="B_CODE", severity="warning", path="/z"),
+        AuthoringDiagnosticV1(code="A_CODE", severity="error", path="/b"),
+        AuthoringDiagnosticV1(code="A_CODE", severity="error", path="/a"),
+        AuthoringDiagnosticV1(code="C_CODE", severity="advisory", path="/a"),
+    )
+    ordered = sort_authoring_diagnostics(shuffled)
+    # Errors first, then by code, then by path — deterministic and total.
+    assert [(d.severity, d.code, d.path) for d in ordered] == [
+        ("error", "A_CODE", "/a"),
+        ("error", "A_CODE", "/b"),
+        ("warning", "B_CODE", "/z"),
+        ("advisory", "C_CODE", "/a"),
+    ]
+    assert sort_authoring_diagnostics(tuple(reversed(shuffled))) == ordered
+
+
+def test_answering_a_decision_this_plan_never_raised_is_refused(spy):
+    """A resolution for an unknown decision means the caller is working from a
+    DIFFERENT plan — exactly the staleness the binding exists to catch."""
+    request = AuthoringRequestV1(
+        intent=process_ir_request().intent,
+        decisions=(DecisionResolutionV1(decision_id="ghost", option_id="a"),),
+    )
+    result = _plan(request)
+    codes = {diagnostic.code for diagnostic in result.errors}
+    assert AUTHORING_REQUIRED_DECISION_MISSING in codes
+    assert spy.calls == []
+
+
+def test_a_capability_revision_mismatch_blocks_the_plan(spy):
+    request = AuthoringRequestV1(
+        intent=process_ir_request().intent,
+        expected_capability_revision="sha256:" + "0" * 64,
+    )
+    with pytest.raises(AuthoringWorkflowError) as excinfo:
+        _plan(request)
+    assert excinfo.value.code == AUTHORING_CAPABILITY_REVISION_MISMATCH
+    assert spy.calls == []
+
+
+def test_a_stale_expected_plan_hash_is_refused(spy):
+    request = AuthoringRequestV1(
+        intent=process_ir_request().intent,
+        expected_plan_hash="sha256:" + "1" * 64,
+    )
+    with pytest.raises(AuthoringWorkflowError) as excinfo:
+        _plan(request)
+    assert excinfo.value.code == AUTHORING_PLAN_STALE
+    assert spy.calls == []
+
+
+def test_the_recipe_intent_reaches_the_engine_and_still_mutates_nothing(spy):
+    """A recipe that cannot resolve is a recipe-layer refusal, carried
+    value-free — never a mutation, and never re-diagnosed by this layer."""
+    request = AuthoringRequestV1(
+        intent=RecipeAuthoringIntentV1(
+            integration_name="M12.11 Recipe",
+            invocations=(
+                RecipeInvocationRequestV1(
+                    recipe_id="definitely_not_a_registered_recipe",
+                    invocation_id="i1",
+                    raw_input={},
+                ),
+            ),
+        )
+    )
+    with pytest.raises(AuthoringWorkflowError):
+        _plan(request)
+    assert spy.calls == []
+
+
+def test_every_result_collection_is_present_even_when_empty(spy):
+    """A field that is absent when empty forces every caller to write the same
+    defensive branch, and they will not all write it correctly."""
+    result = _plan(process_ir_request())
+    for name in (
+        "errors",
+        "warnings",
+        "capability_gaps",
+        "required_decisions",
+        "resolved_references",
+        "component_dependencies",
+        "topology_relations",
+        "pipeline_stages",
+        "process_cfg",
+    ):
+        assert isinstance(getattr(result, name), tuple), name
+    dumped = result.model_dump(mode="json")
+    for name in ("errors", "warnings", "capability_gaps", "required_decisions"):
+        assert name in dumped and isinstance(dumped[name], list)
+
+
+def test_the_read_only_phase_never_imports_a_write_helper():
+    """Structural, not behavioural: the orchestration module must not even NAME
+    a create/update/execute/deploy helper."""
+    import inspect
+
+    from boomi_mcp.authoring import workflow
+
+    source = inspect.getsource(workflow)
+    for forbidden in (
+        "create_component",
+        "update_component",
+        "create_connector",
+        "update_connector",
+        "create_trading_partner",
+        "update_trading_partner",
+        "execute_process",
+        "manage_deployment",
+        "orchestrate_deploy",
+    ):
+        assert forbidden not in source, forbidden
+
+
+# ---------------------------------------------------------------------------
+# Regressions for the defects live QA found (issue #146 QA, bugs #401-#411)
+# ---------------------------------------------------------------------------
+
+
+def test_the_typed_plan_reuses_the_legacy_redaction(monkeypatch, spy):
+    """Bug #401 (High). The same spec returned "[REDACTED]" down the legacy root
+    and the plaintext password down the typed one, because the typed path echoed
+    the caller's spec instead of the legacy planner's redacted one."""
+    from unittest.mock import MagicMock
+
+    import boomi_mcp.categories.integration_builder as builder
+    from boomi_mcp.models.authoring_workflow import (
+        AuthoringRequestV1,
+        IntegrationSpecAuthoringIntentV1,
+    )
+    from boomi_mcp.models.integration_models import (
+        IntegrationComponentSpec,
+        IntegrationSpecV1,
+    )
+
+    monkeypatch.setattr(builder, "paginate_metadata", lambda *a, **k: [])
+    secret = "PW_146_PLAINTEXT"
+    request = AuthoringRequestV1(
+        intent=IntegrationSpecAuthoringIntentV1(
+            integration_spec=IntegrationSpecV1(
+                name="M12.11 Redaction",
+                components=[
+                    IntegrationComponentSpec(
+                        key="db",
+                        type="connector-settings",
+                        name="M12.11 DB",
+                        config={
+                            "connector_type": "database",
+                            "component_name": "M12.11 DB",
+                            "password": secret,
+                        },
+                    )
+                ],
+            )
+        )
+    )
+    result, _ = plan_authoring_request_v1(
+        request, boomi_client=MagicMock(), profile="qa", account_id="acct"
+    )
+    blob = result.model_dump_json()
+    assert secret not in blob, "the typed plan echoed a plaintext credential"
+
+
+def test_the_typed_plan_does_not_claim_zero_warnings_when_nothing_looked(spy):
+    """Bug #402 (High). With no client the component-plan lint cannot run, so
+    the honest answer is "unknown", not an affirmative empty list."""
+    result = _plan(process_ir_request())
+    assert result.warnings, "a plan that ran no lint must not report zero warnings"
+    assert any(
+        "did not run" in diagnostic.message for diagnostic in result.warnings
+    )
+
+
+def test_a_dangling_ref_appears_in_resolved_references(spy):
+    """Bug #410. The field listed declared component keys, so the one reference
+    an agent needs to see — the dangling one — was exactly the one omitted."""
+    result = _plan(process_ir_request(UNRESOLVABLE_IR_DOC))
+    refs = {r.ref: r.resolved for r in result.resolved_references}
+    assert "$ref:nonexistent_op" in refs
+    assert refs["$ref:nonexistent_op"] is False
+
+
+def test_the_compile_block_remediation_is_not_circular(spy):
+    """Bug #409. It said "re-plan", and plan reports the input valid."""
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+
+    with pytest.raises(AuthoringWorkflowError) as excinfo:
+        compile_authoring_request_v1(
+            process_ir_request(UNRESOLVABLE_IR_DOC), profile="qa", account_id="acct"
+        )
+    remediations = " ".join(d.remediation for d in excinfo.value.diagnostics).lower()
+    # It must point at the COMPONENT the step references...
+    assert "component" in remediations
+    # ...and say outright that re-planning will not surface this, rather than
+    # sending the caller back to a phase that reports the input valid.
+    assert "will not surface" in remediations
+
+
+def test_the_validation_summary_counts_this_results_diagnostics(spy):
+    """Bug #412. `warnings: [5 items]` beside `warning_count: 0` is the same
+    "positively asserts absence" defect one field over."""
+    result = _plan(process_ir_request())
+    assert result.validation_report.warning_count + (
+        result.validation_report.advisory_count
+    ) == len(result.warnings)
+    assert result.validation_report.error_count == len(result.errors)
+    assert result.validation_report.is_valid == (not result.errors)
+
+
+def test_the_validation_summary_tracks_a_blocking_plan(spy):
+    """Guard the guard: a summary hard-coded to zero would pass the pin above
+    on a clean plan."""
+    request = AuthoringRequestV1(
+        intent=process_ir_request().intent,
+        decisions=(DecisionResolutionV1(decision_id="ghost", option_id="a"),),
+    )
+    result = _plan(request)
+    assert result.errors
+    assert result.validation_report.error_count == len(result.errors)
+    assert result.validation_report.is_valid is False
