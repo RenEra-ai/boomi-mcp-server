@@ -894,7 +894,7 @@ the only constructor, which the public model never guaranteed.
 | `RECIPE_PATCH_TARGET_NOT_FOUND` | a closed slot does not resolve after composition |
 | `RECIPE_PATCH_CONFLICT` | two writers, one slot, no declared merge |
 | `RECIPE_CONSTRAINT_FAILED` | a canonical validator or a declared requirement rejected the result; canonical codes ride along as sorted `cause_codes` |
-| `RECIPE_OUTPUT_NONDETERMINISTIC` | two runs over identical input produced different canonical bytes |
+| `RECIPE_OUTPUT_NONDETERMINISTIC` | two runs over independently rebuilt inputs produced different canonical bytes |
 | `RECIPE_REQUEST_INVALID` | the request envelope, not a recipe input: a duplicate `invocation_id` |
 
 The recipe layer blames the **recipe layer**. A canonical rejection never becomes a

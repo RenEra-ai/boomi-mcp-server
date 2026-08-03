@@ -362,7 +362,12 @@ RecipeExecutorV1 = Callable[[RecipeInputBase], Tuple[Any, ...]]
 
 @dataclass(frozen=True)
 class RecipeRegistrationV1:
-    """One production registration. Code-owned; there is no runtime registrar."""
+    """One production registration. Code-owned; no MCP-accessible registrar.
+
+    In-process Python can still construct a ``RecipeRegistry`` and pass it to
+    ``run_recipes`` — an injection/test seam that presupposes arbitrary code
+    execution, not an extension point. §5 states the precise boundary.
+    """
 
     recipe_id: str
     recipe_version: str

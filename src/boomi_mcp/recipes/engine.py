@@ -136,6 +136,36 @@ class RecipeRunResultV1:
         return None
 
 
+def _plain_mappings(value: Any, memo: Dict[int, Any]) -> Any:
+    """Every mapping replaced by a plain ``dict``, structure otherwise preserved.
+
+    Carries its own ``memo`` so a value appearing twice stays ONE object and a
+    cycle terminates — the properties ``deepcopy`` provides and that a naive
+    recursive rebuild silently loses.
+    """
+    marker = id(value)
+    if marker in memo:
+        return memo[marker]
+    if isinstance(value, Mapping):
+        rebuilt: Dict[Any, Any] = {}
+        memo[marker] = rebuilt
+        for key, item in value.items():
+            rebuilt[key] = _plain_mappings(item, memo)
+        return rebuilt
+    if type(value) in (list, tuple, set, frozenset):
+        if type(value) is list:
+            items: List[Any] = []
+            memo[marker] = items
+            items.extend(_plain_mappings(item, memo) for item in value)
+            return items
+        # The immutable containers cannot be filled after the fact, so they
+        # cannot participate in a cycle through themselves.
+        rebuilt_seq = type(value)(_plain_mappings(item, memo) for item in value)
+        memo[marker] = rebuilt_seq
+        return rebuilt_seq
+    return value
+
+
 def _snapshot_raw(descriptor: RecipeDescriptorV1, raw: Any) -> Any:
     """A private, deep copy of the caller's mapping — or a clean refusal.
 
@@ -145,12 +175,14 @@ def _snapshot_raw(descriptor: RecipeDescriptorV1, raw: Any) -> Any:
     line before validation. That was a regression this snapshot introduced — the
     same input worked before it (issue #145, §6 architect review round 3).
 
-    ``dict(raw)`` first, because the OUTER type is the engine's business and only
-    the contents need preserving; anything still uncopyable is refused as invalid
-    input rather than escaping as a raw exception.
+    Read-only mappings are normalized to plain dicts at EVERY depth, not just the
+    outer one: ``{"a": MappingProxyType({"b": 1})}`` is valid for a
+    ``Dict[str, Dict[str, int]]`` field and was still being refused. Anything
+    uncopyable after that is refused as invalid input rather than escaping as a
+    raw exception (issue #145, §6 architect review).
     """
     try:
-        return copy.deepcopy(dict(raw)) if isinstance(raw, Mapping) else copy.deepcopy(raw)
+        return copy.deepcopy(_plain_mappings(raw, {}))
     except Exception:  # noqa: BLE001 — a copier is author code and can raise anything
         raise recipe_error(
             RECIPE_INPUT_INVALID,

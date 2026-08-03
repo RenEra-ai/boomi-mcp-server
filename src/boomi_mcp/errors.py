@@ -1351,7 +1351,7 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             category="recipe",
             retryable=False,
             summary=(
-                "Two executions of one recipe over identical validated input "
+                "Two executions of one recipe over independently rebuilt inputs "
                 "produced different canonical contributions."
             ),
             owner="#145",

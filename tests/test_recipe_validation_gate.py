@@ -1180,6 +1180,23 @@ def test_a_read_only_raw_mapping_is_still_accepted():
     assert snapshot == {"a": [1, 2]}
     snapshot["a"].append(3)  # a private copy: mutating it cannot reach the caller
 
+    # NESTED read-only mappings too. ``{"a": MappingProxyType(...)}`` is valid for
+    # a ``Dict[str, Dict[str, int]]`` field and normalizing only the outer level
+    # left it refused (issue #145, §6 architect review round 4).
+    assert _snapshot_raw(_Descriptor(), {"a": MappingProxyType({"b": 1})}) == {"a": {"b": 1}}
+    assert _snapshot_raw(
+        _Descriptor(), MappingProxyType({"x": [MappingProxyType({"y": 2})]})
+    ) == {"x": [{"y": 2}]}
+
+    # ``deepcopy``'s two structural guarantees survive the normalization.
+    shared = {"s": 1}
+    out = _snapshot_raw(_Descriptor(), {"p": shared, "q": shared})
+    assert out["p"] is out["q"], "a value seen twice must stay ONE object"
+    cyclic = {}
+    cyclic["self"] = cyclic
+    copied = _snapshot_raw(_Descriptor(), cyclic)  # must terminate
+    assert copied["self"] is copied
+
     # An input that genuinely cannot be copied is a clean refusal, not a raw raise.
     class Uncopyable:
         def __deepcopy__(self, memo):

@@ -71,7 +71,7 @@ _MESSAGES: Dict[str, str] = {
     RECIPE_PATCH_TARGET_NOT_FOUND: "a closed patch operation names a slot that does not resolve",
     RECIPE_PATCH_CONFLICT: "two writers target one semantic slot with no declared merge rule",
     RECIPE_CONSTRAINT_FAILED: "a canonical validator or declared requirement rejected the result",
-    RECIPE_OUTPUT_NONDETERMINISTIC: "two runs over identical input produced different contributions",
+    RECIPE_OUTPUT_NONDETERMINISTIC: "two runs over independently rebuilt inputs produced different contributions",
     RECIPE_REQUEST_INVALID: "the recipe request envelope is malformed",
 }
 
