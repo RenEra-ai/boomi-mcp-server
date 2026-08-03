@@ -40,7 +40,7 @@ from collections import OrderedDict, deque
 from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
 from decimal import Decimal
 from fractions import Fraction
-from types import GetSetDescriptorType
+from types import GetSetDescriptorType, MemberDescriptorType
 from typing import (
     Annotated,
     Any,
@@ -729,6 +729,64 @@ _REPLAYABLE_MAPPINGS: Tuple[type, ...] = (dict, OrderedDict)
 _CLASS_VARS = type.__dict__["__dict__"].__get__
 _CLASS_MRO = type.__dict__["__mro__"].__get__
 
+#: Classes whose bodies are OURS or pydantic's, so they are skipped rather than
+#: scanned. ``BaseModel`` defines ``__getattr__`` itself, so a scan that did not
+#: skip it would refuse every model ever registered.
+_TRUSTED_CLASS_BASES = frozenset(BaseModel.__mro__)
+_TRUSTED_METACLASSES = frozenset(_CLASS_MRO(type(BaseModel)))
+
+
+def _is_slot_descriptor(attribute: Any, owner: type) -> bool:
+    """A ``__slots__`` member the COMPILER generated for ``owner``, not author code.
+
+    ``__slots__`` puts a ``member_descriptor`` under every field name, which a
+    blanket "is it a descriptor?" test read as interception — refusing 15 slotted
+    dataclasses on honest input, 8 of them our own process-IR types, on every
+    invocation (issue #145, live QA #380). ``__objclass__`` is what separates the
+    generated ones from an author's, the same compiler-generated-versus-supplied
+    move ``_instance_vars`` makes for ``__dict__``.
+    """
+    return (
+        type(attribute) is MemberDescriptorType
+        and getattr(attribute, "__objclass__", None) is owner
+    )
+
+
+def _declared_fields(value: Any) -> Mapping[str, Any]:
+    """The model's fields, read from the class BODY rather than asked for.
+
+    ``type(value).model_fields`` is ordinary attribute access, so a METACLASS
+    ``__getattribute__`` answers it — and a metaclass lives on ``type(type(value))``,
+    which no scan of the value's own MRO ever reaches. Returning the real mapping
+    minus one entry meant that field was never visited at all: the gate accepted
+    and the executor read the caller's mapping at a position declared as a model
+    (issue #145, live QA #377).
+    """
+    for klass in _CLASS_MRO(type(value)):
+        fields = _CLASS_VARS(klass).get("__pydantic_fields__")
+        if fields is not None:
+            return fields
+    raise ValueError("validated input does not declare its fields")
+
+
+def _stored_attribute(value: Any, name: str, stored: Optional[Mapping[str, Any]]) -> Any:
+    """One field's value, read from storage rather than by attribute lookup.
+
+    A ``__slots__`` class puts nothing in an instance dict; the value lives behind
+    the generated ``member_descriptor``, which is storage too and is read exactly
+    as unforgeably.
+    """
+    if stored is not None and name in stored:
+        return stored[name]
+    for klass in _CLASS_MRO(type(value)):
+        descriptor = _CLASS_VARS(klass).get(name)
+        if _is_slot_descriptor(descriptor, klass):
+            try:
+                return descriptor.__get__(value)
+            except AttributeError:  # an unset slot
+                return None
+    return None
+
 
 def _instance_vars(value: Any) -> Optional[Mapping[str, Any]]:
     """The instance ``__dict__``, or ``None`` if the class redefined how it is READ.
@@ -768,6 +826,15 @@ def _instance_vars(value: Any) -> Optional[Mapping[str, Any]]:
 #: while wearing neither of these names.
 _ATTRIBUTE_HOOKS = ("__getattribute__", "__getattr__")
 
+#: Engine-critical slots pydantic owns. An author redefining one is not shadowing
+#: a field, it is shadowing the STORAGE the gate reads. A ``__pydantic_extra__``
+#: property with a setter diverted the real extras elsewhere, so reading pydantic's
+#: own slot found nothing and the undeclared-key check passed (issue #145, live QA
+#: #378). ``__pydantic_fields__`` is NOT here: pydantic writes it into every model's
+#: class body, so banning it would ban every model — it is defended instead by
+#: cross-checking the declared names against what the instance actually stores.
+_RESERVED_MODEL_SLOTS = ("__pydantic_extra__", "__pydantic_private__")
+
 
 def _assert_fields_are_not_intercepted(value: Any, names: Sequence[str]) -> None:
     """Refuse a class that answers a DECLARED FIELD's read with a descriptor.
@@ -783,12 +850,14 @@ def _assert_fields_are_not_intercepted(value: Any, names: Sequence[str]) -> None
     under a field name is never the ordinary case.
     """
     for klass in _CLASS_MRO(type(value)):
-        if klass in (BaseModel, object):
-            break
+        if klass in _TRUSTED_CLASS_BASES:
+            continue
         class_vars = _CLASS_VARS(klass)
         for name in names:
             attribute = class_vars.get(name)
-            if attribute is not None and hasattr(type(attribute), "__get__"):
+            if attribute is None or _is_slot_descriptor(attribute, klass):
+                continue
+            if hasattr(type(attribute), "__get__"):
                 raise ValueError("validated input intercepts a declared field's read")
 
 
@@ -811,16 +880,37 @@ def _assert_no_attribute_hooks(value: Any) -> None:
     ``inp.field`` returning what the walk actually judged.
     """
     for klass in _CLASS_MRO(type(value)):
-        if klass in (BaseModel, object):
-            break
-        if any(hook in _CLASS_VARS(klass) for hook in _ATTRIBUTE_HOOKS):
+        # SKIP a trusted base, do not STOP at one. ``class Evil(RecipeInputBase,
+        # Mixin)`` linearises as ``[Evil, RecipeInputBase, BaseModel, Mixin,
+        # object]``, so stopping put ``Mixin`` out of reach of the scan while
+        # Python's own lookup still found the hook there (issue #145, live QA #379).
+        if klass in _TRUSTED_CLASS_BASES:
+            continue
+        class_vars = _CLASS_VARS(klass)
+        if any(hook in class_vars for hook in _ATTRIBUTE_HOOKS):
             raise ValueError("validated input answers its own attribute reads")
+        if isinstance(value, BaseModel) and any(
+            slot in class_vars for slot in _RESERVED_MODEL_SLOTS
+        ):
+            raise ValueError("validated input redefines the storage the gate reads")
+    for meta in _CLASS_MRO(type(type(value))):
+        if meta in _TRUSTED_METACLASSES:
+            continue
+        if any(hook in _CLASS_VARS(meta) for hook in _ATTRIBUTE_HOOKS):
+            raise ValueError("validated input's class answers its own attribute reads")
 
 
 def _model_extra(value: Any) -> Any:
     """``__pydantic_extra__`` read so the class cannot answer for it."""
+    # ``object.__getattribute__`` bypasses a class ``__getattribute__`` but still
+    # runs DESCRIPTOR lookup, so a ``__pydantic_extra__`` property — with a setter,
+    # which is what makes it constructible — answered the undeclared-keys check
+    # with ``None`` while the real extras stayed live (issue #145, live QA #378).
+    descriptor = _CLASS_VARS(BaseModel).get("__pydantic_extra__")
+    if type(descriptor) is not MemberDescriptorType:  # pragma: no cover - pydantic
+        raise ValueError("cannot read the model's undeclared-key storage")
     try:
-        return object.__getattribute__(value, "__pydantic_extra__")
+        return descriptor.__get__(value)
     except AttributeError:
         return None
 
@@ -992,9 +1082,18 @@ def _assert_declared_shape(
         stored = _instance_vars(value)
         if stored is None:
             raise ValueError("validated input redefines how its own fields are read")
-        _assert_fields_are_not_intercepted(value, tuple(type(value).model_fields))
-        for name, field in type(value).model_fields.items():
-            _assert_declared_shape(stored.get(name), field.annotation, _seen, _journal)
+        declared = _declared_fields(value)
+        # The field list is itself read from the class body, so cross-check it
+        # against what the instance actually holds: a forged ``__pydantic_fields__``
+        # that omits a field would otherwise mean that field is never visited
+        # (issue #145, live QA #377).
+        if set(stored) - set(declared):
+            raise ValueError("validated input stores values it does not declare")
+        _assert_fields_are_not_intercepted(value, tuple(declared))
+        for name, field in declared.items():
+            _assert_declared_shape(
+                _stored_attribute(value, name, stored), field.annotation, _seen, _journal
+            )
         return
 
     # A pydantic dataclass is neither a ``BaseModel`` nor a container, so an
@@ -1011,12 +1110,12 @@ def _assert_declared_shape(
         )
         stored = _instance_vars(value)
         for field in dataclass_fields(value):
-            read = (
-                stored.get(field.name)
-                if stored is not None
-                else getattr(value, field.name, None)  # ``__slots__``: no dict to read
+            _assert_declared_shape(
+                _stored_attribute(value, field.name, stored),
+                hints.get(field.name),
+                _seen,
+                _journal,
             )
-            _assert_declared_shape(read, hints.get(field.name), _seen, _journal)
         return
 
     # RECURSE INTO ANY ELEMENT, not only the ones that are already models. An

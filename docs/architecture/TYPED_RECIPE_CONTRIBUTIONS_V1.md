@@ -611,6 +611,28 @@ channels.
   refused for the same reason. `_check_input_schema_closed` sees none of this — it reads the
   emitted JSON schema, and all three are statements about the class body.
 
+  **Three further reads had to stop asking the class, and the pattern in them is worth stating.**
+  `type(value).model_fields` is ordinary attribute access, so a *metaclass* `__getattribute__`
+  answers it — and a metaclass lives on `type(type(value))`, which no scan of the value's own MRO
+  ever reaches; returning the real mapping minus one entry meant that field was never visited.
+  `object.__getattribute__(value, "__pydantic_extra__")` bypasses a class `__getattribute__` but
+  still runs *descriptor* lookup, so a `__pydantic_extra__` property — with a setter, which is what
+  makes it constructible — answered the undeclared-key check with `None` while diverting the real
+  extras elsewhere. And both MRO scans originally **stopped** at `BaseModel`: for
+  `class Evil(RecipeInputBase, Mixin)` C3 linearises as `[Evil, RecipeInputBase, BaseModel, Mixin,
+  object]`, so stopping put the mixin out of reach while Python's own lookup still found the hook
+  there. **Skipping a trusted base is not the same as stopping at one**, a redefinition of the
+  storage the gate reads is refused outright, and the declared field list is cross-checked against
+  what the instance actually stores — because a class body can be written to as well as read from.
+
+  The `__slots__` allowance is the mirror-image lesson. Treating every descriptor under a field
+  name as interception refused fifteen slotted dataclasses on honest input — eight of them this
+  repository's own process-IR types — on *every* invocation, because `__slots__` puts a
+  `member_descriptor` under each field. `__objclass__` separates the compiler's descriptors from an
+  author's, and it is load-bearing rather than decorative: a `member_descriptor` can be lifted off
+  one class and installed on another, where it reads a slot of a class the value has nothing to do
+  with.
+
   **Stated boundary:** the size bound asks for the value's `len()` through its base, so an
   overriding `__len__` cannot shrink it; an *unsized* value abstains and is bounded only by the
   walk itself.

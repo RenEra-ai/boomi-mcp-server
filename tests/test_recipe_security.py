@@ -4694,3 +4694,217 @@ def test_a_descriptor_under_a_field_name_is_refused():
     assert plain.leaf is converting
     with pytest.raises(Exception):
         _assert_declared_shape(plain)
+
+
+def test_the_walk_does_not_ask_the_class_which_fields_exist():
+    """``type(value).model_fields`` is attribute access a METACLASS can answer.
+
+    A metaclass lives on ``type(type(value))``, which no scan of the value's own
+    MRO ever reaches, so returning the real mapping minus one entry meant that
+    field was never visited at all (issue #145, live QA #377).
+
+    Two things close it, and both are needed: the field list is read out of the
+    class BODY, and it is cross-checked against what the instance actually stores
+    — a class body can be written to as well as read from.
+    """
+    from typing import Optional as OptionalType
+
+    from pydantic._internal._model_construction import ModelMetaclass
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
+    assert isinstance(converting, dict)  # the premise
+
+    class HidesAField(ModelMetaclass):
+        def __getattribute__(cls, name):
+            real = ModelMetaclass.__getattribute__(cls, name)
+            if name == "model_fields" and ModelMetaclass.__getattribute__(cls, "_hide"):
+                return {k: v for k, v in real.items() if k != "secret"}
+            return real
+
+    class Dropped(RecipeInputBase, metaclass=HidesAField):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        _hide = False
+        label: str = "ok"
+        secret: OptionalType[_DeclaredKeysOnlyLeaf] = None
+
+    Dropped._hide = True
+    hidden = Dropped.model_construct(label="ok", secret=converting)
+    assert "secret" not in type(hidden).model_fields  # the premise: the lie works
+    assert object.__getattribute__(hidden, "__dict__")["secret"] is converting
+    with pytest.raises(Exception):
+        _assert_declared_shape(hidden)
+
+    # A forged field list written INTO the class body is caught by the cross-check.
+    class Forged(RecipeInputBase):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        label: str = "ok"
+        secret: OptionalType[_DeclaredKeysOnlyLeaf] = None
+
+    forged = Forged.model_construct(label="ok", secret=converting)
+    Forged.__pydantic_fields__ = {
+        k: v for k, v in Forged.__pydantic_fields__.items() if k != "secret"
+    }
+    with pytest.raises(Exception):
+        _assert_declared_shape(forged)
+
+
+def test_a_model_cannot_redefine_the_storage_the_gate_reads():
+    """``object.__getattribute__`` still runs descriptor lookup.
+
+    A ``__pydantic_extra__`` property — with a setter, which is what makes it
+    constructible — answered the undeclared-key check with ``None`` while its
+    setter kept the real extras somewhere else. Reading pydantic's own slot then
+    finds nothing, so the redefinition itself has to be refused
+    (issue #145, live QA #378).
+    """
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    class BlindExtras(RecipeInputBase):
+        model_config = ConfigDict(extra="allow", frozen=True)
+        label: str = "ok"
+
+        @property
+        def __pydantic_extra__(self):
+            return None
+
+        @__pydantic_extra__.setter
+        def __pydantic_extra__(self, value):
+            object.__getattribute__(self, "__dict__")["_diverted"] = value
+
+    blind = BlindExtras.model_construct(label="ok", **{"smuggled": "SENTINEL"})
+    # The premise: the extras are real, and pydantic's own slot no longer holds them.
+    assert object.__getattribute__(blind, "__dict__").get("_diverted") == {
+        "smuggled": "SENTINEL"
+    }
+    with pytest.raises(Exception):
+        _assert_declared_shape(blind)
+
+
+def test_a_hook_on_a_base_after_basemodel_is_still_found():
+    """``class Evil(RecipeInputBase, Mixin)`` puts ``BaseModel`` BEFORE ``Mixin``.
+
+    C3 linearises it as ``[Evil, RecipeInputBase, BaseModel, Mixin, object]``, so a
+    scan that STOPPED at ``BaseModel`` never reached the mixin while Python's own
+    lookup found the hook there. Skipping a trusted base is not the same as
+    stopping at one (issue #145, live QA #379).
+    """
+    from typing import Optional as OptionalType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
+    assert isinstance(converting, dict)  # the premise
+
+    class HookMixin:
+        def __getattribute__(self, name):
+            if name == "leaf":
+                return converting
+            return object.__getattribute__(self, name)
+
+    class EvilOrder(RecipeInputBase, HookMixin):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        leaf: OptionalType[_DeclaredKeysOnlyLeaf] = None
+
+    # The premise: the trusted base really does precede the mixin, and the hook
+    # really is live.
+    mro = list(EvilOrder.__mro__)
+    from pydantic import BaseModel as _BaseModel
+
+    assert mro.index(_BaseModel) < mro.index(HookMixin)
+    assert EvilOrder.__getattribute__ is HookMixin.__getattribute__
+    with pytest.raises(Exception):
+        _assert_declared_shape(EvilOrder.model_construct(leaf=_DeclaredKeysOnlyLeaf()))
+
+    class DescriptorMixin:
+        leaf = property(lambda self: converting)
+
+    class EvilDescriptor(RecipeInputBase, DescriptorMixin):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        leaf: OptionalType[_DeclaredKeysOnlyLeaf] = None
+
+    with pytest.raises(Exception):
+        _assert_declared_shape(EvilDescriptor.model_construct(leaf=_DeclaredKeysOnlyLeaf()))
+
+
+def test_a_slots_dataclass_is_walked_not_refused():
+    """``__slots__`` puts a ``member_descriptor`` under EVERY field name.
+
+    A blanket "is it a descriptor?" test read that as interception and refused 15
+    slotted dataclasses on honest input — 8 of them our own process-IR types — on
+    every invocation. ``__objclass__`` separates the compiler's from an author's,
+    and the values behind them are storage that reads exactly as unforgeably
+    (issue #145, live QA #380).
+    """
+    from dataclasses import dataclass as std_dataclass
+    from typing import Optional as OptionalType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    converting = _DeclaredKeysOnlyLeaf.model_validate({"ok": "y"})
+    assert isinstance(converting, dict)  # the premise
+
+    @std_dataclass(frozen=True)
+    class Slotted:
+        __slots__ = ("leaf",)
+        leaf: OptionalType[_DeclaredKeysOnlyLeaf]
+
+    assert type(Slotted.__dict__["leaf"]).__name__ == "member_descriptor"  # the premise
+
+    model = type(
+        "SlottedInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": Slotted},
+            "field": None,
+        },
+    )
+    _assert_declared_shape(
+        model.model_construct(field=Slotted(leaf=_DeclaredKeysOnlyLeaf.model_construct(ok="a")))
+    )
+    # ...and the slot's value is genuinely judged, not skipped as unreadable.
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=Slotted(leaf=converting)))
+
+
+def test_a_borrowed_slot_descriptor_is_not_mistaken_for_the_compiler_s():
+    """``__objclass__`` is what makes the ``__slots__`` allowance safe.
+
+    A ``member_descriptor`` can be lifted off one class and installed on another
+    under a field name — it is still a ``member_descriptor``, so a type check
+    alone would wave it through as compiler-generated while it reads a slot of a
+    class the value has nothing to do with (issue #145).
+    """
+    from dataclasses import dataclass as std_dataclass
+    from typing import Optional as OptionalType
+
+    from boomi_mcp.recipes.engine import _assert_declared_shape, _is_slot_descriptor
+
+    class Donor:
+        __slots__ = ("leaf",)
+
+    @std_dataclass
+    class Thief:
+        leaf: OptionalType[_DeclaredKeysOnlyLeaf] = None
+
+    borrowed = Donor.__dict__["leaf"]
+    Thief.leaf = borrowed
+    # The premise: it really is the same KIND of descriptor, owned elsewhere.
+    assert type(borrowed).__name__ == "member_descriptor"
+    assert borrowed.__objclass__ is Donor
+    assert _is_slot_descriptor(borrowed, Thief) is False
+    assert _is_slot_descriptor(Donor.__dict__["leaf"], Donor) is True
+
+    model = type(
+        "BorrowedSlotInputV1",
+        (RecipeInputBase,),
+        {
+            "model_config": ConfigDict(extra="forbid", frozen=True),
+            "__annotations__": {"field": Thief},
+            "field": None,
+        },
+    )
+    with pytest.raises(Exception):
+        _assert_declared_shape(model.model_construct(field=Thief.__new__(Thief)))
