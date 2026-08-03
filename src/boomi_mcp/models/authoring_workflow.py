@@ -337,16 +337,35 @@ class AuthoringRevisionBindingV1(_AuthoringModel):
     compile_hash: Optional[DigestString] = None
 
 
-class TopologyRelationSummaryV1(_AuthoringModel):
-    """One topology relation, named as a relation and not as a "flow"."""
+class TopologyParticipantV1(_AuthoringModel):
+    """One role a topology relation binds, and the object it names."""
 
-    relation_kind: NonEmptyString
-    source_key: str = ""
-    target_key: str = ""
+    role: NonEmptyString
+    ref: str = ""
 
     @property
-    def sort_key(self) -> Tuple[str, str, str]:
-        return (self.relation_kind, self.source_key, self.target_key)
+    def sort_key(self) -> Tuple[str, str]:
+        return (self.role, self.ref)
+
+
+class TopologyRelationSummaryV1(_AuthoringModel):
+    """One topology relation, named as a relation and not as a "flow".
+
+    Participants are DERIVED from each relation variant's own fields rather than
+    forced into a source/target pair. Topology relations are not uniformly
+    binary — ``DeploymentBindingRelationV1`` binds three objects — and the
+    variants use role-specific names (``caller_process``, ``callee_process``,
+    ``api_service``, …). An earlier version read ``source_key``/``target_key``,
+    which no variant defines, so every relation summarized as empty strings.
+    """
+
+    relation_kind: NonEmptyString
+    relation_key: str = ""
+    participants: Tuple[TopologyParticipantV1, ...] = ()
+
+    @property
+    def sort_key(self) -> Tuple[str, str]:
+        return (self.relation_kind, self.relation_key)
 
 
 class ComponentDependencyEdgeV1(_AuthoringModel):
@@ -457,6 +476,10 @@ class LiveDeploymentComparisonV1(_AuthoringModel):
     )
     drifted_components: Tuple[str, ...] = ()
     missing_components: Tuple[str, ...] = ()
+    #: Build-owned components with no apply-time baseline to compare against —
+    #: their read-back failed when the build was created. Reported separately so
+    #: "not compared" can never be mistaken for "unchanged".
+    unverifiable_components: Tuple[str, ...] = ()
     diagnostics: Tuple[AuthoringDiagnosticV1, ...] = ()
 
 
@@ -538,6 +561,7 @@ __all__ = [
     "RecipeInvocationRequestV1",
     "RequiredDecisionV1",
     "ResolvedReferenceSummaryV1",
+    "TopologyParticipantV1",
     "TopologyRelationSummaryV1",
     "ValidationReportSummaryV1",
     "authoring_build_provenance_v1_json_schema",

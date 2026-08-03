@@ -623,3 +623,308 @@ def test_a_binding_compiled_without_the_lint_cannot_satisfy_an_apply_with_it():
         assert execute.call_count == 0
     assert result["_success"] is False
     assert result["error_code"] == "AUTHORING_PLAN_STALE"
+
+
+# ---------------------------------------------------------------------------
+# Regressions for the Codex review findings (round 1)
+# ---------------------------------------------------------------------------
+
+
+def test_the_bound_conflict_policy_survives_into_materialization():
+    """P1. `conflict_policy` is a legacy root, so the typed-apply strip removed
+    it and `_build_plan` defaulted to "reuse" — a compile that bound "fail" or
+    "clone" would mutate under "reuse". The hash promised one policy and the
+    write performed another."""
+    seen = {}
+
+    real_build_plan = integration_builder._build_plan
+
+    def _recording(client, config):
+        seen["conflict_policy"] = config.get("conflict_policy")
+        return real_build_plan(client, config)
+
+    for policy in ("reuse", "clone", "fail"):
+        payload = appliable_request().model_dump(mode="json")
+        payload["intent"]["conflict_policy"] = policy
+        compiled = build_integration_action(
+            MagicMock(), _PROFILE, "compile", config={"authoring_request": payload}
+        )
+        binding = compiled["authoring_result"]["revision_binding"]
+        payload["expected_capability_revision"] = binding["capability_revision"]
+        payload["expected_compile_hash"] = binding["compile_hash"]
+
+        seen.clear()
+        with patch(_EXECUTE) as execute, patch(_GET_XML) as get_xml, patch.object(
+            integration_builder, "_build_plan", _recording
+        ):
+            execute.side_effect = lambda *a, **k: {
+                "_success": True,
+                "component_id": "cid-1",
+            }
+            get_xml.return_value = {"type": "connector-settings", "xml": _LIVE_XML}
+            result = build_integration_action(
+                MagicMock(),
+                _PROFILE,
+                "apply",
+                config={"authoring_request": payload, "dry_run": False},
+            )
+        assert result["_success"] is True, policy
+        assert seen["conflict_policy"] == policy, policy
+
+
+def test_a_schema_invalid_typed_request_never_echoes_its_input():
+    """P1. Pydantic's default error text interpolates `input_value`, so letting
+    a ValidationError reach the generic handler echoed the rejected payload —
+    including a credential sitting in a recipe intent's `raw_input`."""
+    secret = "PW_REVIEW_LEAK_CHECK"
+    payload = {
+        "contract_version": "1",
+        "intent": {
+            "intent_kind": "recipe",
+            # `integration_name` deliberately omitted -> ValidationError
+            "invocations": [
+                {
+                    "recipe_id": "r",
+                    "invocation_id": "i",
+                    "raw_input": {"password": secret},
+                }
+            ],
+        },
+    }
+    for action in ("plan", "compile", "apply"):
+        result = build_integration_action(
+            MagicMock(),
+            _PROFILE,
+            action,
+            config={"authoring_request": payload, "dry_run": False},
+        )
+        assert result["_success"] is False, action
+        assert result["error_code"] == INVALID_INPUT, action
+        assert secret not in repr(result), f"{action} echoed the rejected input"
+        assert result["validation_errors"], action
+
+
+def test_an_incomplete_apply_baseline_verifies_as_unknown_not_match():
+    """P2. A component whose post-apply read failed was omitted entirely, so
+    verify compared only what succeeded and reported `match` over an incomplete
+    baseline."""
+    payload = _bound_payload()
+    with patch(_EXECUTE) as execute, patch(_GET_XML) as get_xml:
+        execute.side_effect = lambda *a, **k: {
+            "_success": True,
+            "component_id": "cid-1",
+        }
+        get_xml.side_effect = RuntimeError("read-back failed")
+        applied = build_integration_action(
+            MagicMock(),
+            _PROFILE,
+            "apply",
+            config={"authoring_request": payload, "dry_run": False},
+        )
+    assert applied["_success"] is True
+    recorded = _BUILD_REGISTRY[applied["build_id"]]["authoring"][
+        "live_component_fingerprints"
+    ]
+    # The component IS recorded, with no digest — not silently dropped.
+    assert recorded
+    assert all(entry["digest"] is None for entry in recorded.values())
+
+    with patch(_GET_XML) as get_xml:
+        get_xml.return_value = {"type": "connector-settings", "xml": _LIVE_XML}
+        verified = build_integration_action(
+            MagicMock(), _PROFILE, "verify", config={"build_id": applied["build_id"]}
+        )
+    comparison = verified["authoring_provenance"]["live_comparison"]
+    assert comparison["status"] == "unknown"
+    assert comparison["unverifiable_components"]
+
+
+# ---------------------------------------------------------------------------
+# Regressions for QA round 4 (bugs #415-#417)
+# ---------------------------------------------------------------------------
+
+
+def test_a_typed_apply_refused_by_its_bound_policy_answers_in_the_typed_envelope():
+    """Bug #415. A refusal by the bound conflict_policy came back in the LEGACY
+    shape with no `error_code` and no `mutation_performed` — so an agent
+    branching on the fields this contract tells it to read saw None for both.
+    This path was unreachable from the typed root until the policy fix landed."""
+    payload = appliable_request().model_dump(mode="json")
+    payload["intent"]["conflict_policy"] = "fail"
+    compiled = build_integration_action(
+        MagicMock(), _PROFILE, "compile", config={"authoring_request": payload}
+    )
+    binding = compiled["authoring_result"]["revision_binding"]
+    payload["expected_capability_revision"] = binding["capability_revision"]
+    payload["expected_compile_hash"] = binding["compile_hash"]
+
+    # A pre-existing component makes conflict_policy="fail" refuse.
+    existing = [
+        {
+            "component_id": "existing-1",
+            "name": "M12.11 Applied Conn",
+            "type": "connector-settings",
+            "version": "1",
+        }
+    ]
+    with patch(_EXECUTE) as execute, patch.object(
+        integration_builder, "paginate_metadata", lambda *a, **k: existing
+    ):
+        result = build_integration_action(
+            MagicMock(),
+            _PROFILE,
+            "apply",
+            config={"authoring_request": payload, "dry_run": False},
+        )
+        assert execute.call_count == 0
+    assert result["_success"] is False
+    assert result["action"] == "apply"
+    assert result["mutation_performed"] is False
+    assert result["error_code"]
+
+
+def test_a_compile_that_cannot_be_applied_does_not_report_itself_valid():
+    """Bug #416. The lint already resolved the collision, yet compile reported
+    `is_valid: true` with no warnings and issued a binding whose apply then
+    failed every time."""
+    payload = appliable_request().model_dump(mode="json")
+    payload["intent"]["conflict_policy"] = "fail"
+    existing = [
+        {
+            "component_id": "existing-1",
+            "name": "M12.11 Applied Conn",
+            "type": "connector-settings",
+            "version": "1",
+        }
+    ]
+    with patch.object(
+        integration_builder, "paginate_metadata", lambda *a, **k: existing
+    ):
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "compile", config={"authoring_request": payload}
+        )
+    assert result["_success"] is False
+    assert result["error_code"] == "AUTHORING_COMPILE_BLOCKED"
+    causes = {c for d in result["authoring_diagnostics"] for c in d["cause_codes"]}
+    assert any(cause.startswith("error_") for cause in causes)
+
+
+def test_a_process_ir_compile_is_not_blocked_by_a_lint_it_can_never_apply():
+    """The other half of #416's scope: a ProcessIR intent is plan/compile-only,
+    so its component plan exists to resolve `$ref` symbols rather than be built.
+    Blocking compile there would make the capability this issue adds unusable."""
+    result = build_integration_action(
+        MagicMock(),
+        _PROFILE,
+        "compile",
+        config={"authoring_request": process_ir_request().model_dump(mode="json")},
+    )
+    assert result["_success"] is True
+    assert result["authoring_result"]["artifact_fingerprints"]
+
+
+# ---------------------------------------------------------------------------
+# Regressions for QA round 5 (bugs #418-#419)
+# ---------------------------------------------------------------------------
+
+
+def test_a_typed_dry_run_does_not_claim_it_mutated():
+    """Bug #418. `mutation_performed` was `bool(_success)`, so a dry run — which
+    succeeds having written nothing — claimed it mutated."""
+    payload = _bound_payload()
+    with patch(_EXECUTE) as execute:
+        result = build_integration_action(
+            MagicMock(),
+            _PROFILE,
+            "apply",
+            config={"authoring_request": payload, "dry_run": True},
+        )
+        assert execute.call_count == 0
+    assert result["_success"] is True
+    assert result["dry_run"] is True
+    assert result["mutation_performed"] is False
+
+
+def test_a_partial_failure_that_wrote_something_says_so():
+    """Bug #418, the direction that matters most. A failure AFTER a real create
+    reported `mutation_performed: false`, so an agent had no reason to clean up."""
+    from boomi_mcp.models.integration_models import (
+        IntegrationComponentSpec,
+        IntegrationSpecV1,
+    )
+    from boomi_mcp.models.authoring_workflow import (
+        AuthoringRequestV1,
+        IntegrationSpecAuthoringIntentV1,
+    )
+
+    two = AuthoringRequestV1(
+        intent=IntegrationSpecAuthoringIntentV1(
+            integration_spec=IntegrationSpecV1(
+                name="M12.11 Partial",
+                components=[
+                    IntegrationComponentSpec(
+                        key="a", type="connector-settings", name="M12.11 A",
+                        config={"connector_type": "rest", "component_name": "M12.11 A",
+                                "base_url": "https://api.example.com", "auth": "NONE"},
+                    ),
+                    IntegrationComponentSpec(
+                        key="b", type="connector-settings", name="M12.11 B",
+                        config={"connector_type": "rest", "component_name": "M12.11 B",
+                                "base_url": "https://api.example.com", "auth": "NONE"},
+                    ),
+                ],
+            )
+        )
+    )
+    compiled, _ = compile_authoring_request_v1(
+        two, boomi_client=MagicMock(), profile=_PROFILE
+    )
+    payload = two.model_dump(mode="json")
+    payload["expected_capability_revision"] = (
+        compiled.revision_binding.capability_revision
+    )
+    payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+
+    calls = {"n": 0}
+
+    def _first_ok_then_fail(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"_success": True, "component_id": "created-1"}
+        return {"_success": False, "error": "builder blew up"}
+
+    with patch(_EXECUTE) as execute, patch(_GET_XML) as get_xml:
+        execute.side_effect = _first_ok_then_fail
+        get_xml.return_value = {"type": "connector-settings", "xml": _LIVE_XML}
+        result = build_integration_action(
+            MagicMock(),
+            _PROFILE,
+            "apply",
+            config={"authoring_request": payload, "dry_run": False},
+        )
+    assert result["_success"] is False
+    assert result["mutation_performed"] is True, (
+        "a failure after a real create must not report that nothing was written"
+    )
+
+
+def test_a_post_mutation_failure_is_not_labelled_as_needing_revalidation():
+    """Bug #419. AUTHORING_APPLY_VALIDATION_REQUIRED means "nothing was mutated;
+    re-plan and retry". Attaching it after a real create turned its remediation
+    into "retry over live state" — which under clone duplicated the component on
+    every retry. Once mutation begins the legacy failure stands (ADR-001 §7)."""
+    from boomi_mcp.categories.integration_builder import _decorate_typed_apply
+
+    post_mutation = {
+        "_success": False,
+        "error": "Failed at step 'b'",
+        "partial_results": {"a": {"component_id": "created-1"}},
+    }
+    _decorate_typed_apply(post_mutation, {})
+    assert post_mutation["mutation_performed"] is True
+    assert "error_code" not in post_mutation
+
+    pre_mutation = {"_success": False, "error": "refused before any write"}
+    _decorate_typed_apply(pre_mutation, {})
+    assert pre_mutation["mutation_performed"] is False
+    assert pre_mutation["error_code"] == AUTHORING_APPLY_VALIDATION_REQUIRED

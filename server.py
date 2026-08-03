@@ -2336,11 +2336,22 @@ if build_integration_action:
             Fetch its exact schema with
             get_schema_template(schema_name="AuthoringRequestV1").
 
-            Additional config keys, all optional except on a typed apply:
-                authoring_request           - the typed intent
-                expected_capability_revision - REQUIRED for a typed apply
-                expected_compile_hash        - REQUIRED for a typed apply
-                expected_plan_hash           - optional staleness check
+            config.authoring_request is the ONLY new config key. The three
+            binding values are fields OF that object (they are AuthoringRequestV1
+            fields), not siblings of it — placed at the config root they are
+            ignored and a typed apply fails with
+            AUTHORING_APPLY_VALIDATION_REQUIRED:
+
+                config = {
+                  "authoring_request": {
+                    "contract_version": "1",
+                    "intent": {...},
+                    "expected_capability_revision": "sha256:...",  # typed apply: REQUIRED
+                    "expected_compile_hash": "sha256:...",         # typed apply: REQUIRED
+                    "expected_plan_hash": "sha256:..."             # optional staleness check
+                  },
+                  "dry_run": false
+                }
 
             config.authoring_request is mutually exclusive with the legacy
             integration_spec / source_description / components roots; sending

@@ -1458,6 +1458,7 @@ def test_models_package_exports_are_pinned():
         "RecipeInvocationRequestV1",
         "RequiredDecisionV1",
         "ResolvedReferenceSummaryV1",
+        "TopologyParticipantV1",
         "TopologyRelationSummaryV1",
         "ValidationReportSummaryV1",
         "authoring_build_provenance_v1_json_schema",

@@ -40,6 +40,14 @@ No sixth tool is introduced. `compile` is an additive action on `build_integrati
 | 5 | `build_integration(action="plan", config={"authoring_request": …})` | **no** |
 | 6 | `build_integration(action="compile", config={"authoring_request": …})` | **no** |
 | 7 | `build_integration(action="apply", …)` | **yes** — the first phase that may |
+
+A typed apply always answers in the typed envelope: `action`, `mutation_performed`, and — when it
+refused before writing anything — an `error_code`. `mutation_performed` is derived from EVIDENCE (a
+component id in `results`/`partial_results`), not from `_success`: a dry run succeeds having written
+nothing, and a partial failure fails having already written something. Once mutation has begun the
+legacy `BUILD_*` failure stands and no `AUTHORING_*` code is attached, because that family's
+remediation means "nothing was mutated, re-plan and retry" — advice that would compound damage
+against live state under `conflict_policy="clone"`.
 | 8 | `build_integration(action="verify", config={"build_id": …})` | no |
 
 ### Three planning concepts, deliberately distinct
@@ -62,7 +70,7 @@ executable. Every response this issue introduces uses:
 | `pipeline_stages` | the inert `PipelineSpec` echo (ADR-001 §5) — drives nothing |
 | `process_cfg` | the compiler's semantic control-flow graph, summarized shape-only |
 | `component_dependencies` | ComponentPlan materialization edges |
-| `topology_relations` | `SystemTopologySpecV1` relations |
+| `topology_relations` | `SystemTopologySpecV1` relations — each carries `relation_kind`, `relation_key` and typed `participants` (`role` + `ref`), derived from the variant's own fields. Relations are not uniformly binary (`deployment_binding` binds three objects), so there is deliberately no source/target pair. |
 
 `IntegrationSpecV1.flows` and the `flow_sequence` process-config key keep their names. They are
 frozen legacy surface (ADR-001 §9); renaming them is not in this issue's scope, and the rule above
@@ -113,6 +121,10 @@ only *that* something does.
 
 Recovery from drift or staleness: re-run `list_capabilities`, re-fetch the schemas, re-plan,
 recompile, then apply with the new binding.
+
+Verify reports `unknown` — never `match` — when any build-owned component has no apply-time
+baseline to compare against (its read-back failed when the build was created). Those components are
+listed in `unverifiable_components`, so "not compared" can never be mistaken for "unchanged".
 
 ## 6. Capability gaps — what this surface cannot do, said out loud
 

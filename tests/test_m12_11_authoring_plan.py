@@ -404,3 +404,149 @@ def test_the_validation_summary_tracks_a_blocking_plan(spy):
     assert result.errors
     assert result.validation_report.error_count == len(result.errors)
     assert result.validation_report.is_valid is False
+
+
+# ---------------------------------------------------------------------------
+# Regressions for the Codex review findings (round 1)
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_stages_carry_the_authored_stage_keys(spy):
+    """P2. StageSpec has `key`, no `name` — read behind a getattr default, every
+    authored pipeline summarized as a list of empty strings."""
+    from boomi_mcp.authoring.workflow import build_pipeline_stages
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+    from boomi_mcp.models.pipeline_models import PipelineSpec, StageSpec
+
+    spec = IntegrationSpecV1(
+        name="pipeline",
+        components=[],
+        pipeline=PipelineSpec(
+            stages=[StageSpec(key="fetch", kind="fetch"), StageSpec(key="send", kind="send")]
+        ),
+    )
+    assert build_pipeline_stages(spec) == ("fetch", "send")
+
+
+def test_topology_relations_summarize_their_real_fields(spy):
+    """P2. No relation variant defines relation_kind/source_key/target_key, so
+    every relation summarized as empty strings behind getattr defaults."""
+    from boomi_mcp.authoring.workflow import build_topology_relations
+    from boomi_mcp.models.system_topology import parse_system_topology_v1
+
+    topology = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "qa",
+            "objects": [
+                {"kind": "process", "key": "p1", "component_ref": "$ref:a"},
+                {"kind": "process", "key": "p2", "component_ref": "$ref:b"},
+            ],
+            "relations": [
+                {
+                    "kind": "process_call",
+                    "key": "r1",
+                    "caller_process": "p1",
+                    "callee_process": "p2",
+                }
+            ],
+        }
+    )
+    summaries = build_topology_relations(topology)
+    assert len(summaries) == 1
+    summary = summaries[0]
+    assert summary.relation_kind == "process_call"
+    assert summary.relation_key == "r1"
+    assert [(p.role, p.ref) for p in summary.participants] == [
+        ("callee_process", "p2"),
+        ("caller_process", "p1"),
+    ]
+
+
+def test_a_three_role_relation_is_not_forced_into_a_pair(spy):
+    """`deployment_binding` binds THREE objects; a source/target shape loses one."""
+    from boomi_mcp.authoring.workflow import build_topology_relations
+    from boomi_mcp.models.system_topology import parse_system_topology_v1
+
+    topology = parse_system_topology_v1(
+        {
+            "version": "1",
+            "profile_ref": "qa",
+            "objects": [
+                {"kind": "process", "key": "p", "component_ref": "$ref:a"},
+                {"kind": "deployment_unit", "key": "u"},
+                {
+                    "kind": "environment",
+                    "key": "e",
+                    "environment_ref": "env-1",
+                    "classification": "TEST",
+                },
+            ],
+            "relations": [
+                {
+                    "kind": "deployment_binding",
+                    "key": "r",
+                    "deployment_unit": "u",
+                    "process": "p",
+                    "environment": "e",
+                }
+            ],
+        }
+    )
+    participants = build_topology_relations(topology)[0].participants
+    assert len(participants) == 3
+    assert {p.role for p in participants} == {
+        "deployment_unit",
+        "process",
+        "environment",
+    }
+
+
+def test_an_in_plan_reference_is_resolved_not_dangling(spy):
+    """P2. A `$ref` to a component THIS plan declares is resolved by the symbol
+    table whether or not it exists yet. Marking it unresolved made a valid
+    forward reference indistinguishable from a dangling one."""
+    result = _plan(process_ir_request())
+    by_ref = {r.ref: r for r in result.resolved_references}
+    assert by_ref["$ref:db_conn"].resolved is True
+    assert by_ref["$ref:proc"].resolved is True
+
+
+def test_a_dangling_reference_is_still_distinguishable(spy):
+    """Guard the guard: marking everything resolved would satisfy the pin above."""
+    result = _plan(process_ir_request(UNRESOLVABLE_IR_DOC))
+    by_ref = {r.ref: r for r in result.resolved_references}
+    assert by_ref["$ref:nonexistent_op"].resolved is False
+    assert by_ref["$ref:db_conn"].resolved is True
+
+
+def test_a_failed_legacy_lint_blocks_instead_of_echoing_the_raw_request(spy):
+    """P1. A failed `_build_plan` returns no `integration_spec`; treating it as
+    success left the preview as the RAW request — and that path includes
+    PLAINTEXT_SECRET_REJECTED, so the response would have echoed the very value
+    the legacy planner refused, while reporting success."""
+    from unittest.mock import MagicMock
+
+    import boomi_mcp.authoring.workflow as workflow
+    from boomi_mcp.errors import AUTHORING_COMPILE_BLOCKED
+
+    def _failing_plan(*args, **kwargs):
+        return {"_success": False, "error_code": "PLAINTEXT_SECRET_REJECTED"}
+
+    import boomi_mcp.categories.integration_builder as builder
+
+    original = builder._build_plan
+    builder._build_plan = _failing_plan
+    try:
+        with pytest.raises(workflow.AuthoringWorkflowError) as excinfo:
+            plan_authoring_request_v1(
+                process_ir_request(),
+                boomi_client=MagicMock(),
+                profile="qa",
+                account_id="acct",
+            )
+    finally:
+        builder._build_plan = original
+    assert excinfo.value.code == AUTHORING_COMPILE_BLOCKED
+    causes = {c for d in excinfo.value.diagnostics for c in d.cause_codes}
+    assert "PLAINTEXT_SECRET_REJECTED" in causes

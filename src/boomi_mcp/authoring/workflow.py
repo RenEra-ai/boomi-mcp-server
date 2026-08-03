@@ -62,6 +62,7 @@ from ..models.authoring_workflow import (
     ProcessCfgSummaryV1,
     RequiredDecisionV1,
     ResolvedReferenceSummaryV1,
+    TopologyParticipantV1,
     TopologyRelationSummaryV1,
     ValidationReportSummaryV1,
     sort_authoring_diagnostics,
@@ -360,31 +361,63 @@ def build_component_dependencies(
 
 
 def build_pipeline_stages(spec: IntegrationSpecV1) -> Tuple[str, ...]:
-    """The inert ``PipelineSpec`` stage names (ADR-001 §5), if one was authored.
+    """The inert ``PipelineSpec`` stage KEYS (ADR-001 §5), if one was authored.
 
     Echoed, never executed: a v1.0 spec's top-level pipeline drives nothing, and
     surfacing it under its own name keeps that visible instead of letting a
     reader assume it is the process.
+
+    ``StageSpec`` identifies itself with ``key`` and has no ``name`` field. An
+    earlier version read ``name`` behind a ``getattr`` default, so every authored
+    pipeline summarized as a list of empty strings — a defensive default on a
+    model whose fields we control, hiding the error instead of surfacing it.
     """
     pipeline = getattr(spec, "pipeline", None)
     if pipeline is None:
         return ()
-    stages = getattr(pipeline, "stages", ()) or ()
-    return tuple(str(getattr(stage, "name", "") or "") for stage in stages)
+    return tuple(str(stage.key) for stage in (pipeline.stages or ()))
+
+
+#: Fields every topology relation carries; everything else names a participant.
+_TOPOLOGY_RELATION_META_FIELDS = frozenset({"kind", "key"})
 
 
 def build_topology_relations(
     topology_spec,
 ) -> Tuple[TopologyRelationSummaryV1, ...]:
+    """Summarize topology relations from the fields they ACTUALLY declare.
+
+    Each variant carries ``kind`` and ``key`` plus role-specific object
+    references — ``caller_process``/``callee_process`` for a process call,
+    ``deployment_unit``/``process``/``environment`` for a deployment binding, and
+    so on. Participants are therefore derived from the model's own field set
+    rather than squeezed into a source/target pair, which is both wrong for the
+    three-role variants and, as written before, wrong for all of them: no variant
+    defines ``relation_kind``, ``source_key`` or ``target_key``, so every
+    relation summarized as empty strings behind a ``getattr`` default.
+    """
     if topology_spec is None:
         return ()
     summaries = []
-    for relation in getattr(topology_spec, "relations", ()) or ():
+    for relation in topology_spec.relations or ():
+        participants = tuple(
+            sorted(
+                (
+                    TopologyParticipantV1(
+                        role=field,
+                        ref=str(getattr(relation, field, "") or ""),
+                    )
+                    for field in type(relation).model_fields
+                    if field not in _TOPOLOGY_RELATION_META_FIELDS
+                ),
+                key=lambda participant: participant.sort_key,
+            )
+        )
         summaries.append(
             TopologyRelationSummaryV1(
-                relation_kind=str(getattr(relation, "relation_kind", "") or "relation"),
-                source_key=str(getattr(relation, "source_key", "") or ""),
-                target_key=str(getattr(relation, "target_key", "") or ""),
+                relation_kind=str(relation.kind),
+                relation_key=str(getattr(relation, "key", "") or ""),
+                participants=participants,
             )
         )
     return sort_by_key(summaries)
@@ -437,7 +470,7 @@ def _legacy_plan_echo(
     try:
         from ..categories.integration_builder import _build_plan
 
-        return _build_plan(
+        result = _build_plan(
             boomi_client,
             {
                 "integration_spec": normalized.integration_spec.model_dump(mode="json"),
@@ -446,6 +479,67 @@ def _legacy_plan_echo(
         )
     except Exception:  # noqa: BLE001 — the lint is evidence, never the gate
         return None
+
+    # A FAILED legacy plan is not a lint that ran clean. It returns no
+    # `integration_spec`, so treating it as success left `spec_preview` as the
+    # RAW request — and the path that reaches it includes
+    # `PLAINTEXT_SECRET_REJECTED` on a top-level pipeline, meaning the typed
+    # response would have echoed the very value the legacy planner refused
+    # value-free, while reporting success. Returned as a failure so the caller
+    # sees the refusal instead.
+    if not result.get("_success"):
+        raise AuthoringWorkflowError(
+            AUTHORING_COMPILE_BLOCKED,
+            (
+                _diag(
+                    AUTHORING_COMPILE_BLOCKED,
+                    "error",
+                    message=(
+                        "The component-plan lint rejected this intent; its "
+                        "diagnosis is carried value-free."
+                    ),
+                    subject_kind="component_plan",
+                    remediation=(
+                        "Fix the component plan and re-plan. See cause_codes for "
+                        "the legacy planner's own code."
+                    ),
+                    cause_codes=(
+                        str(result.get("error_code") or "LEGACY_PLAN_REJECTED"),
+                    ),
+                ),
+            ),
+        )
+    return result
+
+
+def _resolve_component_by_id(boomi_client: Any, component_id: str):
+    """Read-only metadata for one component id, or ``None``.
+
+    Exists so a component carrying an explicit ``component_id`` still yields a
+    ``version_marker``. Without it, the staleness guarantee held only for
+    components resolved by NAME.
+    """
+    from boomi.models import (
+        ComponentMetadataQueryConfig,
+        ComponentMetadataQueryConfigQueryFilter,
+        ComponentMetadataSimpleExpression,
+        ComponentMetadataSimpleExpressionOperator,
+        ComponentMetadataSimpleExpressionProperty,
+    )
+
+    from ..categories.integration_builder import paginate_metadata
+
+    expression = ComponentMetadataSimpleExpression(
+        operator=ComponentMetadataSimpleExpressionOperator.EQUALS,
+        property=ComponentMetadataSimpleExpressionProperty.COMPONENTID,
+        argument=[component_id],
+    )
+    query_filter = ComponentMetadataQueryConfigQueryFilter(expression=expression)
+    matches = paginate_metadata(
+        boomi_client, ComponentMetadataQueryConfig(query_filter=query_filter),
+        show_all=False,
+    )
+    return matches[0] if matches else None
 
 
 def build_resolved_reference_summary(
@@ -465,9 +559,12 @@ def build_resolved_reference_summary(
     between plan and apply would leave every hash unchanged, and the binding
     would certify semantics that no longer hold.
 
-    A lookup failure degrades to ``resolved=False`` rather than raising: planning
-    must still return the caller's gaps, and a discovery outage is not a reason
-    to refuse to describe the plan.
+    A lookup failure leaves ``version_marker`` unset rather than raising, and
+    does NOT flip ``resolved``: whether a reference resolves is a property of the
+    component PLAN, which is known locally, so a discovery outage must not
+    reclassify a valid in-plan reference as dangling. Planning must still return
+    the caller's gaps, and an outage is not a reason to refuse to describe the
+    plan — but it is also not evidence that a reference is broken.
     """
     summaries: List[ResolvedReferenceSummaryV1] = []
     declared = {component.key: component for component in spec.components}
@@ -475,24 +572,38 @@ def build_resolved_reference_summary(
     for key, component in sorted(declared.items()):
         component_id: Optional[str] = component.component_id
         version_marker: Optional[str] = None
-        resolved = component_id is not None
+        # A `$ref` naming a component THIS PLAN declares is resolved by the
+        # compiler's symbol table whether or not that component exists yet.
+        # Marking it unresolved made a valid in-plan reference to a
+        # to-be-created component indistinguishable from a genuinely dangling
+        # one — which is exactly the distinction this field exists to draw.
+        resolved = True
 
-        if boomi_client is not None and component_id is None and component.name:
+        if boomi_client is not None:
             try:
                 from ..categories.integration_builder import (
                     _resolve_existing_components,
                 )
 
-                matches = _resolve_existing_components(boomi_client, component)
-                if matches:
-                    first = matches[0]
-                    component_id = first.get("component_id")
+                match = None
+                if component_id:
+                    # Resolve by ID too, not only by name. Skipping the lookup
+                    # for an explicit id left `version_marker` empty, so editing
+                    # that component between compile and apply moved no hash and
+                    # a stale binding passed the gate — the exact guarantee the
+                    # marker is documented to provide.
+                    match = _resolve_component_by_id(boomi_client, component_id)
+                elif component.name:
+                    matches = _resolve_existing_components(boomi_client, component)
+                    match = matches[0] if matches else None
+
+                if match:
+                    component_id = match.get("component_id") or component_id
                     version_marker = str(
-                        first.get("version") or first.get("modified_date") or ""
+                        match.get("version") or match.get("modified_date") or ""
                     ) or None
-                    resolved = bool(component_id)
             except Exception:  # noqa: BLE001 — advisory evidence, never fatal
-                resolved = False
+                version_marker = None
 
         summaries.append(
             ResolvedReferenceSummaryV1(
@@ -834,11 +945,52 @@ def plan_authoring_request_v1(
     legacy = _legacy_plan_echo(normalized, request, boomi_client)
     legacy_warnings: Tuple[AuthoringDiagnosticV1, ...] = ()
     if legacy is not None:
+        # A step the legacy planner marked `error_*` CANNOT execute — that is
+        # the planner's own vocabulary, and `_apply_plan` refuses on the same
+        # prefix. Surfaced so compile stops issuing a binding whose apply is
+        # guaranteed to fail while reporting `is_valid: true` and no warnings.
+        #
+        # BLOCKING only when apply is actually reachable. A direct ProcessIR
+        # intent is plan/compile-only by design, and its component plan exists to
+        # resolve `$ref` symbols rather than to be built — so blocking compile on
+        # a materialization lint would make the one capability this issue adds
+        # (compile a ProcessIR, get its artifact fingerprints) unusable unless
+        # the caller also supplied a fully materializable component plan they
+        # never intended to apply. There the finding is real but advisory.
+        blocks_apply = request.intent.intent_kind != "process_ir"
+        unexecutable = tuple(
+            _diag(
+                AUTHORING_COMPILE_BLOCKED,
+                "error" if blocks_apply else "warning",
+                message=(
+                    "The component-plan lint marked this step unexecutable; "
+                    "apply would refuse it."
+                    if blocks_apply
+                    else "The component-plan lint marked this step unexecutable. "
+                    "This intent is plan/compile-only, so nothing would be built "
+                    "from it either way."
+                ),
+                path=f"/components/{step.get('key', '')}",
+                subject_kind="component",
+                subject_id=str(step.get("key", "")),
+                remediation=(
+                    "Resolve the component collision, or re-plan with a "
+                    "different conflict_policy."
+                ),
+                cause_codes=(str(step.get("planned_action", "")),),
+            )
+            for step in (legacy.get("steps") or ())
+            if str(step.get("planned_action", "")).startswith("error_")
+        )
+        if blocks_apply:
+            errors = sort_authoring_diagnostics(errors + unexecutable)
         # The redacted echo REPLACES the caller's spec. This is the single line
         # that stops a plaintext password from riding back out in the preview.
         if isinstance(legacy.get("integration_spec"), dict):
             spec_preview = IntegrationSpecV1(**legacy["integration_spec"])
-        legacy_warnings = tuple(
+        # ACCUMULATED, not reassigned: the advisory unexecutable-step findings
+        # above must survive alongside the planner's own warning strings.
+        legacy_warnings = (() if blocks_apply else unexecutable) + tuple(
             _diag(
                 AUTHORING_COMPILE_BLOCKED,
                 "warning",
@@ -1427,11 +1579,19 @@ def compare_live_build_provenance(
 
     drifted: List[str] = []
     missing: List[str] = []
+    unavailable: List[str] = []
     diagnostics: List[AuthoringDiagnosticV1] = []
 
     for component_key in sorted(recorded):
         expected_digest = (recorded[component_key] or {}).get("digest")
         observed_digest = live_component_digests.get(component_key)
+        if expected_digest is None:
+            # No apply-time baseline for this component: the read-back failed
+            # when the build was created. There is nothing to compare, and
+            # saying "match" for a comparison that never happened is the false
+            # clean this whole surface exists to avoid.
+            unavailable.append(component_key)
+            continue
         if observed_digest is None:
             missing.append(component_key)
             diagnostics.append(
@@ -1463,12 +1623,20 @@ def compare_live_build_provenance(
                 )
             )
 
-    status = "drift" if (drifted or missing) else "match"
+    if drifted or missing:
+        status = "drift"
+    elif unavailable:
+        # Some component had no baseline, so "everything else matched" is not
+        # the same statement as "this build is unchanged".
+        status = "unknown"
+    else:
+        status = "match"
     return LiveDeploymentComparisonV1(
         status=status,
         revision_skew=skew,
         drifted_components=tuple(drifted),
         missing_components=tuple(missing),
+        unverifiable_components=tuple(unavailable),
         diagnostics=sort_authoring_diagnostics(tuple(diagnostics)),
     )
 

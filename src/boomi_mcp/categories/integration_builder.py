@@ -221,7 +221,10 @@ from .components.builders.transform_function_wrapper_builder import (
     get_transform_function_wrapper_builder,
 )
 from .components.component_update_preservation import merge_for_update
+from pydantic import ValidationError
+
 from ..errors import (
+    AUTHORING_APPLY_VALIDATION_REQUIRED,
     AUTHORING_LIVE_DEPLOYMENT_DRIFT,
     INVALID_INPUT,
     LEGACY_ADAPTER_AUTHORITY_CONFLICT,
@@ -6893,6 +6896,8 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 profile=profile,
                 account_id=_client_account_id(boomi_client),
             )
+        except ValidationError as exc:
+            return _reject_invalid_typed_request(exc, "apply")
         except AuthoringWorkflowError as exc:
             return _authoring_error_envelope(exc, "apply")
 
@@ -6907,6 +6912,13 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         config["integration_spec"] = authoring_bundle.integration_spec.model_dump(
             mode="json"
         )
+        # The BOUND conflict policy, restored explicitly. `conflict_policy` is a
+        # legacy root, so the strip above removes it and `_build_plan` would
+        # default to "reuse" — meaning a compile that bound "fail" or "clone"
+        # would mutate under "reuse". The hash promised one policy and the write
+        # performed another, which is precisely the divergence this binding
+        # exists to prevent.
+        config["conflict_policy"] = authoring_bundle.request.intent.conflict_policy
 
     planned = _build_plan(boomi_client, config)
     if not planned.get("_success"):
@@ -7278,14 +7290,20 @@ def _authoring_build_provenance(
         resolved_references=compile_result.resolved_references,
     )
 
+    # EVERY build-owned component is recorded, including ones whose read-back
+    # failed — with `digest: None`. Omitting them let verify compare only the
+    # entries that happened to succeed and report `match` over an incomplete
+    # baseline, or `not_requested` when every read failed. An unavailable
+    # baseline must read as unknown, never as agreement.
     live: Dict[str, Any] = {}
     for key, step in sorted(results.items()):
         component_id = step.get("component_id") if isinstance(step, dict) else None
         if not component_id:
             continue
-        digest = _live_component_digest(boomi_client, component_id)
-        if digest:
-            live[key] = {"component_id": component_id, "digest": digest}
+        live[key] = {
+            "component_id": component_id,
+            "digest": _live_component_digest(boomi_client, component_id),
+        }
 
     return {
         "provenance": provenance.model_dump(mode="json"),
@@ -7570,6 +7588,39 @@ def _authoring_error_envelope(exc, action: str) -> Dict[str, Any]:
     }
 
 
+def _reject_invalid_typed_request(exc, action: str) -> Dict[str, Any]:
+    """A schema failure reported VALUE-FREE.
+
+    Pydantic's default error text interpolates ``input_value``, so letting a
+    ``ValidationError`` reach the generic handler echoed the rejected payload
+    back to the caller — including, for a recipe intent, a credential sitting in
+    ``raw_input``. Only the field locations and error types travel.
+    """
+    locations = []
+    for error in getattr(exc, "errors", lambda: [])():
+        location = ".".join(str(part) for part in error.get("loc", ()))
+        locations.append(
+            {"path": location, "type": str(error.get("type", "invalid"))}
+        )
+    locations.sort(key=lambda entry: (entry["path"], entry["type"]))
+    return {
+        "_success": False,
+        "action": action,
+        "mutation_performed": False,
+        "error_code": INVALID_INPUT,
+        "error": (
+            f"config.authoring_request failed AuthoringRequestV1 validation at "
+            f"{len(locations)} location(s)."
+        ),
+        "validation_errors": locations,
+        "hint": (
+            "Fetch the schema with "
+            "get_schema_template(schema_name='AuthoringRequestV1'). Values are "
+            "deliberately omitted from this envelope."
+        ),
+    }
+
+
 def _plan_authoring(
     boomi_client: Boomi, profile: str, cfg: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -7587,6 +7638,10 @@ def _plan_authoring(
 
     try:
         request = AuthoringRequestV1.model_validate(payload)
+    except ValidationError as exc:
+        return _reject_invalid_typed_request(exc, "plan")
+
+    try:
         result, _internals = plan_authoring_request_v1(
             request,
             boomi_client=boomi_client,
@@ -7638,6 +7693,10 @@ def _compile_authoring(
 
     try:
         request = AuthoringRequestV1.model_validate(payload)
+    except ValidationError as exc:
+        return _reject_invalid_typed_request(exc, "compile")
+
+    try:
         result, _internals = compile_authoring_request_v1(
             request,
             boomi_client=boomi_client,
@@ -7653,6 +7712,49 @@ def _compile_authoring(
         "mutation_performed": False,
         "authoring_result": result.model_dump(mode="json"),
     }
+
+
+
+def _components_were_written(result: Dict[str, Any]) -> bool:
+    """Did this apply actually create or update anything?
+
+    Read from EVIDENCE — a component id in `results` or `partial_results` — not
+    from `_success`. Deriving it from `_success` was wrong in both directions: a
+    dry run succeeds having written nothing, and a partial failure fails having
+    already written something. Both matter, and the second one matters most: an
+    agent told `mutation_performed: false` after a real create has no reason to
+    clean up.
+    """
+    for bucket in ("results", "partial_results"):
+        entries = result.get(bucket)
+        if not isinstance(entries, dict):
+            continue
+        for entry in entries.values():
+            if isinstance(entry, dict) and entry.get("component_id"):
+                return True
+    return False
+
+
+def _decorate_typed_apply(result: Dict[str, Any], cfg: Dict[str, Any]) -> None:
+    """Give a typed apply the typed envelope, with an HONEST mutation flag.
+
+    A typed apply must answer in the typed shape even when the legacy machinery
+    is what refused it — otherwise an agent branching on `error_code` and
+    `mutation_performed`, as this contract instructs, reads ``None`` for both.
+
+    The error CODE is only defaulted when nothing was written.
+    ``AUTHORING_APPLY_VALIDATION_REQUIRED`` means "nothing was mutated; re-plan
+    and retry", and attaching it to a failure that already created components
+    turned its remediation into an instruction to retry over live state — which
+    under ``conflict_policy="clone"`` produced another copy on every retry. Once
+    mutation has begun the legacy ``BUILD_*`` failure stands, exactly as ADR-001
+    §7 requires.
+    """
+    mutated = _components_were_written(result)
+    result.setdefault("action", "apply")
+    result["mutation_performed"] = mutated
+    if not result.get("_success") and not mutated:
+        result.setdefault("error_code", AUTHORING_APPLY_VALIDATION_REQUIRED)
 
 
 def build_integration_action(
@@ -7691,6 +7793,13 @@ def build_integration_action(
             return result
         if normalized_action == "apply":
             result = _apply_plan(boomi_client, profile, cfg)
+            # A TYPED apply must answer in the typed envelope even when the
+            # legacy machinery is what refused it. Without this, a refusal by
+            # the bound conflict_policy came back as the legacy shape with no
+            # `error_code` and no `mutation_performed` — so an agent branching
+            # on the fields this contract tells it to read saw None for both.
+            if _authoring_payload(cfg) not in (None, _AUTHORING_PAYLOAD_MALFORMED):
+                _decorate_typed_apply(result, cfg)
             result["profile"] = profile
             return result
         if normalized_action == "verify":
