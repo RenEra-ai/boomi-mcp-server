@@ -418,6 +418,32 @@ def _iter_core_schema_nodes(model: Any) -> Iterator[Any]:
                 stack.extend(item for item in value if isinstance(item, dict))
 
 
+def _check_input_owner_shared(reg: RecipeRegistrationV1) -> None:
+    """The input model and the executor must be the same author's code.
+
+    §7 accepts that a registered model can hand its executor anything it likes,
+    because both are trusted code in the same review — and because a model that
+    stashes the caller's mapping in a module global reaches the executor
+    identically, which §12 already declares open. That reasoning holds only while
+    the two are written together.
+
+    Pair a hostile or buggy model with SOMEONE ELSE'S honest executor and it stops
+    holding: the module-global channel needs the executor to cooperate, a payload
+    landing in a declared field does not. No registration does that today, so this
+    is an assumption — and an assumption that decides a threat model is worth an
+    assertion rather than a sentence in a document.
+    """
+    model_module = getattr(reg.input_model, "__module__", None)
+    executor_module = getattr(reg.executor, "__module__", None)
+    if not model_module or not executor_module:
+        return
+    if model_module.rsplit(".", 1)[0] != executor_module.rsplit(".", 1)[0]:
+        raise ValueError(
+            f"{reg.recipe_id!r} input_model and executor must ship in one package: "
+            f"{model_module} vs {executor_module}"
+        )
+
+
 def _check_input_model_forbids_extras(recipe_id: str, model: Any) -> None:
     """Assert what the COMPILED VALIDATOR does, by reading what it was built from.
 
@@ -1779,7 +1805,17 @@ def production_registry() -> RecipeRegistry:
     """
     global _PRODUCTION_REGISTRY
     if _PRODUCTION_REGISTRY is None:
-        _PRODUCTION_REGISTRY = _production_registry()
+        from .builtins.catalog import PRODUCTION_REGISTRATIONS
+
+        registry = _production_registry()
+        # Asserted over the PRODUCTION catalogue only. ``build_test_registry``
+        # legitimately pairs a shipped model with a fixture executor, and the
+        # assumption this defends is about what we ship, not about what a test
+        # assembles.
+        for reg in PRODUCTION_REGISTRATIONS:
+            if reg.input_model is not None and reg.executor is not None:
+                _check_input_owner_shared(reg)
+        _PRODUCTION_REGISTRY = registry
     return _PRODUCTION_REGISTRY
 
 

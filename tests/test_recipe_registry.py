@@ -4739,3 +4739,28 @@ def test_an_input_model_that_cannot_rebuild_is_a_build_defect():
 
     with pytest.raises(ValueError, match="cannot be rebuilt"):
         build_test_registry((_reg(input_model=UnrebuildableInputV1),))
+
+
+def test_a_split_owner_registration_is_a_build_defect():
+    """A model and executor from different packages break §7's own reasoning.
+
+    §7 accepts that a registered model can hand its executor anything, because a
+    model stashing the caller's mapping in a module global reaches it identically
+    — a channel §12 already declares open. That holds only while the two are
+    written together. Pair a hostile or buggy model with SOMEONE ELSE'S honest
+    executor and it stops holding, because the stash needs the executor to
+    cooperate and a payload in a declared field does not (issue #145).
+
+    Asserted over the production catalogue, so the assumption cannot expire in
+    silence.
+    """
+    from boomi_mcp.recipes.registry import _check_input_owner_shared
+
+    _check_input_owner_shared(_reg())  # the shipped pairing is same-package
+
+    def _foreign_executor(inp):  # pragma: no cover - rejected before it can run
+        return ()
+
+    _foreign_executor.__module__ = "some.other.package"
+    with pytest.raises(ValueError, match="must ship in one package"):
+        _check_input_owner_shared(_reg(executor=_foreign_executor))

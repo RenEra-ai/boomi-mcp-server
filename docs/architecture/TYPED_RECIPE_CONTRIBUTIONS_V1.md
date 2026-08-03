@@ -483,37 +483,62 @@ that is strictly weaker. Three paths refuse instead of degrading: an iterable th
 enumerate safely, a dataclass or `TypedDict` whose hints will not resolve, and an alias that names
 something undefined.
 
-This is a **coverage** boundary, not a residue like the author-cooperation channels in §12, and
-the distinction is load-bearing in both directions. A gap here puts caller data in a *declared*
-field an ordinary executor reads — the same criterion that made a masking serializer a defeated
-guard rather than acceptable residue — whereas every §12 channel needs a name the author invented.
-And this one is closable in principle: §12's channels are not. Around twenty defects were found
-in this layer and only two needed an unusual annotation; the rest used `Dict[str, Any]`, a plain
-`TypedDict`, `Union[List[A], List[B]]`, a stdlib dataclass under PEP 563, `NewType` and friends.
-Five of them refused *every invocation of an honest recipe*.
+**This boundary has two halves with opposite properties, and one sentence used to cover both.**
 
-The instrument that found most of them was a census rather than an absence of findings — an
-absence measures the attacker's repertoire, not the code. Two named failure modes (*abstention
-read as permission*, *one arm's answer used for another arm's value*) were graded against every
-site that chooses among union arms or returns a no-information value, and every blocking finding
-from nine consecutive review rounds landed in one of those sites.
+*The annotation-form half is a coverage boundary and is closable in principle.* A gap here puts
+caller data in a **declared** field an ordinary executor reads, through an **honest declaration plus
+caller-controlled input** — no construct in the model whose only purpose is the bypass. `Iterable[str]`
+validating lazily, `Union[List[A], List[B]]` holding `[A(), B()]`, a `TypedDict` judged in neither
+dimension, a PEP 695 alias walked unjudged, `Dict[str, Any]`. These are **bugs**, they are what the
+value-first walk exists for, and they are fixable.
 
-**The census did not end it, and that is the more useful fact.** Four further defects arrived
-after it reported clean, all of them inside sites it had already graded. Two were *introduced by
-the fixes for the previous round* — a refusal added to one arm-building helper fired before its
-result was concatenated with a second source of arms, refusing a `Union[Tuple[X, ...], SomeTypedDict]`
-outright; and removing an eager copy to bound a walk let each union arm re-iterate a container that
-could answer differently the second time. The other two were one rule applied at one of its two
-consumers. A census grades sites against modes it already knows; it cannot grade a mode that a fix
-introduces, and it does not re-grade a site the fix has changed. **Re-run the instrument on the
-patch, not only on the code the patch was written against.**
+*The read-interception half is not closable, and saying otherwise was the error that drove six
+review rounds.* §7 already concluded that "the class of reading an attribute of the author's class is
+exhausted: every one of them is writable, and registration runs after class creation." Every guard
+added afterwards kept reading those same artifacts through less-forgeable **accessors** —
+`type.__dict__["__dict__"].__get__` and friends — which makes the *read* unforgeable and does nothing
+about the *content* being author-written. A registration-time gate loses to one assignment after a
+class body. Findings of this shape are **accepted residue**, not bugs.
 
-The round after that made the same point a third time, and more sharply: the fix for the
-re-iteration defect introduced a guard that asked `getattr(cls, ...)` whether a container still
-enumerated like its base — reaching, unprompted, for the one surface this section had already
-written off as exhausted. It was defeated three ways within a round. **When a fix needs to know
-something about an author-supplied class, the answer is to read the value through a base the
-author does not own, not to ask the class a better question.**
+**The criterion, decidable from a repro script alone:** does the reproduction require author class
+machinery — a metaclass, a descriptor or plain class attribute under a field name, a redefined
+`__dict__` / `__pydantic_extra__`, a post-hoc rewrite of `__pydantic_fields__[...].annotation`, an
+`__instancecheck__` or `__hash__` that writes? If yes it is residue. If the payload arrives through
+an honest declaration and caller data alone, it is a bug. **Refusing ordinary supported Python is
+always a bug, and ranks above both** — this layer shipped five such refusals (`OrderedDict`, a
+`NamedTuple` field named `keys`, `Counter`, every `__slots__` dataclass, `cached_property`), three of
+them introduced by hardening against residue, two of them hitting this repository's own types.
+
+Why residue is the right disposition rather than a defeat: **every one of those attacks is dominated
+by a channel §12 already accepts.** A registered model that stashes the caller's raw mapping in a
+module-level dict, never touching the instance at all, reaches the executor identically — measured
+side by side against the metaclass attack. An adversary who can write a metaclass `__hash__` can
+write `_STASH = {}`. Registered input models and executors are statically catalogued, reviewed server
+code and are part of the trusted computing base; MCP callers control request data and cannot register
+or replace executable Python (§5). Protecting only against malicious recipe *classes* while trusting
+the rest of the Python in the same process is not a coherent boundary.
+
+So: `_assert_declared_shape` is defence in depth against malformed caller data, accidental validator
+substitution, and type confusion in trusted recipes. **It is not a sandbox, and not an
+information-flow guarantee against a malicious or cooperating registered model.** Registered Python
+may retain or communicate data through module globals, private or computed attributes, class
+mutation, descriptors, metaclasses, imports or I/O. Provenance hashes identify code and detect skew;
+they do not confine it. "Executors receive only their validated input" means the engine passes no
+context or catalog argument — nothing more.
+
+The one case where the module-global channel and a declared-field payload are **not** equivalent is a
+hostile-or-buggy input model consumed by *someone else's* honest executor: the stash needs the
+executor to cooperate, a payload in a declared field does not. That pairing does not exist today —
+every registration pairs a model and executor from the same package — and `_check_input_owner_shared`
+now enforces it as a build defect rather than leaving it an assumption.
+
+**Any future runtime, marketplace or third-party executable-registration path changes this threat
+model.** It would need a data-only design or an isolated execution boundary introduced *before* such
+code is admitted; this layer cannot host untrusted code whatever the input handoff looks like,
+because §12's channel is open by construction. Note also that `run_recipes` accepts a `registry=`
+argument and `RecipeRegistry` is publicly exported: no MCP tool exposes either, but in-process Python
+can supply an alternate registry. That is an injection/test seam, not a supported extension point,
+and it presupposes arbitrary code execution.
 
 `Annotated`; both union spellings (`typing.Union` and `X | Y`); `TypeAliasType`, subscripted and
 not; `NewType`; `TypedDict` from either `typing` or `typing_extensions`; parametrised containers
