@@ -488,3 +488,65 @@ def test_capability_revision_covers_every_region_of_the_manifest():
     assert _revision_with(
         _REASON_CODES=MappingProxyType({})
     ) != baseline, "a reason-code change left capability_revision unchanged"
+
+
+def test_no_published_entry_advertises_a_version_that_does_not_resolve():
+    """QA #440. Republishing `schema_version: "inherited"` changed the served
+    payload and left the suite green. The rule is not "omit for inherited" — it
+    is that a published version must actually resolve."""
+    from boomi_mcp.categories.meta_tools import _get_authoring_schema_by_name
+
+    for entry in build_authoring_contract_manifest()["schemas"]:
+        selector, version = entry["selector"], entry.get("schema_version")
+        if version is None:
+            # No version published -> `@anything` must be rejected, so a client
+            # cannot pin what we did not advertise.
+            assert (
+                _get_authoring_schema_by_name(f"{selector}@1").get("_success") is not True
+            ), selector
+            continue
+        resolved = _get_authoring_schema_by_name(f"{selector}@{version}")
+        assert resolved.get("_success") is True, f"{selector}@{version} does not resolve"
+
+
+def test_the_two_published_kind_vocabularies_stay_namespaced_apart():
+    """QA #441. The manifest published registry ENTRY kinds under the name of the
+    disjoint RecipeContributionV1 vocabulary; a client feeding one to the
+    discriminator was rejected every time."""
+    from boomi_mcp.categories.meta_tools import get_schema_template_action
+    from boomi_mcp.models.recipe_contributions import RECIPE_CONTRIBUTION_KINDS
+
+    manifest = build_authoring_contract_manifest()
+    entry_kinds = set(manifest["recipe_registry"]["entry_kinds"])
+    assert entry_kinds == set(
+        get_schema_template_action(schema_name="recipe_registry")["entry_kinds"]
+    )
+    assert entry_kinds.isdisjoint(set(RECIPE_CONTRIBUTION_KINDS))
+
+    # Generalized to the class: ANY manifest key called `contribution_kinds` must
+    # carry the contribution vocabulary, not something else wearing its name.
+    for path, key in walk_keys(dict(manifest)):
+        if key == "contribution_kinds":
+            raise AssertionError(
+                f"{path}.{key} republishes the contribution vocabulary name"
+            )
+
+
+def test_the_intent_kinds_are_derived_from_the_union_not_restated():
+    """QA #443. Reverting to a literal AND adding a fourth union member left the
+    manifest advertising a three-kind axis for a four-kind request model, green."""
+    from typing import get_args
+
+    from boomi_mcp.models.authoring_workflow import (
+        AUTHORING_INTENT_KINDS,
+        AuthoringIntentV1,
+    )
+
+    union_kinds = tuple(
+        get_args(member.model_fields["intent_kind"].annotation)[0]
+        for member in get_args(get_args(AuthoringIntentV1)[0])
+    )
+    assert AUTHORING_INTENT_KINDS == union_kinds
+    manifest = build_authoring_contract_manifest()
+    assert tuple(manifest["intent_kinds"]) == union_kinds
+    assert set(manifest["support_matrix"]) == set(union_kinds)

@@ -272,3 +272,19 @@ def test_the_served_status_contract_matches_what_the_classifier_does():
     # that is the certainty `possible` exists to withhold.
     assert "UNCONFIRMED" in doc
     assert "created but its id did not come back" not in doc
+
+
+def test_the_tool_catalog_teaches_a_config_shape_that_works():
+    """QA #442. The catalog listed the binding values as config-ROOT keys; they
+    are fields INSIDE authoring_request and root copies are silently dropped, so
+    a caller who discovered the surface the documented way — list_capabilities
+    first — was steered into a guaranteed AUTHORING_APPLY_VALIDATION_REQUIRED."""
+    catalog = meta_tools.list_capabilities_action()
+    config_text = catalog["tools"]["build_integration"]["parameters"]["config"]
+    assert "authoring_request" in config_text
+    # It must say the binding values live INSIDE the typed request...
+    assert "INSIDE" in config_text or "inside" in config_text
+    # ...and warn that the root placement fails, which is the actual trap.
+    assert "AUTHORING_APPLY_VALIDATION_REQUIRED" in config_text
+    # The served docstring and the catalog must agree on that point.
+    assert "not siblings of it" in server.build_integration.__doc__
