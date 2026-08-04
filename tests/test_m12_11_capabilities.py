@@ -597,3 +597,49 @@ def test_the_authoring_workflow_contract_is_inside_the_revision():
 
     assert flipped != baseline, "a mutation-flag change left the revision unmoved"
     assert prose == baseline, "advisory prose leaked into the revision"
+
+
+def test_the_workflow_entrys_mutation_flags_are_inside_the_revision():
+    """QA #445. `boomi_mutation` / `read_only` / `raw_xml_exposed` are envelope
+    metadata for every other selector, but `authoring_workflow` has no body — so
+    here they are the surface aggregate of the per-phase `mutates_boomi` flags
+    this entry exists to bind, and flipping them changed what the server served
+    while moving nothing."""
+    from boomi_mcp.authoring import contract as contract_module
+    from boomi_mcp.categories import meta_tools
+
+    contract_module.reset_manifest_cache()
+    baseline = contract_module._schema_bundle()["authoring_workflow"]
+    real = meta_tools.get_schema_template_action
+
+    def _flip_flags(*args, **kwargs):
+        payload = dict(real(*args, **kwargs))
+        if kwargs.get("schema_name") == "authoring_workflow":
+            payload["boomi_mutation"] = True
+            payload["read_only"] = False
+            payload["raw_xml_exposed"] = True
+        return payload
+
+    try:
+        meta_tools.get_schema_template_action = _flip_flags
+        contract_module.reset_manifest_cache()
+        flipped = contract_module._schema_bundle()["authoring_workflow"]
+    finally:
+        meta_tools.get_schema_template_action = real
+        contract_module.reset_manifest_cache()
+
+    assert flipped != baseline
+
+
+def test_the_workflow_contract_key_list_is_actually_the_one_in_use():
+    """QA #446. The previous constant was dead code — it documented an exclusion
+    rule the digest did not consult, so it could drift from reality silently."""
+    import inspect
+
+    from boomi_mcp.authoring import contract as contract_module
+
+    source = inspect.getsource(contract_module._inherited_schema_digest)
+    assert "_AUTHORING_WORKFLOW_CONTRACT_KEYS" in source
+    assert not hasattr(contract_module, "_SELF_REFERENTIAL_KEYS")
+    # And the allowlist must exclude the self-referential field by construction.
+    assert "revision_binding" not in contract_module._AUTHORING_WORKFLOW_CONTRACT_KEYS

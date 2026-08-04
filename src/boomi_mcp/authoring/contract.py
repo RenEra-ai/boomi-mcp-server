@@ -322,12 +322,28 @@ _INHERITED_SCHEMA_SELECTORS: Tuple[str, ...] = (
     "workflow_sequences",
 )
 
-#: Keys excluded when fingerprinting a served payload that EMBEDS the revision.
-#: ``authoring_workflow`` publishes ``revision_binding`` inside itself, so hashing
-#: it whole would be self-referential — the revision would be an input to its own
-#: computation. The phases, actions, intent kinds and terminology ARE the
-#: contract, and they are what gets hashed.
-_SELF_REFERENTIAL_KEYS: Tuple[str, ...] = ("revision_binding",)
+#: ``authoring_workflow`` has no single schema body — the selector IS the
+#: contract — so it is fingerprinted from an ALLOWLIST of its substantive fields.
+#:
+#: An allowlist, not a deny-list of self-referential keys: the payload embeds
+#: ``revision_binding``, so a deny-list would have to keep pace with every field
+#: ever added, and the first one missed would either re-introduce the
+#: self-reference or fold prose back into the revision. Naming what counts is the
+#: safer direction, and ``revision_binding`` is excluded by simply not appearing.
+#:
+#: ``boomi_mutation`` / ``read_only`` / ``raw_xml_exposed`` are in the list: for
+#: every other selector those are envelope metadata, but here they are the
+#: SURFACE AGGREGATE of the per-phase ``mutates_boomi`` flags this very entry
+#: exists to bind, and flipping them changes what the server serves.
+_AUTHORING_WORKFLOW_CONTRACT_KEYS: Tuple[str, ...] = (
+    "actions",
+    "boomi_mutation",
+    "intent_kinds",
+    "phases",
+    "raw_xml_exposed",
+    "read_only",
+    "terminology",
+)
 
 
 #: Envelope keys that actually carry a SCHEMA. Different surfaces use different
@@ -374,7 +390,7 @@ def _inherited_schema_digest(selector: str) -> str:
         contract_body = {
             k: v
             for k, v in payload.items()
-            if k in ("phases", "actions", "intent_kinds", "terminology")
+            if k in _AUTHORING_WORKFLOW_CONTRACT_KEYS
         }
         if contract_body:
             return sha256_fingerprint(contract_body)
