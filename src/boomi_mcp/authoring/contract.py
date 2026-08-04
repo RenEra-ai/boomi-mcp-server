@@ -322,28 +322,6 @@ _INHERITED_SCHEMA_SELECTORS: Tuple[str, ...] = (
     "workflow_sequences",
 )
 
-#: ``authoring_workflow`` has no single schema body — the selector IS the
-#: contract — so it is fingerprinted from an ALLOWLIST of its substantive fields.
-#:
-#: An allowlist, not a deny-list of self-referential keys: the payload embeds
-#: ``revision_binding``, so a deny-list would have to keep pace with every field
-#: ever added, and the first one missed would either re-introduce the
-#: self-reference or fold prose back into the revision. Naming what counts is the
-#: safer direction, and ``revision_binding`` is excluded by simply not appearing.
-#:
-#: ``boomi_mutation`` / ``read_only`` / ``raw_xml_exposed`` are in the list: for
-#: every other selector those are envelope metadata, but here they are the
-#: SURFACE AGGREGATE of the per-phase ``mutates_boomi`` flags this very entry
-#: exists to bind, and flipping them changes what the server serves.
-_AUTHORING_WORKFLOW_CONTRACT_KEYS: Tuple[str, ...] = (
-    "actions",
-    "boomi_mutation",
-    "intent_kinds",
-    "phases",
-    "raw_xml_exposed",
-    "read_only",
-    "terminology",
-)
 
 
 #: Envelope keys that actually carry a SCHEMA. Different surfaces use different
@@ -383,11 +361,14 @@ def _inherited_schema_digest(selector: str) -> str:
         # so fetching it here would call back into the manifest currently being
         # built. Reading the manifest-free source AFTER the fetch was not enough:
         # the recursion is in the fetch itself.
-        contract_body = {
-            k: v
-            for k, v in authoring_workflow_contract().items()
-            if k in _AUTHORING_WORKFLOW_CONTRACT_KEYS
-        }
+        # The WHOLE contract, not a filtered subset. Filtering it through a
+        # hard-coded key list made a second catalog that could drift from the
+        # first: a new contract member would change the served payload and leave
+        # the revision unmoved. `authoring_workflow_contract()` is already
+        # contract-only and manifest-free — it carries no revision and no prose —
+        # so there is nothing to filter out, and anything added to it is covered
+        # automatically.
+        contract_body = authoring_workflow_contract()
         if contract_body:
             return sha256_fingerprint(contract_body)
         raise KeyError("authoring_workflow published no contract body")

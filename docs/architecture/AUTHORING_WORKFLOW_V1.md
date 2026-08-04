@@ -340,8 +340,11 @@ not what a caller *sends*.
 - **Topology is validated, not planned.** `_validate_topology` calls `validate_system_topology` and
   not `plan_system_topology`. Blocking topology findings ARE returned, as authoring diagnostics, and
   their codes and counts enter the validation summary that is hashed into `plan_hash` — so they are
-  surfaced and partially bound. What is omitted is the rest of the planner's output: resolved
-  references, prerequisites, typed blocker records, and unresolved decisions. `required_decisions` is
+  surfaced and partially bound. What is omitted is the rest of `SystemTopologyPlanV1`:
+  `capability_report`, `resolved_references`, `executable_component_prerequisites`,
+  `planning_only_relations`, `runtime_process_order`, `guidance`, the typed `blockers` records and
+  `unresolved_decisions` — plus topology validation *advisories*, which are discarded entirely (only
+  errors and warnings become authoring diagnostics). `required_decisions` is
   consequently always empty — the machinery exists and is tested, but no decision family populates it.
 - **Verify compares component XML, not dependency edges or reference versions**, and checks the
   capability revision but not the compiler revision.

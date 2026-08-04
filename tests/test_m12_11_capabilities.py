@@ -628,18 +628,25 @@ def test_the_workflow_entrys_mutation_flags_are_inside_the_revision():
     assert flipped != baseline
 
 
-def test_the_workflow_contract_key_list_is_actually_the_one_in_use():
-    """QA #446. The previous constant was dead code — it documented an exclusion
-    rule the digest did not consult, so it could drift from reality silently."""
+def test_the_workflow_digest_hashes_the_whole_contract_not_a_subset():
+    """QA #446 + architect round 3. First a constant documented an exclusion the
+    digest never consulted; then an allowlist filtered the contract through seven
+    hard-coded keys, so a NEW contract member would be served while the revision
+    stayed still. Both were second catalogs that could drift from the first.
+
+    The digest now hashes the whole manifest-free contract, so coverage follows
+    the contract automatically.
+    """
     import inspect
 
     from boomi_mcp.authoring import contract as contract_module
 
     source = inspect.getsource(contract_module._inherited_schema_digest)
-    assert "_AUTHORING_WORKFLOW_CONTRACT_KEYS" in source
+    assert "authoring_workflow_contract()" in source
     assert not hasattr(contract_module, "_SELF_REFERENTIAL_KEYS")
-    # And the allowlist must exclude the self-referential field by construction.
-    assert "revision_binding" not in contract_module._AUTHORING_WORKFLOW_CONTRACT_KEYS
+    assert not hasattr(contract_module, "_AUTHORING_WORKFLOW_CONTRACT_KEYS")
+    # Nothing self-referential can be in it, since the contract is manifest-free.
+    assert "revision_binding" not in contract_module.authoring_workflow_contract()
 
 
 def test_a_cold_manifest_build_does_not_recurse():
@@ -683,15 +690,12 @@ def test_a_cold_manifest_build_does_not_recurse():
 def test_the_workflow_contract_has_one_source_for_digest_and_payload():
     """The served payload and the digested body must come from the same place,
     or the revision can describe a contract different from the one served."""
-    from boomi_mcp.authoring.contract import (
-        _AUTHORING_WORKFLOW_CONTRACT_KEYS,
-        authoring_workflow_contract,
-    )
+    from boomi_mcp.authoring.contract import authoring_workflow_contract
     from boomi_mcp.categories.meta_tools import _get_authoring_schema_by_name
 
     contract = authoring_workflow_contract()
     served = _get_authoring_schema_by_name("authoring_workflow")
-    for key in _AUTHORING_WORKFLOW_CONTRACT_KEYS:
+    for key in contract:
         assert key in contract, key
         assert served[key] == contract[key], key
     # The revision is decoration on the served payload only — never digested.
@@ -701,15 +705,14 @@ def test_the_workflow_contract_has_one_source_for_digest_and_payload():
 
 @pytest.mark.parametrize(
     "member",
-    [
-        "actions",
-        "boomi_mutation",
-        "intent_kinds",
-        "phases",
-        "raw_xml_exposed",
-        "read_only",
-        "terminology",
-    ],
+    # DERIVED from the contract itself. A hard-coded list here would be the same
+    # second-catalog drift the digest just stopped having: a new member would be
+    # served, unhashed, and unpinned all at once.
+    sorted(
+        __import__(
+            "boomi_mcp.authoring.contract", fromlist=["authoring_workflow_contract"]
+        ).authoring_workflow_contract()
+    ),
 )
 def test_each_workflow_contract_member_individually_moves_the_revision(member):
     """QA #447. Dropping six of the seven members individually survived all 9116
@@ -733,7 +736,6 @@ def test_each_workflow_contract_member_individually_moves_the_revision(member):
         contract_module.reset_manifest_cache()
 
     assert dropped != baseline, f"{member} is served but not hashed"
-    assert member in contract_module._AUTHORING_WORKFLOW_CONTRACT_KEYS
 
 
 def test_the_workflow_contract_flags_have_the_right_VALUES():
