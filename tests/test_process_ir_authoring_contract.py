@@ -1162,8 +1162,8 @@ def _paginate_contract(category):
         seen_cursors.add(cursor)
 
 
-def _served_strings():
-    """Every string on every surface that serves instructions.
+def _served_surfaces():
+    """Every response payload that serves instructions.
 
     Deliberately NOT just the ``schema_name`` selectors. ``list_capabilities``
     publishes 23 template call strings of its own, and the advisory planner
@@ -1176,11 +1176,46 @@ def _served_strings():
             surfaces.append(meta_tools.get_schema_template_action(schema_name=name))
         except Exception:  # noqa: BLE001 — a selector that cannot build serves nothing
             continue
+    # resource_type ALONE and resource_type x operation: the second axis serves
+    # 179 further strings, two of which carry their own instructions.
     for resource_type in meta_tools._VALID_RESOURCE_TYPES:
+        for operation in (None, "create", "update", "list", "execute"):
+            try:
+                surfaces.append(
+                    meta_tools.get_schema_template_action(
+                        resource_type=resource_type, operation=operation
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                continue
+
+    # The ERROR envelopes. A rejection is served text too, and its suggestion is
+    # the instruction a caller is most likely to follow — they are stuck.
+    for bad in (
+        {},
+        {"schema_name": "no_such_selector"},
+        {"resource_type": "no_such_type"},
+        {"schema_name": "process_ir_authoring", "node_kind": "no_such_kind"},
+        {"schema_name": "process_ir_authoring", "limit": 999},
+        {"schema_name": "process_ir_authoring", "after_entry_id": "node.branch"},
+        {"schema_name": "ProcessIRV1", "node_kind": "branch"},
+        {"schema_name": "process_ir_authoring@99"},
+    ):
         try:
-            surfaces.append(
-                meta_tools.get_schema_template_action(resource_type=resource_type)
-            )
+            surfaces.append(meta_tools.get_schema_template_action(**bad))
+        except Exception:  # noqa: BLE001
+            continue
+
+    # Every plan_integration_design mode, including its refusals.
+    for kwargs in (
+        {},
+        {"authoring_mode": "process_ir"},
+        {"archetype": "database_to_api_sync"},
+        {"authoring_mode": "not_a_mode"},
+        {"archetype": "database_to_api_sync", "authoring_mode": "process_ir"},
+    ):
+        try:
+            surfaces.append(meta_tools.plan_integration_design_action(**kwargs))
         except Exception:  # noqa: BLE001
             continue
     # The authoring contract's own ENTRIES. A bare selector deliberately returns
@@ -1195,8 +1230,6 @@ def _served_strings():
         surfaces.extend(_paginate_contract(category))
 
     surfaces.append(meta_tools.list_capabilities_action())
-    surfaces.append(meta_tools.plan_integration_design_action())
-    surfaces.append(meta_tools.plan_integration_design_action(authoring_mode="process_ir"))
 
     # Every REGISTERED tool's description. This is the surface an LLM reads
     # before it reads anything else, and it was 0% covered: a poisoned tool
@@ -1209,18 +1242,13 @@ def _served_strings():
     # one of those would be a false alarm about text no caller can see.
     surfaces.extend(_registered_tool_descriptions())
 
-    def walk(value):
-        if isinstance(value, str):
-            yield value
-        elif isinstance(value, dict):
-            for item in value.values():
-                yield from walk(item)
-        elif isinstance(value, (list, tuple)):
-            for item in value:
-                yield from walk(item)
+    return surfaces
 
-    for surface in surfaces:
-        yield from walk(surface)
+
+def _served_strings():
+    """Every served string. One list of surfaces, two walkers over it."""
+    for _path, text in _served_strings_with_paths():
+        yield text
 
 
 #: ``get_schema_template``'s positional order, DERIVED from the signature.
@@ -1351,15 +1379,29 @@ _FETCH_IMPERATIVE = re.compile(
 def _has_fetch_imperative(text):
     return bool(_FETCH_IMPERATIVE.search(text))
 
+#: The repository's own architecture documents, DERIVED from disk rather than
+#: listed. A bare ``AUTHORING_WORKFLOW_V1`` (the ``.md`` dropped) escaped an
+#: extension-based pattern, and enumerating the names by hand would be the same
+#: second-copy defect this contract exists to prevent.
+_REPO_DOC_NAMES = tuple(
+    sorted(
+        path.stem
+        for path in (
+            Path(__file__).resolve().parent.parent / "docs" / "architecture"
+        ).glob("*.md")
+    )
+)
+
 #: An unfetchable TARGET: a repository path, a documentation/source filename, or
 #: a bare well-known document name.
 #:
-#: Widened after a measured escape table showed 18 of 23 shapes getting through:
-#: ``/mnt/...`` sandbox paths, ``.py``/``.rst``/``.toml`` files, a bare
-#: ``README``, a lowercase ``.md`` with no ``docs/`` prefix, and an uppercase
-#: ``.MD`` (the pattern was case-sensitive). Enumerating extensions is still an
-#: enumeration — but it is an enumeration of TARGETS, which is closed and
+#: Widened twice against measured escape tables. Enumerating extensions is still
+#: an enumeration — but it is an enumeration of TARGETS, which is closed and
 #: inspectable, rather than of the verbs that might precede them, which is not.
+#:
+#: ``json`` and ``xml`` are deliberately ABSENT: ``profile.json`` is a real
+#: profile_type value on this surface, and flagging legitimate domain data would
+#: make the guard something people switch off.
 #:
 #: ``\b`` is applied ONLY to alternatives beginning with a word character: in
 #: front of the whole group it silently disabled the ``.codex/`` alternative,
@@ -1371,13 +1413,20 @@ def _has_fetch_imperative(text):
 #: flagged a reachable destination would teach the wrong lesson.
 _UNFETCHABLE_DOCUMENT = re.compile(
     r"(?:"
-    r"\b(?:ADR-\d+|README)\b"
-    r"|\b(?:docs|src|tests|agents|examples)/(?!Atomsphere)[\w/.-]+"
-    r"|\.codex/[\w/.-]+"
+    # Bare document names are UPPERCASE and matched case-SENSITIVELY. Matching
+    # them case-insensitively flagged the ordinary word "license" inside a
+    # warning about connection licences — a guard that cries wolf on prose is a
+    # guard someone switches off.
+    r"\b(?:ADR-\d+|README|CHANGELOG|LICENSE|Makefile)\b"
+    + (r"|\b(?:" + "|".join(re.escape(n) for n in _REPO_DOC_NAMES) + r")\b"
+       if _REPO_DOC_NAMES else "")
+    + r"|\b(?:docs|src|tests|agents|examples|scripts|boomi_mcp)/(?!Atomsphere)[\w/.-]+"
+    r"|\.(?:codex|github)/[\w/.-]+"
     r"|/mnt/[\w/.-]+"
-    r"|\b[\w.-]+\.(?:md|rst|py|toml|cfg|ini)\b"
-    r")",
-    re.IGNORECASE,
+    # Only the EXTENSION alternative ignores case, so `SETUP.MD` is caught
+    # without dragging every lowercase English word in with it.
+    r"|(?i:\b[\w.-]+\.(?:md|rst|py|toml|cfg|ini|yaml|yml|sh|sql|js|ts|html)\b)"
+    r")"
 )
 
 
@@ -1511,59 +1560,67 @@ def test_the_escape_shapes_that_leaked_are_all_matched_now():
     assert not _UNFETCHABLE_DOCUMENT.findall("docs/Atomsphere/Integration/Process")
 
 
-def _amendment_owned_strings():
-    """Only the surfaces this amendment introduced or rewrote.
+#: Keys whose values are PROVENANCE LABELS or fetchable references, not
+#: instructions — the only exemptions from the strict rule below.
+#:
+#: Measured, not guessed. Running the strict rule over every served surface
+#: yields offenders on exactly one: ``list_capabilities``, where 55 upstream SDK
+#: example-script names sit under ``sdk_examples_covered`` (a coverage ledger,
+#: not somewhere a caller is sent) and one ``map_component.md`` sits under
+#: ``read_boomi_doc_page.examples`` — a Boomi doc key that tool fetches.
+#:
+#: An earlier version exempted 20 of 22 SURFACES on the theory that those
+#: labels were spread across them. They are not; they are two keys. Exempting by
+#: key buys back everything that scoping gave up — including
+#: ``AuthoringRevisionBindingV1`` and ``cache_property_authoring``, the very
+#: surfaces two earlier bugs were found on.
+_ARTIFACT_EXEMPT_KEYS = ("sdk_examples_covered", "read_boomi_doc_page.examples")
 
-    The strict rule below is deliberately NOT repo-wide. A blanket ban on
-    file-shaped tokens would flag ~55 pre-existing example-script labels in
-    other tools' descriptions and one legitimately fetchable Boomi doc key —
-    that is a separate cleanup, not this amendment's, and pretending otherwise
-    would either fail the build on unrelated prose or force a scope creep
-    nobody asked for.
-    """
-    surfaces = [
-        meta_tools.get_schema_template_action(schema_name="ProcessIRV1"),
-        meta_tools.get_schema_template_action(schema_name="process_ir_authoring"),
-    ]
-    facets = surfaces[1]["contract_page"]["facets"]
-    for category in facets["categories"]:
-        surfaces.extend(_paginate_contract(category))
 
-    def walk(value):
+def _served_strings_with_paths():
+    """``(dotted path, string)`` for every served string, for key exemptions."""
+
+    def walk(value, path):
         if isinstance(value, str):
-            yield value
+            yield path, value
         elif isinstance(value, dict):
-            for item in value.values():
-                yield from walk(item)
+            for key, item in value.items():
+                yield from walk(item, f"{path}.{key}" if path else str(key))
         elif isinstance(value, (list, tuple)):
             for item in value:
-                yield from walk(item)
+                yield from walk(item, f"{path}[]")
 
-    for surface in surfaces:
-        yield from walk(surface)
+    for index, surface in enumerate(_served_surfaces()):
+        yield from walk(surface, "")
 
 
-def test_no_surface_this_amendment_owns_names_a_repository_artifact_at_all():
-    """The STRICT rule, where this work is responsible for every word.
+def test_no_served_string_names_a_repository_artifact_at_all():
+    """The STRICT rule: no imperative required, over EVERY served surface.
 
-    No imperative required. A repository path or document filename in a served
-    string is unreachable however the sentence is phrased, so the shapes that
-    escape an imperative-gated guard — "Grounded in X", "the rules are at X" —
-    are caught here by the target alone.
+    Shapes like "Grounded in X" and "the rules are at X" carry no fetch verb, so
+    an imperative-gated guard can never see them. The target alone is the
+    offence: a repository path or document filename is unreachable however the
+    sentence is phrased.
 
-    ``ADR-001`` is exempted as bare PROVENANCE: it carries no path and no
-    extension, nothing is promised to the reader, and the alternative is
-    rewriting 34 pre-existing attributions across selectors this amendment does
-    not own.
+    Scoped by KEY, not by surface. The previous version read 2 of 22 changed
+    surfaces on the theory that pre-existing labels were spread across them;
+    measurement showed they are two keys on one surface, and the 20 skipped
+    surfaces included the two that earlier bugs were found on.
+
+    ``ADR-001`` stays exempt as bare PROVENANCE: no path, no extension, nothing
+    promised to the reader.
     """
     bare_provenance = re.compile(r"\bADR-\d+\b")
     offenders = []
-    for text in _amendment_owned_strings():
+    for path, text in _served_strings_with_paths():
+        if any(key in path for key in _ARTIFACT_EXEMPT_KEYS):
+            continue
         for match in _UNFETCHABLE_DOCUMENT.findall(text):
             if bare_provenance.fullmatch(match):
                 continue
-            offenders.append((match, text.strip()[:120]))
-    assert offenders == [], offenders
+            offenders.append((path, match, text.strip()[:110]))
+    assert offenders == [], offenders[:12]
+
 
 
 def test_the_sweep_reads_registered_tools_not_every_module_global():
@@ -1619,13 +1676,12 @@ def test_the_pagination_helper_is_shared_by_both_sweeps():
     """
     import inspect
 
-    # Both SWEEPS route through the shared helper. (The pagination TESTS above
-    # page independently on purpose — an independent implementation is what
-    # makes them a check on the helper rather than a restatement of it.)
-    for sweep in (_served_strings, _amendment_owned_strings):
-        source = inspect.getsource(sweep)
-        assert "_paginate_contract" in source
-        assert "after_entry_id=cursor" not in source, "a sweep re-implemented paging"
+    # There is ONE surface builder, and both rules walk it. (The pagination
+    # TESTS above page independently on purpose — an independent implementation
+    # is what makes them a check on the helper rather than a restatement of it.)
+    source = inspect.getsource(_served_surfaces)
+    assert "_paginate_contract" in source
+    assert "after_entry_id=cursor" not in source, "the sweep re-implemented paging"
 
     # ...and the one implementation carries both guards.
     helper = inspect.getsource(_paginate_contract)
@@ -1654,3 +1710,91 @@ def test_the_positional_table_is_derived_from_the_real_signature():
     assert kwargs["schema_name"] == "process_ir_authoring"
     assert kwargs["authoring_entry_id"] == "node.branch"
     assert meta_tools.get_schema_template_action(**kwargs)["_success"] is True
+
+
+def test_the_strict_rule_reaches_the_surfaces_earlier_bugs_were_found_on():
+    """Scoping by SURFACE skipped 20 of 22; scoping by KEY skips two keys.
+
+    The previous version read only `ProcessIRV1` and `process_ir_authoring` on
+    the theory that pre-existing example labels were spread across the other
+    surfaces. Measurement showed they are two keys on one surface — and the
+    skipped 20 included `AuthoringRevisionBindingV1` and
+    `cache_property_authoring`, the surfaces bugs #461 and #460 were found on.
+    """
+    # Check the SURFACES, not the path strings: a selector name appears as a
+    # payload VALUE (`schema_name: "cache_property_authoring"`), not as a key.
+    served = {
+        surface.get("schema_name")
+        for surface in _served_surfaces()
+        if isinstance(surface, dict)
+    }
+    for selector in (
+        "AuthoringRevisionBindingV1",
+        "cache_property_authoring",
+        "authoring_workflow",
+        "ProcessIRV1",
+        "process_ir_authoring",
+    ):
+        assert selector in served, selector
+
+    # ...and the strict rule really walks their strings.
+    paths = {path for path, _ in _served_strings_with_paths()}
+    assert any("AuthoringRevisionBindingV1" in path for path in paths)
+
+
+def test_the_artifact_exemption_is_two_keys_not_a_surface():
+    """A narrow exemption is auditable; a broad one hides what it excuses."""
+    assert _ARTIFACT_EXEMPT_KEYS == (
+        "sdk_examples_covered",
+        "read_boomi_doc_page.examples",
+    )
+    exempted = [
+        path
+        for path, _ in _served_strings_with_paths()
+        if any(key in path for key in _ARTIFACT_EXEMPT_KEYS)
+    ]
+    assert exempted, "the exemption matches nothing — it is dead or misspelled"
+    # It must not swallow a whole surface.
+    assert all("sdk_examples_covered" in p or "read_boomi_doc_page" in p for p in exempted)
+
+
+@pytest.mark.parametrize(
+    "text,flagged",
+    [
+        ("The table is at AUTHORING_WORKFLOW_V1.md §11.", True),
+        # the same citation with the extension dropped
+        ("Consult AUTHORING_WORKFLOW_V1 §11.", True),
+        # no imperative at all — only the strict rule can see these
+        ("Grounded in .codex/plans/issue-141-live-captures.md.", True),
+        ("lives in boomi_mcp/models/process_ir.py", True),
+        ("see scripts/build.sh", True),
+        ("config.yaml", True),
+        ("SETUP.MD", True),
+        ("README", True),
+        # ...and the shapes that must NOT be flagged
+        ("two connections each burn a separate connection license", False),
+        ("docs/Atomsphere/Integration/Process", False),
+        ("a profile_type of profile.json", False),
+        ("recorded in ADR-001 §6", False),
+    ],
+)
+def test_the_measured_escape_table(text, flagged):
+    """Every shape a QA round measured, in one table.
+
+    ``ADR-001`` and ``profile.json`` are the two that must stay quiet: the first
+    is provenance, the second is real domain data on this very surface.
+    """
+    bare_provenance = re.compile(r"\bADR-\d+\b")
+    matches = [
+        match
+        for match in _UNFETCHABLE_DOCUMENT.findall(text)
+        if not bare_provenance.fullmatch(match)
+    ]
+    assert bool(matches) is flagged, (text, matches)
+
+
+def test_the_repo_document_names_are_derived_from_disk():
+    """A hand-listed set of doc names is another copy that drifts."""
+    assert _REPO_DOC_NAMES
+    assert "AUTHORING_WORKFLOW_V1" in _REPO_DOC_NAMES
+    assert "PROCESS_IR_V1" in _REPO_DOC_NAMES
