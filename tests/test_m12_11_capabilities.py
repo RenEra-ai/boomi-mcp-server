@@ -308,3 +308,73 @@ def test_the_schema_revision_moves_when_an_inherited_schema_moves(monkeypatch):
     contract_module.reset_manifest_cache()
 
     assert before != after
+
+
+def test_the_published_support_matrix_matches_the_runtime_refusal():
+    """QA #431. The predicate was corrected to key on the compiled artifact, but
+    the published matrix kept the old `intent_kind == "process_ir"` conditional
+    and went on advertising `recipe.apply: supported` for a route the server
+    refuses. One rule with two expressions is one rule that drifts."""
+    import inspect
+
+    from boomi_mcp.authoring.contract import (
+        AUTHORING_PROCESS_COMPILING_INTENTS,
+        AUTHORING_SUPPORT_MATRIX,
+    )
+    from boomi_mcp.authoring.workflow import _materialization_gaps
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+
+    spec = IntegrationSpecV1(name="x", components=[])
+    for kind, actions in AUTHORING_SUPPORT_MATRIX.items():
+        compiles_a_process = kind in AUTHORING_PROCESS_COMPILING_INTENTS
+        assert actions["apply"] == (
+            "unsupported" if compiles_a_process else "supported"
+        ), kind
+
+    # The runtime refuses exactly when a process root was compiled — which is
+    # what the named set is claiming about these intent kinds.
+    assert _materialization_gaps(None, spec, ()) == ()
+    source = inspect.getsource(_materialization_gaps)
+    assert "if not process_roots:" in source
+
+
+def test_every_selector_the_revision_covers_is_published():
+    """QA #434. Folding a schema into the revision without publishing it left a
+    caller unable to see WHICH schema moved."""
+    from boomi_mcp.authoring.contract import _schema_bundle
+
+    manifest = build_authoring_contract_manifest()
+    published = {entry["selector"] for entry in manifest["schemas"]}
+    assert published == set(_schema_bundle())
+    inherited = [
+        e for e in manifest["schemas"] if not e["owned_by_authoring_contract"]
+    ]
+    assert {e["selector"] for e in inherited} >= {
+        "IntegrationSpecV1",
+        "archetype_parameters",
+    }
+
+
+def test_the_archetype_parameter_digest_is_covered_by_a_test():
+    """QA #435. Replacing it with a constant survived the whole suite, so the
+    branch existed without a witness."""
+    from boomi_mcp.authoring import contract as contract_module
+
+    contract_module.reset_manifest_cache()
+    baseline = contract_module._schema_bundle()["archetype_parameters"]
+    assert baseline.startswith("sha256:") and baseline != "unavailable"
+
+    real = contract_module._inherited_schema_digest
+
+    def _perturb(selector):
+        if selector.startswith("archetype:"):
+            return "sha256:" + "c" * 64
+        return real(selector)
+
+    contract_module._inherited_schema_digest = _perturb
+    try:
+        moved = contract_module._schema_bundle()["archetype_parameters"]
+    finally:
+        contract_module._inherited_schema_digest = real
+        contract_module.reset_manifest_cache()
+    assert moved != baseline

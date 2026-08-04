@@ -185,8 +185,13 @@ the binding attested to the ProcessIR emission plan, so the compile hash would c
 that was never created. A binding that means what it says is the whole point of this milestone, so
 this is refused — and the gap is reported at **plan** time, before a caller spends a compile.
 
-`integration_spec` and `recipe` intents are unaffected: neither carries a ProcessIR root that the
-builders would contradict.
+The rule keys on the **compiled artifact**, not the intent kind: if compilation fingerprinted a
+ProcessIR root, apply must materialize that root. That covers a direct `process_ir` intent AND a
+`recipe` intent whose composed roots were compiled — refusing one while permitting the other made
+the safety argument incoherent, since both certify one representation and build another.
+
+`integration_spec` is unaffected: it produces no process roots, so its binding never claims a process
+artifact and apply is the legacy behaviour plus a binding over the component plan.
 
 ### Artifact fingerprints describe the emission plan, not XML
 

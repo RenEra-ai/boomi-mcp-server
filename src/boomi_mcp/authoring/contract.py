@@ -123,12 +123,23 @@ AUTHORING_CAPABILITY_REGISTRY: Mapping[str, Tuple[str, str, str]] = MappingProxy
     }
 )
 
+#: Intent kinds whose compilation produces a ProcessIR root, and which therefore
+#: cannot be applied — the runtime refusal keys on the compiled artifact, and
+#: this is the same rule stated once for publication.
+#:
+#: It is a NAMED SET rather than a second conditional. The runtime predicate
+#: originally keyed on ``intent_kind == "process_ir"`` and was later corrected to
+#: key on the artifact; this matrix kept the old conditional and went on
+#: advertising ``recipe.apply: supported`` for a route the server refuses. One
+#: rule with two expressions is one rule that drifts.
+AUTHORING_PROCESS_COMPILING_INTENTS: Tuple[str, ...] = ("process_ir", "recipe")
+
 #: Intent kind x action -> supported / unsupported.
 #:
 #: Every intent kind supports every READ-ONLY phase. ``apply`` is where they
 #: differ, and the difference is real rather than cosmetic: applying means
-#: materializing, and a bare ``process_ir`` intent produces a component plan
-#: whose process has no ``config.process_kind`` for the builders to emit from.
+#: materializing, and no production path materializes a ProcessIR root, so an
+#: intent that compiled one cannot be built from its own binding.
 #: ``verify`` is build-id scoped, so it is intent-agnostic.
 AUTHORING_SUPPORT_MATRIX: Mapping[str, Mapping[str, str]] = MappingProxyType(
     {
@@ -137,7 +148,9 @@ AUTHORING_SUPPORT_MATRIX: Mapping[str, Mapping[str, str]] = MappingProxyType(
                 "plan": "supported",
                 "compile": "supported",
                 "apply": (
-                    "unsupported" if kind == "process_ir" else "supported"
+                    "unsupported"
+                    if kind in AUTHORING_PROCESS_COMPILING_INTENTS
+                    else "supported"
                 ),
                 "verify": "supported",
             }
@@ -369,14 +382,27 @@ def build_authoring_contract_manifest() -> Mapping[str, Any]:
         "contract_version": AUTHORING_CONTRACT_VERSION,
         "actions": list(AUTHORING_ACTIONS),
         "intent_kinds": list(AUTHORING_INTENT_KINDS),
+        # Every selector the revision COVERS, not only the ones this contract
+        # owns. Folding a schema into the revision without publishing it left a
+        # caller unable to see which schema moved — the revision said "something
+        # changed" and the catalog said nothing changed.
         "schemas": [
             {
                 "selector": selector,
-                "schema_version": AUTHORING_SCHEMA_REGISTRY[selector][0],
+                "schema_version": (
+                    AUTHORING_SCHEMA_REGISTRY[selector][0]
+                    if selector in AUTHORING_SCHEMA_REGISTRY
+                    else "inherited"
+                ),
                 "schema_hash": schema_bundle[selector],
-                "provenance": AUTHORING_SCHEMA_REGISTRY[selector][2],
+                "provenance": (
+                    AUTHORING_SCHEMA_REGISTRY[selector][2]
+                    if selector in AUTHORING_SCHEMA_REGISTRY
+                    else "runtime_schema_registry"
+                ),
+                "owned_by_authoring_contract": selector in AUTHORING_SCHEMA_REGISTRY,
             }
-            for selector in authoring_schema_selectors()
+            for selector in sorted(schema_bundle)
         ],
         "capabilities": [
             {

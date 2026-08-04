@@ -1522,10 +1522,12 @@ def preflight_typed_apply_v1(
                     subject_kind="component",
                     subject_id=gap.path.rsplit("/", 1)[-1],
                     remediation=(
-                        "Use build_from_archetype or a typed recipe to produce a "
-                        "materializable component plan, or apply the legacy "
-                        "integration_spec form. Plan and compile remain available "
-                        "for this intent."
+                        "Use build_from_archetype — its adapter proves byte "
+                        "parity against the legacy renderer — or apply the "
+                        "legacy integration_spec form. A typed recipe intent is "
+                        "NOT an alternative: it compiles a ProcessIR root too and "
+                        "is refused here for the same reason. Plan and compile "
+                        "remain available for this intent."
                     ),
                     cause_codes=(gap.reason_code,),
                 )
