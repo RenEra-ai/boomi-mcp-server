@@ -1143,3 +1143,60 @@ def test_mutation_status_is_an_apply_only_field():
         MagicMock(), _PROFILE, "apply", config={"authoring_request": "not-a-dict"}
     )
     assert applied["mutation_status"] == "none"
+
+
+def test_the_materialization_refusal_keys_on_the_compiled_artifact():
+    """Architect review, P1. The refusal was keyed on `intent_kind == "process_ir"`,
+    which was an inconsistency rather than a policy: a typed RECIPE intent also
+    has its composed ProcessIR roots compiled and fingerprinted while apply builds
+    from the component config the recipe emitted alongside them — the identical
+    "certify one representation, build another" divergence.
+
+    Keyed on the artifact, both are refused and `integration_spec` (which
+    produces no roots, so its binding never claims a process artifact) is not.
+    """
+    import inspect
+
+    from boomi_mcp.authoring.workflow import _materialization_gaps
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+
+    source = inspect.getsource(_materialization_gaps)
+    assert "if not process_roots:" in source
+    assert 'intent_kind != "process_ir"' not in source
+
+    spec = IntegrationSpecV1(name="x", components=[])
+
+    # No compiled root -> no gap, whatever the intent kind.
+    assert _materialization_gaps(appliable_request(), spec, ()) == ()
+
+    # A compiled root -> refused, and the gap names the intent it came from.
+    with_root = _materialization_gaps(
+        process_ir_request(), spec, (("proc", object()),)
+    )
+    assert len(with_root) == 1
+    assert with_root[0].state == "unsupported"
+    assert with_root[0].reason_code == "PROCESS_KIND_REQUIRED"
+
+
+def test_the_published_digest_is_really_sha256_of_the_canonical_bytes():
+    """Architect review, P1. `sha256:` was the length-prefixed
+    `implementation_digest`, so an independent client computing
+    `sha256(canonical_json)` got a different value — a label naming an algorithm
+    that was not the one used."""
+    import hashlib
+
+    from boomi_mcp.authoring.revisions import (
+        artifact_fingerprint,
+        canonical_json_bytes,
+        sha256_fingerprint,
+    )
+
+    payload = {"b": [2, 3], "a": 1}
+    assert sha256_fingerprint(payload) == (
+        "sha256:" + hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+    )
+
+    text = '{"artifact":1}'
+    digest, length = artifact_fingerprint(text)
+    assert digest == "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+    assert length == len(text.encode("utf-8"))

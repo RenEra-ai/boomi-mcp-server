@@ -30,10 +30,10 @@ drift against itself.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any, Mapping, Optional, Tuple
 
-from ..build_info import implementation_digest
 
 _CANONICAL_JSON = {
     "sort_keys": True,
@@ -57,17 +57,23 @@ def canonical_json_bytes(value: Any) -> bytes:
 
 
 def sha256_fingerprint(payload: Any) -> str:
-    """``sha256:<hex>`` over the canonical JSON of ``payload``.
+    """``sha256:<hex>`` — literally SHA-256 of the canonical JSON bytes.
 
-    Delegates to :func:`boomi_mcp.build_info.implementation_digest` rather than
-    hashing directly: that helper is LENGTH-PREFIXED, is already the basis of the
-    recipe registry's ``registry_revision`` and ``descriptor_sha256``, and is
-    already pinned by tests. A second hashing primitive in the same codebase is
-    two things to keep in agreement.
+    It hashes the bytes DIRECTLY rather than delegating to
+    :func:`boomi_mcp.build_info.implementation_digest`. That helper
+    length-prefixes its input, so ``sha256(b"7:{"a":1}")`` is what came out — a
+    value no independent client computing ``sha256(canonical_json)`` can
+    reproduce, published under a label that says exactly which algorithm was
+    used.
+
+    Reusing one primitive was the wrong trade. ``implementation_digest`` stays
+    correct for the recipe registry's ``registry_revision``, where the
+    length-prefixing is load-bearing (it stops ``("ab","c")`` and ``("a","bc")``
+    hashing alike across an ordered tuple) and where the value is internal. Here
+    there is exactly one input and the value is a PUBLIC contract, so the label
+    has to be true.
     """
-    return _DIGEST_PREFIX + implementation_digest(
-        (canonical_json_bytes(payload).decode("utf-8"),)
-    )
+    return _DIGEST_PREFIX + hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
 
 
 def _sorted_registry(entries, key_fields: Tuple[str, ...]):
@@ -171,9 +177,13 @@ def artifact_fingerprint(canonical_text: str) -> Tuple[str, int]:
     Returns the length alongside the digest because the length is the only part
     a caller may see besides the digest, and deriving it separately is how the
     two end up describing different bytes.
+
+    Same rule as :func:`sha256_fingerprint`: SHA-256 of the artifact's own UTF-8
+    bytes, so a client that fetches the same canonical form computes the same
+    digest.
     """
     encoded = canonical_text.encode("utf-8")
-    return _DIGEST_PREFIX + implementation_digest((canonical_text,)), len(encoded)
+    return _DIGEST_PREFIX + hashlib.sha256(encoded).hexdigest(), len(encoded)
 
 
 def account_scope_fingerprint(
