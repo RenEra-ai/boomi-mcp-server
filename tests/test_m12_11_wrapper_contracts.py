@@ -202,3 +202,17 @@ def test_the_workflow_doc_still_describes_all_eight_steps():
         assert f"| {step} |" in doc, step
     assert "Three planning concepts" in doc
     assert "no `build_id`" in doc
+
+
+def test_the_retry_safety_signal_is_the_status_not_one_error_code():
+    """QA #425. `error_code` is a setdefault, so a more specific refusal code
+    wins. Documenting one token in text that invites branching would make a
+    client miss three equally retry-safe refusals."""
+    doc = server.build_integration.__doc__
+    assert "Branch on mutation_status, not on one" in doc
+    for code in (
+        "AUTHORING_PLAN_STALE",
+        "AUTHORING_CAPABILITY_REVISION_MISMATCH",
+        "AUTHORING_APPLY_VALIDATION_REQUIRED",
+    ):
+        assert code in doc, code

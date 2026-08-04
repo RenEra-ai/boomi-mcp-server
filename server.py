@@ -2416,8 +2416,15 @@ if build_integration_action:
                                           conflict_policy="clone".
             mutation_status="none"      - nothing was attempted (only reuse, or
                                           refused before any write). A FAILURE in
-                                          this state is retry-safe and carries
-                                          AUTHORING_APPLY_VALIDATION_REQUIRED.
+                                          this state is retry-safe. Its error_code
+                                          is whichever the refusal named —
+                                          AUTHORING_PLAN_STALE,
+                                          AUTHORING_CAPABILITY_REVISION_MISMATCH,
+                                          INVALID_INPUT — and
+                                          AUTHORING_APPLY_VALIDATION_REQUIRED only
+                                          when nothing more specific applied.
+                                          Branch on mutation_status, not on one
+                                          code: every "none" refusal is retry-safe.
 
         mutation_performed is the boolean shorthand (true for performed and
         possible). Legacy applies carry neither field.
