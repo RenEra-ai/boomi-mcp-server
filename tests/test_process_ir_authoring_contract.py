@@ -746,10 +746,14 @@ def test_no_served_remediation_ships_an_unsubstituted_placeholder():
     """
     import re
 
+    # ANY angle-bracketed token, not just <lowercase_underscore>. The narrow
+    # pattern is how '<that kind>' and '<one of them>' each slipped through a
+    # round after '<kind>' was fixed — three wordings of one defect, because the
+    # pin described one spelling of a placeholder rather than the shape of one.
     blob = json.dumps(
         [entry.model_dump(mode="json") for entry in build_process_ir_authoring_entries()]
     )
-    placeholders = sorted(set(re.findall(r"<[a-z_]+>", blob)))
+    placeholders = sorted(set(re.findall(r"<[^<>]{1,40}>", blob)))
     assert placeholders == [], placeholders
 
 
@@ -847,3 +851,62 @@ def test_the_wrapper_docstring_agrees_with_the_served_budget_scope():
     assert "payload budget" not in doc
     assert "budget on the ENTRIES" in doc
     assert "entry_byte_budget_scope" in doc
+
+
+def test_no_served_selector_anywhere_cites_an_unfetchable_repository_path():
+    """#459. The scan that matters is over EVERY selector, not the new ones.
+
+    A round-22 sweep of all 105 selectors found one leak the amendment had not
+    touched — a pre-existing archetype description citing a capture ledger.
+    Scoping the check to the surfaces this work introduced is how it survived
+    two rounds: the defect class is "a served string points somewhere no MCP
+    tool can reach", and that class is not bounded by which issue wrote it.
+    """
+    names = meta_tools._valid_schema_names()
+    assert len(names) > 50, "the sweep must actually be broad"
+    leaks = {}
+    for name in names:
+        try:
+            payload = meta_tools.get_schema_template_action(schema_name=name)
+        except Exception:  # noqa: BLE001 — a selector that cannot build is not a leak
+            continue
+        blob = json.dumps(payload, default=str)
+        for artifact in (".codex/", "docs/architecture/"):
+            if artifact in blob:
+                leaks.setdefault(name, []).append(artifact)
+    assert leaks == {}, leaks
+
+
+def test_a_remediation_pointer_delivers_more_than_the_sentence_that_cited_it():
+    """#458. A pointer that resolves but teaches nothing has moved the defect.
+
+    The first fix for the placeholder bug replaced an unfollowable citation with
+    a circular one: it pointed at the diagnostic's own entry, whose only prose
+    was the citing sentence itself. So the test is not "does it resolve" but
+    "does the destination carry prose the caller did not already have".
+    """
+    import re
+
+    pattern = re.compile(
+        r"get_schema_template\(\s*schema_name='process_ir_authoring'\s*,\s*"
+        r"(\w+)='([^']+)'\s*\)"
+    )
+    checked = 0
+    for entry in build_process_ir_authoring_entries():
+        if entry.entry_type != "diagnostic":
+            continue
+        source_text = " ".join(entry.ordering_facts) + entry.summary
+        for field, value in pattern.findall(" ".join(source_text.split())):
+            page = fetch(**{field: value}, limit=50)["contract_page"]
+            assert page["matched_entry_count"] > 0, (entry.subject, field, value)
+            delivered = "".join(
+                " ".join(row["ordering_facts"]) + row["summary"]
+                for row in page["entries"]
+                if row["contract_entry_id"] != entry.contract_entry_id
+            )
+            assert delivered.strip(), (
+                f"{entry.subject} cites {field}={value!r}, which returns only "
+                f"itself — a circular pointer"
+            )
+            checked += 1
+    assert checked, "no diagnostic named a contract call — the pin is vacuous"

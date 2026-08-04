@@ -2011,9 +2011,8 @@ _REMEDIATION = {
         "Use one of the ProcessIRV1 node kinds published by "
         "get_schema_template(schema_name='ProcessIRV1'). A bare "
         "get_schema_template(schema_name='process_ir_authoring') lists every "
-        "valid node_kind in its facets; this rule is at get_schema_template("
-        "schema_name='process_ir_authoring', "
-        "authoring_entry_id='diagnostic.process_ir_schema_unknown_node')."
+        "valid node_kind in its facets; pass one of those values as node_kind to "
+        "read that kind's authoring rules."
     ),
     PROCESS_IR_SCHEMA_UNKNOWN_FIELD: (
         "Remove the unknown field — ProcessIRV1 nodes are strict and reject extras."
@@ -2024,11 +2023,17 @@ _REMEDIATION = {
     # the path" — but the path is a JSON pointer of field names and indices, and
     # the kind is recoverable from it in only one of the three shapes this code
     # reports. An exact id needs no derivation and always resolves.
+    # The PRIMARY pointer must deliver something the caller does not already
+    # have. An earlier wording cited this code's own contract entry, whose only
+    # prose was this same sentence — a pointer that resolves and teaches nothing
+    # is not better than one that does not resolve. The bounds and the step
+    # ordering are structural, so the schema is where they actually live.
     PROCESS_IR_SCHEMA_INVALID_CARDINALITY: (
-        "Fix the list bound or step ordering at the referenced path. The rule "
-        "that rejected it is at get_schema_template("
-        "schema_name='process_ir_authoring', "
-        "authoring_entry_id='diagnostic.process_ir_schema_invalid_cardinality')."
+        "Fix the list bound or step ordering at the referenced path. The exact "
+        "bounds are in the node's own definition in "
+        "get_schema_template(schema_name='ProcessIRV1'); the behavioural rules "
+        "for the node kind at that path are at get_schema_template("
+        "schema_name='process_ir_authoring', category='placement')."
     ),
     PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED: (
         "Set version to the supported ProcessIR version '1'."

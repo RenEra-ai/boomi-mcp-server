@@ -903,9 +903,11 @@ class RestPathReplacement(BaseModel):
     operation property, whose value is built by a Set Properties step that
     concatenates the static path segments with the mapped leaf value(s). Each
     replacement maps a ``{name}`` token in ``RestSendRequest.path`` to a mapped
-    target leaf (``target_path``). Grounded in the live REST Client export — see
-    ``.codex/plans/issue-100-live-captures.md``.
+    target leaf (``target_path``). Grounded in a live REST Client export.
     """
+    # Evidence: .codex/plans/issue-100-live-captures.md. Kept in a comment, not
+    # in the docstring: pydantic publishes the docstring as this model's served
+    # `description`, and no MCP tool can fetch a repository path (#146).
 
     model_config = ConfigDict(extra="forbid")
 

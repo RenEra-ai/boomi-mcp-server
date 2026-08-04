@@ -3231,8 +3231,12 @@ if get_schema_template_action:
             capability_id: Filter to one published capability row (e.g. 'joins').
             workflow_stage: One of discover, plan, author, compile, repair — every one of
                 which matches entries (a stage that matched nothing would be a filter that
-                only looks available). 'plan' and 'compile' select the diagnostics each
-                phase can raise; 'repair' selects every diagnostic.
+                only looks available). A stage selects every entry RELEVANT to that phase,
+                not diagnostics alone: 'plan' returns the capabilities, connector actions and
+                diagnostics that matter while planning. For diagnostics specifically the tag
+                means REACHABILITY — 'compile' returns exactly the codes a compile can raise
+                (a strict superset of 'plan', because compile re-runs parse and semantic
+                validation), and 'repair' returns every diagnostic.
             after_entry_id: Stateless pagination cursor; requires at least one other filter.
             limit: 1-50, default 20. Filters AND together, results sort by contract_entry_id, and
                 a bare call returns the facets and schema with ZERO entries — ask for what you
