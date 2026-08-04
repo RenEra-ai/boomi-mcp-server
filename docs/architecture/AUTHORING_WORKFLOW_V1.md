@@ -54,7 +54,8 @@ No sixth tool is introduced. `compile` is an additive action on `build_integrati
 
 ### The typed apply envelope
 
-A typed apply always answers in the typed envelope: `action`, `mutation_performed`,
+A typed apply — once the profile resolves — always answers in the typed envelope: `action`,
+`mutation_performed`,
 `mutation_status`, and — when it REFUSED before writing anything — an `error_code`. A *successful*
 apply never carries one, including an all-`reuse` apply that legitimately wrote nothing.
 
@@ -84,7 +85,7 @@ signal". Some failures DO carry structured evidence — a pre-write component-GE
 `error_code: COMPONENT_GET_DEADLINE_EXCEEDED` with `retryable: true`, which are contract fields, not
 prose. But the evidence is not uniform: other steps distinguish "Boomi rejected it" from "Boomi
 committed it and the reply was lost" only by a Python exception class name, and a 200 carrying
-unexpected XML lands in the rejection bucket. A rule that were safe for some steps and silently
+unexpected XML lands in the rejection bucket. A rule that is safe for some steps and silently
 wrong for others is worse than one that is uniformly conservative, so `possible` covers all of them.
 
 The consequence is stated rather than hidden: a step that provably wrote nothing — the GET-timeout
