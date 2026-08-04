@@ -172,15 +172,15 @@ indistinguishable from one the client forgot to ask about.
 | `authoring.system_topology.deploy` | unsupported | `TOPOLOGY_APPLY_NOT_SUPPORTED` — #144 ships a planner and no apply path at all |
 | `authoring.typed_apply.process_materialization` | unsupported | `PROCESS_KIND_REQUIRED` — see below |
 
-### A direct ProcessIR intent is plan/compile-only
+### An intent that compiles a ProcessIR root is plan/compile-only
 
 Boomi processes are created by the legacy builders, which emit XML from `config.process_kind`.
 Nothing on a production path materializes a ProcessIR root: the compiler stops at the emission plan,
 and promoting its emitter to a production component writer is an ADR-001 §9 byte-parity cutover that
 belongs to its own issue.
 
-The refusal keys on the **intent**, not on whether a `process_kind` happens to be present. Adding
-one would make things worse, not better: the builder would emit XML from the component config while
+A `process_kind` on the component would not rescue it. Adding one would make things worse, not
+better: the builder would emit XML from the component config while
 the binding attested to the ProcessIR emission plan, so the compile hash would certify an artifact
 that was never created. A binding that means what it says is the whole point of this milestone, so
 this is refused — and the gap is reported at **plan** time, before a caller spends a compile.

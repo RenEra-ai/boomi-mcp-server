@@ -324,12 +324,26 @@ def test_the_published_support_matrix_matches_the_runtime_refusal():
     from boomi_mcp.authoring.workflow import _materialization_gaps
     from boomi_mcp.models.integration_models import IntegrationSpecV1
 
+    # ENUMERATED, not derived from the constant under test. Deriving the
+    # expectation from `AUTHORING_PROCESS_COMPILING_INTENTS` made this guard
+    # tautological: shrinking that tuple to ("process_ir",) put
+    # `recipe.apply: "supported"` back on the wire — the exact bug — while the
+    # suite stayed green. Same discipline as the enumerated export pins.
+    _MUST_BE_REFUSED_AT_APPLY = {"process_ir", "recipe"}
+    _MUST_BE_APPLIABLE = {"integration_spec"}
+    assert _MUST_BE_REFUSED_AT_APPLY | _MUST_BE_APPLIABLE == set(
+        AUTHORING_SUPPORT_MATRIX
+    ), "an intent kind was added without deciding whether it can be applied"
+    assert set(AUTHORING_PROCESS_COMPILING_INTENTS) == _MUST_BE_REFUSED_AT_APPLY
+
     spec = IntegrationSpecV1(name="x", components=[])
     for kind, actions in AUTHORING_SUPPORT_MATRIX.items():
-        compiles_a_process = kind in AUTHORING_PROCESS_COMPILING_INTENTS
-        assert actions["apply"] == (
-            "unsupported" if compiles_a_process else "supported"
-        ), kind
+        expected = (
+            "unsupported" if kind in _MUST_BE_REFUSED_AT_APPLY else "supported"
+        )
+        assert actions["apply"] == expected, kind
+        assert actions["plan"] == "supported", kind
+        assert actions["compile"] == "supported", kind
 
     # The runtime refuses exactly when a process root was compiled — which is
     # what the named set is claiming about these intent kinds.
