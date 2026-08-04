@@ -1127,3 +1127,19 @@ def test_a_malformed_typed_apply_still_publishes_its_mutation_status():
         assert result["mutation_status"] == "none", malformed
         assert result["mutation_performed"] is False, malformed
         assert result["error_code"] == INVALID_INPUT, malformed
+
+
+def test_mutation_status_is_an_apply_only_field():
+    """QA #426. The always-present promise belongs to the typed-APPLY envelope.
+    Publishing it on two of plan's ten routes — and on neither success route —
+    would be a shape nobody can rely on."""
+    for action in ("plan", "compile"):
+        result = build_integration_action(
+            MagicMock(), _PROFILE, action, config={"authoring_request": "not-a-dict"}
+        )
+        assert result["error_code"] == INVALID_INPUT, action
+        assert "mutation_status" not in result, action
+    applied = build_integration_action(
+        MagicMock(), _PROFILE, "apply", config={"authoring_request": "not-a-dict"}
+    )
+    assert applied["mutation_status"] == "none"

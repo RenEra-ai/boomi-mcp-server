@@ -7539,15 +7539,10 @@ def _authoring_payload(cfg: Dict[str, Any]):
 
 def _reject_malformed_authoring_request(payload, action: str) -> Dict[str, Any]:
     """One envelope for a present-but-unparseable typed request."""
-    return {
+    envelope = {
         "_success": False,
         "action": action,
         "mutation_performed": False,
-        # `none`, and stated rather than omitted: this refusal happens before
-        # anything is attempted, and the documented typed-apply envelope
-        # promises the field is ALWAYS present. A client told to branch on
-        # `mutation_status` could not classify this deterministic refusal.
-        "mutation_status": "none",
         "error_code": INVALID_INPUT,
         "error": (
             "config.authoring_request must be a JSON object (an "
@@ -7558,6 +7553,9 @@ def _reject_malformed_authoring_request(payload, action: str) -> Dict[str, Any]:
             "get_schema_template(schema_name='AuthoringRequestV1')."
         ),
     }
+    if action == "apply":
+        envelope["mutation_status"] = "none"
+    return envelope
 
 
 def _reject_ambiguous_authoring_request(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -7608,7 +7606,7 @@ def _reject_invalid_typed_request(exc, action: str) -> Dict[str, Any]:
             {"path": location, "type": str(error.get("type", "invalid"))}
         )
     locations.sort(key=lambda entry: (entry["path"], entry["type"]))
-    return {
+    envelope = {
         "_success": False,
         "action": action,
         "mutation_performed": False,
@@ -7624,6 +7622,13 @@ def _reject_invalid_typed_request(exc, action: str) -> Dict[str, Any]:
             "deliberately omitted from this envelope."
         ),
     }
+    if action == "apply":
+        # APPLY only. The documented always-present promise is a property of the
+        # typed-apply envelope; plan and compile write nothing by construction,
+        # so publishing a mutation field on two of their ten routes — and on
+        # neither success route — would be a shape nobody can rely on.
+        envelope["mutation_status"] = "none"
+    return envelope
 
 
 def _plan_authoring(

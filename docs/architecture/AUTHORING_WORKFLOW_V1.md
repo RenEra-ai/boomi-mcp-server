@@ -77,10 +77,23 @@ An id alone is not enough for `performed`: a failed update carries the TARGET id
 (a pre-write component GET that times out returns one), so the step's own result must have succeeded.
 
 `possible` does not distinguish "the request committed and the response was lost" from "the request
-was rejected" or "no request was issued". The only available discriminator is the builder's error
-prose, and keying a safety decision on message text is how a reworded error silently becomes a
-data-loss bug. It therefore reports uncertainty rather than guessing, and withholds the retry code —
-retrying an unconfirmed write duplicates under `conflict_policy="clone"`.
+was rejected" or "no request was issued".
+
+That is a deliberate under-classification, and the honest reason is narrower than "there is no
+signal". Some failures DO carry structured evidence — a pre-write component-GET timeout returns
+`error_code: COMPONENT_GET_DEADLINE_EXCEEDED` with `retryable: true`, which are contract fields, not
+prose. But the evidence is not uniform: other steps distinguish "Boomi rejected it" from "Boomi
+committed it and the reply was lost" only by a Python exception class name, and a 200 carrying
+unexpected XML lands in the rejection bucket. A rule that were safe for some steps and silently
+wrong for others is worse than one that is uniformly conservative, so `possible` covers all of them.
+
+The consequence is stated rather than hidden: a step that provably wrote nothing — the GET-timeout
+case above — is still reported `possible` with `mutation_performed: true`, and still withholds the
+retry code. Its own `retryable: true` survives untouched inside `partial_results[<key>].result`, so
+the information is available to a caller who wants it; the top-level signal simply does not claim
+more precision than the surface can guarantee. Narrowing this properly means having the materializer
+record whether it dispatched a write, so the predicate reads a fact instead of inferring one — a
+change to the builder layer, and its own issue.
 
 ## 3. Terminology — four graphs, four names
 
