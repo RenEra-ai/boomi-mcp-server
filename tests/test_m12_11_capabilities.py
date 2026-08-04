@@ -262,3 +262,49 @@ def test_the_new_authoring_workflow_survives_the_capability_catalog_filter():
     unregistered tool. A new sequence that vanished would be invisible."""
     catalog = list_capabilities_action()
     assert catalog["authoring_contract"]["actions"], "authoring contract vanished"
+
+
+def test_the_schema_revision_covers_the_whole_served_authoring_contract():
+    """Architect review, P1. The revision hashed only the eight selectors #146
+    introduced, so a change to `IntegrationSpecV1` — the component plan every
+    typed result embeds — left every outstanding binding looking current. A
+    revision that does not move when the contract moves is the failure this
+    manifest exists to detect, one level in."""
+    from boomi_mcp.authoring.contract import _schema_bundle
+
+    bundle = _schema_bundle()
+    for inherited in (
+        "IntegrationSpecV1",
+        "recipe_contributions",
+        "recipe_registry",
+        "workflow_sequences",
+        "archetype_parameters",
+    ):
+        assert inherited in bundle, inherited
+        assert bundle[inherited] != "unavailable", inherited
+    # ...and the owned ones are still there.
+    for owned in ("AuthoringRequestV1", "ProcessIRV1", "validation_report"):
+        assert owned in bundle, owned
+
+
+def test_the_schema_revision_moves_when_an_inherited_schema_moves(monkeypatch):
+    """Guard the guard: including a selector in the bundle is only useful if its
+    movement actually changes the revision."""
+    from boomi_mcp.authoring import contract as contract_module
+
+    contract_module.reset_manifest_cache()
+    before = contract_module.build_authoring_contract_manifest()["schema_revision"]
+
+    real = contract_module._inherited_schema_digest
+    monkeypatch.setattr(
+        contract_module,
+        "_inherited_schema_digest",
+        lambda selector: "sha256:" + "b" * 64
+        if selector == "IntegrationSpecV1"
+        else real(selector),
+    )
+    contract_module.reset_manifest_cache()
+    after = contract_module.build_authoring_contract_manifest()["schema_revision"]
+    contract_module.reset_manifest_cache()
+
+    assert before != after

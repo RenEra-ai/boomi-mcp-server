@@ -286,11 +286,42 @@ def _recipe_registry_block() -> Dict[str, Any]:
     }
 
 
+#: Authoring selectors this contract does not OWN but which `get_schema_template`
+#: serves, and whose movement must therefore move `schema_revision`.
+#:
+#: Without them the revision covered only the eight #146 selectors, so a change
+#: to `IntegrationSpecV1` — the component/materialization plan every typed result
+#: embeds — left every outstanding binding looking current. A revision that does
+#: not move when the contract moves is the exact failure this manifest exists to
+#: detect, one level in.
+_INHERITED_SCHEMA_SELECTORS: Tuple[str, ...] = (
+    "IntegrationSpecV1",
+    "recipe_contributions",
+    "recipe_registry",
+    "workflow_sequences",
+)
+
+
+def _inherited_schema_digest(selector: str) -> str:
+    """Digest of a served selector owned by another surface."""
+    from ..categories.meta_tools import get_schema_template_action
+
+    payload = get_schema_template_action(schema_name=selector)
+    # The envelope carries advisory prose; hash the SCHEMA, which is the contract.
+    body = payload.get("json_schema", payload)
+    return sha256_fingerprint(body)
+
+
 def _schema_bundle() -> Dict[str, str]:
     """Selector -> that schema's own digest.
 
     Hashing each schema separately (rather than one blob) is what lets a caller
     be told WHICH schema moved, not merely that something did.
+
+    Covers the selectors this contract owns AND the served authoring selectors it
+    inherits, plus the live archetype parameter surface — because the revision's
+    job is to describe the whole authoring contract a client binds to, not only
+    the part #146 introduced.
     """
     bundle = {}
     for selector in authoring_schema_selectors():
@@ -299,6 +330,23 @@ def _schema_bundle() -> Dict[str, str]:
             bundle[selector] = sha256_fingerprint(builder())
         except Exception:  # noqa: BLE001 — a schema that cannot build is reported, not fatal
             bundle[selector] = "unavailable"
+    for selector in _INHERITED_SCHEMA_SELECTORS:
+        try:
+            bundle[selector] = _inherited_schema_digest(selector)
+        except Exception:  # noqa: BLE001
+            bundle[selector] = "unavailable"
+    try:
+        # The archetype PARAMETER schemas are part of the authoring contract too:
+        # a changed archetype input is a changed contract even when the archetype
+        # list is identical, which the name-and-version list alone cannot show.
+        bundle["archetype_parameters"] = sha256_fingerprint(
+            {
+                entry["name"]: _inherited_schema_digest(f"archetype:{entry['name']}")
+                for entry in list_archetype_registry()
+            }
+        )
+    except Exception:  # noqa: BLE001
+        bundle["archetype_parameters"] = "unavailable"
     return bundle
 
 

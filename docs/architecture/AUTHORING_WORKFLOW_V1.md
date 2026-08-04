@@ -286,3 +286,48 @@ Verify hashes the component XML it already fetched; the bytes never leave the se
   **both** paths. That is pre-existing behavior shared with every existing caller; widening it
   changes the legacy contract and belongs to its own issue, not to #146 (recorded from live QA as
   bug #413).
+
+
+## 11. Deviations from the architect design plan, and what remains open
+
+The §6 architect-vs-plan review found the implementation faithful in intent but narrower than the
+plan in specific, named ways. Recorded here rather than left implicit — a reduction nobody wrote
+down is a reduction nobody can approve.
+
+### Accepted deviations
+
+**No route both canonically compiles AND materializes the same artifact.** The plan envisioned one
+end-to-end workflow. What ships is: `process_ir` and `recipe` intents compile canonically and are
+refused at apply (§6); `integration_spec` applies through the legacy builders and produces no
+process artifact. Closing this needs a production ProcessIR materializer with byte-parity against
+the legacy renderer — an ADR-001 §9 cutover, and its own issue. **This is a scope reduction that
+needs explicit approval, not a defect.**
+
+**Account scope is keyed on the account, not the profile.** The plan asked for cross-*profile*
+replay prevention. Live QA measured the cost: two profiles addressing one account produced different
+bindings, so a valid compile was refused with a false "stale plan" diagnosis, and the shipped
+remediation text claimed account semantics the hash did not have. Two profiles for one account carry
+the same authority, so replay between them is not a privilege escalation — the security argument for
+profile-keying is weak, and the usability cost was measured. Deliberate amendment to the plan.
+
+**The typed recipe intent carries invocations, not the #145 contribution union.** A recipe's
+`raw_input` is recipe-defined and open by construction; the engine's own input gate is what
+validates it. Embedding the closed contribution union would have described what recipes *return*,
+not what a caller *sends*.
+
+### Known limits, not fixed here
+
+- **The typed contract is not secret-free at the type level.** `IntegrationComponentSpec.config` is
+  `Dict[str, Any]`; it is hashed into `semantic_hash` and echoed through `integration_spec_preview`
+  under the *legacy* redaction, which this issue achieved byte-parity with but did not widen. A
+  typed-only allowlisted projection would close it without touching legacy behaviour.
+- **Topology is validated, not planned.** `_validate_topology` calls `validate_system_topology` and
+  not `plan_system_topology`, so #144's resolved references, prerequisites and blockers are neither
+  returned nor bound into `plan_hash`. `required_decisions` is consequently always empty — the
+  machinery exists and is tested, but no decision family populates it.
+- **Verify compares component XML, not dependency edges or reference versions**, and checks the
+  capability revision but not the compiler revision.
+- **`build_integration` keeps its three-parameter signature.** The typed request rides inside the
+  existing `config` JSON rather than becoming strict wrapper parameters. That was chosen so the
+  wrapper signature stays byte-identical — the strongest backward-compatibility statement available
+  — at the cost of the plan's "one unified strict contract" across all five wrappers.
