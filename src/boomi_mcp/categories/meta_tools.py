@@ -6731,20 +6731,30 @@ def _authoring_filter_value_error(schema_name: str, exc: Any) -> Dict[str, Any]:
     from ..errors import INVALID_INPUT
 
     allowed = list(getattr(exc, "allowed", ()) or ())
-    return {
+    rule = getattr(exc, "rule", "") or ""
+    envelope = {
         "_success": False,
         "error_code": INVALID_INPUT,
         "schema_name": schema_name,
         "invalid_parameter": getattr(exc, "field", ""),
-        "allowed_values": allowed[:50],
-        "allowed_value_count": len(allowed),
         "error": f"Invalid value for '{getattr(exc, 'field', '')}'.",
-        "suggestion": (
+    }
+    if rule:
+        # A range or a companion requirement, not an enumeration. Publishing an
+        # empty allowed-values list beside "filter with a published value" was
+        # worse than saying nothing — for a cursor the rejected value IS
+        # published, so the advice sent the caller in a circle.
+        envelope["rule"] = rule
+        envelope["suggestion"] = rule
+    else:
+        envelope["allowed_values"] = allowed[:50]
+        envelope["allowed_value_count"] = len(allowed)
+        envelope["suggestion"] = (
             "Fetch the facets with a bare "
             "get_schema_template(schema_name='process_ir_authoring') call, then "
             "filter with a published value."
-        ),
-    }
+        )
+    return envelope
 
 
 def _authoring_workflow_schema() -> Dict[str, Any]:

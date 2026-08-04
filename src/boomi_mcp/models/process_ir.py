@@ -2012,9 +2012,11 @@ _REMEDIATION = {
         "Remove the unknown field — ProcessIRV1 nodes are strict and reject extras."
     ),
     PROCESS_IR_SCHEMA_INVALID_CARDINALITY: (
-        "Fix the list bound or step ordering at the referenced path; the sequence "
-        "rules for this node are at "
-        "get_schema_template(schema_name='process_ir_authoring', node_kind='<kind>')."
+        "Fix the list bound or step ordering at the referenced path. Read the "
+        "sequence rules for the node kind named in the path with "
+        "get_schema_template(schema_name='process_ir_authoring', "
+        "node_kind=<that kind>) — substitute the kind; a literal placeholder is "
+        "not a valid filter value."
     ),
     PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED: (
         "Set version to the supported ProcessIR version '1'."

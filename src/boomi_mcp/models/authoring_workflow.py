@@ -237,9 +237,8 @@ class AuthoringEvidenceV1(_AuthoringModel):
 
     Deliberately not the compiler's own evidence type and not a free-form map.
     Forwarding the compiler contract would put an internal model on a served
-    schema (ADR-001 §6); a ``Dict[str, Any]`` would put an open map on a strict
-    LLM-facing surface, through which an authored value could reach a caller's
-    logs.
+    schema; a ``Dict[str, Any]`` would put an open map on a strict LLM-facing
+    surface, through which an authored value could reach a caller's logs.
 
     So the pair is re-validated HERE against the same closed key allowlist and
     the same token/code value rules. Re-validating rather than trusting is the

@@ -601,3 +601,126 @@ def test_every_diagnostic_code_the_surface_can_emit_has_a_contract_entry():
 
     for spec in process_ir_v1_parse_diagnostic_specs():
         assert spec["code"] in served, spec["code"]
+
+
+# ---------------------------------------------------------------------------
+# QA round 20 regressions (#449-#453)
+# ---------------------------------------------------------------------------
+
+
+def test_every_advertised_workflow_stage_matches_at_least_one_entry():
+    """#449. A stage that matches nothing is a filter that only looks available.
+
+    ``compile`` was declared, documented on the wrapper, and matched zero
+    entries — while being the stage an LLM is most likely to try, because the
+    typed next steps end at compile and a third of the catalog is compile
+    diagnostics. Diagnostics now carry the phase that RAISES them.
+    """
+    from boomi_mcp.models.process_ir_authoring import (
+        PROCESS_IR_AUTHORING_WORKFLOW_STAGES,
+    )
+
+    facets = fetch()["contract_page"]["facets"]["workflow_stages"]
+    assert set(facets) == set(PROCESS_IR_AUTHORING_WORKFLOW_STAGES)
+    for stage in PROCESS_IR_AUTHORING_WORKFLOW_STAGES:
+        page = fetch(workflow_stage=stage, limit=1)["contract_page"]
+        assert page["matched_entry_count"] > 0, stage
+
+
+def test_compile_and_plan_stages_select_the_diagnostics_of_their_phase():
+    compile_page = fetch(workflow_stage="compile", limit=50)["contract_page"]
+    assert compile_page["matched_entry_count"] > 0
+    for entry in compile_page["entries"]:
+        assert entry["entry_type"] == "diagnostic"
+
+
+@pytest.mark.parametrize(
+    "filters,expected_field",
+    [({"limit": 99}, "limit"), ({"after_entry_id": "node.branch"}, "after_entry_id")],
+)
+def test_a_non_enumerated_filter_error_states_its_own_rule(filters, expected_field):
+    """#450. An empty allowed-values list beside "use a published value" is worse
+    than silence — for a cursor the rejected value IS published, so the advice
+    sent the caller in a circle.
+    """
+    payload = fetch(**filters)
+    assert payload["_success"] is False
+    assert payload["invalid_parameter"] == expected_field
+    assert payload["rule"]
+    assert payload["suggestion"] == payload["rule"]
+    # The misleading enum fields must be ABSENT, not present-and-empty.
+    assert "allowed_values" not in payload
+    assert "allowed_value_count" not in payload
+
+
+def test_an_enumerated_filter_error_still_lists_its_facet():
+    payload = fetch(category="nonsense")
+    assert payload["allowed_values"]
+    assert "rule" not in payload
+
+
+def test_no_served_remediation_ships_an_unsubstituted_placeholder():
+    """#451. A remediation a caller can paste must be one that works.
+
+    ``node_kind='<kind>'`` returned INVALID_INPUT when followed literally, and
+    the placeholder was baked into the served contract data too.
+    """
+    import re
+
+    blob = json.dumps(
+        [entry.model_dump(mode="json") for entry in build_process_ir_authoring_entries()]
+    )
+    placeholders = sorted(set(re.findall(r"<[a-z_]+>", blob)))
+    assert placeholders == [], placeholders
+
+
+def test_the_entry_byte_budget_is_published_for_what_it_actually_bounds():
+    """#452. The budget caps the ENTRIES, not the whole response.
+
+    Published as a bare ``byte_budget`` it read as a payload cap, and the
+    envelope (schema + facets + state mappings) pushed real responses past it.
+    The accounting was always correct; the name was not.
+    """
+    from boomi_mcp.authoring.process_ir_projection import (
+        build_process_ir_authoring_index,
+    )
+
+    retrieval = build_process_ir_authoring_index()["retrieval"]
+    assert "byte_budget" not in retrieval
+    assert retrieval["entry_byte_budget"] == PROCESS_IR_AUTHORING_BYTE_BUDGET
+    assert "entries array only" in retrieval["entry_byte_budget_scope"]
+
+    page = fetch(workflow_stage="author", limit=PROCESS_IR_AUTHORING_MAX_LIMIT)[
+        "contract_page"
+    ]
+    measured = sum(
+        len(json.dumps(entry, sort_keys=True, separators=(",", ":")))
+        for entry in page["entries"]
+    )
+    assert measured <= PROCESS_IR_AUTHORING_BYTE_BUDGET
+
+
+def test_no_model_this_amendment_added_cites_an_unfetchable_document():
+    """#453. The amendment must not ADD to the citation debt it set out to pay.
+
+    40 such references predate this work in other selectors and are out of its
+    scope; the one it introduced is not.
+    """
+    schema = meta_tools.get_schema_template_action(
+        schema_name="AuthoringPlanResultV1"
+    )["json_schema"]
+    added = ("AuthoringEvidenceV1",)
+    for name in added:
+        description = schema["$defs"][name].get("description", "")
+        for token in ("ADR-001", "AUTHORING_WORKFLOW_V1", "docs/", ".codex/"):
+            assert token not in description, (name, token)
+
+
+def test_no_diagnostic_remediation_cites_an_unfetchable_artifact():
+    """The acceptance criterion, asserted over every code the surface can emit."""
+    for entry in build_process_ir_authoring_entries():
+        if entry.entry_type != "diagnostic":
+            continue
+        text = " ".join(entry.ordering_facts) + entry.summary
+        for token in ("ADR-001", "AUTHORING_WORKFLOW_V1", "docs/", ".codex/"):
+            assert token not in text, (entry.contract_entry_id, token)

@@ -3229,7 +3229,10 @@ if get_schema_template_action:
             node_kind: Filter to entries about one ProcessIR node kind (e.g. 'branch').
             category: Filter by entry domain (e.g. 'control', 'connector_action', 'diagnostic').
             capability_id: Filter to one published capability row (e.g. 'joins').
-            workflow_stage: One of discover, plan, author, compile, repair.
+            workflow_stage: One of discover, plan, author, compile, repair — every one of
+                which matches entries (a stage that matched nothing would be a filter that
+                only looks available). 'plan' and 'compile' select the diagnostics each
+                phase can raise; 'repair' selects every diagnostic.
             after_entry_id: Stateless pagination cursor; requires at least one other filter.
             limit: 1-50, default 20. Filters AND together, results sort by contract_entry_id, and
                 a bare call returns the facets and schema with ZERO entries — ask for what you

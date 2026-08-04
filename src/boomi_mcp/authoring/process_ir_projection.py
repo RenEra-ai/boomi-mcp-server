@@ -81,10 +81,19 @@ class ProcessIRAuthoringQueryError(ValueError):
     to ask for instead of only that they asked wrongly.
     """
 
-    def __init__(self, field: str, allowed: Tuple[str, ...] = ()) -> None:
+    def __init__(
+        self, field: str, allowed: Tuple[str, ...] = (), rule: str = ""
+    ) -> None:
         super().__init__(field)
         self.field = field
         self.allowed = tuple(allowed)
+        # ``rule`` is for the filters that are NOT enumerations. ``limit`` has a
+        # numeric range and ``after_entry_id`` has a companion requirement, so
+        # rendering them through the enum template gave an empty allowed-values
+        # list and advice ("filter with a published value") that is actively
+        # wrong: the rejected cursor IS a published id, so a caller following it
+        # loops. A filter that cannot be explained by a facet explains itself.
+        self.rule = rule
 
 
 # ---------------------------------------------------------------------------
@@ -1049,21 +1058,33 @@ def _diagnostic_entries(
     entries under one code would make a citation ambiguous.
     """
     merged: Dict[str, Dict[str, Any]] = {}
-    for specs, source_id in (
-        (sources.parse_specs, SOURCE_PARSE_DIAGNOSTICS),
-        (sources.finding_specs, SOURCE_VALIDATION_DIAGNOSTICS),
-        (sources.compiler_specs, SOURCE_COMPILER_DIAGNOSTICS),
+    for specs, source_id, stage in (
+        # The WORKFLOW STAGE each producer belongs to. A caller repairing a
+        # rejected compile filters by ``compile``; one repairing a rejected plan
+        # filters by ``plan``. Without this every diagnostic carried only
+        # ``repair``, so ``compile`` was a declared stage that matched nothing —
+        # and it is the stage an LLM is most likely to try, because the typed
+        # next steps end there and a third of the catalog is compile diagnostics.
+        (sources.parse_specs, SOURCE_PARSE_DIAGNOSTICS, "plan"),
+        (sources.finding_specs, SOURCE_VALIDATION_DIAGNOSTICS, "plan"),
+        (sources.compiler_specs, SOURCE_COMPILER_DIAGNOSTICS, "compile"),
     ):
         for spec in specs:
             code = str(spec["code"])
             row = merged.setdefault(
-                code, {"message": "", "remediation": "", "sources": []}
+                code,
+                {"message": "", "remediation": "", "sources": [], "stages": ["repair"]},
             )
             if spec.get("message") and not row["message"]:
                 row["message"] = spec["message"]
             if spec.get("remediation") and not row["remediation"]:
                 row["remediation"] = spec["remediation"]
             row["sources"].append(source_id)
+            # A code raised by more than one producer carries BOTH stages: it is
+            # reachable from both, and hiding one would make the filter lie in
+            # the other direction.
+            if stage not in row["stages"]:
+                row["stages"].append(stage)
 
     entries = []
     for code in sorted(merged):
@@ -1076,7 +1097,7 @@ def _diagnostic_entries(
                 subject=code,
                 title=code,
                 summary=(row["message"] or "").strip(),
-                workflow_stages=("repair",),
+                workflow_stages=tuple(row["stages"]),
                 ordering_facts=(
                     (row["remediation"],) if row["remediation"] else ()
                 ),
@@ -1357,10 +1378,15 @@ def _facets(
 def _validated_limit(limit: Optional[int]) -> int:
     if limit is None:
         return PROCESS_IR_AUTHORING_DEFAULT_LIMIT
+    rule = (
+        f"limit must be an integer from 1 to {PROCESS_IR_AUTHORING_MAX_LIMIT} "
+        f"(default {PROCESS_IR_AUTHORING_DEFAULT_LIMIT}). It bounds the entry "
+        f"COUNT; a separate byte budget bounds the entries' size."
+    )
     if not isinstance(limit, int) or isinstance(limit, bool):
-        raise ProcessIRAuthoringQueryError("limit")
+        raise ProcessIRAuthoringQueryError("limit", rule=rule)
     if limit < 1 or limit > PROCESS_IR_AUTHORING_MAX_LIMIT:
-        raise ProcessIRAuthoringQueryError("limit")
+        raise ProcessIRAuthoringQueryError("limit", rule=rule)
     return limit
 
 
@@ -1397,7 +1423,15 @@ def query_process_ir_authoring_contract(
     if after_entry_id and not any(semantic):
         # A cursor with no filter would page the entire catalog one screen at a
         # time, which is the same unbounded dump wearing a different hat.
-        raise ProcessIRAuthoringQueryError("after_entry_id")
+        raise ProcessIRAuthoringQueryError(
+            "after_entry_id",
+            rule=(
+                "after_entry_id resumes a FILTERED result and needs a companion "
+                "filter (authoring_entry_id, node_kind, category, capability_id "
+                "or workflow_stage). The value itself is a contract_entry_id and "
+                "may well be valid — what is missing is the filter to page within."
+            ),
+        )
 
     if node_kind and node_kind not in facets.node_kinds:
         raise ProcessIRAuthoringQueryError("node_kind", facets.node_kinds)
@@ -1518,7 +1552,16 @@ def build_process_ir_authoring_index() -> Dict[str, Any]:
             ],
             "default_limit": PROCESS_IR_AUTHORING_DEFAULT_LIMIT,
             "max_limit": PROCESS_IR_AUTHORING_MAX_LIMIT,
-            "byte_budget": PROCESS_IR_AUTHORING_BYTE_BUDGET,
+            # Named for what it actually bounds. It caps the serialized
+            # ENTRIES, not the whole response: the schema, facets and state
+            # mappings that wrap them are a fixed envelope the caller asked for
+            # by choosing this selector, and counting them would make the
+            # entry budget shrink as the envelope grew.
+            "entry_byte_budget": PROCESS_IR_AUTHORING_BYTE_BUDGET,
+            "entry_byte_budget_scope": (
+                "the serialized entries array only; the surrounding schema, "
+                "facets and state_mappings envelope is not counted"
+            ),
             "bare_retrieval_returns_entries": False,
         },
     }
