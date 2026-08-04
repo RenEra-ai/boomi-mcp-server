@@ -1154,7 +1154,13 @@ def _served_strings():
     )["contract_page"]["facets"]
     for category in facets["categories"]:
         cursor = None
-        for _ in range(60):
+        seen_cursors = set()
+        # Paginate to a TERMINAL page. A fixed iteration bound that falls out
+        # still truncated omits entries silently, and the sweeps then pass
+        # while never reading them — which is the failure mode this whole guard
+        # exists to prevent, one level up. The loop instead asserts that the
+        # cursor advances and that it ends on an untruncated page.
+        while True:
             page = meta_tools.get_schema_template_action(
                 schema_name="process_ir_authoring",
                 category=category,
@@ -1165,6 +1171,9 @@ def _served_strings():
             if not page["truncated"]:
                 break
             cursor = page["next_after_entry_id"]
+            assert cursor, f"{category}: truncated page carried no cursor"
+            assert cursor not in seen_cursors, f"{category}: cursor did not advance"
+            seen_cursors.add(cursor)
 
     surfaces.append(meta_tools.list_capabilities_action())
     surfaces.append(meta_tools.plan_integration_design_action())
@@ -1259,7 +1268,19 @@ def test_every_executable_instruction_the_server_serves_actually_executes():
 #: — attribution, and a reader who cannot fetch it has lost nothing they were
 #: promised. It may NOT INSTRUCT the reader to go and read one ("See
 #: AUTHORING_WORKFLOW_V1.md §11"), because no MCP tool can fetch it.
-_FETCH_IMPERATIVES = ("see ", "consult ", "read ", "fetch ", "refer to ")
+#: Matched on a WORD BOUNDARY, then any of space / colon / punctuation. A
+#: space-suffixed literal list missed ``Read: docs/design.md`` — the colon form
+#: keeps the instruction and its target in one clause, which is exactly the
+#: shape the previous fix preserved, so the verb list has to reach it too.
+_FETCH_IMPERATIVE_VERBS = ("see", "consult", "read", "fetch", "refer to")
+_FETCH_IMPERATIVE = re.compile(
+    r"\b(?:" + "|".join(v.replace(" ", r"\s+") for v in _FETCH_IMPERATIVE_VERBS) + r")\b[\s:]",
+    re.IGNORECASE,
+)
+
+
+def _has_fetch_imperative(text):
+    return bool(_FETCH_IMPERATIVE.search(text))
 
 #: ``\b`` is applied ONLY to the alternatives that begin with a word character.
 #: A leading ``\b`` in front of the whole group silently disabled the
@@ -1286,8 +1307,7 @@ def test_no_served_string_instructs_the_caller_to_read_an_unfetchable_document()
         # instruction, and splitting it put the verb in one fragment and the
         # unfetchable target in the next, so neither carried both.
         for sentence in re.split(r"(?<=[.;])\s+", text):
-            lowered = sentence.lower()
-            if not any(verb in lowered for verb in _FETCH_IMPERATIVES):
+            if not _has_fetch_imperative(sentence):
                 continue
             for match in _UNFETCHABLE_DOCUMENT.findall(sentence):
                 offenders.append((match, sentence.strip()[:130]))
@@ -1304,11 +1324,12 @@ def test_the_citation_guard_detects_the_paths_it_was_written_for():
     also = "Consult AUTHORING_WORKFLOW_V1.md §11 before authoring."
     allowed = "The projection decision is recorded in ADR-001 §6."
 
-    for text in (caught, also):
+    direct_colon = "Read: docs/design.md"
+    for text in (caught, also, direct_colon):
         assert _UNFETCHABLE_DOCUMENT.findall(text), text
-        assert any(verb in text.lower() for verb in _FETCH_IMPERATIVES), text
+        assert _has_fetch_imperative(text), text
     # Provenance carries no imperative, so the pair-test above lets it through.
-    assert not any(verb in allowed.lower() for verb in _FETCH_IMPERATIVES)
+    assert not _has_fetch_imperative(allowed)
 
 
 def test_the_instruction_sweep_reaches_the_contract_entries_themselves():
@@ -1359,8 +1380,7 @@ def test_a_colon_linked_instruction_is_still_one_instruction():
     text = "Read the details here: docs/design.md before proceeding"
     fragments = re.split(r"(?<=[.;])\s+", text)
     caught = any(
-        any(verb in fragment.lower() for verb in _FETCH_IMPERATIVES)
-        and _UNFETCHABLE_DOCUMENT.findall(fragment)
+        _has_fetch_imperative(fragment) and _UNFETCHABLE_DOCUMENT.findall(fragment)
         for fragment in fragments
     )
     assert caught
