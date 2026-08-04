@@ -6402,8 +6402,9 @@ _CACHE_PROPERTY_AUTHORING_TERMS: Dict[str, Dict[str, str]] = {
         "surface": (
             "manage_component(action='create', config={component_type:"
             "'processproperty', ...}) or an in-spec build_integration "
-            "component; template at get_schema_template(component_type="
-            "'processproperty', operation='create')"
+            "component; template at get_schema_template("
+            "resource_type='component', component_type='processproperty', "
+            "operation='create')"
         ),
     },
     "documentcache_component": {
@@ -6414,8 +6415,8 @@ _CACHE_PROPERTY_AUTHORING_TERMS: Dict[str, Dict[str, str]] = {
         "surface": (
             "manage_component(action='create', config={component_type:"
             "'documentcache', ...}) or an in-spec build_integration component; "
-            "template at get_schema_template(component_type='documentcache', "
-            "operation='create')"
+            "template at get_schema_template(resource_type='component', "
+            "component_type='documentcache', operation='create')"
         ),
     },
 }

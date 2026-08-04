@@ -422,7 +422,9 @@ class AuthoringRevisionBindingV1(_AuthoringModel):
     hash, so a compile made under one can be applied under the other. That is a
     staleness/integrity guarantee, not a privilege one: Boomi's own authorization
     still governs what each credential may do, and the apply recompiles under the
-    active profile before writing. See AUTHORING_WORKFLOW_V1.md §11.
+    active profile before writing. The published capability states and the
+    workflow contract are at get_schema_template(schema_name='authoring_workflow')
+    and list_capabilities().
     """
 
     contract_version: Literal["1"] = "1"

@@ -1077,3 +1077,104 @@ def test_direct_process_ir_next_steps_never_prepare_the_caller_for_apply():
         s for s in payload["typed_next_steps"] if s["action"] == "compile"
     )
     assert "apply is refused" in compile_step["why"]
+
+
+# ---------------------------------------------------------------------------
+# QA round 23: the class, pinned by EXECUTION rather than by spelling
+# ---------------------------------------------------------------------------
+
+import ast  # noqa: E402
+import re  # noqa: E402
+
+_CALL_PATTERN = re.compile(r"get_schema_template\(([^()]*)\)")
+
+
+def _harvest_calls(value, into):
+    if isinstance(value, str):
+        into.update(_CALL_PATTERN.findall(value))
+    elif isinstance(value, dict):
+        for item in value.values():
+            _harvest_calls(item, into)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _harvest_calls(item, into)
+
+
+def test_every_executable_instruction_the_server_serves_actually_executes():
+    """The instrument that finally closed the class.
+
+    Four rounds chased spellings — ``<kind>``, ``<that kind>``,
+    ``<one of them>``, ``category='node'`` — because each pin described what a
+    broken instruction LOOKED like. This one runs them: harvest every
+    ``get_schema_template(...)`` string the server serves, parse it, call it,
+    and require success. A fifth spelling cannot hide from it.
+
+    Template strings carrying a placeholder are skipped deliberately — they are
+    example payloads meant to be substituted, not instructions to paste — and
+    the placeholder pin covers those separately.
+    """
+    calls = set()
+    for name in meta_tools._valid_schema_names():
+        try:
+            _harvest_calls(meta_tools.get_schema_template_action(schema_name=name), calls)
+        except Exception:  # noqa: BLE001 — a selector that cannot build serves nothing
+            continue
+
+    executed, failures = 0, []
+    for call in sorted(calls):
+        if "<" in call or "..." in call or "…" in call:
+            continue
+        try:
+            node = ast.parse(f"f({call})", mode="eval").body
+            if node.args:
+                continue
+            kwargs = {
+                keyword.arg: ast.literal_eval(keyword.value)
+                for keyword in node.keywords
+                if keyword.arg
+            }
+        except Exception:  # noqa: BLE001 — not a literal call, not an instruction
+            continue
+        if not kwargs:
+            continue
+        result = meta_tools.get_schema_template_action(**kwargs)
+        executed += 1
+        if not result.get("_success"):
+            failures.append((call, result.get("error_code")))
+
+    assert executed >= 10, f"only {executed} instructions executed — pin is weak"
+    assert failures == [], failures
+
+
+#: The citation boundary, written down so a pin can enforce it.
+#:
+#: A served string MAY name a document as PROVENANCE ("recorded in ADR-001 §6")
+#: — that is attribution, and a reader who cannot fetch it has lost nothing they
+#: were promised. A served string may NOT INSTRUCT the reader to go and read one
+#: ("See AUTHORING_WORKFLOW_V1.md §11"), because no MCP tool can fetch it and the
+#: instruction therefore cannot be carried out.
+#:
+#: Left unwritten for four rounds, this distinction produced a new spelling each
+#: time. It is a rule now.
+_FETCH_IMPERATIVES = ("see ", "consult ", "read ", "fetch ", "refer to ")
+_UNFETCHABLE_DOCUMENT = re.compile(
+    r"\b(?:ADR-\d+|[A-Z][A-Z0-9_]{3,}\.md|docs/[\w/.-]+|\.codex/[\w/.-]+)"
+)
+
+
+def test_no_served_string_instructs_the_caller_to_read_an_unfetchable_document():
+    """Provenance is allowed; an unfollowable instruction is not."""
+    offenders = []
+    for name in meta_tools._valid_schema_names():
+        try:
+            payload = meta_tools.get_schema_template_action(schema_name=name)
+        except Exception:  # noqa: BLE001
+            continue
+        for sentence in re.split(r"(?<=[.;])\s+", json.dumps(payload, default=str)):
+            lowered = sentence.lower()
+            if not any(verb in lowered for verb in _FETCH_IMPERATIVES):
+                continue
+            for match in _UNFETCHABLE_DOCUMENT.findall(sentence):
+                # An imperative and an unfetchable target in the same sentence.
+                offenders.append((name, match, sentence.strip()[:120]))
+    assert offenders == [], offenders

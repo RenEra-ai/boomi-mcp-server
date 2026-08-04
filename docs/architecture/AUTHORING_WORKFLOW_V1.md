@@ -100,6 +100,16 @@ which resolves through `get_schema_template(schema_name="process_ir_authoring",
 authoring_entry_id=…)`. **No served remediation cites a repository artifact**, because no MCP tool
 can fetch one.
 
+**The citation boundary.** A served string MAY name a document as *provenance*
+("recorded in ADR-001 §6") — that is attribution, and a reader who cannot fetch it has lost nothing
+they were promised. A served string may NOT *instruct* the reader to go and read one ("See
+AUTHORING_WORKFLOW_V1.md §11"), because no MCP tool can fetch it, so the instruction cannot be
+carried out. The same rule applies to tool calls a response tells a caller to make: every
+`get_schema_template(...)` string the server serves is harvested, parsed and **executed** by CI, and
+must succeed. Four rounds of this amendment chased individual spellings of a broken instruction — a
+`<kind>` placeholder, then `<that kind>`, then `<one of them>`, then an invalid `category='node'` —
+because each pin described what a broken instruction looked like instead of running it.
+
 A typed request whose `process_ir` document is malformed is reported by **ProcessIR's own parser**:
 stable `PROCESS_IR_*` code and an RFC 6901 pointer into the authored payload
 (`/intent/process_ir/...`), not a pydantic `loc`/`type` pair. Pydantic's `input`, `ctx` and `msg` are
