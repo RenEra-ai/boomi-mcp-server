@@ -1086,7 +1086,33 @@ def test_direct_process_ir_next_steps_never_prepare_the_caller_for_apply():
 import ast  # noqa: E402
 import re  # noqa: E402
 
-_CALL_PATTERN = re.compile(r"get_schema_template\(([^()]*)\)")
+_CALL_PREFIX = "get_schema_template("
+
+
+def _harvest_calls(text):
+    """Every ``get_schema_template(...)`` occurrence, balanced, or a marker.
+
+    A regex over ``[^()]*`` cannot see malformed OUTER syntax: an extra ``)``
+    leaves a valid interior to match, and a missing ``)`` matches nothing at
+    all. Either way the broken instruction never reaches the classifier and the
+    build stays green. So the scan starts at each literal ``get_schema_template(``
+    and balances forward; an unbalanced occurrence is yielded as ``None`` and
+    fails the caller.
+    """
+    out = []
+    index = text.find(_CALL_PREFIX)
+    while index != -1:
+        cursor = index + len(_CALL_PREFIX)
+        depth = 1
+        while cursor < len(text) and depth:
+            if text[cursor] == "(":
+                depth += 1
+            elif text[cursor] == ")":
+                depth -= 1
+            cursor += 1
+        out.append(None if depth else text[index + len(_CALL_PREFIX) : cursor - 1])
+        index = text.find(_CALL_PREFIX, index + len(_CALL_PREFIX))
+    return out
 
 #: A placeholder to substitute, or an enumeration of alternatives — both are
 #: EXAMPLES, not instructions to paste. Classified explicitly rather than left
@@ -1118,6 +1144,28 @@ def _served_strings():
             )
         except Exception:  # noqa: BLE001
             continue
+    # The authoring contract's own ENTRIES. A bare selector deliberately returns
+    # none, so a sweep that only fetches selectors never reads the remediations
+    # this contract exists to publish — the exact strings four rounds of
+    # findings were about. Paged through the served surface, not read off the
+    # projector, so what is checked is what a caller receives.
+    facets = meta_tools.get_schema_template_action(
+        schema_name="process_ir_authoring"
+    )["contract_page"]["facets"]
+    for category in facets["categories"]:
+        cursor = None
+        for _ in range(60):
+            page = meta_tools.get_schema_template_action(
+                schema_name="process_ir_authoring",
+                category=category,
+                after_entry_id=cursor,
+                limit=50,
+            )["contract_page"]
+            surfaces.append(page)
+            if not page["truncated"]:
+                break
+            cursor = page["next_after_entry_id"]
+
     surfaces.append(meta_tools.list_capabilities_action())
     surfaces.append(meta_tools.plan_integration_design_action())
     surfaces.append(meta_tools.plan_integration_design_action(authoring_mode="process_ir"))
@@ -1173,8 +1221,14 @@ def test_every_executable_instruction_the_server_serves_actually_executes():
     instruction would sit in a green build.
     """
     calls = set()
+    unbalanced = []
     for text in _served_strings():
-        calls.update(_CALL_PATTERN.findall(text))
+        for harvested in _harvest_calls(text):
+            if harvested is None:
+                unbalanced.append(text.strip()[:130])
+            else:
+                calls.add(harvested)
+    assert unbalanced == [], unbalanced
     assert calls, "the harvester found nothing — the pin is vacuous"
 
     executed, templates, malformed, failures = 0, 0, [], []
@@ -1228,7 +1282,10 @@ def test_no_served_string_instructs_the_caller_to_read_an_unfetchable_document()
     """
     offenders = []
     for text in _served_strings():
-        for sentence in re.split(r"(?<=[.;:])\s+", text):
+        # NOT on a colon: "Read the details here: docs/design.md" is one
+        # instruction, and splitting it put the verb in one fragment and the
+        # unfetchable target in the next, so neither carried both.
+        for sentence in re.split(r"(?<=[.;])\s+", text):
             lowered = sentence.lower()
             if not any(verb in lowered for verb in _FETCH_IMPERATIVES):
                 continue
@@ -1252,3 +1309,58 @@ def test_the_citation_guard_detects_the_paths_it_was_written_for():
         assert any(verb in text.lower() for verb in _FETCH_IMPERATIVES), text
     # Provenance carries no imperative, so the pair-test above lets it through.
     assert not any(verb in allowed.lower() for verb in _FETCH_IMPERATIVES)
+
+
+def test_the_instruction_sweep_reaches_the_contract_entries_themselves():
+    """The strings this amendment exists to publish must be IN the sweep.
+
+    ``process_ir_authoring`` deliberately serves zero entries for a bare
+    selector, so a sweep that only fetched selectors never read a single
+    remediation — the exact class four rounds of findings were about. The sweep
+    pages the filtered surface instead.
+    """
+    strings = list(_served_strings())
+    assert len(strings) > 15000, len(strings)
+    entry_remediations = [
+        text
+        for text in strings
+        if "category='placement'" in text and "list bound" in text
+    ]
+    assert entry_remediations, "the sweep does not reach contract-entry remediations"
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        # Well-formed: the interior is returned and will be executed.
+        ("get_schema_template(resource_type='component')", ["resource_type='component'"]),
+        # Nested parens must not terminate the scan early.
+        ("get_schema_template(config=f(1))", ["config=f(1)"]),
+        # TRUNCATED: no closing paren at all. A regex over `[^()]*` matched
+        # nothing here, so the broken instruction was invisible; balancing
+        # reports it.
+        ("get_schema_template(resource_type='component'", [None]),
+        # A stray paren AFTER a complete call is prose noise, not a broken
+        # instruction: the call itself is well formed and a caller pasting it
+        # succeeds, so the interior is returned rather than flagged.
+        ("get_schema_template(resource_type='component'))", ["resource_type='component'"]),
+    ],
+)
+def test_the_call_harvester_sees_malformed_outer_syntax(text, expected):
+    assert _harvest_calls(text) == expected
+
+
+def test_a_colon_linked_instruction_is_still_one_instruction():
+    """`Read the details here: docs/design.md` must not be split in two.
+
+    Splitting on the colon put the verb in one fragment and the unfetchable
+    target in the next, so neither carried both and the guard reported nothing.
+    """
+    text = "Read the details here: docs/design.md before proceeding"
+    fragments = re.split(r"(?<=[.;])\s+", text)
+    caught = any(
+        any(verb in fragment.lower() for verb in _FETCH_IMPERATIVES)
+        and _UNFETCHABLE_DOCUMENT.findall(fragment)
+        for fragment in fragments
+    )
+    assert caught
