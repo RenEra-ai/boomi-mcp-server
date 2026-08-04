@@ -2403,6 +2403,24 @@ if build_integration_action:
         first phase that can, and a TYPED apply re-parses the raw request,
         recompiles it in this profile, and compares the binding before its first
         write — a stale or mismatched binding mutates nothing.
+
+        A typed apply reports how sure it is, because "must I reconcile?" and
+        "is this safe to retry?" are different questions:
+
+            mutation_status="performed" - a writing step returned a component id;
+                                          the write was observed. Reconcile.
+            mutation_status="possible"  - a write was attempted and returned no
+                                          id; this server does not know whether
+                                          it committed. Check before retrying —
+                                          a retry duplicates under
+                                          conflict_policy="clone".
+            mutation_status="none"      - nothing was attempted (only reuse, or
+                                          refused before any write). A FAILURE in
+                                          this state is retry-safe and carries
+                                          AUTHORING_APPLY_VALIDATION_REQUIRED.
+
+        mutation_performed is the boolean shorthand (true for performed and
+        possible). Legacy applies carry neither field.
         """
         config_data = {}
         if config:

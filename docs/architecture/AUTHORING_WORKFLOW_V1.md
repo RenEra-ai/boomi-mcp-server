@@ -40,9 +40,23 @@ No sixth tool is introduced. `compile` is an additive action on `build_integrati
 | 5 | `build_integration(action="plan", config={"authoring_request": …})` | **no** |
 | 6 | `build_integration(action="compile", config={"authoring_request": …})` | **no** |
 | 7 | `build_integration(action="apply", …)` | **yes** — the first phase that may |
+| 8 | `build_integration(action="verify", config={"build_id": …})` | no |
+
+### Three planning concepts, deliberately distinct
+
+* `plan_integration_design` — **advisory**. Doctrine, gaps, and typed next steps. It never turns
+  prose into executable intent, and it never builds an `AuthoringRequestV1` for you.
+* `build_integration(action="plan")` — **semantic**. Validation, resolved references, capability
+  gaps, required decisions, and the `IntegrationSpecV1` ComponentPlan preview.
+* `build_integration(action="compile")` — **canonical**. Normalized intent, deterministic artifact
+  fingerprints, and the compile hash apply binds to. Returns **no `build_id`** — nothing was created,
+  so there is nothing to identify.
+
+### The typed apply envelope
 
 A typed apply always answers in the typed envelope: `action`, `mutation_performed`,
-`mutation_status`, and — when it provably touched nothing — an `error_code`.
+`mutation_status`, and — when it REFUSED before writing anything — an `error_code`. A *successful*
+apply never carries one, including an all-`reuse` apply that legitimately wrote nothing.
 
 `mutation_status` is the honest one, because a single boolean was answering two questions that
 diverge exactly where it matters — *must the caller reconcile?* and *is this failure retry-safe?*
@@ -51,7 +65,7 @@ diverge exactly where it matters — *must the caller reconcile?* and *is this f
 |---|---|---|---|
 | `performed` | a writing step returned a component id — the write was observed | `true` | no |
 | `possible` | a writing step was attempted and returned no id — the outcome is unknown to this server | `true` | no |
-| `none` | only `reused` bindings, or nothing attempted at all | `false` | **yes** — carries `AUTHORING_APPLY_VALIDATION_REQUIRED` |
+| `none` | only `reused` bindings, or nothing attempted at all | `false` | **yes** — a FAILED apply in this state carries `AUTHORING_APPLY_VALIDATION_REQUIRED`; a successful one carries no error at all |
 
 `possible` does not distinguish "the request committed and the response was lost" from "the request
 was rejected" or "no request was issued". The only available discriminator is the builder's error

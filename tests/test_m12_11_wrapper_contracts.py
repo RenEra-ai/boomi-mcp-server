@@ -178,3 +178,27 @@ def test_a_legacy_request_never_enters_the_typed_path():
     source = inspect.getsource(integration_builder.build_integration_action)
     assert "payload = _authoring_payload(cfg)" in source
     assert "elif payload is not None:" in source
+
+
+def test_the_mutation_certainty_vocabulary_is_published():
+    """QA #424. An enum's vocabulary is not self-describing the way a boolean
+    is, so a caller cannot branch on values no served surface ever names."""
+    doc = server.build_integration.__doc__
+    for value in ("performed", "possible", "none"):
+        assert f'mutation_status="{value}"' in doc, value
+    assert "mutation_performed" in doc
+
+
+def test_the_workflow_doc_still_describes_all_eight_steps():
+    """QA #422. A doc edit over-deleted the verify row and the phase-distinction
+    section while the title still promised them."""
+    from pathlib import Path
+
+    doc = (
+        Path(__file__).resolve().parent.parent
+        / "docs" / "architecture" / "AUTHORING_WORKFLOW_V1.md"
+    ).read_text()
+    for step in range(1, 9):
+        assert f"| {step} |" in doc, step
+    assert "Three planning concepts" in doc
+    assert "no `build_id`" in doc
