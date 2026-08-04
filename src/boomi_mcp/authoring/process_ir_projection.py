@@ -1058,16 +1058,23 @@ def _diagnostic_entries(
     entries under one code would make a citation ambiguous.
     """
     merged: Dict[str, Dict[str, Any]] = {}
-    for specs, source_id, stage in (
-        # The WORKFLOW STAGE each producer belongs to. A caller repairing a
-        # rejected compile filters by ``compile``; one repairing a rejected plan
-        # filters by ``plan``. Without this every diagnostic carried only
-        # ``repair``, so ``compile`` was a declared stage that matched nothing —
-        # and it is the stage an LLM is most likely to try, because the typed
-        # next steps end there and a third of the catalog is compile diagnostics.
-        (sources.parse_specs, SOURCE_PARSE_DIAGNOSTICS, "plan"),
-        (sources.finding_specs, SOURCE_VALIDATION_DIAGNOSTICS, "plan"),
-        (sources.compiler_specs, SOURCE_COMPILER_DIAGNOSTICS, "compile"),
+    for specs, source_id, stages in (
+        # The phases each code is REACHABLE FROM — not the module that emits it.
+        #
+        # The distinction cost a round. Filing by producer said "parse codes
+        # belong to plan", which is true of ownership and false of reachability:
+        # ``action="compile"`` re-runs parse and semantic validation before the
+        # compiler, so it is a strict SUPERSET of plan. A caller repairing a
+        # rejected compile who filtered by ``compile`` therefore missed most of
+        # the codes they had just received.
+        #
+        # So the containment is encoded here rather than left implicit:
+        # everything plan can raise, compile can raise too. Compiler diagnostics
+        # are the only ones plan cannot reach — nothing is compiled at plan.
+        # ``repair`` stays the union, so it is always the safe filter.
+        (sources.parse_specs, SOURCE_PARSE_DIAGNOSTICS, ("plan", "compile")),
+        (sources.finding_specs, SOURCE_VALIDATION_DIAGNOSTICS, ("plan", "compile")),
+        (sources.compiler_specs, SOURCE_COMPILER_DIAGNOSTICS, ("compile",)),
     ):
         for spec in specs:
             code = str(spec["code"])
@@ -1080,11 +1087,9 @@ def _diagnostic_entries(
             if spec.get("remediation") and not row["remediation"]:
                 row["remediation"] = spec["remediation"]
             row["sources"].append(source_id)
-            # A code raised by more than one producer carries BOTH stages: it is
-            # reachable from both, and hiding one would make the filter lie in
-            # the other direction.
-            if stage not in row["stages"]:
-                row["stages"].append(stage)
+            for stage in stages:
+                if stage not in row["stages"]:
+                    row["stages"].append(stage)
 
     entries = []
     for code in sorted(merged):

@@ -3236,9 +3236,10 @@ if get_schema_template_action:
             after_entry_id: Stateless pagination cursor; requires at least one other filter.
             limit: 1-50, default 20. Filters AND together, results sort by contract_entry_id, and
                 a bare call returns the facets and schema with ZERO entries — ask for what you
-                need rather than receiving the whole catalog. A 64 KiB payload budget applies on
-                top of the count limit; when it bites, 'truncated' is true and
-                'next_after_entry_id' resumes. All seven apply ONLY to 'process_ir_authoring' and
+                need rather than receiving the whole catalog. A 64 KiB budget on the ENTRIES
+                applies on top of the count limit (the surrounding schema/facets envelope is
+                not counted — see entry_byte_budget_scope); when it bites, 'truncated' is true
+                and 'next_after_entry_id' resumes. All seven apply ONLY to 'process_ir_authoring' and
                 are INVALID_INPUT on any other selector.
 
         Examples:

@@ -627,11 +627,90 @@ def test_every_advertised_workflow_stage_matches_at_least_one_entry():
         assert page["matched_entry_count"] > 0, stage
 
 
-def test_compile_and_plan_stages_select_the_diagnostics_of_their_phase():
-    compile_page = fetch(workflow_stage="compile", limit=50)["contract_page"]
-    assert compile_page["matched_entry_count"] > 0
-    for entry in compile_page["entries"]:
+def test_compile_reachability_contains_plan_reachability():
+    """#454. ``compile`` re-runs parse and semantic validation, so it is a strict
+    SUPERSET of ``plan`` — and the filter has to say so.
+
+    Filing each code by the module that EMITS it looked right and was wrong: a
+    caller repairing a rejected compile filtered by ``compile`` and missed most
+    of the codes they had just received, because those codes are "owned" by the
+    parse and validation layers that compile also runs.
+    """
+    diagnostics = [
+        entry
+        for entry in build_process_ir_authoring_entries()
+        if entry.entry_type == "diagnostic"
+    ]
+    assert diagnostics
+
+    plan_codes = {e.subject for e in diagnostics if "plan" in e.workflow_stages}
+    compile_codes = {e.subject for e in diagnostics if "compile" in e.workflow_stages}
+    repair_codes = {e.subject for e in diagnostics if "repair" in e.workflow_stages}
+
+    assert plan_codes, "plan must reach the parse and validation codes"
+    assert plan_codes < compile_codes, "compile must strictly contain plan"
+    assert compile_codes == repair_codes == {e.subject for e in diagnostics}
+
+    for entry in fetch(workflow_stage="compile", limit=50)["contract_page"]["entries"]:
         assert entry["entry_type"] == "diagnostic"
+
+
+def test_a_code_the_compile_action_really_raises_is_filed_under_compile():
+    """The claim, checked against the behaviour rather than against itself.
+
+    A parse-owned code that a real ``action='compile'`` call returns must be
+    reachable by ``workflow_stage='compile'``, or the filter is advertising a
+    phase model the server does not implement.
+    """
+    request = {
+        "authoring_request": {
+            "contract_version": "1",
+            "intent": {
+                "intent_kind": "process_ir",
+                "integration_name": "x",
+                "component_key": "p",
+                "process_ir": {
+                    "version": "1",
+                    "body": {
+                        "kind": "sequence",
+                        "steps": [
+                            {
+                                "kind": "source",
+                                "connection_ref": "$ref:c",
+                                "operation_ref": "$ref:o",
+                            },
+                            {
+                                "kind": "branch",
+                                "legs": [
+                                    {
+                                        "steps": [{"kind": "message", "text": "m"}],
+                                        "terminal": {"kind": "stop"},
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                },
+            },
+        }
+    }
+    result = integration_builder._compile_authoring(None, "p", request)
+    raised = {row["code"] for row in result["validation_errors"]}
+    assert raised
+
+    reachable = {
+        entry["subject"]
+        for entry in fetch(workflow_stage="compile", limit=50)["contract_page"]["entries"]
+    }
+    # Page through the rest of the compile facet.
+    cursor = fetch(workflow_stage="compile", limit=50)["contract_page"]
+    while cursor["truncated"]:
+        cursor = fetch(
+            workflow_stage="compile", after_entry_id=cursor["next_after_entry_id"], limit=50
+        )["contract_page"]
+        reachable |= {entry["subject"] for entry in cursor["entries"]}
+
+    assert raised <= reachable, sorted(raised - reachable)
 
 
 @pytest.mark.parametrize(
@@ -724,3 +803,47 @@ def test_no_diagnostic_remediation_cites_an_unfetchable_artifact():
         text = " ".join(entry.ordering_facts) + entry.summary
         for token in ("ADR-001", "AUTHORING_WORKFLOW_V1", "docs/", ".codex/"):
             assert token not in text, (entry.contract_entry_id, token)
+
+
+def test_every_diagnostic_remediation_is_followable_without_substitution():
+    """#455. A remediation a caller pastes must work as pasted.
+
+    Two wordings failed: a literal ``<kind>`` placeholder, then an instruction
+    to read the kind "from the path" — which is a JSON pointer of field names
+    and indices, so the kind is recoverable in only one of three shapes. Any
+    ``process_ir_authoring`` call a remediation names must therefore be exact.
+    """
+    import re
+
+    pattern = re.compile(
+        r"get_schema_template\(\s*schema_name='process_ir_authoring'\s*,\s*"
+        r"(\w+)='([^']+)'\s*\)"
+    )
+    checked = 0
+    for entry in build_process_ir_authoring_entries():
+        if entry.entry_type != "diagnostic":
+            continue
+        for text in entry.ordering_facts:
+            for field, value in pattern.findall(text):
+                assert "<" not in value and ">" not in value, (entry.subject, value)
+                page = fetch(**{field: value})
+                assert page["_success"] is True, (entry.subject, field, value)
+                assert page["contract_page"]["matched_entry_count"] > 0, (
+                    entry.subject,
+                    field,
+                    value,
+                )
+                checked += 1
+    assert checked, "no remediation named a contract call — the pin is vacuous"
+
+
+def test_the_wrapper_docstring_agrees_with_the_served_budget_scope():
+    """#456. A tool description that contradicts the served data is a claim defect.
+
+    The docstring said "payload budget" while the payload said the budget covers
+    the entries only. Both cannot be true, and the caller reads the docstring.
+    """
+    doc = server.get_schema_template.__doc__
+    assert "payload budget" not in doc
+    assert "budget on the ENTRIES" in doc
+    assert "entry_byte_budget_scope" in doc

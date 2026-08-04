@@ -2002,21 +2002,33 @@ _DISCRIMINATOR_TAGS = frozenset(
 # They cite ``process_ir_authoring`` entry ids instead, which resolve through
 # ``get_schema_template``.
 _REMEDIATION = {
+    # ``category='node'`` was WRONG and shipped: a node entry is categorised by
+    # what it does (control, connector, state, terminal, ...), so there is no
+    # "node" category to filter on and the remediation was unfollowable. The
+    # facets a bare call returns list every valid node_kind, and the code's own
+    # entry always resolves — neither needs the caller to guess a value.
     PROCESS_IR_SCHEMA_UNKNOWN_NODE: (
         "Use one of the ProcessIRV1 node kinds published by "
-        "get_schema_template(schema_name='ProcessIRV1'); the per-node authoring "
-        "rules are at get_schema_template(schema_name='process_ir_authoring', "
-        "category='node')."
+        "get_schema_template(schema_name='ProcessIRV1'). A bare "
+        "get_schema_template(schema_name='process_ir_authoring') lists every "
+        "valid node_kind in its facets; this rule is at get_schema_template("
+        "schema_name='process_ir_authoring', "
+        "authoring_entry_id='diagnostic.process_ir_schema_unknown_node')."
     ),
     PROCESS_IR_SCHEMA_UNKNOWN_FIELD: (
         "Remove the unknown field — ProcessIRV1 nodes are strict and reject extras."
     ),
+    # Cites its OWN entry id rather than a node_kind the caller has to derive.
+    # Two earlier wordings failed here: one shipped a literal '<kind>'
+    # placeholder, and the replacement told the caller to read the kind "from
+    # the path" — but the path is a JSON pointer of field names and indices, and
+    # the kind is recoverable from it in only one of the three shapes this code
+    # reports. An exact id needs no derivation and always resolves.
     PROCESS_IR_SCHEMA_INVALID_CARDINALITY: (
-        "Fix the list bound or step ordering at the referenced path. Read the "
-        "sequence rules for the node kind named in the path with "
-        "get_schema_template(schema_name='process_ir_authoring', "
-        "node_kind=<that kind>) — substitute the kind; a literal placeholder is "
-        "not a valid filter value."
+        "Fix the list bound or step ordering at the referenced path. The rule "
+        "that rejected it is at get_schema_template("
+        "schema_name='process_ir_authoring', "
+        "authoring_entry_id='diagnostic.process_ir_schema_invalid_cardinality')."
     ),
     PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED: (
         "Set version to the supported ProcessIR version '1'."
