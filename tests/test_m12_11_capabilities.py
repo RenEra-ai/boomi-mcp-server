@@ -697,3 +697,62 @@ def test_the_workflow_contract_has_one_source_for_digest_and_payload():
     # The revision is decoration on the served payload only — never digested.
     assert "revision_binding" in served
     assert "revision_binding" not in contract
+
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        "actions",
+        "boomi_mutation",
+        "intent_kinds",
+        "phases",
+        "raw_xml_exposed",
+        "read_only",
+        "terminology",
+    ],
+)
+def test_each_workflow_contract_member_individually_moves_the_revision(member):
+    """QA #447. Dropping six of the seven members individually survived all 9116
+    tests, because the only guard flipped three flags AT ONCE and so pinned their
+    union rather than its members. Parametrized so each member is its own case."""
+    from boomi_mcp.authoring import contract as contract_module
+
+    contract_module.reset_manifest_cache()
+    baseline = contract_module._schema_bundle()["authoring_workflow"]
+    real = contract_module.authoring_workflow_contract
+
+    def _without_member():
+        return {k: v for k, v in real().items() if k != member}
+
+    try:
+        contract_module.authoring_workflow_contract = _without_member
+        contract_module.reset_manifest_cache()
+        dropped = contract_module._schema_bundle()["authoring_workflow"]
+    finally:
+        contract_module.authoring_workflow_contract = real
+        contract_module.reset_manifest_cache()
+
+    assert dropped != baseline, f"{member} is served but not hashed"
+    assert member in contract_module._AUTHORING_WORKFLOW_CONTRACT_KEYS
+
+
+def test_the_workflow_contract_flags_have_the_right_VALUES():
+    """QA #448. The flags were pinned as hashed but never as CORRECT — serving
+    `boomi_mutation: True` for the workflow entry passed all 9116 tests, while
+    the per-phase `mutates_boomi` it aggregates was properly pinned."""
+    from boomi_mcp.authoring.contract import authoring_workflow_contract
+    from boomi_mcp.categories.meta_tools import _get_authoring_schema_by_name
+
+    contract = authoring_workflow_contract()
+    # Fetching the workflow description is a read; it builds nothing and emits
+    # no XML. The aggregate must agree with the per-phase flags it summarizes.
+    assert contract["read_only"] is True
+    assert contract["boomi_mutation"] is False
+    assert contract["raw_xml_exposed"] is False
+
+    served = _get_authoring_schema_by_name("authoring_workflow")
+    for flag in ("read_only", "boomi_mutation", "raw_xml_exposed"):
+        assert served[flag] == contract[flag], flag
+
+    # ...and the phase table it aggregates still says exactly one phase mutates.
+    assert [p["step"] for p in contract["phases"] if p["mutates_boomi"]] == [7]
