@@ -55,6 +55,7 @@ from ..models.authoring_workflow import (
     AuthoringDiagnosticV1,
     AuthoringPlanResultV1,
     AuthoringRequestV1,
+    parse_authoring_request_v1,
     AuthoringRevisionBindingV1,
     CapabilityGapV1,
     ComponentDependencyEdgeV1,
@@ -113,6 +114,9 @@ def _diag(
     subject_id: str = "",
     remediation: str = "",
     cause_codes: Tuple[str, ...] = (),
+    node_identity: str = "",
+    evidence: Tuple[Any, ...] = (),
+    authoring_contract_entry_ids: Tuple[str, ...] = (),
 ) -> AuthoringDiagnosticV1:
     return AuthoringDiagnosticV1(
         code=code,
@@ -123,7 +127,66 @@ def _diag(
         message=message,
         remediation=remediation,
         cause_codes=tuple(sorted(set(cause_codes))),
+        node_identity=node_identity,
+        evidence=tuple(evidence),
+        authoring_contract_entry_ids=tuple(sorted(set(authoring_contract_entry_ids))),
     )
+
+
+def _safe_evidence(finding: Any) -> Tuple[Any, ...]:
+    """Re-validate the validator's evidence at the public boundary (#146).
+
+    RE-validated, not forwarded. The compiler's evidence model already enforces
+    a closed key allowlist and a token/code value shape, but this layer owns
+    what it publishes: trusting the upstream model would mean a widened
+    allowlist there silently widens what reaches an MCP response here.
+
+    A pair that fails re-validation is DROPPED rather than raising. Evidence is
+    supplementary — losing one pair costs a caller some context, while failing
+    the whole plan over it would turn a formatting problem into an outage.
+    """
+    from ..models.authoring_workflow import AuthoringEvidenceV1
+
+    out = []
+    for item in getattr(finding, "evidence", ()) or ():
+        try:
+            out.append(AuthoringEvidenceV1(key=item.key, value=item.value))
+        except Exception:  # noqa: BLE001 — supplementary context, never fatal
+            continue
+    return tuple(sorted(out, key=lambda pair: pair.sort_key))
+
+
+#: Appended to every compile-phase remediation. Kept SEPARATE from the compiler's
+#: own per-code text rather than replacing it: the per-code text says what to
+#: fix, and this says where the failure was NOT found. Both are needed — bug #409
+#: was a caller told to "re-plan" a payload that plan reports as valid.
+_COMPILE_PHASE_NOTE = (
+    " Re-planning will NOT surface this: reference resolution happens at "
+    "compile, not during semantic validation, so the fix is usually in the "
+    "COMPONENT the reported node references rather than in the node itself."
+)
+
+
+def _compile_remediation(diagnostic: Any) -> str:
+    own = (getattr(diagnostic, "remediation", "") or "").strip()
+    if not own:
+        return _COMPILE_PHASE_NOTE.strip()
+    return own + _COMPILE_PHASE_NOTE
+
+
+def _contract_ids_for(code: str) -> Tuple[str, ...]:
+    """The served authoring entries that explain ``code``.
+
+    Best-effort: a diagnostic must still reach the caller if the projection
+    cannot be built, because the diagnostic is the thing that blocks their
+    compile and the citation is the thing that helps them fix it.
+    """
+    try:
+        from .process_ir_projection import authoring_contract_entry_ids_for_diagnostic
+
+        return authoring_contract_entry_ids_for_diagnostic(code)
+    except Exception:  # noqa: BLE001 — advisory citation, never fatal
+        return ()
 
 
 # ---------------------------------------------------------------------------
@@ -687,33 +750,43 @@ def _validate_processes(
         errors += len(report.errors)
         warnings += len(report.warnings)
         advisories += len(report.advisories)
-        for finding in report.errors:
-            codes.append(finding.code)
-            diagnostics.append(
-                _diag(
-                    AUTHORING_COMPILE_BLOCKED,
-                    "error",
-                    message="Semantic validation rejected this process.",
-                    path=finding.path,
-                    subject_kind="process",
-                    subject_id=component_key,
-                    remediation="Fix the reported node and re-plan.",
-                    cause_codes=(finding.code,),
+        # #146 amendment: forward the validator's OWN message and remediation.
+        #
+        # This layer used to write "Semantic validation rejected this process."
+        # and "Fix the reported node and re-plan." over the top of them. Both
+        # are true and neither is actionable — the validator already knows that
+        # a Branch leg depends on state a later leg writes, and already knows
+        # the fix is to reorder the legs. Genericizing that at the public
+        # boundary is what forced a caller back to repository knowledge.
+        #
+        # Safe to forward: every string is a STATIC table entry selected by
+        # code, and the evidence is re-validated against a closed key allowlist
+        # at this boundary. Nothing authored crosses.
+        for severity, findings in (
+            ("error", report.errors),
+            ("warning", report.warnings),
+            # Advisories were counted and DROPPED. An advisory that never
+            # reaches the caller is an advisory nobody can act on, and its count
+            # in the summary then describes something they cannot see.
+            ("advisory", report.advisories),
+        ):
+            for finding in findings:
+                codes.append(finding.code)
+                diagnostics.append(
+                    _diag(
+                        AUTHORING_COMPILE_BLOCKED,
+                        severity,
+                        message=finding.message,
+                        path=finding.path,
+                        subject_kind="process",
+                        subject_id=component_key,
+                        remediation=finding.remediation,
+                        cause_codes=(finding.code,),
+                        node_identity=getattr(finding, "node_identity", "") or "",
+                        evidence=_safe_evidence(finding),
+                        authoring_contract_entry_ids=_contract_ids_for(finding.code),
+                    )
                 )
-            )
-        for finding in report.warnings:
-            codes.append(finding.code)
-            diagnostics.append(
-                _diag(
-                    AUTHORING_COMPILE_BLOCKED,
-                    "warning",
-                    message="Semantic validation warned about this process.",
-                    path=finding.path,
-                    subject_kind="process",
-                    subject_id=component_key,
-                    cause_codes=(finding.code,),
-                )
-            )
 
     summary = ValidationReportSummaryV1(
         is_valid=errors == 0,
@@ -1187,14 +1260,18 @@ def build_artifact_descriptors(
                         # they could not exit (issue #146 QA, bug #409). The
                         # failure is usually in the COMPONENT the reported node
                         # references, not in the node as authored.
-                        remediation=(
-                            "Check the component this step references — a "
-                            "connector operation needs connector_type and "
-                            "action_type on its component config. Re-planning "
-                            "will NOT surface this: reference resolution happens "
-                            "at compile, not during semantic validation."
-                        ),
+                        # #146 amendment: the compiler's OWN remediation for this
+                        # code, with the reference-resolution note appended
+                        # rather than replacing it. The note is what bug #409
+                        # needed — plan reports this input valid, so "re-plan"
+                        # sent callers round a loop they could not exit — and the
+                        # per-code text is what tells them WHICH thing to fix.
+                        remediation=_compile_remediation(diagnostic),
                         cause_codes=(getattr(diagnostic, "code", "") or "",),
+                        node_identity=getattr(diagnostic, "node_identity", "") or "",
+                        authoring_contract_entry_ids=_contract_ids_for(
+                            getattr(diagnostic, "code", "") or ""
+                        ),
                     )
                     for diagnostic in (exc.diagnostics or ())
                 )
@@ -1387,7 +1464,10 @@ def preflight_typed_apply_v1(
     Requires both ``expected_capability_revision`` and ``expected_compile_hash``.
     An apply with no binding is an apply that verified nothing.
     """
-    request = AuthoringRequestV1.model_validate(dict(raw_request_payload))
+    # #146: the SAME parser as plan and compile, so a malformed ProcessIR is
+    # reported identically at all three sites rather than depending on which one
+    # the caller reached.
+    request = parse_authoring_request_v1(dict(raw_request_payload))
 
     missing = [
         name

@@ -7631,12 +7631,72 @@ def _reject_invalid_typed_request(exc, action: str) -> Dict[str, Any]:
     return envelope
 
 
+def _reject_invalid_process_ir(exc, action: str) -> Dict[str, Any]:
+    """A ProcessIR failure reported the way ProcessIR reports it (#146).
+
+    Same outer envelope and same ``INVALID_INPUT`` as the generic typed-request
+    rejection — a caller switching on the error code sees no change — but the
+    contents are the canonical diagnostics rather than pydantic internals:
+
+    * ``validation_errors`` carries the RFC 6901 pointer into the AUTHORED
+      payload and the stable ``PROCESS_IR_*`` code, not a ``loc`` tuple with a
+      discriminator function name in it and a ``type`` like
+      ``function-after[...]``;
+    * ``authoring_diagnostics`` carries the static per-code remediation and the
+      served contract entries that explain the rule;
+    * nothing from pydantic's ``input``, ``ctx`` or ``msg`` is serialized, so
+      the authored value never travels — the same value-free guarantee the
+      generic path makes, for the same reason.
+    """
+    from ..authoring.workflow import _contract_ids_for
+
+    diagnostics = list(getattr(exc, "diagnostics", ()) or ())
+    locations = sorted(
+        ({"path": d["path"], "code": d["code"]} for d in diagnostics),
+        key=lambda entry: (entry["path"], entry["code"]),
+    )
+    envelope = {
+        "_success": False,
+        "action": action,
+        "mutation_performed": False,
+        "error_code": INVALID_INPUT,
+        "error": (
+            f"config.authoring_request.intent.process_ir failed ProcessIRV1 "
+            f"validation at {len(locations)} location(s)."
+        ),
+        "validation_errors": locations,
+        "authoring_diagnostics": [
+            {
+                "code": d["code"],
+                "path": d["path"],
+                "message": d["message"],
+                "remediation": d["remediation"],
+                "authoring_contract_entry_ids": list(_contract_ids_for(d["code"])),
+            }
+            for d in sorted(diagnostics, key=lambda d: (d["path"], d["code"]))
+        ],
+        "hint": (
+            "Fetch the grammar with get_schema_template(schema_name='ProcessIRV1') "
+            "and the behavioural rules with "
+            "get_schema_template(schema_name='process_ir_authoring', "
+            "authoring_entry_id=<the id cited above>). Values are deliberately "
+            "omitted from this envelope."
+        ),
+    }
+    if action == "apply":
+        envelope["mutation_status"] = "none"
+    return envelope
+
+
 def _plan_authoring(
     boomi_client: Boomi, profile: str, cfg: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Typed read-only plan. Calls no create/update/execute/deploy helper."""
     from ..authoring.workflow import AuthoringWorkflowError, plan_authoring_request_v1
-    from ..models.authoring_workflow import AuthoringRequestV1
+    from ..models.authoring_workflow import (
+        AuthoringRequestProcessIRValidationError,
+        parse_authoring_request_v1,
+    )
 
     payload = _authoring_payload(cfg)
     if payload is _AUTHORING_PAYLOAD_MALFORMED:
@@ -7647,7 +7707,11 @@ def _plan_authoring(
         return ambiguous
 
     try:
-        request = AuthoringRequestV1.model_validate(payload)
+        request = parse_authoring_request_v1(payload)
+    except AuthoringRequestProcessIRValidationError as exc:
+        # ProcessIR's OWN diagnostics — stable code, authored pointer, static
+        # remediation — instead of raw pydantic loc/type.
+        return _reject_invalid_process_ir(exc, "plan")
     except ValidationError as exc:
         return _reject_invalid_typed_request(exc, "plan")
 
@@ -7679,7 +7743,10 @@ def _compile_authoring(
         AuthoringWorkflowError,
         compile_authoring_request_v1,
     )
-    from ..models.authoring_workflow import AuthoringRequestV1
+    from ..models.authoring_workflow import (
+        AuthoringRequestProcessIRValidationError,
+        parse_authoring_request_v1,
+    )
 
     payload = _authoring_payload(cfg)
     if payload is _AUTHORING_PAYLOAD_MALFORMED:
@@ -7702,7 +7769,11 @@ def _compile_authoring(
         return ambiguous
 
     try:
-        request = AuthoringRequestV1.model_validate(payload)
+        request = parse_authoring_request_v1(payload)
+    except AuthoringRequestProcessIRValidationError as exc:
+        # ProcessIR's OWN diagnostics — stable code, authored pointer, static
+        # remediation — instead of raw pydantic loc/type.
+        return _reject_invalid_process_ir(exc, "compile")
     except ValidationError as exc:
         return _reject_invalid_typed_request(exc, "compile")
 

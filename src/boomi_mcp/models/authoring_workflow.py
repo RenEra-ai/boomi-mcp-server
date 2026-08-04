@@ -47,18 +47,28 @@ extensions, document data, or raw XML (ADR-001 §11).
 from __future__ import annotations
 
 import json
+import re
 from typing import (
     Annotated,
     Any,
     Dict,
     Literal,
+    Mapping,
     Optional,
     Tuple,
     Union,
     get_args,
 )
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    StringConstraints,
+    field_validator,
+)
 
 from .integration_models import IntegrationComponentSpec, IntegrationSpecV1
 from .process_ir import ProcessIRV1
@@ -222,6 +232,58 @@ class AuthoringRequestV1(_AuthoringModel):
 # ---------------------------------------------------------------------------
 
 
+class AuthoringEvidenceV1(_AuthoringModel):
+    """One structural evidence pair, RE-VALIDATED at the public boundary (#146).
+
+    Deliberately not the compiler's own evidence type and not a free-form map.
+    Forwarding the compiler contract would put an internal model on a served
+    schema (ADR-001 §6); a ``Dict[str, Any]`` would put an open map on a strict
+    LLM-facing surface, through which an authored value could reach a caller's
+    logs.
+
+    So the pair is re-validated HERE against the same closed key allowlist and
+    the same token/code value rules. Re-validating rather than trusting is the
+    point: this layer owns what it publishes, and a widened allowlist upstream
+    cannot silently widen what crosses the boundary.
+    """
+
+    key: NonEmptyString
+    value: Union[StrictBool, StrictInt, str]
+
+    @field_validator("key")
+    @classmethod
+    def _key_is_allowed(cls, value: str) -> str:
+        from ..compiler.process_ir.semantic_validation.contracts import (
+            ValidationEvidenceV1,
+        )
+
+        if value not in ValidationEvidenceV1.allowed_keys():
+            raise ValueError("evidence key is not in the closed allowlist")
+        return value
+
+    @field_validator("value")
+    @classmethod
+    def _value_is_safe(cls, value: Any) -> Any:
+        # bool before int: a bool IS an int in Python, so checking int first
+        # would take the wrong branch for True/False.
+        if isinstance(value, bool) or isinstance(value, int):
+            return value
+        if _SAFE_EVIDENCE_TOKEN.match(value) or _SAFE_EVIDENCE_CODE.match(value):
+            return value
+        raise ValueError("evidence value is neither a structural token nor a code")
+
+    @property
+    def sort_key(self) -> Tuple[str, str]:
+        return (self.key, str(self.value))
+
+
+#: The same shapes the compiler's evidence enforces, restated at this boundary.
+#: A structural token is lowercase and bounded; a code is uppercase and bounded.
+#: Nothing else crosses — not an id, not a ref, not a label, not a path segment.
+_SAFE_EVIDENCE_TOKEN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_SAFE_EVIDENCE_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,95}$")
+
+
 class AuthoringDiagnosticV1(_AuthoringModel):
     """One authoring-surface finding.
 
@@ -230,6 +292,12 @@ class AuthoringDiagnosticV1(_AuthoringModel):
     never an authored value. When a canonical validator blocks compilation its
     codes are carried verbatim in ``cause_codes`` (ADR-001 §7: the canonical
     taxonomy stays authoritative about its own domain).
+
+    #146 amendment adds three repair fields. ``node_identity`` names the
+    authored node the failure sits on, ``evidence`` carries the validator's own
+    structural facts, and ``authoring_contract_entry_ids`` cites the served
+    rules that explain it — so a diagnostic becomes something a caller can act
+    on rather than something they have to interpret.
     """
 
     code: NonEmptyString
@@ -240,9 +308,17 @@ class AuthoringDiagnosticV1(_AuthoringModel):
     message: str = ""
     remediation: str = ""
     cause_codes: Tuple[str, ...] = ()
+    node_identity: str = ""
+    evidence: Tuple[AuthoringEvidenceV1, ...] = ()
+    authoring_contract_entry_ids: Tuple[str, ...] = ()
 
     @property
     def sort_key(self) -> Tuple[Any, ...]:
+        # The new fields PARTICIPATE. The ordered diagnostic list is hashed into
+        # the plan/compile hash, so two diagnostics differing only in
+        # node_identity, evidence or citations would otherwise order
+        # nondeterministically — and a nondeterministic order makes the compile
+        # hash unstable, which is the one thing a binding may not be.
         return (
             _SEVERITY_RANK.get(self.severity, 99),
             self.code,
@@ -250,6 +326,9 @@ class AuthoringDiagnosticV1(_AuthoringModel):
             self.subject_kind,
             self.subject_id,
             self.message,
+            self.node_identity,
+            tuple(item.sort_key for item in self.evidence),
+            self.authoring_contract_entry_ids,
         )
 
 
@@ -537,6 +616,75 @@ def canonical_authoring_json(model: BaseModel) -> str:
 # ---------------------------------------------------------------------------
 
 
+class AuthoringRequestProcessIRValidationError(Exception):
+    """A typed request whose ProcessIR document failed ProcessIR's OWN parser.
+
+    Exists so the public boundary can report a ProcessIR failure the way
+    ProcessIR reports it — stable ``PROCESS_IR_*`` code, RFC 6901 pointer into
+    the AUTHORED payload, static remediation — instead of the raw pydantic
+    ``loc``/``type`` a generic envelope validation produces.
+
+    The difference is not cosmetic. Pydantic says
+    ``('intent', 'process_ir', 'body', 'steps', 1, "function-after[...]",
+    'legs')`` with a ``ctx`` carrying the offending value; ProcessIR's parser
+    says ``/intent/process_ir/body/steps/1/legs`` with
+    ``PROCESS_IR_SCHEMA_BRANCH_CARDINALITY`` and a remediation naming the bound.
+    Only the second is repairable, and only the second is value-free.
+    """
+
+    def __init__(self, diagnostics: Tuple[Dict[str, str], ...]) -> None:
+        super().__init__("process_ir validation failed")
+        self.diagnostics = tuple(diagnostics)
+
+
+#: Where a ProcessIR document sits inside a typed request. Pointers from
+#: ProcessIR's own parser address the DOCUMENT, so they are prefixed with this to
+#: address the request the caller actually sent.
+_PROCESS_IR_POINTER_PREFIX = "/intent/process_ir"
+
+
+def parse_authoring_request_v1(raw_payload: Any) -> "AuthoringRequestV1":
+    """Parse a typed authoring request, routing ProcessIR through its own parser.
+
+    ONE entry point for every direct validation site — plan, compile, and the
+    typed-apply preflight — so all three report a malformed ProcessIR
+    identically. Before this, each site validated the envelope directly and a
+    ProcessIR defect surfaced as pydantic internals at whichever site happened
+    to catch it.
+
+    The nested document is parsed FIRST. Running the envelope first would report
+    the ProcessIR failure as a union-discrimination error on the intent, which
+    names the wrong thing entirely.
+
+    Never mutates the caller's mapping: the nested payload is read, not popped.
+    """
+    from .process_ir import ProcessIRValidationError, parse_process_ir_v1
+
+    if isinstance(raw_payload, Mapping):
+        intent = raw_payload.get("intent")
+        if (
+            isinstance(intent, Mapping)
+            and intent.get("intent_kind") == "process_ir"
+            and isinstance(intent.get("process_ir"), Mapping)
+        ):
+            try:
+                parse_process_ir_v1(dict(intent["process_ir"]))
+            except ProcessIRValidationError as exc:
+                raise AuthoringRequestProcessIRValidationError(
+                    tuple(
+                        {
+                            "code": diagnostic.code,
+                            "path": f"{_PROCESS_IR_POINTER_PREFIX}{diagnostic.path}",
+                            "message": diagnostic.message,
+                            "remediation": diagnostic.remediation,
+                        }
+                        for diagnostic in exc.diagnostics
+                    )
+                ) from None
+
+    return AuthoringRequestV1.model_validate(raw_payload)
+
+
 def authoring_request_v1_json_schema() -> Dict[str, Any]:
     return AuthoringRequestV1.model_json_schema()
 
@@ -558,6 +706,9 @@ def authoring_build_provenance_v1_json_schema() -> Dict[str, Any]:
 
 
 __all__ = [
+    "AuthoringEvidenceV1",
+    "AuthoringRequestProcessIRValidationError",
+    "parse_authoring_request_v1",
     "AUTHORING_ACTIONS",
     "AUTHORING_CONTRACT_VERSION",
     "AUTHORING_INTENT_KINDS",
