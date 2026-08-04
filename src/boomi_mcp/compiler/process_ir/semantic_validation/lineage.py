@@ -93,7 +93,7 @@ STATE_VISIBILITY_V1: "Mapping[str, Mapping[str, object]]" = MappingProxyType(
                 # documents, so a value written before the Branch is on every
                 # copy — but a value written INSIDE one leg is on that leg's
                 # copies only.
-                "survives_branch_leg_entry": True,
+                "survives_branch_path_entry": True,
                 "visible_across_sibling_paths": False,
                 "convergence": "intersection",
                 "read_before_write": "rejected",
@@ -103,7 +103,7 @@ STATE_VISIBILITY_V1: "Mapping[str, Mapping[str, object]]" = MappingProxyType(
             {
                 "scope": "execution",
                 "lifetime": "execution",
-                "survives_branch_leg_entry": True,
+                "survives_branch_path_entry": True,
                 # The asymmetry that makes leg ORDER matter: execution state
                 # accumulates across legs, so leg 1 sees what leg 0 wrote.
                 "visible_across_sibling_paths": True,
@@ -115,7 +115,7 @@ STATE_VISIBILITY_V1: "Mapping[str, Mapping[str, object]]" = MappingProxyType(
             {
                 "scope": "execution",
                 "lifetime": "execution",
-                "survives_branch_leg_entry": True,
+                "survives_branch_path_entry": True,
                 "visible_across_sibling_paths": True,
                 "convergence": "intersection",
                 # A cache may legitimately be populated outside this process, so

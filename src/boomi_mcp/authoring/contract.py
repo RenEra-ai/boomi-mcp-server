@@ -29,7 +29,7 @@ issue exists to remove.
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, Mapping, NamedTuple, Optional, Tuple
 
 from ..errors import TOPOLOGY_APPLY_NOT_SUPPORTED
 from ..models.authoring_workflow import (
@@ -44,12 +44,33 @@ from ..models.authoring_workflow import (
 )
 from .revisions import capability_fingerprint, schema_fingerprint, sha256_fingerprint
 
-#: Selector -> (schema version, zero-arg schema builder, symbolic provenance).
+class AuthoringSchemaRegistration(NamedTuple):
+    """One served selector: version, schema builder, provenance, query builder.
+
+    A ``NamedTuple`` rather than a dataclass ON PURPOSE. It is frozen and gives
+    named access, AND it stays index-addressable — so every existing
+    ``entry[0]``/``entry[1]``/``entry[2]`` reader keeps working while the named
+    form is adopted. A shape change that silently broke an unread consumer would
+    be the worst possible way to add a fourth field.
+
+    ``projection_query`` names the local builder that answers a FILTERED
+    retrieval, and is ``None`` for every selector that serves a plain schema. It
+    is what distinguishes "a schema you fetch" from "a contract you query"
+    without adding a second registry to hold the difference.
+    """
+
+    version: str
+    builder: Any
+    provenance: str
+    projection_query: Optional[str] = None
+
+
+#: Selector -> its registration.
 #:
 #: Provenance is SYMBOLIC — ``runtime_schema_registry``, never a filesystem path.
 #: A path in a discovery response is both a leak and a lie: it describes the
 #: server's disk, which the caller cannot see and must not depend on.
-AUTHORING_SCHEMA_REGISTRY: Mapping[str, Tuple[str, Any, str]] = MappingProxyType(
+AUTHORING_SCHEMA_REGISTRY: Mapping[str, AuthoringSchemaRegistration] = MappingProxyType(
     {
         "ProcessIRV1": ("1", "_process_ir_schema", "runtime_schema_registry"),
         "SystemTopologySpecV1": (
@@ -87,6 +108,27 @@ AUTHORING_SCHEMA_REGISTRY: Mapping[str, Tuple[str, Any, str]] = MappingProxyType
             "_validation_report_schema",
             "semantic_validator",
         ),
+        # #146 amendment. The compiler-facing authoring contract rides the SAME
+        # registry as every other selector — a second one would be a second place
+        # to look, and a second fingerprint to keep in step. It is the only entry
+        # that carries a projection query, because it is the only selector whose
+        # payload is filtered rather than whole.
+        "process_ir_authoring": (
+            "1",
+            "_process_ir_authoring_schema",
+            "runtime_schema_registry",
+            "_process_ir_authoring_query",
+        ),
+    }
+)
+
+# Normalize every literal above into the descriptor. Written as plain tuples for
+# readability and converted once here, so a reader sees the table rather than
+# eleven constructor calls — and so a future entry cannot forget the wrapper.
+AUTHORING_SCHEMA_REGISTRY = MappingProxyType(
+    {
+        selector: AuthoringSchemaRegistration(*entry)
+        for selector, entry in AUTHORING_SCHEMA_REGISTRY.items()
     }
 )
 
@@ -109,6 +151,19 @@ AUTHORING_CAPABILITY_REGISTRY: Mapping[str, Tuple[str, str, str]] = MappingProxy
         "authoring.integration_spec": ("supported", "1", "archetype_registry"),
         "authoring.compile": ("supported", "1", "canonical_compiler"),
         "authoring.revision_binding": ("supported", "1", "runtime_schema_registry"),
+        # #146 amendment. Published so a caller can discover, before authoring
+        # anything, that the behavioural contract exists and that direct
+        # ProcessIR planning is available without an archetype.
+        "authoring.process_ir.contract": (
+            "supported",
+            "1",
+            "runtime_schema_registry",
+        ),
+        "authoring.process_ir.pre_selection": (
+            "supported",
+            "1",
+            "runtime_schema_registry",
+        ),
         # Published as unsupported rather than omitted, for the same reason as
         # topology deploy: a caller must be able to learn BEFORE authoring that a
         # ProcessIR root can be planned and compiled but not built. Nothing on a
@@ -203,11 +258,46 @@ def _validation_report_schema() -> Dict[str, Any]:
     return ValidationReportSummaryV1.model_json_schema()
 
 
+def _process_ir_authoring_schema() -> Dict[str, Any]:
+    """The page schema. Imported lazily like every other compiler-adjacent one."""
+    from ..models.process_ir_authoring import (
+        process_ir_authoring_contract_v1_json_schema,
+    )
+
+    return process_ir_authoring_contract_v1_json_schema()
+
+
+def _process_ir_authoring_query(**filters: Any) -> Dict[str, Any]:
+    """Answer a FILTERED retrieval of the authoring contract.
+
+    Returns the page as plain JSON data. The serving layer owns the envelope and
+    the error translation; this stays a thin adapter so the projection has one
+    caller and one shape.
+    """
+    from .process_ir_projection import query_process_ir_authoring_contract
+
+    return query_process_ir_authoring_contract(**filters).model_dump(mode="json")
+
+
 _LOCAL_BUILDERS = {
     "_process_ir_schema": _process_ir_schema,
     "_system_topology_schema": _system_topology_schema,
     "_validation_report_schema": _validation_report_schema,
+    "_process_ir_authoring_schema": _process_ir_authoring_schema,
+    "_process_ir_authoring_query": _process_ir_authoring_query,
 }
+
+
+def projection_query_builder(selector: str):
+    """The filtered-retrieval builder for ``selector``, or ``None``.
+
+    ``None`` is the normal answer: only the authoring contract is queryable, and
+    every other selector serves its schema whole.
+    """
+    entry = AUTHORING_SCHEMA_REGISTRY.get(selector)
+    if entry is None or not entry.projection_query:
+        return None
+    return _LOCAL_BUILDERS[entry.projection_query]
 
 
 def schema_builder(selector: str):
@@ -317,6 +407,16 @@ def _recipe_registry_block() -> Dict[str, Any]:
 _INHERITED_SCHEMA_SELECTORS: Tuple[str, ...] = (
     "IntegrationSpecV1",
     "authoring_workflow",
+    # #146 amendment. The cache/property surface publishes the state-visibility
+    # model the authoring contract references, so a change to it is a change to
+    # the contract a caller bound to — and until now it moved NOTHING.
+    #
+    # Adding the selector here is necessary but NOT sufficient on its own: the
+    # served payload carries none of `_SCHEMA_BODY_KEYS`, so the digest would
+    # have been permanently "unavailable" and the revision still would not have
+    # moved. The manifest-free short-circuit in `_inherited_schema_digest` is
+    # what makes this line load-bearing.
+    "cache_property_authoring",
     "recipe_contributions",
     "recipe_registry",
     "workflow_sequences",
@@ -372,6 +472,20 @@ def _inherited_schema_digest(selector: str) -> str:
         if contract_body:
             return sha256_fingerprint(contract_body)
         raise KeyError("authoring_workflow published no contract body")
+
+    if selector == "cache_property_authoring":
+        # SHORT-CIRCUIT for the same structural reason as `authoring_workflow`,
+        # not the same recursion reason. This selector's payload has no single
+        # schema body — it is a vocabulary surface — so the `_SCHEMA_BODY_KEYS`
+        # lookup below finds nothing and would report "unavailable" forever.
+        # Hashing the manifest-free contract body instead is what makes a
+        # state-visibility change actually move `schema_revision`.
+        from ..categories.meta_tools import cache_property_authoring_contract
+
+        contract_body = cache_property_authoring_contract()
+        if contract_body:
+            return sha256_fingerprint(contract_body)
+        raise KeyError("cache_property_authoring published no contract body")
 
     payload = get_schema_template_action(schema_name=selector)
     for key in _SCHEMA_BODY_KEYS:
@@ -535,7 +649,22 @@ def build_authoring_contract_manifest() -> Mapping[str, Any]:
         return cached
 
     schema_bundle = _schema_bundle()
-    schema_revision = schema_fingerprint(schema_bundle)
+    # #146 amendment: the VERSION participates, not only the body hash.
+    #
+    # AUTHORING_WORKFLOW_V1 §11 recorded the gap — `schema_revision` covered
+    # selector-to-body hashes, so bumping an owned selector's version while its
+    # body happened to be unchanged left every outstanding binding looking
+    # current. Folding the owned versions in closes it; the published `schemas`
+    # list is unchanged, because this is an input to the hash, not a new field.
+    schema_revision = schema_fingerprint(
+        {
+            "bundle": dict(schema_bundle),
+            "owned_versions": {
+                selector: AUTHORING_SCHEMA_REGISTRY[selector].version
+                for selector in sorted(AUTHORING_SCHEMA_REGISTRY)
+            },
+        }
+    )
 
     manifest: Dict[str, Any] = {
         "manifest_version": "1",
@@ -609,6 +738,19 @@ def build_authoring_contract_manifest() -> Mapping[str, Any]:
     except Exception:  # noqa: BLE001
         manifest["recipe_registry"] = {"status": "unavailable"}
 
+    # #146 amendment: the COMPACT index only — counts, facets, mappings, limits.
+    # Added BEFORE the fingerprint below, or the index would not be covered by
+    # the revision that is supposed to describe it. The detailed entries stay
+    # behind `get_schema_template`: `list_capabilities` is the call every client
+    # makes first, and a 179-entry catalog inside it would make discovery the
+    # most expensive step in the workflow.
+    try:
+        from .process_ir_projection import build_process_ir_authoring_index
+
+        manifest["process_ir_authoring"] = build_process_ir_authoring_index()
+    except Exception:  # noqa: BLE001
+        manifest["process_ir_authoring"] = {"status": "unavailable"}
+
     manifest["capability_revision"] = capability_fingerprint(manifest)
     frozen = MappingProxyType(manifest)
     _MANIFEST_CACHE["manifest"] = frozen
@@ -646,7 +788,92 @@ def _compiler_revision() -> str:
         )
     except Exception:  # noqa: BLE001
         payload["recipe_capability_revisions"] = "unavailable"
+
+    # #146 amendment: every BEHAVIOUR authority the served authoring contract
+    # projects. Without these the contract could publish a changed placement
+    # rule, a changed replay classification or a changed remediation while
+    # `compiler_revision` stood still — and a revision that does not move when
+    # behaviour moves is the failure this whole manifest exists to detect.
+    #
+    # Each in its own try/except, matching the discipline above: one authority
+    # that fails to import is reported as unavailable rather than taking the
+    # whole capability response down.
+    for key, loader in (
+        (
+            "body_placement_rows",
+            lambda: [
+                list(row[:2]) + [list(row[2])]
+                for row in _import("body_capabilities").body_placement_rows()
+            ],
+        ),
+        (
+            "connector_capability_rows",
+            lambda: [
+                dict(row)
+                for row in _import("connector_capabilities").connector_capability_rows()
+            ],
+        ),
+        (
+            "retry_rules",
+            lambda: [dict(row) for row in _import("error_handling").retry_rule_specs()],
+        ),
+        (
+            "state_visibility",
+            lambda: [
+                dict(row)
+                for row in _import(
+                    "semantic_validation.lineage"
+                ).state_visibility_rows()
+            ],
+        ),
+        ("process_property_scope", _process_property_scope_payload),
+        (
+            "compiler_diagnostic_specs",
+            lambda: [
+                dict(spec)
+                for spec in _import("diagnostics").compiler_diagnostic_specs()
+            ],
+        ),
+        (
+            "validation_finding_specs",
+            lambda: [
+                dict(spec)
+                for spec in _import("semantic_validation.findings").finding_specs()
+            ],
+        ),
+        ("parse_diagnostic_specs", _parse_diagnostic_specs_payload),
+        ("process_ir_authoring_contract", _authoring_projection_payload),
+    ):
+        try:
+            payload[key] = loader()
+        except Exception:  # noqa: BLE001
+            payload[key] = "unavailable"
     return sha256_fingerprint(payload)
+
+
+def _import(module: str):
+    """Import one compiler submodule lazily, by dotted suffix."""
+    import importlib
+
+    return importlib.import_module(f"..compiler.process_ir.{module}", __package__)
+
+
+def _process_property_scope_payload() -> Dict[str, Any]:
+    from ..models.cache_property_models import PROCESS_PROPERTY_SCOPE_V1
+
+    return dict(PROCESS_PROPERTY_SCOPE_V1)
+
+
+def _parse_diagnostic_specs_payload() -> Any:
+    from ..models.process_ir import process_ir_v1_parse_diagnostic_specs
+
+    return [dict(spec) for spec in process_ir_v1_parse_diagnostic_specs()]
+
+
+def _authoring_projection_payload() -> Any:
+    from .process_ir_projection import process_ir_authoring_revision_payload
+
+    return process_ir_authoring_revision_payload()
 
 
 def get_authoring_revisions() -> Dict[str, str]:

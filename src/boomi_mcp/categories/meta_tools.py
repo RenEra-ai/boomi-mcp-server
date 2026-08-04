@@ -5,7 +5,7 @@ Meta tools — schema templates and generic API invoker.
 - invoke_api: generic escape-hatch for any Boomi REST API endpoint
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 from boomi import Boomi
 from boomi.net.transport.serializer import Serializer
@@ -6421,18 +6421,21 @@ _CACHE_PROPERTY_AUTHORING_TERMS: Dict[str, Dict[str, str]] = {
 }
 
 
-def _cache_property_authoring_schema() -> Dict[str, Any]:
-    """The read-only cache_property_authoring vocabulary surface (#120)."""
+def cache_property_authoring_contract() -> Dict[str, Any]:
+    """The CONTRACT half of the cache/property surface — manifest-free (#146).
+
+    Extracted so one body feeds both the served payload and
+    ``schema_revision``. Before this split the selector's payload carried no
+    recognised schema body at all, so its digest was permanently unavailable and
+    a change to the state-visibility model moved no revision.
+
+    Manifest-free on purpose, exactly like ``authoring_workflow_contract``: the
+    served payload embeds the revision, so fingerprinting the served payload
+    would recurse into the manifest being built.
+    """
     from ..models.cache_property_models import PROPERTY_SOURCE_FIELD_CONTRACT
 
     return {
-        "_success": True,
-        "schema_name": "cache_property_authoring",
-        "surface": "cache_property_authoring",
-        "read_only": True,
-        "raw_xml_exposed": False,
-        "boomi_mutation": False,
-        "epic": "#118 (M11: Cache + Dynamic Properties Authoring)",
         "terms": _CACHE_PROPERTY_AUTHORING_TERMS,
         "source_value_contract": {
             value_type: {
@@ -6449,6 +6452,16 @@ def _cache_property_authoring_schema() -> Dict[str, Any]:
             "processproperty": "component-backed deploy-time defaults; runtime reads via map functions (#131)",
             "documentcache": "execution-scoped store; write (cache_put/doccacheload) must precede read (cache_get/cache_join)",
         },
+        # #146: the same four scopes, GENERATED from the authorities that enforce
+        # them, beside the legacy prose rather than replacing it.
+        #
+        # The prose above stays byte-identical for compatibility, but it was an
+        # unpinned second copy of the state-visibility model — the exact drift
+        # this contract exists to prevent. These rows come from the lineage
+        # traversal's own descriptor (and, for the process property, from the
+        # model that owns it), so they cannot say something the code does not do,
+        # and a parity test asserts the prose agrees with them.
+        "canonical_scopes": _canonical_scope_rows(),
         # Issue #124 M11.5: the honesty ledger — what each provenance label
         # means and which shapes remain gated, sourced from the #119 census.
         "provenance_labels": {
@@ -6471,6 +6484,34 @@ def _cache_property_authoring_schema() -> Dict[str, Any]:
             "evidence actually is — never treat a companion_unverified claim "
             "as authoritative."
         ),
+    }
+
+
+def _canonical_scope_rows() -> List[Dict[str, Any]]:
+    """The four state scopes, generated from the authorities that enforce them.
+
+    Fetched through the authoring projection rather than read off the compiler
+    directly. A serving module reaching into the compiler's validation package
+    would be a THIRD wiring site into a package whose call sites are
+    deliberately enumerated and asserted, and the whole point of #146's seam is
+    that exactly one module does that reading.
+    """
+    from ..authoring.process_ir_projection import canonical_state_scope_rows
+
+    return canonical_state_scope_rows()
+
+
+def _cache_property_authoring_schema() -> Dict[str, Any]:
+    """The read-only cache_property_authoring vocabulary surface (#120)."""
+    return {
+        "_success": True,
+        "schema_name": "cache_property_authoring",
+        "surface": "cache_property_authoring",
+        "read_only": True,
+        "raw_xml_exposed": False,
+        "boomi_mutation": False,
+        "epic": "#118 (M11: Cache + Dynamic Properties Authoring)",
+        **cache_property_authoring_contract(),
     }
 
 

@@ -1595,6 +1595,7 @@ __all__ = [
     "authoring_contract_entry_ids_for_diagnostic",
     "build_process_ir_authoring_entries",
     "build_process_ir_authoring_index",
+    "canonical_state_scope_rows",
     "collect_projection_sources",
     "process_ir_authoring_revision_payload",
     "query_process_ir_authoring_contract",
@@ -1602,3 +1603,26 @@ __all__ = [
     "state_mappings",
     "validate_process_ir_authoring_projection",
 ]
+
+
+def canonical_state_scope_rows() -> List[Dict[str, Any]]:
+    """The four state scopes as served by ``cache_property_authoring``.
+
+    Lives here, not in ``meta_tools``, because this module is the ONE place
+    permitted to read the compiler's registries. A serving module importing
+    ``semantic_validation`` directly would be a third wiring site into a package
+    whose call sites are deliberately enumerated.
+
+    The document cache is renamed to the spelling the cache/property surface
+    already uses; the lineage model calls the scope ``cache``. One rename,
+    applied once, so the served vocabulary stays internally consistent.
+    """
+    from ..compiler.process_ir.semantic_validation.lineage import state_visibility_rows
+    from ..models.cache_property_models import PROCESS_PROPERTY_SCOPE_V1
+
+    rows = [dict(row) for row in state_visibility_rows()]
+    rows.append(dict(PROCESS_PROPERTY_SCOPE_V1))
+    for row in rows:
+        if row["state_scope"] == "cache":
+            row["state_scope"] = "documentcache"
+    return sorted(rows, key=lambda row: str(row["state_scope"]))

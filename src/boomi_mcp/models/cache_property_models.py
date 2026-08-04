@@ -231,7 +231,7 @@ PROCESS_PROPERTY_SCOPE_V1: "Mapping[str, object]" = MappingProxyType(
         "lifetime": "deployment",
         # A component-backed value is not carried on the document at all, so
         # copying documents into Branch legs neither preserves nor discards it.
-        "survives_branch_leg_entry": True,
+        "survives_branch_path_entry": True,
         "visible_across_sibling_paths": True,
         # There is no flow-established write to converge, so convergence does
         # not apply — stated explicitly rather than left blank, because an
