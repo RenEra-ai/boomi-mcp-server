@@ -3182,6 +3182,13 @@ if get_schema_template_action:
         component_type: str = None,
         protocol: str = None,
         schema_name: str = None,
+        authoring_entry_id: str = None,
+        node_kind: str = None,
+        category: str = None,
+        capability_id: str = None,
+        workflow_stage: str = None,
+        after_entry_id: str = None,
+        limit: int = None,
     ):
         """Get JSON template and enum values for constructing tool requests.
 
@@ -3212,6 +3219,24 @@ if get_schema_template_action:
                 any '@' suffix with SCHEMA_NAME_UNSUPPORTED. list_capabilities' authoring_contract
                 omits schema_version for exactly those, so a client pinning from the catalog can
                 tell the two apart.
+                Issue #146's amendment adds 'process_ir_authoring': the compiler-facing
+                behavioural contract for authoring ProcessIRV1 — one addressable entry per node,
+                capability, body placement, connector action, diagnostic, state scope, doctrine
+                pattern and recipe, each carrying the runtime authority it was derived from. It is
+                the only QUERIED selector: use the seven filter arguments below.
+            authoring_entry_id: Exact contract entry id (e.g. 'node.branch'). An unknown id is a
+                SUCCESS with zero entries, so a stale citation is observable rather than an error.
+            node_kind: Filter to entries about one ProcessIR node kind (e.g. 'branch').
+            category: Filter by entry domain (e.g. 'control', 'connector_action', 'diagnostic').
+            capability_id: Filter to one published capability row (e.g. 'joins').
+            workflow_stage: One of discover, plan, author, compile, repair.
+            after_entry_id: Stateless pagination cursor; requires at least one other filter.
+            limit: 1-50, default 20. Filters AND together, results sort by contract_entry_id, and
+                a bare call returns the facets and schema with ZERO entries — ask for what you
+                need rather than receiving the whole catalog. A 64 KiB payload budget applies on
+                top of the count limit; when it bites, 'truncated' is true and
+                'next_after_entry_id' resumes. All seven apply ONLY to 'process_ir_authoring' and
+                are INVALID_INPUT on any other selector.
 
         Examples:
             get_schema_template("trading_partner") → overview of all actions/standards
@@ -3225,6 +3250,9 @@ if get_schema_template_action:
             get_schema_template(schema_name="IntegrationSpecV1") → IntegrationSpecV1 JSON schema
             get_schema_template(schema_name="archetype:database_to_api_sync") → archetype parameter schema
             get_schema_template(schema_name="workflow_sequences") → recommended workflow sequences
+            get_schema_template(schema_name="process_ir_authoring") → facets + state mappings, no entries
+            get_schema_template(schema_name="process_ir_authoring", node_kind="branch") → the Branch rules
+            get_schema_template(schema_name="process_ir_authoring", authoring_entry_id="capability.joins") → one entry
         """
         return get_schema_template_action(
             resource_type=resource_type,
@@ -3233,6 +3261,13 @@ if get_schema_template_action:
             component_type=component_type,
             protocol=protocol,
             schema_name=schema_name,
+            authoring_entry_id=authoring_entry_id,
+            node_kind=node_kind,
+            category=category,
+            capability_id=capability_id,
+            workflow_stage=workflow_stage,
+            after_entry_id=after_entry_id,
+            limit=limit,
         )
 
     print("[INFO] Schema template tool registered successfully")
@@ -3428,6 +3463,7 @@ if plan_integration_design_action:
         archetype: str = None,
         intent_flags: list[str] = None,
         profile: str = None,
+        authoring_mode: str = None,
     ):
         """Read-only assembler that returns a budgeted Boomi integration design brief.
 
@@ -3453,11 +3489,21 @@ if plan_integration_design_action:
                 relevance scoring. Tokens only — not free-text task descriptions.
             profile: Optional credential-profile name. When present, it appears in
                 the suggested discovery-step arguments; the tool makes no account call.
+            authoring_mode: Optional, #146 amendment. Only 'process_ir' is accepted, and it
+                must be requested explicitly — intent_flags never select it. It returns the
+                DIRECT ProcessIR brief: mode='process_ir_pre_selection', no archetype reported
+                as a missing input, the supported node vocabulary with a contract entry id per
+                kind, the non-supported capability states verbatim, the filtered
+                process_ir_authoring query to read the rules with, and typed next steps that end
+                at build_integration(action='compile') because a direct ProcessIR intent is
+                plan/compile-only. Supplying it together with an archetype is INVALID_INPUT: the
+                two answer different questions and are not merged.
         """
         payload = plan_integration_design_action(
             archetype=archetype,
             intent_flags=intent_flags,
             profile=profile,
+            authoring_mode=authoring_mode,
         )
         return ToolResult(content=payload["text"], structured_content=payload)
 

@@ -10,6 +10,8 @@ against a checkout that had six.
 import inspect
 import os
 import sys
+
+import pytest
 from pathlib import Path
 
 _src = str(Path(__file__).resolve().parent.parent / "src")
@@ -60,25 +62,66 @@ def test_list_capabilities_gained_exactly_one_trailing_optional_parameter():
     assert signature.parameters["expected_capability_revision"].default is None
 
 
-def test_the_other_three_wrappers_are_untouched():
+def test_build_from_archetype_is_untouched():
     assert list(inspect.signature(server.build_from_archetype).parameters) == [
         "name",
         "parameters",
         "recipe_version",
     ]
-    assert list(inspect.signature(server.plan_integration_design).parameters) == [
-        "archetype",
-        "intent_flags",
-        "profile",
-    ]
-    assert list(inspect.signature(server.get_schema_template).parameters) == [
+
+
+#: The signatures #146's original scope shipped. The amendment may only APPEND
+#: to these — a caller who wrote against the shipped wrapper keeps every
+#: positional meaning, and every new argument is optional with a ``None``
+#: default. Kept as literals so an accidental reorder is a failure, not a
+#: recomputation that agrees with itself.
+_SHIPPED_LEADING_PARAMS = {
+    "plan_integration_design": ["archetype", "intent_flags", "profile"],
+    "get_schema_template": [
         "resource_type",
         "operation",
         "standard",
         "component_type",
         "protocol",
         "schema_name",
-    ]
+    ],
+}
+
+#: What the #146 amendment appends, in order.
+_AMENDMENT_TRAILING_PARAMS = {
+    "plan_integration_design": ["authoring_mode"],
+    "get_schema_template": [
+        "authoring_entry_id",
+        "node_kind",
+        "category",
+        "capability_id",
+        "workflow_stage",
+        "after_entry_id",
+        "limit",
+    ],
+}
+
+
+@pytest.mark.parametrize("wrapper", sorted(_SHIPPED_LEADING_PARAMS))
+def test_the_amendment_only_appends_trailing_optional_parameters(wrapper):
+    """Backward compatibility as a POSITIONAL claim, not just a name claim.
+
+    Asserting the parameter set is unchanged would have been wrong (it did
+    change); asserting only that the new names exist would miss a reorder that
+    silently changes what a positional call means. So: the shipped names must
+    still LEAD, in their original order, and everything after them must be
+    optional with a ``None`` default.
+    """
+    signature = inspect.signature(getattr(server, wrapper))
+    params = list(signature.parameters)
+    leading = _SHIPPED_LEADING_PARAMS[wrapper]
+    trailing = _AMENDMENT_TRAILING_PARAMS[wrapper]
+
+    assert params[: len(leading)] == leading
+    assert params == leading + trailing
+
+    for name in trailing:
+        assert signature.parameters[name].default is None, name
 
 
 def test_every_surface_advertises_the_same_action_set():

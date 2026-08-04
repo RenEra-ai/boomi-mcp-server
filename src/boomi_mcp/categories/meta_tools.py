@@ -5,7 +5,7 @@ Meta tools — schema templates and generic API invoker.
 - invoke_api: generic escape-hatch for any Boomi REST API endpoint
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from boomi import Boomi
 from boomi.net.transport.serializer import Serializer
@@ -6621,7 +6621,9 @@ def _recipe_descriptor_schema(reference: str) -> Dict[str, Any]:
     return payload
 
 
-def _authoring_contract_schema(schema_name: str) -> Optional[Dict[str, Any]]:
+def _authoring_contract_schema(
+    schema_name: str, *, query: Optional[Dict[str, Any]] = None
+) -> Optional[Dict[str, Any]]:
     """Serve one #146 authoring selector from the runtime models themselves.
 
     Generated, never hand-copied: a hand-written schema is a second source of
@@ -6629,9 +6631,15 @@ def _authoring_contract_schema(schema_name: str) -> Optional[Dict[str, Any]]:
     optional ``@<version>`` suffix; an unknown version is
     ``AUTHORING_SCHEMA_VERSION_UNAVAILABLE`` with the served versions listed, and
     a bare selector stays valid exactly as before.
+
+    ``query`` (#146 amendment) carries the retrieval filters for the one
+    selector that is QUERIED rather than fetched whole. The schema is always
+    returned alongside the page, so a caller who filters still learns the shape
+    of what came back.
     """
     from ..authoring.contract import (
         get_authoring_revisions,
+        projection_query_builder,
         schema_builder,
         schema_version_for,
         supported_schema_versions,
@@ -6664,7 +6672,7 @@ def _authoring_contract_schema(schema_name: str) -> Optional[Dict[str, Any]]:
 
     revisions = get_authoring_revisions()
     json_schema = builder()
-    return {
+    payload = {
         "_success": True,
         "schema_name": selector,
         "surface": "MCP authoring contract (issue #146 M12.11)",
@@ -6675,6 +6683,67 @@ def _authoring_contract_schema(schema_name: str) -> Optional[Dict[str, Any]]:
         "schema_hash": sha256_fingerprint(json_schema),
         "revision_binding": revisions,
         "json_schema": json_schema,
+    }
+
+    query_builder = projection_query_builder(selector)
+    if query_builder is None:
+        if query:
+            # A filter on a selector that has nothing to filter is a caller
+            # mistake worth naming: silently ignoring it would return the whole
+            # schema and let them believe the filter applied.
+            return _authoring_filter_error(schema_name, sorted(query))
+        return payload
+
+    from ..authoring.process_ir_projection import ProcessIRAuthoringQueryError
+
+    try:
+        payload["contract_page"] = query_builder(**(query or {}))
+    except ProcessIRAuthoringQueryError as exc:
+        return _authoring_filter_value_error(schema_name, exc)
+    return payload
+
+
+def _authoring_filter_error(schema_name: str, fields: List[str]) -> Dict[str, Any]:
+    from ..errors import INVALID_INPUT
+
+    return {
+        "_success": False,
+        "error_code": INVALID_INPUT,
+        "schema_name": schema_name,
+        "invalid_parameters": list(fields),
+        "error": (
+            "Retrieval filters apply only to schema_name='process_ir_authoring'."
+        ),
+        "suggestion": (
+            "Drop the filter arguments, or request "
+            "get_schema_template(schema_name='process_ir_authoring', ...)."
+        ),
+    }
+
+
+def _authoring_filter_value_error(schema_name: str, exc: Any) -> Dict[str, Any]:
+    """One bounded envelope naming the field AND the values that would work.
+
+    The allowed list is truncated rather than omitted when it is long: an error
+    that says only "invalid" makes the caller guess, and an error that returns
+    every value turns a mistake into a payload.
+    """
+    from ..errors import INVALID_INPUT
+
+    allowed = list(getattr(exc, "allowed", ()) or ())
+    return {
+        "_success": False,
+        "error_code": INVALID_INPUT,
+        "schema_name": schema_name,
+        "invalid_parameter": getattr(exc, "field", ""),
+        "allowed_values": allowed[:50],
+        "allowed_value_count": len(allowed),
+        "error": f"Invalid value for '{getattr(exc, 'field', '')}'.",
+        "suggestion": (
+            "Fetch the facets with a bare "
+            "get_schema_template(schema_name='process_ir_authoring') call, then "
+            "filter with a published value."
+        ),
     }
 
 
@@ -6716,20 +6785,30 @@ def _authoring_workflow_schema() -> Dict[str, Any]:
     }
 
 
-def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
+def _get_authoring_schema_by_name(
+    schema_name: str, *, query: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """Dispatch get_schema_template(schema_name=...) requests (issue #10).
 
     Read-only reference data — never calls Boomi, never emits raw XML.
     """
     if schema_name == "authoring_workflow":
+        if query:
+            return _authoring_filter_error(schema_name, sorted(query))
         return _authoring_workflow_schema()
 
     # Issue #146 M12.11. Checked before the named selectors below so an
     # "@version" suffix reaches the version check rather than falling through to
     # the unknown-schema envelope.
-    _authoring = _authoring_contract_schema(schema_name)
+    _authoring = _authoring_contract_schema(schema_name, query=query)
     if _authoring is not None:
         return _authoring
+
+    # Every remaining selector serves a whole schema, so a filter on one is the
+    # same caller mistake as a filter on an authoring selector without a
+    # projection — reported the same way rather than ignored.
+    if query:
+        return _authoring_filter_error(schema_name, sorted(query))
 
     if schema_name == "recipe_contributions":
         return _recipe_contributions_schema()
@@ -7314,6 +7393,13 @@ def get_schema_template_action(
     component_type: Optional[str] = None,
     protocol: Optional[str] = None,
     schema_name: Optional[str] = None,
+    authoring_entry_id: Optional[str] = None,
+    node_kind: Optional[str] = None,
+    category: Optional[str] = None,
+    capability_id: Optional[str] = None,
+    workflow_stage: Optional[str] = None,
+    after_entry_id: Optional[str] = None,
+    limit: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Look up and return the appropriate template.
 
@@ -7321,10 +7407,35 @@ def get_schema_template_action(
     picks an authoring schema (issue #10 — IntegrationSpecV1, archetype:<name>,
     workflow_sequences, workflow:<name>). ``schema_name`` takes precedence when
     both are supplied; omitting both returns SCHEMA_SELECTOR_REQUIRED.
+
+    The seven trailing parameters (#146 amendment) filter
+    ``schema_name='process_ir_authoring'`` and are rejected anywhere else. They
+    are TRAILING and OPTIONAL: every existing call keeps its exact meaning, and
+    a caller who supplies none gets byte-identical behaviour to before.
     """
+    query = {
+        key: value
+        for key, value in (
+            ("authoring_entry_id", authoring_entry_id),
+            ("node_kind", node_kind),
+            ("category", category),
+            ("capability_id", capability_id),
+            ("workflow_stage", workflow_stage),
+            ("after_entry_id", after_entry_id),
+            ("limit", limit),
+        )
+        if value is not None and value != ""
+    }
 
     if schema_name:
-        return _get_authoring_schema_by_name(schema_name)
+        return _get_authoring_schema_by_name(schema_name, query=query)
+
+    if query:
+        # A filter with no ``schema_name`` cannot mean anything: the legacy
+        # ``resource_type`` templates have nothing to filter, and guessing that
+        # the caller meant the authoring selector would answer a question they
+        # did not ask.
+        return _authoring_filter_error("", sorted(query))
 
     if not resource_type:
         return {
@@ -8958,7 +9069,21 @@ PLAN_INTEGRATION_DESIGN_OUTPUT_SCHEMA: Dict[str, Any] = {
     "properties": {
         "_success": {"type": "boolean"},
         "tool": {"const": "plan_integration_design"},
-        "mode": {"enum": ["archetype", "pre_selection", "error"]},
+        # #146 amendment adds "process_ir_pre_selection". ADDITIVE to the enum;
+        # `required` below is deliberately untouched, because adding a required
+        # property is a breaking change for every caller validating against this
+        # schema — and this is the one tool in the repo that declares one.
+        "mode": {
+            "enum": [
+                "archetype",
+                "pre_selection",
+                "process_ir_pre_selection",
+                "error",
+            ]
+        },
+        "supported_process_ir_constructs": {"type": "array"},
+        "process_ir_capability_gaps": {"type": "array"},
+        "authoring_contract_query": {"type": "object"},
         "archetype": {"anyOf": [{"type": "string"}, {"type": "null"}]},
         "intent_flags": {"type": "array", "items": {"type": "string"}},
         "profile": {"anyOf": [{"type": "string"}, {"type": "null"}]},
@@ -9370,6 +9495,58 @@ def _plan_discovery_steps(profile: Optional[str], pre_selection: bool) -> list:
     return steps
 
 
+def _plan_process_ir_discovery_steps(profile: Optional[str]) -> list:
+    """Discovery for a caller authoring ProcessIR directly (#146 amendment).
+
+    Deliberately NOT the archetype path with one step swapped. Archetype
+    discovery is the wrong first move here — there is no archetype to pick — so
+    the sequence starts at the revision surface, then the grammar, then the
+    behaviour, and only then reaches the account for the components the
+    document will reference.
+    """
+    steps: list = [
+        {
+            "tool": "list_capabilities",
+            "purpose": (
+                "Read the served actions, selectors and the schema/capability/"
+                "compiler revisions this runtime publishes."
+            ),
+            "arguments": {},
+        },
+        {
+            "tool": "get_schema_template",
+            "purpose": "Fetch the strict ProcessIRV1 grammar (what a document may contain).",
+            "arguments": {"schema_name": "ProcessIRV1"},
+        },
+        {
+            "tool": "get_schema_template",
+            "purpose": (
+                "Fetch the behavioural authoring contract (what the constructs "
+                "MEAN): facets first, then filter by node_kind, category, "
+                "capability_id or workflow_stage."
+            ),
+            "arguments": {"schema_name": "process_ir_authoring"},
+        },
+        {
+            "tool": "list_boomi_profiles",
+            "purpose": "List credential profiles; pass profile= to every account-scoped call.",
+            "arguments": {},
+        },
+    ]
+    query_args: Dict[str, Any] = {"action": "list"}
+    if profile:
+        query_args["profile"] = profile
+    steps.append({
+        "tool": "query_components",
+        "purpose": (
+            "Resolve the connection, operation, map, profile and cache "
+            "components the ProcessIR document will reference by opaque id."
+        ),
+        "arguments": query_args,
+    })
+    return steps
+
+
 def _plan_error_envelope(
     error: str,
     error_code: str,
@@ -9397,17 +9574,111 @@ def _plan_error_envelope(
     return envelope
 
 
+#: The one value ``authoring_mode`` accepts. A CLOSED set, not a free string:
+#: this tool's whole contract is that it parses no free text, and an open mode
+#: argument would be free text wearing a parameter's clothes.
+_PLAN_AUTHORING_MODES: Tuple[str, ...] = ("process_ir",)
+
+
+def _plan_process_ir_block() -> Dict[str, Any]:
+    """The three direct-ProcessIR fields, all derived from the served contract.
+
+    Bounded on purpose. ``supported_process_ir_constructs`` is the node
+    vocabulary with a contract id per kind — enough to choose constructs and
+    know where to read more — not the entries themselves; those stay behind
+    ``get_schema_template``, which is what makes the retrieval budgeted rather
+    than dumped into every advisory response.
+
+    Gaps carry the AUTHORITY'S state verbatim, and the published apply refusal
+    is one of them: a caller must be able to see, before authoring, that a
+    direct ProcessIR intent plans and compiles but never applies.
+    """
+    from ..authoring.contract import AUTHORING_CAPABILITY_REGISTRY
+    from ..authoring.process_ir_projection import build_process_ir_authoring_entries
+
+    entries = build_process_ir_authoring_entries()
+    constructs = [
+        {
+            "kind": entry.subject,
+            "category": entry.category,
+            "contract_entry_id": entry.contract_entry_id,
+        }
+        for entry in entries
+        if entry.entry_type == "node"
+    ]
+    gaps = [
+        {
+            "capability_id": entry.capability_id,
+            "state": entry.canonical_state,
+            "source_state": entry.source_state,
+            "contract_entry_id": entry.contract_entry_id,
+        }
+        for entry in entries
+        if entry.entry_type == "capability" and entry.canonical_state != "supported"
+    ]
+    materialization = AUTHORING_CAPABILITY_REGISTRY.get(
+        "authoring.typed_apply.process_materialization"
+    )
+    if materialization is not None:
+        gaps.append(
+            {
+                "capability_id": "authoring.typed_apply.process_materialization",
+                "state": materialization[0],
+                "source_state": materialization[0],
+                "contract_entry_id": None,
+                "note": (
+                    "A direct ProcessIR intent is plan/compile-only: nothing on a "
+                    "production path materializes a ProcessIR root, so apply is "
+                    "refused rather than silently producing a different artifact."
+                ),
+            }
+        )
+    return {
+        "supported_process_ir_constructs": constructs,
+        "process_ir_capability_gaps": gaps,
+        "authoring_contract_query": {
+            "tool": "get_schema_template",
+            "schema_name": "process_ir_authoring",
+            "filters": [
+                "authoring_entry_id",
+                "node_kind",
+                "category",
+                "capability_id",
+                "workflow_stage",
+                "after_entry_id",
+                "limit",
+            ],
+            "hint": (
+                "A bare call returns the facets with zero entries. Filter by "
+                "node_kind while authoring, and by the diagnostic code's entry id "
+                "while repairing."
+            ),
+        },
+    }
+
+
 def plan_integration_design_action(
     archetype: Optional[str] = None,
     intent_flags: Optional[list] = None,
     profile: Optional[str] = None,
+    authoring_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Deterministically assemble a budgeted integration design brief.
 
     A read-only JOIN over the archetype registry, ``design_doctrine`` (#86), and
     ``account_governance`` (#93), plus a static discovery catalog. Parses no free
-    text, calls no LLM/Boomi, infers no archetype. Two modes keyed on whether an
-    ``archetype`` is supplied (full brief vs pre-selection brief).
+    text, calls no LLM/Boomi, infers no archetype.
+
+    THREE modes now (#146 amendment). The first two are keyed on whether an
+    ``archetype`` is supplied (full brief vs pre-selection brief) and are
+    unchanged. The third, ``authoring_mode="process_ir"``, is the direct
+    ProcessIR pre-selection brief: a caller who intends to author ProcessIR
+    directly is no longer told the archetype is a missing input, because for
+    them it is not one.
+
+    ``authoring_mode`` must be requested EXPLICITLY. It is never inferred from
+    ``intent_flags`` — flags are relevance hints, and letting a hint switch a
+    response mode is how a caller ends up with a brief they did not ask for.
     """
     # --- Validate intent_flags (anti-free-text-parsing guard) ----------------
     if intent_flags is None:
@@ -9435,6 +9706,29 @@ def plan_integration_design_action(
             INVALID_INPUT, None, flags, profile,
         )
     archetype_provided = isinstance(archetype, str) and archetype.strip() != ""
+
+    # --- Validate authoring_mode (#146 amendment) ----------------------------
+    process_ir_mode = False
+    if authoring_mode is not None and str(authoring_mode).strip() != "":
+        requested = str(authoring_mode).strip()
+        if requested not in _PLAN_AUTHORING_MODES:
+            return _plan_error_envelope(
+                f"Invalid authoring_mode {requested!r}: expected one of "
+                f"{list(_PLAN_AUTHORING_MODES)}.",
+                INVALID_INPUT, archetype, flags, profile,
+            )
+        if archetype_provided:
+            # Not a merge of two briefs. An archetype brief answers "configure
+            # THIS pattern"; a direct-ProcessIR brief answers "author a process
+            # from the node vocabulary". Silently preferring one would give the
+            # caller a brief for a question they did not ask.
+            return _plan_error_envelope(
+                "authoring_mode='process_ir' plans direct ProcessIR authoring and "
+                "takes no archetype. Omit the archetype, or drop authoring_mode "
+                "for the archetype brief.",
+                INVALID_INPUT, archetype, flags, profile,
+            )
+        process_ir_mode = True
 
     keywords = _plan_intent_keywords(flags)
 
@@ -9494,6 +9788,28 @@ def plan_integration_design_action(
             schema_decisions + _plan_doctrine_decisions(selected_doctrine)
         )
         discovery_steps = _plan_discovery_steps(profile, pre_selection=False)
+    elif process_ir_mode:
+        # The whole point of the mode: an archetype is NOT a missing input for a
+        # caller who is authoring ProcessIR directly, so it is neither reported
+        # as missing nor offered as a decision, and archetype discovery is
+        # replaced by contract discovery.
+        mode = "process_ir_pre_selection"
+        missing_inputs = []
+        required_user_decisions = _plan_doctrine_decisions(selected_doctrine)
+        discovery_steps = _plan_process_ir_discovery_steps(profile)
+        notes.append(
+            "Direct ProcessIR brief: no archetype is required. Author a "
+            "ProcessIRV1 document against get_schema_template("
+            "schema_name='ProcessIRV1'), consult "
+            "get_schema_template(schema_name='process_ir_authoring') for the "
+            "behavioural rules, then plan and compile."
+        )
+        notes.append(
+            "Plan and compile only. A direct ProcessIR intent is never applied: "
+            "'authoring.typed_apply.process_materialization' is published as an "
+            "unsupported capability, so the workflow ends at "
+            "build_integration(action='compile')."
+        )
     else:
         mode = "pre_selection"
         missing_inputs = ["archetype"]
@@ -9612,10 +9928,23 @@ def plan_integration_design_action(
         },
     ]
 
+    # --- Direct-ProcessIR additions (#146 amendment) -------------------------
+    # All THREE fields are optional in the output schema and absent from every
+    # other mode, so nothing an existing caller reads changes shape.
+    process_ir_block: Dict[str, Any] = {}
+    if process_ir_mode:
+        # Apply is not merely omitted from the sequence — it is REFUSED, and the
+        # refusal is a published capability. Ending the steps at compile without
+        # saying why would look like an oversight; saying it here makes the
+        # boundary discoverable before the caller authors anything.
+        typed_next_steps = [step for step in typed_next_steps if step["action"] != "apply"]
+        process_ir_block = _plan_process_ir_block()
+
     return {
         "_success": True,
         "tool": "plan_integration_design",
         "mode": mode,
+        **process_ir_block,
         "revision_binding": revision_binding,
         "typed_next_steps": typed_next_steps,
         "recommended_recipes": recommended_recipes,
