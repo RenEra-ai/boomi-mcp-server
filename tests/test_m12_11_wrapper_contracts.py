@@ -254,3 +254,8 @@ def test_the_served_status_contract_matches_what_the_classifier_does():
     assert "SUCCEEDED and returned a" in doc
     assert "succeeded without returning" in doc
     assert "partial_results[<key>].result" in doc
+    # QA #429: the pointer resolves in only ONE of `possible`'s two sub-cases —
+    # a SUCCEEDED apply has no partial_results at all, and its only tell is a
+    # null component_id. Both routes must be readable from the served text.
+    assert "results[<key>].component_id" in doc
+    assert "there is no" in doc and "partial_results" in doc

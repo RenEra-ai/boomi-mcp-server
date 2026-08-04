@@ -2425,9 +2425,15 @@ if build_integration_action:
                                           committed. Check before retrying — a
                                           retry duplicates under
                                           conflict_policy="clone".
-                                          A step's own retryable/error_code
-                                          evidence survives in
-                                          partial_results[<key>].result.
+                                          Which sub-case you got is readable:
+                                          if the step FAILED, its own
+                                          retryable/error_code evidence is in
+                                          partial_results[<key>].result. If the
+                                          apply SUCCEEDED, there is no
+                                          partial_results — look for
+                                          results[<key>].component_id being
+                                          null, which means the component was
+                                          created but its id did not come back.
             mutation_status="none"      - nothing was attempted (only reuse, or
                                           refused before any write). A FAILURE in
                                           this state is retry-safe. Its error_code
