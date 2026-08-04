@@ -7543,6 +7543,11 @@ def _reject_malformed_authoring_request(payload, action: str) -> Dict[str, Any]:
         "_success": False,
         "action": action,
         "mutation_performed": False,
+        # `none`, and stated rather than omitted: this refusal happens before
+        # anything is attempted, and the documented typed-apply envelope
+        # promises the field is ALWAYS present. A client told to branch on
+        # `mutation_status` could not classify this deterministic refusal.
+        "mutation_status": "none",
         "error_code": INVALID_INPUT,
         "error": (
             "config.authoring_request must be a JSON object (an "
@@ -7793,7 +7798,20 @@ def _mutation_status(result: Dict[str, Any]) -> str:
                 continue
             if str(entry.get("status", "")) in _NON_WRITING_STEP_STATUSES:
                 continue
-            if entry.get("component_id"):
+            # An id proves a write only on a step that SUCCEEDED. A failed
+            # update carries the TARGET id it was aiming at — a pre-write
+            # component GET that times out returns
+            # `{_success: False, retryable: True, component_id: <target>}`, and
+            # `_extract_component_id` reads that field first. Treating it as
+            # observed evidence claimed a write that never happened and
+            # suppressed a retry the envelope itself marks retryable.
+            step_result = entry.get("result")
+            step_succeeded = (
+                step_result.get("_success") is True
+                if isinstance(step_result, dict)
+                else False
+            )
+            if step_succeeded and entry.get("component_id"):
                 return "performed"
             status = "possible"
     return status

@@ -63,7 +63,7 @@ diverge exactly where it matters — *must the caller reconcile?* and *is this f
 
 | `mutation_status` | meaning | `mutation_performed` | retry-safe |
 |---|---|---|---|
-| `performed` | a writing step returned a component id — the write was observed | `true` | no |
+| `performed` | a writing step SUCCEEDED and returned a component id — the write was observed | `true` | no |
 | `possible` | a writing step was attempted and returned no id — the outcome is unknown to this server | `true` | no |
 | `none` | only `reused` bindings, or nothing attempted at all | `false` | **yes** — a FAILED apply in this state carries an error code (see below); a successful one carries no error at all |
 
@@ -72,6 +72,9 @@ for a stale binding, `AUTHORING_CAPABILITY_REVISION_MISMATCH` for a moved contra
 for a schema-invalid request — and `AUTHORING_APPLY_VALIDATION_REQUIRED` only when nothing more
 specific applied. **Branch on `mutation_status`, not on one code**: all `none` refusals are equally
 retry-safe, and a client keying on a single token would miss three of them.
+
+An id alone is not enough for `performed`: a failed update carries the TARGET id it was aiming at
+(a pre-write component GET that times out returns one), so the step's own result must have succeeded.
 
 `possible` does not distinguish "the request committed and the response was lost" from "the request
 was rejected" or "no request was issued". The only available discriminator is the builder's error

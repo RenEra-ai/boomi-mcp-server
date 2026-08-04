@@ -918,7 +918,7 @@ def test_a_post_mutation_failure_is_not_labelled_as_needing_revalidation():
     post_mutation = {
         "_success": False,
         "error": "Failed at step 'b'",
-        "partial_results": {"a": {"component_id": "created-1"}},
+        "partial_results": {"a": {"status": "created", "component_id": "created-1", "result": {"_success": True}}},
     }
     _decorate_typed_apply(post_mutation, {})
     assert post_mutation["mutation_performed"] is True
@@ -953,7 +953,7 @@ def test_a_reused_step_is_not_evidence_of_a_write():
     for writing_status in ("created", "updated"):
         wrote = {
             "_success": False,
-            "partial_results": {"a": {"status": writing_status, "component_id": "c1"}},
+            "partial_results": {"a": {"status": writing_status, "component_id": "c1", "result": {"_success": True}}},
         }
         assert _components_were_written(wrote) is True, writing_status
         _decorate_typed_apply(wrote, {})
@@ -1023,7 +1023,11 @@ def test_the_response_says_how_SURE_it_is_that_something_was_written():
         _mutation_status,
     )
 
-    observed = {"partial_results": {"a": {"status": "created", "component_id": "c1"}}}
+    observed = {
+        "partial_results": {
+            "a": {"status": "created", "component_id": "c1", "result": {"_success": True}}
+        }
+    }
     assert _mutation_status(observed) == "performed"
 
     ambiguous = {"partial_results": {"a": {"status": "created", "component_id": None}}}
@@ -1038,7 +1042,7 @@ def test_the_response_says_how_SURE_it_is_that_something_was_written():
     mixed = {
         "partial_results": {
             "a": {"status": "created", "component_id": None},
-            "b": {"status": "created", "component_id": "c2"},
+            "b": {"status": "created", "component_id": "c2", "result": {"_success": True}},
         }
     }
     assert _mutation_status(mixed) == "performed"
@@ -1069,3 +1073,57 @@ def test_only_a_provably_untouched_apply_is_marked_retry_safe():
     _decorate_typed_apply(ambiguous, {})
     assert ambiguous["mutation_performed"] is True
     assert ambiguous["mutation_status"] == "possible"
+
+
+def test_a_target_id_on_a_FAILED_update_is_not_proof_of_a_write():
+    """Codex review (round 3), P2. A pre-write component GET that times out
+    returns `{_success: False, retryable: True, component_id: <target>}`, and
+    `_extract_component_id` reads that field first — so a failed, explicitly
+    retryable update was reported as an OBSERVED write, suppressing a retry the
+    envelope itself marks safe."""
+    from boomi_mcp.categories.integration_builder import _mutation_status
+
+    failed_update = {
+        "_success": False,
+        "partial_results": {
+            "a": {
+                "status": "updated",
+                "component_id": "target-1",
+                "result": {
+                    "_success": False,
+                    "error_code": "COMPONENT_GET_DEADLINE_EXCEEDED",
+                    "component_id": "target-1",
+                    "retryable": True,
+                },
+            }
+        },
+    }
+    assert _mutation_status(failed_update) == "possible"
+
+    succeeded = {
+        "results": {
+            "a": {
+                "status": "updated",
+                "component_id": "target-1",
+                "result": {"_success": True},
+            }
+        }
+    }
+    assert _mutation_status(succeeded) == "performed"
+
+
+def test_a_malformed_typed_apply_still_publishes_its_mutation_status():
+    """Codex review (round 3), P2. The documented envelope promises the field is
+    ALWAYS present; this refusal skipped the decorator entirely, so a client
+    told to branch on it could not classify a deterministic INVALID_INPUT."""
+    for malformed in ("not-a-dict", [1, 2], 7, True):
+        result = build_integration_action(
+            MagicMock(),
+            _PROFILE,
+            "apply",
+            config={"authoring_request": malformed, "dry_run": False},
+        )
+        assert result["_success"] is False, malformed
+        assert result["mutation_status"] == "none", malformed
+        assert result["mutation_performed"] is False, malformed
+        assert result["error_code"] == INVALID_INPUT, malformed
