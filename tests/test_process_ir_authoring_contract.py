@@ -1085,6 +1085,7 @@ def test_direct_process_ir_next_steps_never_prepare_the_caller_for_apply():
 
 import ast  # noqa: E402
 import asyncio  # noqa: E402
+import inspect  # noqa: E402
 import re  # noqa: E402
 
 _CALL_PREFIX = "get_schema_template("
@@ -1222,17 +1223,18 @@ def _served_strings():
         yield from walk(surface)
 
 
-#: ``get_schema_template``'s positional order, so a positional instruction can
-#: be executed rather than written off. ``get_schema_template("component")`` is
-#: a legal, working call; classifying it "malformed" was a bug in the guard, and
-#: it was the bug that made widening the sweep look impossible.
-_POSITIONAL_PARAMETERS = (
-    "resource_type",
-    "operation",
-    "standard",
-    "component_type",
-    "protocol",
-    "schema_name",
+#: ``get_schema_template``'s positional order, DERIVED from the signature.
+#:
+#: It was hand-written first, and it was wrong within one round: six entries
+#: against a real thirteen, so a legal seven-positional call
+#: (``authoring_entry_id`` binds at position seven) was reported malformed and a
+#: regression test locked the stale copy in. That is precisely the defect this
+#: whole amendment exists to prevent — a second copy of a fact that drifts from
+#: the one the code enforces — reproduced inside the guard written to catch it.
+#:
+#: Derived, it cannot drift: adding a parameter extends it automatically.
+_POSITIONAL_PARAMETERS = tuple(
+    inspect.signature(meta_tools.get_schema_template_action).parameters
 )
 
 
@@ -1593,8 +1595,8 @@ def test_the_sweep_reads_registered_tools_not_every_module_global():
         "'component', resource_type='process'",
         # the same keyword twice
         "resource_type='component', resource_type='process'",
-        # more positionals than the signature has
-        "'a', 'b', 'c', 'd', 'e', 'f', 'g'",
+        # more positionals than the signature has (13 parameters, so 14 values)
+        ", ".join(f"'v{index}'" for index in range(14)),
     ],
 )
 def test_a_duplicate_or_overlong_binding_is_malformed_not_normalized(call):
@@ -1629,3 +1631,26 @@ def test_the_pagination_helper_is_shared_by_both_sweeps():
     helper = inspect.getsource(_paginate_contract)
     assert "truncated page carried no cursor" in helper
     assert "cursor did not advance" in helper
+
+
+def test_the_positional_table_is_derived_from_the_real_signature():
+    """A hand-written copy of a signature is the defect this contract exists to
+    prevent — and the guard reproduced it.
+
+    Six entries were written against a real thirteen, so a legal call binding
+    ``authoring_entry_id`` at position seven was reported malformed, and a
+    regression test locked the stale copy in.
+    """
+    real = tuple(inspect.signature(meta_tools.get_schema_template_action).parameters)
+    assert _POSITIONAL_PARAMETERS == real
+    assert len(real) == 13
+    assert real[6] == "authoring_entry_id"
+
+    # ...and the call that the stale table rejected is executable again.
+    kind, kwargs = _classify_call(
+        "None, None, None, None, None, 'process_ir_authoring', 'node.branch'"
+    )
+    assert kind == "executable"
+    assert kwargs["schema_name"] == "process_ir_authoring"
+    assert kwargs["authoring_entry_id"] == "node.branch"
+    assert meta_tools.get_schema_template_action(**kwargs)["_success"] is True
