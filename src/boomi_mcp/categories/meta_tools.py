@@ -6644,96 +6644,27 @@ def _authoring_workflow_schema() -> Dict[str, Any]:
     this issue adds: which calls may mutate is not a detail a caller should have
     to infer from a tool name.
     """
-    from ..authoring.contract import build_authoring_contract_manifest
+    from ..authoring.contract import (
+        authoring_workflow_contract,
+        build_authoring_contract_manifest,
+    )
 
+    # The CONTRACT body is manifest-free; the manifest only decorates it with the
+    # revision. Reading the whole thing off the manifest made the digest of this
+    # selector recurse into the manifest that was computing it — 143 levels of
+    # full-bundle recomputation on a cold cache, and an "unavailable" hash on any
+    # runtime whose recursion limit bit first.
     manifest = build_authoring_contract_manifest()
     return {
+        **authoring_workflow_contract(),
         "_success": True,
         "schema_name": "authoring_workflow",
         "surface": "MCP authoring workflow (issue #146 M12.11)",
-        "read_only": True,
-        "raw_xml_exposed": False,
-        "boomi_mutation": False,
         "revision_binding": {
             "contract_version": manifest["contract_version"],
             "schema_revision": manifest["schema_revision"],
             "capability_revision": manifest["capability_revision"],
             "compiler_revision": manifest["compiler_revision"],
-        },
-        "phases": [
-            {
-                "step": 1,
-                "call": "list_capabilities()",
-                "purpose": "Discover served actions, selectors and revisions.",
-                "mutates_boomi": False,
-            },
-            {
-                "step": 2,
-                "call": "get_schema_template(schema_name='AuthoringRequestV1')",
-                "purpose": "Obtain the exact strict request schema.",
-                "mutates_boomi": False,
-            },
-            {
-                "step": 3,
-                "call": "plan_integration_design(...)",
-                "purpose": (
-                    "ADVISORY doctrine, gaps and typed next steps. Prose is "
-                    "never compiled or executed."
-                ),
-                "mutates_boomi": False,
-            },
-            {
-                "step": 4,
-                "call": "build_from_archetype(...) or author ProcessIR / recipes",
-                "purpose": "Produce typed semantic intent.",
-                "mutates_boomi": False,
-            },
-            {
-                "step": 5,
-                "call": "build_integration(action='plan', config={'authoring_request': ...})",
-                "purpose": (
-                    "Semantic validation, resolved references, gaps, decisions, "
-                    "and the IntegrationSpecV1 ComponentPlan preview."
-                ),
-                "mutates_boomi": False,
-            },
-            {
-                "step": 6,
-                "call": "build_integration(action='compile', config={'authoring_request': ...})",
-                "purpose": (
-                    "Canonical compilation: normalized intent, deterministic "
-                    "artifact fingerprints, and the compile hash. Returns no "
-                    "build_id, because no build exists."
-                ),
-                "mutates_boomi": False,
-            },
-            {
-                "step": 7,
-                "call": "build_integration(action='apply', ...)",
-                "purpose": (
-                    "The FIRST phase permitted to mutate. A typed apply must "
-                    "carry expected_capability_revision and expected_compile_hash; "
-                    "the server recomputes and compares both before its first write."
-                ),
-                "mutates_boomi": True,
-            },
-            {
-                "step": 8,
-                "call": "build_integration(action='verify', config={'build_id': ...})",
-                "purpose": (
-                    "Component/dependency verification, plus compiler and "
-                    "artifact provenance for typed builds."
-                ),
-                "mutates_boomi": False,
-            },
-        ],
-        "actions": list(manifest["actions"]),
-        "intent_kinds": list(manifest["intent_kinds"]),
-        "terminology": {
-            "pipeline_stages": "The inert PipelineSpec echo (ADR-001 §5).",
-            "process_cfg": "The compiler's semantic control-flow graph.",
-            "component_dependencies": "ComponentPlan materialization edges.",
-            "topology_relations": "SystemTopologySpecV1 relations.",
         },
         "authoring_note": (
             "Plan and compile perform ZERO remote mutation. Apply cannot proceed "

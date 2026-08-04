@@ -377,27 +377,124 @@ def _inherited_schema_digest(selector: str) -> str:
     """
     from ..categories.meta_tools import get_schema_template_action
 
+    if selector == "authoring_workflow":
+        # SHORT-CIRCUIT, before any fetch. This selector has no single schema
+        # body — it IS the contract — and its served payload embeds the revision,
+        # so fetching it here would call back into the manifest currently being
+        # built. Reading the manifest-free source AFTER the fetch was not enough:
+        # the recursion is in the fetch itself.
+        contract_body = {
+            k: v
+            for k, v in authoring_workflow_contract().items()
+            if k in _AUTHORING_WORKFLOW_CONTRACT_KEYS
+        }
+        if contract_body:
+            return sha256_fingerprint(contract_body)
+        raise KeyError("authoring_workflow published no contract body")
+
     payload = get_schema_template_action(schema_name=selector)
     for key in _SCHEMA_BODY_KEYS:
         body = payload.get(key)
         if body:
             return sha256_fingerprint(body)
-    if selector == "authoring_workflow":
-        # No single schema body: this selector IS the contract. Hash its
-        # substantive fields, minus the revision it embeds and the advisory
-        # envelope keys, so a phase / action / terminology change moves the
-        # revision but a prose edit does not.
-        contract_body = {
-            k: v
-            for k, v in payload.items()
-            if k in _AUTHORING_WORKFLOW_CONTRACT_KEYS
-        }
-        if contract_body:
-            return sha256_fingerprint(contract_body)
     raise KeyError(
         f"{selector!r} published no recognized schema body "
         f"(looked for {list(_SCHEMA_BODY_KEYS)})"
     )
+
+
+
+def authoring_workflow_contract() -> Dict[str, Any]:
+    """The workflow CONTRACT — phases, actions, intent kinds, terminology, flags.
+
+    Manifest-free ON PURPOSE. ``get_schema_template("authoring_workflow")``
+    decorates this with the current revision, and ``_schema_bundle`` fingerprints
+    it; if the fingerprint had to go through the served payload, computing the
+    manifest would recurse into the manifest.
+
+    One source for both, so the digest cannot describe a contract different from
+    the one served.
+    """
+    return {
+        "read_only": True,
+        "raw_xml_exposed": False,
+        "boomi_mutation": False,
+        "phases": [
+            {
+                "step": 1,
+                "call": "list_capabilities()",
+                "purpose": "Discover served actions, selectors and revisions.",
+                "mutates_boomi": False,
+            },
+            {
+                "step": 2,
+                "call": "get_schema_template(schema_name='AuthoringRequestV1')",
+                "purpose": "Obtain the exact strict request schema.",
+                "mutates_boomi": False,
+            },
+            {
+                "step": 3,
+                "call": "plan_integration_design(...)",
+                "purpose": (
+                    "ADVISORY doctrine, gaps and typed next steps. Prose is "
+                    "never compiled or executed."
+                ),
+                "mutates_boomi": False,
+            },
+            {
+                "step": 4,
+                "call": "build_from_archetype(...) or author ProcessIR / recipes",
+                "purpose": "Produce typed semantic intent.",
+                "mutates_boomi": False,
+            },
+            {
+                "step": 5,
+                "call": "build_integration(action='plan', config={'authoring_request': ...})",
+                "purpose": (
+                    "Semantic validation, resolved references, gaps, decisions, "
+                    "and the IntegrationSpecV1 ComponentPlan preview."
+                ),
+                "mutates_boomi": False,
+            },
+            {
+                "step": 6,
+                "call": "build_integration(action='compile', config={'authoring_request': ...})",
+                "purpose": (
+                    "Canonical compilation: normalized intent, deterministic "
+                    "artifact fingerprints, and the compile hash. Returns no "
+                    "build_id, because no build exists."
+                ),
+                "mutates_boomi": False,
+            },
+            {
+                "step": 7,
+                "call": "build_integration(action='apply', ...)",
+                "purpose": (
+                    "The FIRST phase permitted to mutate. A typed apply must "
+                    "carry expected_capability_revision and expected_compile_hash; "
+                    "the server recomputes and compares both before its first write."
+                ),
+                "mutates_boomi": True,
+            },
+            {
+                "step": 8,
+                "call": "build_integration(action='verify', config={'build_id': ...})",
+                "purpose": (
+                    "Component/dependency verification, plus compiler and "
+                    "artifact provenance for typed builds."
+                ),
+                "mutates_boomi": False,
+            },
+        ],
+        "actions": list(AUTHORING_ACTIONS),
+        "intent_kinds": list(AUTHORING_INTENT_KINDS),
+        "terminology": {
+            "pipeline_stages": "The inert PipelineSpec echo (ADR-001 §5).",
+            "process_cfg": "The compiler's semantic control-flow graph.",
+            "component_dependencies": "ComponentPlan materialization edges.",
+            "topology_relations": "SystemTopologySpecV1 relations.",
+        },
+    }
 
 
 def _schema_bundle() -> Dict[str, str]:

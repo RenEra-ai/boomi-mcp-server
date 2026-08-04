@@ -566,37 +566,34 @@ def test_the_authoring_workflow_contract_is_inside_the_revision():
     assert bundle["authoring_workflow"] != "unavailable"
     baseline = bundle["authoring_workflow"]
 
-    real = meta_tools.get_schema_template_action
+    # Perturb the CONTRACT SOURCE, not the served payload: the digest reads
+    # `authoring_workflow_contract()` directly so that computing the manifest
+    # cannot recurse into the manifest. Patching the served payload would now
+    # prove nothing about the digest.
+    real = contract_module.authoring_workflow_contract
 
-    def _flip_phase(*args, **kwargs):
-        payload = dict(real(*args, **kwargs))
-        if kwargs.get("schema_name") == "authoring_workflow":
-            phases = [dict(p) for p in payload["phases"]]
-            phases[4]["mutates_boomi"] = True  # the read-only plan phase
-            payload["phases"] = phases
-        return payload
-
-    def _edit_prose(*args, **kwargs):
-        payload = dict(real(*args, **kwargs))
-        if kwargs.get("schema_name") == "authoring_workflow":
-            payload["authoring_note"] = "completely rewritten advisory prose"
-            payload["surface"] = "reworded surface label"
-        return payload
+    def _flip_phase():
+        body = dict(real())
+        phases = [dict(p) for p in body["phases"]]
+        phases[4]["mutates_boomi"] = True  # the read-only plan phase
+        body["phases"] = phases
+        return body
 
     try:
-        meta_tools.get_schema_template_action = _flip_phase
+        contract_module.authoring_workflow_contract = _flip_phase
         contract_module.reset_manifest_cache()
         flipped = contract_module._schema_bundle()["authoring_workflow"]
-
-        meta_tools.get_schema_template_action = _edit_prose
-        contract_module.reset_manifest_cache()
-        prose = contract_module._schema_bundle()["authoring_workflow"]
     finally:
-        meta_tools.get_schema_template_action = real
+        contract_module.authoring_workflow_contract = real
         contract_module.reset_manifest_cache()
 
     assert flipped != baseline, "a mutation-flag change left the revision unmoved"
-    assert prose == baseline, "advisory prose leaked into the revision"
+
+    # Advisory prose lives only on the served envelope, which the digest never
+    # reads — so it cannot leak into the revision by construction.
+    served = meta_tools._get_authoring_schema_by_name("authoring_workflow")
+    assert "authoring_note" in served
+    assert "authoring_note" not in contract_module.authoring_workflow_contract()
 
 
 def test_the_workflow_entrys_mutation_flags_are_inside_the_revision():
@@ -610,22 +607,22 @@ def test_the_workflow_entrys_mutation_flags_are_inside_the_revision():
 
     contract_module.reset_manifest_cache()
     baseline = contract_module._schema_bundle()["authoring_workflow"]
-    real = meta_tools.get_schema_template_action
+    real = contract_module.authoring_workflow_contract
 
-    def _flip_flags(*args, **kwargs):
-        payload = dict(real(*args, **kwargs))
-        if kwargs.get("schema_name") == "authoring_workflow":
-            payload["boomi_mutation"] = True
-            payload["read_only"] = False
-            payload["raw_xml_exposed"] = True
-        return payload
+    def _flip_flags():
+        return {
+            **real(),
+            "boomi_mutation": True,
+            "read_only": False,
+            "raw_xml_exposed": True,
+        }
 
     try:
-        meta_tools.get_schema_template_action = _flip_flags
+        contract_module.authoring_workflow_contract = _flip_flags
         contract_module.reset_manifest_cache()
         flipped = contract_module._schema_bundle()["authoring_workflow"]
     finally:
-        meta_tools.get_schema_template_action = real
+        contract_module.authoring_workflow_contract = real
         contract_module.reset_manifest_cache()
 
     assert flipped != baseline
@@ -643,3 +640,60 @@ def test_the_workflow_contract_key_list_is_actually_the_one_in_use():
     assert not hasattr(contract_module, "_SELF_REFERENTIAL_KEYS")
     # And the allowlist must exclude the self-referential field by construction.
     assert "revision_binding" not in contract_module._AUTHORING_WORKFLOW_CONTRACT_KEYS
+
+
+def test_a_cold_manifest_build_does_not_recurse():
+    """Codex round 8 (P1). Fingerprinting `authoring_workflow` fetched its served
+    payload, which embeds `revision_binding` — so building the manifest called
+    back into the manifest. 143 levels of full-bundle recomputation on a cold
+    cache, terminating only because the RecursionError was swallowed into
+    `schema_hash: "unavailable"` on whichever runtime hit its limit first.
+
+    Depth is asserted, not just absence of an exception: the old code DID return
+    a correct hash on this machine, which is exactly why it survived review.
+    """
+    from boomi_mcp.authoring import contract as contract_module
+
+    depth = {"now": 0, "max": 0}
+    real = contract_module._schema_bundle
+
+    def _counting():
+        depth["now"] += 1
+        depth["max"] = max(depth["max"], depth["now"])
+        try:
+            return real()
+        finally:
+            depth["now"] -= 1
+
+    contract_module.reset_manifest_cache()
+    contract_module._schema_bundle = _counting
+    try:
+        manifest = contract_module.build_authoring_contract_manifest()
+    finally:
+        contract_module._schema_bundle = real
+        contract_module.reset_manifest_cache()
+
+    assert depth["max"] == 1, f"cold manifest build re-entered the bundle {depth['max']}x"
+    entry = next(
+        e for e in manifest["schemas"] if e["selector"] == "authoring_workflow"
+    )
+    assert entry["schema_hash"] != "unavailable"
+
+
+def test_the_workflow_contract_has_one_source_for_digest_and_payload():
+    """The served payload and the digested body must come from the same place,
+    or the revision can describe a contract different from the one served."""
+    from boomi_mcp.authoring.contract import (
+        _AUTHORING_WORKFLOW_CONTRACT_KEYS,
+        authoring_workflow_contract,
+    )
+    from boomi_mcp.categories.meta_tools import _get_authoring_schema_by_name
+
+    contract = authoring_workflow_contract()
+    served = _get_authoring_schema_by_name("authoring_workflow")
+    for key in _AUTHORING_WORKFLOW_CONTRACT_KEYS:
+        assert key in contract, key
+        assert served[key] == contract[key], key
+    # The revision is decoration on the served payload only — never digested.
+    assert "revision_binding" in served
+    assert "revision_binding" not in contract
