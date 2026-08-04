@@ -2432,8 +2432,10 @@ if build_integration_action:
                                           apply SUCCEEDED, there is no
                                           partial_results — look for
                                           results[<key>].component_id being
-                                          null, which means the component was
-                                          created but its id did not come back.
+                                          null, meaning the step reported success
+                                          without returning an id. That is still
+                                          UNCONFIRMED — reconcile rather than
+                                          assume the component exists.
             mutation_status="none"      - nothing was attempted (only reuse, or
                                           refused before any write). A FAILURE in
                                           this state is retry-safe. Its error_code

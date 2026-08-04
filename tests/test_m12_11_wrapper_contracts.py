@@ -238,11 +238,16 @@ def test_the_served_status_contract_matches_what_the_classifier_does():
             }
         }
     }
+    # A SUCCESSFUL apply returns `results`, not `partial_results` — the latter
+    # is emitted only on failure. Modelling this sub-case under the failure key
+    # meant the assertion never exercised the shape it documents, and would have
+    # kept passing if the classifier stopped reading `results` at all.
     succeeded_without_id = {
-        "partial_results": {
+        "_success": True,
+        "results": {
             "a": {"status": "created", "component_id": None,
                   "result": {"_success": True}}
-        }
+        },
     }
     assert _mutation_status(failed_update_with_id) == "possible"
     assert _mutation_status(succeeded_without_id) == "possible"
@@ -259,3 +264,7 @@ def test_the_served_status_contract_matches_what_the_classifier_does():
     # null component_id. Both routes must be readable from the served text.
     assert "results[<key>].component_id" in doc
     assert "there is no" in doc and "partial_results" in doc
+    # The successful sub-case must not be described as a confirmed creation —
+    # that is the certainty `possible` exists to withhold.
+    assert "UNCONFIRMED" in doc
+    assert "created but its id did not come back" not in doc
