@@ -278,7 +278,7 @@ def test_the_schema_revision_covers_the_whole_served_authoring_contract():
         "recipe_contributions",
         "recipe_registry",
         "workflow_sequences",
-        "archetype_parameters",
+        "archetype:stub_minimal_integration",
     ):
         assert inherited in bundle, inherited
         assert bundle[inherited] != "unavailable", inherited
@@ -365,30 +365,70 @@ def test_every_selector_the_revision_covers_is_published():
     ]
     assert {e["selector"] for e in inherited} >= {
         "IntegrationSpecV1",
-        "archetype_parameters",
+        "archetype:stub_minimal_integration",
     }
 
 
-def test_the_archetype_parameter_digest_is_covered_by_a_test():
-    """QA #435. Replacing it with a constant survived the whole suite, so the
-    branch existed without a witness."""
+def test_every_archetype_parameter_schema_is_covered_and_individually_named():
+    """QA #435 + Codex round 6. The aggregate `archetype_parameters` entry was
+    neither fetchable nor able to say WHICH archetype moved; each archetype now
+    appears under its own real selector."""
     from boomi_mcp.authoring import contract as contract_module
 
     contract_module.reset_manifest_cache()
-    baseline = contract_module._schema_bundle()["archetype_parameters"]
-    assert baseline.startswith("sha256:") and baseline != "unavailable"
+    bundle = contract_module._schema_bundle()
+    archetypes = [e["name"] for e in contract_module.list_archetype_registry()]
+    assert len(archetypes) == 6
+    assert "archetype_parameters" not in bundle
+    for name in archetypes:
+        selector = f"archetype:{name}"
+        assert selector in bundle, selector
+        assert bundle[selector].startswith("sha256:"), selector
 
+    # Moving ONE archetype's parameter schema moves the revision, and the entry
+    # that moved is identifiable.
     real = contract_module._inherited_schema_digest
+    target = f"archetype:{archetypes[0]}"
 
     def _perturb(selector):
-        if selector.startswith("archetype:"):
-            return "sha256:" + "c" * 64
-        return real(selector)
+        return "sha256:" + "c" * 64 if selector == target else real(selector)
 
     contract_module._inherited_schema_digest = _perturb
     try:
-        moved = contract_module._schema_bundle()["archetype_parameters"]
+        moved = contract_module._schema_bundle()
     finally:
         contract_module._inherited_schema_digest = real
         contract_module.reset_manifest_cache()
-    assert moved != baseline
+    assert moved[target] != bundle[target]
+    for name in archetypes[1:]:
+        assert moved[f"archetype:{name}"] == bundle[f"archetype:{name}"]
+
+
+def test_a_documentation_only_edit_does_not_move_the_schema_revision():
+    """Codex round 6, P2. The digest fell back to hashing the whole envelope, so
+    an archetype's `examples` / `limitations` / `capability_notes` were folded
+    into `schema_revision` — a docs edit then failed otherwise-valid typed
+    applies on a revision check while the accepted parameters were unchanged."""
+    from boomi_mcp.authoring import contract as contract_module
+    from boomi_mcp.categories import meta_tools
+
+    contract_module.reset_manifest_cache()
+    before = contract_module._schema_bundle()["archetype:stub_minimal_integration"]
+
+    real = meta_tools.get_schema_template_action
+
+    def _with_edited_prose(*args, **kwargs):
+        payload = dict(real(*args, **kwargs))
+        if kwargs.get("schema_name") == "archetype:stub_minimal_integration":
+            payload["examples"] = ["a completely different example"]
+            payload["limitations"] = ["reworded limitation"]
+            payload["capability_notes"] = "rewritten note"
+        return payload
+
+    meta_tools.get_schema_template_action = _with_edited_prose
+    try:
+        after = contract_module._schema_bundle()["archetype:stub_minimal_integration"]
+    finally:
+        meta_tools.get_schema_template_action = real
+        contract_module.reset_manifest_cache()
+    assert after == before, "prose leaked into the schema revision"

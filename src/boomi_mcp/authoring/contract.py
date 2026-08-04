@@ -315,14 +315,46 @@ _INHERITED_SCHEMA_SELECTORS: Tuple[str, ...] = (
 )
 
 
+#: Envelope keys that actually carry a SCHEMA. Different surfaces use different
+#: names — ``archetype:<name>`` answers with ``parameter_schema``, the rest with
+#: ``json_schema`` — and there is deliberately no fallback to the whole envelope.
+#:
+#: The fallback is what made this wrong: hashing the envelope pulled in
+#: ``examples``, ``limitations`` and ``capability_notes``, so a documentation-only
+#: edit to an archetype moved ``schema_revision`` and ``capability_revision`` and
+#: failed otherwise-valid typed applies on a revision check, while the accepted
+#: parameters had not changed at all.
+#: Ordered: the first key present wins. Four names because four surfaces chose
+#: four names — and removing the envelope fallback is what revealed the last two.
+#: ``recipe_registry`` in particular also carries a live ``snapshot``, so the
+#: fallback had been folding REGISTRY STATE into ``schema_revision``, conflating
+#: "the schema changed" with "the data changed".
+_SCHEMA_BODY_KEYS: Tuple[str, ...] = (
+    "json_schema",
+    "parameter_schema",
+    "expected_registry_schema",
+    "record_schema",
+)
+
+
 def _inherited_schema_digest(selector: str) -> str:
-    """Digest of a served selector owned by another surface."""
+    """Digest of the SCHEMA a served selector publishes — never its envelope.
+
+    Raises when the payload carries no recognized schema body, so a surface that
+    changes shape shows up as ``unavailable`` in the bundle rather than silently
+    fingerprinting prose.
+    """
     from ..categories.meta_tools import get_schema_template_action
 
     payload = get_schema_template_action(schema_name=selector)
-    # The envelope carries advisory prose; hash the SCHEMA, which is the contract.
-    body = payload.get("json_schema", payload)
-    return sha256_fingerprint(body)
+    for key in _SCHEMA_BODY_KEYS:
+        body = payload.get(key)
+        if body:
+            return sha256_fingerprint(body)
+    raise KeyError(
+        f"{selector!r} published no recognized schema body "
+        f"(looked for {list(_SCHEMA_BODY_KEYS)})"
+    )
 
 
 def _schema_bundle() -> Dict[str, str]:
@@ -348,18 +380,25 @@ def _schema_bundle() -> Dict[str, str]:
             bundle[selector] = _inherited_schema_digest(selector)
         except Exception:  # noqa: BLE001
             bundle[selector] = "unavailable"
+    # Each archetype's PARAMETER schema, under its own REAL selector. A changed
+    # archetype input is a changed contract even when the archetype list is
+    # identical, which a name-and-version list cannot show.
+    #
+    # Published per archetype rather than as one aggregate: an aggregate told a
+    # client that something moved without telling it WHICH archetype moved, and
+    # `archetype_parameters` was not a selector `get_schema_template` served at
+    # all — so a client traversing the advertised catalog could neither fetch nor
+    # verify it. Everything in this bundle is now fetchable under its own name.
     try:
-        # The archetype PARAMETER schemas are part of the authoring contract too:
-        # a changed archetype input is a changed contract even when the archetype
-        # list is identical, which the name-and-version list alone cannot show.
-        bundle["archetype_parameters"] = sha256_fingerprint(
-            {
-                entry["name"]: _inherited_schema_digest(f"archetype:{entry['name']}")
-                for entry in list_archetype_registry()
-            }
-        )
+        archetypes = list_archetype_registry()
     except Exception:  # noqa: BLE001
-        bundle["archetype_parameters"] = "unavailable"
+        archetypes = ()
+    for entry in archetypes:
+        selector = f"archetype:{entry['name']}"
+        try:
+            bundle[selector] = _inherited_schema_digest(selector)
+        except Exception:  # noqa: BLE001
+            bundle[selector] = "unavailable"
     return bundle
 
 
@@ -389,10 +428,16 @@ def build_authoring_contract_manifest() -> Mapping[str, Any]:
         "schemas": [
             {
                 "selector": selector,
-                "schema_version": (
-                    AUTHORING_SCHEMA_REGISTRY[selector][0]
+                # OMITTED for inherited selectors rather than invented. An
+                # earlier version published `schema_version: "inherited"`, which
+                # combined with this contract's own `<selector>@<version>` syntax
+                # to advertise pairs like `IntegrationSpecV1@inherited` that every
+                # dispatcher rejects. A version we do not know is a key we do not
+                # publish.
+                **(
+                    {"schema_version": AUTHORING_SCHEMA_REGISTRY[selector][0]}
                     if selector in AUTHORING_SCHEMA_REGISTRY
-                    else "inherited"
+                    else {}
                 ),
                 "schema_hash": schema_bundle[selector],
                 "provenance": (
