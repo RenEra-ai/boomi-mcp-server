@@ -47,7 +47,16 @@ extensions, document data, or raw XML (ADR-001 §11).
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any, Dict, Literal, Optional, Tuple, Union
+from typing import (
+    Annotated,
+    Any,
+    Dict,
+    Literal,
+    Optional,
+    Tuple,
+    Union,
+    get_args,
+)
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -179,10 +188,14 @@ AuthoringIntentV1 = Annotated[
 
 #: DERIVED from the union, never hand-listed, so the capability manifest's
 #: intent-kind axis cannot drift from what the union actually accepts.
-AUTHORING_INTENT_KINDS: Tuple[str, ...] = (
-    "integration_spec",
-    "process_ir",
-    "recipe",
+#:
+#: It was a literal that merely CLAIMED to be derived — a fourth union member
+#: could be added and the manifest would go on advertising a three-kind axis with
+#: the whole suite green, because every guard compared the literal against
+#: something else built from the same literal.
+AUTHORING_INTENT_KINDS: Tuple[str, ...] = tuple(
+    get_args(member.model_fields["intent_kind"].annotation)[0]
+    for member in get_args(get_args(AuthoringIntentV1)[0])
 )
 
 

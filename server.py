@@ -2353,9 +2353,12 @@ if build_integration_action:
                   "dry_run": false
                 }
 
-            config.authoring_request is mutually exclusive with the legacy
-            integration_spec / source_description / components roots; sending
-            both is rejected rather than silently resolved by precedence.
+            config.authoring_request is mutually exclusive with EVERY legacy
+            root that drives the legacy planner — integration_spec,
+            source_description, components, name, mode and conflict_policy —
+            sending both is rejected rather than silently resolved by precedence.
+            (conflict_policy is the consequential one: at the config root it
+            would be silently replaced by the typed intent's own value.)
 
         Actions:
             plan:
@@ -3201,8 +3204,14 @@ if get_schema_template_action:
                 'AuthoringRequestV1', 'AuthoringPlanResultV1', 'AuthoringCompileResultV1',
                 'AuthoringRevisionBindingV1', 'AuthoringBuildProvenanceV1', and
                 'authoring_workflow' (the eight-step sequence and which phases may mutate).
-                An optional '@<version>' suffix pins the schema version; an unserved version
-                returns AUTHORING_SCHEMA_VERSION_UNAVAILABLE with the supported list.
+                An optional '@<version>' suffix pins the schema version, and is accepted ONLY
+                by the eight selectors listed above that this contract owns (all at version '1');
+                an unserved version on one of those returns AUTHORING_SCHEMA_VERSION_UNAVAILABLE
+                with the supported list. Every other selector — including 'IntegrationSpecV1',
+                'recipe_contributions' and 'archetype:<name>' — publishes no version and rejects
+                any '@' suffix with SCHEMA_NAME_UNSUPPORTED. list_capabilities' authoring_contract
+                omits schema_version for exactly those, so a client pinning from the catalog can
+                tell the two apart.
 
         Examples:
             get_schema_template("trading_partner") → overview of all actions/standards

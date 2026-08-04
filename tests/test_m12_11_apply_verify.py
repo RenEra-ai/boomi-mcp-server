@@ -1200,3 +1200,54 @@ def test_the_published_digest_is_really_sha256_of_the_canonical_bytes():
     digest, length = artifact_fingerprint(text)
     assert digest == "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
     assert length == len(text.encode("utf-8"))
+
+
+def test_a_real_successful_apply_reports_performed_end_to_end():
+    """Audit finding (high). The `performed` direction was asserted only on a
+    FAILED apply and via synthetic envelopes — no end-to-end successful write
+    read either field. Two mutants proved the gap: forcing `none` on success, and
+    renaming the step record's `result` key, both survived all 9103 tests while
+    silently telling a caller nothing had been written."""
+    payload = _bound_payload()
+    with patch(_EXECUTE) as execute, patch(_GET_XML) as get_xml:
+        execute.side_effect = lambda *a, **k: {
+            "_success": True,
+            "component_id": "cid-real-1",
+        }
+        get_xml.return_value = {"type": "connector-settings", "xml": _LIVE_XML}
+        result = build_integration_action(
+            MagicMock(),
+            _PROFILE,
+            "apply",
+            config={"authoring_request": payload, "dry_run": False},
+        )
+        assert execute.call_count == 1
+
+    assert result["_success"] is True
+    assert result["build_id"]
+    # The two fields, read off a REAL write rather than a synthetic envelope.
+    assert result["mutation_status"] == "performed"
+    assert result["mutation_performed"] is True
+    assert "error_code" not in result
+    # ...and the step record really does carry the shape the classifier reads,
+    # so a rename of `result`/`status`/`component_id` cannot pass silently.
+    step = result["results"]["api_conn"]
+    assert step["status"] == "created"
+    assert step["component_id"] == "cid-real-1"
+    assert step["result"]["_success"] is True
+
+
+def test_a_real_successful_dry_run_reports_none_end_to_end():
+    """The opposite pole of the same gap: a dry run succeeds having written
+    nothing and must say so, measured end-to-end rather than synthetically."""
+    with patch(_EXECUTE) as execute:
+        result = build_integration_action(
+            MagicMock(),
+            _PROFILE,
+            "apply",
+            config={"authoring_request": _bound_payload(), "dry_run": True},
+        )
+        assert execute.call_count == 0
+    assert result["_success"] is True
+    assert result["mutation_status"] == "none"
+    assert result["mutation_performed"] is False

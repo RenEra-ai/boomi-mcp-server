@@ -10425,13 +10425,18 @@ def list_capabilities_action(
                 "action": "str (required) — plan | compile | apply | verify",
                 "config": (
                     "JSON str (optional) — IntegrationSpecV1 payload and execution "
-                    "options. Issue #146 adds the opt-in typed authoring keys: "
-                    "'authoring_request' (an AuthoringRequestV1 — get its exact "
-                    "schema from get_schema_template(schema_name='AuthoringRequestV1')), "
-                    "plus 'expected_capability_revision', 'expected_plan_hash' and "
-                    "'expected_compile_hash'. A typed apply REQUIRES "
-                    "expected_capability_revision and expected_compile_hash; "
-                    "legacy requests need none of them and are unchanged."
+                    "options. Issue #146 adds ONE opt-in typed key at the config "
+                    "root: 'authoring_request' (an AuthoringRequestV1 — get its "
+                    "exact schema from "
+                    "get_schema_template(schema_name='AuthoringRequestV1')). The "
+                    "binding values 'expected_capability_revision', "
+                    "'expected_plan_hash' and 'expected_compile_hash' are fields "
+                    "INSIDE that object, not siblings of it — placed at the config "
+                    "root they are ignored and a typed apply fails with "
+                    "AUTHORING_APPLY_VALIDATION_REQUIRED. A typed apply REQUIRES "
+                    "expected_capability_revision and expected_compile_hash inside "
+                    "authoring_request; legacy requests need none of them and are "
+                    "unchanged."
                 ),
             },
             "authority_versions": _AUTHORITY_VERSIONS,

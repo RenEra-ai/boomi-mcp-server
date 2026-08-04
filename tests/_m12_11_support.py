@@ -183,9 +183,14 @@ def appliable_request(name="M12.11 Applied", **extra):
 class MutationSpy:
     """Fails the moment any Boomi write helper is called.
 
-    Patched over the builder's create/update helpers AND the execute/deploy
-    actions. "Plan performs zero remote mutation" is an acceptance criterion, and
-    the only way to test a negative is to make the forbidden call explode.
+    Patched over the builder's six component create/update helpers — which is
+    every write door out of `integration_builder`. It does NOT patch
+    `execute_process` or `manage_deployment`; the read-only orchestration never
+    imports them, and `test_the_read_only_phase_never_imports_a_write_helper`
+    asserts that structurally rather than by spying.
+
+    "Plan performs zero remote mutation" is an acceptance criterion, and the only
+    way to test a negative is to make the forbidden call explode.
     """
 
     #: Every write door out of the builder module, by name.

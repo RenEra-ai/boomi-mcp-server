@@ -432,3 +432,59 @@ def test_a_documentation_only_edit_does_not_move_the_schema_revision():
         meta_tools.get_schema_template_action = real
         contract_module.reset_manifest_cache()
     assert after == before, "prose leaked into the schema revision"
+
+
+def test_capability_revision_covers_every_region_of_the_manifest():
+    """Audit finding (high). Shrinking `capability_fingerprint` to cover only
+    schemas+archetypes passed all 9103 tests, so `authoring.compile` flipping to
+    unsupported — or a compiler_revision move — became invisible to every
+    outstanding binding. The four-vs-six archetype guard was the ONLY
+    revision-movement pin that existed."""
+    from boomi_mcp.authoring import contract as contract_module
+
+    def _revision_with(**overrides):
+        contract_module.reset_manifest_cache()
+        saved = {}
+        try:
+            for name, value in overrides.items():
+                saved[name] = getattr(contract_module, name)
+                setattr(contract_module, name, value)
+            contract_module.reset_manifest_cache()
+            return contract_module.build_authoring_contract_manifest()[
+                "capability_revision"
+            ]
+        finally:
+            for name, value in saved.items():
+                setattr(contract_module, name, value)
+            contract_module.reset_manifest_cache()
+
+    baseline = _revision_with()
+
+    # Every REGION the manifest publishes must move the revision when it moves.
+    from types import MappingProxyType
+
+    flipped_caps = dict(contract_module.AUTHORING_CAPABILITY_REGISTRY)
+    flipped_caps["authoring.compile"] = ("unsupported", "1", "canonical_compiler")
+    assert _revision_with(
+        AUTHORING_CAPABILITY_REGISTRY=MappingProxyType(flipped_caps)
+    ) != baseline, "a capability state flip left capability_revision unchanged"
+
+    flipped_matrix = {
+        kind: MappingProxyType({**dict(actions), "apply": "unsupported"})
+        for kind, actions in contract_module.AUTHORING_SUPPORT_MATRIX.items()
+    }
+    assert _revision_with(
+        AUTHORING_SUPPORT_MATRIX=MappingProxyType(flipped_matrix)
+    ) != baseline, "a support-matrix flip left capability_revision unchanged"
+
+    assert _revision_with(
+        _compiler_revision=lambda: "sha256:" + "e" * 64
+    ) != baseline, "a compiler_revision move left capability_revision unchanged"
+
+    assert _revision_with(
+        AUTHORING_ACTIONS=("plan", "apply", "verify")
+    ) != baseline, "an action-set change left capability_revision unchanged"
+
+    assert _revision_with(
+        _REASON_CODES=MappingProxyType({})
+    ) != baseline, "a reason-code change left capability_revision unchanged"

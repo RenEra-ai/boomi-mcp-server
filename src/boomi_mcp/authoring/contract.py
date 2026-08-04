@@ -292,7 +292,14 @@ def _recipe_registry_block() -> Dict[str, Any]:
         "schema_version": snapshot.get("schema_version"),
         "registry_revision": snapshot.get("registry_revision"),
         "source_version": snapshot.get("source_version"),
-        "contribution_kinds": sorted(
+        # ``entry_kinds``, not ``contribution_kinds``. These are registry ENTRY
+        # kinds (advisory / executable_recipe / …); the published
+        # ``contribution_kinds`` vocabulary is the disjoint four-member
+        # RecipeContributionV1 discriminator served by
+        # get_schema_template("recipe_contributions"). Publishing one under the
+        # other's name meant a client reading this and feeding it to the
+        # discriminator was rejected every time.
+        "entry_kinds": sorted(
             {str(entry.get("entry_kind", "")) for entry in snapshot.get("entries", ())}
         ),
         "entry_count": len(snapshot.get("entries", ())),
