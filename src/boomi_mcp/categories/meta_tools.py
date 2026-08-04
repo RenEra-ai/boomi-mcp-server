@@ -11380,7 +11380,15 @@ def list_capabilities_action(
 
     hints = {
         "start_here": "Call list_boomi_profiles() first to see available profiles",
-        "need_template": "Use get_schema_template() before create/update operations",
+        # Names the tool and its requirement rather than showing an empty call.
+        # `get_schema_template()` with no argument returns SCHEMA_SELECTOR_REQUIRED,
+        # so a reader who pasted the parenthesised form got an error; the guard
+        # classifies a no-argument form as a MENTION, and this wording removes
+        # the ambiguity instead of relying on that reading.
+        "need_template": (
+            "Call get_schema_template with a resource_type or schema_name before "
+            "create/update operations"
+        ),
         "uncovered_api": "Use invoke_boomi_api() for APIs without dedicated tools (integration packs, secrets rotation, etc.)",
         "profile_required": "Most tools require a 'profile' parameter — get it from list_boomi_profiles()",
         "raw_write_gate": "invoke_boomi_api mutating POST/PUT requires confirm_write=true (enforced); "

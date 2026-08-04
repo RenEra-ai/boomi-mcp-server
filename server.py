@@ -3331,18 +3331,18 @@ if invoke_api:
                            (safety gate; not needed for GET or */query POSTs)
 
         Common endpoints:
-            # Roles — see /mnt/examples/04_environment_setup/manage_roles.py
+            # Roles
             - "Role/query" POST with filter body → list roles
             - "Role" POST with role body → create role
             - "Role/{id}" GET → get role
             - "Role/{id}" DELETE → delete role
 
-            # Branches — see /mnt/examples/02_organize_structure/manage_branches.py
+            # Branches
             - "Branch/query" POST with filter body → list branches
             - "Branch" POST → create branch
             - "Branch/{id}" DELETE → delete branch
 
-            # Folders — see /mnt/examples/02_organize_structure/manage_folders.py
+            # Folders
             - "Folder/query" POST with filter body → list folders
             - "Folder" POST → create folder
             - "Folder/{id}" GET → get folder

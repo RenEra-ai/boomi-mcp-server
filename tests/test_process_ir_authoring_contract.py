@@ -1179,6 +1179,18 @@ def _served_strings():
     surfaces.append(meta_tools.plan_integration_design_action())
     surfaces.append(meta_tools.plan_integration_design_action(authoring_mode="process_ir"))
 
+    # Every registered tool's DESCRIPTION. This is the surface an LLM reads
+    # before it reads anything else, and it was 0% covered: a poisoned tool
+    # description — a broken call, a bare `.md`, a `docs/architecture/` path —
+    # left the whole suite green. A guard blind to the first surface is a guard
+    # whose green means little.
+    seen_docs = set()
+    for attribute in vars(server).values():
+        doc = getattr(attribute, "__doc__", None)
+        if callable(attribute) and doc and doc not in seen_docs:
+            seen_docs.add(doc)
+            surfaces.append(doc)
+
     def walk(value):
         if isinstance(value, str):
             yield value
@@ -1193,26 +1205,50 @@ def _served_strings():
         yield from walk(surface)
 
 
+#: ``get_schema_template``'s positional order, so a positional instruction can
+#: be executed rather than written off. ``get_schema_template("component")`` is
+#: a legal, working call; classifying it "malformed" was a bug in the guard, and
+#: it was the bug that made widening the sweep look impossible.
+_POSITIONAL_PARAMETERS = (
+    "resource_type",
+    "operation",
+    "standard",
+    "component_type",
+    "protocol",
+    "schema_name",
+)
+
+
 def _classify_call(argument_text):
-    """``('template'|'executable'|'malformed', kwargs)`` for one harvested call."""
+    """``('mention'|'template'|'executable'|'malformed', kwargs)`` for one call.
+
+    Four buckets, none of them a silent drop:
+
+    * ``mention`` — no arguments at all. ``Use get_schema_template() before
+      create/update`` names the tool; it is not a call to paste.
+    * ``template`` — a placeholder or an alternation of choices: an example.
+    * ``executable`` — a literal call, positional or keyword, that must succeed.
+    * ``malformed`` — anything else, and it FAILS the test rather than vanishing.
+    """
     stripped = argument_text.strip()
     if not stripped:
-        return "template", {}
+        return "mention", {}
     if any(marker in stripped for marker in _TEMPLATE_MARKERS):
         return "template", {}
     if _ALTERNATION.search(stripped):
-        # `protocol='a'|'b'|'c'` enumerates choices; it is a template, and it is
-        # recognised as one HERE rather than by falling into an exception.
         return "template", {}
     try:
         node = ast.parse(f"f({stripped})", mode="eval").body
-        if node.args:
-            return "malformed", {}
-        return "executable", {
+        kwargs = {
             keyword.arg: ast.literal_eval(keyword.value)
             for keyword in node.keywords
             if keyword.arg
         }
+        for index, argument in enumerate(node.args):
+            if index >= len(_POSITIONAL_PARAMETERS):
+                return "malformed", {}
+            kwargs[_POSITIONAL_PARAMETERS[index]] = ast.literal_eval(argument)
+        return "executable", kwargs
     except Exception:  # noqa: BLE001
         return "malformed", {}
 
@@ -1243,14 +1279,11 @@ def test_every_executable_instruction_the_server_serves_actually_executes():
     executed, templates, malformed, failures = 0, 0, [], []
     for call in sorted(calls):
         kind, kwargs = _classify_call(call)
-        if kind == "template":
+        if kind in ("template", "mention"):
             templates += 1
             continue
         if kind == "malformed":
             malformed.append(call)
-            continue
-        if not kwargs:
-            templates += 1
             continue
         result = meta_tools.get_schema_template_action(**kwargs)
         executed += 1
@@ -1292,13 +1325,33 @@ _FETCH_IMPERATIVE = re.compile(
 def _has_fetch_imperative(text):
     return bool(_FETCH_IMPERATIVE.search(text))
 
-#: ``\b`` is applied ONLY to the alternatives that begin with a word character.
-#: A leading ``\b`` in front of the whole group silently disabled the
-#: ``.codex/`` alternative — a standalone dot is a non-word character, so the
-#: boundary demanded a word character before it and ``See .codex/plans/x.md``
-#: matched nothing. The guard was blind to the exact path it was written for.
+#: An unfetchable TARGET: a repository path, a documentation/source filename, or
+#: a bare well-known document name.
+#:
+#: Widened after a measured escape table showed 18 of 23 shapes getting through:
+#: ``/mnt/...`` sandbox paths, ``.py``/``.rst``/``.toml`` files, a bare
+#: ``README``, a lowercase ``.md`` with no ``docs/`` prefix, and an uppercase
+#: ``.MD`` (the pattern was case-sensitive). Enumerating extensions is still an
+#: enumeration — but it is an enumeration of TARGETS, which is closed and
+#: inspectable, rather than of the verbs that might precede them, which is not.
+#:
+#: ``\b`` is applied ONLY to alternatives beginning with a word character: in
+#: front of the whole group it silently disabled the ``.codex/`` alternative,
+#: because a standalone dot is a non-word character and the boundary then
+#: demanded a word character before it.
+#:
+#: ``docs/Atomsphere/...`` is deliberately NOT matched: that is a Boomi
+#: documentation page key, and ``read_boomi_doc_page`` fetches it. A guard that
+#: flagged a reachable destination would teach the wrong lesson.
 _UNFETCHABLE_DOCUMENT = re.compile(
-    r"(?:\b(?:ADR-\d+|[A-Z][A-Z0-9_]{3,}\.md|docs/[\w/.-]+)|\.codex/[\w/.-]+)"
+    r"(?:"
+    r"\b(?:ADR-\d+|README)\b"
+    r"|\b(?:docs|src|tests|agents|examples)/(?!Atomsphere)[\w/.-]+"
+    r"|\.codex/[\w/.-]+"
+    r"|/mnt/[\w/.-]+"
+    r"|\b[\w.-]+\.(?:md|rst|py|toml|cfg|ini)\b"
+    r")",
+    re.IGNORECASE,
 )
 
 
@@ -1402,3 +1455,97 @@ def test_a_colon_linked_instruction_is_still_one_instruction():
         for fragment in fragments
     )
     assert caught
+
+
+def test_the_escape_shapes_that_leaked_are_all_matched_now():
+    """The measured escape table, pinned.
+
+    Two rows decide the design. ``Grounded in .codex/plans/x.md`` is bug #459's
+    own wording minus the word "see"; ``The states are at X.md §11`` is the exact
+    grammar an earlier fix adopted. Both carry no imperative, so an
+    imperative-gated guard can never see them — which is why the surfaces this
+    amendment owns are held to the stricter rule below instead.
+    """
+    targets = (
+        "/mnt/examples/04_environment_setup/manage_roles.py",
+        "docs/design.md",
+        ".codex/plans/issue-141-live-captures.md",
+        "AUTHORING_WORKFLOW_V1.md",
+        "README",
+        "guide.rst",
+        "pyproject.toml",
+        "SETUP.MD",
+        "notes.md",
+        "ADR-001",
+    )
+    for text in targets:
+        assert _UNFETCHABLE_DOCUMENT.findall(text), text
+
+    # A Boomi documentation page key IS fetchable, and must not be flagged.
+    assert not _UNFETCHABLE_DOCUMENT.findall("docs/Atomsphere/Integration/Process")
+
+
+def _amendment_owned_strings():
+    """Only the surfaces this amendment introduced or rewrote.
+
+    The strict rule below is deliberately NOT repo-wide. A blanket ban on
+    file-shaped tokens would flag ~55 pre-existing example-script labels in
+    other tools' descriptions and one legitimately fetchable Boomi doc key —
+    that is a separate cleanup, not this amendment's, and pretending otherwise
+    would either fail the build on unrelated prose or force a scope creep
+    nobody asked for.
+    """
+    surfaces = [
+        meta_tools.get_schema_template_action(schema_name="ProcessIRV1"),
+        meta_tools.get_schema_template_action(schema_name="process_ir_authoring"),
+    ]
+    facets = surfaces[1]["contract_page"]["facets"]
+    for category in facets["categories"]:
+        cursor = None
+        while True:
+            page = meta_tools.get_schema_template_action(
+                schema_name="process_ir_authoring",
+                category=category,
+                after_entry_id=cursor,
+                limit=50,
+            )["contract_page"]
+            surfaces.append(page)
+            if not page["truncated"]:
+                break
+            cursor = page["next_after_entry_id"]
+
+    def walk(value):
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, dict):
+            for item in value.values():
+                yield from walk(item)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                yield from walk(item)
+
+    for surface in surfaces:
+        yield from walk(surface)
+
+
+def test_no_surface_this_amendment_owns_names_a_repository_artifact_at_all():
+    """The STRICT rule, where this work is responsible for every word.
+
+    No imperative required. A repository path or document filename in a served
+    string is unreachable however the sentence is phrased, so the shapes that
+    escape an imperative-gated guard — "Grounded in X", "the rules are at X" —
+    are caught here by the target alone.
+
+    ``ADR-001`` is exempted as bare PROVENANCE: it carries no path and no
+    extension, nothing is promised to the reader, and the alternative is
+    rewriting 34 pre-existing attributions across selectors this amendment does
+    not own.
+    """
+    bare_provenance = re.compile(r"\bADR-\d+\b")
+    offenders = []
+    for text in _amendment_owned_strings():
+        for match in _UNFETCHABLE_DOCUMENT.findall(text):
+            if bare_provenance.fullmatch(match):
+                continue
+            offenders.append((match, text.strip()[:120]))
+    assert offenders == [], offenders
