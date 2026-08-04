@@ -335,9 +335,16 @@ class ArtifactFingerprintV1(_AuthoringModel):
 class AuthoringRevisionBindingV1(_AuthoringModel):
     """What a result was computed against, and what an apply must reproduce.
 
-    ``account_scope_hash`` is one-way over the profile and account scope. It
-    exists so a binding minted under one credential profile cannot be replayed
-    against another — without either identifier appearing in the response.
+    ``account_scope_hash`` is one-way over the ACCOUNT scope. It stops a binding
+    minted against one account from satisfying an apply against another, without
+    either identifier appearing in the response.
+
+    It is deliberately NOT a per-profile boundary, and it is not an authorization
+    token. Two credential profiles addressing one account produce the same scope
+    hash, so a compile made under one can be applied under the other. That is a
+    staleness/integrity guarantee, not a privilege one: Boomi's own authorization
+    still governs what each credential may do, and the apply recompiles under the
+    active profile before writing. See AUTHORING_WORKFLOW_V1.md §11.
     """
 
     contract_version: Literal["1"] = "1"

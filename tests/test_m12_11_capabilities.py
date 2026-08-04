@@ -550,3 +550,50 @@ def test_the_intent_kinds_are_derived_from_the_union_not_restated():
     manifest = build_authoring_contract_manifest()
     assert tuple(manifest["intent_kinds"]) == union_kinds
     assert set(manifest["support_matrix"]) == set(union_kinds)
+
+
+def test_the_authoring_workflow_contract_is_inside_the_revision():
+    """Architect re-review (P1). The #146 workflow contract — its eight phases,
+    mutation flags and terminology — sat outside `schema_revision`, so changing
+    which phase mutates Boomi left every outstanding binding looking current.
+    It embeds `revision_binding`, so only its contract fields are hashed."""
+    from boomi_mcp.authoring import contract as contract_module
+    from boomi_mcp.categories import meta_tools
+
+    contract_module.reset_manifest_cache()
+    bundle = contract_module._schema_bundle()
+    assert "authoring_workflow" in bundle
+    assert bundle["authoring_workflow"] != "unavailable"
+    baseline = bundle["authoring_workflow"]
+
+    real = meta_tools.get_schema_template_action
+
+    def _flip_phase(*args, **kwargs):
+        payload = dict(real(*args, **kwargs))
+        if kwargs.get("schema_name") == "authoring_workflow":
+            phases = [dict(p) for p in payload["phases"]]
+            phases[4]["mutates_boomi"] = True  # the read-only plan phase
+            payload["phases"] = phases
+        return payload
+
+    def _edit_prose(*args, **kwargs):
+        payload = dict(real(*args, **kwargs))
+        if kwargs.get("schema_name") == "authoring_workflow":
+            payload["authoring_note"] = "completely rewritten advisory prose"
+            payload["surface"] = "reworded surface label"
+        return payload
+
+    try:
+        meta_tools.get_schema_template_action = _flip_phase
+        contract_module.reset_manifest_cache()
+        flipped = contract_module._schema_bundle()["authoring_workflow"]
+
+        meta_tools.get_schema_template_action = _edit_prose
+        contract_module.reset_manifest_cache()
+        prose = contract_module._schema_bundle()["authoring_workflow"]
+    finally:
+        meta_tools.get_schema_template_action = real
+        contract_module.reset_manifest_cache()
+
+    assert flipped != baseline, "a mutation-flag change left the revision unmoved"
+    assert prose == baseline, "advisory prose leaked into the revision"

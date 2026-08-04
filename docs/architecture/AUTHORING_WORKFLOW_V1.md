@@ -308,12 +308,23 @@ process artifact. Closing this needs a production ProcessIR materializer with by
 the legacy renderer — an ADR-001 §9 cutover, and its own issue. **This is a scope reduction that
 needs explicit approval, not a defect.**
 
-**Account scope is keyed on the account, not the profile.** The plan asked for cross-*profile*
-replay prevention. Live QA measured the cost: two profiles addressing one account produced different
-bindings, so a valid compile was refused with a false "stale plan" diagnosis, and the shipped
-remediation text claimed account semantics the hash did not have. Two profiles for one account carry
-the same authority, so replay between them is not a privilege escalation — the security argument for
-profile-keying is weak, and the usability cost was measured. Deliberate amendment to the plan.
+**Account scope is keyed on the account, not the profile — a WEAKER property than the plan asked
+for, recorded here for approval.** The plan asked for cross-*profile* replay prevention. Live QA
+measured the cost of that: two profiles addressing one account produced different bindings, so a
+valid compile was refused with a false "stale plan" diagnosis.
+
+An earlier version of this note justified the change by claiming two profiles for one account "carry
+the same authority". **That is false** and the claim has been withdrawn: a profile stores its own
+username and password, so two profiles on one account can be different principals with different
+Boomi roles. What is actually true is narrower — the binding is a *staleness and integrity* check,
+not an authorization token. Boomi's own authorization still governs what each credential may do, and
+a typed apply recompiles under the ACTIVE profile before its first write, so a replayed binding
+cannot make profile B perform something B is not permitted to perform.
+
+The residual gap is real and is the thing to approve or reject: **a compile produced under profile A
+can be applied under profile B when both address the same account.** If that is unacceptable, the
+fix is to put the profile back into `account_scope_fingerprint` and accept that two profiles for one
+account can no longer share a binding.
 
 **The typed recipe intent carries invocations, not the #145 contribution union.** A recipe's
 `raw_input` is recipe-defined and open by construction; the engine's own input gate is what
@@ -327,11 +338,19 @@ not what a caller *sends*.
   under the *legacy* redaction, which this issue achieved byte-parity with but did not widen. A
   typed-only allowlisted projection would close it without touching legacy behaviour.
 - **Topology is validated, not planned.** `_validate_topology` calls `validate_system_topology` and
-  not `plan_system_topology`, so #144's resolved references, prerequisites and blockers are neither
-  returned nor bound into `plan_hash`. `required_decisions` is consequently always empty — the
-  machinery exists and is tested, but no decision family populates it.
+  not `plan_system_topology`. Blocking topology findings ARE returned, as authoring diagnostics, and
+  their codes and counts enter the validation summary that is hashed into `plan_hash` — so they are
+  surfaced and partially bound. What is omitted is the rest of the planner's output: resolved
+  references, prerequisites, typed blocker records, and unresolved decisions. `required_decisions` is
+  consequently always empty — the machinery exists and is tested, but no decision family populates it.
 - **Verify compares component XML, not dependency edges or reference versions**, and checks the
   capability revision but not the compiler revision.
+- **`schema_revision` covers selector-to-body hashes, not selector+version pairs.** The plan asked
+  for selector, real version and canonical hash with versioned retrieval. The eight selectors this
+  contract owns publish a real version and accept `@<version>`; the eleven inherited ones publish no
+  version and reject the suffix, and no version participates in the revision itself. A version bump
+  on an inherited selector therefore moves the revision only through its body hash.
+
 - **`build_integration` keeps its three-parameter signature.** The typed request rides inside the
   existing `config` JSON rather than becoming strict wrapper parameters. That was chosen so the
   wrapper signature stays byte-identical — the strongest backward-compatibility statement available

@@ -316,10 +316,18 @@ def _recipe_registry_block() -> Dict[str, Any]:
 #: detect, one level in.
 _INHERITED_SCHEMA_SELECTORS: Tuple[str, ...] = (
     "IntegrationSpecV1",
+    "authoring_workflow",
     "recipe_contributions",
     "recipe_registry",
     "workflow_sequences",
 )
+
+#: Keys excluded when fingerprinting a served payload that EMBEDS the revision.
+#: ``authoring_workflow`` publishes ``revision_binding`` inside itself, so hashing
+#: it whole would be self-referential — the revision would be an input to its own
+#: computation. The phases, actions, intent kinds and terminology ARE the
+#: contract, and they are what gets hashed.
+_SELF_REFERENTIAL_KEYS: Tuple[str, ...] = ("revision_binding",)
 
 
 #: Envelope keys that actually carry a SCHEMA. Different surfaces use different
@@ -358,6 +366,18 @@ def _inherited_schema_digest(selector: str) -> str:
         body = payload.get(key)
         if body:
             return sha256_fingerprint(body)
+    if selector == "authoring_workflow":
+        # No single schema body: this selector IS the contract. Hash its
+        # substantive fields, minus the revision it embeds and the advisory
+        # envelope keys, so a phase / action / terminology change moves the
+        # revision but a prose edit does not.
+        contract_body = {
+            k: v
+            for k, v in payload.items()
+            if k in ("phases", "actions", "intent_kinds", "terminology")
+        }
+        if contract_body:
+            return sha256_fingerprint(contract_body)
     raise KeyError(
         f"{selector!r} published no recognized schema body "
         f"(looked for {list(_SCHEMA_BODY_KEYS)})"

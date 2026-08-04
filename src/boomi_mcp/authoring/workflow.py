@@ -1469,9 +1469,13 @@ def preflight_typed_apply_v1(
     # The scope IS bound, transitively and unavoidably: ``account_scope_hash``
     # is a field of the revision binding, the binding is hashed into
     # ``plan_hash``, and ``plan_hash`` is hashed into ``compile_hash``. So a
-    # binding minted under profile A cannot satisfy an apply under profile B —
-    # it fails below as a ``compile_hash`` mismatch, which is exactly right:
-    # under B, that compile genuinely was never produced.
+    # binding minted against account A cannot satisfy an apply against account B.
+    #
+    # It is NOT a per-profile boundary: two profiles addressing one account share
+    # a scope hash, so a compile made under one applies under the other. That is
+    # deliberate and recorded (AUTHORING_WORKFLOW_V1.md §11) — the binding is a
+    # staleness check, not an authorization token, and Boomi's own authorization
+    # still governs what each credential may do.
 
     # Capability mismatch takes PRECEDENCE (ADR-001 §7): when the server's own
     # contract moved, every downstream hash is expected to differ, and reporting
@@ -1558,9 +1562,10 @@ def preflight_typed_apply_v1(
                     subject_id=field,
                     remediation=(
                         "Re-plan, recompile, and apply with the new binding. A "
-                        "binding minted under a DIFFERENT credential profile "
-                        "also fails here: the account scope is part of the hash "
-                        "chain, so that compile was never produced in this scope."
+                        "binding minted against a DIFFERENT ACCOUNT also fails "
+                        "here, because the account scope is part of the hash "
+                        "chain. Two profiles addressing the SAME account share a "
+                        "scope and do not conflict."
                     ),
                 )
                 for field in sorted(mismatches)
