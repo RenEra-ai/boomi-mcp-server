@@ -1080,7 +1080,7 @@ def test_direct_process_ir_next_steps_never_prepare_the_caller_for_apply():
 
 
 # ---------------------------------------------------------------------------
-# QA round 23: the class, pinned by EXECUTION rather than by spelling
+# The instruction contract, pinned by EXECUTION rather than by spelling
 # ---------------------------------------------------------------------------
 
 import ast  # noqa: E402
@@ -1088,60 +1088,113 @@ import re  # noqa: E402
 
 _CALL_PATTERN = re.compile(r"get_schema_template\(([^()]*)\)")
 
+#: A placeholder to substitute, or an enumeration of alternatives — both are
+#: EXAMPLES, not instructions to paste. Classified explicitly rather than left
+#: to fall out of a bare ``except``: a silent skip cannot tell "this is a
+#: template" from "this is malformed", which is exactly how a broken instruction
+#: would keep CI green.
+_TEMPLATE_MARKERS = ("<", "...", "…")
+_ALTERNATION = re.compile(r"'\s*\|\s*'")
 
-def _harvest_calls(value, into):
-    if isinstance(value, str):
-        into.update(_CALL_PATTERN.findall(value))
-    elif isinstance(value, dict):
-        for item in value.values():
-            _harvest_calls(item, into)
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            _harvest_calls(item, into)
+
+def _served_strings():
+    """Every string on every surface that serves instructions.
+
+    Deliberately NOT just the ``schema_name`` selectors. ``list_capabilities``
+    publishes 23 template call strings of its own, and the advisory planner
+    publishes discovery steps — a sweep that misses them is a sweep whose green
+    means less than it looks like.
+    """
+    surfaces = []
+    for name in meta_tools._valid_schema_names():
+        try:
+            surfaces.append(meta_tools.get_schema_template_action(schema_name=name))
+        except Exception:  # noqa: BLE001 — a selector that cannot build serves nothing
+            continue
+    for resource_type in meta_tools._VALID_RESOURCE_TYPES:
+        try:
+            surfaces.append(
+                meta_tools.get_schema_template_action(resource_type=resource_type)
+            )
+        except Exception:  # noqa: BLE001
+            continue
+    surfaces.append(meta_tools.list_capabilities_action())
+    surfaces.append(meta_tools.plan_integration_design_action())
+    surfaces.append(meta_tools.plan_integration_design_action(authoring_mode="process_ir"))
+
+    def walk(value):
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, dict):
+            for item in value.values():
+                yield from walk(item)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                yield from walk(item)
+
+    for surface in surfaces:
+        yield from walk(surface)
+
+
+def _classify_call(argument_text):
+    """``('template'|'executable'|'malformed', kwargs)`` for one harvested call."""
+    stripped = argument_text.strip()
+    if not stripped:
+        return "template", {}
+    if any(marker in stripped for marker in _TEMPLATE_MARKERS):
+        return "template", {}
+    if _ALTERNATION.search(stripped):
+        # `protocol='a'|'b'|'c'` enumerates choices; it is a template, and it is
+        # recognised as one HERE rather than by falling into an exception.
+        return "template", {}
+    try:
+        node = ast.parse(f"f({stripped})", mode="eval").body
+        if node.args:
+            return "malformed", {}
+        return "executable", {
+            keyword.arg: ast.literal_eval(keyword.value)
+            for keyword in node.keywords
+            if keyword.arg
+        }
+    except Exception:  # noqa: BLE001
+        return "malformed", {}
 
 
 def test_every_executable_instruction_the_server_serves_actually_executes():
     """The instrument that finally closed the class.
 
     Four rounds chased spellings — ``<kind>``, ``<that kind>``,
-    ``<one of them>``, ``category='node'`` — because each pin described what a
-    broken instruction LOOKED like. This one runs them: harvest every
-    ``get_schema_template(...)`` string the server serves, parse it, call it,
-    and require success. A fifth spelling cannot hide from it.
+    ``<one of them>``, an invalid ``category='node'`` — because each pin
+    described what a broken instruction LOOKED like. This one runs them.
 
-    Template strings carrying a placeholder are skipped deliberately — they are
-    example payloads meant to be substituted, not instructions to paste — and
-    the placeholder pin covers those separately.
+    A call is classified, never silently dropped: a template is skipped and
+    counted, an executable call must succeed, and anything that is neither
+    FAILS. Dropping the leftovers into an ``except`` is how a malformed
+    instruction would sit in a green build.
     """
     calls = set()
-    for name in meta_tools._valid_schema_names():
-        try:
-            _harvest_calls(meta_tools.get_schema_template_action(schema_name=name), calls)
-        except Exception:  # noqa: BLE001 — a selector that cannot build serves nothing
-            continue
+    for text in _served_strings():
+        calls.update(_CALL_PATTERN.findall(text))
+    assert calls, "the harvester found nothing — the pin is vacuous"
 
-    executed, failures = 0, []
+    executed, templates, malformed, failures = 0, 0, [], []
     for call in sorted(calls):
-        if "<" in call or "..." in call or "…" in call:
+        kind, kwargs = _classify_call(call)
+        if kind == "template":
+            templates += 1
             continue
-        try:
-            node = ast.parse(f"f({call})", mode="eval").body
-            if node.args:
-                continue
-            kwargs = {
-                keyword.arg: ast.literal_eval(keyword.value)
-                for keyword in node.keywords
-                if keyword.arg
-            }
-        except Exception:  # noqa: BLE001 — not a literal call, not an instruction
+        if kind == "malformed":
+            malformed.append(call)
             continue
         if not kwargs:
+            templates += 1
             continue
         result = meta_tools.get_schema_template_action(**kwargs)
         executed += 1
         if not result.get("_success"):
             failures.append((call, result.get("error_code")))
 
+    assert malformed == [], malformed
     assert executed >= 10, f"only {executed} instructions executed — pin is weak"
     assert failures == [], failures
 
@@ -1149,32 +1202,53 @@ def test_every_executable_instruction_the_server_serves_actually_executes():
 #: The citation boundary, written down so a pin can enforce it.
 #:
 #: A served string MAY name a document as PROVENANCE ("recorded in ADR-001 §6")
-#: — that is attribution, and a reader who cannot fetch it has lost nothing they
-#: were promised. A served string may NOT INSTRUCT the reader to go and read one
-#: ("See AUTHORING_WORKFLOW_V1.md §11"), because no MCP tool can fetch it and the
-#: instruction therefore cannot be carried out.
-#:
-#: Left unwritten for four rounds, this distinction produced a new spelling each
-#: time. It is a rule now.
+#: — attribution, and a reader who cannot fetch it has lost nothing they were
+#: promised. It may NOT INSTRUCT the reader to go and read one ("See
+#: AUTHORING_WORKFLOW_V1.md §11"), because no MCP tool can fetch it.
 _FETCH_IMPERATIVES = ("see ", "consult ", "read ", "fetch ", "refer to ")
+
+#: ``\b`` is applied ONLY to the alternatives that begin with a word character.
+#: A leading ``\b`` in front of the whole group silently disabled the
+#: ``.codex/`` alternative — a standalone dot is a non-word character, so the
+#: boundary demanded a word character before it and ``See .codex/plans/x.md``
+#: matched nothing. The guard was blind to the exact path it was written for.
 _UNFETCHABLE_DOCUMENT = re.compile(
-    r"\b(?:ADR-\d+|[A-Z][A-Z0-9_]{3,}\.md|docs/[\w/.-]+|\.codex/[\w/.-]+)"
+    r"(?:\b(?:ADR-\d+|[A-Z][A-Z0-9_]{3,}\.md|docs/[\w/.-]+)|\.codex/[\w/.-]+)"
 )
 
 
 def test_no_served_string_instructs_the_caller_to_read_an_unfetchable_document():
-    """Provenance is allowed; an unfollowable instruction is not."""
+    """Provenance is allowed; an unfollowable instruction is not.
+
+    Each served STRING is examined on its own. Serializing the whole payload and
+    splitting on sentence punctuation merged neighbouring fields — JSON puts
+    ``", "`` between them, not a sentence break — so an imperative in one field
+    and a permitted citation in another were read as one sentence and reported
+    as an offence that did not exist.
+    """
     offenders = []
-    for name in meta_tools._valid_schema_names():
-        try:
-            payload = meta_tools.get_schema_template_action(schema_name=name)
-        except Exception:  # noqa: BLE001
-            continue
-        for sentence in re.split(r"(?<=[.;])\s+", json.dumps(payload, default=str)):
+    for text in _served_strings():
+        for sentence in re.split(r"(?<=[.;:])\s+", text):
             lowered = sentence.lower()
             if not any(verb in lowered for verb in _FETCH_IMPERATIVES):
                 continue
             for match in _UNFETCHABLE_DOCUMENT.findall(sentence):
-                # An imperative and an unfetchable target in the same sentence.
-                offenders.append((name, match, sentence.strip()[:120]))
+                offenders.append((match, sentence.strip()[:130]))
     assert offenders == [], offenders
+
+
+def test_the_citation_guard_detects_the_paths_it_was_written_for():
+    """The guard's own sentinel.
+
+    A regex guard that matches nothing passes every payload. These are the two
+    shapes the rule exists to stop, plus the provenance form it must permit.
+    """
+    caught = "See .codex/plans/issue-141-live-captures.md for the evidence."
+    also = "Consult AUTHORING_WORKFLOW_V1.md §11 before authoring."
+    allowed = "The projection decision is recorded in ADR-001 §6."
+
+    for text in (caught, also):
+        assert _UNFETCHABLE_DOCUMENT.findall(text), text
+        assert any(verb in text.lower() for verb in _FETCH_IMPERATIVES), text
+    # Provenance carries no imperative, so the pair-test above lets it through.
+    assert not any(verb in allowed.lower() for verb in _FETCH_IMPERATIVES)
