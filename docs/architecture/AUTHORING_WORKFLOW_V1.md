@@ -41,29 +41,23 @@ No sixth tool is introduced. `compile` is an additive action on `build_integrati
 | 6 | `build_integration(action="compile", config={"authoring_request": …})` | **no** |
 | 7 | `build_integration(action="apply", …)` | **yes** — the first phase that may |
 
-A typed apply always answers in the typed envelope: `action`, `mutation_performed`, and — when it
-refused before writing anything — an `error_code`. `mutation_performed` is derived from EVIDENCE — the STATUS of each recorded step — not from
-`_success`. Only a `reused` step is a confirmed non-write; every other recorded step was attempted.
-A returned component id is deliberately not required: the builder records the failing step too, with
-`component_id: None`, and that is exactly the ambiguous case where the write reached Boomi but the
-response was lost. An unrecognized status counts as written for the same reason. The two directions
-are not symmetric: over-reporting costs a retry-safety hint, while under-reporting tells a caller
-nothing needs cleanup when something does: a dry run succeeds having written
-nothing, and a partial failure fails having already written something. Once mutation has begun the
-legacy `BUILD_*` failure stands and no `AUTHORING_*` code is attached, because that family's
-remediation means "nothing was mutated, re-plan and retry" — advice that would compound damage
-against live state under `conflict_policy="clone"`.
-| 8 | `build_integration(action="verify", config={"build_id": …})` | no |
+A typed apply always answers in the typed envelope: `action`, `mutation_performed`,
+`mutation_status`, and — when it provably touched nothing — an `error_code`.
 
-### Three planning concepts, deliberately distinct
+`mutation_status` is the honest one, because a single boolean was answering two questions that
+diverge exactly where it matters — *must the caller reconcile?* and *is this failure retry-safe?*
 
-* `plan_integration_design` — **advisory**. Doctrine, gaps, and typed next steps. It never turns
-  prose into executable intent, and it never builds an `AuthoringRequestV1` for you.
-* `build_integration(action="plan")` — **semantic**. Validation, resolved references, capability
-  gaps, required decisions, and the `IntegrationSpecV1` ComponentPlan preview.
-* `build_integration(action="compile")` — **canonical**. Normalized intent, deterministic artifact
-  fingerprints, and the compile hash apply binds to. Returns **no `build_id`** — nothing was created,
-  so there is nothing to identify.
+| `mutation_status` | meaning | `mutation_performed` | retry-safe |
+|---|---|---|---|
+| `performed` | a writing step returned a component id — the write was observed | `true` | no |
+| `possible` | a writing step was attempted and returned no id — the outcome is unknown to this server | `true` | no |
+| `none` | only `reused` bindings, or nothing attempted at all | `false` | **yes** — carries `AUTHORING_APPLY_VALIDATION_REQUIRED` |
+
+`possible` does not distinguish "the request committed and the response was lost" from "the request
+was rejected" or "no request was issued". The only available discriminator is the builder's error
+prose, and keying a safety decision on message text is how a reworded error silently becomes a
+data-loss bug. It therefore reports uncertainty rather than guessing, and withholds the retry code —
+retrying an unconfirmed write duplicates under `conflict_policy="clone"`.
 
 ## 3. Terminology — four graphs, four names
 

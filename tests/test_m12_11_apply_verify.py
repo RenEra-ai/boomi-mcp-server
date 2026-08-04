@@ -1012,3 +1012,60 @@ def test_a_reused_step_is_still_the_only_confirmed_non_write():
     ) is False
     # A plan/dry-run envelope carries no results at all.
     assert _components_were_written({"_success": True, "dry_run": True, "steps": []}) is False
+
+
+def test_the_response_says_how_SURE_it_is_that_something_was_written():
+    """QA #421. One boolean was answering two different questions — "must the
+    caller reconcile?" and "is this failure retry-safe?" — which diverge exactly
+    where it matters. The certainty is now published."""
+    from boomi_mcp.categories.integration_builder import (
+        _decorate_typed_apply,
+        _mutation_status,
+    )
+
+    observed = {"partial_results": {"a": {"status": "created", "component_id": "c1"}}}
+    assert _mutation_status(observed) == "performed"
+
+    ambiguous = {"partial_results": {"a": {"status": "created", "component_id": None}}}
+    assert _mutation_status(ambiguous) == "possible"
+
+    nothing = {"partial_results": {"a": {"status": "reused", "component_id": "pre"}}}
+    assert _mutation_status(nothing) == "none"
+
+    assert _mutation_status({"_success": True, "dry_run": True}) == "none"
+
+    # An observed write anywhere outranks an ambiguous one.
+    mixed = {
+        "partial_results": {
+            "a": {"status": "created", "component_id": None},
+            "b": {"status": "created", "component_id": "c2"},
+        }
+    }
+    assert _mutation_status(mixed) == "performed"
+
+
+def test_only_a_provably_untouched_apply_is_marked_retry_safe():
+    """`possible` withholds the retry code just as `performed` does: retrying an
+    unconfirmed write duplicates under conflict_policy="clone"."""
+    from boomi_mcp.categories.integration_builder import _decorate_typed_apply
+
+    for status_value, expect_code in (
+        ("created", False),   # observed or ambiguous -> not retry-safe
+        ("reused", True),     # confirmed non-write   -> retry-safe
+    ):
+        envelope = {
+            "_success": False,
+            "partial_results": {"a": {"status": status_value, "component_id": None
+                                      if status_value == "created" else "pre"}},
+        }
+        _decorate_typed_apply(envelope, {})
+        assert ("error_code" in envelope) is expect_code, status_value
+
+    # And the boolean stays conservative for the ambiguous case.
+    ambiguous = {
+        "_success": False,
+        "partial_results": {"a": {"status": "created", "component_id": None}},
+    }
+    _decorate_typed_apply(ambiguous, {})
+    assert ambiguous["mutation_performed"] is True
+    assert ambiguous["mutation_status"] == "possible"

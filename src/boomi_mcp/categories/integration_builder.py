@@ -7752,6 +7752,38 @@ def _components_were_written(result: Dict[str, Any]) -> bool:
     something does — and then invites a retry that duplicates under `clone`.
     Everything uncertain fails toward the recoverable mistake.
     """
+    return _mutation_status(result) != "none"
+
+
+def _mutation_status(result: Dict[str, Any]) -> str:
+    """``performed`` | ``possible`` | ``none`` — how sure the server is.
+
+    ``mutation_performed`` answers "must the caller reconcile?", and collapsing
+    that into a single boolean also answered a SECOND question it should not
+    have: "is this failure retry-safe?". Those diverge exactly where it matters.
+    A step with a writing status but no returned id may have committed and may
+    have failed before the request left — reporting ``true`` there claims a
+    write nobody observed, and reporting ``false`` hides one that may exist.
+
+    So the certainty is published:
+
+    ``performed``
+        A writing step returned a component id. The write is observed.
+    ``possible``
+        A writing step was attempted and returned no id. The outcome is
+        genuinely unknown to this server — the request may have committed, or
+        may have been rejected, or may never have been issued. It does NOT
+        distinguish further, because the only available discriminator is the
+        builder's error prose, and keying safety on message text is how a
+        reworded error silently becomes a data-loss bug.
+    ``none``
+        Nothing was attempted: only ``reused`` bindings, or no steps at all.
+
+    Both ``performed`` and ``possible`` withhold the retry-oriented error code,
+    because retrying an unconfirmed write duplicates under ``conflict_policy=
+    "clone"``. Only ``none`` is retry-safe.
+    """
+    status = "none"
     for bucket in ("results", "partial_results"):
         entries = result.get(bucket)
         if not isinstance(entries, dict):
@@ -7759,9 +7791,12 @@ def _components_were_written(result: Dict[str, Any]) -> bool:
         for entry in entries.values():
             if not isinstance(entry, dict):
                 continue
-            if str(entry.get("status", "")) not in _NON_WRITING_STEP_STATUSES:
-                return True
-    return False
+            if str(entry.get("status", "")) in _NON_WRITING_STEP_STATUSES:
+                continue
+            if entry.get("component_id"):
+                return "performed"
+            status = "possible"
+    return status
 
 
 def _decorate_typed_apply(result: Dict[str, Any], cfg: Dict[str, Any]) -> None:
@@ -7779,10 +7814,15 @@ def _decorate_typed_apply(result: Dict[str, Any], cfg: Dict[str, Any]) -> None:
     mutation has begun the legacy ``BUILD_*`` failure stands, exactly as ADR-001
     §7 requires.
     """
-    mutated = _components_were_written(result)
+    status = _mutation_status(result)
     result.setdefault("action", "apply")
-    result["mutation_performed"] = mutated
-    if not result.get("_success") and not mutated:
+    result["mutation_performed"] = status != "none"
+    # Published alongside the boolean, because the boolean cannot say whether
+    # the server OBSERVED the write or merely could not rule it out — and those
+    # need different handling: one is "reconcile what you built", the other is
+    # "check before you do anything".
+    result["mutation_status"] = status
+    if not result.get("_success") and status == "none":
         result.setdefault("error_code", AUTHORING_APPLY_VALIDATION_REQUIRED)
 
 
