@@ -1084,6 +1084,7 @@ def test_direct_process_ir_next_steps_never_prepare_the_caller_for_apply():
 # ---------------------------------------------------------------------------
 
 import ast  # noqa: E402
+import asyncio  # noqa: E402
 import re  # noqa: E402
 
 _CALL_PREFIX = "get_schema_template("
@@ -1123,6 +1124,43 @@ _TEMPLATE_MARKERS = ("<", "...", "…")
 _ALTERNATION = re.compile(r"'\s*\|\s*'")
 
 
+def _registered_tool_descriptions():
+    """The description of every tool FastMCP actually serves."""
+    loop = asyncio.new_event_loop()
+    try:
+        tools = loop.run_until_complete(server.mcp.list_tools())
+    finally:
+        loop.close()
+    return [tool.description for tool in tools if tool.description]
+
+
+def _paginate_contract(category):
+    """Every page of one contract category, to a TERMINAL page.
+
+    ONE implementation, used by both sweeps. It existed twice, and the copy
+    silently lost the cursor guards — so a pagination regression would have hung
+    CI in one sweep while the other reported it. A rule restated in a second
+    place drifts; this one is stated once.
+    """
+    pages = []
+    cursor = None
+    seen_cursors = set()
+    while True:
+        page = meta_tools.get_schema_template_action(
+            schema_name="process_ir_authoring",
+            category=category,
+            after_entry_id=cursor,
+            limit=50,
+        )["contract_page"]
+        pages.append(page)
+        if not page["truncated"]:
+            return pages
+        cursor = page["next_after_entry_id"]
+        assert cursor, f"{category}: truncated page carried no cursor"
+        assert cursor not in seen_cursors, f"{category}: cursor did not advance"
+        seen_cursors.add(cursor)
+
+
 def _served_strings():
     """Every string on every surface that serves instructions.
 
@@ -1153,43 +1191,22 @@ def _served_strings():
         schema_name="process_ir_authoring"
     )["contract_page"]["facets"]
     for category in facets["categories"]:
-        cursor = None
-        seen_cursors = set()
-        # Paginate to a TERMINAL page. A fixed iteration bound that falls out
-        # still truncated omits entries silently, and the sweeps then pass
-        # while never reading them — which is the failure mode this whole guard
-        # exists to prevent, one level up. The loop instead asserts that the
-        # cursor advances and that it ends on an untruncated page.
-        while True:
-            page = meta_tools.get_schema_template_action(
-                schema_name="process_ir_authoring",
-                category=category,
-                after_entry_id=cursor,
-                limit=50,
-            )["contract_page"]
-            surfaces.append(page)
-            if not page["truncated"]:
-                break
-            cursor = page["next_after_entry_id"]
-            assert cursor, f"{category}: truncated page carried no cursor"
-            assert cursor not in seen_cursors, f"{category}: cursor did not advance"
-            seen_cursors.add(cursor)
+        surfaces.extend(_paginate_contract(category))
 
     surfaces.append(meta_tools.list_capabilities_action())
     surfaces.append(meta_tools.plan_integration_design_action())
     surfaces.append(meta_tools.plan_integration_design_action(authoring_mode="process_ir"))
 
-    # Every registered tool's DESCRIPTION. This is the surface an LLM reads
+    # Every REGISTERED tool's description. This is the surface an LLM reads
     # before it reads anything else, and it was 0% covered: a poisoned tool
     # description — a broken call, a bare `.md`, a `docs/architecture/` path —
-    # left the whole suite green. A guard blind to the first surface is a guard
-    # whose green means little.
-    seen_docs = set()
-    for attribute in vars(server).values():
-        doc = getattr(attribute, "__doc__", None)
-        if callable(attribute) and doc and doc not in seen_docs:
-            seen_docs.add(doc)
-            surfaces.append(doc)
+    # left the whole suite green.
+    #
+    # Read off the FastMCP registry, NOT off ``vars(server)``. The module
+    # namespace also holds imported types (``Enum``, ``Any``, ``Path``) and
+    # private decorators whose docstrings FastMCP never serves; failing CI on
+    # one of those would be a false alarm about text no caller can see.
+    surfaces.extend(_registered_tool_descriptions())
 
     def walk(value):
         if isinstance(value, str):
@@ -1239,16 +1256,23 @@ def _classify_call(argument_text):
         return "template", {}
     try:
         node = ast.parse(f"f({stripped})", mode="eval").body
-        kwargs = {
-            keyword.arg: ast.literal_eval(keyword.value)
-            for keyword in node.keywords
-            if keyword.arg
-        }
+        # A parameter bound twice — positionally and by keyword, or by the same
+        # keyword twice — raises TypeError in a REAL call. Normalizing it into a
+        # dict silently picked a winner and let the broken example execute, so
+        # the guard passed exactly the instruction a caller could not run.
+        bound = []
         for index, argument in enumerate(node.args):
             if index >= len(_POSITIONAL_PARAMETERS):
                 return "malformed", {}
-            kwargs[_POSITIONAL_PARAMETERS[index]] = ast.literal_eval(argument)
-        return "executable", kwargs
+            bound.append((_POSITIONAL_PARAMETERS[index], ast.literal_eval(argument)))
+        for keyword in node.keywords:
+            if not keyword.arg:
+                return "malformed", {}
+            bound.append((keyword.arg, ast.literal_eval(keyword.value)))
+        names = [name for name, _ in bound]
+        if len(names) != len(set(names)):
+            return "malformed", {}
+        return "executable", dict(bound)
     except Exception:  # noqa: BLE001
         return "malformed", {}
 
@@ -1501,18 +1525,7 @@ def _amendment_owned_strings():
     ]
     facets = surfaces[1]["contract_page"]["facets"]
     for category in facets["categories"]:
-        cursor = None
-        while True:
-            page = meta_tools.get_schema_template_action(
-                schema_name="process_ir_authoring",
-                category=category,
-                after_entry_id=cursor,
-                limit=50,
-            )["contract_page"]
-            surfaces.append(page)
-            if not page["truncated"]:
-                break
-            cursor = page["next_after_entry_id"]
+        surfaces.extend(_paginate_contract(category))
 
     def walk(value):
         if isinstance(value, str):
@@ -1549,3 +1562,70 @@ def test_no_surface_this_amendment_owns_names_a_repository_artifact_at_all():
                 continue
             offenders.append((match, text.strip()[:120]))
     assert offenders == [], offenders
+
+
+def test_the_sweep_reads_registered_tools_not_every_module_global():
+    """`vars(server)` is not the served surface.
+
+    It also holds imported types (`Enum`, `Any`, `Path`) and private decorators
+    whose docstrings FastMCP never serves. Failing CI on one of those would be a
+    false alarm about text no caller can see — and passing because of one would
+    be worse.
+    """
+    descriptions = _registered_tool_descriptions()
+    assert 20 <= len(descriptions) <= 200, len(descriptions)
+    swept = set(_served_strings())
+    for description in descriptions:
+        assert description in swept
+    # The module namespace holds far more callables than the registry serves.
+    module_callables = [
+        name
+        for name, value in vars(server).items()
+        if callable(value) and getattr(value, "__doc__", None)
+    ]
+    assert len(module_callables) > len(descriptions)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        # positional + keyword for the SAME parameter
+        "'component', resource_type='process'",
+        # the same keyword twice
+        "resource_type='component', resource_type='process'",
+        # more positionals than the signature has
+        "'a', 'b', 'c', 'd', 'e', 'f', 'g'",
+    ],
+)
+def test_a_duplicate_or_overlong_binding_is_malformed_not_normalized(call):
+    """A real invocation raises TypeError; the guard must not paper over it.
+
+    Collapsing the binding into a dict silently picked a winner and executed a
+    call the caller could never make, so the guard passed exactly the broken
+    instruction it exists to catch.
+    """
+    assert _classify_call(call)[0] == "malformed"
+
+
+def test_the_pagination_helper_is_shared_by_both_sweeps():
+    """One statement of the cursor rule, not two.
+
+    It was written twice, and the copy lost the cursor-presence and advancement
+    guards — so a pagination regression would have hung CI in one sweep while
+    the other reported it. Asserting both sweeps route through the same helper
+    is what keeps the guards from drifting apart again.
+    """
+    import inspect
+
+    # Both SWEEPS route through the shared helper. (The pagination TESTS above
+    # page independently on purpose — an independent implementation is what
+    # makes them a check on the helper rather than a restatement of it.)
+    for sweep in (_served_strings, _amendment_owned_strings):
+        source = inspect.getsource(sweep)
+        assert "_paginate_contract" in source
+        assert "after_entry_id=cursor" not in source, "a sweep re-implemented paging"
+
+    # ...and the one implementation carries both guards.
+    helper = inspect.getsource(_paginate_contract)
+    assert "truncated page carried no cursor" in helper
+    assert "cursor did not advance" in helper
