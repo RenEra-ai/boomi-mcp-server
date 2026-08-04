@@ -1211,3 +1211,74 @@ def test_capability_manifest_immutable_and_complete():
         "scoped_try_catch",
         "typed_idempotency_evidence",
     ]
+
+
+# ---------------------------------------------------------------------------
+# #146 amendment: the served schema is published contract text for an LLM
+# ---------------------------------------------------------------------------
+
+
+def test_every_process_ir_def_has_a_non_empty_description():
+    """A ``$def`` with no description teaches a caller nothing.
+
+    20 of the 39 shipped undescribed at 845bda1 — including the three control
+    nodes whose behaviour a caller most needs (Branch, Decision, Flow Control).
+    The schema is SERVED, so an undescribed node is a node the caller has to
+    guess at or discover by failing a compile.
+    """
+    defs = process_ir_v1_json_schema()["$defs"]
+    assert len(defs) == 39
+    undescribed = sorted(name for name, body in defs.items() if not body.get("description"))
+    assert undescribed == []
+
+
+def test_no_served_description_cites_an_unserved_repository_artifact():
+    """A remediation a caller cannot fetch is a remediation that does not exist.
+
+    The capture ledgers under ``.codex/plans/`` and the pages under
+    ``docs/architecture/`` reach no MCP tool, and neither does the
+    capability manifest by its Python name. Evidence pointers belong in
+    comments — which are not served — and callers are pointed at
+    ``process_ir_authoring`` entry ids instead.
+    """
+    blob = json.dumps(process_ir_v1_json_schema())
+    for artifact in (".codex/", "docs/architecture", "PROCESS_IR_V1_CAPABILITIES"):
+        assert artifact not in blob, artifact
+
+
+def test_branch_description_states_ordered_sequential_leg_execution():
+    """The word the schema never said.
+
+    "sequential" and "parallel" both occurred ZERO times in the served schema at
+    845bda1, so nothing told a caller whether Branch legs race. They do not —
+    and the ordering is load-bearing, because execution-scoped state written in
+    an earlier leg is visible in a later one.
+    """
+    branch = process_ir_v1_json_schema()["$defs"]["BranchNodeV1"]["description"]
+    # Collapse the docstring's own line wrapping: a phrase that happens to
+    # straddle a newline is still the phrase the caller reads.
+    lowered = " ".join(branch.lower().split())
+    assert "sequential" in lowered
+    assert "order" in lowered
+    assert "never parallel" in lowered
+    # The depth bound is OURS, not the platform's — a caller told otherwise
+    # would go looking for a Boomi setting that does not exist.
+    assert "compiler bound" in lowered
+    assert "not a boomi platform limit" in lowered
+
+
+def test_flow_control_description_states_batching_without_configurable_parallelism():
+    """Documents-per-batch is the only authorable mode.
+
+    Deliberately NOT the stronger claim "threading is off": emission fixes the
+    mode with zero parallel chunks, which proves non-configurability, not that
+    no threading exists anywhere. Splitting and combining are separate explicit
+    ``data_process`` operations and are named as such.
+    """
+    flow = process_ir_v1_json_schema()["$defs"]["FlowControlNodeV1"]["description"]
+    lowered = " ".join(flow.lower().split())
+    assert "batch" in lowered
+    assert "for_each_count" in lowered
+    assert "no caller-configurable parallel" in lowered
+    assert "split_documents" in lowered and "combine_documents" in lowered
+    assert "threading" not in lowered

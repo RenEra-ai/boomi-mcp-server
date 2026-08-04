@@ -2,9 +2,25 @@
 
 Promotion of the frozen ``flow_sequence`` vocabulary (ADR-001 §4 "semantic seed",
 inventory §1.4) into a strict, versioned, discriminated Pydantic model family —
-NOT a parallel DSL (ADR-001 §12). The models ship DARK: nothing at runtime
-constructs or consumes them yet; no MCP surface, compiler, CFG, emitter, or XML
-behavior changes in #136.
+NOT a parallel DSL (ADR-001 §12).
+
+These models were DARK in #136. They are not any more: #146 serves this schema
+through ``get_schema_template(schema_name="ProcessIRV1")`` and compiles authored
+documents through ``build_integration(action="plan"|"compile")``. What has NOT
+changed is the authoring boundary — a caller still writes only semantic nodes and
+opaque component references, and never connector metadata, CFG edges, shape or
+layout ids, XML, or secrets.
+
+Because the schema is SERVED, every ``description`` in this module is published
+contract text read by an LLM caller. Two rules follow, both pinned by tests:
+
+- No description may cite a repository artifact (a ``.codex/`` capture ledger, a
+  ``docs/architecture/`` page, or "the PROCESS_IR_V1_CAPABILITIES manifest").
+  None of them is fetchable through any MCP tool, so a caller sent there is sent
+  nowhere. Cite a ``process_ir_authoring`` contract entry id instead; the
+  evidence pointers stay in comments, which are not served.
+- No description may contain a compiler-internal identifier
+  (``tests/test_process_ir_compiler_surface.py::FORBIDDEN_NAMES``).
 
 Contract highlights (ADR-001 §6/§7/§9/§11):
 
@@ -322,11 +338,29 @@ UseCacheTrueV1 = Annotated[StrictBool, AfterValidator(_use_cache_true_only)]
 
 
 class StaticPropertySourceV1(_ProcessIRBase):
+    """A literal string written into the property.
+
+    The value is authored as-is and is not interpreted, templated, or resolved
+    against anything at runtime. An empty string is legal and means "write an
+    empty value", which is distinct from omitting the source entirely. Secrets
+    must never be authored here: the whole document is scanned for
+    secret-shaped keys and rejected before compilation.
+    """
+
     value_type: Literal["static"]
     value: str = Field(..., description="Literal value (may be empty)")
 
 
 class CurrentPropertySourceV1(_ProcessIRBase):
+    """Re-uses the property's CURRENT value as the source value.
+
+    Carries no payload — the value is whatever the property already holds at
+    this point on the path. Combined with other sources in ``source_values``, it
+    is how a set-property step appends to, rather than replaces, what an earlier
+    write established. Because it READS the property, lineage validation still
+    requires an earlier write on the same path to establish it.
+    """
+
     value_type: Literal["current"]
 
 
@@ -339,6 +373,19 @@ def _require_non_blank(model: Any, *fields: str) -> None:
 
 
 class ProfilePropertySourceV1(_ProcessIRBase):
+    """Reads a single element out of the current document via a profile.
+
+    The profile is named by an opaque reference; ``element_id`` and
+    ``element_name`` address one element inside it. Both are required and
+    non-blank — the element is addressed by id, and the name is carried so a
+    reader can see which element was meant without resolving the profile.
+
+    Because the value comes from the CURRENT DOCUMENT, this source is
+    per-document: on a path where the document stream has been replaced (an
+    all-document cache read, a combine operation) it reads from the new stream,
+    not the old one.
+    """
+
     value_type: Literal["profile"]
     element_id: str = Field(..., min_length=1)
     element_name: str = Field(..., min_length=1)
@@ -352,6 +399,20 @@ class ProfilePropertySourceV1(_ProcessIRBase):
 
 
 class DdpPropertySourceV1(_ProcessIRBase):
+    """Reads a DYNAMIC DOCUMENT property (per-document scope).
+
+    ``property_name`` is the bare name — the wire prefix is owned by the
+    emitter and must not be authored. A dynamic document property travels with
+    its own document copy: it is visible to later steps on the same path, and it
+    is NOT visible across sibling Branch legs, because each leg receives an
+    independent copy of the document stream.
+
+    ``default_value`` is used when the property has not been written. Supplying
+    it does not discharge the lineage rule: a read with no establishing write on
+    the same path is still reported, because a silent default is how a
+    mis-authored flow looks identical to a correct one.
+    """
+
     value_type: Literal["ddp"]
     property_name: str = Field(..., min_length=1)
     default_value: Optional[str] = None
@@ -363,6 +424,19 @@ class DdpPropertySourceV1(_ProcessIRBase):
 
 
 class DppPropertySourceV1(_ProcessIRBase):
+    """Reads a DYNAMIC PROCESS property (per-execution scope).
+
+    ``property_name`` is the bare name — the wire prefix is owned by the
+    emitter. Unlike a dynamic DOCUMENT property, a dynamic PROCESS property is
+    scoped to the whole execution, so a value written in an earlier Branch leg
+    IS visible in a later leg. That ordering matters: legs run in the authored
+    order, so reading in leg 0 what leg 1 writes is rejected rather than
+    silently reading nothing.
+
+    ``default_value`` supplies a fallback when the property is unset; as with
+    the document-scoped source it does not discharge the read-before-write rule.
+    """
+
     value_type: Literal["dpp"]
     property_name: str = Field(..., min_length=1)
     default_value: Optional[str] = None
@@ -394,6 +468,16 @@ PropertySourceV1 = Annotated[
 
 
 class CustomScriptingOpV1(_ProcessIRBase):
+    """A Groovy 2 custom-scripting operation inside a Data Process step.
+
+    The script body is authored verbatim and is the one place in this contract
+    where free-form code is accepted. Its state effects are therefore OPAQUE to
+    validation: a script that reads or writes properties cannot be proven safe,
+    so lineage reports the effect as unknown unless a typed effect contract
+    declares it. Scripts must never embed credentials — the document is scanned
+    for secret-shaped keys before compilation.
+    """
+
     operation: Literal["custom_scripting"]
     script: str = Field(..., min_length=1)
     language: Literal["groovy2"] = "groovy2"
@@ -407,6 +491,18 @@ class CustomScriptingOpV1(_ProcessIRBase):
 
 
 class SplitDocumentsOpV1(_ProcessIRBase):
+    """Splits each inbound document into many, at a named profile element.
+
+    This is the EXPLICIT way to fan a document out in ProcessIR v1: splitting is
+    an authored Data Process operation, never an implicit side effect of another
+    node. ``link_element_key``/``link_element_name`` address the repeating
+    element inside the referenced profile.
+
+    It REPLACES the document stream: everything downstream on this path sees the
+    split documents, not the originals. A per-document property written before
+    the split therefore does not carry over unchanged.
+    """
+
     operation: Literal["split_documents"]
     profile_type: Literal["json", "xml"]
     profile_ref: ComponentRefV1
@@ -420,6 +516,19 @@ class SplitDocumentsOpV1(_ProcessIRBase):
 
 
 class CombineDocumentsOpV1(_ProcessIRBase):
+    """Combines many inbound documents into one, at a named profile element.
+
+    The counterpart of the split operation, and likewise EXPLICIT: combining is
+    something you author, not something a Branch, a Decision, or a batching flow
+    control does for you. ProcessIR v1 emits no join or merge of control paths —
+    combining documents and rejoining paths are different things, and only the
+    first is authorable here.
+
+    ``combine_into_link_element_key`` defaults to ``'null'``, which combines into
+    the document root. It REPLACES the document stream, so downstream steps see
+    the single combined document.
+    """
+
     operation: Literal["combine_documents"]
     profile_type: Literal["json", "xml"]
     profile_ref: ComponentRefV1
@@ -449,6 +558,14 @@ DataProcessOperationV1 = Annotated[
 
 
 class TrackOperandV1(_ProcessIRBase):
+    """A Decision operand read from a tracked property.
+
+    ``property_id`` names the property being compared; ``property_name`` is
+    optional display text and never changes which property is read.
+    ``default_value`` supplies a fallback when the property is unset, which is
+    what keeps a comparison total rather than erroring on an absent value.
+    """
+
     value_type: Literal["track"]
     property_id: str = Field(..., min_length=1)
     property_name: Optional[str] = None
@@ -462,6 +579,14 @@ class TrackOperandV1(_ProcessIRBase):
 
 
 class StaticOperandV1(_ProcessIRBase):
+    """A Decision operand that is a literal comparison value.
+
+    The value is compared as authored; an empty string is a legal operand and
+    compares as the empty value rather than as "no operand". Both sides of a
+    Decision are operands, so a static-vs-static comparison is expressible and
+    is constant — which is a design smell, not an error, and is not rejected.
+    """
+
     value_type: Literal["static"]
     static_value: str = Field(..., description="Literal comparison value (may be empty)")
 
@@ -542,18 +667,24 @@ class ConnectorCallNodeV1(_ProcessIRBase):
     placeholders carrying BOTH ids — a ConnectorCall authors only the *operation*
     symbol. The connection is derived by the compiler from its symbol-table
     resolution context, never authored (ADR-001 §6). That is not a stylistic
-    choice: no connector-action component declares its connection (live capture,
-    ``.codex/plans/issue-140-live-captures.md`` FINDING 1; the repo's own
-    operation builders document "Boomi binds the connection at the process
-    connector step, not in the operation XML"), so the operation->connection edge
-    is a fact of the component plan, and letting a caller author it would
-    recreate exactly the duplicate-authority split ADR-001 exists to remove.
+    choice: no connector-action component declares its connection, because Boomi
+    binds the connection at the process connector step rather than in the
+    operation configuration. The operation-to-connection edge is therefore a fact
+    of the component plan, and letting a caller author it would recreate exactly
+    the duplicate-authority split ADR-001 exists to remove.
 
     ``action`` is an OPTIONAL ASSERTION of caller intent. It never supplies
     emitter metadata: the family and action that reach the wire always come from
     the resolved operation symbol. A supplied value that disagrees with the
     authoritative one is an error, never an override.
+
+    Which family/action pairs are callable, whether each consumes or produces
+    documents, and whether each may sit inside a retried region are published
+    per pair — fetch ``process_ir_authoring`` entries under the
+    ``connector_action`` category, or ``node.connector_call`` for this node.
     """
+    # Evidence: .codex/plans/issue-140-live-captures.md FINDING 1. Kept in a
+    # comment, not the served description — a caller cannot fetch that path.
 
     kind: Literal["connector_call"]
     operation_ref: ComponentRefV1
@@ -573,24 +704,73 @@ class ConnectorCallNodeV1(_ProcessIRBase):
 
 
 class FlowControlNodeV1(_ProcessIRBase):
+    """Batches the document stream into groups of ``for_each_count`` documents.
+
+    ProcessIR v1 authors exactly ONE flow-control mode: documents-per-batch.
+    ``for_each_count`` must be a positive integer and is the batch size —
+    downstream steps on this path then run once per batch rather than once per
+    document.
+
+    There is no caller-configurable parallel chunking or multiprocess execution:
+    those settings are fixed by emission and are not authorable fields, so a
+    flow control never makes a path run concurrently. It also does not split or
+    combine documents — those are explicit ``data_process`` operations
+    (``split_documents`` / ``combine_documents``). Batching regroups the stream;
+    it does not change document contents.
+
+    See the ``process_ir_authoring`` entries ``node.flow_control`` and
+    ``capability.flow_control_parallel_chunks`` for the published states.
+    """
+
     kind: Literal["flow_control"]
     for_each_count: StrictInt = Field(..., gt=0)
     label: Optional[str] = None
 
 
 class MessageNodeV1(_ProcessIRBase):
+    """Replaces the document stream with one document built from ``text``.
+
+    The text is authored literally. Because the step PRODUCES its own document,
+    it does not read the inbound one, and everything downstream on this path
+    sees the message document instead of what arrived. That makes it useful as a
+    payload shaper and unsuitable as a passthrough.
+    """
+
     kind: Literal["message"]
     text: str = Field(..., min_length=1)
     label: Optional[str] = None
 
 
 class MapRefNodeV1(_ProcessIRBase):
+    """Applies a map component to the document stream.
+
+    The map is named by an opaque reference; its source and destination profiles
+    live in the map component and are never authored here. A map transforms each
+    document, so the stream shape is preserved while the contents change.
+
+    Like a custom script, a map's property effects are OPAQUE unless a typed
+    effect contract declares them, so lineage reports state written only inside
+    a map as unknown rather than assuming it.
+    """
+
     kind: Literal["map_ref"]
     map_ref: ComponentRefV1
     label: Optional[str] = None
 
 
 class DataProcessNodeV1(_ProcessIRBase):
+    """One or more explicit data-processing operations, run in authored order.
+
+    ``steps`` is a non-empty ordered list of ``custom_scripting``,
+    ``split_documents`` or ``combine_documents`` operations. This node is where
+    document fan-out and fan-in are authored EXPLICITLY: nothing else in this
+    contract splits or combines documents implicitly.
+
+    The operations run in the order given, and each one's stream effect applies
+    to the next — a split followed by a combine is not a no-op, because the
+    combine acts on the documents the split produced.
+    """
+
     kind: Literal["data_process"]
     steps: List[DataProcessOperationV1] = Field(..., min_length=1)
     label: Optional[str] = None
@@ -627,6 +807,17 @@ class CacheGetNodeV1(_ProcessIRBase):
 
 
 class CacheRemoveNodeV1(_ProcessIRBase):
+    """Removes ALL documents from a document cache.
+
+    Whole-cache removal is the only supported mode: ``remove_all_documents`` is
+    fixed ``true``, and keyed or indexed removal is capability-gated because no
+    verified wire shape exists for it (see the ``process_ir_authoring`` entry
+    ``capability.keyed_cache``).
+
+    The step operates on the cache, not on the document stream — it neither
+    consumes nor replaces the documents flowing through this path.
+    """
+
     kind: Literal["cache_remove"]
     cache_ref: ComponentRefV1
     remove_all_documents: KeyedCacheAllDocsV1 = Field(default=True, json_schema_extra={"const": True})
@@ -654,6 +845,21 @@ def _validate_bare_property_name(name: str) -> None:
 
 
 class SetDdpNodeV1(_ProcessIRBase):
+    """Writes a DYNAMIC DOCUMENT property (per-document scope).
+
+    ``name`` is the BARE property name — the emitter owns the wire prefix, so a
+    prefixed name is rejected rather than double-prefixed. ``source_values`` is
+    a non-empty ordered list; the sources are concatenated in the authored
+    order, which is how ``current`` composes with a literal to append.
+
+    Scope is the document copy. A value written here is visible to later steps
+    on the same path and is NOT visible in a sibling Branch leg, because each
+    leg gets its own copy of the stream. Where paths converge, only state
+    written on EVERY incoming path counts as established.
+
+    See the ``process_ir_authoring`` entry ``state_visibility.ddp``.
+    """
+
     kind: Literal["set_ddp"]
     name: str = Field(..., min_length=1, description="Bare property name (no wire prefix)")
     source_values: List[PropertySourceV1] = Field(..., min_length=1)
@@ -666,6 +872,23 @@ class SetDdpNodeV1(_ProcessIRBase):
 
 
 class SetDppNodeV1(_ProcessIRBase):
+    """Writes a DYNAMIC PROCESS property (per-execution scope).
+
+    ``name`` is the BARE property name — the emitter owns the wire prefix.
+    ``source_values`` is a non-empty ordered list concatenated in the authored
+    order.
+
+    Scope is the whole execution, not the document copy, so a value written in
+    one Branch leg IS visible in a LATER leg. Legs run in the authored order, so
+    a leg that reads what a later leg writes is reported rather than silently
+    reading nothing — reordering the legs is the fix.
+
+    ``persist`` requests that the value survive beyond the step that set it; it
+    changes durability, never scope.
+
+    See the ``process_ir_authoring`` entry ``state_visibility.dpp``.
+    """
+
     kind: Literal["set_dpp"]
     name: str = Field(..., min_length=1, description="Bare property name (no wire prefix)")
     source_values: List[PropertySourceV1] = Field(..., min_length=1)
@@ -701,6 +924,17 @@ class StopNodeV1(_ProcessIRBase):
 
 
 class ReturnDocumentsNodeV1(_ProcessIRBase):
+    """Terminal that returns the current document batch to the caller.
+
+    Returns whatever documents reach it on this path and TERMINATES the path —
+    nothing may follow it. It is the terminal a process invoked by another
+    process uses to hand its results back; a plain ``stop`` ends the path
+    without returning anything.
+
+    It is a ROOT-sequence terminal only: it is not admitted in a Branch leg, a
+    Decision arm, or a Try/Catch body.
+    """
+
     kind: Literal["return_documents"]
     label: Optional[str] = None
 
@@ -896,13 +1130,19 @@ class BranchLegV1(_ProcessIRBase):
 
     Steps are the linear vocabulary plus ``connector_call`` and ``process_call``;
     the terminal is a routed target endpoint, a target-less staging ``cache_put``
-    (the live staging pattern), a plain ``stop``, or a nested ``decision``.
+    (the staging pattern), a plain ``stop``, or a nested ``decision``.
 
-    A nested ``branch`` is deliberately ABSENT: the live capture proves Branch-leg
-    -> Decision (`.codex/plans/issue-141-live-captures.md` §2.1) but records no
-    Branch-leg -> Branch anywhere, and fail-closed is the rule for an unproven
-    placement.
+    A nested ``branch`` is deliberately ABSENT — a Branch is not a legal Branch-leg
+    terminal. Only placements with attested evidence are admitted, and this one
+    has none; the rule is fail-closed, so absence means rejected.
+
+    The exact admitted set for each slot is published as the
+    ``process_ir_authoring`` entries ``placement.branch_path.step`` and
+    ``placement.branch_path.terminal``.
     """
+    # Evidence: .codex/plans/issue-141-live-captures.md §2.1 attests
+    # Branch-leg -> Decision and records no Branch-leg -> Branch anywhere.
+    # Kept in a comment: a caller cannot fetch that path.
 
     steps: List[BranchLegStepV1] = Field(default_factory=list)
     terminal: Annotated[
@@ -923,6 +1163,30 @@ class BranchLegV1(_ProcessIRBase):
 
 
 class BranchNodeV1(_ProcessIRBase):
+    """Runs 2–25 legs in the authored order, SEQUENTIALLY.
+
+    Execution is ordered and sequential, one leg fully before the next — never
+    parallel. That ordering is load-bearing, not incidental: state written in an
+    earlier leg is visible to a later one at execution scope, so authoring a leg
+    that reads what a later leg writes is an error the ordering makes real.
+
+    Each leg receives an INDEPENDENT COPY of the document stream, so legs do not
+    see each other's document-scoped state and a leg cannot consume the
+    documents another leg needs.
+
+    A Branch TERMINALIZES its path: ProcessIR v1 emits no continuation after a
+    Branch, and no join or merge of the legs. Work that must happen "after the
+    branch" is authored inside every leg instead.
+
+    Nesting is bounded at two control levels — a compiler bound of this contract,
+    NOT a Boomi platform limit — and a nested Branch is not a legal leg terminal
+    (see ``BranchLegV1``). Deeper routing belongs in a subprocess.
+
+    Published states for the related capabilities live in
+    ``process_ir_authoring``: ``capability.continuation_after_branch_or_decision``,
+    ``capability.joins``, ``capability.parallel_branch_execution``.
+    """
+
     kind: Literal["branch"]
     legs: List[BranchLegV1] = Field(..., min_length=2, max_length=25)
     label: Optional[str] = None
@@ -933,9 +1197,17 @@ class DecisionTrueArmV1(_ProcessIRBase):
 
     Steps are the linear vocabulary plus ``connector_call`` and ``process_call``;
     the terminal is a routed target, a plain ``stop``, an ``exception``, or a
-    nested ``branch``/``decision``. Decision-in-Decision is live-attested
-    (`.codex/plans/issue-141-live-captures.md` §2.1).
+    nested ``branch``/``decision``.
+
+    This arm admits ``process_call`` and a routed target; the FALSE arm admits
+    neither. The asymmetry is deliberate — each placement is admitted only where
+    evidence attests it — so a body that is legal here may be rejected there.
+
+    The admitted sets are published as the ``process_ir_authoring`` entries
+    ``placement.decision_true_arm.step`` and ``placement.decision_true_arm.terminal``.
     """
+    # Evidence: .codex/plans/issue-141-live-captures.md §2.1 (Decision-in-Decision,
+    # and ProcessCall on TRUE outcomes only). Comment, not served text.
 
     steps: List[DecisionTrueArmStepV1] = Field(default_factory=list)
     terminal: Annotated[
@@ -968,16 +1240,21 @@ class DecisionTrueArmV1(_ProcessIRBase):
 class DecisionFalseArmV1(_ProcessIRBase):
     """FALSE (reject) arm (#141: rich bodies).
 
-    Steps are the linear vocabulary plus ``connector_call`` — no ``process_call``
-    (the live capture attests ProcessCall only on TRUE arms). The terminal is a
+    Steps are the linear vocabulary plus ``connector_call`` — no ``process_call``,
+    and no routed target, both of which the TRUE arm admits. The terminal is a
     ``stop``, an ``exception``, or a nested ``branch``/``decision``.
 
-    #141 REMOVED the "reject path is never a bare Stop" rule. That was legacy
-    BUILDER parity, not a platform rule: a real production Decision routes its
-    false outcome straight to a Stop with zero intervening steps (live evidence,
-    `.codex/plans/issue-141-live-captures.md` §2.1). The legacy ``flow_sequence``
-    surface keeps rejecting it — only the direct IR accepts it.
+    Unlike a Branch leg and the TRUE arm, this arm may be EMPTY: a Decision may
+    route its false outcome straight to a ``stop`` with zero intervening steps.
+    The legacy ``flow_sequence`` surface keeps rejecting that shape; only the
+    direct IR accepts it.
+
+    The admitted sets are published as the ``process_ir_authoring`` entries
+    ``placement.decision_false_arm.step`` and ``placement.decision_false_arm.terminal``.
     """
+    # Evidence: .codex/plans/issue-141-live-captures.md §2.1 shows a real
+    # Decision routing false -> stop with no steps, which is why #141 dropped the
+    # legacy "reject path is never a bare Stop" builder rule. Comment, not served.
 
     steps: List[DecisionFalseArmStepV1] = Field(default_factory=list)
     terminal: Annotated[
@@ -1000,6 +1277,26 @@ class DecisionFalseArmV1(_ProcessIRBase):
 
 
 class DecisionNodeV1(_ProcessIRBase):
+    """A two-way conditional: compares ``left`` to ``right`` and takes one arm.
+
+    Exactly one of ``true_arm``/``false_arm`` runs — the arms are mutually
+    exclusive, never both, and both are REQUIRED. Seven comparisons are
+    authorable: ``equals``, ``greaterthaneq``, ``lessthaneq``, ``greaterthan``,
+    ``lessthan``, ``regex``, ``wildcard``.
+
+    The two arms admit DIFFERENT bodies (see ``DecisionTrueArmV1`` and
+    ``DecisionFalseArmV1``) — a body that is legal on one is not automatically
+    legal on the other.
+
+    Like a Branch, a Decision TERMINALIZES its path: ProcessIR v1 emits no
+    continuation after it and no join of the arms, so work that must follow the
+    decision is authored inside both arms. Where the arms would conceptually
+    converge, only state written on BOTH is treated as established.
+
+    Nesting is bounded at two control levels — a compiler bound of this contract,
+    not a Boomi platform limit.
+    """
+
     kind: Literal["decision"]
     comparison: Literal[
         "equals",
