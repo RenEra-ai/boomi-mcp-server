@@ -42,6 +42,69 @@ No sixth tool is introduced. `compile` is an additive action on `build_integrati
 | 7 | `build_integration(action="apply", …)` | **yes** — the first phase that may |
 | 8 | `build_integration(action="verify", config={"build_id": …})` | no |
 
+### Authoring ProcessIR directly (#146 amendment)
+
+A caller who intends to author `ProcessIRV1` directly does not need an archetype, and the sequence
+above no longer pretends otherwise. `plan_integration_design(authoring_mode="process_ir")` returns
+`mode="process_ir_pre_selection"`: **no archetype is reported as a missing input**, and discovery
+starts at the revision surface rather than the archetype catalog.
+
+| # | Call | What it gives you |
+|---|---|---|
+| 1 | `list_capabilities()` | served selectors, capability states, the three revisions |
+| 2 | `get_schema_template(schema_name="ProcessIRV1")` | the **grammar** — what a document may contain |
+| 3 | `get_schema_template(schema_name="process_ir_authoring", …)` | the **behaviour** — what the constructs mean |
+| 4 | `plan_integration_design(authoring_mode="process_ir")` | doctrine, capability gaps, the apply refusal |
+| 5 | `build_integration(action="plan", …)` | semantic validation against your document |
+| 6 | `build_integration(action="compile", …)` | canonical compile + the compile hash |
+
+There is deliberately **no step 7**. A direct ProcessIR intent is plan/compile-only while
+`authoring.typed_apply.process_materialization` is published `unsupported` (§11, Decision 1), and the
+brief says so in its own gap list rather than leaving the reader to notice the sequence stopped early.
+
+`authoring_mode` must be requested explicitly. `intent_flags` never selects it — a relevance hint
+that could switch a response shape is a hint that changes an answer nobody asked to change.
+
+### The behavioural authoring contract
+
+`get_schema_template(schema_name="process_ir_authoring")` serves one addressable entry per public
+ProcessIR node, capability, body placement, connector action, diagnostic, state scope, doctrine
+pattern and recipe. It exists because the JSON Schema states the **grammar** and nothing states the
+**semantics**: before it, a caller could not learn from any MCP response that Branch paths run in the
+authored order, which node kinds a Decision's false arm admits, or that retry over an action with no
+established replay safety is refused whatever evidence they attach.
+
+**Retrieval is budgeted.** A bare call returns the schema, the facets and **zero** entries — ask for
+what you need. Filters (`authoring_entry_id`, `node_kind`, `category`, `capability_id`,
+`workflow_stage`, `after_entry_id`, `limit`) AND together, results sort by `contract_entry_id`, and a
+64 KiB payload budget applies on top of the 1–50 count bound. An unknown *enumerated* value is
+`INVALID_INPUT` naming the facet; an unknown *exact* entry id is a **success with zero entries**, so a
+stale citation is observable rather than indistinguishable from a malformed request.
+
+**One capability vocabulary.** Everything is published as `supported` / `gated` / `unsupported`, with
+each entry also carrying its authority's own `source_state` verbatim and the published mapping from
+the three pre-existing vocabularies. `gated` ("not yet") and `unsupported` ("never") never collapse.
+Doctrine's `guidance_only` and `na` map to `unsupported` with `applicable: false` — they are advice,
+not a capability that was withdrawn.
+
+**Every entry names its source** and whether it was `generated` from a named runtime registry or
+`parity_pinned` against one. See ADR-001 §6 for why the projection is admitted at all and what it may
+never carry.
+
+### Diagnostics carry their own repair
+
+A blocked plan or compile no longer genericizes the validator. Each diagnostic carries the canonical
+code in `cause_codes`, the authored path and `node_identity`, the validator's **own** static
+remediation, re-validated structural `evidence`, and `authoring_contract_entry_ids` — every one of
+which resolves through `get_schema_template(schema_name="process_ir_authoring",
+authoring_entry_id=…)`. **No served remediation cites a repository artifact**, because no MCP tool
+can fetch one.
+
+A typed request whose `process_ir` document is malformed is reported by **ProcessIR's own parser**:
+stable `PROCESS_IR_*` code and an RFC 6901 pointer into the authored payload
+(`/intent/process_ir/...`), not a pydantic `loc`/`type` pair. Pydantic's `input`, `ctx` and `msg` are
+never serialized, so the authored value never travels.
+
 ### Three planning concepts, deliberately distinct
 
 * `plan_integration_design` — **advisory**. Doctrine, gaps, and typed next steps. It never turns
@@ -346,13 +409,19 @@ not what a caller *sends*.
   `unresolved_decisions` — plus topology validation *advisories*, which are discarded entirely (only
   errors and warnings become authoring diagnostics). `required_decisions` is
   consequently always empty — the machinery exists and is tested, but no decision family populates it.
-- **Verify compares component XML, not dependency edges or reference versions**, and checks the
-  capability revision but not the compiler revision.
-- **`schema_revision` covers selector-to-body hashes, not selector+version pairs.** The plan asked
-  for selector, real version and canonical hash with versioned retrieval. The eight selectors this
-  contract owns publish a real version and accept `@<version>`; the eleven inherited ones publish no
-  version and reject the suffix, and no version participates in the revision itself. A version bump
-  on an inherited selector therefore moves the revision only through its body hash.
+- **Verify compares component XML, not dependency edges or reference versions.** ~~and checks the
+  capability revision but not the compiler revision.~~ **The compiler-revision half is CLOSED by the
+  #146 amendment**: `compiler_revision` now covers the body-placement rows, the connector capability
+  rows, the replay-safety rules, the state-visibility model, the process-property scope, all three
+  diagnostic spec tables and the served authoring projection — so a behaviour change moves it. The
+  XML-versus-edges limit stands.
+- ~~**`schema_revision` covers selector-to-body hashes, not selector+version pairs.**~~ **CLOSED by
+  the #146 amendment.** Owned selector versions now participate in `schema_revision` directly, so a
+  version bump moves it even when the body is byte-identical. Separately,
+  `cache_property_authoring` was absent from the inherited selectors *and* published no recognized
+  schema body, so a change to the state-visibility semantics moved nothing at all; it is now
+  inherited with a manifest-free digest, and a visibility change moves `schema_revision`. Inherited
+  selectors still publish no version of their own and still reject the `@<version>` suffix.
 
 - **`build_integration` keeps its three-parameter signature.** The typed request rides inside the
   existing `config` JSON rather than becoming strict wrapper parameters. That was chosen so the
