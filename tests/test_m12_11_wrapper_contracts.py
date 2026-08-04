@@ -263,7 +263,11 @@ def test_the_served_status_contract_matches_what_the_classifier_does():
     # a SUCCEEDED apply has no partial_results at all, and its only tell is a
     # null component_id. Both routes must be readable from the served text.
     assert "results[<key>].component_id" in doc
-    assert "there is no" in doc and "partial_results" in doc
+    # "SUCCEEDED, there is no" and not the two tokens separately: both already
+    # occurred in this docstring for unrelated reasons ("there is no build to
+    # identify" in the compile bullet), so the loose form passed on the very
+    # revision it exists to catch — zero coverage wearing the shape of a pin.
+    assert "SUCCEEDED, there is no" in doc
     # The successful sub-case must not be described as a confirmed creation —
     # that is the certainty `possible` exists to withhold.
     assert "UNCONFIRMED" in doc
