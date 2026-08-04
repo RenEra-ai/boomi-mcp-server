@@ -1268,13 +1268,23 @@ def test_every_executable_instruction_the_server_serves_actually_executes():
 #: — attribution, and a reader who cannot fetch it has lost nothing they were
 #: promised. It may NOT INSTRUCT the reader to go and read one ("See
 #: AUTHORING_WORKFLOW_V1.md §11"), because no MCP tool can fetch it.
-#: Matched on a WORD BOUNDARY, then any of space / colon / punctuation. A
-#: space-suffixed literal list missed ``Read: docs/design.md`` — the colon form
-#: keeps the instruction and its target in one clause, which is exactly the
-#: shape the previous fix preserved, so the verb list has to reach it too.
+#: Matched on WORD BOUNDARIES ALONE — no separator class at all.
+#:
+#: Two narrower versions leaked in turn. A space-suffixed literal list missed
+#: ``Read: docs/design.md``; replacing it with ``[\s:]`` then still missed
+#: ``See—docs/design.md``, ``See(docs/x.md)`` and ``consult,docs/x.md``. Every
+#: attempt to enumerate the separators that can follow a verb was another list
+#: of spellings, which is the defect this guard exists to catch — so the
+#: separator is not enumerated. A trailing word boundary already prevents
+#: ``seeded`` from matching ``see``, and it accepts end-of-string too.
+#:
+#: The guard errs toward catching: a sentence containing a fetch verb AND an
+#: unfetchable target is reported even when the verb was incidental. A false
+#: positive costs one reworded sentence; a false negative ships an instruction
+#: nobody can follow.
 _FETCH_IMPERATIVE_VERBS = ("see", "consult", "read", "fetch", "refer to")
 _FETCH_IMPERATIVE = re.compile(
-    r"\b(?:" + "|".join(v.replace(" ", r"\s+") for v in _FETCH_IMPERATIVE_VERBS) + r")\b[\s:]",
+    r"\b(?:" + "|".join(v.replace(" ", r"\s+") for v in _FETCH_IMPERATIVE_VERBS) + r")\b",
     re.IGNORECASE,
 )
 
@@ -1324,8 +1334,16 @@ def test_the_citation_guard_detects_the_paths_it_was_written_for():
     also = "Consult AUTHORING_WORKFLOW_V1.md §11 before authoring."
     allowed = "The projection decision is recorded in ADR-001 §6."
 
-    direct_colon = "Read: docs/design.md"
-    for text in (caught, also, direct_colon):
+    # Every separator shape that leaked in a previous round, pinned so the next
+    # narrowing of this pattern fails here rather than in production text.
+    separators = (
+        "Read: docs/design.md",
+        "See—docs/design.md",
+        "See(docs/design.md)",
+        "consult,docs/design.md",
+        "Refer to docs/design.md",
+    )
+    for text in (caught, also, *separators):
         assert _UNFETCHABLE_DOCUMENT.findall(text), text
         assert _has_fetch_imperative(text), text
     # Provenance carries no imperative, so the pair-test above lets it through.
