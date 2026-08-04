@@ -65,7 +65,7 @@ diverge exactly where it matters — *must the caller reconcile?* and *is this f
 | `mutation_status` | meaning | `mutation_performed` | retry-safe |
 |---|---|---|---|
 | `performed` | a writing step SUCCEEDED and returned a component id — the write was observed | `true` | no |
-| `possible` | a writing step was attempted and returned no id — the outcome is unknown to this server | `true` | no |
+| `possible` | a writing step was attempted and this server cannot confirm the outcome — it failed, or succeeded without returning an id | `true` | no |
 | `none` | only `reused` bindings, or nothing attempted at all | `false` | **yes** — a FAILED apply in this state carries an error code (see below); a successful one carries no error at all |
 
 The code on a failed `none` apply is whichever one the refusal already named — `AUTHORING_PLAN_STALE`

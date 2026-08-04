@@ -2407,13 +2407,27 @@ if build_integration_action:
         A typed apply reports how sure it is, because "must I reconcile?" and
         "is this safe to retry?" are different questions:
 
-            mutation_status="performed" - a writing step returned a component id;
-                                          the write was observed. Reconcile.
-            mutation_status="possible"  - a write was attempted and returned no
-                                          id; this server does not know whether
-                                          it committed. Check before retrying —
-                                          a retry duplicates under
+            mutation_status="performed" - a writing step SUCCEEDED and returned a
+                                          component id; the write was observed.
+                                          Reconcile.
+                                          Note: an id alone is NOT enough. A
+                                          failed update carries the target id it
+                                          was aiming at (a pre-write component
+                                          GET that times out returns one), so
+                                          that case is "possible", not
+                                          "performed".
+                                          Do not infer the status from the
+                                          presence of an id — read the field.
+            mutation_status="possible"  - a write was attempted and this server
+                                          cannot confirm the outcome: the step
+                                          failed, or succeeded without returning
+                                          an id. It may or may not have
+                                          committed. Check before retrying — a
+                                          retry duplicates under
                                           conflict_policy="clone".
+                                          A step's own retryable/error_code
+                                          evidence survives in
+                                          partial_results[<key>].result.
             mutation_status="none"      - nothing was attempted (only reuse, or
                                           refused before any write). A FAILURE in
                                           this state is retry-safe. Its error_code

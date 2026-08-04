@@ -216,3 +216,41 @@ def test_the_retry_safety_signal_is_the_status_not_one_error_code():
         "AUTHORING_APPLY_VALIDATION_REQUIRED",
     ):
         assert code in doc, code
+
+
+def test_the_served_status_contract_matches_what_the_classifier_does():
+    """Codex review (round 4), P2. The docstring defined `performed` as "returned
+    a component id" while the classifier requires the step to have SUCCEEDED —
+    so a failed update with a target id is `possible`-with-ID, and a client
+    following the served text would have mishandled it.
+
+    Derived from the classifier, not restated: this asserts the SHAPES the
+    implementation actually produces are the ones the description documents.
+    """
+    from boomi_mcp.categories.integration_builder import _mutation_status
+
+    failed_update_with_id = {
+        "partial_results": {
+            "a": {
+                "status": "updated",
+                "component_id": "target-1",
+                "result": {"_success": False, "retryable": True},
+            }
+        }
+    }
+    succeeded_without_id = {
+        "partial_results": {
+            "a": {"status": "created", "component_id": None,
+                  "result": {"_success": True}}
+        }
+    }
+    assert _mutation_status(failed_update_with_id) == "possible"
+    assert _mutation_status(succeeded_without_id) == "possible"
+
+    doc = server.build_integration.__doc__
+    # The served text must state the id-alone caveat, since that is exactly the
+    # inference the previous wording invited.
+    assert "an id alone is not enough" in doc.lower()
+    assert "SUCCEEDED and returned a" in doc
+    assert "succeeded without returning" in doc
+    assert "partial_results[<key>].result" in doc
