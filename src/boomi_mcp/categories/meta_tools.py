@@ -9947,7 +9947,27 @@ def plan_integration_design_action(
         # refusal is a published capability. Ending the steps at compile without
         # saying why would look like an oversight; saying it here makes the
         # boundary discoverable before the caller authors anything.
-        typed_next_steps = [step for step in typed_next_steps if step["action"] != "apply"]
+        typed_next_steps = [
+            # ...and the compile step must stop describing itself as preparation
+            # for that apply. Dropping the step while leaving "obtain the
+            # compile hash to bind apply to" told the caller, in one response,
+            # both that apply is unsupported and that they should get ready for
+            # it.
+            {
+                **step,
+                "why": (
+                    "Canonically compile and obtain the compile hash and "
+                    "artifact fingerprints. This is the last phase for a direct "
+                    "ProcessIR intent: apply is refused, so the hash is "
+                    "evidence of WHAT was compiled, not a binding to spend. "
+                    "Performs zero remote mutation."
+                ),
+            }
+            if step["action"] == "compile"
+            else step
+            for step in typed_next_steps
+            if step["action"] != "apply"
+        ]
         process_ir_block = _plan_process_ir_block()
 
     return {

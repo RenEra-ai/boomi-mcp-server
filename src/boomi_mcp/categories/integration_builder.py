@@ -6885,6 +6885,9 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             AuthoringWorkflowError,
             preflight_typed_apply_v1,
         )
+        from ..models.authoring_workflow import (
+            AuthoringRequestProcessIRValidationError,
+        )
 
         ambiguous = _reject_ambiguous_authoring_request(config)
         if ambiguous:
@@ -6896,6 +6899,14 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 profile=profile,
                 account_id=_client_account_id(boomi_client),
             )
+        except AuthoringRequestProcessIRValidationError as exc:
+            # #146 amendment: apply routes a malformed nested ProcessIR exactly
+            # as plan and compile do. Routing the parser through the preflight
+            # without adding this catch let the new exception reach the generic
+            # dispatcher, which answers with an unstructured failure carrying
+            # neither the typed-apply mutation fields nor any diagnostic — the
+            # worst of the three shapes, on the one route that mutates.
+            return _reject_invalid_process_ir(exc, "apply")
         except ValidationError as exc:
             return _reject_invalid_typed_request(exc, "apply")
         except AuthoringWorkflowError as exc:

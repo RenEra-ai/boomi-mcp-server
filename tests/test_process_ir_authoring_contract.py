@@ -910,3 +910,170 @@ def test_a_remediation_pointer_delivers_more_than_the_sentence_that_cited_it():
             )
             checked += 1
     assert checked, "no diagnostic named a contract call — the pin is vacuous"
+
+
+# ---------------------------------------------------------------------------
+# Codex commit-review round 1 regressions
+# ---------------------------------------------------------------------------
+
+
+def _malformed_apply_config():
+    return {
+        "authoring_request": {
+            "contract_version": "1",
+            "intent": {
+                "intent_kind": "process_ir",
+                "integration_name": "x",
+                "component_key": "p",
+                "process_ir": {
+                    "version": "1",
+                    "body": {
+                        "kind": "sequence",
+                        "steps": [
+                            {
+                                "kind": "source",
+                                "connection_ref": "$ref:c",
+                                "operation_ref": "$ref:o",
+                            },
+                            {
+                                "kind": "branch",
+                                "legs": [
+                                    {
+                                        "steps": [{"kind": "message", "text": "m"}],
+                                        "terminal": {"kind": "stop"},
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                },
+            },
+            "expected_capability_revision": "sha256:" + "0" * 64,
+            "expected_compile_hash": "sha256:" + "0" * 64,
+        }
+    }
+
+
+def test_apply_reports_a_malformed_process_ir_like_plan_and_compile_do():
+    """The route that MUTATES must not be the one with the worst error shape.
+
+    Routing the shared parser through the typed-apply preflight without adding
+    the matching catch let the new exception reach the generic dispatcher: an
+    unstructured failure carrying neither the typed-apply mutation fields nor
+    any diagnostic. Four validation sites, three of them updated, is not a
+    shared parser.
+    """
+    result = integration_builder.build_integration_action(
+        None, "p", "apply", config=_malformed_apply_config()
+    )
+    assert result["_success"] is False
+    assert result["error_code"] == "INVALID_INPUT"
+    # The typed-apply envelope's always-present promise.
+    assert result["mutation_performed"] is False
+    assert result["mutation_status"] == "none"
+    diagnostics = result["authoring_diagnostics"]
+    assert diagnostics
+    assert diagnostics[0]["code"].startswith("PROCESS_IR_")
+    assert diagnostics[0]["path"].startswith("/intent/process_ir")
+
+
+@pytest.mark.parametrize("action", ["plan", "compile", "apply"])
+def test_all_three_typed_routes_agree_on_a_malformed_process_ir(action):
+    """One parser must mean one reported shape, whichever door you came in by."""
+    result = integration_builder.build_integration_action(
+        None, "p", action, config=_malformed_apply_config()
+    )
+    assert result["error_code"] == "INVALID_INPUT"
+    codes = {row["code"] for row in result["validation_errors"]}
+    assert "PROCESS_IR_SCHEMA_BRANCH_CARDINALITY" in codes
+
+
+def test_every_generated_recipe_selector_is_actually_fetchable():
+    """A selector nobody can fetch is a citation that fails at the first hop.
+
+    The registry SNAPSHOT is served under `recipe_registry`; a single descriptor
+    is fetched with `recipe:<id>[@<version>]`. Emitting the former for the
+    latter made every per-recipe selector return SCHEMA_NAME_UNSUPPORTED.
+    """
+    checked = 0
+    for entry in build_process_ir_authoring_entries():
+        if not entry.recipe_selector:
+            continue
+        payload = meta_tools.get_schema_template_action(
+            schema_name=entry.recipe_selector
+        )
+        assert payload["_success"] is True, (entry.contract_entry_id, payload)
+        checked += 1
+    assert checked, "no recipe selector was generated — the pin is vacuous"
+
+
+def test_every_generated_doctrine_selector_is_actually_fetchable():
+    """The sibling property, pinned for the same reason."""
+    checked = 0
+    for entry in build_process_ir_authoring_entries():
+        if not entry.doctrine_selector:
+            continue
+        payload = meta_tools.get_schema_template_action(
+            schema_name=entry.doctrine_selector
+        )
+        assert payload["_success"] is True, (entry.contract_entry_id, payload)
+        checked += 1
+    assert checked
+
+
+def test_a_connector_node_publishes_no_blanket_document_claim():
+    """What a connector call returns is decided by its ACTION, not by the node.
+
+    A single ``output_documents: documents`` on the node entry contradicted the
+    published database ``Send`` row, which produces none — and an exact-id
+    lookup returns only the node, so a caller citing it would place a consumer
+    after a terminal call.
+    """
+    for kind in ("connector_call", "source", "target"):
+        entry = next(
+            e
+            for e in build_process_ir_authoring_entries()
+            if e.contract_entry_id == f"node.{kind}"
+        )
+        assert entry.document_semantics is None, kind
+        linked = [
+            related
+            for related in entry.related_entry_ids
+            if related.startswith("connector_action.")
+        ]
+        assert linked, f"node.{kind} must point at the per-action rows"
+        for related in linked:
+            assert resolve_one(related) is not None
+
+
+def resolve_one(entry_id):
+    page = fetch(authoring_entry_id=entry_id)["contract_page"]
+    return page["entries"][0] if page["entries"] else None
+
+
+def test_the_default_value_description_matches_what_the_validator_does():
+    """A served description that contradicts the validator is worse than none.
+
+    ``_reads_of`` marks a defaulted read ``has_default=True`` and the lineage
+    walk then skips the unmet-read check, so the rejection the descriptions
+    promised never happens. A caller would repair a flow that was never broken.
+    """
+    from boomi_mcp.models.process_ir import process_ir_v1_json_schema
+
+    defs = process_ir_v1_json_schema()["$defs"]
+    for name in ("DdpPropertySourceV1", "DppPropertySourceV1"):
+        description = " ".join(defs[name]["description"].split())
+        assert "DISCHARGES the read-before-write rule" in description, name
+        assert "does not discharge" not in description, name
+
+
+def test_direct_process_ir_next_steps_never_prepare_the_caller_for_apply():
+    """The response may not declare apply unsupported and then coach for it."""
+    payload = meta_tools.plan_integration_design_action(authoring_mode="process_ir")
+    for step in payload["typed_next_steps"]:
+        assert step["action"] != "apply"
+        assert "bind apply to" not in step["why"]
+    compile_step = next(
+        s for s in payload["typed_next_steps"] if s["action"] == "compile"
+    )
+    assert "apply is refused" in compile_step["why"]

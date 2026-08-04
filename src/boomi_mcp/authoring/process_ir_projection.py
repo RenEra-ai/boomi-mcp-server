@@ -273,8 +273,11 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "the connection and the operation reference; the compiler derives "
             "connector metadata from the resolved components."
         ),
-        _ORDERING: ("A source occupies the first position of the sequence it opens.",),
-        _DOCS: ("none", "documents", "per_document"),
+        _ORDERING: (
+            "A source occupies the first position of the sequence it opens.",
+            "It takes no inbound documents. What it RETURNS is decided by its "
+            "family/action row, not by the node.",
+        ),
         _REFS: (("connection_ref", True), ("operation_ref", True)),
         _STAGES: ("author",),
     },
@@ -289,8 +292,10 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "On the legacy linear path a target is immediately followed by a stop.",
             "A target is a legal terminal of a Branch path and of a Decision true arm; "
             "it is not admitted on a Decision false arm.",
+            "It consumes inbound documents. Whether it RETURNS any is decided by "
+            "its family/action row — a database Send returns nothing, a REST "
+            "PATCH does.",
         ),
-        _DOCS: ("required", "none", "per_document"),
         _REFS: (("connection_ref", True), ("operation_ref", True)),
         _STAGES: ("author",),
     },
@@ -311,7 +316,12 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "Whether a call may sit inside a retried region comes from its replay "
             "classification; no caller-supplied evidence can lift a refusal.",
         ),
-        _DOCS: ("optional", "documents", "per_document"),
+        # No generic document semantics ON PURPOSE. What a connector call takes
+        # and returns is decided by its family/action row, and the rows disagree:
+        # a database Send returns nothing at all. Publishing one blanket
+        # "produces documents" on the node entry let a caller place a downstream
+        # consumer after a terminal call — the exact error the per-action rows
+        # exist to prevent. The related entries below carry the real answer.
         _REFS: (("operation_ref", True),),
         _CAPS: (
             "generalized_connector_call",
@@ -772,6 +782,15 @@ def _node_entries(
                 )
             )
 
+    connector_action_ids = tuple(
+        sorted(
+            "connector_action.{0}.{1}".format(
+                _family_token(str(row["family"])), str(row["action"]).lower()
+            )
+            for row in sources.connector_rows
+        )
+    )
+
     entries = []
     for kind in sources.node_kinds:
         facts = _NODE_FACTS.get(kind)
@@ -821,7 +840,11 @@ def _node_entries(
                     for field, required in facts.get(_REFS, ())
                 ),
                 related_entry_ids=tuple(facts.get(_RELATED, ()))
-                + tuple(f"capability.{cap}" for cap in facts.get(_CAPS, ())),
+                + tuple(f"capability.{cap}" for cap in facts.get(_CAPS, ()))
+                # The connector nodes publish no generic document semantics
+                # (they are action-dependent), so they must point at the rows
+                # that do. Generated, so a new action row is linked automatically.
+                + (connector_action_ids if kind in _CONNECTOR_NODE_KINDS else ()),
                 sources=tuple(entry_sources),
             )
         )
@@ -1261,7 +1284,11 @@ def _recipe_entries(
                     "recipe registry; this entry never restates them."
                 ),
                 workflow_stages=("discover", "plan"),
-                recipe_selector=f"recipe_registry:{recipe_id}@{version}",
+                # ``recipe:``, not ``recipe_registry:``. The registry SNAPSHOT
+                # lives under `recipe_registry`, but a single descriptor is
+                # fetched with `recipe:<id>[@<version>]` — every generated
+                # `recipe_registry:` selector returned SCHEMA_NAME_UNSUPPORTED.
+                recipe_selector=f"recipe:{recipe_id}@{version}",
                 ordering_facts=(
                     "Entry kind: {0}.".format(row.get("entry_kind") or "unknown"),
                 ),
@@ -1303,6 +1330,10 @@ def _recipe_entries(
         )
     return entries
 
+
+#: Node kinds whose document behaviour comes from a connector action row rather
+#: than from the node itself.
+_CONNECTOR_NODE_KINDS = frozenset({"connector_call", "source", "target"})
 
 _BUILDERS = (
     _node_entries,

@@ -407,10 +407,10 @@ class DdpPropertySourceV1(_ProcessIRBase):
     is NOT visible across sibling Branch legs, because each leg receives an
     independent copy of the document stream.
 
-    ``default_value`` is used when the property has not been written. Supplying
-    it does not discharge the lineage rule: a read with no establishing write on
-    the same path is still reported, because a silent default is how a
-    mis-authored flow looks identical to a correct one.
+    ``default_value`` supplies a value when the property has not been written,
+    and supplying it DISCHARGES the read-before-write rule: a defaulted read
+    cannot fail, because the default establishes the value. Omit it when you
+    want an unmet read reported rather than silently defaulted.
     """
 
     value_type: Literal["ddp"]
@@ -433,8 +433,10 @@ class DppPropertySourceV1(_ProcessIRBase):
     order, so reading in leg 0 what leg 1 writes is rejected rather than
     silently reading nothing.
 
-    ``default_value`` supplies a fallback when the property is unset; as with
-    the document-scoped source it does not discharge the read-before-write rule.
+    ``default_value`` supplies a value when the property is unset, and — as with
+    the document-scoped source — supplying it DISCHARGES the read-before-write
+    rule: a defaulted read cannot fail. Omit it when you want an unmet read
+    reported rather than silently defaulted.
     """
 
     value_type: Literal["dpp"]
