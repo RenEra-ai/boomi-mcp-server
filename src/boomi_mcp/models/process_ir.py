@@ -1871,7 +1871,13 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         #   * nested try_catch: composition rewrites the outer step's effective
         #     error selection, adjacency-dependently (capture §G6).
         "catch_failure_trigger_selection": "gated",  # #142
-        "verified_write_retry_safety": "gated",  # #142
+        # RENAMED by #146 from ``verified_write_retry_safety``. The old spelling
+        # embedded the connector model's own field name, which the served
+        # surface may not carry (tests/test_process_ir_compiler_surface.py::
+        # FORBIDDEN_NAMES) — and this row is now projected into the public
+        # authoring contract. "replay safety" is the public term throughout.
+        # Safe to rename: the manifest key had never been served.
+        "verified_write_replay_safety": "gated",  # #142
         "listener_error_scope": "gated",  # #142
         "nested_try_catch": "gated",  # #142
         "keyed_cache": "gated",  # no live-captured wire shape (#119 census)

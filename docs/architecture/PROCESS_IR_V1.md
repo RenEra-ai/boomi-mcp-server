@@ -368,7 +368,7 @@ Published as the immutable `PROCESS_IR_V1_CAPABILITIES` manifest (not an authore
 | `retry_backoff_authoring` — authoring the retry wait schedule | **unsupported (permanent)** | #142 — platform-owned, no wire field (capture §G1) |
 | `queue_topology` — creating queues / Event Streams objects | **unsupported** | #142 — out of scope; zero live queue components (capture §G5) |
 | `catch_failure_trigger_selection` — choosing document-errors vs all-errors | gated | #142 — semantics known, emitter fixed (capture §G2/§G3) |
-| `verified_write_retry_safety` — a stock write action classified replay-safe | gated | #142 — no authoritative classification (capture §G4) |
+| `verified_write_replay_safety` — a stock write action classified replay-safe | gated | #142 — no authoritative classification (capture §G4) |
 | `listener_error_scope` | gated | #142 — the fused listener start rejects reliability composition |
 | `nested_try_catch` | gated | #142 — composition rewrites the outer error selection (capture §G6) |
 | keyed cache (`doc_cache_index`/`cache_key_values`/keyed `load_all_documents`) | gated | no live-captured wire shape (#119) |

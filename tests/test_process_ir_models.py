@@ -1190,7 +1190,7 @@ def test_capability_manifest_immutable_and_complete():
     # ...while these four are genuinely "not yet", each blocked on a different
     # missing thing (see the manifest comments).
     assert PROCESS_IR_V1_CAPABILITIES["catch_failure_trigger_selection"] == "gated"
-    assert PROCESS_IR_V1_CAPABILITIES["verified_write_retry_safety"] == "gated"
+    assert PROCESS_IR_V1_CAPABILITIES["verified_write_replay_safety"] == "gated"
     assert PROCESS_IR_V1_CAPABILITIES["listener_error_scope"] == "gated"
     assert PROCESS_IR_V1_CAPABILITIES["nested_try_catch"] == "gated"
     assert set(PROCESS_IR_V1_CAPABILITIES.values()) <= {
