@@ -77,7 +77,9 @@ established replay safety is refused whatever evidence they attach.
 **Retrieval is budgeted.** A bare call returns the schema, the facets and **zero** entries — ask for
 what you need. Filters (`authoring_entry_id`, `node_kind`, `category`, `capability_id`,
 `workflow_stage`, `after_entry_id`, `limit`) AND together, results sort by `contract_entry_id`, and a
-64 KiB payload budget applies on top of the 1–50 count bound. An unknown *enumerated* value is
+64 KiB budget on the **entries** applies on top of the 1–50 count bound (the surrounding
+schema/facets envelope is not counted — see the served `entry_byte_budget_scope`). An unknown
+*enumerated* value is
 `INVALID_INPUT` naming the facet; an unknown *exact* entry id is a **success with zero entries**, so a
 stale citation is observable rather than indistinguishable from a malformed request.
 
