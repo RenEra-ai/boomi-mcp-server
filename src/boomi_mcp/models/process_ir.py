@@ -1876,11 +1876,34 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         "nested_try_catch": "gated",  # #142
         "keyed_cache": "gated",  # no live-captured wire shape (#119 census)
         "definedparameter_property_source": "gated",  # no verified wire shape
+        # ONE authority for join AND merge. The served contract exposes "merge"
+        # as a display ALIAS of this row rather than a second row: two names for
+        # one construct is how a state ends up updated in one place and stale in
+        # the other, which is the drift #146 exists to remove.
         "joins": "gated",
         "loops": "gated",
         "caller_authored_cfg_edges": "unsupported",
         "xml_or_layout_or_shape_ids": "unsupported",
         "secret_values": "unsupported",
+        # #146 amendment. Two rows added so the served authoring contract can
+        # PROJECT a state for parallelism instead of inventing one. A caller who
+        # asks "do Branch legs run at once?" needs an answer with an authority
+        # behind it, and until these existed the honest answer was "the manifest
+        # does not say" — which the projection would then have had to decide on
+        # its own, exactly the second-authority split ADR-001 §6 forbids.
+        #
+        # UNSUPPORTED, not gated, and the distinction is deliberate: gated means
+        # "not yet", and neither of these is pending research. Branch legs are
+        # ordered and sequential by construction — the ordering is what makes
+        # execution-scoped state visible from an earlier leg to a later one, so
+        # concurrent legs would not be the same feature with more speed, they
+        # would be a different semantics. Flow control likewise exposes no
+        # authorable parallel field at all.
+        #
+        # Both rows describe ProcessIR v1, NOT the Boomi platform: the platform
+        # has parallel settings this contract does not author.
+        "parallel_branch_execution": "unsupported",
+        "flow_control_parallel_chunks": "unsupported",
     }
 )
 
@@ -1965,17 +1988,27 @@ _DISCRIMINATOR_TAGS = frozenset(
     }
 )
 
+# Every remediation below is SERVED — it reaches a caller through
+# ``build_integration(action="plan"|"compile")`` and through the typed request
+# rejection. So none of them may point at a repository artifact: a
+# ``docs/architecture/`` page and the capability manifest's Python name are both
+# unfetchable through any MCP tool, and a caller sent there is sent nowhere.
+# They cite ``process_ir_authoring`` entry ids instead, which resolve through
+# ``get_schema_template``.
 _REMEDIATION = {
     PROCESS_IR_SCHEMA_UNKNOWN_NODE: (
-        "Use one of the documented ProcessIRV1 node kinds / discriminator tags "
-        "(see docs/architecture/PROCESS_IR_V1.md)."
+        "Use one of the ProcessIRV1 node kinds published by "
+        "get_schema_template(schema_name='ProcessIRV1'); the per-node authoring "
+        "rules are at get_schema_template(schema_name='process_ir_authoring', "
+        "category='node')."
     ),
     PROCESS_IR_SCHEMA_UNKNOWN_FIELD: (
         "Remove the unknown field — ProcessIRV1 nodes are strict and reject extras."
     ),
     PROCESS_IR_SCHEMA_INVALID_CARDINALITY: (
-        "Fix the list bound or step ordering at the referenced path "
-        "(see docs/architecture/PROCESS_IR_V1.md for the sequence rules)."
+        "Fix the list bound or step ordering at the referenced path; the sequence "
+        "rules for this node are at "
+        "get_schema_template(schema_name='process_ir_authoring', node_kind='<kind>')."
     ),
     PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED: (
         "Set version to the supported ProcessIR version '1'."
@@ -1987,8 +2020,11 @@ _REMEDIATION = {
         "Use an exact '$ref:KEY' token (non-empty, whitespace-free key) or a literal component id."
     ),
     PROCESS_IR_CAPABILITY_UNSUPPORTED: (
-        "The referenced construct is capability-gated or unsupported in ProcessIR v1; "
-        "see the PROCESS_IR_V1_CAPABILITIES manifest."
+        "The referenced construct is capability-gated or unsupported in ProcessIR v1. "
+        "Fetch its published state with "
+        "get_schema_template(schema_name='process_ir_authoring', category='capability') — "
+        "'gated' means not yet, 'unsupported' means never, and only the latter needs a "
+        "different design."
     ),
     PROCESS_IR_SCHEMA_BRANCH_CARDINALITY: (
         "A Branch must declare between 2 and 25 legs (the platform's documented bound)."
@@ -1998,8 +2034,10 @@ _REMEDIATION = {
         "ProcessIR v1 emits no continuation after a control node."
     ),
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY: (
-        "Use a node kind this body slot admits; see the body capability matrix in "
-        "docs/architecture/PROCESS_IR_V1.md."
+        "Use a node kind this body slot admits. The admitted set for each slot is "
+        "published at "
+        "get_schema_template(schema_name='process_ir_authoring', category='placement'); "
+        "a kind absent from a slot is rejected, so absence is the rule, not an omission."
     ),
     PROCESS_IR_SEMANTIC_NESTING_LIMIT: (
         "Reduce Branch/Decision nesting to at most "
@@ -2013,7 +2051,8 @@ _REMEDIATION = {
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED: (
         "Use a supported error scope in its verified placement: a process scope as "
         "the sole root step, or a connector scope as the last step of a "
-        "connector-call sequence. See docs/architecture/PROCESS_IR_V1.md."
+        "connector-call sequence. See "
+        "get_schema_template(schema_name='process_ir_authoring', node_kind='try_catch')."
     ),
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED: (
         "End the catch body with a stop, an exception, or a staging cache_put — "
@@ -2178,7 +2217,7 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
                 path,
                 message=(
                     "this error-handling construct is capability-gated or unsupported "
-                    "in ProcessIR v1; see the PROCESS_IR_V1_CAPABILITIES manifest"
+                    "in ProcessIR v1"
                 ),
             )
         return _diagnostic(PROCESS_IR_SCHEMA_UNKNOWN_FIELD, path)
@@ -2366,3 +2405,47 @@ def process_ir_v1_json_schema() -> dict:
 
 def canonical_process_ir_schema_json() -> str:
     return _canonical_json(process_ir_v1_json_schema())
+
+
+# ---------------------------------------------------------------------------
+# Sanitized accessors for the #146 authoring projection
+# ---------------------------------------------------------------------------
+#
+# The projection in ``boomi_mcp.authoring.process_ir_projection`` reads these to
+# build the served ``process_ir_authoring`` contract. They return plain immutable
+# data — never a translator, a discriminator table, or a pydantic internal — so
+# the projector cannot reach anything the schema itself does not already
+# publish, and so a change here shows up in ``compiler_revision``.
+
+
+def process_ir_v1_node_kinds() -> Tuple[str, ...]:
+    """Every authorable node kind, plus the ``sequence`` root, sorted.
+
+    DERIVED from the root union rather than listed, for the same reason
+    ``_NODE_KIND_TAGS`` is: a hand-kept list is a second vocabulary that drifts
+    from the one the models actually accept. ``sequence`` is added because it is
+    a real authored kind that is not a member of ``ProcessNodeV1`` — it is the
+    body, not a step — and a caller still has to author one.
+    """
+    return tuple(sorted(_NODE_KIND_TAGS | {"sequence"}))
+
+
+def process_ir_v1_parse_diagnostic_specs() -> Tuple[Mapping[str, str], ...]:
+    """(code, message, remediation) for every parse diagnostic, sorted by code.
+
+    The messages and remediations here are STATIC strings selected by code —
+    nothing is interpolated from an authored payload — which is what makes them
+    safe to publish. A code with no remediation entry is reported with an empty
+    string rather than omitted: a caller comparing the served set against the
+    codes they actually receive must see the gap.
+    """
+    return tuple(
+        MappingProxyType(
+            {
+                "code": code,
+                "message": _MESSAGES.get(code, ""),
+                "remediation": _REMEDIATION.get(code, ""),
+            }
+        )
+        for code in sorted(set(_MESSAGES) | set(_REMEDIATION))
+    )

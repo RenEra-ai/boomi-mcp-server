@@ -14,7 +14,8 @@ for the same reason: these strings reach logs.
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Optional, Tuple
+from types import MappingProxyType
+from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
 from ....errors import (
     LEGACY_ADAPTER_EXEMPTION_DECISION_PROPERTY_READ,
@@ -187,7 +188,10 @@ def finding(
         node_identity=node_identity_for(path),
         message=_MESSAGES.get(code, "semantic validation rejected the payload"),
         remediation=_REMEDIATION.get(
-            code, "See the ProcessIR semantic-validation documentation for this code."
+            code,
+            "Fetch this code's authoring rule with "
+            "get_schema_template(schema_name='process_ir_authoring', "
+            "category='diagnostic').",
         ),
         evidence=tuple(
             ValidationEvidenceV1(key=key, value=value) for key, value in evidence
@@ -201,4 +205,29 @@ def registered_codes() -> Tuple[str, ...]:
     return tuple(sorted(_MESSAGES))
 
 
-__all__: List[str] = ["finding", "registered_codes"]
+
+
+#: A shared shape for the #146 authoring projection: (code, message,
+#: remediation), sorted by code. Every string is STATIC and selected by code —
+#: nothing is interpolated from an authored payload — which is what makes the
+#: table safe to serve. A code carrying one of the two texts but not the other
+#: is emitted with an empty string rather than skipped: a caller comparing the
+#: served set against the codes they actually receive has to be able to see the
+#: gap.
+
+
+def finding_specs() -> Tuple[Mapping[str, str], ...]:
+    """Static (code, message, remediation) for every semantic-validation code."""
+    return tuple(
+        MappingProxyType(
+            {
+                "code": code,
+                "message": _MESSAGES.get(code, ""),
+                "remediation": _REMEDIATION.get(code, ""),
+            }
+        )
+        for code in sorted(set(_MESSAGES) | set(_REMEDIATION))
+    )
+
+
+__all__: List[str] = ["finding", "finding_specs", "registered_codes"]

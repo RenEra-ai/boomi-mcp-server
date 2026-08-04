@@ -20,7 +20,8 @@ gated until a verified wire shape exists.
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from types import MappingProxyType
+from typing import Literal, Mapping, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, model_validator
 
@@ -204,3 +205,47 @@ class PropertyAssignment(BaseModel):
                 "declare a processproperty component and use map functions to write it"
             )
         return self
+
+
+# ---------------------------------------------------------------------------
+# Process-property scope descriptor (#146 amendment)
+# ---------------------------------------------------------------------------
+
+#: The visibility model for a PROCESS PROPERTY, stated here and nowhere else.
+#:
+#: Kept OUT of ``semantic_validation.lineage.STATE_VISIBILITY_V1`` deliberately.
+#: That module models the state a flow establishes and reads DURING an
+#: execution — dynamic document properties, dynamic process properties, and the
+#: document cache — and a process property is none of those: it is a component
+#: with deploy-time defaults, read at runtime through map functions. Pinning it
+#: against the lineage traversal would assert an ownership that does not exist,
+#: and the resulting parity test would pass by agreeing with a claim neither
+#: side actually enforces.
+#:
+#: The field names match the lineage descriptor's so a caller reads one shape
+#: across all four scopes; the VALUES are what differ, and that is the point.
+PROCESS_PROPERTY_SCOPE_V1: "Mapping[str, object]" = MappingProxyType(
+    {
+        "state_scope": "processproperty",
+        "scope": "component",
+        "lifetime": "deployment",
+        # A component-backed value is not carried on the document at all, so
+        # copying documents into Branch legs neither preserves nor discards it.
+        "survives_branch_leg_entry": True,
+        "visible_across_sibling_paths": True,
+        # There is no flow-established write to converge, so convergence does
+        # not apply — stated explicitly rather than left blank, because an
+        # absent field reads as an oversight.
+        "convergence": "not_applicable",
+        # Writes from inside a flow are gated (no verified wire shape); the
+        # value comes from the component's deploy-time configuration instead, so
+        # a read never depends on an earlier in-flow write.
+        "read_before_write": "not_applicable",
+        "authored_writes": "gated",
+    }
+)
+
+
+def process_property_scope_row() -> "Mapping[str, object]":
+    """The process-property scope descriptor, for the #146 projection."""
+    return PROCESS_PROPERTY_SCOPE_V1

@@ -17,6 +17,15 @@ at CALL time, not module scope, because archetype discovery reaches
 ``categories.components.builders`` and a module-scope import cycles.
 
 Nothing under ``boomi_mcp.compiler`` is re-exported through this package.
+
+**#146 amendment — the sanitized projection.** ``process_ir_projection`` READS
+three named compiler registries (``body_capabilities``,
+``connector_capabilities``, ``error_handling``) to derive the read-only
+``process_ir_authoring`` contract. That does not weaken the rule above: what
+crosses is derived DATA under a public vocabulary, never a compiler type, and
+the projection is output only — nothing a caller sends can re-enter the compiler
+through it. Every compiler import inside that module is function-local, so
+``import boomi_mcp`` and ``import server`` still pay nothing for the compiler.
 """
 
 from .revisions import (

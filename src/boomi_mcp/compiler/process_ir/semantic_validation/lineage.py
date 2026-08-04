@@ -37,7 +37,8 @@ default back in through the side door.
 
 from __future__ import annotations
 
-from typing import Dict, FrozenSet, List, Optional, Set, Tuple
+from types import MappingProxyType
+from typing import Dict, FrozenSet, List, Mapping, Optional, Set, Tuple
 
 from ....errors import (
     PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID,
@@ -68,11 +69,86 @@ CACHE = "cache"
 StateKey = Tuple[str, str]
 
 
+#: The visibility model this module ENFORCES, stated once as data (#146).
+#:
+#: LOAD-BEARING, not documentation: ``_State`` reads ``lifetime`` from here to
+#: decide which compartment a write lands in, so the served contract and the
+#: traversal cannot disagree. An earlier draft kept this as a separate table
+#: beside a hard-coded ``key[0] == DDP`` test, which is precisely the
+#: second-copy-of-one-rule shape #146 exists to remove — the copy would go stale
+#: the first time the traversal changed and nothing would fail.
+#:
+#: ``processproperty`` is deliberately ABSENT. A process property is a
+#: component-backed deploy-time value, not execution state this module tracks,
+#: and asserting it here would be a false claim of ownership. Its scope
+#: descriptor lives with the model that does own it
+#: (``models.cache_property_models.PROCESS_PROPERTY_SCOPE_V1``).
+STATE_VISIBILITY_V1: "Mapping[str, Mapping[str, object]]" = MappingProxyType(
+    {
+        DDP: MappingProxyType(
+            {
+                "scope": "document_copy",
+                "lifetime": "document",
+                # Each Branch leg gets its own copy of the SAME pre-Branch
+                # documents, so a value written before the Branch is on every
+                # copy — but a value written INSIDE one leg is on that leg's
+                # copies only.
+                "survives_branch_leg_entry": True,
+                "visible_across_sibling_paths": False,
+                "convergence": "intersection",
+                "read_before_write": "rejected",
+            }
+        ),
+        DPP: MappingProxyType(
+            {
+                "scope": "execution",
+                "lifetime": "execution",
+                "survives_branch_leg_entry": True,
+                # The asymmetry that makes leg ORDER matter: execution state
+                # accumulates across legs, so leg 1 sees what leg 0 wrote.
+                "visible_across_sibling_paths": True,
+                "convergence": "intersection",
+                "read_before_write": "rejected",
+            }
+        ),
+        CACHE: MappingProxyType(
+            {
+                "scope": "execution",
+                "lifetime": "execution",
+                "survives_branch_leg_entry": True,
+                "visible_across_sibling_paths": True,
+                "convergence": "intersection",
+                # A cache may legitimately be populated outside this process, so
+                # a read with no in-process writer is reported only when the
+                # caller has NOT declared an external writer.
+                "read_before_write": "rejected_unless_external_writer_declared",
+            }
+        ),
+    }
+)
+
+#: Scopes whose state lives on the DOCUMENT copy rather than the execution.
+#: Derived from the descriptor above so there is exactly one statement of it.
+_DOCUMENT_LIFETIME_SCOPES: FrozenSet[str] = frozenset(
+    scope for scope, row in STATE_VISIBILITY_V1.items() if row["lifetime"] == "document"
+)
+
+
+def state_visibility_rows() -> Tuple["Mapping[str, object]", ...]:
+    """The visibility model as sorted public data, for the #146 projection."""
+    return tuple(
+        MappingProxyType({"state_scope": scope, **dict(row)})
+        for scope, row in sorted(STATE_VISIBILITY_V1.items())
+    )
+
+
 class _State:
     """What is established at one program point.
 
-    ``document`` holds DDP keys, which are discarded when documents are re-copied
-    into Branch legs. ``execution`` holds DPP and cache keys, which are not.
+    ``document`` holds keys whose lifetime is the document copy (DDP), which are
+    discarded when documents are re-copied into Branch legs. ``execution`` holds
+    DPP and cache keys, which are not. Which compartment a scope uses is read
+    from :data:`STATE_VISIBILITY_V1`, not restated here.
     """
 
     __slots__ = ("document", "execution")
@@ -86,12 +162,15 @@ class _State:
         self.execution: FrozenSet[StateKey] = execution or frozenset()
 
     def with_write(self, key: StateKey) -> "_State":
-        if key[0] == DDP:
+        if key[0] in _DOCUMENT_LIFETIME_SCOPES:
             return _State(self.document | {key}, self.execution)
         return _State(self.document, self.execution | {key})
 
     def establishes(self, key: StateKey) -> bool:
-        return key in (self.document if key[0] == DDP else self.execution)
+        compartment = (
+            self.document if key[0] in _DOCUMENT_LIFETIME_SCOPES else self.execution
+        )
+        return key in compartment
 
     def entering_branch_leg(self) -> "_State":
         """State a Branch leg starts from.

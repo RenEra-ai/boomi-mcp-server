@@ -12,8 +12,26 @@ are rejected by *absence*, not by remembering to list them.
 Every row is traceable to checkout evidence or official Boomi documentation; the
 capture ledger is ``.codex/plans/issue-140-live-captures.md``.
 
-This module is compiler-internal: it is never exported from
-``compiler.process_ir.__all__`` and no MCP tool, schema, or builder reaches it.
+**Charter (amended by #146).** This module stays compiler-internal: it is never
+exported from ``compiler.process_ir.__all__``, and no MCP tool, schema, or
+builder may reach it — with ONE named exception. ``boomi_mcp.authoring.
+process_ir_projection`` may READ :data:`CONNECTOR_CALL_CAPABILITIES_V1` (through
+:func:`connector_capability_rows`) to derive the read-only
+``process_ir_authoring`` contract that ``get_schema_template`` serves.
+
+The exception is bounded exactly as it is for the body registry: the projection
+is output only and can never re-enter the compiler as capability context; this
+table stays the sole enforcement authority; and the projection publishes the
+SEMANTIC FACTS under a distinct public vocabulary
+(:data:`PUBLIC_CAPABILITY_FIELDS`) rather than this model's own field names,
+which are compiler-internal identifiers the served surface may not carry.
+
+The classification VALUES (``read_only``, ``idempotent_write``,
+``conditionally_idempotent``, ``non_idempotent``, ``unverified``) are published
+VERBATIM — renaming a state would be exactly the second-vocabulary drift #146
+exists to remove. Only the field names change.
+
+Nothing else crosses: no binding, no resolution machinery, no symbol table.
 """
 
 from __future__ import annotations
@@ -199,16 +217,21 @@ GATED_CONNECTOR_CALL_REASONS: Mapping[str, str] = MappingProxyType(
             "Database V2 is a different connector from Database (Legacy) and has no "
             "verified operation/emitter contract here; it is never aliased to 'database'."
         ),
+        # #146: these two strings are SERVED, so neither may cite a repository
+        # page — a caller cannot fetch `docs/architecture/` through any MCP tool.
+        # They name the fetchable contract selector instead.
         "unverified_action": (
             "This connector family/action pair has no verified operation, emitter and "
-            "document-cardinality evidence; see the #140 capability matrix in "
-            "docs/architecture/PROCESS_IR_COMPILER_V1.md."
+            "document-cardinality evidence. The callable pairs are published at "
+            "get_schema_template(schema_name='process_ir_authoring', "
+            "category='connector_action')."
         ),
         "retry_unverified_write": (
             "This connector action has no established retry safety, so it may not sit "
             "inside a retried region; set the retry count to zero or move the call "
-            "outside the protected scope. See the #142 retry-safety matrix in "
-            "docs/architecture/PROCESS_IR_COMPILER_V1.md."
+            "outside the protected scope. Per-action replay classifications are at "
+            "get_schema_template(schema_name='process_ir_authoring', "
+            "category='connector_action')."
         ),
     }
 )
@@ -247,6 +270,56 @@ def canonicalize_connector_metadata(
     return canonical.lower(), action
 
 
+#: Internal capability field -> the PUBLIC name the authoring contract publishes.
+#:
+#: Three of this model's own field names are compiler-internal identifiers the
+#: served surface may not carry (``tests/test_process_ir_compiler_surface.py::
+#: FORBIDDEN_NAMES``), so publishing the rows verbatim is not an option. The
+#: public names say the same thing in the caller's terms: what a call takes, what
+#: it gives back, and whether it may be replayed.
+#:
+#: ``family``/``action`` pass through unchanged — they are already the caller's
+#: vocabulary. ``side_effect`` likewise: "does this change anything?" is a
+#: distinct question from replay safety, and flattening the two is the exact
+#: mistake the model's own docstring warns against.
+#:
+#: TOTAL and INJECTIVE over the model's fields, pinned in both directions, so the
+#: projection loses no fact and cannot merge two facts into one.
+PUBLIC_CAPABILITY_FIELDS: Mapping[str, str] = MappingProxyType(
+    {
+        "family": "family",
+        "action": "action",
+        "accepts_input": "input_documents",
+        "produces_output": "output_documents",
+        "side_effect": "side_effect",
+        "retry_safety": "replay_classification",
+    }
+)
+
+
+def connector_capability_rows() -> Tuple[Mapping[str, Any], ...]:
+    """Every callable (family, action) pair as sorted public data.
+
+    Each row carries EVERY field of :class:`ConnectorCapabilityV1`, renamed
+    through :data:`PUBLIC_CAPABILITY_FIELDS` — no field is dropped, because a
+    partially projected row is one a caller would have to guess the rest of.
+    Values are published verbatim.
+
+    As with the body registry, the DENIED pairs are not enumerated: the registry
+    is an allowlist, absence is the rule, and the contract publishes that rule
+    once as ``unlisted_connector_action_state``.
+    """
+    rows = []
+    for spec in CONNECTOR_CALL_CAPABILITIES_V1.values():
+        dumped = spec.model_dump(mode="json")
+        rows.append(
+            MappingProxyType(
+                {PUBLIC_CAPABILITY_FIELDS[key]: value for key, value in dumped.items()}
+            )
+        )
+    return tuple(sorted(rows, key=lambda row: (row["family"], row["action"])))
+
+
 def lookup_capability(family: str, action: str) -> Optional[ConnectorCapabilityV1]:
     """Resolve one CANONICAL (family, action) pair, or ``None`` when unsupported.
 
@@ -261,7 +334,9 @@ def lookup_capability(family: str, action: str) -> Optional[ConnectorCapabilityV
 __all__ = [
     "CONNECTOR_CALL_CAPABILITIES_V1",
     "GATED_CONNECTOR_CALL_REASONS",
+    "PUBLIC_CAPABILITY_FIELDS",
     "ConnectorCapabilityV1",
     "canonicalize_connector_metadata",
+    "connector_capability_rows",
     "lookup_capability",
 ]

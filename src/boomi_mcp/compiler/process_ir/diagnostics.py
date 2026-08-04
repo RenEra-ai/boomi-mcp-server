@@ -17,7 +17,8 @@ in ``__str__`` of the raised error, which is what ends up in a log.
 
 from __future__ import annotations
 
-from typing import Iterable, List, Literal, Optional, Sequence, Tuple
+from types import MappingProxyType
+from typing import Iterable, List, Literal, Mapping, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -110,8 +111,9 @@ _REMEDIATION = {
         "divergent path must terminate independently."
     ),
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY: (
-        "Use a node kind this body slot admits; see the body capability matrix in "
-        "docs/architecture/PROCESS_IR_V1.md."
+        "Use a node kind this body slot admits. The admitted set for each slot is "
+        "published at get_schema_template(schema_name='process_ir_authoring', "
+        "category='placement'); a kind absent from a slot is rejected outright."
     ),
     PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID: (
         "This is a compiler defect: derived branch/decision wiring (count, order, "
@@ -142,8 +144,9 @@ _REMEDIATION = {
         "this is a compiler defect — please report it."
     ),
     PROCESS_IR_CAPABILITY_UNSUPPORTED: (
-        "This construct is capability-gated in ProcessIR v1; see the capability "
-        "manifest for the owning issue."
+        "This construct is capability-gated in ProcessIR v1. Fetch its published "
+        "state at get_schema_template(schema_name='process_ir_authoring', "
+        "category='capability') — 'gated' means not yet, 'unsupported' means never."
     ),
     PROCESS_IR_COMPILE_EMITTER_MISSING: (
         "This node kind has no registered emitter at the current capability level; "
@@ -181,7 +184,9 @@ _REMEDIATION = {
     PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED: (
         "Use a connector family/action pair from the verified connector-call "
         "capability matrix, and either omit the authored action or set it to the "
-        "operation's own action; see docs/architecture/PROCESS_IR_COMPILER_V1.md."
+        "operation's own action. The callable pairs are published at "
+        "get_schema_template(schema_name='process_ir_authoring', "
+        "category='connector_action')."
     ),
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH: (
         "Make the map's source profile the preceding call's output profile and its "
@@ -340,7 +345,10 @@ def diagnostic(
         node_identity=node_identity_for(path),
         message=message or _MESSAGES.get(code, "compiler rejected the payload"),
         remediation=_REMEDIATION.get(
-            code, "See the ProcessIR compiler documentation for this code."
+            code,
+            "Fetch this code's authoring rule with "
+            "get_schema_template(schema_name='process_ir_authoring', "
+            "category='diagnostic').",
         ),
         internal_node_id=internal_node_id,
     )
@@ -410,8 +418,34 @@ def sorted_diagnostics(
     return ProcessIRCompileError(diagnostics).diagnostics
 
 
+
+
+#: A shared shape for the #146 authoring projection: (code, message,
+#: remediation), sorted by code. Every string is STATIC and selected by code —
+#: nothing is interpolated from an authored payload — which is what makes the
+#: table safe to serve. A code carrying one of the two texts but not the other
+#: is emitted with an empty string rather than skipped: a caller comparing the
+#: served set against the codes they actually receive has to be able to see the
+#: gap.
+
+
+def compiler_diagnostic_specs() -> Tuple[Mapping[str, str], ...]:
+    """Static (code, message, remediation) for every compiler diagnostic code."""
+    return tuple(
+        MappingProxyType(
+            {
+                "code": code,
+                "message": _MESSAGES.get(code, ""),
+                "remediation": _REMEDIATION.get(code, ""),
+            }
+        )
+        for code in sorted(set(_MESSAGES) | set(_REMEDIATION))
+    )
+
+
 __all__: List[str] = [
     "ROOT_NODE_IDENTITY",
+    "compiler_diagnostic_specs",
     "CompilerDiagnostic",
     "CompilerPhase",
     "ProcessIRCompileError",

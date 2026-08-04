@@ -1,12 +1,22 @@
 """Internal ProcessIR compiler: CFG + emission-plan lowering (issue #137, M12.2).
 
-DARK. No MCP tool, production builder, or JSON Schema constructs or consumes
-these types. Since #138 (M12.3) a TEST-ONLY consumer exists — the typed
-process-emitter registry in ``emitter_registry`` turns an ``EmissionPlanV1`` into
-process XML for parity tests — but it is imported directly (never via this
-package's ``__all__``), is invoked by no MCP tool or production builder, and adds
-no eager compiler/builder import coupling. The legacy ``flow_sequence`` path is
-unchanged and stays authoritative until #139 (production adapters) reaches parity.
+**Charter (rewritten by #146).** This package was DARK through #138. It is not
+any more: ``boomi_mcp.authoring.workflow`` compiles authored documents through it
+on the production ``build_integration(action="plan"|"compile")`` path. What has
+NOT changed — and is the invariant that matters — is that no compiler TYPE
+reaches an MCP surface or an LLM-facing JSON Schema (issue #137's acceptance
+criterion, ADR-001 §6). ``SemanticCfgV1``, ``EmissionPlanV1``, the emitter
+inputs, and the capability registries stay internal, and nothing here is added
+to ``__all__`` for a serving surface to pick up.
+
+#146 opens exactly one seam, named in the charters of the three modules it
+touches (``body_capabilities``, ``connector_capabilities``, ``error_handling``):
+``boomi_mcp.authoring.process_ir_projection`` may READ those registries to derive
+a sanitized, read-only authoring contract. That projection is OUTPUT ONLY — no
+caller input re-enters the compiler as capability context — and it publishes
+semantic facts under a distinct public vocabulary, never these modules' own
+identifiers. The legacy ``flow_sequence`` path is unchanged and stays
+authoritative for materialization.
 
 Pipeline::
 

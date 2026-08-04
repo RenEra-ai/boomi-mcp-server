@@ -30,12 +30,22 @@ ref, contract name, key, action, family, header, payload, or connector response
 is ever interpolated — a diagnostic names the authored JSON path and nothing
 else.
 
-Compiler-internal: never exported from ``compiler.process_ir.__all__``, and no
-MCP tool, schema, or builder reaches it.
+**Charter (amended by #146).** Compiler-internal: never exported from
+``compiler.process_ir.__all__``, and no MCP tool, schema, or builder may reach
+it — with ONE named exception. ``boomi_mcp.authoring.process_ir_projection`` may
+call :func:`retry_rule_specs` to publish the RULE (which classification permits
+a retry, and what evidence it demands) in the read-only ``process_ir_authoring``
+contract.
+
+Only the rule crosses. The region derivation is the part that must not: error
+regions are node-id sets over the control-flow graph, and a node id is exactly
+the kind of internal handle ADR-001 §6 keeps off an LLM-facing surface. Nothing
+here exposes :class:`ErrorRegionV1`, a CFG, or any node id.
 """
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Tuple
 
 from ...errors import (
@@ -354,9 +364,66 @@ def _evidence_missing(binding, node_id: str):
     )
 
 
+#: Every replay classification the connector registry can assign. Listed here so
+#: the projection publishes a CLOSED set: a classification that exists on a row
+#: but not in this tuple would be projected with no rule beside it, which is the
+#: silent gap the fail-closed design exists to prevent.
+_REPLAY_CLASSIFICATIONS: Tuple[str, ...] = (
+    "conditionally_idempotent",
+    "idempotent_write",
+    "non_idempotent",
+    "read_only",
+    "unverified",
+)
+
+
+def retry_rule_specs() -> Tuple[Mapping[str, Any], ...]:
+    """The retry rule per replay classification, as sorted public data.
+
+    DERIVED from the two tables the checks actually consult
+    (:data:`_NEVER_RETRYABLE` and :data:`_REQUIRED_EVIDENCE_KIND`), never
+    restated — a hand-written copy of this rule is how a served contract ends up
+    promising a retry the compiler refuses.
+
+    The shape a caller needs is three facts per classification:
+
+    * ``retry_permitted`` — may a call so classified sit inside a retried region
+      at all? ``False`` for ``non_idempotent`` and ``unverified``, and that
+      refusal is absolute: no evidence a caller attaches can lift it, because the
+      registry decides replay safety, not the payload;
+    * ``required_evidence`` — when a retry IS permitted, the evidence kind that
+      discharges the obligation (``verified_action`` for ``idempotent_write``,
+      ``key_reference`` for ``conditionally_idempotent``), or empty when none is
+      needed (``read_only``);
+    * ``evidence_can_authorise`` — always ``False`` where ``retry_permitted`` is
+      ``False``. Published explicitly rather than left inferable, because
+      "attach evidence and it will work" is the single most likely wrong reading
+      of the row.
+    """
+    rows = []
+    for classification in _REPLAY_CLASSIFICATIONS:
+        permitted = classification not in _NEVER_RETRYABLE
+        rows.append(
+            MappingProxyType(
+                {
+                    "replay_classification": classification,
+                    "retry_permitted": permitted,
+                    "required_evidence": (
+                        _REQUIRED_EVIDENCE_KIND.get(classification, "")
+                        if permitted
+                        else ""
+                    ),
+                    "evidence_can_authorise": permitted,
+                }
+            )
+        )
+    return tuple(rows)
+
+
 __all__ = [
     "ErrorRegionV1",
     "catch_region_node_ids",
     "derive_error_regions",
+    "retry_rule_specs",
     "validate_error_handling",
 ]

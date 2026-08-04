@@ -25,8 +25,27 @@ Evidence for every admitted placement is recorded in
 ``.codex/plans/issue-141-live-captures.md``; the per-row citations live in the
 matrix below.
 
-This module is compiler-internal: it is never exported from
-``compiler.process_ir.__all__`` and no MCP tool, schema, or builder reaches it.
+**Charter (amended by #146).** This module stays compiler-internal: it is never
+exported from ``compiler.process_ir.__all__``, and no MCP tool, schema, or
+builder may reach it — with ONE named exception. ``boomi_mcp.authoring.
+process_ir_projection`` may READ :data:`BODY_CAPABILITIES_V1` (through
+:func:`body_placement_rows`) to derive the read-only ``process_ir_authoring``
+contract that ``get_schema_template`` serves.
+
+That exception is deliberate and bounded, and it does not reopen ADR-001 §6:
+
+* the projection is OUTPUT ONLY. Nothing a caller sends can re-enter the
+  compiler as capability context, so this table remains the sole enforcement
+  authority and the projection cannot override or mutate it;
+* it projects the SEMANTIC FACT (which node kinds a slot admits), never the
+  compiler's representation of it. The served vocabulary is a distinct public
+  one — the internal context name ``branch_leg`` is published as
+  ``branch_path`` — so no internal identifier crosses the boundary;
+* a caller had no other way to learn these rules. Before #146 a rejected
+  placement pointed at this file by name, which no MCP tool can fetch.
+
+Enforcement types, the walk functions, and the diagnostic machinery stay
+internal. No CFG edge, node id, layout coordinate, shape id, or XML is projected.
 """
 
 from __future__ import annotations
@@ -453,15 +472,61 @@ def registry_kinds() -> Dict[Tuple[str, str], FrozenSet[str]]:
     return {key: set(value) for key, value in BODY_CAPABILITIES_V1.items()}
 
 
+#: Internal body context -> the PUBLIC name the authoring contract publishes.
+#:
+#: Only ``branch_leg`` actually renames, and it is not cosmetic: ``branch_leg``
+#: is a compiler-internal identifier that the served surface is forbidden to
+#: carry (``tests/test_process_ir_compiler_surface.py::FORBIDDEN_NAMES``), and
+#: "path" is the platform's own word for a Branch outlet. The other four pass
+#: through unchanged rather than being renamed for symmetry — a rename with no
+#: reason is a second vocabulary to keep in step.
+#:
+#: The mapping is TOTAL and INJECTIVE over the contexts this registry uses, and a
+#: parity test pins both directions, so projecting through it loses no fact and
+#: cannot collapse two contexts into one.
+PUBLIC_BODY_CONTEXTS: Mapping[str, str] = MappingProxyType(
+    {
+        BRANCH_LEG: "branch_path",
+        DECISION_TRUE_ARM: DECISION_TRUE_ARM,
+        DECISION_FALSE_ARM: DECISION_FALSE_ARM,
+        TRY_BODY: TRY_BODY,
+        CATCH_BODY: CATCH_BODY,
+    }
+)
+
+
+def body_placement_rows() -> Tuple[Tuple[str, str, Tuple[str, ...]], ...]:
+    """The closed matrix as sorted public data: (context, slot, admitted kinds).
+
+    Contexts are the PUBLIC names (see :data:`PUBLIC_BODY_CONTEXTS`); kinds are
+    the authored discriminators, which are already public vocabulary. Sorted so
+    the projection — and therefore ``compiler_revision`` — is deterministic.
+
+    What this deliberately does NOT emit is the complement: the denied triples
+    are not enumerated, because the registry is an ALLOWLIST and absence is the
+    rule. The contract publishes that rule once, as
+    ``unlisted_placement_state``, rather than shipping a combinatorial table
+    that would grow silently wrong every time a node kind is added.
+    """
+    return tuple(
+        sorted(
+            (PUBLIC_BODY_CONTEXTS[context], slot, tuple(sorted(kinds)))
+            for (context, slot), kinds in BODY_CAPABILITIES_V1.items()
+        )
+    )
+
+
 __all__ = [
     "BODY_CAPABILITIES_V1",
     "BRANCH_LEG",
     "CATCH_BODY",
     "DECISION_FALSE_ARM",
     "DECISION_TRUE_ARM",
+    "PUBLIC_BODY_CONTEXTS",
     "STEP_SLOT",
     "TERMINAL_SLOT",
     "TRY_BODY",
+    "body_placement_rows",
     "is_allowed",
     "registry_kinds",
     "validate_body_capabilities",
