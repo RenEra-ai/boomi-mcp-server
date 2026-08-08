@@ -9668,12 +9668,23 @@ def _plan_process_ir_block() -> Dict[str, Any]:
     for entry in entries:
         if entry.entry_type != "node":
             continue
+        # WITH IDENTITY. `["gated","gated","unsupported"]` named nothing and
+        # repeated itself, so a caller could not tell which capability was
+        # gated — while `process_ir_capability_gaps` in the same payload
+        # carries ids. Same shape here.
         blocking = sorted(
-            gated_by_capability[capability]
-            for related in entry.related_entry_ids
-            if related.startswith("capability.")
-            for capability in (related.split(".", 1)[1],)
-            if capability in gated_by_capability
+            (
+                {
+                    "capability_id": capability,
+                    "state": gated_by_capability[capability],
+                    "contract_entry_id": related,
+                }
+                for related in entry.related_entry_ids
+                if related.startswith("capability.")
+                for capability in (related.split(".", 1)[1],)
+                if capability in gated_by_capability
+            ),
+            key=lambda row: row["capability_id"],
         )
         constructs.append(
             {
@@ -9682,7 +9693,7 @@ def _plan_process_ir_block() -> Dict[str, Any]:
                 # yet available, the strictest of those states is surfaced.
                 "state": "supported",
                 "category": entry.category,
-                "related_capability_states": blocking,
+                "related_capability_gaps": blocking,
                 "contract_entry_id": entry.contract_entry_id,
             }
         )
@@ -10446,6 +10457,8 @@ def list_capabilities_action(
             "actions": ["list", "get"],
             "read_only": True,
             "parameters": {
+                # #146 amendment: advertised, not only accepted.
+                "config": "str (optional) — JSON string; reserved for future process actions, ignored by list/get",
                 "profile": "str (required)",
                 "action": "str (required) — list | get",
                 "process_id": "str (optional) — required for get",
@@ -10464,6 +10477,8 @@ def list_capabilities_action(
             "read_only": True,
             "no_boomi_mutation": True,
             "parameters": {
+                # #146 amendment: advertised, not only accepted.
+                "expected_recipe_registry": "str (optional) — JSON string of the recipe-registry snapshot you expect; supplying it turns recipe_registry_skew into a real comparison instead of not_requested",
                 "query": "str (optional) — case-insensitive substring filter over name/description/tags/use_cases/not_for",
                 "tags": "list[str] (optional) — tags the archetype must include (subset match)",
             },
@@ -10480,6 +10495,8 @@ def list_capabilities_action(
             "read_only": True,
             "no_boomi_mutation": True,
             "parameters": {
+                # #146 amendment: advertised, not only accepted.
+                "recipe_version": "str (optional) — pin the archetype's recipe version; omit for the registry default",
                 "name": "str (required) — archetype name from list_integration_archetypes()",
             },
             "examples": [
@@ -10493,6 +10510,8 @@ def list_capabilities_action(
             "read_only": True,
             "no_boomi_mutation": True,
             "parameters": {
+                # #146 amendment: advertised, not only accepted.
+                "recipe_version": "str (optional) — pin the archetype's recipe version; omit for the registry default",
                 "name": "str (required) — archetype name from list_integration_archetypes()",
                 "parameters": "dict (optional) — values matching the archetype's parameter_schema",
             },

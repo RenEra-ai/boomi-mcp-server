@@ -725,8 +725,12 @@ def test_the_doctrine_projection_carries_the_entry_s_own_metadata():
     checked_verification = checked_refs = 0
     for name, row in DESIGN_DOCTRINE_ENTRIES.items():
         entry = projected[name]
-        assert entry.category == (row.get("category") or "doctrine"), name
+        # `category` is the served FILTER FACET and stays "doctrine" — the
+        # pattern's own taxonomy is metadata, published as a fact.
+        assert entry.category == "doctrine", name
         facts = " ".join(entry.ordering_facts)
+        if row.get("category"):
+            assert "Doctrine category: {0}.".format(row["category"]) in facts, name
         if row.get("verification_status"):
             assert row["verification_status"] in facts, name
             checked_verification += 1

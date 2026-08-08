@@ -1664,6 +1664,11 @@ def preflight_typed_apply_v1(
 # ---------------------------------------------------------------------------
 
 
+#: The revisions a verify compares. Named once: the loop and the "was this
+#: comparison even complete?" fallback must agree, and they did not.
+_COMPARED_REVISIONS: Tuple[str, ...] = ("capability_revision", "compiler_revision")
+
+
 def compare_live_build_provenance(
     provenance: Mapping[str, Any],
     live_component_digests: Mapping[str, str],
@@ -1695,7 +1700,7 @@ def compare_live_build_provenance(
     # this surface exists to prevent.
     revision_mismatches: List[str] = []
     if binding:
-        for field in ("capability_revision", "compiler_revision"):
+        for field in _COMPARED_REVISIONS:
             expected = binding.get(field)
             # A binding minted before the field existed carries no value; that
             # is unknown, not a mismatch, and is reported as such below.
@@ -1703,7 +1708,12 @@ def compare_live_build_provenance(
                 revision_mismatches.append(field)
         if revision_mismatches:
             skew = "mismatch"
-        elif binding.get("capability_revision") is None:
+        elif any(binding.get(field) is None for field in _COMPARED_REVISIONS):
+            # A binding missing EITHER field was never fully compared, so
+            # "match" would claim a comparison that did not happen. Keying the
+            # fallback on `capability_revision` alone contradicted this code's
+            # own comment and reported `match` for a binding carrying no
+            # compiler revision at all.
             skew = "unknown"
         else:
             skew = "match"

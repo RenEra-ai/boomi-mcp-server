@@ -1231,14 +1231,18 @@ def _valid_operations(resource_type):
     return tuple(sorted(set(reported) | set(_documented_vocabulary("operation"))))
 
 
-def _registered_tool_descriptions():
-    """The description of every tool FastMCP actually serves."""
+def _registered_tools():
+    """Every tool FastMCP serves, as tool objects."""
     loop = asyncio.new_event_loop()
     try:
-        tools = loop.run_until_complete(server.mcp.list_tools())
+        return loop.run_until_complete(server.mcp.list_tools())
     finally:
         loop.close()
-    return [tool.description for tool in tools if tool.description]
+
+
+def _registered_tool_descriptions():
+    """The description of every tool FastMCP actually serves."""
+    return [tool.description for tool in _registered_tools() if tool.description]
 
 
 def _paginate_contract(category):
@@ -2398,14 +2402,79 @@ def test_the_meta_tool_catalog_advertises_every_wrapper_parameter():
     import inspect
 
     catalog = meta_tools.list_capabilities_action()["tools"]
-    for tool_name, action in (
-        ("get_schema_template", meta_tools.get_schema_template_action),
-        ("plan_integration_design", meta_tools.plan_integration_design_action),
-    ):
-        advertised = set(catalog[tool_name]["parameters"])
-        accepted = set(inspect.signature(action).parameters)
+
+    # EVERY registered tool, not the two this amendment happened to touch. The
+    # guard was named "…advertises every wrapper parameter" while comparing 2 of
+    # 48 — and four other tools had a parameter documented only in a docstring,
+    # the exact condition the name declares unacceptable.
+    checked = 0
+    gaps = {}
+    for tool in _registered_tools():
+        wrapper = getattr(server, tool.name, None)
+        if wrapper is None or tool.name not in catalog:
+            continue
+        accepted = set(inspect.signature(wrapper).parameters)
+        advertised = set(catalog[tool.name].get("parameters") or {})
         missing = accepted - advertised
-        assert missing == set(), (tool_name, missing)
+        if missing:
+            gaps[tool.name] = sorted(missing)
+        checked += 1
+    assert checked >= 40, checked
+    assert gaps == {}, gaps
 
     assert "expected_capability_revision" in catalog["list_capabilities"]["parameters"]
     assert "process_ir_authoring" in catalog["get_schema_template"]["parameters"]["schema_name"]
+
+
+def test_the_doctrine_filter_value_callers_depend_on_still_selects_them():
+    """A filter VALUE is a contract. Redefining one is a breaking change.
+
+    Projecting each pattern's own taxonomy as `category` looked like fidelity
+    and silently deleted `category='doctrine'` — the only call that selected
+    these 39 entries — while moving `category='reliability'` from 2 entries to 9
+    by mixing patterns in with the node it used to return. There is no
+    `entry_type` filter, so nothing else selected them.
+    """
+    page = fetch(category="doctrine", limit=50)["contract_page"]
+    assert page["matched_entry_count"] == len(
+        [e for e in build_process_ir_authoring_entries() if e.entry_type == "doctrine"]
+    )
+    for entry in page["entries"]:
+        assert entry["entry_type"] == "doctrine"
+
+    # ...and a pre-existing value still means what it meant.
+    reliability = fetch(category="reliability", limit=50)["contract_page"]
+    assert {e["entry_type"] for e in reliability["entries"]} == {"node", "semantic_rule"}
+
+    # The pattern's own taxonomy is still published — as metadata, where it
+    # moves the revision without redefining a filter value.
+    doctrine = next(
+        e for e in build_process_ir_authoring_entries() if e.entry_type == "doctrine"
+    )
+    assert any(f.startswith("Doctrine category:") for f in doctrine.ordering_facts)
+
+
+def test_the_contract_never_serves_a_verbatim_copy_of_doctrine_prose():
+    """The entry's own summary says it never copies the prose.
+
+    `mutual_exclusion` holds sentences, not pattern names, so joining them
+    served the same words under two selectors — under a label that promised a
+    name list.
+    """
+    from boomi_mcp.kb.design_doctrine import DESIGN_DOCTRINE_ENTRIES
+
+    served = json.dumps(
+        [
+            e.model_dump(mode="json")
+            for e in build_process_ir_authoring_entries()
+            if e.entry_type == "doctrine"
+        ]
+    )
+    checked = 0
+    for row in DESIGN_DOCTRINE_ENTRIES.values():
+        for sentence in row.get("mutual_exclusion") or ():
+            assert sentence not in served, sentence[:70]
+            checked += 1
+    assert checked, "no mutual_exclusion prose exists — the pin is vacuous"
+    # ...but a change to it still moves the contract.
+    assert "Mutual-exclusion guidance: present (digest" in served

@@ -28,6 +28,7 @@ exists to remove.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
 
 from ..models.process_ir_authoring import (
@@ -473,7 +474,7 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "is owned by emission. Source values concatenate in the authored order."
         ),
         _ORDERING: (
-            "Per-document state is not visible across sibling Branch paths: each "
+            "Per-document state is not visible across sibling paths: each "
             "path receives its own copy of the documents.",
             "Where paths converge, only state written on every incoming path is "
             "established.",
@@ -1267,6 +1268,14 @@ def _semantic_rule_entries(
     ]
 
 
+def _prose_digest(value):
+    """A short stable digest of prose, so it moves a revision without being copied."""
+    import hashlib
+
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
 def _doctrine_entries(
     sources: ProjectionSourcesV1,
 ) -> List[ProcessIRAuthoringContractEntryV1]:
@@ -1297,16 +1306,26 @@ def _doctrine_entries(
                 canonical_state=canonical,
                 source_state=status,
                 applicable=applicable,
-                # The doctrine entry's OWN metadata, not just name+status.
-                # Publishing two of six fields meant changing a pattern's
-                # verification status, its provenance or a cross-reference moved
-                # no revision at all — the projection could not see it, so the
-                # hash could not either.
-                category=str(row.get("category") or "doctrine"),
+                # `category` is the served FILTER FACET, and it stays "doctrine".
+                #
+                # Publishing each pattern's own taxonomy here looked like more
+                # fidelity and was a silent breaking change: `category='doctrine'`
+                # — the only call that selected these 39 entries — became
+                # INVALID_INPUT, and `category='reliability'` went from 2 entries
+                # to 9 by mixing patterns in with the node it used to return.
+                # There is no `entry_type` filter, so nothing else selected them.
+                #
+                # The pattern's own category is metadata ABOUT the entry, and is
+                # published below where it moves the revision without redefining
+                # a filter value callers depend on.
+                category="doctrine",
                 workflow_stages=("discover", "plan"),
                 ordering_facts=tuple(
                     fact
                     for fact in (
+                        "Doctrine category: {0}.".format(row["category"])
+                        if row.get("category")
+                        else "",
                         "Verification: {0}.".format(row["verification_status"])
                         if row.get("verification_status")
                         else "",
@@ -1318,8 +1337,15 @@ def _doctrine_entries(
                         )
                         if row.get("cross_refs")
                         else "",
-                        "Mutually exclusive with: {0}.".format(
-                            ", ".join(sorted(row.get("mutual_exclusion") or ()))
+                        # A DIGEST, not the text. `mutual_exclusion` holds prose
+                        # sentences, not pattern names, so joining them served a
+                        # verbatim copy of doctrine — under a label promising a
+                        # name list, in an entry whose own summary says it never
+                        # copies prose. The digest still moves the revision when
+                        # the guidance changes; the words stay on the selector
+                        # that owns them.
+                        "Mutual-exclusion guidance: present (digest {0}).".format(
+                            _prose_digest(row["mutual_exclusion"])
                         )
                         if row.get("mutual_exclusion")
                         else "",
