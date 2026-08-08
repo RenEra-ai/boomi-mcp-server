@@ -1125,6 +1125,29 @@ _TEMPLATE_MARKERS = ("<", "...", "…")
 _ALTERNATION = re.compile(r"'\s*\|\s*'")
 
 
+#: Values the wrapper's own Args block documents for one selector axis.
+#:
+#: Parsed from the SERVED description rather than restated, so the sweep covers
+#: what the tool advertises. A vocabulary copied into the test is one more
+#: second copy — the defect this whole contract exists to prevent.
+_VOCABULARY_LINE = re.compile(r"^\s*(\w+):[^:]*:\s*(.+)$")
+
+
+def _documented_vocabulary(axis):
+    for line in (server.get_schema_template.__doc__ or "").splitlines():
+        match = _VOCABULARY_LINE.match(line)
+        if not match or match.group(1) != axis:
+            continue
+        values = []
+        for token in match.group(2).split(","):
+            token = token.strip().rstrip(".")
+            # `etc.` and prose tails are not values.
+            if token and re.fullmatch(r"[\w.\-]+", token) and token != "etc":
+                values.append(token)
+        return tuple(values)
+    return ()
+
+
 def _registered_tool_descriptions():
     """The description of every tool FastMCP actually serves."""
     loop = asyncio.new_event_loop()
@@ -1176,10 +1199,18 @@ def _served_surfaces():
             surfaces.append(meta_tools.get_schema_template_action(schema_name=name))
         except Exception:  # noqa: BLE001 — a selector that cannot build serves nothing
             continue
-    # resource_type ALONE and resource_type x operation: the second axis serves
-    # 179 further strings, two of which carry their own instructions.
+    # Every resource_type x operation, plus the specialization axes.
+    #
+    # A hand-picked five-operation subset missed integration `plan`, component
+    # `safe_edit`, package `deploy` and the whole monitoring family — real
+    # payloads with their own instructions. The vocabularies are DERIVED from
+    # the wrapper's own Args block, so a new operation is swept the day it is
+    # documented rather than the day someone remembers to extend a tuple.
+    #
+    # Over-enumerating is harmless and useful: an unsupported combination
+    # returns an ERROR payload, which is served text worth sweeping too.
     for resource_type in meta_tools._VALID_RESOURCE_TYPES:
-        for operation in (None, "create", "update", "list", "execute"):
+        for operation in (None,) + _documented_vocabulary("operation"):
             try:
                 surfaces.append(
                     meta_tools.get_schema_template_action(
@@ -1188,6 +1219,17 @@ def _served_surfaces():
                 )
             except Exception:  # noqa: BLE001
                 continue
+    for axis in ("standard", "component_type", "protocol"):
+        for value in _documented_vocabulary(axis):
+            for resource_type in meta_tools._VALID_RESOURCE_TYPES:
+                try:
+                    surfaces.append(
+                        meta_tools.get_schema_template_action(
+                            resource_type=resource_type, **{axis: value}
+                        )
+                    )
+                except Exception:  # noqa: BLE001
+                    continue
 
     # The ERROR envelopes. A rejection is served text too, and its suggestion is
     # the instruction a caller is most likely to follow — they are stuck.
@@ -1411,23 +1453,41 @@ _REPO_DOC_NAMES = tuple(
 #: ``docs/Atomsphere/...`` is deliberately NOT matched: that is a Boomi
 #: documentation page key, and ``read_boomi_doc_page`` fetches it. A guard that
 #: flagged a reachable destination would teach the wrong lesson.
-_UNFETCHABLE_DOCUMENT = re.compile(
-    r"(?:"
-    # Bare document names are UPPERCASE and matched case-SENSITIVELY. Matching
-    # them case-insensitively flagged the ordinary word "license" inside a
-    # warning about connection licences — a guard that cries wolf on prose is a
-    # guard someone switches off.
-    r"\b(?:ADR-\d+|README|CHANGELOG|LICENSE|Makefile)\b"
-    + (r"|\b(?:" + "|".join(re.escape(n) for n in _REPO_DOC_NAMES) + r")\b"
-       if _REPO_DOC_NAMES else "")
-    + r"|\b(?:docs|src|tests|agents|examples|scripts|boomi_mcp)/(?!Atomsphere)[\w/.-]+"
-    r"|\.(?:codex|github)/[\w/.-]+"
-    r"|/mnt/[\w/.-]+"
-    # Only the EXTENSION alternative ignores case, so `SETUP.MD` is caught
-    # without dragging every lowercase English word in with it.
-    r"|(?i:\b[\w.-]+\.(?:md|rst|py|toml|cfg|ini|yaml|yml|sh|sql|js|ts|html)\b)"
-    r")"
+#: Alternatives, ORDERED. Alternation is leftmost-wins, and that ordering is
+#: load-bearing here: ``ADR-\d+`` matches the *prefix* of
+#: ``ADR-001-process-ir-authority``, so with the bare id first the full document
+#: name was reduced to ``ADR-001`` and then discarded by the provenance
+#: exemption — the extensionless case the derived names exist to catch escaped
+#: through the exemption meant for something else. Derived names go first, and
+#: ``(?!-)`` on the bare id is the belt to that braces.
+#:
+#: Bare document names are matched case-SENSITIVELY; only the extension
+#: alternative ignores case (so ``SETUP.MD`` is caught). Matching bare names
+#: case-insensitively flagged the ordinary word "license" in a warning about
+#: connection licences, and a guard that cries wolf on prose is one people
+#: switch off.
+_UNFETCHABLE_ALTERNATIVES = (
+    ([r"\b(?:" + "|".join(re.escape(name) for name in _REPO_DOC_NAMES) + r")\b"]
+     if _REPO_DOC_NAMES else [])
+    + [
+        r"\bADR-\d+\b(?!-)",
+        r"\b(?:README|CHANGELOG|LICENSE|Makefile)\b",
+        # `docs/Atomsphere/...` is EXCLUDED: it is a Boomi documentation page
+        # key and `read_boomi_doc_page` fetches it. Flagging a reachable
+        # destination would teach the wrong lesson.
+        r"\b(?:docs|src|tests|agents|examples|scripts|boomi_mcp)/(?!Atomsphere)[\w/.-]+",
+        # `\b` is applied only to alternatives beginning with a word character;
+        # in front of the whole group it silently disabled this one, because a
+        # standalone dot is a non-word character.
+        r"\.(?:codex|github)/[\w/.-]+",
+        r"/mnt/[\w/.-]+",
+        # `json` and `xml` are deliberately absent: `profile.json` is a real
+        # profile_type value on this surface.
+        r"(?i:\b[\w.-]+\.(?:md|rst|py|toml|cfg|ini|yaml|yml|sh|sql|js|ts|html)\b)",
+    ]
 )
+
+_UNFETCHABLE_DOCUMENT = re.compile("(?:" + "|".join(_UNFETCHABLE_ALTERNATIVES) + ")")
 
 
 def test_no_served_string_instructs_the_caller_to_read_an_unfetchable_document():
@@ -1798,3 +1858,44 @@ def test_the_repo_document_names_are_derived_from_disk():
     assert _REPO_DOC_NAMES
     assert "AUTHORING_WORKFLOW_V1" in _REPO_DOC_NAMES
     assert "PROCESS_IR_V1" in _REPO_DOC_NAMES
+
+
+def test_a_full_document_name_is_not_reduced_to_an_exempt_adr_id():
+    """Alternation order is load-bearing.
+
+    ``ADR-\\d+`` matches the prefix of ``ADR-001-process-ir-authority``, so with
+    the bare id first the full document name was reduced to ``ADR-001`` and then
+    thrown away by the provenance exemption — the extensionless case the derived
+    names exist to catch escaped through the exemption meant for something else.
+    """
+    bare = re.compile(r"\bADR-\d+\b")
+    full = "Grounded in ADR-001-process-ir-authority."
+    matches = [m for m in _UNFETCHABLE_DOCUMENT.findall(full) if not bare.fullmatch(m)]
+    assert matches == ["ADR-001-process-ir-authority"]
+
+    # ...while the bare provenance form is still exempt.
+    provenance = "recorded in ADR-001 §6"
+    assert [m for m in _UNFETCHABLE_DOCUMENT.findall(provenance) if not bare.fullmatch(m)] == []
+
+
+def test_the_selector_vocabularies_are_derived_from_the_served_description():
+    """A vocabulary copied into the test is one more second copy.
+
+    A hand-picked five-operation subset missed integration `plan`, component
+    `safe_edit`, package `deploy` and the whole monitoring family.
+    """
+    operations = _documented_vocabulary("operation")
+    assert len(operations) >= 10
+    for expected in ("create", "execution_records", "compare_versions", "events"):
+        assert expected in operations
+    assert "etc" not in _documented_vocabulary("component_type")
+    assert _documented_vocabulary("standard")
+    assert _documented_vocabulary("protocol")
+    assert _documented_vocabulary("not_an_axis") == ()
+
+
+def test_the_sweep_reaches_the_operations_a_fixed_subset_missed():
+    surfaces = _served_surfaces()
+    rendered = json.dumps(surfaces, default=str)
+    for marker in ("safe_edit", "execution_records", "deploy"):
+        assert marker in rendered, marker
