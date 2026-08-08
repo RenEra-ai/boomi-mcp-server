@@ -1779,14 +1779,23 @@ _ARTIFACT_EXEMPT_KEYS = (
 def _is_artifact_exempt(path):
     """True when ``path``'s LEAF is an exempted key.
 
-    Suffix, not substring. A substring test accepted a subtree PREFIX as if it
-    were a key: ``tools.read_boomi_doc_page`` matches only 9 of 28,160 paths, so
-    it slipped under both the count and percentage caps while silently excusing
-    an entire served tool. An exemption names the leaf it excuses or it does
-    not apply.
+    Exact, or bounded by a ``.`` path separator — never a bare suffix.
+
+    Two narrower-than-stated versions leaked in turn. A SUBSTRING test accepted
+    a subtree prefix as if it were a key (``tools.read_boomi_doc_page`` matched
+    9 of 28,160 paths, slipping under both caps while excusing a whole served
+    tool). A bare SUFFIX test then exempted any leaf whose name merely ends with
+    an exempt name — ``tools.not_sdk_examples_covered`` is a different field,
+    and anything placed under it would have bypassed the sweep.
+
+    The boundary is what makes "names the leaf it excuses" true rather than
+    approximately true.
     """
     normalized = path[:-2] if path.endswith("[]") else path
-    return any(normalized.endswith(key) for key in _ARTIFACT_EXEMPT_KEYS)
+    return any(
+        normalized == key or normalized.endswith("." + key)
+        for key in _ARTIFACT_EXEMPT_KEYS
+    )
 
 
 def _served_strings_with_paths():
@@ -1966,11 +1975,7 @@ def test_the_artifact_exemption_stays_a_handful_of_keys_not_a_surface():
 
     all_paths = [path for path, _ in _served_strings_with_paths()]
     for key in _ARTIFACT_EXEMPT_KEYS:
-        matched = [
-            path
-            for path in all_paths
-            if (path[:-2] if path.endswith("[]") else path).endswith(key)
-        ]
+        matched = [path for path in all_paths if _is_artifact_exempt(path) and key in path]
         assert matched, f"exemption {key!r} matches nothing — dead or misspelled"
 
     exempted = [path for path in all_paths if _is_artifact_exempt(path)]
@@ -2287,8 +2292,16 @@ def test_a_subtree_prefix_cannot_masquerade_as_an_exempted_key():
     an entire served tool. An exemption names the LEAF it excuses.
     """
     assert _is_artifact_exempt("tools.read_boomi_doc_page.examples[]")
+    # a DESCENDANT of an exempt subtree
     assert not _is_artifact_exempt("tools.read_boomi_doc_page.description")
     assert not _is_artifact_exempt("tools.read_boomi_doc_page.notes[]")
+    # a DIFFERENT LEAF whose name merely ends with an exempt name
+    assert not _is_artifact_exempt("tools.not_sdk_examples_covered[]")
+    assert not _is_artifact_exempt("tools.my_sdk_examples_covered[]")
+    assert not _is_artifact_exempt("other_user_decisions[].field")
+    # ...and the real ones still qualify
+    assert _is_artifact_exempt("tools.x.sdk_examples_covered[]")
+    assert _is_artifact_exempt("required_user_decisions[].field")
 
     # Every real exemption is still a leaf match.
     exempted = [
