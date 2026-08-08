@@ -2478,3 +2478,64 @@ def test_the_contract_never_serves_a_verbatim_copy_of_doctrine_prose():
     assert checked, "no mutual_exclusion prose exists — the pin is vacuous"
     # ...but a change to it still moves the contract.
     assert "Mutual-exclusion guidance: present (digest" in served
+
+
+#: Parameters this amendment ADDED to the catalog, and the JSON-schema type the
+#: registered wrapper generates for each. Advertising a type the wrapper rejects
+#: is worse than not advertising at all: a client that follows the catalog is
+#: rejected by schema validation before the action ever runs.
+_AMENDMENT_CATALOG_PARAMS = {
+    ("get_schema_template", "authoring_entry_id"): "string",
+    ("get_schema_template", "node_kind"): "string",
+    ("get_schema_template", "category"): "string",
+    ("get_schema_template", "capability_id"): "string",
+    ("get_schema_template", "workflow_stage"): "string",
+    ("get_schema_template", "after_entry_id"): "string",
+    ("get_schema_template", "limit"): "integer",
+    ("plan_integration_design", "authoring_mode"): "string",
+    ("list_capabilities", "expected_capability_revision"): "string",
+    ("list_integration_archetypes", "expected_recipe_registry"): "object",
+    ("get_integration_archetype", "recipe_version"): "string",
+    ("build_from_archetype", "recipe_version"): "string",
+    ("manage_process", "config"): "string",
+}
+
+_JSON_TYPE_WORD = {
+    "string": "str",
+    "integer": "int",
+    "number": "float",
+    "boolean": "bool",
+    "array": "list",
+    "object": "dict",
+}
+
+
+def test_the_catalog_advertises_the_type_the_wrapper_actually_accepts():
+    """Presence was not enough; the TYPE has to match too.
+
+    The fix that closed the catalog gaps described
+    `expected_recipe_registry` as a JSON string while the wrapper declares an
+    object — so a client following the newly-honest catalog would be rejected by
+    FastMCP validation before the action's own normalization ever ran. An
+    advertisement that cannot be followed is the same defect the gap was.
+    """
+    catalog = meta_tools.list_capabilities_action()["tools"]
+    schemas = {tool.name: (getattr(tool, "parameters", None) or {}) for tool in _registered_tools()}
+
+    checked = 0
+    for (tool_name, param), expected_json_type in _AMENDMENT_CATALOG_PARAMS.items():
+        properties = schemas[tool_name].get("properties", {})
+        assert param in properties, (tool_name, param)
+        spec = properties[param]
+        declared = spec.get("type") or "|".join(
+            option.get("type", "")
+            for option in spec.get("anyOf", [])
+            if option.get("type") != "null"
+        )
+        assert expected_json_type in declared, (tool_name, param, declared)
+
+        text = catalog[tool_name]["parameters"][param]
+        word = _JSON_TYPE_WORD[expected_json_type]
+        assert text.lstrip().startswith(word), (tool_name, param, text[:40])
+        checked += 1
+    assert checked == len(_AMENDMENT_CATALOG_PARAMS)

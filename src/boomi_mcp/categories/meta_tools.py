@@ -10478,7 +10478,7 @@ def list_capabilities_action(
             "no_boomi_mutation": True,
             "parameters": {
                 # #146 amendment: advertised, not only accepted.
-                "expected_recipe_registry": "str (optional) — JSON string of the recipe-registry snapshot you expect; supplying it turns recipe_registry_skew into a real comparison instead of not_requested",
+                "expected_recipe_registry": "dict (optional) — the recipe-registry snapshot OBJECT you expect (the wrapper declares an object; a JSON string is rejected by schema validation before the action runs); supplying it turns recipe_registry_skew into a real comparison instead of not_requested",
                 "query": "str (optional) — case-insensitive substring filter over name/description/tags/use_cases/not_for",
                 "tags": "list[str] (optional) — tags the archetype must include (subset match)",
             },
