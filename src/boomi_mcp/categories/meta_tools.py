@@ -6467,6 +6467,10 @@ def cache_property_authoring_contract() -> Dict[str, Any]:
         # model that owns it), so they cannot say something the code does not do,
         # and a parity test asserts the prose agrees with them.
         "canonical_scopes": _canonical_scope_rows(),
+        # Per-TERM canonical state, beside each term's own `capability_status`.
+        # `canonical_scopes` are visibility facts, not capability states — they
+        # answer "where is this value visible", not "may I author this".
+        "canonical_term_states": _canonical_term_states(),
         # Issue #124 M11.5: the honesty ledger — what each provenance label
         # means and which shapes remain gated, sourced from the #119 census.
         "provenance_labels": {
@@ -6490,6 +6494,32 @@ def cache_property_authoring_contract() -> Dict[str, Any]:
             "as authoritative."
         ),
     }
+
+
+def _canonical_term_states() -> List[Dict[str, Any]]:
+    """Each term's own capability_status, mapped to the canonical vocabulary.
+
+    Derived from the term table and the published mapping, so a term flipped to
+    executable moves both at once.
+    """
+    from ..authoring.process_ir_projection import state_mappings
+
+    mapping = {
+        row.source_state: row.canonical_state
+        for row in state_mappings()
+        if row.source_vocabulary == "cache_property_authoring"
+    }
+    rows = []
+    for term, body in sorted(_CACHE_PROPERTY_AUTHORING_TERMS.items()):
+        source_state = body.get("capability_status", "")
+        rows.append(
+            {
+                "term": term,
+                "source_state": source_state,
+                "canonical_state": mapping.get(source_state, "unsupported"),
+            }
+        )
+    return rows
 
 
 def _canonical_scope_rows() -> List[Dict[str, Any]]:
@@ -9612,15 +9642,39 @@ def _plan_process_ir_block() -> Dict[str, Any]:
     from ..authoring.process_ir_projection import build_process_ir_authoring_entries
 
     entries = build_process_ir_authoring_entries()
-    constructs = [
-        {
-            "kind": entry.subject,
-            "category": entry.category,
-            "contract_entry_id": entry.contract_entry_id,
-        }
+    # `state` is the field the plan asked for and the one a caller acts on:
+    # "may I author this construct?". `category` answers a different question
+    # and was published in its place. Both ship now — a node entry carries no
+    # capability state of its own, so it is `supported` unless a capability row
+    # says otherwise, and that derivation is stated rather than assumed.
+    gated_by_capability = {
+        related.split(".", 1)[1]: entry.canonical_state
         for entry in entries
-        if entry.entry_type == "node"
-    ]
+        if entry.entry_type == "capability" and entry.canonical_state != "supported"
+        for related in (entry.contract_entry_id,)
+    }
+    constructs = []
+    for entry in entries:
+        if entry.entry_type != "node":
+            continue
+        blocking = sorted(
+            gated_by_capability[capability]
+            for related in entry.related_entry_ids
+            if related.startswith("capability.")
+            for capability in (related.split(".", 1)[1],)
+            if capability in gated_by_capability
+        )
+        constructs.append(
+            {
+                "kind": entry.subject,
+                # A node is authorable; where a capability it depends on is not
+                # yet available, the strictest of those states is surfaced.
+                "state": "supported",
+                "category": entry.category,
+                "related_capability_states": blocking,
+                "contract_entry_id": entry.contract_entry_id,
+            }
+        )
     gaps = [
         {
             "capability_id": entry.capability_id,

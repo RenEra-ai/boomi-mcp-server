@@ -1468,6 +1468,11 @@ def test_models_package_exports_are_pinned():
         "authoring_revision_binding_v1_json_schema",
         "canonical_authoring_json",
         "sort_authoring_diagnostics",
+        # #146 AMENDMENT — the public authoring-contract surface.
+        "PROCESS_IR_AUTHORING_CONTRACT_VERSION",
+        "ProcessIRAuthoringContractEntryV1",
+        "ProcessIRAuthoringContractPageV1",
+        "process_ir_authoring_contract_v1_json_schema",
     }
     non_topology = (
         set(models.__all__)

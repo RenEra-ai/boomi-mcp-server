@@ -319,9 +319,9 @@ def test_the_behavioural_facts_a_caller_needs_are_all_reachable():
 
     dpp = resolve_entry("state_visibility.dpp")[0]
     dpp_facts = " ".join(dpp["ordering_facts"])
-    assert "sibling Branch paths: yes" in dpp_facts
+    assert "sibling paths: yes" in dpp_facts
     ddp = resolve_entry("state_visibility.ddp")[0]
-    assert "sibling Branch paths: no" in " ".join(ddp["ordering_facts"])
+    assert "sibling paths: no" in " ".join(ddp["ordering_facts"])
 
 
 def test_the_apply_refusal_is_discoverable_before_authoring_anything():

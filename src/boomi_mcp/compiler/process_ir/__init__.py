@@ -18,6 +18,16 @@ semantic facts under a distinct public vocabulary, never these modules' own
 identifiers. The legacy ``flow_sequence`` path is unchanged and stays
 authoritative for materialization.
 
+**Recorded deviation (#146 amendment).** The implementation plan said "do not
+re-export internal capability or CFG types". This package's ``__all__`` still
+re-exports ``SemanticCfgV1``, ``EmissionPlanV1`` and their neighbours — they
+predate this work, the test-only emitter registry and the parity suites import
+them through it, and withdrawing them is a refactor with its own blast radius
+rather than part of serving an authoring contract. It is NOT an MCP leak: those
+names are in ``FORBIDDEN_NAMES`` and a repository-wide guard fails the build if
+any of them reaches a served payload or a tool description. Recorded here so the
+gap between the plan and the code is visible rather than discovered.
+
 Pipeline::
 
     authored payload --parse--> ProcessIRV1 --lower--> SemanticCfgV1

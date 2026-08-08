@@ -2335,3 +2335,53 @@ def test_the_dead_exemption_check_asks_about_the_key_it_is_checking():
     assert not any(_matches_exempt_key(path, "field") for path in paths if "[]." not in path)
     for key in _ARTIFACT_EXEMPT_KEYS:
         assert any(_matches_exempt_key(path, key) for path in paths), key
+
+
+# ---------------------------------------------------------------------------
+# §6 architect-vs-plan review findings
+# ---------------------------------------------------------------------------
+
+
+def test_verify_compares_the_compiler_revision_and_names_what_moved():
+    """The §11 limit this amendment CLAIMED to close, actually closed.
+
+    `compare_live_build_provenance` compared only `capability_revision`, so a
+    server whose compiler BEHAVIOUR had changed — a placement rule, a replay
+    classification, a remediation — reported `match` against a binding minted
+    before the change. The document said the limit was closed. That is the
+    false-claim defect this whole amendment exists to remove, written into the
+    record of the amendment itself.
+    """
+    from boomi_mcp.authoring.contract import get_authoring_revisions
+    from boomi_mcp.authoring.workflow import compare_live_build_provenance
+
+    revisions = get_authoring_revisions()
+    base = {"live_component_fingerprints": {"c": {"digest": "d"}}}
+    observed = {"c": "d"}
+    stale = "sha256:" + "0" * 64
+
+    matching = compare_live_build_provenance(
+        dict(base, revision_binding=dict(revisions)), observed
+    )
+    assert matching.revision_skew == "match"
+    assert matching.revision_mismatches == ()
+
+    for field in ("capability_revision", "compiler_revision"):
+        moved = compare_live_build_provenance(
+            dict(base, revision_binding=dict(revisions, **{field: stale})), observed
+        )
+        assert moved.revision_skew == "mismatch", field
+        assert moved.revision_mismatches == (field,), field
+
+    both = compare_live_build_provenance(
+        dict(
+            base,
+            revision_binding=dict(
+                revisions,
+                capability_revision=stale,
+                compiler_revision="sha256:" + "1" * 64,
+            ),
+        ),
+        observed,
+    )
+    assert both.revision_mismatches == ("capability_revision", "compiler_revision")

@@ -19,6 +19,12 @@ from .pipeline_models import (
     StageSideEffect,
     StageFailureBehavior,
 )
+from .process_ir_authoring import (
+    PROCESS_IR_AUTHORING_CONTRACT_VERSION,
+    ProcessIRAuthoringContractEntryV1,
+    ProcessIRAuthoringContractPageV1,
+    process_ir_authoring_contract_v1_json_schema,
+)
 from .process_ir import (
     PROCESS_IR_V1_CAPABILITIES,
     PROCESS_IR_VERSION,
@@ -215,7 +221,11 @@ __all__ = [
     'StageFailureBehavior',
     # ProcessIRV1 (issue #136) — the private _process_ir_compat codec is
     # deliberately NOT exported.
+    'PROCESS_IR_AUTHORING_CONTRACT_VERSION',
     'PROCESS_IR_V1_CAPABILITIES',
+    'ProcessIRAuthoringContractEntryV1',
+    'ProcessIRAuthoringContractPageV1',
+    'process_ir_authoring_contract_v1_json_schema',
     'PROCESS_IR_VERSION',
     'BranchLegV1',
     'BranchNodeV1',

@@ -132,6 +132,17 @@ SortedStrings = Annotated[Tuple[str, ...], AfterValidator(_sorted_unique)]
 SortedEntryIds = Annotated[Tuple[ContractEntryId, ...], AfterValidator(_sorted_unique)]
 
 
+def _sorted_unique_models(values):
+    """The same rule for tuples of MODELS, which had no validator at all.
+
+    Only the string aliases were sorted-and-uniqued, so ``placements``,
+    ``required_references``, ``sources``, ``state_mappings`` and a page's
+    ``entries`` accepted duplicates in arbitrary order — and their bytes feed a
+    revision, so iteration order could move a hash without any content change.
+    """
+    return _sorted_unique(values)
+
+
 class _ContractModel(BaseModel):
     """Strict and frozen: a served contract entry is a value, not a workspace."""
 
@@ -225,7 +236,13 @@ class ProcessIRDocumentSemanticsV1(_ContractModel):
 
     input_documents: Literal["none", "optional", "required"]
     output_documents: Literal["none", "documents", "stream_replacing", "consumed"]
-    grouping: Literal["per_document", "per_batch", "all_documents", "not_applicable"]
+    #: ``unspecified`` is NOT a synonym for ``not_applicable``. It means no
+    #: authority states this fact — a connector action's grouping is decided by
+    #: the operation, and inventing ``per_document`` for every row published a
+    #: claim with nothing behind it.
+    grouping: Literal[
+        "per_document", "per_batch", "all_documents", "not_applicable", "unspecified"
+    ]
 
 
 class ProcessIRAuthoringStateMappingV1(_ContractModel):
@@ -283,14 +300,14 @@ class ProcessIRAuthoringContractEntryV1(_ContractModel):
     workflow_stages: SortedStrings = ()
     schema_refs: SortedStrings = ()
 
-    placements: Tuple[ProcessIRAuthoringPlacementV1, ...] = ()
+    placements: Annotated[Tuple[ProcessIRAuthoringPlacementV1, ...], AfterValidator(_sorted_unique_models)] = ()
     document_semantics: Optional[ProcessIRDocumentSemanticsV1] = None
     #: Free-form but STATIC sentences about ordering, terminality and
     #: continuation — the facts that have no structural home. Every one of them
     #: is parity-pinned; none is interpolated from anything a caller sent.
     ordering_facts: SortedStrings = ()
 
-    required_references: Tuple[ProcessIRAuthoringReferenceV1, ...] = ()
+    required_references: Annotated[Tuple[ProcessIRAuthoringReferenceV1, ...], AfterValidator(_sorted_unique_models)] = ()
     diagnostic_codes: SortedStrings = ()
     related_entry_ids: SortedEntryIds = ()
     #: Other names the same construct goes by. ``merge`` is an alias of the
@@ -301,7 +318,7 @@ class ProcessIRAuthoringContractEntryV1(_ContractModel):
     doctrine_selector: Optional[str] = None
     recipe_selector: Optional[str] = None
 
-    sources: Tuple[ProcessIRAuthoringSourceV1, ...] = Field(..., min_length=1)
+    sources: Annotated[Tuple[ProcessIRAuthoringSourceV1, ...], AfterValidator(_sorted_unique_models)] = Field(..., min_length=1)
 
 
 class ProcessIRAuthoringFacetsV1(_ContractModel):
@@ -350,7 +367,7 @@ class ProcessIRAuthoringContractPageV1(_ContractModel):
     """
 
     contract_version: Literal["1"] = "1"
-    state_mappings: Tuple[ProcessIRAuthoringStateMappingV1, ...] = ()
+    state_mappings: Annotated[Tuple[ProcessIRAuthoringStateMappingV1, ...], AfterValidator(_sorted_unique_models)] = ()
     unlisted_placement_state: Literal["unsupported"] = "unsupported"
     unlisted_connector_action_state: Literal["unsupported"] = "unsupported"
 
@@ -363,6 +380,11 @@ class ProcessIRAuthoringContractPageV1(_ContractModel):
     next_after_entry_id: Optional[ContractEntryId] = None
 
     facets: ProcessIRAuthoringFacetsV1
+    #: NOT re-sorted. Order is meaningful here and nowhere else in this model:
+    #: the contract promises results in ``contract_entry_id`` order, and the
+    #: cursor pages through that order. Applying the generic set-sorter re-ordered
+    #: a page by serialized JSON and silently broke pagination — the one tuple
+    #: where "order is never meaningful" is false.
     entries: Tuple[ProcessIRAuthoringContractEntryV1, ...] = ()
 
 

@@ -434,9 +434,12 @@ def test_drift_control_changing_a_validator_remediation_changes_the_contract():
     )
     drifted = build_process_ir_authoring_entries(_perturbed(finding_specs=specs))
     entry = next(e for e in drifted if e.subject == code)
-    assert "CHANGED" in entry.ordering_facts
+    # Substring, not membership: each fact is prefixed with the PHASE that
+    # emits it, so a code with two disagreeing producers publishes both.
+    assert any("CHANGED" in fact for fact in entry.ordering_facts)
+    assert any(fact.startswith("[semantic validation]") for fact in entry.ordering_facts)
     live = next(e for e in entries() if e.subject == code)
-    assert "CHANGED" not in live.ordering_facts
+    assert not any("CHANGED" in fact for fact in live.ordering_facts)
 
 
 def test_drift_control_changing_a_state_visibility_fact_changes_the_contract():
@@ -448,9 +451,9 @@ def test_drift_control_changing_a_state_visibility_fact_changes_the_contract():
     )
     drifted = build_process_ir_authoring_entries(_perturbed(state_visibility=rows))
     entry = next(e for e in drifted if e.contract_entry_id == "state_visibility.ddp")
-    assert any("sibling Branch paths: yes" in fact for fact in entry.ordering_facts)
+    assert any("sibling paths: yes" in fact for fact in entry.ordering_facts)
     live = next(e for e in entries() if e.contract_entry_id == "state_visibility.ddp")
-    assert any("sibling Branch paths: no" in fact for fact in live.ordering_facts)
+    assert any("sibling paths: no" in fact for fact in live.ordering_facts)
 
 
 def test_drift_control_a_new_node_kind_with_no_facts_fails_loudly():
@@ -565,3 +568,113 @@ def test_state_mappings_cover_every_projected_source_state():
         assert any(
             (vocab, entry.source_state) in published for vocab in vocabularies
         ), entry.contract_entry_id
+
+
+# ---------------------------------------------------------------------------
+# §6 review: frozen evidence, and content pins for handwritten prose
+# ---------------------------------------------------------------------------
+
+_CONTRACT_FIXTURES = (
+    Path(__file__).resolve().parent / "fixtures" / "authoring_contract"
+)
+
+
+def test_the_whole_contract_is_frozen_in_a_committed_snapshot():
+    """What makes ``parity_pinned`` TRUE for prose.
+
+    ``_NODE_FACTS`` and ``_SEMANTIC_RULES`` are handwritten — deliberately, for
+    facts with no runtime source to generate them from — and every entry they
+    produce was labelled ``parity_pinned``. That label promises a CI test
+    asserting the content against its source in both directions, and for the
+    prose there was none: the two-way tests compared IDs and the presence of a
+    source label, never a summary, an ordering fact, a document-semantics row or
+    a reference requirement. A sentence could be rewritten to say the opposite
+    and nothing would fail.
+
+    A committed byte snapshot is the pin that actually holds for prose: it
+    cannot verify the claim is TRUE, but it makes every change to a served
+    behavioural statement land in a diff a reviewer must approve, which is the
+    reviewable property the label was asserting.
+    """
+    committed = (_CONTRACT_FIXTURES / "process_ir_authoring_v1.contract.json").read_text()
+    rendered = json.dumps(
+        process_ir_authoring_revision_payload(),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    assert rendered == committed, (
+        "the served authoring contract changed. If the change is intended, "
+        "regenerate tests/fixtures/authoring_contract/"
+        "process_ir_authoring_v1.contract.json and review the diff — every line "
+        "of it is text an LLM caller will read."
+    )
+    # ...and it is deterministic across rebuilds, not merely stable in one read.
+    assert rendered == json.dumps(
+        process_ir_authoring_revision_payload(),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+
+
+def test_the_page_schema_is_frozen_in_a_committed_snapshot():
+    from boomi_mcp.models.process_ir_authoring import (
+        process_ir_authoring_contract_v1_json_schema,
+    )
+
+    committed = (_CONTRACT_FIXTURES / "process_ir_authoring_v1.schema.json").read_text()
+    rendered = json.dumps(
+        process_ir_authoring_contract_v1_json_schema(),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    assert rendered == committed
+
+
+def test_the_handwritten_facts_that_ARE_derivable_are_pinned_to_their_source():
+    """Not every handwritten fact is unpinnable — several have a real authority.
+
+    Where one exists, the snapshot is not enough: the prose must agree with the
+    code, not merely stay unchanged.
+    """
+    from boomi_mcp.models.process_ir import PROCESS_IR_V1_MAX_CONTROL_DEPTH
+
+    by_id = {entry.contract_entry_id: entry for entry in entries()}
+
+    # The depth bound is a real constant, and the contract states it as OURS.
+    branch_entry = by_id["node.branch"]
+    branch = " ".join(
+        (branch_entry.summary + " " + " ".join(branch_entry.ordering_facts)).lower().split()
+    )
+    assert "two control levels" in branch
+    assert PROCESS_IR_V1_MAX_CONTROL_DEPTH == 2, (
+        "the served Branch prose says 'two control levels' — update both"
+    )
+    assert "not a boomi platform limit" in branch
+
+    # "A nested Branch is not a legal Branch-path terminal" is derivable from
+    # the allowlist: it holds precisely because `branch` is absent from the row.
+    terminal = by_id["placement.branch_path.terminal"]
+    assert "branch" not in terminal.node_kinds
+    assert "nested branch is not a legal branch-path terminal" in branch
+
+    # Flow control's single mode is a model constraint.
+    flow_entry = by_id["node.flow_control"]
+    flow = " ".join(
+        (flow_entry.summary + " " + " ".join(flow_entry.ordering_facts)).lower().split()
+    )
+    assert "no caller-configurable parallel" in flow
+    assert by_id["capability.flow_control_parallel_chunks"].source_state == "unsupported"
+
+    # The retry rule's wording must match the shipped fail-closed rule.
+    rule = " ".join(by_id["semantic_rule.retry.replay_safety"].summary.lower().split())
+    rules = {row["replay_classification"]: row for row in retry_rule_specs()}
+    for classification in ("non_idempotent", "unverified"):
+        assert classification in rule
+        assert rules[classification]["retry_permitted"] is False
+    assert "verified_action" in rule
+    assert rules["idempotent_write"]["required_evidence"] == "verified_action"
+    assert "key_reference" in rule
+    assert rules["conditionally_idempotent"]["required_evidence"] == "key_reference"

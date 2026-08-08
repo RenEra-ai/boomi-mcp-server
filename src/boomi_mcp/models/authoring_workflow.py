@@ -571,6 +571,10 @@ class LiveDeploymentComparisonV1(_AuthoringModel):
     """
 
     status: Literal["not_requested", "match", "drift", "unknown"]
+    #: WHICH revisions moved, sorted. A bare "mismatch" tells a caller their
+    #: binding is stale without telling them what changed — the capability
+    #: surface, or the compiler's behaviour. Those have different remedies.
+    revision_mismatches: Tuple[str, ...] = ()
     revision_skew: Literal["not_requested", "match", "mismatch", "unknown"] = (
         "not_requested"
     )

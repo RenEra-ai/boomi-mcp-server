@@ -193,9 +193,12 @@ _STATE_MAPPINGS: Tuple[Tuple[str, str, str, bool], ...] = (
     ("body_placement_registry", "absent", "unsupported", True),
     ("connector_capability_registry", "listed", "supported", True),
     ("connector_capability_registry", "absent", "unsupported", True),
+    # The owning surface's OWN spellings. `gated`/`reserved` were shorthand for
+    # states that surface never emits, so two of the three mapping rows could
+    # never fire — a published mapping from a vocabulary that does not exist.
     ("cache_property_authoring", "executable", "supported", True),
-    ("cache_property_authoring", "gated", "gated", True),
-    ("cache_property_authoring", "reserved", "unsupported", True),
+    ("cache_property_authoring", "gated_no_verified_wire_shape", "gated", True),
+    ("cache_property_authoring", "reserved_not_executable", "unsupported", True),
 )
 
 #: The mapping as a lookup, so a projector never decides a state itself.
@@ -993,7 +996,12 @@ def _connector_entries(
                 document_semantics=ProcessIRDocumentSemanticsV1(
                     input_documents=input_documents,
                     output_documents="documents" if row["output_documents"] else "none",
-                    grouping="per_document",
+                    # UNSPECIFIED, not per_document. Grouping is decided by the
+                    # operation's own configuration, which the (family, action)
+                    # registry cannot see — asserting `per_document` for every
+                    # row published a fact with no authority behind it, on an
+                    # entry whose sources claim everything is generated.
+                    grouping="unspecified",
                 ),
                 ordering_facts=(
                     "Side effect: {0}. Replay classification: {1}.".format(
@@ -1081,7 +1089,7 @@ def _diagnostic_entries(
     entries under one code would make a citation ambiguous.
     """
     merged: Dict[str, Dict[str, Any]] = {}
-    for specs, source_id, stages in (
+    for specs, source_id, stages, stage_label in (
         # The phases each code is REACHABLE FROM — not the module that emits it.
         #
         # The distinction cost a round. Filing by producer said "parse codes
@@ -1095,20 +1103,38 @@ def _diagnostic_entries(
         # everything plan can raise, compile can raise too. Compiler diagnostics
         # are the only ones plan cannot reach — nothing is compiled at plan.
         # ``repair`` stays the union, so it is always the safe filter.
-        (sources.parse_specs, SOURCE_PARSE_DIAGNOSTICS, ("plan", "compile")),
-        (sources.finding_specs, SOURCE_VALIDATION_DIAGNOSTICS, ("plan", "compile")),
-        (sources.compiler_specs, SOURCE_COMPILER_DIAGNOSTICS, ("compile",)),
+        (sources.parse_specs, SOURCE_PARSE_DIAGNOSTICS, ("plan", "compile"), "parse"),
+        (
+            sources.finding_specs,
+            SOURCE_VALIDATION_DIAGNOSTICS,
+            ("plan", "compile"),
+            "semantic validation",
+        ),
+        (sources.compiler_specs, SOURCE_COMPILER_DIAGNOSTICS, ("compile",), "compile"),
     ):
         for spec in specs:
             code = str(spec["code"])
             row = merged.setdefault(
                 code,
-                {"message": "", "remediation": "", "sources": [], "stages": ["repair"]},
+                {
+                    "message": "",
+                    "remediation": "",
+                    "sources": [],
+                    "stages": ["repair"],
+                    "texts": {},
+                },
             )
             if spec.get("message") and not row["message"]:
                 row["message"] = spec["message"]
             if spec.get("remediation") and not row["remediation"]:
                 row["remediation"] = spec["remediation"]
+            # KEEP every distinct text, attributed to the phase that emits it.
+            # Seven codes have producers whose wording differs, and taking the
+            # first non-empty discarded the rest while the entry went on
+            # claiming both producers as generated sources. A caller who
+            # received the compile wording could not find it in the contract.
+            if spec.get("remediation"):
+                row["texts"].setdefault(spec["remediation"], []).append(stage_label)
             row["sources"].append(source_id)
             for stage in stages:
                 if stage not in row["stages"]:
@@ -1126,8 +1152,9 @@ def _diagnostic_entries(
                 title=code,
                 summary=(row["message"] or "").strip(),
                 workflow_stages=tuple(row["stages"]),
-                ordering_facts=(
-                    (row["remediation"],) if row["remediation"] else ()
+                ordering_facts=tuple(
+                    "[{0}] {1}".format("/".join(sorted(set(where))), text)
+                    for text, where in sorted(row["texts"].items())
                 ),
                 diagnostic_codes=(code,),
                 sources=tuple(
@@ -1159,15 +1186,22 @@ def _state_visibility_entries(
                     "happens to it where paths diverge and converge."
                 ),
                 workflow_stages=("author", "repair"),
-                ordering_facts=(
-                    "Scope: {0}.".format(row["scope"]),
-                    "Visible across sibling Branch paths: {0}.".format(
-                        "yes" if row["visible_across_sibling_paths"] else "no"
-                    ),
-                    "Where paths converge: {0}.".format(row["convergence"]),
-                    "Read with no establishing write: {0}.".format(
-                        row["read_before_write"]
-                    ),
+                # EVERY field the authority carries. Projecting four of six
+                # dropped `lifetime` (which compartment a write lands in — the
+                # one field the traversal actually reads) and
+                # `survives_branch_path_entry`, so a caller could not tell why
+                # a pre-Branch write is visible in every path.
+                ordering_facts=tuple(
+                    "{0}: {1}.".format(
+                        field.replace("_", " ").capitalize(),
+                        "yes"
+                        if value is True
+                        else "no"
+                        if value is False
+                        else value,
+                    )
+                    for field, value in sorted(row.items())
+                    if field != "state_scope"
                 ),
                 related_entry_ids=(
                     ("node.set_ddp",)

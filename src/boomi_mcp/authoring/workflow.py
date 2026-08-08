@@ -1685,14 +1685,31 @@ def compare_live_build_provenance(
 
     revisions = get_authoring_revisions()
     binding = dict(provenance.get("revision_binding") or {})
+    # #146 amendment: BOTH revisions, and the report says which moved.
+    #
+    # Comparing only `capability_revision` meant a server whose compiler
+    # BEHAVIOUR had changed — a placement rule, a replay classification, a
+    # remediation — reported `match` against a binding made before the change.
+    # That is the §11 limit this amendment claims to close, and claiming it
+    # closed while comparing one of two would have been the same false-clean
+    # this surface exists to prevent.
+    revision_mismatches: List[str] = []
     if binding:
-        skew = (
-            "match"
-            if binding.get("capability_revision") == revisions["capability_revision"]
-            else "mismatch"
-        )
+        for field in ("capability_revision", "compiler_revision"):
+            expected = binding.get(field)
+            # A binding minted before the field existed carries no value; that
+            # is unknown, not a mismatch, and is reported as such below.
+            if expected is not None and expected != revisions[field]:
+                revision_mismatches.append(field)
+        if revision_mismatches:
+            skew = "mismatch"
+        elif binding.get("capability_revision") is None:
+            skew = "unknown"
+        else:
+            skew = "match"
     else:
         skew = "unknown"
+    revision_mismatches = sorted(revision_mismatches)
 
     drifted: List[str] = []
     missing: List[str] = []
@@ -1751,6 +1768,7 @@ def compare_live_build_provenance(
     return LiveDeploymentComparisonV1(
         status=status,
         revision_skew=skew,
+        revision_mismatches=tuple(revision_mismatches),
         drifted_components=tuple(drifted),
         missing_components=tuple(missing),
         unverifiable_components=tuple(unavailable),
