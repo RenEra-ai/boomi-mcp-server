@@ -1148,6 +1148,24 @@ def _documented_vocabulary(axis):
     return ()
 
 
+def _valid_operations(resource_type):
+    """The operations a resource_type REALLY accepts, asked of the runtime.
+
+    The wrapper's Args block lists twelve and omits `plan`, `apply`, `verify`,
+    `safe_edit` and `deploy` — so deriving the sweep from the docstring left
+    whole success paths unvisited while the test still passed, because those
+    tokens appear in the `valid_operations` of the ERROR payload. Asking the
+    tool what it accepts is the one source that cannot be behind.
+    """
+    probe = meta_tools.get_schema_template_action(
+        resource_type=resource_type, operation="__not_an_operation__"
+    )
+    reported = tuple(probe.get("valid_operations") or ())
+    # Union with the documented list: a type whose error payload omits the key
+    # still gets the general vocabulary rather than nothing.
+    return tuple(sorted(set(reported) | set(_documented_vocabulary("operation"))))
+
+
 def _registered_tool_descriptions():
     """The description of every tool FastMCP actually serves."""
     loop = asyncio.new_event_loop()
@@ -1210,7 +1228,7 @@ def _served_surfaces():
     # Over-enumerating is harmless and useful: an unsupported combination
     # returns an ERROR payload, which is served text worth sweeping too.
     for resource_type in meta_tools._VALID_RESOURCE_TYPES:
-        for operation in (None,) + _documented_vocabulary("operation"):
+        for operation in (None,) + _valid_operations(resource_type):
             try:
                 surfaces.append(
                     meta_tools.get_schema_template_action(
@@ -1219,17 +1237,25 @@ def _served_surfaces():
                 )
             except Exception:  # noqa: BLE001
                 continue
+
+    # Specializations, crossed with the operation that CONSUMES them. Called on
+    # their own, `standard='x12'` returns the 607-byte overview rather than the
+    # 1290-byte create template — so exercising each axis independently swept
+    # the general payload and never the specialized one.
     for axis in ("standard", "component_type", "protocol"):
         for value in _documented_vocabulary(axis):
             for resource_type in meta_tools._VALID_RESOURCE_TYPES:
-                try:
-                    surfaces.append(
-                        meta_tools.get_schema_template_action(
-                            resource_type=resource_type, **{axis: value}
+                for operation in (None, "create"):
+                    try:
+                        surfaces.append(
+                            meta_tools.get_schema_template_action(
+                                resource_type=resource_type,
+                                operation=operation,
+                                **{axis: value},
+                            )
                         )
-                    )
-                except Exception:  # noqa: BLE001
-                    continue
+                    except Exception:  # noqa: BLE001
+                        continue
 
     # The ERROR envelopes. A rejection is served text too, and its suggestion is
     # the instruction a caller is most likely to follow — they are stuck.
@@ -1470,7 +1496,12 @@ _UNFETCHABLE_ALTERNATIVES = (
     ([r"\b(?:" + "|".join(re.escape(name) for name in _REPO_DOC_NAMES) + r")\b"]
      if _REPO_DOC_NAMES else [])
     + [
-        r"\bADR-\d+\b(?!-)",
+        # A GENERIC ADR slug, not just the stems on disk. ``(?!-)`` on the bare
+        # id was meant as belt-and-braces and instead cut a hole: an unlisted
+        # slug (`ADR-002-new-policy`, a typo, a future document) matched neither
+        # the derived names nor the bare id, so it disappeared from BOTH guards.
+        # Match the slug; the exact bare form is exempted afterwards.
+        r"\bADR-\d+(?:-[\w-]+)?\b",
         r"\b(?:README|CHANGELOG|LICENSE|Makefile)\b",
         # `docs/Atomsphere/...` is EXCLUDED: it is a Boomi documentation page
         # key and `read_boomi_doc_page` fetches it. Flagging a reachable
@@ -1894,8 +1925,88 @@ def test_the_selector_vocabularies_are_derived_from_the_served_description():
     assert _documented_vocabulary("not_an_axis") == ()
 
 
-def test_the_sweep_reaches_the_operations_a_fixed_subset_missed():
-    surfaces = _served_surfaces()
-    rendered = json.dumps(surfaces, default=str)
-    for marker in ("safe_edit", "execution_records", "deploy"):
-        assert marker in rendered, marker
+def test_the_sweep_reaches_a_SUCCESSFUL_surface_for_every_real_operation():
+    """Searching serialized text for an operation name proves nothing.
+
+    The name also appears in the ``valid_operations`` list of the ERROR payload,
+    so the previous assertion passed while `integration/plan`,
+    `component/safe_edit` and `package/deploy` were never successfully invoked —
+    a false green about coverage, in the coverage test.
+    """
+    checked = 0
+    for resource_type in meta_tools._VALID_RESOURCE_TYPES:
+        for operation in _valid_operations(resource_type):
+            payload = meta_tools.get_schema_template_action(
+                resource_type=resource_type, operation=operation
+            )
+            if not payload.get("_success"):
+                # Not every documented operation applies to every type; what
+                # matters is that the ones the RUNTIME reports for this type do.
+                probe = meta_tools.get_schema_template_action(
+                    resource_type=resource_type, operation="__not_an_operation__"
+                )
+                if operation in (probe.get("valid_operations") or ()):
+                    raise AssertionError(
+                        f"{resource_type}/{operation} is advertised but does not serve"
+                    )
+                continue
+            checked += 1
+    assert checked >= 25, checked
+
+    # ...and the three that a documented-only vocabulary missed are among them.
+    for resource_type, operation in (
+        ("integration", "plan"),
+        ("component", "safe_edit"),
+        ("package", "deploy"),
+    ):
+        assert operation in _valid_operations(resource_type), (resource_type, operation)
+
+
+def test_an_unlisted_adr_slug_does_not_vanish_between_the_two_guards():
+    """`(?!-)` was belt-and-braces and instead cut a hole.
+
+    An ADR slug that is not a current file stem — a typo, a future document —
+    matched neither the derived names nor the bare id, so it disappeared from
+    the strict rule AND from the imperative rule that used to catch it.
+    """
+    bare = re.compile(r"\bADR-\d+\b")
+    for text, expected in (
+        ("See ADR-002-new-policy for the rule.", "ADR-002-new-policy"),
+        ("Grounded in ADR-001-process-ir-authority.", "ADR-001-process-ir-authority"),
+    ):
+        matches = [m for m in _UNFETCHABLE_DOCUMENT.findall(text) if not bare.fullmatch(m)]
+        assert matches == [expected], (text, matches)
+
+    # The bare provenance form stays exempt.
+    provenance = "recorded in ADR-001 §6"
+    assert [
+        m for m in _UNFETCHABLE_DOCUMENT.findall(provenance) if not bare.fullmatch(m)
+    ] == []
+
+
+def test_the_operation_vocabulary_comes_from_the_runtime_not_the_docstring():
+    """The Args block omits five operations the tool actually accepts.
+
+    Deriving the sweep from the served description therefore left whole success
+    paths unvisited — and the docstring is itself a served claim that is behind
+    the code.
+    """
+    documented = set(_documented_vocabulary("operation"))
+    for missing in ("plan", "apply", "verify", "safe_edit", "deploy"):
+        assert missing not in documented, f"{missing} is documented now — update this pin"
+    assert "plan" in _valid_operations("integration")
+    assert "safe_edit" in _valid_operations("component")
+    assert "deploy" in _valid_operations("package")
+
+
+def test_a_specialization_is_swept_together_with_the_operation_that_consumes_it():
+    """`standard='x12'` alone is the overview, not the create template."""
+    overview = meta_tools.get_schema_template_action(
+        resource_type="trading_partner", standard="x12"
+    )
+    specialized = meta_tools.get_schema_template_action(
+        resource_type="trading_partner", operation="create", standard="x12"
+    )
+    assert json.dumps(overview, default=str) != json.dumps(specialized, default=str)
+    rendered = json.dumps(_served_surfaces(), default=str)
+    assert json.dumps(specialized, default=str)[:200] in rendered
