@@ -1776,6 +1776,19 @@ _ARTIFACT_EXEMPT_KEYS = (
 )
 
 
+def _is_artifact_exempt(path):
+    """True when ``path``'s LEAF is an exempted key.
+
+    Suffix, not substring. A substring test accepted a subtree PREFIX as if it
+    were a key: ``tools.read_boomi_doc_page`` matches only 9 of 28,160 paths, so
+    it slipped under both the count and percentage caps while silently excusing
+    an entire served tool. An exemption names the leaf it excuses or it does
+    not apply.
+    """
+    normalized = path[:-2] if path.endswith("[]") else path
+    return any(normalized.endswith(key) for key in _ARTIFACT_EXEMPT_KEYS)
+
+
 def _served_strings_with_paths():
     """``(dotted path, string)`` for every served string, for key exemptions."""
 
@@ -1812,7 +1825,7 @@ def test_no_served_string_names_a_repository_artifact_at_all():
     bare_provenance = re.compile(r"\bADR-\d+\b")
     offenders = []
     for path, text in _served_strings_with_paths():
-        if any(key in path for key in _ARTIFACT_EXEMPT_KEYS):
+        if _is_artifact_exempt(path):
             continue
         for match in _UNFETCHABLE_DOCUMENT.findall(text):
             if bare_provenance.fullmatch(match):
@@ -1952,17 +1965,27 @@ def test_the_artifact_exemption_stays_a_handful_of_keys_not_a_surface():
     assert len(_ARTIFACT_EXEMPT_KEYS) <= 4, _ARTIFACT_EXEMPT_KEYS
 
     all_paths = [path for path, _ in _served_strings_with_paths()]
-    exempted = []
     for key in _ARTIFACT_EXEMPT_KEYS:
-        matched = [path for path in all_paths if key in path]
+        matched = [
+            path
+            for path in all_paths
+            if (path[:-2] if path.endswith("[]") else path).endswith(key)
+        ]
         assert matched, f"exemption {key!r} matches nothing — dead or misspelled"
-        exempted.extend(matched)
 
-    # A rounding error, not a carve-out: well under 1% of served strings.
-    assert len(exempted) / len(all_paths) < 0.01, (
-        len(exempted),
-        len(all_paths),
-    )
+    exempted = [path for path in all_paths if _is_artifact_exempt(path)]
+    # A rounding error, not a carve-out.
+    assert len(exempted) / len(all_paths) < 0.01, (len(exempted), len(all_paths))
+
+    # A subtree PREFIX must not qualify, whatever the caps say. This is the
+    # invariant the caps alone could not express.
+    subtree_prefixes = {
+        path.rsplit(".", 1)[0]
+        for path in exempted
+        if "." in path
+    }
+    for prefix in subtree_prefixes:
+        assert not _is_artifact_exempt(prefix + ".some_other_leaf"), prefix
 
 
 @pytest.mark.parametrize(
@@ -2254,3 +2277,24 @@ def test_the_sweep_visits_every_archetype_and_the_sixth_error_code():
     )
     assert payload["error_code"] == "WORKFLOW_SEQUENCE_NOT_FOUND"
     assert json.dumps(payload, default=str)[:120] in rendered
+
+
+def test_a_subtree_prefix_cannot_masquerade_as_an_exempted_key():
+    """The invariant the caps could not express.
+
+    `tools.read_boomi_doc_page` matches only 9 of 28,160 paths, so a substring
+    test let it pass both the count and percentage caps while silently excusing
+    an entire served tool. An exemption names the LEAF it excuses.
+    """
+    assert _is_artifact_exempt("tools.read_boomi_doc_page.examples[]")
+    assert not _is_artifact_exempt("tools.read_boomi_doc_page.description")
+    assert not _is_artifact_exempt("tools.read_boomi_doc_page.notes[]")
+
+    # Every real exemption is still a leaf match.
+    exempted = [
+        path for path, _ in _served_strings_with_paths() if _is_artifact_exempt(path)
+    ]
+    assert exempted
+    for path in exempted:
+        normalized = path[:-2] if path.endswith("[]") else path
+        assert any(normalized.endswith(key) for key in _ARTIFACT_EXEMPT_KEYS), path
