@@ -1791,11 +1791,20 @@ def _is_artifact_exempt(path):
     The boundary is what makes "names the leaf it excuses" true rather than
     approximately true.
     """
+    return any(_matches_exempt_key(path, key) for key in _ARTIFACT_EXEMPT_KEYS)
+
+
+def _matches_exempt_key(path, key):
+    """Does ``path``'s leaf match THIS key, exactly or on a ``.`` boundary?
+
+    Per-key on purpose. The audit below previously asked "is this path exempt at
+    all, and does the key appear in it" — two different questions whose
+    conjunction is satisfied by a DEAD key that is merely a substring of a live
+    one (`examples_cover` inside `sdk_examples_covered`). One predicate, asked
+    per key, is what makes the dead-exemption check mean what it says.
+    """
     normalized = path[:-2] if path.endswith("[]") else path
-    return any(
-        normalized == key or normalized.endswith("." + key)
-        for key in _ARTIFACT_EXEMPT_KEYS
-    )
+    return normalized == key or normalized.endswith("." + key)
 
 
 def _served_strings_with_paths():
@@ -1975,7 +1984,7 @@ def test_the_artifact_exemption_stays_a_handful_of_keys_not_a_surface():
 
     all_paths = [path for path, _ in _served_strings_with_paths()]
     for key in _ARTIFACT_EXEMPT_KEYS:
-        matched = [path for path in all_paths if _is_artifact_exempt(path) and key in path]
+        matched = [path for path in all_paths if _matches_exempt_key(path, key)]
         assert matched, f"exemption {key!r} matches nothing — dead or misspelled"
 
     exempted = [path for path in all_paths if _is_artifact_exempt(path)]
@@ -2311,3 +2320,18 @@ def test_a_subtree_prefix_cannot_masquerade_as_an_exempted_key():
     for path in exempted:
         normalized = path[:-2] if path.endswith("[]") else path
         assert any(normalized.endswith(key) for key in _ARTIFACT_EXEMPT_KEYS), path
+
+
+def test_the_dead_exemption_check_asks_about_the_key_it_is_checking():
+    """A dead key must not look alive because a LIVE key covers the same path.
+
+    `examples_cover` matches nothing on its own, but it is a substring of
+    `sdk_examples_covered` — so an audit that asked "is this path exempt at all,
+    and does the key appear in it" accepted 54 paths for a key that matches
+    zero. Two different questions, conjoined, answered a third.
+    """
+    paths = [path for path, _ in _served_strings_with_paths()]
+    assert not any(_matches_exempt_key(path, "examples_cover") for path in paths)
+    assert not any(_matches_exempt_key(path, "field") for path in paths if "[]." not in path)
+    for key in _ARTIFACT_EXEMPT_KEYS:
+        assert any(_matches_exempt_key(path, key) for path in paths), key
