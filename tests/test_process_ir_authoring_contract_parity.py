@@ -678,3 +678,45 @@ def test_the_handwritten_facts_that_ARE_derivable_are_pinned_to_their_source():
     assert rules["idempotent_write"]["required_evidence"] == "verified_action"
     assert "key_reference" in rule
     assert rules["conditionally_idempotent"]["required_evidence"] == "key_reference"
+
+
+def test_the_doctrine_projection_carries_the_entry_s_own_metadata():
+    """Two fields of six moved no revision at all.
+
+    Publishing only name+status meant a pattern's verification status, its
+    provenance or a cross-reference could change and the projection would not
+    see it — so no revision moved, and a caller bound to one kept believing
+    stale doctrine was current.
+    """
+    projected = {e.subject: e for e in entries() if e.entry_type == "doctrine"}
+    assert projected
+
+    checked_verification = checked_refs = 0
+    for name, row in DESIGN_DOCTRINE_ENTRIES.items():
+        entry = projected[name]
+        assert entry.category == (row.get("category") or "doctrine"), name
+        facts = " ".join(entry.ordering_facts)
+        if row.get("verification_status"):
+            assert row["verification_status"] in facts, name
+            checked_verification += 1
+        if row.get("cross_refs"):
+            for ref in row["cross_refs"]:
+                assert ref in facts, (name, ref)
+            checked_refs += 1
+    assert checked_verification and checked_refs
+
+
+def test_a_doctrine_cross_reference_change_moves_the_contract():
+    """The drift this narrowing hid."""
+    sources = collect_projection_sources()
+    rows = []
+    for row in sources.doctrine_rows:
+        row = dict(row)
+        if row["name"] == sorted(DESIGN_DOCTRINE_ENTRIES)[0]:
+            row["cross_refs"] = ["a_pattern_that_did_not_exist_before"]
+        rows.append(row)
+    drifted = build_process_ir_authoring_entries(sources._replace(doctrine_rows=tuple(rows)))
+    blob = json.dumps([e.model_dump(mode="json") for e in drifted])
+    assert "a_pattern_that_did_not_exist_before" in blob
+    live = json.dumps([e.model_dump(mode="json") for e in entries()])
+    assert "a_pattern_that_did_not_exist_before" not in live

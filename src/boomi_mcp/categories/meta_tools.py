@@ -11146,7 +11146,19 @@ def list_capabilities_action(
                                "'design_doctrine' | 'design_pattern:<name>' | "
                                "'account_governance' | 'governance_pattern:<name>' | "
                                "'script_dataprocess' | 'script_mapping'. "
+                               "'process_ir_authoring' (the #146 behavioural contract). "
                                "Takes precedence over resource_type.",
+                # #146 amendment. The catalog is what a client ENUMERATES, so a
+                # parameter documented only in the wrapper docstring is one
+                # nobody discovers. All seven apply to 'process_ir_authoring'
+                # and are INVALID_INPUT elsewhere.
+                "authoring_entry_id": "str (optional) — exact process_ir_authoring entry id; an unknown id returns zero entries, not an error",
+                "node_kind": "str (optional) — filter the authoring contract to one ProcessIR node kind",
+                "category": "str (optional) — filter the authoring contract by entry domain",
+                "capability_id": "str (optional) — filter the authoring contract to one capability row",
+                "workflow_stage": "str (optional) — discover | plan | author | compile | repair",
+                "after_entry_id": "str (optional) — pagination cursor; requires another filter",
+                "limit": "int (optional) — 1-50, default 20; a 64 KiB entries budget applies on top",
             },
             "examples": [
                 'get_schema_template(resource_type="trading_partner", operation="create", standard="x12")',
@@ -11211,6 +11223,7 @@ def list_capabilities_action(
                 "archetype": "str (optional) — archetype name from list_integration_archetypes(); omit for the pre-selection brief",
                 "intent_flags": "list[str] (optional) — short tokens like retry, dlq, incremental, bidirectional, notify (no free text)",
                 "profile": "str (optional) — echoed into the suggested discovery-step arguments; no account call is made",
+                "authoring_mode": "str (optional) — 'process_ir' returns the direct ProcessIR brief and requires no archetype; must be requested explicitly, intent_flags never selects it",
             },
             "examples": [
                 'plan_integration_design(intent_flags=["incremental", "retry"])',
@@ -11222,8 +11235,13 @@ def list_capabilities_action(
             "description": "This tool — lists all available MCP tools and capabilities",
             "actions": ["(single action — returns full catalog)"],
             "read_only": True,
-            "parameters": {},
-            "note": "No parameters needed. Returns this catalog.",
+            "parameters": {
+                # It was documented as taking none while accepting one. A
+                # caller reading the catalog could not discover the only way to
+                # get a real revision comparison instead of `not_requested`.
+                "expected_capability_revision": "str (optional) — the revision you believe this server runs; supplying it turns authoring_contract.capability_comparison into a real match/mismatch instead of not_requested",
+            },
+            "note": "One optional parameter. Returns this catalog.",
         },
 
         # === Category 9b: Account Group Management ===

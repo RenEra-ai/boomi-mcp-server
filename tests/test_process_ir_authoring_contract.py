@@ -2385,3 +2385,27 @@ def test_verify_compares_the_compiler_revision_and_names_what_moved():
         observed,
     )
     assert both.revision_mismatches == ("capability_revision", "compiler_revision")
+
+
+def test_the_meta_tool_catalog_advertises_every_wrapper_parameter():
+    """The catalog is what a client ENUMERATES.
+
+    A parameter documented only in the wrapper docstring is one nobody
+    discovers: the seven filters, `authoring_mode`, and `list_capabilities`'
+    own `expected_capability_revision` were all absent while the signatures
+    already accepted them.
+    """
+    import inspect
+
+    catalog = meta_tools.list_capabilities_action()["tools"]
+    for tool_name, action in (
+        ("get_schema_template", meta_tools.get_schema_template_action),
+        ("plan_integration_design", meta_tools.plan_integration_design_action),
+    ):
+        advertised = set(catalog[tool_name]["parameters"])
+        accepted = set(inspect.signature(action).parameters)
+        missing = accepted - advertised
+        assert missing == set(), (tool_name, missing)
+
+    assert "expected_capability_revision" in catalog["list_capabilities"]["parameters"]
+    assert "process_ir_authoring" in catalog["get_schema_template"]["parameters"]["schema_name"]

@@ -1276,17 +1276,45 @@ def _doctrine_entries(
             ProcessIRAuthoringContractEntryV1(
                 contract_entry_id=f"doctrine.{name}",
                 entry_type="doctrine",
-                category="doctrine",
                 subject=name,
                 title=name.replace("_", " ").strip().capitalize(),
                 summary=(
                     "A design pattern. Fetch its full text from the doctrine "
-                    "selector; this entry publishes only its state and identity."
+                    "selector; this entry publishes its identity, state and "
+                    "evidence, never a copy of the prose."
                 ),
                 canonical_state=canonical,
                 source_state=status,
                 applicable=applicable,
+                # The doctrine entry's OWN metadata, not just name+status.
+                # Publishing two of six fields meant changing a pattern's
+                # verification status, its provenance or a cross-reference moved
+                # no revision at all — the projection could not see it, so the
+                # hash could not either.
+                category=str(row.get("category") or "doctrine"),
                 workflow_stages=("discover", "plan"),
+                ordering_facts=tuple(
+                    fact
+                    for fact in (
+                        "Verification: {0}.".format(row["verification_status"])
+                        if row.get("verification_status")
+                        else "",
+                        "Provenance: {0}.".format(row["provenance"])
+                        if row.get("provenance")
+                        else "",
+                        "Cross-references: {0}.".format(
+                            ", ".join(sorted(row.get("cross_refs") or ()))
+                        )
+                        if row.get("cross_refs")
+                        else "",
+                        "Mutually exclusive with: {0}.".format(
+                            ", ".join(sorted(row.get("mutual_exclusion") or ()))
+                        )
+                        if row.get("mutual_exclusion")
+                        else "",
+                    )
+                    if fact
+                ),
                 doctrine_selector=f"design_pattern:{name}",
                 sources=(
                     _source(
