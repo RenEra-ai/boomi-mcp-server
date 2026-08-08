@@ -1605,18 +1605,16 @@ _UNFETCHABLE_ALTERNATIVES = (
         # standalone dot is a non-word character.
         r"\.(?:codex|github)/[\w/.-]+",
         r"/mnt/[\w/.-]+",
-        # A FILENAME, not a dotted identifier.
+        # `json` and `xml` are absent because `profile.json` is a real
+        # profile_type VALUE on this surface.
         #
-        # `json` and `xml` were excluded because `profile.json` is a real
-        # profile_type value — and then `sql`/`py`/`js`/`ts`/`sh` were added
-        # without applying the same reasoning, so the planner's
-        # `target.write_profile.sql` (a parameter ADDRESS) read as a file.
-        #
-        # `(?<![\w.])` is what separates the two: a real filename's basename is
-        # one segment, while a domain identifier has a dotted parent. It blocks
-        # the match at `write_profile.sql` because a dot precedes it, and leaves
-        # `manage_roles.py`, `decision_step.md` and `/mnt/.../x.py` matching.
-        r"(?i:(?<![\w.])[\w-]+\.(?:md|rst|py|toml|cfg|ini|yaml|yml|sh|sql|js|ts|html)\b)",
+        # A dotted parameter address (`target.write_profile.sql`) is handled by
+        # POSITION, not by shape. Requiring a single-segment basename did
+        # separate it — and silently stopped catching `settings.prod.yaml`,
+        # `foo.test.py` and `.eslintrc.js`, trading one false positive for a
+        # class of false negatives. `X.Y.ext` is genuinely ambiguous in
+        # isolation; where the string SITS is not.
+        r"(?i:[\w.-]*[\w-]\.(?:md|rst|py|toml|cfg|ini|yaml|yml|sh|sql|js|ts|html)\b)",
     ]
 )
 
@@ -1767,7 +1765,15 @@ def test_the_escape_shapes_that_leaked_are_all_matched_now():
 #: key buys back everything that scoping gave up — including
 #: ``AuthoringRevisionBindingV1`` and ``cache_property_authoring``, the very
 #: surfaces two earlier bugs were found on.
-_ARTIFACT_EXEMPT_KEYS = ("sdk_examples_covered", "read_boomi_doc_page.examples")
+_ARTIFACT_EXEMPT_KEYS = (
+    "sdk_examples_covered",
+    "read_boomi_doc_page.examples",
+    # A planner decision's `field` is a parameter ADDRESS by contract
+    # (`target.write_profile.sql`), never a document reference. Exempting the
+    # key keeps the pattern free to catch dotted filenames like
+    # `settings.prod.yaml` everywhere else.
+    "required_user_decisions[].field",
+)
 
 
 def _served_strings_with_paths():
@@ -1935,20 +1941,28 @@ def test_the_strict_rule_reaches_the_surfaces_earlier_bugs_were_found_on():
     assert any("AuthoringRevisionBindingV1" in path for path in paths)
 
 
-def test_the_artifact_exemption_is_two_keys_not_a_surface():
-    """A narrow exemption is auditable; a broad one hides what it excuses."""
-    assert _ARTIFACT_EXEMPT_KEYS == (
-        "sdk_examples_covered",
-        "read_boomi_doc_page.examples",
+def test_the_artifact_exemption_stays_a_handful_of_keys_not_a_surface():
+    """A narrow exemption is auditable; a broad one hides what it excuses.
+
+    Asserts the PROPERTY rather than a frozen tuple: every exemption must be a
+    key path (so it cannot quietly become a surface), every one must actually
+    match something (so a misspelling is not silently dead), and together they
+    must stay a rounding error against the corpus.
+    """
+    assert len(_ARTIFACT_EXEMPT_KEYS) <= 4, _ARTIFACT_EXEMPT_KEYS
+
+    all_paths = [path for path, _ in _served_strings_with_paths()]
+    exempted = []
+    for key in _ARTIFACT_EXEMPT_KEYS:
+        matched = [path for path in all_paths if key in path]
+        assert matched, f"exemption {key!r} matches nothing — dead or misspelled"
+        exempted.extend(matched)
+
+    # A rounding error, not a carve-out: well under 1% of served strings.
+    assert len(exempted) / len(all_paths) < 0.01, (
+        len(exempted),
+        len(all_paths),
     )
-    exempted = [
-        path
-        for path, _ in _served_strings_with_paths()
-        if any(key in path for key in _ARTIFACT_EXEMPT_KEYS)
-    ]
-    assert exempted, "the exemption matches nothing — it is dead or misspelled"
-    # It must not swallow a whole surface.
-    assert all("sdk_examples_covered" in p or "read_boomi_doc_page" in p for p in exempted)
 
 
 @pytest.mark.parametrize(
@@ -2198,11 +2212,12 @@ def test_a_specialized_instruction_must_select_the_specialized_template():
 @pytest.mark.parametrize(
     "text,flagged",
     [
-        # A dotted DOMAIN identifier is not a file. `target.write_profile.sql`
-        # is a planner parameter address; `json`/`xml` were excluded for exactly
-        # this reason and `sql`/`py`/`ts` were added without applying it.
-        ("target.write_profile.sql", False),
-        ("source.target.field.py", False),
+        # `X.Y.ext` is ambiguous in ISOLATION, so the pattern flags it and the
+        # planner's parameter address is exempted by its key instead. These
+        # dotted filenames must keep matching.
+        ("settings.prod.yaml", True),
+        ("foo.test.py", True),
+        ("target.write_profile.sql", True),
         ("a profile_type of profile.json", False),
         # ...while real filenames still match.
         ("manage_roles.py", True),
