@@ -2304,8 +2304,8 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_WRITE = {
     "see_also": {
         "send_operation": (
             "Wrap this write profile in a database Send operation via "
-            "get_schema_template(component_type='connector-action', "
-            "protocol='database.send')."
+            "get_schema_template(resource_type='component', "
+            "component_type='connector-action', protocol='database.send')."
         ),
         "read_profile": (
             "For read/query profiles, use protocol='database.read' or "
@@ -2607,8 +2607,8 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_SEND = {
     "see_also": {
         "write_profile": (
             "Create the referenced write profile via "
-            "get_schema_template(component_type='profile.db', "
-            "protocol='database.write')."
+            "get_schema_template(resource_type='component', "
+            "component_type='profile.db', protocol='database.write')."
         ),
         "get_operation": (
             "For Database Get (read) operations, use protocol='database.get'."
@@ -8174,7 +8174,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             "target.dynamic_path, or return_documents — each returns "
             "PROCESS_DECISION_CONFIG_INVALID. Default (decision absent or "
             "enabled=false) keeps the single-target flow byte-for-byte. Live-verified "
-            "via companion decision_step.md + a work-profile decision export.",
+            "via a companion capture and a work-profile decision export.",
             "Issue #92 M4.5.7: process_extensions declares connection fields as "
             "per-environment override points so the DEPLOYED process exposes them "
             "via manage_environments(get_extensions) / update_extensions — without "
