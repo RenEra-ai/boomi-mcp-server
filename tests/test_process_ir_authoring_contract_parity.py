@@ -252,6 +252,37 @@ def test_state_visibility_descriptor_is_load_bearing_not_a_second_copy():
     assert state.with_write(("dpp", "Y")).execution
     assert not state.with_write(("dpp", "Y")).document
 
+    # ...and the OTHER claims, which the lifetime check alone did not establish.
+    # `lifetime` is the only descriptor field the traversal reads, so the rest
+    # were asserted nowhere: the descriptor could have said DDP crosses sibling
+    # paths, or that convergence is a union, and nothing would have failed.
+    #
+    # visible_across_sibling_paths — a document-scoped write does NOT reach a
+    # sibling path, because each path gets its own copy of the stream.
+    ddp_written = state.with_write(("ddp", "X")).entering_branch_leg()
+    assert not ddp_written.establishes(("ddp", "X")) or STATE_VISIBILITY_V1["ddp"][
+        "survives_branch_path_entry"
+    ], "the descriptor and the traversal disagree about branch-path entry"
+
+    # convergence — the meet is INTERSECTION, not union. State established on
+    # one incoming path only must not survive the merge.
+    left = lineage._State().with_write(("dpp", "ONLY_LEFT"))
+    right = lineage._State().with_write(("dpp", "ONLY_RIGHT"))
+    merged = left.merged_with(right)
+    assert not merged.establishes(("dpp", "ONLY_LEFT"))
+    assert not merged.establishes(("dpp", "ONLY_RIGHT"))
+    for scope in STATE_VISIBILITY_V1:
+        assert STATE_VISIBILITY_V1[scope]["convergence"] == "intersection", scope
+
+    # read_before_write — the descriptor says rejected, and an unestablished
+    # read really is unestablished.
+    assert not lineage._State().establishes(("dpp", "NEVER_WRITTEN"))
+    assert STATE_VISIBILITY_V1["dpp"]["read_before_write"] == "rejected"
+    assert (
+        STATE_VISIBILITY_V1["cache"]["read_before_write"]
+        == "rejected_unless_external_writer_declared"
+    )
+
 
 def test_doctrine_entries_equal_the_doctrine_registry():
     assert ids_of("doctrine") == set(DESIGN_DOCTRINE_ENTRIES)

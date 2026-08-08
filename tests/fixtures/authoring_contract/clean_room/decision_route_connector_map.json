@@ -1,0 +1,166 @@
+{
+  "covers": [
+    "connector",
+    "map",
+    "decision",
+    "terminal",
+    "references"
+  ],
+  "design_decisions": [
+    {
+      "authored_path": "/intent/process_ir/body/steps/0",
+      "contract_entry_ids": [
+        "node.source",
+        "connector_action.database.get"
+      ],
+      "decision_id": "the_source_opens_the_sequence",
+      "why": "Placement and document behaviour of the entry connector call."
+    },
+    {
+      "authored_path": "/intent/process_ir/body/steps/1",
+      "contract_entry_ids": [
+        "node.map_ref"
+      ],
+      "decision_id": "a_map_preserves_the_stream",
+      "why": "A map transforms each document; its property effects are unknown without a typed contract."
+    },
+    {
+      "authored_path": "/intent/process_ir/body/steps/2",
+      "contract_entry_ids": [
+        "node.decision",
+        "placement.decision_true_arm.terminal",
+        "placement.decision_false_arm.terminal"
+      ],
+      "decision_id": "the_two_arms_admit_different_bodies",
+      "why": "A routed target is legal on the TRUE arm and not on the FALSE arm."
+    },
+    {
+      "authored_path": "/intent/process_ir/body/steps/2/false_arm",
+      "contract_entry_ids": [
+        "placement.decision_false_arm.step",
+        "node.stop"
+      ],
+      "decision_id": "the_false_arm_may_stop_with_no_steps",
+      "why": "The one body that may be empty; a Branch path and the true arm may not."
+    },
+    {
+      "authored_path": "/intent/process_ir/body/steps/2/true_arm/terminal",
+      "contract_entry_ids": [
+        "node.target",
+        "connector_action.rest.patch"
+      ],
+      "decision_id": "the_rest_target_returns_documents",
+      "why": "A REST PATCH returns documents; a database Send would not \u2014 the action decides."
+    },
+    {
+      "authored_path": "/intent/process_ir/body/steps/2/true_arm/terminal",
+      "contract_entry_ids": [
+        "semantic_rule.control.no_continuation"
+      ],
+      "decision_id": "each_arm_terminates_independently",
+      "why": "No continuation and no join after a Decision."
+    }
+  ],
+  "fixture_id": "decision_route_connector_map",
+  "intent": "Read with a database Get, transform through a map, and route on a Decision: the true arm sends to a REST target, the false arm stops.",
+  "request": {
+    "contract_version": "1",
+    "intent": {
+      "component_key": "router",
+      "components": [
+        {
+          "config": {
+            "connector_type": "database"
+          },
+          "key": "src_conn",
+          "name": "CR DB Conn",
+          "type": "connector-settings"
+        },
+        {
+          "config": {
+            "action_type": "Get",
+            "connection_key": "src_conn",
+            "connector_type": "database"
+          },
+          "key": "src_op",
+          "name": "CR DB Get",
+          "type": "connector-action"
+        },
+        {
+          "config": {
+            "connector_type": "officialboomi-X3979C-rest-prod"
+          },
+          "key": "tgt_conn",
+          "name": "CR REST Conn",
+          "type": "connector-settings"
+        },
+        {
+          "config": {
+            "action_type": "PATCH",
+            "connection_key": "tgt_conn",
+            "connector_type": "officialboomi-X3979C-rest-prod"
+          },
+          "key": "tgt_op",
+          "name": "CR REST Patch",
+          "type": "connector-action"
+        },
+        {
+          "config": {},
+          "key": "xform",
+          "name": "CR Map",
+          "type": "transform.map"
+        }
+      ],
+      "integration_name": "clean-room-decision-route",
+      "intent_kind": "process_ir",
+      "process_ir": {
+        "body": {
+          "kind": "sequence",
+          "steps": [
+            {
+              "connection_ref": "$ref:src_conn",
+              "kind": "source",
+              "operation_ref": "$ref:src_op"
+            },
+            {
+              "kind": "map_ref",
+              "map_ref": "$ref:xform"
+            },
+            {
+              "comparison": "equals",
+              "false_arm": {
+                "steps": [],
+                "terminal": {
+                  "kind": "stop"
+                }
+              },
+              "kind": "decision",
+              "left": {
+                "property_id": "dynamicdocument.STATUS",
+                "value_type": "track"
+              },
+              "right": {
+                "static_value": "OK",
+                "value_type": "static"
+              },
+              "true_arm": {
+                "steps": [
+                  {
+                    "kind": "message",
+                    "text": "ok"
+                  }
+                ],
+                "terminal": {
+                  "connection_ref": "$ref:tgt_conn",
+                  "kind": "target",
+                  "operation_ref": "$ref:tgt_op"
+                }
+              }
+            }
+          ]
+        },
+        "version": "1"
+      }
+    }
+  }
+}

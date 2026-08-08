@@ -68,6 +68,29 @@ _FORBIDDEN_IMPORT_PREFIXES = (
 #: fetch them.
 _UNSERVED_ARTIFACTS = (".codex/", "docs/architecture", "PROCESS_IR_V1_CAPABILITIES")
 
+#: The ONLY top-level modules a clean-room test may import: the stdlib pieces it
+#: needs, pytest, and `server` — the public entry point a caller has.
+_ALLOWED_TOP_LEVEL_IMPORTS = frozenset(
+    {"ast", "asyncio", "json", "os", "re", "sys", "pathlib", "pytest", "server"}
+)
+
+
+def _resolves(document, pointer):
+    """Does an RFC 6901-ish authored path address something in ``document``?"""
+    node = document
+    for token in [t for t in pointer.split("/") if t]:
+        if isinstance(node, list):
+            if not token.isdigit() or int(token) >= len(node):
+                return False
+            node = node[int(token)]
+        elif isinstance(node, dict):
+            if token not in node:
+                return False
+            node = node[token]
+        else:
+            return False
+    return True
+
 
 # ---------------------------------------------------------------------------
 # The public surface, reached only through registered tools
@@ -172,12 +195,23 @@ def test_this_module_imports_nothing_it_is_not_allowed_to():
             imported.extend(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.append(node.module)
+    # An ALLOWLIST, not a denylist. A denylist only forbids the packages someone
+    # thought of: a future `boomi_mcp.something_new` would import cleanly and
+    # the suite would still call itself clean-room.
     offenders = [
+        name
+        for name in imported
+        if name.split(".")[0] not in _ALLOWED_TOP_LEVEL_IMPORTS
+    ]
+    assert offenders == [], offenders
+    # The denylist is kept as a second, redundant check — it names the packages
+    # that would most obviously defeat the point.
+    denied = [
         name
         for name in imported
         if any(name.startswith(prefix) for prefix in _FORBIDDEN_IMPORT_PREFIXES)
     ]
-    assert offenders == [], offenders
+    assert denied == [], denied
 
 
 def test_the_citation_harness_actually_fails_on_a_dangling_id():
@@ -194,6 +228,18 @@ def test_the_citation_harness_actually_fails_on_a_dangling_id():
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+def _fixture_document(fixture):
+    """The request a fixture's decisions address.
+
+    A repair fixture carries `invalid_request`; a straight authoring fixture
+    carries `request`. The citation harness needs whichever one exists.
+    """
+    for key in ("invalid_request", "request"):
+        if key in fixture:
+            return fixture[key]
+    raise AssertionError(f"fixture {fixture.get('fixture_id')} carries no request")
 
 
 def _fixture_files():
@@ -224,7 +270,15 @@ def test_every_design_decision_cites_a_resolvable_contract_entry(fixture_path):
     seen_ids = set()
     for decision in decisions:
         assert decision["decision_id"], fixture_path.name
-        assert decision["authored_path"], decision["decision_id"]
+        authored_path = decision["authored_path"]
+        assert authored_path, decision["decision_id"]
+        # ...and it must RESOLVE inside the fixture's own request. Checking only
+        # for non-emptiness let a citation point at a path the document does
+        # not contain, which is a dangling reference of a different kind.
+        assert _resolves(_fixture_document(fixture), authored_path), (
+            decision["decision_id"],
+            authored_path,
+        )
         cited = decision["contract_entry_ids"]
         assert cited, f"{decision['decision_id']} cites nothing"
         assert len(cited) == len(set(cited)), decision["decision_id"]
@@ -271,6 +325,27 @@ def test_the_public_workflow_reaches_a_read_only_compile():
     brief = design_brief(authoring_mode="process_ir")
     assert brief["mode"] == "process_ir_pre_selection"
     assert brief["missing_inputs"] == []
+
+    # ...and it must actually REACH the compile the name promises. Stopping at
+    # advisory planning left the last two steps — the ones that prove the public
+    # surface is sufficient to produce an artifact — unexercised.
+    request = _load("branch_leg_order.json")["repaired_request"]
+
+    planned = build("plan", {"authoring_request": request})
+    assert planned["authoring_result"]["validation_report"]["is_valid"] is True
+    assert planned["mutation_performed"] is False
+
+    compiled = build("compile", {"authoring_request": request})
+    assert compiled["_success"] is True
+    assert compiled["mutation_performed"] is False
+    assert compiled["authoring_result"]["revision_binding"]["compile_hash"]
+
+    # Every phase reports the SAME revisions a caller discovered in step 1.
+    served = discovery["authoring_contract"]
+    for phase in (planned, compiled):
+        binding = phase["authoring_result"]["revision_binding"]
+        for field in ("schema_revision", "capability_revision", "compiler_revision"):
+            assert binding[field] == served[field], (field, phase["action"])
 
 
 def test_the_grammar_alone_describes_every_node_it_serves():
@@ -395,12 +470,36 @@ def test_the_repair_derived_from_the_cited_rules_reaches_a_clean_compile():
     """
     fixture = _load("branch_leg_order.json")
 
-    planned = build("plan", {"authoring_request": fixture["repaired_request"]})
+    # DERIVE the repair from the served remediation, rather than trusting the
+    # fixture's prewritten `repaired_request`. The test claimed the repair came
+    # from the cited rules; compiling a document someone already fixed proves
+    # only that the fixture is valid.
+    rejected = build("plan", {"authoring_request": fixture["invalid_request"]})
+    diagnostics = [
+        row
+        for row in rejected["authoring_result"]["errors"]
+        if fixture["expected_code"] in row["cause_codes"]
+    ]
+    assert diagnostics
+    remediation = " ".join(row["remediation"] for row in diagnostics).lower()
+    # The served instruction is "move the write into an earlier leg" — i.e. swap
+    # the paths. Applying THAT, mechanically, to the invalid document.
+    assert "earlier leg" in remediation or "order" in remediation
+
+    derived = json.loads(json.dumps(fixture["invalid_request"]))
+    legs = derived["intent"]["process_ir"]["body"]["steps"][1]["legs"]
+    legs.reverse()
+    assert derived == fixture["repaired_request"], (
+        "the repair derived from the served remediation must be the fixture's "
+        "repaired document — if they differ, one of them is wrong"
+    )
+
+    planned = build("plan", {"authoring_request": derived})
     report = planned["authoring_result"]["validation_report"]
     assert report["is_valid"] is True, report
     assert fixture["expected_code"] not in report["codes"]
 
-    compiled = build("compile", {"authoring_request": fixture["repaired_request"]})
+    compiled = build("compile", {"authoring_request": derived})
     assert compiled["_success"] is True, compiled
     assert compiled["mutation_performed"] is False
     binding = compiled["authoring_result"]["revision_binding"]
@@ -423,3 +522,65 @@ def test_the_diagnostic_never_echoes_an_authored_value():
     fixture = _load("branch_leg_order.json")
     result = build("plan", {"authoring_request": fixture["invalid_request"]})
     assert fixture["sentinel_value"] not in json.dumps(result)
+
+
+def test_every_authoring_fixture_plans_and_compiles_through_the_public_surface():
+    """A fixture that is never submitted proves only that JSON parses."""
+    compiled = 0
+    for fixture_path in _fixture_files():
+        fixture = json.loads(fixture_path.read_text())
+        if "request" not in fixture:
+            continue  # a repair fixture; covered by the negative-flow tests
+        result = build("plan", {"authoring_request": fixture["request"]})
+        report = result["authoring_result"]["validation_report"]
+        assert report["is_valid"] is True, (fixture_path.name, report["codes"])
+
+        result = build("compile", {"authoring_request": fixture["request"]})
+        assert result["_success"] is True, fixture_path.name
+        assert result["mutation_performed"] is False
+        assert result["authoring_result"]["revision_binding"]["compile_hash"]
+        compiled += 1
+    assert compiled >= 1
+
+
+#: Construct families the clean-room corpus is INTENDED to cover, and the state
+#: of each. Recorded rather than implied: the §6 review found the corpus was one
+#: flow while the module docstring implied a representative set, and a coverage
+#: gap nobody wrote down is a gap nobody closes.
+_CLEAN_ROOM_COVERAGE = {
+    "connector": True,
+    "map": True,
+    "decision": True,
+    "terminal": True,
+    "references": True,
+    "branch": True,
+    "state_lineage": True,
+    # Not yet exercised end-to-end. Each needs a compiling document of its own,
+    # and each is named here so the gap is visible in CI output rather than
+    # discovered by the next reviewer.
+    "try_catch_retry": False,
+    "flow_control_batching": False,
+    "split_combine": False,
+    "process_call": False,
+    "return_documents": False,
+    "cache": False,
+}
+
+
+def test_the_clean_room_coverage_census_matches_the_fixtures():
+    """The census must describe the corpus that actually exists."""
+    covered = set()
+    for fixture_path in _fixture_files():
+        fixture = json.loads(fixture_path.read_text())
+        covered.update(fixture.get("covers") or ())
+        if fixture.get("fixture_id") == "branch_leg_order":
+            covered.update({"branch", "state_lineage"})
+
+    claimed = {name for name, done in _CLEAN_ROOM_COVERAGE.items() if done}
+    assert claimed == covered, (
+        "the coverage census disagrees with the fixtures — update "
+        "_CLEAN_ROOM_COVERAGE when a family is added or removed",
+        claimed ^ covered,
+    )
+    # The uncovered families are recorded, not silently absent.
+    assert {name for name, done in _CLEAN_ROOM_COVERAGE.items() if not done}
