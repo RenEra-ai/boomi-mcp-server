@@ -1148,6 +1148,61 @@ def _documented_vocabulary(axis):
     return ()
 
 
+def _probe_vocabulary(key, **kwargs):
+    """The ``valid_*`` list the runtime reports for one probed combination."""
+    payload = meta_tools.get_schema_template_action(**kwargs)
+    return tuple(payload.get(key) or ())
+
+
+def _component_types():
+    overview = meta_tools.get_schema_template_action(resource_type="component")
+    return tuple(overview.get("component_types") or ())
+
+
+def _specialized_surfaces():
+    """Every VALID specialization combination, derived by probing the runtime.
+
+    Walks the axes together rather than independently: component_type first
+    (because it decides which protocols exist), then the protocol set the
+    runtime reports for that pair, then the standards for trading partners.
+    """
+    surfaces = []
+
+    for resource_type in meta_tools._VALID_RESOURCE_TYPES:
+        for operation in (None, "create"):
+            base = {"resource_type": resource_type, "operation": operation}
+
+            # resource-level protocols (e.g. process/create + a process_kind)
+            for protocol in _probe_vocabulary(
+                "valid_protocols", **base, protocol="__not_a_protocol__"
+            ):
+                surfaces.append(
+                    meta_tools.get_schema_template_action(**base, protocol=protocol)
+                )
+
+            for standard in _probe_vocabulary(
+                "valid_standards", **base, standard="__not_a_standard__"
+            ):
+                surfaces.append(
+                    meta_tools.get_schema_template_action(**base, standard=standard)
+                )
+
+            if resource_type != "component":
+                continue
+            for component_type in _component_types():
+                pair = dict(base, component_type=component_type)
+                surfaces.append(meta_tools.get_schema_template_action(**pair))
+                # ...and the protocols THIS component_type admits.
+                for protocol in _probe_vocabulary(
+                    "valid_protocols", **pair, protocol="__not_a_protocol__"
+                ):
+                    surfaces.append(
+                        meta_tools.get_schema_template_action(**pair, protocol=protocol)
+                    )
+
+    return surfaces
+
+
 def _valid_operations(resource_type):
     """The operations a resource_type REALLY accepts, asked of the runtime.
 
@@ -1238,24 +1293,20 @@ def _served_surfaces():
             except Exception:  # noqa: BLE001
                 continue
 
-    # Specializations, crossed with the operation that CONSUMES them. Called on
-    # their own, `standard='x12'` returns the 607-byte overview rather than the
-    # 1290-byte create template — so exercising each axis independently swept
-    # the general payload and never the specialized one.
-    for axis in ("standard", "component_type", "protocol"):
-        for value in _documented_vocabulary(axis):
-            for resource_type in meta_tools._VALID_RESOURCE_TYPES:
-                for operation in (None, "create"):
-                    try:
-                        surfaces.append(
-                            meta_tools.get_schema_template_action(
-                                resource_type=resource_type,
-                                operation=operation,
-                                **{axis: value},
-                            )
-                        )
-                    except Exception:  # noqa: BLE001
-                        continue
+    # Specializations, COMBINED and derived.
+    #
+    # Two rounds were lost here to axes exercised one at a time. `standard='x12'`
+    # alone returns the 607-byte overview, not the 1290-byte create template;
+    # and a protocol only reaches its real payload alongside the component_type
+    # that admits it — `component/create + connector-settings +
+    # database.sqlserver` is 15 KB and was never swept, `process/create +
+    # database_to_api_sync` is 27 KB and was never swept.
+    #
+    # The vocabularies are asked of the RUNTIME, which reports `valid_protocols`
+    # / `valid_standards` for the exact combination being probed. A documented
+    # list cannot do this: the wrapper's `protocol` line names only the
+    # trading-partner values, and the real set depends on the component_type.
+    surfaces.extend(_specialized_surfaces())
 
     # The ERROR envelopes. A rejection is served text too, and its suggestion is
     # the instruction a caller is most likely to follow — they are stuck.
@@ -2010,3 +2061,63 @@ def test_a_specialization_is_swept_together_with_the_operation_that_consumes_it(
     assert json.dumps(overview, default=str) != json.dumps(specialized, default=str)
     rendered = json.dumps(_served_surfaces(), default=str)
     assert json.dumps(specialized, default=str)[:200] in rendered
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        # A protocol only reaches its real payload alongside the component_type
+        # that admits it — 15 KB, and absent while the axes were swept apart.
+        {
+            "resource_type": "component",
+            "operation": "create",
+            "component_type": "connector-settings",
+            "protocol": "database.sqlserver",
+        },
+        # 27 KB, likewise absent.
+        {
+            "resource_type": "process",
+            "operation": "create",
+            "protocol": "database_to_api_sync",
+        },
+        # The specialization that needs its operation.
+        {"resource_type": "trading_partner", "operation": "create", "standard": "x12"},
+    ],
+)
+def test_a_specialized_template_is_actually_inside_the_sweep(kwargs):
+    """Exercising each axis alone swept the overview, never the specialization."""
+    payload = meta_tools.get_schema_template_action(**kwargs)
+    assert payload["_success"] is True
+    rendered = json.dumps(_served_surfaces(), default=str)
+    assert json.dumps(payload, default=str)[:200] in rendered, kwargs
+
+
+def test_the_specialization_vocabularies_are_asked_of_the_runtime():
+    """A documented list cannot express a vocabulary that depends on context.
+
+    The wrapper's `protocol` line names only the trading-partner values, while
+    the real set depends on the component_type — `connector-settings` admits
+    `database.sqlserver`, and `process` admits `database_to_api_sync`.
+    """
+    documented = set(_documented_vocabulary("protocol"))
+    component_protocols = set(
+        _probe_vocabulary(
+            "valid_protocols",
+            resource_type="component",
+            operation="create",
+            component_type="connector-settings",
+            protocol="__not_a_protocol__",
+        )
+    )
+    process_protocols = set(
+        _probe_vocabulary(
+            "valid_protocols",
+            resource_type="process",
+            operation="create",
+            protocol="__not_a_protocol__",
+        )
+    )
+    assert component_protocols and process_protocols
+    assert not (component_protocols & documented)
+    assert not (process_protocols & documented)
+    assert _component_types()
