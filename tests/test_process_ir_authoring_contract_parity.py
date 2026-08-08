@@ -751,3 +751,65 @@ def test_a_doctrine_cross_reference_change_moves_the_contract():
     assert "a_pattern_that_did_not_exist_before" in blob
     live = json.dumps([e.model_dump(mode="json") for e in entries()])
     assert "a_pattern_that_did_not_exist_before" not in live
+
+
+def test_every_producer_s_message_AND_remediation_is_findable_in_its_entry():
+    """A caller matches on the text they RECEIVED, not on the one we kept.
+
+    Seven codes have producers whose wording differs. Attributing only the
+    remediations fixed half of it: the compiler's MESSAGE was still dropped
+    from an entry that names the compiler as a generated source, so a caller
+    who received it could not find the rule.
+    """
+    from boomi_mcp.models.process_ir import process_ir_v1_parse_diagnostic_specs
+
+    by_code = {}
+    for specs in (
+        process_ir_v1_parse_diagnostic_specs(),
+        finding_specs(),
+        compiler_diagnostic_specs(),
+    ):
+        for spec in specs:
+            by_code.setdefault(spec["code"], []).append(spec)
+
+    projected = {e.subject: e for e in entries() if e.entry_type == "diagnostic"}
+    multi = 0
+    for code, specs in by_code.items():
+        entry = projected[code]
+        published = entry.summary + " " + " ".join(entry.ordering_facts)
+        for spec in specs:
+            for field in ("message", "remediation"):
+                if spec.get(field):
+                    assert spec[field] in published, (code, field, spec[field][:60])
+        if len({(s["message"], s["remediation"]) for s in specs}) > 1:
+            multi += 1
+    assert multi >= 5, f"only {multi} multi-producer codes — the pin is weak"
+
+
+def test_an_unmapped_cache_state_fails_loudly_instead_of_becoming_unsupported():
+    """"unsupported" means NEVER. Defaulting to it invents a verdict.
+
+    It would also let a served term cite a source state absent from the
+    published `state_mappings`, so a caller could not look it up either.
+    """
+    from boomi_mcp.categories import meta_tools
+
+    original = dict(meta_tools._CACHE_PROPERTY_AUTHORING_TERMS)
+    patched = {k: dict(v) for k, v in original.items()}
+    first = sorted(patched)[0]
+    patched[first]["capability_status"] = "a_state_nobody_mapped"
+    meta_tools._CACHE_PROPERTY_AUTHORING_TERMS = patched
+    try:
+        with pytest.raises(KeyError):
+            meta_tools._canonical_term_states()
+    finally:
+        meta_tools._CACHE_PROPERTY_AUTHORING_TERMS = original
+
+    # ...and every state the surface really emits IS mapped.
+    for row in meta_tools._canonical_term_states():
+        assert row["canonical_state"] in ("supported", "gated", "unsupported")
+        assert any(
+            m.source_vocabulary == "cache_property_authoring"
+            and m.source_state == row["source_state"]
+            for m in state_mappings()
+        ), row

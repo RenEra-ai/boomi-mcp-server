@@ -1122,12 +1122,19 @@ def _diagnostic_entries(
                     "sources": [],
                     "stages": ["repair"],
                     "texts": {},
+                    "messages": {},
                 },
             )
             if spec.get("message") and not row["message"]:
                 row["message"] = spec["message"]
             if spec.get("remediation") and not row["remediation"]:
                 row["remediation"] = spec["remediation"]
+            # MESSAGES too, not only remediations. Attributing the remediations
+            # and leaving `summary` first-wins fixed half the defect: a caller
+            # who received the compiler's wording still could not find it in an
+            # entry that names the compiler as a generated source.
+            if spec.get("message"):
+                row["messages"].setdefault(spec["message"], []).append(stage_label)
             # KEEP every distinct text, attributed to the phase that emits it.
             # Seven codes have producers whose wording differs, and taking the
             # first non-empty discarded the rest while the entry went on
@@ -1153,6 +1160,10 @@ def _diagnostic_entries(
                 summary=(row["message"] or "").strip(),
                 workflow_stages=tuple(row["stages"]),
                 ordering_facts=tuple(
+                    "[{0}] {1}".format("/".join(sorted(set(where))), text)
+                    for text, where in sorted(row["messages"].items())
+                )
+                + tuple(
                     "[{0}] {1}".format("/".join(sorted(set(where))), text)
                     for text, where in sorted(row["texts"].items())
                 ),

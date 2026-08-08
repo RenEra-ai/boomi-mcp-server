@@ -6512,11 +6512,22 @@ def _canonical_term_states() -> List[Dict[str, Any]]:
     rows = []
     for term, body in sorted(_CACHE_PROPERTY_AUTHORING_TERMS.items()):
         source_state = body.get("capability_status", "")
+        if source_state not in mapping:
+            # LOUD, like the projector's own `_canonical_state`. Defaulting to
+            # "unsupported" would publish "never" for a state whose real meaning
+            # nobody decided — and would let a served term cite a source state
+            # that is absent from the published `state_mappings`, so a caller
+            # could not look it up either.
+            raise KeyError(
+                f"cache/property term {term!r} has capability_status "
+                f"{source_state!r}, which the published state mapping does not "
+                f"cover; add it to the mapping rather than defaulting."
+            )
         rows.append(
             {
                 "term": term,
                 "source_state": source_state,
-                "canonical_state": mapping.get(source_state, "unsupported"),
+                "canonical_state": mapping[source_state],
             }
         )
     return rows
