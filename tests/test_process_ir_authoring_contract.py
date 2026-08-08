@@ -1203,6 +1203,16 @@ def _specialized_surfaces():
     return surfaces
 
 
+def _live_archetypes():
+    """Archetype names from the live registry, not a literal."""
+    from boomi_mcp.authoring.contract import list_archetype_registry
+
+    try:
+        return tuple(entry["name"] for entry in list_archetype_registry())
+    except Exception:  # noqa: BLE001 — a registry that cannot build sweeps nothing
+        return ()
+
+
 def _valid_operations(resource_type):
     """The operations a resource_type REALLY accepts, asked of the runtime.
 
@@ -1319,6 +1329,11 @@ def _served_surfaces():
         {"schema_name": "process_ir_authoring", "after_entry_id": "node.branch"},
         {"schema_name": "ProcessIRV1", "node_kind": "branch"},
         {"schema_name": "process_ir_authoring@99"},
+        # WORKFLOW_SEQUENCE_NOT_FOUND — the one code the tuple missed. A planted
+        # `See docs/architecture/...` in its message survived the whole suite.
+        {"schema_name": "workflow:__not_a_workflow__"},
+        {"schema_name": "archetype:__not_an_archetype__"},
+        {"schema_name": "recipe:__not_a_recipe__"},
     ):
         try:
             surfaces.append(meta_tools.get_schema_template_action(**bad))
@@ -1326,13 +1341,19 @@ def _served_surfaces():
             continue
 
     # Every plan_integration_design mode, including its refusals.
-    for kwargs in (
+    planner_calls = [
         {},
         {"authoring_mode": "process_ir"},
-        {"archetype": "database_to_api_sync"},
         {"authoring_mode": "not_a_mode"},
-        {"archetype": "database_to_api_sync", "authoring_mode": "process_ir"},
-    ):
+        {"archetype": "__not_an_archetype__"},
+    ]
+    # EVERY archetype, from the live registry. Naming one visited 1 of 6 and
+    # left 119 served strings unswept — a hardcoded subset inside the very
+    # function whose comment argues against hardcoded subsets.
+    for entry in _live_archetypes():
+        planner_calls.append({"archetype": entry})
+        planner_calls.append({"archetype": entry, "authoring_mode": "process_ir"})
+    for kwargs in planner_calls:
         try:
             surfaces.append(meta_tools.plan_integration_design_action(**kwargs))
         except Exception:  # noqa: BLE001
@@ -1584,9 +1605,18 @@ _UNFETCHABLE_ALTERNATIVES = (
         # standalone dot is a non-word character.
         r"\.(?:codex|github)/[\w/.-]+",
         r"/mnt/[\w/.-]+",
-        # `json` and `xml` are deliberately absent: `profile.json` is a real
-        # profile_type value on this surface.
-        r"(?i:\b[\w.-]+\.(?:md|rst|py|toml|cfg|ini|yaml|yml|sh|sql|js|ts|html)\b)",
+        # A FILENAME, not a dotted identifier.
+        #
+        # `json` and `xml` were excluded because `profile.json` is a real
+        # profile_type value — and then `sql`/`py`/`js`/`ts`/`sh` were added
+        # without applying the same reasoning, so the planner's
+        # `target.write_profile.sql` (a parameter ADDRESS) read as a file.
+        #
+        # `(?<![\w.])` is what separates the two: a real filename's basename is
+        # one segment, while a domain identifier has a dotted parent. It blocks
+        # the match at `write_profile.sql` because a dot precedes it, and leaves
+        # `manage_roles.py`, `decision_step.md` and `/mnt/.../x.py` matching.
+        r"(?i:(?<![\w.])[\w-]+\.(?:md|rst|py|toml|cfg|ini|yaml|yml|sh|sql|js|ts|html)\b)",
     ]
 )
 
@@ -2163,3 +2193,49 @@ def test_a_specialized_instruction_must_select_the_specialized_template():
     # ...but only the specialized one claims it as its identity.
     assert overview.get("standard") != "x12"
     assert specialized.get("standard") == "x12"
+
+
+@pytest.mark.parametrize(
+    "text,flagged",
+    [
+        # A dotted DOMAIN identifier is not a file. `target.write_profile.sql`
+        # is a planner parameter address; `json`/`xml` were excluded for exactly
+        # this reason and `sql`/`py`/`ts` were added without applying it.
+        ("target.write_profile.sql", False),
+        ("source.target.field.py", False),
+        ("a profile_type of profile.json", False),
+        # ...while real filenames still match.
+        ("manage_roles.py", True),
+        ("decision_step.md", True),
+        ("q.sql", True),
+        ("b.ts", True),
+        ("config.yaml", True),
+        ("SETUP.MD", True),
+        ("/mnt/examples/manage_roles.py", True),
+        ("boomi_mcp/models/process_ir.py", True),
+    ],
+)
+def test_a_dotted_domain_identifier_is_not_a_filename(text, flagged):
+    assert bool(_UNFETCHABLE_DOCUMENT.findall(text)) is flagged, text
+
+
+def test_the_sweep_visits_every_archetype_and_the_sixth_error_code():
+    """Two hardcoded subsets survived inside the function arguing against them.
+
+    The planner loop named one archetype of six (119 strings unswept), and the
+    error tuple reached five codes of six — a planted citation in
+    `WORKFLOW_SEQUENCE_NOT_FOUND` survived the entire suite.
+    """
+    archetypes = _live_archetypes()
+    assert len(archetypes) >= 4, archetypes
+
+    rendered = json.dumps(_served_surfaces(), default=str)
+    for archetype in archetypes:
+        assert archetype in rendered, archetype
+
+    # The sixth code is now reachable.
+    payload = meta_tools.get_schema_template_action(
+        schema_name="workflow:__not_a_workflow__"
+    )
+    assert payload["error_code"] == "WORKFLOW_SEQUENCE_NOT_FOUND"
+    assert json.dumps(payload, default=str)[:120] in rendered
