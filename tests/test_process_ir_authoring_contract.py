@@ -1463,16 +1463,26 @@ def test_every_executable_instruction_the_server_serves_actually_executes():
         if not result.get("_success"):
             failures.append((call, result.get("error_code")))
             continue
-        # SUCCEEDING is not enough. An instruction that names a specialization
-        # must return the specialized payload: two repaired `see_also` links
-        # executed cleanly and returned the generic component overview, because
-        # they omitted `operation='create'` — the "resolves but does not
-        # deliver" shape, one layer down from the citation guard.
-        rendered = json.dumps(result, default=str)
+        # SUCCEEDING is not enough, and neither is a substring.
+        #
+        # An instruction that names a specialization must return the SPECIALIZED
+        # payload. Two repaired `see_also` links executed cleanly and returned
+        # the generic component overview because they omitted
+        # `operation='create'`. The first attempt to catch that searched the
+        # serialized response for the value — and passed anyway for
+        # `trading_partner, standard='x12'`, because the OVERVIEW enumerates
+        # `x12` in its list of standards. Membership somewhere in the payload is
+        # not identity.
+        #
+        # So the comparison is against the response's own IDENTITY fields: a
+        # specialized template echoes the selector it was built for, an overview
+        # does not.
         for axis in ("protocol", "component_type", "standard"):
             value = kwargs.get(axis)
-            if value and value not in rendered:
-                failures.append((call, f"{axis}={value!r} not reflected in the payload"))
+            if value and result.get(axis) != value:
+                failures.append(
+                    (call, f"{axis}={value!r} did not select the specialized template")
+                )
 
     assert malformed == [], malformed
     assert executed >= 10, f"only {executed} instructions executed — pin is weak"
@@ -2132,3 +2142,24 @@ def test_the_specialization_vocabularies_are_asked_of_the_runtime():
     assert not (component_protocols & documented)
     assert not (process_protocols & documented)
     assert _component_types()
+
+
+def test_a_specialized_instruction_must_select_the_specialized_template():
+    """Membership somewhere in the payload is not identity.
+
+    `get_schema_template(resource_type='trading_partner', standard='x12')`
+    returns the 607-byte OVERVIEW, which enumerates `x12` in its list of
+    standards — so a substring check passed while a served B2B workflow step
+    handed callers the catalog instead of the X12 create template it promised.
+    """
+    overview = meta_tools.get_schema_template_action(
+        resource_type="trading_partner", standard="x12"
+    )
+    specialized = meta_tools.get_schema_template_action(
+        resource_type="trading_partner", operation="create", standard="x12"
+    )
+    # The trap: the value IS present in the wrong payload...
+    assert "x12" in json.dumps(overview, default=str)
+    # ...but only the specialized one claims it as its identity.
+    assert overview.get("standard") != "x12"
+    assert specialized.get("standard") == "x12"

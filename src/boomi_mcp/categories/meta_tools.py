@@ -6081,7 +6081,11 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
             "description": "Create a trading partner for EDI/B2B integration",
             "steps": [
                 "1. manage_trading_partner(action='list_options') → see available standards/protocols",
-                "2. get_schema_template(resource_type='trading_partner', standard='x12') → get template",
+                # `operation='create'` is required: without it the trading-partner
+                # handler ignores `standard` and serves the generic overview, so
+                # the step returned 607 bytes of catalog instead of the 1290-byte
+                # X12 create template it promises.
+                "2. get_schema_template(resource_type='trading_partner', operation='create', standard='x12') → get template",
                 "3. manage_trading_partner(action='create', config='{...}') → create partner",
                 "4. manage_trading_partner(action='analyze_usage', resource_id='...') → verify setup",
             ],
