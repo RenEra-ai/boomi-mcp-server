@@ -1462,6 +1462,17 @@ def test_every_executable_instruction_the_server_serves_actually_executes():
         executed += 1
         if not result.get("_success"):
             failures.append((call, result.get("error_code")))
+            continue
+        # SUCCEEDING is not enough. An instruction that names a specialization
+        # must return the specialized payload: two repaired `see_also` links
+        # executed cleanly and returned the generic component overview, because
+        # they omitted `operation='create'` — the "resolves but does not
+        # deliver" shape, one layer down from the citation guard.
+        rendered = json.dumps(result, default=str)
+        for axis in ("protocol", "component_type", "standard"):
+            value = kwargs.get(axis)
+            if value and value not in rendered:
+                failures.append((call, f"{axis}={value!r} not reflected in the payload"))
 
     assert malformed == [], malformed
     assert executed >= 10, f"only {executed} instructions executed — pin is weak"

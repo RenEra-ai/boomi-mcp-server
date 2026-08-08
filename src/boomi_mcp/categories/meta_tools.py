@@ -2304,7 +2304,7 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_WRITE = {
     "see_also": {
         "send_operation": (
             "Wrap this write profile in a database Send operation via "
-            "get_schema_template(resource_type='component', "
+            "get_schema_template(resource_type='component', operation='create', "
             "component_type='connector-action', protocol='database.send')."
         ),
         "read_profile": (
@@ -2607,7 +2607,7 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_SEND = {
     "see_also": {
         "write_profile": (
             "Create the referenced write profile via "
-            "get_schema_template(resource_type='component', "
+            "get_schema_template(resource_type='component', operation='create', "
             "component_type='profile.db', protocol='database.write')."
         ),
         "get_operation": (
