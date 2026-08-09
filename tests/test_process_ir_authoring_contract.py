@@ -3648,7 +3648,8 @@ def test_the_index_publishes_the_same_page_rules_as_the_page_itself():
     ), shared
 
     for name in shared:
-        declared = ProcessIRAuthoringContractPageV1.model_fields[name].default
+        field = ProcessIRAuthoringContractPageV1.model_fields[name]
+        declared = None if field.is_required() else field.default
         if name == "facets":
             # The index publishes only the FILTERABLE facets; the page adds
             # `entry_types`, which is informational — there is no `entry_type`
@@ -3770,11 +3771,34 @@ def test_a_corrupted_page_is_refused_rather_than_served():
     with pytest.raises(pydantic.ValidationError):
         _revalidated_contract_page(dict(served, surprise_field=1))
 
-    # A DROPPED rule is REFILLED from its default, not refused — a default
-    # repairs an omission and never reports one. Stated because the comment
-    # above the mechanism once claimed the opposite.
-    without = {k: v for k, v in served.items() if k != "diagnostic_label_legend"}
-    assert _revalidated_contract_page(without) == served
+    # A DROPPED rule is handled for EVERY rule, derived — not for the single
+    # field the first version of this test happened to check, which was also
+    # the only one where the convenient answer was true. Pydantic skips
+    # `AfterValidator` on a default, so a rule whose default is not its correct
+    # value was served wrong when dropped: `state_mappings` came back empty.
+    #
+    # Two acceptable outcomes, no third: refuse the page, or restore the
+    # correct value. Serving a different one is the defect.
+    from boomi_mcp.models.process_ir_authoring import (
+        ProcessIRAuthoringContractPageV1,
+    )
+
+    rules = [
+        name
+        for name in ProcessIRAuthoringContractPageV1.model_fields
+        if name not in _QUERY_DEPENDENT_PAGE_FIELDS
+    ]
+    assert len(rules) >= 6, rules
+    for rule in rules:
+        without = {k: v for k, v in served.items() if k != rule}
+        try:
+            restored = _revalidated_contract_page(without)
+        except pydantic.ValidationError:
+            continue  # refused — the other acceptable outcome
+        assert restored == served, (
+            f"dropping {rule!r} was neither refused nor restored: "
+            f"served {restored.get(rule)!r} instead of {served.get(rule)!r}"
+        )
 
 
 def test_both_revalidation_call_sites_refuse_a_corrupted_page(monkeypatch):
@@ -3822,3 +3846,81 @@ def test_both_revalidation_call_sites_refuse_a_corrupted_page(monkeypatch):
     monkeypatch.setattr(server, "get_schema_template_action", poisoned_action)
     with pytest.raises(pydantic.ValidationError):
         server.get_schema_template(schema_name=SELECTOR, category="capability")
+
+
+def test_the_page_rule_protection_mechanisms_are_counted_correctly():
+    """#542. Two versions of the mechanism comment miscounted these sets.
+
+    The counts are the load-bearing part of the claim — "correct by
+    construction" is only true if every rule is covered by one mechanism or the
+    other — so they are derived and asserted rather than written down.
+    """
+    import typing
+
+    from boomi_mcp.models.process_ir_authoring import (
+        ProcessIRAuthoringContractPageV1,
+    )
+
+    rules = {
+        name
+        for name in ProcessIRAuthoringContractPageV1.model_fields
+        if name not in _QUERY_DEPENDENT_PAGE_FIELDS
+    }
+    literal, registry = set(), set()
+    for name in rules:
+        field = ProcessIRAuthoringContractPageV1.model_fields[name]
+        if typing.get_origin(field.annotation) is typing.Literal:
+            literal.add(name)
+        if "_matches_the_registry" in repr(field.metadata):
+            registry.add(name)
+
+    assert literal == {
+        "contract_version",
+        "diagnostic_label_legend",
+        "unlisted_placement_state",
+        "unlisted_connector_action_state",
+    }, sorted(literal)
+    assert registry == {"state_mappings", "facets", "catalog_entry_count"}, sorted(
+        registry
+    )
+    # Every rule is covered by exactly one mechanism — no rule protected by
+    # neither, which is what "correct by construction" asserts.
+    assert literal | registry == rules, sorted(rules - (literal | registry))
+    assert literal & registry == set(), sorted(literal & registry)
+
+    # A registry-validated rule must be REQUIRED: pydantic skips
+    # `AfterValidator` on a default, so a default would silently disable it.
+    for name in registry:
+        assert ProcessIRAuthoringContractPageV1.model_fields[name].is_required(), name
+    # ...and a `Literal` rule's default must BE its literal value.
+    for name in literal:
+        field = ProcessIRAuthoringContractPageV1.model_fields[name]
+        assert typing.get_args(field.annotation) == (field.default,), name
+
+
+def test_the_served_state_mappings_are_normalised_before_they_are_served():
+    """#543. `_sorted_unique_models` on this field was graded by nothing.
+
+    Deleting it was full-suite green while changing the served mapping order on
+    every page, and letting a downstream permutation through un-normalised. The
+    registry validator compares content, deliberately — so order is precisely
+    what it cannot see, and this is the guard for it.
+    """
+    from boomi_mcp.authoring.process_ir_projection import state_mappings
+
+    served = _served_contract_page({"category": "capability"})
+    assert served is not None
+    rows = served["state_mappings"]
+    assert rows
+
+    keys = [json.dumps(row, sort_keys=True) for row in rows]
+    assert keys == sorted(keys), keys
+    assert len(keys) == len(set(keys)), "duplicate mapping rows served"
+
+    # Normalisation, not accident: the registry's own order is different, and
+    # a page built from a permuted registry still serves the sorted order.
+    registry_keys = [
+        json.dumps(m.model_dump(mode="json"), sort_keys=True) for m in state_mappings()
+    ]
+    assert sorted(registry_keys) == keys
+    assert len(registry_keys) == len(keys)

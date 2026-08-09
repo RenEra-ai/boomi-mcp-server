@@ -432,10 +432,17 @@ class ProcessIRAuthoringContractPageV1(_ContractModel):
     """
 
     contract_version: Literal["1"] = "1"
+    #: REQUIRED, deliberately. Pydantic does not run `AfterValidator` on a
+    #: default, so a page that reached re-validation with this field DROPPED had
+    #: its registry check skipped and was served with an empty mapping list —
+    #: the one rule whose default is not also its correct value, and therefore
+    #: the one where "a default repairs an omission" was false. `facets` and
+    #: `catalog_entry_count` are required for the same reason and refuse the
+    #: drop; this now does too. Both construction sites already pass it.
     state_mappings: Annotated[
         Annotated[Tuple[ProcessIRAuthoringStateMappingV1, ...], AfterValidator(_sorted_unique_models)],
         AfterValidator(_matches_the_registry("state_mappings")),
-    ] = ()
+    ]
     unlisted_placement_state: Literal["unsupported"] = "unsupported"
     unlisted_connector_action_state: Literal["unsupported"] = "unsupported"
 

@@ -6747,17 +6747,24 @@ def _authoring_contract_schema(
     except ProcessIRAuthoringQueryError as exc:
         return _authoring_filter_value_error(schema_name, exc)
 
-    # RE-VALIDATE what is about to be served. The page model makes every
-    # page-level rule correct by construction — three by `Literal`, three by a
-    # registry validator — but the builder hands back a plain dict, and a dict
-    # is editable by every layer between here and the caller. Round-tripping it
-    # through the model extends that guarantee past the model layer.
+    # RE-VALIDATE what is about to be served. The page model makes all seven
+    # page-level rules correct by construction — FOUR by `Literal`
+    # (`contract_version`, `diagnostic_label_legend` and the two
+    # `unlisted_*_state`) and THREE by a registry validator (`state_mappings`,
+    # `facets`, `catalog_entry_count`) — but the builder hands back a plain
+    # dict, and a dict is editable by every layer between here and the caller.
+    # Round-tripping it through the model extends that guarantee past the model
+    # layer. (Two earlier versions of this comment miscounted these sets; the
+    # count is asserted in the tests rather than trusted here.)
     #
-    # Precisely: a rule BLANKED or FALSIFIED downstream is refused, and an
-    # unexpected key INJECTED is refused (`extra='forbid'`). A rule DROPPED is
-    # not refused — the model refills it from its default and serves a correct
-    # page. A default repairs an omission; it never reports one, and an earlier
-    # version of this comment claimed otherwise.
+    # Per verb: a rule BLANKED or FALSIFIED downstream is refused, and an
+    # unexpected key INJECTED is refused (`extra='forbid'`). DROPPED splits —
+    # the three registry-validated rules are declared REQUIRED and are refused,
+    # while the four `Literal` rules are restored from their defaults, which is
+    # safe only because for them the default IS the correct value. That split
+    # is load-bearing: pydantic does not run `AfterValidator` on a default, so
+    # while `state_mappings` still carried one it was served EMPTY when
+    # dropped.
     payload["contract_page"] = _revalidated_contract_page(page)
     return payload
 
