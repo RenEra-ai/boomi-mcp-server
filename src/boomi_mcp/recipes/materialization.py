@@ -137,6 +137,19 @@ def build_symbol_table(
     adapters and the #136 codec: no connector-action component declares its own
     connection, so the family is a fact of the component plan the compiler
     receives, not one the IR authors.
+
+    The operation->connection edge is the same kind of fact and is read from the
+    same place: an operation component's ``config["connection_key"]`` names the
+    connection component it binds to, and that becomes the operation symbol's
+    ``connection_ref``. ``connector_resolution`` resolves the connection off
+    THAT field and nothing else, so leaving it unset made every first-class
+    ``connector_call`` fail reference resolution — and, because Try/Catch bodies
+    admit ``connector_call``, made no Try/Catch document compilable at all. The
+    ``source``/``target`` node kinds were unaffected because they carry their own
+    ``connection_ref`` in the IR, which is why the shipped fixtures stayed green.
+
+    Derived here rather than passed in, so both call sites — the authoring
+    workflow and the recipe engine — get it from one place.
     """
     from ..compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
 
@@ -145,6 +158,7 @@ def build_symbol_table(
     for component in components:
         connector_type, action_type = metadata.get(component.key, (None, None))
         ref = f"{_REF_PREFIX}{component.key}"
+        connection_key = (component.config or {}).get("connection_key")
         symbols.append(
             ComponentSymbolV1(
                 ref=ref,
@@ -152,6 +166,9 @@ def build_symbol_table(
                 component_type=component.type,
                 connector_type=connector_type,
                 action_type=action_type,
+                connection_ref=(
+                    f"{_REF_PREFIX}{connection_key}" if connection_key else None
+                ),
             )
         )
     return SymbolTableV1(symbols=tuple(symbols))

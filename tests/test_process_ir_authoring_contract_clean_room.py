@@ -584,3 +584,40 @@ def test_the_clean_room_coverage_census_matches_the_fixtures():
     )
     # The uncovered families are recorded, not silently absent.
     assert {name for name, done in _CLEAN_ROOM_COVERAGE.items() if not done}
+
+
+def test_a_first_class_connector_call_compiles_through_the_public_surface():
+    """#146 F6. `connector_call` could not be authored at all.
+
+    `build_symbol_table` never read an operation component's
+    `config["connection_key"]`, so every operation symbol carried
+    `connection_ref=None`, and `connector_resolution` — which resolves the
+    connection off exactly that field — rejected every first-class
+    `connector_call`. Because Try/Catch bodies admit `connector_call` and not
+    `source`/`target`, no Try/Catch document was compilable either.
+
+    The two shipped fixtures stayed green throughout because `source`/`target`
+    carry their own `connection_ref` in the IR, so nothing exercised the symbol
+    path. That is why this test authors the node kind the contract publishes as
+    first-class rather than reusing a fixture.
+    """
+    request = json.loads(
+        json.dumps(_load("decision_route_connector_map.json")["request"])
+    )
+    request["intent"]["process_ir"]["body"] = {
+        "kind": "sequence",
+        "steps": [
+            {"kind": "connector_call", "operation_ref": "$ref:src_op"},
+            {"kind": "stop"},
+        ],
+    }
+
+    planned = build("plan", {"authoring_request": request})
+    assert planned["_success"] is True, planned.get("error")
+
+    compiled = build("compile", {"authoring_request": request})
+    assert compiled["_success"] is True, (
+        compiled.get("error"),
+        [d.get("code") for d in (compiled.get("authoring_diagnostics") or [])],
+    )
+    assert not (compiled.get("authoring_diagnostics") or [])

@@ -3924,3 +3924,36 @@ def test_the_served_state_mappings_are_normalised_before_they_are_served():
     ]
     assert sorted(registry_keys) == keys
     assert len(registry_keys) == len(keys)
+
+
+def test_the_operation_symbol_carries_the_connection_its_plan_declares():
+    """The mechanism behind the test above, pinned directly.
+
+    Asserted at the symbol table rather than only end-to-end, so a regression
+    names the cause instead of surfacing as an opaque compile rejection three
+    layers away.
+    """
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+    from boomi_mcp.recipes.materialization import build_symbol_table
+
+    components = [
+        IntegrationComponentSpec(
+            key="conn", name="C", type="connector-settings",
+            config={"connector_type": "database"},
+        ),
+        IntegrationComponentSpec(
+            key="op", name="O", type="connector-action",
+            config={
+                "action_type": "Get",
+                "connection_key": "conn",
+                "connector_type": "database",
+            },
+        ),
+        IntegrationComponentSpec(key="plain", name="P", type="transform.map", config={}),
+    ]
+    symbols = {s.ref: s for s in build_symbol_table(components).symbols}
+
+    assert symbols["$ref:op"].connection_ref == "$ref:conn"
+    # A component that declares no connection must not invent one.
+    assert symbols["$ref:conn"].connection_ref is None
+    assert symbols["$ref:plain"].connection_ref is None
