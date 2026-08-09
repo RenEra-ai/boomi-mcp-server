@@ -575,6 +575,14 @@ class LiveDeploymentComparisonV1(_AuthoringModel):
     #: binding is stale without telling them what changed — the capability
     #: surface, or the compiler's behaviour. Those have different remedies.
     revision_mismatches: Tuple[str, ...] = ()
+    #: Compared revisions the binding carries NO value for, sorted. A binding
+    #: minted before a field existed cannot be compared against it, and
+    #: `revision_mismatches` alone cannot express that: a one-field mismatch
+    #: list read as "the other one matched" when in truth it was never looked
+    #: at. `mismatch` still wins the summary — a definite negative is the
+    #: actionable fact — but WHICH fields backed that summary is now stated
+    #: rather than inferred.
+    revision_uncompared: Tuple[str, ...] = ()
     revision_skew: Literal["not_requested", "match", "mismatch", "unknown"] = (
         "not_requested"
     )

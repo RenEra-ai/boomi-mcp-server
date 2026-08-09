@@ -29,6 +29,8 @@ if _src not in sys.path:
     sys.path.insert(0, _src)
 
 from boomi_mcp.authoring.process_ir_projection import (  # noqa: E402
+    AUTHORING_LAYERS,
+    AUTHORING_LAYER_SEMANTIC_VALIDATOR,
     ProcessIRAuthoringQueryError,
     build_process_ir_authoring_entries,
     build_process_ir_authoring_index,
@@ -468,7 +470,13 @@ def test_drift_control_changing_a_validator_remediation_changes_the_contract():
     # Substring, not membership: each fact is prefixed with the PHASE that
     # emits it, so a code with two disagreeing producers publishes both.
     assert any("CHANGED" in fact for fact in entry.ordering_facts)
-    assert any(fact.startswith("[semantic validation]") for fact in entry.ordering_facts)
+    # Derived, not re-typed: this assertion silently rotted once already when
+    # the served label changed and the test kept pinning the old spelling.
+    assert AUTHORING_LAYER_SEMANTIC_VALIDATOR in AUTHORING_LAYERS
+    assert any(
+        fact.startswith(f"[{AUTHORING_LAYER_SEMANTIC_VALIDATOR}]")
+        for fact in entry.ordering_facts
+    )
     live = next(e for e in entries() if e.subject == code)
     assert not any("CHANGED" in fact for fact in live.ordering_facts)
 
@@ -817,3 +825,99 @@ def test_an_unmapped_cache_state_fails_loudly_instead_of_becoming_unsupported():
             and m.source_state == row["source_state"]
             for m in state_mappings()
         ), row
+
+
+def test_every_authoring_layer_label_is_actually_served():
+    """The constant tuple and the served labels agree in BOTH directions.
+
+    Naming the labels once only helps if the name stays tied to reality: a
+    constant nothing serves is as stale as a re-typed string.
+    """
+    # A code authored by more than one layer is labelled `[compiler/parser]`,
+    # so the label is a SET of layers, not one — split it rather than treating
+    # the joined form as a fourth layer.
+    served = {
+        layer
+        for entry in entries()
+        for fact in entry.ordering_facts
+        if fact.startswith("[") and "]" in fact
+        for layer in fact[1 : fact.index("]")].split("/")
+    }
+    assert set(AUTHORING_LAYERS) == served, (
+        sorted(set(AUTHORING_LAYERS) ^ served),
+    )
+
+
+def test_every_published_page_rule_participates_in_the_revision():
+    """#498. Moving the legend out of the entries moved it out of coverage.
+
+    The byte snapshot and both revisions are computed from
+    `process_ir_authoring_revision_payload()`. When the label legend lived
+    inside each entry's summary it was covered by all three; published on the
+    page envelope instead, it was covered by NONE — its text could be rewritten
+    to assert the opposite and nothing moved.
+
+    Page fields split cleanly in two: those describing the QUERY vary per call
+    and must stay out, and those publishing a RULE are served behaviour and must
+    be in. This asserts the split is total, so a new envelope field forces the
+    decision instead of defaulting to uncovered.
+    """
+    from boomi_mcp.models.process_ir_authoring import (
+        ProcessIRAuthoringContractPageV1,
+    )
+
+    from test_process_ir_authoring_contract import _QUERY_DEPENDENT_PAGE_FIELDS
+
+    query_dependent = set(_QUERY_DEPENDENT_PAGE_FIELDS)
+    # Two rules carry no key of their own because they are FUNCTIONS of the
+    # entries the payload already carries whole: `facets` enumerates the
+    # entries' filterable values and `catalog_entry_count` counts them. A key
+    # for either would be a second copy of a fact already covered — and the
+    # coverage is real, not asserted: the control below changes an entry and
+    # both move with it.
+    derived_from_entries = {"facets", "catalog_entry_count"}
+    payload = process_ir_authoring_revision_payload()
+    fields = set(ProcessIRAuthoringContractPageV1.model_fields)
+    rules = fields - query_dependent - derived_from_entries
+
+    assert query_dependent <= fields, sorted(query_dependent - fields)
+    missing = sorted(rule for rule in rules if rule not in payload)
+    assert missing == [], missing
+
+    # ...and the derivation is DEMONSTRATED, not asserted: both are computed
+    # from the payload's own entry list, so a change to any entry necessarily
+    # moves them. A weaker version of this control compared a query to itself
+    # and proved nothing.
+    served = query_process_ir_authoring_contract(category="capability")
+    covered = payload["entries"]
+    assert served.catalog_entry_count == len(covered)
+
+    facets = served.facets.model_dump(mode="json")
+    assert facets["categories"] == sorted({row["category"] for row in covered})
+    assert facets["entry_types"] == sorted({row["entry_type"] for row in covered})
+    assert facets["node_kinds"] == sorted(
+        {kind for row in covered for kind in row["node_kinds"]}
+    )
+    assert facets["capability_ids"] == sorted(
+        {row["capability_id"] for row in covered if row["capability_id"]}
+    )
+
+
+def test_rewriting_the_label_legend_moves_the_revision():
+    """The negative control for the pin above: the value, not just the key."""
+    import json
+
+    from boomi_mcp.authoring.process_ir_projection import DIAGNOSTIC_LABEL_LEGEND
+
+    payload = process_ir_authoring_revision_payload()
+    assert payload["diagnostic_label_legend"] == DIAGNOSTIC_LABEL_LEGEND
+
+    inverted = dict(payload, diagnostic_label_legend="A compile never returns "
+                    "parser-authored wording.")
+    assert json.dumps(inverted, sort_keys=True) != json.dumps(payload, sort_keys=True)
+
+    # ...and the committed snapshot carries it, so a rewrite lands in a diff.
+    committed = json.loads(
+        (_CONTRACT_FIXTURES / "process_ir_authoring_v1.contract.json").read_text()
+    )
+    assert committed["diagnostic_label_legend"] == DIAGNOSTIC_LABEL_LEGEND

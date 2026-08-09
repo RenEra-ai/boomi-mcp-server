@@ -351,6 +351,71 @@ class ProcessIRAuthoringQueryV1(_ContractModel):
     limit: StrictInt = PROCESS_IR_AUTHORING_DEFAULT_LIMIT
 
 
+#: What a bracketed label in an entry's ``ordering_facts`` means, stated once
+#: per page.
+#:
+#: A bare ``[compile]`` prefix read as "this is what a compile returns" — and it
+#: is not: a real compile surfaces the PARSER's text too, because compile
+#: re-runs parse. The label names the layer that AUTHORED the sentence; which
+#: phase surfaces it is ``workflow_stages``, a different fact.
+DIAGNOSTIC_LABEL_LEGEND = (
+    "Each bracketed label in an entry's ordering_facts names the layer that "
+    "AUTHORED that text (parser, semantic validator, compiler). Any phase that "
+    "runs a layer can surface its text, so a compile can return "
+    "parser-authored wording."
+)
+
+
+def _matches_the_registry(field: str):
+    """Reject a page-level rule that disagrees with the registry it comes from.
+
+    The three `Literal` rules are correct by construction: pydantic refuses any
+    other value at every construction site, on every page, whether or not a
+    test ever fetched that page. These three could not be `Literal` — they are
+    computed — so for forty QA rounds they were guarded instead by a sampler
+    over the page space, and every round found the next unsampled corner. The
+    space is ~10^11; no fetch list closes it.
+
+    A validator does. It runs on every page, so the value-space regress ends:
+    a page whose mappings were cut, whose facets were narrowed to the matched
+    set, or whose catalog count was replaced by the matched count is refused
+    rather than served.
+
+    The import is deliberately inside the function. At module scope it would be
+    a cycle — the projection imports this module — and it would also drag the
+    projection into `import boomi_mcp.models`, which a test forbids. In a
+    function body it runs only at validation time, when the projection is
+    already imported.
+    """
+
+    def canonical(value):
+        # CONTENT, not order. This model sorts its own sequence fields, so the
+        # served order legitimately differs from the registry's emission order;
+        # comparing raw would reject every healthy page.
+        if isinstance(value, (list, tuple)):
+            return sorted(repr(item) for item in value)
+        if isinstance(value, BaseModel):
+            return {k: canonical(v) for k, v in value.__dict__.items()}
+        return value
+
+    def check(value):
+        from ..authoring import process_ir_projection as projection
+
+        expected = projection.expected_page_rule(field)
+        if canonical(value) != canonical(expected):
+            # "the DEFAULT registry", precisely. A page built from an injected
+            # `sources` snapshot legitimately differs, and the old wording told
+            # such a caller their value disagreed with the registry it came
+            # from — which was measurably false, since it came from theirs.
+            raise ValueError(
+                f"{field} disagrees with the default registry; a page built "
+                "from an injected sources snapshot cannot be served"
+            )
+        return value
+
+    return check
+
+
 class ProcessIRAuthoringContractPageV1(_ContractModel):
     """One bounded page of the authoring contract.
 
@@ -367,19 +432,56 @@ class ProcessIRAuthoringContractPageV1(_ContractModel):
     """
 
     contract_version: Literal["1"] = "1"
-    state_mappings: Annotated[Tuple[ProcessIRAuthoringStateMappingV1, ...], AfterValidator(_sorted_unique_models)] = ()
+    state_mappings: Annotated[
+        Annotated[Tuple[ProcessIRAuthoringStateMappingV1, ...], AfterValidator(_sorted_unique_models)],
+        AfterValidator(_matches_the_registry("state_mappings")),
+    ] = ()
     unlisted_placement_state: Literal["unsupported"] = "unsupported"
     unlisted_connector_action_state: Literal["unsupported"] = "unsupported"
 
+    #: The label legend, published ONCE per page rather than appended to every
+    #: entry. Repeating identical text on every diagnostic entry spent roughly
+    #: a fifth of the entry byte budget and pushed entries off a full
+    #: diagnostic page — the exact figures move with the legend's wording and
+    #: the diagnostic count, so they are measured by
+    #: `test_the_label_legend_is_published_once_per_page_not_per_entry` rather
+    #: than frozen into a comment that goes stale. The envelope already publishes
+    #: page-level rules this way (see the two `unlisted_*_state` fields) and is
+    #: excluded from the entry budget, and entries are never served outside it.
+    #:
+    #: The DEFAULT is the legend itself, exactly as the sibling rules default to
+    #: their `Literal` value. Defaulting to `""` instead made the field the one
+    #: page rule a construction site could forget, and one did: the empty-result
+    #: early return served a blank legend while the six populated selectors
+    #: served all 228 characters. A page rule that is correct by construction
+    #: cannot be omitted by a caller that does not know it exists.
+    #:
+    #: And `Literal`, not `str`, for the same reason the two `unlisted_*` rules
+    #: are: a page rule has exactly one correct value, so the type can say so.
+    #: Over forty QA rounds the three `Literal` page rules produced no findings
+    #: at all, while this field and `state_mappings` — the two that were not —
+    #: re-opened repeatedly, each time because some sampler of the page space
+    #: had a gap. The page space is ~10^11 and no fetch list closes it; the type
+    #: closes it for this field in one line. Pydantic now rejects any other
+    #: value at EVERY construction site, on every page, unsampled or not.
+    diagnostic_label_legend: Literal[DIAGNOSTIC_LABEL_LEGEND] = (
+        DIAGNOSTIC_LABEL_LEGEND
+    )
     query: ProcessIRAuthoringQueryV1
-    catalog_entry_count: StrictInt
+    catalog_entry_count: Annotated[
+        StrictInt,
+        AfterValidator(_matches_the_registry("catalog_entry_count")),
+    ]
     matched_entry_count: StrictInt
     returned_entry_count: StrictInt
     limit: StrictInt
     truncated: StrictBool = False
     next_after_entry_id: Optional[ContractEntryId] = None
 
-    facets: ProcessIRAuthoringFacetsV1
+    facets: Annotated[
+        ProcessIRAuthoringFacetsV1,
+        AfterValidator(_matches_the_registry("facets")),
+    ]
     #: NOT re-sorted. Order is meaningful here and nowhere else in this model:
     #: the contract promises results in ``contract_entry_id`` order, and the
     #: cursor pages through that order. Applying the generic set-sorter re-ordered

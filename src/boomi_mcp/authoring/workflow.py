@@ -1706,6 +1706,12 @@ def compare_live_build_provenance(
             # is unknown, not a mismatch, and is reported as such below.
             if expected is not None and expected != revisions[field]:
                 revision_mismatches.append(field)
+        # PRECEDENCE, stated because it was previously only implicit: a
+        # definite mismatch outranks an absent field. "Something you can act on
+        # is wrong" is more useful than "part of this was not checked" — but
+        # the two are no longer conflated, because `revision_uncompared`
+        # reports the absent fields alongside the mismatch instead of leaving a
+        # short mismatch list to be misread as "the rest matched".
         if revision_mismatches:
             skew = "mismatch"
         elif any(binding.get(field) is None for field in _COMPARED_REVISIONS):
@@ -1720,6 +1726,15 @@ def compare_live_build_provenance(
     else:
         skew = "unknown"
     revision_mismatches = sorted(revision_mismatches)
+    # `binding and ...` made the ONE case where NOTHING was compared report an
+    # empty list — indistinguishable, on this field, from a binding where both
+    # revisions were compared and agreed. An absent binding does not compare
+    # fewer fields than a partial one; it compares none.
+    revision_uncompared = sorted(
+        field
+        for field in _COMPARED_REVISIONS
+        if not binding or binding.get(field) is None
+    )
 
     drifted: List[str] = []
     missing: List[str] = []
@@ -1778,6 +1793,7 @@ def compare_live_build_provenance(
     return LiveDeploymentComparisonV1(
         status=status,
         revision_skew=skew,
+        revision_uncompared=tuple(revision_uncompared),
         revision_mismatches=tuple(revision_mismatches),
         drifted_components=tuple(drifted),
         missing_components=tuple(missing),

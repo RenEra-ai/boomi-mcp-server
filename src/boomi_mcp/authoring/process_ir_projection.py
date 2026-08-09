@@ -29,9 +29,19 @@ exists to remove.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
+from typing import (
+    Any,
+    Dict,
+    List,
+    Mapping,
+    MutableMapping,
+    NamedTuple,
+    Optional,
+    Tuple,
+)
 
 from ..models.process_ir_authoring import (
+    DIAGNOSTIC_LABEL_LEGEND,
     PROCESS_IR_AUTHORING_BYTE_BUDGET,
     PROCESS_IR_AUTHORING_CONTRACT_VERSION,
     PROCESS_IR_AUTHORING_DEFAULT_LIMIT,
@@ -1104,14 +1114,14 @@ def _diagnostic_entries(
         # everything plan can raise, compile can raise too. Compiler diagnostics
         # are the only ones plan cannot reach — nothing is compiled at plan.
         # ``repair`` stays the union, so it is always the safe filter.
-        (sources.parse_specs, SOURCE_PARSE_DIAGNOSTICS, ("plan", "compile"), "parse"),
+        (sources.parse_specs, SOURCE_PARSE_DIAGNOSTICS, ("plan", "compile"), AUTHORING_LAYER_PARSER),
         (
             sources.finding_specs,
             SOURCE_VALIDATION_DIAGNOSTICS,
             ("plan", "compile"),
-            "semantic validation",
+            AUTHORING_LAYER_SEMANTIC_VALIDATOR,
         ),
-        (sources.compiler_specs, SOURCE_COMPILER_DIAGNOSTICS, ("compile",), "compile"),
+        (sources.compiler_specs, SOURCE_COMPILER_DIAGNOSTICS, ("compile",), AUTHORING_LAYER_COMPILER),
     ):
         for spec in specs:
             code = str(spec["code"])
@@ -1158,7 +1168,11 @@ def _diagnostic_entries(
                 category="diagnostic",
                 subject=code,
                 title=code,
-                summary=(row["message"] or "").strip(),
+                # The label legend that explains `ordering_facts` lives on the
+                # PAGE (`diagnostic_label_legend`), not here: it is identical on
+                # every entry, and repeating it spent about a fifth of the entry
+                # byte budget and pushed entries off a full diagnostic page.
+                summary=_diagnostic_summary(row),
                 workflow_stages=tuple(row["stages"]),
                 ordering_facts=tuple(
                     "[{0}] {1}".format("/".join(sorted(set(where))), text)
@@ -1266,6 +1280,105 @@ def _semantic_rule_entries(
         )
         for entry_id, category, title, summary, node_kinds, related in _SEMANTIC_RULES
     ]
+
+
+#: The three layers that AUTHOR diagnostic text, as served.
+#:
+#: Named once here because these strings are BOTH the bracketed label in
+#: ``ordering_facts`` and the vocabulary the served legend teaches. A test that
+#: re-typed one of them kept asserting a label the projection had stopped
+#: emitting, and still passed — the drift the two-way pins exist to catch.
+AUTHORING_LAYER_PARSER = "parser"
+AUTHORING_LAYER_SEMANTIC_VALIDATOR = "semantic validator"
+AUTHORING_LAYER_COMPILER = "compiler"
+
+#: Every authoring layer, in pipeline order.
+AUTHORING_LAYERS: Tuple[str, ...] = (
+    AUTHORING_LAYER_PARSER,
+    AUTHORING_LAYER_SEMANTIC_VALIDATOR,
+    AUTHORING_LAYER_COMPILER,
+)
+
+
+def expected_page_rule(field: str):
+    """The registry's own value for a computed page rule.
+
+    The single place the page model asks "what should this be?", so the model
+    carries no second copy of any of these facts.
+
+    Raises ``KeyError`` on an unknown field rather than returning ``None``. A
+    ``None`` was read by the caller as "no opinion", so a one-character typo in
+    a field name silently degraded that field's validator to a no-op — the
+    cheapest possible way to disable a guard, and invisible on every correct
+    page because a disabled guard changes nothing until something is wrong.
+    """
+    builders = {
+        "state_mappings": state_mappings,
+        "catalog_entry_count": lambda: len(build_process_ir_authoring_entries()),
+        "facets": lambda: _facets(build_process_ir_authoring_entries()),
+    }
+    if field not in builders:
+        raise KeyError(f"no registry authority for page rule {field!r}")
+    return builders[field]()
+
+
+def _page_rule_default(field: str) -> Any:
+    """A page-level RULE's value, read from the model that declares it.
+
+    These are `Literal` defaults on the page model — the model is the authority,
+    so a second copy here would be exactly the duplicated fact this contract
+    keeps having to remove.
+    """
+    return ProcessIRAuthoringContractPageV1.model_fields[field].default
+
+
+def _page_envelope_fields() -> Tuple[str, ...]:
+    """Every page field that is NOT the entries array, in declaration order."""
+    return tuple(
+        name
+        for name in ProcessIRAuthoringContractPageV1.model_fields
+        if name != "entries"
+    )
+
+
+def _diagnostic_summary(row: MutableMapping[str, Any]) -> str:
+    """The one-line orientation for a diagnostic code.
+
+    Seven compiler codes have no entry in the static ``_MESSAGES`` table. That
+    is a property of the registry, and it is the only part of this worth
+    stating: WHICH modules raise those codes, and how they pass their text, is
+    a fact this file cannot check, and three successive attempts to write it
+    down here were each wrong in a different way. The observable behaviour is
+    below, and every count in this docstring — the seven, the four and the
+    three — is measured by
+    ``test_exactly_the_expected_codes_fall_back_to_their_remediation`` rather
+    than asserted here. Two of them were unmeasured for one round, in the very
+    change whose sibling fix removed exactly that pattern from three other
+    places.
+
+    FOUR of those seven are also raised by the parse layer, which does supply a
+    short message, and the merge picks it up — so they carry a real "what is
+    wrong" and nothing here applies to them. Only THREE reach this fallback:
+    ``PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID``,
+    ``PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED`` and
+    ``PROCESS_IR_SEMANTIC_UNTERMINATED_PATH``. The projection cannot reach a
+    raise-site literal, so for those three the only authored sentence available
+    is the remediation — which makes their summary a "how to fix" rather than a
+    "what is wrong". Worth stating plainly: it is the strongest claim the
+    authority supports, not a summary in the sense the other entries carry.
+
+    Reading ``message`` alone instead served those three BLANK, which is
+    strictly worse — no orientation at all on codes a failing compile really
+    returns.
+    """
+    message = (row["message"] or "").strip()
+    if message:
+        return message
+    for text in list(row["messages"]) + list(row["texts"]):
+        candidate = str(text).strip()
+        if candidate:
+            return candidate
+    return ""
 
 
 def _prose_digest(value):
@@ -1629,6 +1742,7 @@ def query_process_ir_authoring_contract(
         spent += cost
 
     return ProcessIRAuthoringContractPageV1(
+        diagnostic_label_legend=DIAGNOSTIC_LABEL_LEGEND,
         state_mappings=state_mappings(),
         query=query,
         catalog_entry_count=len(entries),
@@ -1673,8 +1787,14 @@ def build_process_ir_authoring_index() -> Dict[str, Any]:
         "state_mappings": [
             mapping.model_dump(mode="json") for mapping in state_mappings()
         ],
-        "unlisted_placement_state": "unsupported",
-        "unlisted_connector_action_state": "unsupported",
+        # DERIVED, like the revision payload below. A literal here published a
+        # page rule the model no longer declared: flipping it to "gated" served
+        # a falsified rule through `list_capabilities()` and moved the
+        # capability revision, with the suite green.
+        "unlisted_placement_state": _page_rule_default("unlisted_placement_state"),
+        "unlisted_connector_action_state": _page_rule_default(
+            "unlisted_connector_action_state"
+        ),
         "retrieval": {
             "filters": [
                 "authoring_entry_id",
@@ -1693,9 +1813,14 @@ def build_process_ir_authoring_index() -> Dict[str, Any]:
             # by choosing this selector, and counting them would make the
             # entry budget shrink as the envelope grew.
             "entry_byte_budget": PROCESS_IR_AUTHORING_BYTE_BUDGET,
+            # DERIVED. The hand-written list said "schema, facets and
+            # state_mappings" and went stale the moment the envelope gained
+            # `diagnostic_label_legend` — the fourth time in this contract that
+            # an enumeration of something the code already knows drifted from
+            # it. The model is the authority for what the envelope contains.
             "entry_byte_budget_scope": (
-                "the serialized entries array only; the surrounding schema, "
-                "facets and state_mappings envelope is not counted"
+                "the serialized entries array only; the surrounding envelope "
+                "({0}) is not counted".format(", ".join(_page_envelope_fields()))
             ),
             "bare_retrieval_returns_entries": False,
         },
@@ -1725,9 +1850,22 @@ def process_ir_authoring_revision_payload() -> Dict[str, Any]:
     Deliberately the WHOLE entry set rather than a summary: a revision that
     covers only the counts would not move when an entry's remediation or state
     changed, which is precisely the change a bound caller must be told about.
+
+    Page fields that describe the QUERY (counts, limit, truncated, cursor) are
+    excluded — they vary per call and would make the revision meaningless. Page
+    fields that publish a RULE are included: moving the label legend out of the
+    entries and forgetting it here would have left its text covered by nothing
+    at all, so it could be rewritten to say the opposite and no revision would
+    move. `test_every_published_page_rule_participates_in_the_revision` fails
+    when a new envelope field is added without that decision being made.
     """
     return {
         "contract_version": PROCESS_IR_AUTHORING_CONTRACT_VERSION,
+        "diagnostic_label_legend": DIAGNOSTIC_LABEL_LEGEND,
+        "unlisted_connector_action_state": _page_rule_default(
+            "unlisted_connector_action_state"
+        ),
+        "unlisted_placement_state": _page_rule_default("unlisted_placement_state"),
         "entries": [
             entry.model_dump(mode="json")
             for entry in build_process_ir_authoring_entries()
@@ -1768,6 +1906,11 @@ def validate_process_ir_authoring_projection(
 
 
 __all__ = [
+    "AUTHORING_LAYERS",
+    "AUTHORING_LAYER_COMPILER",
+    "AUTHORING_LAYER_PARSER",
+    "AUTHORING_LAYER_SEMANTIC_VALIDATOR",
+    "DIAGNOSTIC_LABEL_LEGEND",
     "ProcessIRAuthoringQueryError",
     "ProjectionSourcesV1",
     "authoring_contract_entry_ids_for_diagnostic",

@@ -36,12 +36,14 @@ from boomi_mcp.authoring.contract import (  # noqa: E402
     reset_manifest_cache,
 )
 from boomi_mcp.authoring.process_ir_projection import (  # noqa: E402
+    AUTHORING_LAYERS,
     build_process_ir_authoring_entries,
     reset_process_ir_authoring_cache,
 )
 from boomi_mcp.categories import integration_builder, meta_tools  # noqa: E402
 from boomi_mcp.models.process_ir_authoring import (  # noqa: E402
     PROCESS_IR_AUTHORING_BYTE_BUDGET,
+    PROCESS_IR_AUTHORING_DEFAULT_LIMIT,
     PROCESS_IR_AUTHORING_MAX_LIMIT,
 )
 
@@ -2346,6 +2348,22 @@ def test_the_dead_exemption_check_asks_about_the_key_it_is_checking():
 # ---------------------------------------------------------------------------
 
 
+def _provenance_fixture():
+    """The minimal comparison inputs: a build with one fingerprinted component.
+
+    Shared so the revision tests exercise ONE setup — the absent-field and
+    partial-binding cases are variations on the same comparison, and two
+    hand-rolled copies would let them drift apart.
+    """
+    from boomi_mcp.authoring.contract import get_authoring_revisions
+
+    return (
+        {"live_component_fingerprints": {"c": {"digest": "d"}}},
+        {"c": "d"},
+        get_authoring_revisions(),
+    )
+
+
 def test_verify_compares_the_compiler_revision_and_names_what_moved():
     """The §11 limit this amendment CLAIMED to close, actually closed.
 
@@ -2356,12 +2374,9 @@ def test_verify_compares_the_compiler_revision_and_names_what_moved():
     false-claim defect this whole amendment exists to remove, written into the
     record of the amendment itself.
     """
-    from boomi_mcp.authoring.contract import get_authoring_revisions
     from boomi_mcp.authoring.workflow import compare_live_build_provenance
 
-    revisions = get_authoring_revisions()
-    base = {"live_component_fingerprints": {"c": {"digest": "d"}}}
-    observed = {"c": "d"}
+    base, observed, revisions = _provenance_fixture()
     stale = "sha256:" + "0" * 64
 
     matching = compare_live_build_provenance(
@@ -2390,6 +2405,18 @@ def test_verify_compares_the_compiler_revision_and_names_what_moved():
     )
     assert both.revision_mismatches == ("capability_revision", "compiler_revision")
 
+    # An ABSENT field is `unknown`, never `match` — the only case the fix
+    # actually changed, and the one the test did not cover. A binding minted
+    # before a field existed was never fully compared, so claiming `match`
+    # would report a comparison that did not happen.
+    for omitted in ("capability_revision", "compiler_revision"):
+        partial = {k: v for k, v in revisions.items() if k != omitted}
+        result = compare_live_build_provenance(
+            dict(base, revision_binding=partial), observed
+        )
+        assert result.revision_skew == "unknown", omitted
+        assert result.revision_mismatches == (), omitted
+
 
 def test_the_meta_tool_catalog_advertises_every_wrapper_parameter():
     """The catalog is what a client ENUMERATES.
@@ -2407,19 +2434,37 @@ def test_the_meta_tool_catalog_advertises_every_wrapper_parameter():
     # guard was named "…advertises every wrapper parameter" while comparing 2 of
     # 48 — and four other tools had a parameter documented only in a docstring,
     # the exact condition the name declares unacceptable.
-    checked = 0
+    # TOTAL over the CATALOG, which is the thing being audited. Two universes
+    # were wrong before this: `checked >= 40` let five tools silently drop out,
+    # and `registered <= set(catalog)` fixed that but audited the registration
+    # instead — and an env-gated tool is never registered in a test process, so
+    # two of `search_boomi_gotchas`' three parameters could vanish from its
+    # catalog row and stay green. Every catalog row must be audited against the
+    # wrapper's real signature, whether or not this process could register it.
+    registered = {tool.name for tool in _registered_tools()}
+    from_source, unreadable = _annotated_tool_schemas_from_source()
+    assert unreadable == [], unreadable
+
+    unaudited = sorted(
+        name
+        for name in catalog
+        if getattr(server, name, None) is None and name not in from_source
+    )
+    assert unaudited == [], unaudited
+    assert registered <= set(catalog), sorted(registered - set(catalog))
+
     gaps = {}
-    for tool in _registered_tools():
-        wrapper = getattr(server, tool.name, None)
-        if wrapper is None or tool.name not in catalog:
-            continue
-        accepted = set(inspect.signature(wrapper).parameters)
-        advertised = set(catalog[tool.name].get("parameters") or {})
+    for name in sorted(catalog):
+        wrapper = getattr(server, name, None)
+        accepted = (
+            set(inspect.signature(wrapper).parameters)
+            if wrapper is not None
+            else set(from_source[name])
+        )
+        advertised = set(catalog[name].get("parameters") or {})
         missing = accepted - advertised
         if missing:
-            gaps[tool.name] = sorted(missing)
-        checked += 1
-    assert checked >= 40, checked
+            gaps[name] = sorted(missing)
     assert gaps == {}, gaps
 
     assert "expected_capability_revision" in catalog["list_capabilities"]["parameters"]
@@ -2539,3 +2584,1241 @@ def test_the_catalog_advertises_the_type_the_wrapper_actually_accepts():
         assert text.lstrip().startswith(word), (tool_name, param, text[:40])
         checked += 1
     assert checked == len(_AMENDMENT_CATALOG_PARAMS)
+
+
+def test_the_direct_planning_capability_gaps_carry_identity():
+    """#481. The shape was entirely unpinned — a full revert stayed green.
+
+    `["gated","gated","unsupported"]` named nothing and repeated itself, so a
+    caller could not tell WHICH capability was gated, while
+    `process_ir_capability_gaps` in the same payload carried ids.
+    """
+    payload = meta_tools.plan_integration_design_action(authoring_mode="process_ir")
+    constructs = payload["supported_process_ir_constructs"]
+    assert constructs
+
+    # The old bare-string key must be gone, not merely supplemented.
+    assert all("related_capability_states" not in row for row in constructs)
+
+    with_gaps = [row for row in constructs if row["related_capability_gaps"]]
+    assert with_gaps, "no construct links a non-supported capability"
+
+    known = {e.contract_entry_id for e in build_process_ir_authoring_entries()}
+    for row in constructs:
+        gaps = row["related_capability_gaps"]
+        ids = [gap["capability_id"] for gap in gaps]
+        assert ids == sorted(ids), row["kind"]
+        assert len(ids) == len(set(ids)), (row["kind"], ids)
+        for gap in gaps:
+            assert gap["state"] in ("gated", "unsupported"), gap
+            assert gap["contract_entry_id"] in known, gap
+            assert gap["contract_entry_id"].endswith(gap["capability_id"])
+
+
+def _annotated_tool_schemas_from_source():
+    """Parameter JSON types for every `@mcp.tool` wrapper, read from server.py.
+
+    The registered schema is the better authority where it exists — it is
+    literally what the caller receives. This is the fallback for wrappers an
+    env gate keeps out of a test process, and it reads the same annotations
+    FastMCP would have used, so it cannot drift into a second opinion.
+
+    Returns ``(types, unreadable)``. An annotation this reader cannot map is
+    REPORTED, never omitted: silently dropping one made the parameter invisible
+    to the caller's totality check, which is how a wrong type behind an
+    unrecognised annotation stayed green.
+    """
+    import ast
+
+    source = ast.parse(
+        (Path(__file__).resolve().parents[1] / "server.py").read_text()
+    )
+    by_annotation = {
+        "str": "string",
+        "int": "integer",
+        "float": "number",
+        "bool": "boolean",
+        "dict": "object",
+        "list": "array",
+        "Any": None,  # deliberately untyped — accepts anything, gradeable by nobody
+    }
+
+    def json_types(node):
+        """The SET of JSON types an annotation admits, or None for untyped.
+
+        A set, not one string: `dict | str | None` is a real two-type union and
+        is exactly what the registered schema expresses as `anyOf`. Collapsing
+        it to a single answer forced the reader to give up on the repo's most
+        common optional-argument idiom.
+        """
+        if isinstance(node, ast.Name):
+            if node.id not in by_annotation:
+                raise KeyError(node.id)
+            mapped = by_annotation[node.id]
+            return None if mapped is None else {mapped}
+        if isinstance(node, ast.Constant):
+            if node.value is None:  # the `None` arm of a union
+                return set()
+            if isinstance(node.value, str):  # a string annotation
+                return json_types(ast.parse(node.value, mode="eval").body)
+            raise KeyError(repr(node.value))
+        if isinstance(node, ast.Subscript):
+            head = node.value
+            name = head.id if isinstance(head, ast.Name) else getattr(head, "attr", "")
+            if name == "Optional":
+                return json_types(node.slice)
+            if name == "Union":
+                parts = getattr(node.slice, "elts", [node.slice])
+                merged = set()
+                for part in parts:
+                    got = json_types(part)
+                    if got is None:
+                        return None
+                    merged |= got
+                return merged
+            if name in ("List", "Sequence", "Tuple"):
+                return {"array"}
+            if name in ("Dict", "Mapping"):
+                return {"object"}
+            return json_types(head)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            merged = set()
+            for side in (node.left, node.right):
+                got = json_types(side)
+                if got is None:
+                    return None
+                merged |= got
+            return merged
+        raise KeyError(type(node).__name__)
+
+    out, unreadable = {}, []
+    for node in ast.walk(source):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not any(
+            isinstance(d, ast.Call)
+            and isinstance(d.func, ast.Attribute)
+            and d.func.attr == "tool"
+            for d in node.decorator_list
+        ):
+            continue
+        properties = {}
+        arguments = node.args
+        for argument in (
+            list(arguments.posonlyargs) + list(arguments.args) + list(arguments.kwonlyargs)
+        ):
+            if argument.annotation is None:
+                unreadable.append((node.name, argument.arg, "no annotation"))
+                continue
+            try:
+                declared = json_types(argument.annotation)
+            except KeyError as exc:
+                unreadable.append((node.name, argument.arg, str(exc)))
+                continue
+            if declared is None:
+                properties[argument.arg] = {}  # untyped: accepts anything
+            elif len(declared) == 1:
+                properties[argument.arg] = {"type": next(iter(declared))}
+            else:
+                properties[argument.arg] = {
+                    "anyOf": [{"type": name} for name in sorted(declared)]
+                }
+        out[node.name] = properties
+    return out, unreadable
+
+
+#: Catalog parameters that CANNOT be type-graded, each with the reason.
+#:
+#: Pinned by name, and the guard fails if the real set differs in EITHER
+#: direction. That is the opposite of the floor it replaces: `checked >= N`
+#: could not distinguish "graded 179" from "graded 170 and silently skipped 9",
+#: so nine rewrites that made parameters unclassifiable shipped green together.
+#: An exemption list that must match exactly turns every new skip into a
+#: failure a reviewer has to look at.
+_UNGRADEABLE_CATALOG_PARAMETERS = {
+    # `artifact: Any` generates `{"title": ...}` — an untyped schema accepts
+    # anything, so no catalog claim about it can be contradicted.
+    ("discover_db_schema", "artifact"),
+    ("discover_openapi_spec", "artifact"),
+    ("import_integration_draft", "artifact"),
+    ("infer_profile_fields", "artifact"),
+}
+
+
+def test_every_catalog_parameter_type_agrees_with_its_wrapper_schema():
+    """#482/#486/#491/#492. TOTAL, not opt-in: nothing is skipped in silence.
+
+    Three defects had one shape — the guard classified what it recognised and
+    ignored the rest, so any mutation that made a parameter unrecognisable was
+    invisible. Pinning 13 of 170 let 157 lie; a leading-word match let
+    "Optional dict (...)" through; an `int` on an env-gated tool was never
+    reached at all. The fix is totality: every catalog parameter is graded or
+    named in `_UNGRADEABLE_CATALOG_PARAMETERS`, and the two sets must agree
+    exactly.
+
+    The house style is a leading type word (`str`, `dict`, `int`, `list`), with
+    `"JSON string (optional)"` and `"Optional dict (...)"` being that same style
+    — which is why matching only the first word both misses real lies and flags
+    correct entries.
+    """
+    catalog = meta_tools.list_capabilities_action()["tools"]
+    schemas = {tool.name: (getattr(tool, "parameters", None) or {}) for tool in _registered_tools()}
+
+    # Three catalog tools register only behind BOOMI_DOCS_ENABLED /
+    # BOOMI_GOTCHAS_ENABLED, and their knowledge base is absent from a test
+    # process — so a registration-only comparison could NEVER grade their nine
+    # parameters, and an `int` -> `dict` lie on one shipped green. Their
+    # wrappers are still declared in server.py, so those annotations are read
+    # from the source rather than from a registration this process cannot make.
+    from_source, unreadable = _annotated_tool_schemas_from_source()
+    assert unreadable == [], unreadable
+    for tool_name, properties in from_source.items():
+        target = schemas.setdefault(tool_name, {}).setdefault("properties", {})
+        for name, spec in properties.items():
+            target.setdefault(name, spec)
+    assert not (set(catalog) - set(schemas)), sorted(set(catalog) - set(schemas))
+
+    # word -> the JSON types it may legitimately describe.
+    accepted = {
+        "str": {"string"},
+        "JSON": {"string"},          # "JSON string ..." — a string carrying JSON
+        "dict": {"object"},
+        "int": {"integer"},
+        "float": {"number"},
+        "bool": {"boolean"},
+        "list": {"array"},
+    }
+    modifiers = ("Optional", "optional", "Required", "required")
+
+    mismatches, graded, ungradeable = [], set(), set()
+    for tool_name, entry in catalog.items():
+        properties = schemas.get(tool_name, {}).get("properties", {})
+        for param, text in (entry.get("parameters") or {}).items():
+            key = (tool_name, param)
+            spec = properties.get(param)
+            if not spec or not isinstance(text, str):
+                ungradeable.add(key)
+                continue
+            declared = {spec["type"]} if spec.get("type") else {
+                option.get("type")
+                for option in spec.get("anyOf", [])
+                if option.get("type") and option.get("type") != "null"
+            }
+            if not declared:
+                ungradeable.add(key)   # `Any`: an untyped schema accepts anything
+                continue
+            word = next(
+                (w for w in re.findall(r"[A-Za-z]+", text)[:3] if w not in modifiers),
+                None,
+            )
+            if word is None or word not in accepted:
+                # NOT skipped: a description with no type word cannot be graded,
+                # so it must be declared. This is the escape that shipped nine
+                # green rewrites.
+                ungradeable.add(key)
+                continue
+            graded.add(key)
+            if not (accepted[word] & declared):
+                mismatches.append((tool_name, param, word, sorted(declared)))
+
+    assert mismatches == [], mismatches
+    assert ungradeable == _UNGRADEABLE_CATALOG_PARAMETERS, {
+        "newly ungradeable": sorted(ungradeable - _UNGRADEABLE_CATALOG_PARAMETERS),
+        "no longer ungradeable": sorted(_UNGRADEABLE_CATALOG_PARAMETERS - ungradeable),
+    }
+    # Totality, stated as an equation rather than a floor.
+    total = sum(len(e.get("parameters") or {}) for e in catalog.values())
+    assert len(graded) + len(ungradeable) == total, (len(graded), len(ungradeable), total)
+
+
+def test_the_source_fallback_actually_reaches_the_env_gated_tools():
+    """Guard the guard: the fallback exists only to close a real hole.
+
+    If server.py's decorator or annotation style changes, the fallback would
+    silently return nothing and #482's widening would quietly re-narrow to the
+    tools this process happens to register.
+    """
+    from_source, unreadable = _annotated_tool_schemas_from_source()
+    assert unreadable == [], unreadable
+    assert len(from_source) >= 40, len(from_source)
+    for gated in ("search_boomi_docs", "read_boomi_doc_page", "search_boomi_gotchas"):
+        assert gated in from_source, gated
+        assert from_source[gated], gated
+    assert from_source["search_boomi_docs"]["top_k"] == {"type": "integer"}
+
+
+def test_no_served_entry_has_an_empty_summary():
+    """#483. Three diagnostics served a blank one-line orientation.
+
+    Seven compiler specs carry an empty `message` — the whole statement lives in
+    the remediation — and reading `message` alone published `summary: ""` on
+    codes a failing compile really returns.
+    """
+    blank = [
+        e.contract_entry_id
+        for e in build_process_ir_authoring_entries()
+        if not (e.summary or "").strip()
+    ]
+    assert blank == [], blank
+
+    # Specifically: the codes whose authority supplies no short message still
+    # get the sentence it DID write, not a placeholder and not silence.
+    by_id = {e.contract_entry_id: e for e in build_process_ir_authoring_entries()}
+    for entry_id in (
+        "diagnostic.process_ir_semantic_join_unsupported",
+        "diagnostic.process_ir_semantic_unterminated_path",
+        "diagnostic.process_ir_compile_control_wiring_invalid",
+    ):
+        summary = by_id[entry_id].summary
+        assert len(summary) > 30, (entry_id, summary)
+        assert any(summary in fact for fact in by_id[entry_id].ordering_facts), entry_id
+
+
+def test_a_partial_revision_binding_says_which_fields_were_not_compared():
+    """#485. `mismatch` with a one-field list read as "the other one matched".
+
+    A binding carrying one stale revision and no value at all for the other
+    reported `revision_mismatches=("capability_revision",)` — indistinguishable
+    from a binding where `compiler_revision` was compared and agreed.
+    """
+    from boomi_mcp.authoring.workflow import (
+        _COMPARED_REVISIONS,
+        compare_live_build_provenance,
+    )
+
+    base, observed, revisions = _provenance_fixture()
+    stale = "sha256:" + "0" * 64
+
+    for mismatched, absent in (
+        ("capability_revision", "compiler_revision"),
+        ("compiler_revision", "capability_revision"),
+    ):
+        binding = {k: v for k, v in revisions.items() if k != absent}
+        binding[mismatched] = stale
+        result = compare_live_build_provenance(
+            dict(base, revision_binding=binding), observed
+        )
+        # A definite negative still wins the summary...
+        assert result.revision_skew == "mismatch", (mismatched, absent)
+        assert result.revision_mismatches == (mismatched,), (mismatched, absent)
+        # ...but "never compared" is now stated, not inferred from a short list.
+        assert result.revision_uncompared == (absent,), (mismatched, absent)
+
+    # An EMPTY or absent binding compared NOTHING, so every field is
+    # uncompared. Reporting `()` there made it indistinguishable — on this
+    # field — from the fully-compared `match` below, which is the exact
+    # confusion the field was added to end.
+    for empty in ({}, None):
+        result = compare_live_build_provenance(
+            dict(base, revision_binding=empty), observed
+        )
+        assert result.revision_skew == "unknown", empty
+        assert result.revision_uncompared == tuple(sorted(_COMPARED_REVISIONS)), empty
+
+    # And a fully-present binding claims nothing was skipped.
+    clean = compare_live_build_provenance(
+        dict(base, revision_binding=dict(revisions)), observed
+    )
+    assert clean.revision_uncompared == ()
+    assert set(_COMPARED_REVISIONS) == {"capability_revision", "compiler_revision"}
+
+
+def test_every_planning_gap_state_matches_the_contract_entry_it_names():
+    """#484/#489. The identity was pinned; the VALUE and the RELATION were not.
+
+    Inverting `gated`<->`unsupported` on every gap-carrying construct left the
+    suite green, and the payload then contradicted `process_ir_capability_gaps`
+    in the same response. Rotating every gap list onto a different construct,
+    and dropping 10 of 15 gaps, were green too: pinning each gap in isolation
+    said nothing about WHICH construct it belongs to, which is the one thing
+    the payload exists to say.
+    """
+    payload = meta_tools.plan_integration_design_action(authoring_mode="process_ir")
+    entries = build_process_ir_authoring_entries()
+    by_id = {e.contract_entry_id: e for e in entries}
+    constructs = payload["supported_process_ir_constructs"]
+
+    compared = 0
+    for construct in constructs:
+        for gap in construct["related_capability_gaps"]:
+            entry = by_id[gap["contract_entry_id"]]
+            assert gap["state"] == entry.canonical_state, (
+                construct["kind"],
+                gap,
+                entry.canonical_state,
+            )
+            compared += 1
+    assert compared >= 5, f"only {compared} gap states compared"
+
+    # The RELATION, rebuilt independently from each node entry's own
+    # `related_entry_ids` and compared WHOLE — so a rotation or a partial drop
+    # is a set difference, not an invisible re-pairing.
+    kinds = {c["kind"] for c in constructs}
+    expected = {}
+    for entry in entries:
+        if entry.subject not in kinds or entry.entry_type != "node":
+            continue
+        blocking = sorted(
+            related.split(".", 1)[1]
+            for related in entry.related_entry_ids
+            if related.startswith("capability.")
+            and by_id[related].canonical_state in ("gated", "unsupported")
+        )
+        if blocking:
+            expected[entry.subject] = blocking
+    served = {
+        c["kind"]: [g["capability_id"] for g in c["related_capability_gaps"]]
+        for c in constructs
+        if c["related_capability_gaps"]
+    }
+    assert served == expected, {"served": served, "expected": expected}
+    assert sum(len(v) for v in served.values()) == compared
+
+    # ...and the same capability never carries two states in one payload.
+    elsewhere = {
+        row["capability_id"]: row["state"]
+        for row in payload.get("process_ir_capability_gaps", [])
+    }
+    for construct in constructs:
+        for gap in construct["related_capability_gaps"]:
+            other = elsewhere.get(gap["capability_id"])
+            if other is not None:
+                assert other == gap["state"], (gap, other)
+
+
+def test_the_label_legend_is_published_once_per_page_not_per_entry():
+    """#488. Repeating identical text on every entry cost a full page's tail.
+
+    The figures move with the legend's wording and the diagnostic count — the
+    ones first written down were already stale two rounds later — so this
+    MEASURES the saving instead of quoting it, and fails if repeating the
+    legend would once again be cheap enough not to matter.
+    """
+    from boomi_mcp.authoring.process_ir_projection import (
+        DIAGNOSTIC_LABEL_LEGEND,
+        query_process_ir_authoring_contract,
+    )
+
+    from boomi_mcp.models.process_ir_authoring import PROCESS_IR_AUTHORING_BYTE_BUDGET
+
+    page = query_process_ir_authoring_contract(category="diagnostic", limit=50)
+    assert page.diagnostic_label_legend == DIAGNOSTIC_LABEL_LEGEND
+    assert page.returned_entry_count == 50, page.returned_entry_count
+
+    # What per-entry repetition WOULD cost today, measured rather than quoted.
+    diagnostics = [
+        entry
+        for entry in build_process_ir_authoring_entries()
+        if entry.entry_type == "diagnostic"
+    ]
+    repeated = len(DIAGNOSTIC_LABEL_LEGEND) * len(diagnostics)
+    assert repeated > PROCESS_IR_AUTHORING_BYTE_BUDGET // 10, (
+        f"{repeated} bytes over {len(diagnostics)} diagnostics is under a tenth "
+        f"of the {PROCESS_IR_AUTHORING_BYTE_BUDGET} byte entry budget — if "
+        "repeating the legend is now that cheap, this guard has lost its point"
+    )
+
+    # The legend explains the labels, so it must name every one of them...
+    for layer in AUTHORING_LAYERS:
+        assert layer in DIAGNOSTIC_LABEL_LEGEND, layer
+    # ...and no entry may carry its own copy again.
+    for entry in page.entries:
+        assert "bracketed label" not in (entry.summary or ""), entry.contract_entry_id
+
+
+def test_the_served_layer_labels_are_the_published_spelling():
+    """#494. Both sides of the two-way test derive from the same constant.
+
+    That pins the WIRING and nothing else: renaming `"parser"` to `"parse"`
+    moves the constant and the served label together and the test still passes.
+    Published vocabulary needs one literal anchor, and this is it.
+    """
+    assert AUTHORING_LAYERS == ("parser", "semantic validator", "compiler")
+
+
+def test_the_public_projection_constants_are_exported():
+    """#493. Deleting all four names from `__all__` was green."""
+    from boomi_mcp.authoring import process_ir_projection
+
+    for name in (
+        "AUTHORING_LAYERS",
+        "AUTHORING_LAYER_PARSER",
+        "AUTHORING_LAYER_SEMANTIC_VALIDATOR",
+        "AUTHORING_LAYER_COMPILER",
+        "DIAGNOSTIC_LABEL_LEGEND",
+    ):
+        assert name in process_ir_projection.__all__, name
+
+    # ...and EVERY exported name resolves. Listing a name that does not exist
+    # was green here while `from ... import *` raised AttributeError — the
+    # guard only checked the five names it already knew about.
+    unresolved = [
+        name
+        for name in process_ir_projection.__all__
+        if not hasattr(process_ir_projection, name)
+    ]
+    assert unresolved == [], unresolved
+    assert sorted(process_ir_projection.__all__) == list(process_ir_projection.__all__)
+
+
+def test_exactly_the_expected_codes_fall_back_to_their_remediation():
+    """#501. The docstring's own claim, measured rather than asserted in prose.
+
+    An earlier version of it said "seven codes", counting every compiler spec
+    with an empty `message`. Four of those seven are ALSO raised by the parse
+    layer, which supplies one, so the merge gives them a real "what is wrong"
+    and only three actually reach the fallback. A claim about behaviour that
+    nothing measures is the defect class this whole contract exists to remove —
+    including when it is my claim about my own code.
+    """
+    from boomi_mcp.authoring.process_ir_projection import collect_projection_sources
+
+    sources = collect_projection_sources()
+
+    # The docstring's OTHER two counts, measured. "Seven" and "four" were prose
+    # for a round — in the same change that deleted that pattern from three
+    # other places — so a legitimate-looking edit plus the fixture regeneration
+    # the failing snapshot prescribes returned the suite to green while reality
+    # was six and three.
+    no_static_message = {
+        str(spec["code"])
+        for spec in sources.compiler_specs
+        if not (spec.get("message") or "").strip()
+    }
+    assert len(no_static_message) == 7, sorted(no_static_message)
+
+    parse_messages = {
+        str(spec["code"]): (spec.get("message") or "").strip()
+        for spec in sources.parse_specs
+    }
+    fell_back = {
+        str(spec["code"])
+        for spec in sources.compiler_specs
+        if not (spec.get("message") or "").strip()
+        and not parse_messages.get(str(spec["code"]), "")
+    }
+    assert fell_back == {
+        "PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID",
+        "PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED",
+        "PROCESS_IR_SEMANTIC_UNTERMINATED_PATH",
+    }, sorted(fell_back)
+    assert len(no_static_message - fell_back) == 4, sorted(no_static_message - fell_back)
+
+    # ...and those three DO serve the remediation, byte for byte.
+    by_id = {e.contract_entry_id: e for e in build_process_ir_authoring_entries()}
+    remediation = {
+        str(spec["code"]): (spec.get("remediation") or "").strip()
+        for spec in sources.compiler_specs
+    }
+    for code in fell_back:
+        entry = by_id["diagnostic." + code.lower()]
+        assert entry.summary == remediation[code], code
+
+
+def test_the_budget_scope_sentence_names_exactly_the_envelope_fields():
+    """#504. Deriving the list removed the staleness but not the blind spot.
+
+    The only guard on the served sentence was a substring pin on the clause
+    BEFORE the list, so re-hardcoding `_page_envelope_fields()` to the exact
+    stale triple #503 removed — naming `schema`, a field the page model has
+    never had — shipped green, as did reordering the model's declarations.
+    A caller reads this sentence to know what the byte budget excludes; it has
+    to name the real envelope, in the real order.
+    """
+    from boomi_mcp.authoring.process_ir_projection import (
+        build_process_ir_authoring_index,
+    )
+    from boomi_mcp.models.process_ir_authoring import (
+        ProcessIRAuthoringContractPageV1,
+    )
+
+    sentence = build_process_ir_authoring_index()["retrieval"][
+        "entry_byte_budget_scope"
+    ]
+    expected = [
+        name
+        for name in ProcessIRAuthoringContractPageV1.model_fields
+        if name != "entries"
+    ]
+    assert "entries array only" in sentence
+    assert "({0})".format(", ".join(expected)) in sentence, sentence
+
+    # A LITERAL anchor, because both sides above derive from `model_fields` and
+    # therefore pin the wiring, not the value: reordering the model's
+    # declarations rewrites the served sentence and every derived check follows
+    # it. Envelope order is published text a caller reads, so one place has to
+    # state it outright — the same reason `AUTHORING_LAYERS` carries a literal
+    # spelling pin next door.
+    assert expected == [
+        "contract_version",
+        "state_mappings",
+        "unlisted_placement_state",
+        "unlisted_connector_action_state",
+        "diagnostic_label_legend",
+        "query",
+        "catalog_entry_count",
+        "matched_entry_count",
+        "returned_entry_count",
+        "limit",
+        "truncated",
+        "next_after_entry_id",
+        "facets",
+    ], expected
+
+    # Every named field is real, and the entries array is never claimed excluded.
+    for name in expected:
+        assert name in sentence, name
+    assert "entries)" not in sentence and ", entries" not in sentence
+
+
+def test_every_page_a_caller_can_fetch_carries_the_page_rules():
+    """#511. The fix was structural; the guard read ONE page off ONE selector.
+
+    Predicate right, universe right, construction sites right — and still only
+    one page instance ever asserted, the one that passes the legend explicitly.
+    Three routes restored the original blank-legend payload green. Page rules
+    are page rules on EVERY page a caller can fetch, so every selector is
+    fetched here, populated and zero-match alike, and each rule is compared to
+    its declared default rather than merely checked non-empty.
+    """
+    from boomi_mcp.authoring.process_ir_projection import (
+        ProcessIRAuthoringQueryError,
+        query_process_ir_authoring_contract,
+    )
+    from boomi_mcp.models.process_ir_authoring import (
+        ProcessIRAuthoringContractPageV1,
+    )
+
+    # The graded set is NOT read from the shared constant. That constant feeds
+    # three guards and was bounded only by `len(rules) >= 4` over exactly five
+    # rules — one unit of slack — so widening it by `diagnostic_label_legend`
+    # and blanking that rule shipped green in one edit. It is still used as a
+    # cross-check below, but the set actually graded is derived from the
+    # SERVED pages: a field every page agrees on is a rule, whatever any
+    # constant says.
+    query_dependent = _QUERY_DEPENDENT_PAGE_FIELDS
+    rules = [
+        name
+        for name in ProcessIRAuthoringContractPageV1.model_fields
+        if name not in query_dependent
+    ]
+    # EXACTLY these, pinned literally. `len(rules) >= 4` over five rules was one
+    # unit of slack, and the constant it derives from feeds three guards: widening
+    # it by one name dropped a rule out of `rules`, and making that same rule VARY
+    # dropped it out of the derived `agreed` set too, so a two-line edit removed a
+    # served rule from grading entirely. A literal set makes the first edit a
+    # failure, and treating variation as a defect (below) makes the second one.
+    assert set(rules) == {
+        "contract_version",
+        "diagnostic_label_legend",
+        "state_mappings",
+        "unlisted_connector_action_state",
+        "unlisted_placement_state",
+        "facets",
+        "catalog_entry_count",
+    }, sorted(rules)
+
+    entries = build_process_ir_authoring_entries()
+    categories = sorted({entry.category for entry in entries})
+    assert len(categories) >= 5, categories
+
+    # EVERY selector the tool exposes, derived from the signature rather than
+    # listed: covering `category` and a hard-coded `node_kind` left five of the
+    # seven unfetched, and blanking the legend on exactly those five shipped
+    # green. The guard has to reach every page a caller can ask for, not every
+    # page the guard's author happened to think of.
+    selectors = set(
+        inspect.signature(query_process_ir_authoring_contract).parameters
+    ) - {"sources"}
+    facets = query_process_ir_authoring_contract().facets.model_dump(mode="json")
+    values = {
+        "authoring_entry_id": entries[0].contract_entry_id,
+        "node_kind": sorted(facets["node_kinds"])[0],
+        "category": categories[0],
+        "capability_id": sorted(
+            e.capability_id for e in entries if e.capability_id
+        )[0],
+        "workflow_stage": sorted(facets["workflow_stages"])[0],
+        "after_entry_id": entries[0].contract_entry_id,
+        "limit": 2,
+    }
+    # `limit` spans 1..50 and every probe sat at 2 or the default 20, so a rule
+    # conditioned on a HIGH limit — or on the byte-budget truncation branch,
+    # which no fetch reached because every truncated page was cut by the entry
+    # count first — was ungraded at both sites.
+    extra_limits = list(range(1, PROCESS_IR_AUTHORING_MAX_LIMIT + 1))
+    assert set(values) == selectors, sorted(set(values) ^ selectors)
+
+    # bare, each selector alone, every category, and a zero-match variant of
+    # each category — the zero-match population is load-bearing, not padding:
+    # a legend served only when entries were selected is caught by nothing else.
+    # `after_entry_id` resumes a FILTERED result and the query layer documents a
+    # companion requirement, so a bare cursor is not a page any caller can
+    # fetch. Pairing it keeps the selector covered without pretending an
+    # unreachable page exists.
+    # `limit` needs one for a different reason: a bare fetch returns NO entries
+    # by design (`bare_retrieval_returns_entries: False`), so `limit` alone
+    # takes the empty-result early return and never reaches the populated
+    # construction site — which is exactly where a `limit`-conditioned blank
+    # legend hid.
+    companions = {
+        "after_entry_id": {"category": categories[0]},
+        "limit": {"category": categories[0]},
+    }
+    # AUGMENT, never replace. Routing `limit` to its companion form removed the
+    # only selector that can VARY an early-return page — that site's reachable
+    # space is exactly `{}` and `{limit: N}` — so it was graded by one invariant
+    # page and a `limit`-conditioned blank went green there. Both forms are
+    # fetched now; a bare form that is genuinely unreachable lands in
+    # `rejected`, which is the honest record of it.
+    # More than two filters, and the pair nothing else fetches: the universe was
+    # a hand-built <=2-filter set, so a rule blanked only on a 3-filter page was
+    # green.
+    deep = [
+        {
+            "category": "diagnostic",
+            "workflow_stage": values["workflow_stage"],
+            "limit": 5,
+        },
+        {"capability_id": values["capability_id"], "workflow_stage": values["workflow_stage"]},
+        {
+            "category": "capability",
+            "capability_id": values["capability_id"],
+            "workflow_stage": values["workflow_stage"],
+            "limit": 3,
+        },
+    ]
+    # EXHAUSTIVE over single selectors, not a sample of one value each. Every
+    # escape of this class lived at an unsampled value — `node_kind` was probed
+    # at 1 of 21, `capability_id` at 1 of 25, `authoring_entry_id` at 1 of 179 —
+    # and widening the sampler by hand is the regress that has re-opened this
+    # site four rounds running. The single-selector space is not large: it is
+    # the published facets plus the entry ids, 244 fetches, measured at 0.55s.
+    # Enumerating it terminates that space instead of sampling it.
+    sweep = (
+        [{"node_kind": v} for v in sorted(facets["node_kinds"])]
+        + [{"capability_id": v} for v in sorted(facets["capability_ids"])]
+        + [{"workflow_stage": v} for v in sorted(facets["workflow_stages"])]
+        + [
+            {"authoring_entry_id": entry.contract_entry_id}
+            for entry in entries
+        ]
+    )
+    fetches = (
+        [{}]
+        + sweep
+        + [{name: value} for name, value in sorted(values.items())]
+        + [
+            dict(companion, **{name: values[name]})
+            for name, companion in sorted(companions.items())
+        ]
+        + [{"limit": value} for value in extra_limits]
+        + [
+            {"workflow_stage": values["workflow_stage"], "limit": value}
+            for value in extra_limits
+        ]
+        + [{"category": c} for c in categories]
+        + [{"category": c, "node_kind": values["node_kind"]} for c in categories]
+        + deep
+    )
+    seen_keys = set()
+    fetches = [
+        kwargs
+        for kwargs in fetches
+        if not (_key(kwargs) in seen_keys or seen_keys.add(_key(kwargs)))
+    ]
+
+    checked = 0
+    populated = empty = 0
+    seen = {}
+    graded = {}
+    graded_fields = {}
+    rejected = []
+    for kwargs in fetches:
+        # THE SERVED PATH, not the projection function. Every assertion here
+        # used to read `query_process_ir_authoring_contract` directly — but a
+        # caller reaches this payload through `get_schema_template` ->
+        # `_authoring_contract_schema` -> `.model_dump()`, and a rule deleted at
+        # either of those two hops was invisible to all 103 tests in this file.
+        # A guard on the layer below the one being served grades the wrong
+        # universe, however total it is within it.
+        served = _served_contract_page(kwargs)
+        if served is None:
+            # The query layer raises BEFORE constructing a page, so a rejected
+            # facet pair is not a page any caller receives. Counted rather than
+            # silently skipped: an unbounded `continue` is how the floor below
+            # could have been satisfied by grading almost nothing.
+            rejected.append(kwargs)
+            continue
+        for rule in rules:
+            value = served[rule]
+            assert value not in ("", None, [], {}), (kwargs, rule)
+            # A page RULE does not vary with the query — that is what makes it a
+            # rule — so every page must agree. Comparing to the declared default
+            # would exempt `state_mappings`, which is computed rather than
+            # defaulted, and that exemption is where a blank legend hid.
+            seen.setdefault(rule, (kwargs, value))
+            assert value == seen[rule][1], (kwargs, rule, seen[rule][0])
+        # The page ECHOES the query it answered, so every selector the caller
+        # sent must come back. This is the forwarding check, and it is total by
+        # construction rather than one assertion per selector: dropping
+        # `limit=limit` from the tool wrapper silently served the default page
+        # while every rule assertion above still passed, because none of them
+        # reads anything a limit changes.
+        # EXACT, including the selectors NOT sent. Checking only what was sent
+        # is total over drops and blind to INJECTION: a wrapper that added
+        # `category` or `limit=1` served a different page while every echo
+        # stayed self-consistent, because the injected value echoed too.
+        # `limit` is the one selector with a documented normalization: unsent,
+        # it echoes the published default rather than None. Everything else
+        # unsent must echo None — that is what makes INJECTION visible.
+        assert served["query"] == {
+            name: kwargs.get(
+                name,
+                PROCESS_IR_AUTHORING_DEFAULT_LIMIT if name == "limit" else None,
+            )
+            for name in selectors
+        }, (kwargs, served["query"])
+
+        for name, value in served.items():
+            graded_fields.setdefault(name, []).append(value)
+
+        checked += 1
+        graded[_key(kwargs)] = served["returned_entry_count"]
+        if served["returned_entry_count"]:
+            populated += 1
+        else:
+            empty += 1
+
+    # An EQUATION, not a floor. `checked >= len(categories) + 1` had 48% slack,
+    # set at exactly the count that survives losing the entire zero-match
+    # population — so a future rename of the probed node kind would silently
+    # `continue` past all fourteen and still pass. Every fetch is a page a
+    # caller receives today, so every fetch must have been graded.
+    assert checked + len(rejected) == len(fetches), (checked, rejected)
+    # Every rejection is a category with no entry of the probed node kind — a
+    # combination the tool refuses, not a page left ungraded.
+    # The EXACT set, not a shape allowlist. A shape check let six single-hunk
+    # changes make pages vanish into `rejected` and pass — extending the
+    # documented companion rule to `limit`, an envelope that errors or omits
+    # `contract_page`, or dropping the eleven zero-match pairs — because
+    # `checked + len(rejected) == len(fetches)` is a tautology of the loop and
+    # cannot fail whatever disappears. Naming the one page that is genuinely
+    # unfetchable de-tautologises it: anything else vanishing is a failure.
+    assert rejected == [{"after_entry_id": values["after_entry_id"]}], rejected
+
+    # Both advertised spellings of the selector serve the same page. Only the
+    # unversioned one was ever fetched, so a rule blanked on
+    # `process_ir_authoring@1` — a spelling the registry accepts — was green.
+    for kwargs in ({}, {"category": categories[0]}, deep[-1]):
+        plain = _served_contract_page(kwargs)
+        versioned = _served_contract_page(kwargs, selector=SELECTOR + "@1")
+        assert versioned is not None, kwargs
+        assert versioned == plain, kwargs
+    assert set(values) <= {k for kwargs in fetches for k in kwargs}, "a selector went unfetched"
+
+    # BOTH construction sites must be exercised — the page model is built in two
+    # places and the omission that started this was in the one nothing fetched.
+    # Stated as the property that matters rather than as a count: EVERY selector
+    # must reach the POPULATED site (a selector whose only fetch comes back
+    # empty silently grades the early return twice and the populated site never),
+    # and the empty site must be reached at all.
+    # The early-return site must be reached by MORE than the one invariant bare
+    # page: a site graded by a single fixed input is graded for existence, not
+    # for behaviour. Counted by the site actually taken — 11 of the 13
+    # zero-result pages come from the POPULATED site (a zero-match filter), so
+    # `empty >= 2` over all zero-result pages was satisfied without the bare
+    # `limit` fetch existing at all, which made the fix re-openable by deleting
+    # one line of this test.
+    assert populated > 0, populated
+    early = [k for k in fetches if not (set(k) - {"limit"})]
+    assert len(early) >= 2, early
+    # EXACTLY the filter-free fetches come back empty, and no other fetch does
+    # by accident. `empty >= len(early)` compared zero-RESULT pages from either
+    # site to a static count of intended early fetches — 4 early vs 11
+    # zero-match populated pages was 15 >= 4, so one token
+    # (`and not limit`) could make a filter-free `{limit: 50}` serve 50 entries
+    # and stay green while the index still published the opposite.
+    # EVERY filter-free fetch is empty, and that is checked against the claim
+    # the contract PUBLISHES rather than against a count. `empty >= len(early)`
+    # compared zero-result pages from either site to a static number — 15 >= 4
+    # held with eleven of the fifteen coming from the populated site — so one
+    # token (`and not limit`) could make a filter-free `{limit: 50}` serve 50
+    # entries while the index went on publishing the opposite.
+    from boomi_mcp.authoring.process_ir_projection import (
+        build_process_ir_authoring_index,
+    )
+
+    published_bare = build_process_ir_authoring_index()["retrieval"][
+        "bare_retrieval_returns_entries"
+    ]
+    assert published_bare is False, published_bare
+    for kwargs in early:
+        assert graded[_key(kwargs)] == 0, (kwargs, graded[_key(kwargs)])
+    # ...and the claim is not vacuously true because nothing is fetched.
+    # EVERY filter-free page, not a floor over four of fifty-one. `limit` is the
+    # only selector that varies one, so the space is exactly `{}` plus the valid
+    # limits — 51 pages, 0.18s — and a rule conditioned on an unswept limit hid
+    # there through four consecutive rounds of raising the floor.
+    assert len(early) == PROCESS_IR_AUTHORING_MAX_LIMIT + 1, len(early)
+    for name, value in sorted(values.items()):
+        kwargs = dict(companions.get(name, {}), **{name: value})
+        reached = _served_contract_page(kwargs)
+        assert reached is not None and reached["returned_entry_count"] > 0, (
+            f"selector {name!r} never reaches the populated construction site"
+        )
+    assert len(rejected) < len(categories), rejected
+
+    # Every field the served pages AGREE on is a rule, derived from the pages
+    # themselves. Two disjoint derivations must give the same answer — the
+    # constant cannot be widened to exempt a rule without contradicting the
+    # payloads.
+    agreed = {
+        name
+        for name, values_seen in graded_fields.items()
+        if len({repr(v) for v in values_seen}) == 1
+    }
+    # A declared rule that VARIES across pages is a defect, not an exclusion.
+    # Reading `agreed` as "the things worth grading" let a rule opt itself out
+    # by misbehaving — precisely backwards.
+    varying = sorted(set(rules) - agreed)
+    assert varying == [], {
+        name: sorted({repr(v) for v in graded_fields[name]})[:3] for name in varying
+    }
+    # ...and every invariant field is GRADED, whatever the constant says. That
+    # is what removes the constant's leverage: widening it to exempt
+    # `diagnostic_label_legend` no longer stops the legend being checked here,
+    # because the pages themselves put it in this set.
+    for name in sorted(agreed):
+        value = graded_fields[name][0]
+        assert value not in ("", None, [], {}), name
+        field = ProcessIRAuthoringContractPageV1.model_fields[name]
+        if field.is_required():
+            continue  # no declared default to compare against
+        declared = field.default
+        if declared not in (None, "", (), [], {}) and not callable(declared):
+            assert value == declared, (name, value, declared)
+
+    # ...and the rules that ARE declared with a substantive default match it,
+    # so "identical everywhere" cannot be satisfied by being uniformly wrong.
+    for rule in rules:
+        field = ProcessIRAuthoringContractPageV1.model_fields[rule]
+        if field.is_required():
+            continue  # no declared default to compare against
+        declared = field.default
+        if declared not in (None, "", (), [], {}) and not callable(declared):
+            assert seen[rule][1] == declared, rule
+
+
+def test_a_not_requested_comparison_declares_every_field_it_reports():
+    """#512. The early return was never graded, so a bogus name shipped green.
+
+    Behaviourally benign — `status` and `revision_skew` both say
+    `not_requested` — but a field this delta added is a field this delta owns,
+    and "nobody looks at it here" is how the previous four findings started.
+    """
+    from boomi_mcp.authoring.workflow import compare_live_build_provenance
+
+    base, observed, _ = _provenance_fixture()
+    result = compare_live_build_provenance({}, {})
+
+    assert result.status == "not_requested"
+    assert result.revision_skew == "not_requested"
+    assert result.revision_uncompared == ()
+    assert result.revision_mismatches == ()
+    # Every declared field is present and defaulted — no silent extras, no
+    # field left to a model default nobody asserted.
+    dumped = result.model_dump(mode="json")
+    assert set(dumped) == set(type(result).model_fields), (
+        sorted(set(dumped) ^ set(type(result).model_fields)),
+    )
+
+
+#: Page fields that describe the QUERY rather than publish a RULE.
+#:
+#: The split is needed in three places (the page-rule guard, the index
+#: agreement guard, and the revision-payload coverage pin next door), so it is
+#: named once rather than hand-written three times.
+#:
+#: `facets` and `catalog_entry_count` are NOT in here, and getting that wrong
+#: twice is worth recording. First a comment claimed as measured fact that
+#: `facets` differed per query; it does not. Then the exclusion survived on a
+#: rewritten "by contract" justification — but the model says
+#: "Every filterable value in the CATALOG ... discovering what you may ask for
+#: must not require already having asked", and the type holds no numbers at
+#: all. Both fields are catalog-wide facts, so both are graded as rules;
+#: narrowing a filtered page's advertised facets breaks the
+#: fetch-then-filter loop this selector is built around.
+_QUERY_DEPENDENT_PAGE_FIELDS = frozenset(
+    {
+        "query",
+        "matched_entry_count",
+        "returned_entry_count",
+        "limit",
+        "truncated",
+        "next_after_entry_id",
+        "entries",
+    }
+)
+
+
+def _served_contract_page(query, selector=None):
+    """The contract page as a CALLER receives it, or None if unfetchable.
+
+    Enters at `server.get_schema_template` — the MCP wrapper — not at the
+    action beneath it. Every layer between the caller and the payload is then
+    inside the graded universe: the wrapper's own argument forwarding, the
+    envelope assignment, the adapter's `model_dump`, and the projection. The
+    action-level entry left the wrapper ungraded, and blanking a rule there was
+    green even though this delta's own clean-room file already drives
+    `server.get_schema_template` directly.
+
+    Returns the page dict alone. An earlier version returned a pair whose first
+    element the docstring called a model and which was in fact the envelope,
+    and which nothing ever read.
+    """
+    payload = server.get_schema_template(schema_name=selector or SELECTOR, **query)
+    if not payload.get("_success", True):
+        return None
+    return payload.get("contract_page")
+
+
+def test_the_served_state_mappings_match_the_committed_fixture_by_value():
+    """#517. Its declared default is `()`, so the default loop skipped it.
+
+    Cross-page identity cannot see a row dropped identically at BOTH
+    construction sites, and the declared-default comparison exempts any rule
+    whose default is empty — so 14 published mappings could be deleted from the
+    served payload with the whole suite green. The committed contract snapshot
+    already pins every row; this asserts the SERVED payload against it, which is
+    the comparison that was missing.
+    """
+    import json
+
+    committed = json.loads(
+        (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "authoring_contract"
+            / "process_ir_authoring_v1.contract.json"
+        ).read_text()
+    )["state_mappings"]
+    assert committed, "the fixture pins no mappings"
+
+    def canonical(rows):
+        # The page model sorts its mappings; the revision payload dumps them in
+        # registry order. That difference is real and legitimate, so the
+        # comparison is over CONTENT — which is the thing that was unpinned.
+        return sorted(json.dumps(row, sort_keys=True) for row in rows)
+
+    served = _served_contract_page({"category": "capability"})
+    assert served is not None
+    assert canonical(served["state_mappings"]) == canonical(committed)
+
+
+def test_the_index_publishes_the_same_page_rules_as_the_page_itself():
+    """#522. The index hard-coded two rules the page derives from the model.
+
+    Two surfaces published the same rule from two sources, and flipping the
+    index's literal to `"gated"` served a falsified rule through
+    `list_capabilities()` — and moved the capability revision, because the index
+    feeds it — with the whole suite green. Deriving it removed the drift;
+    this makes the drift detectable, which is the other half.
+    """
+    from boomi_mcp.authoring.process_ir_projection import (
+        build_process_ir_authoring_index,
+    )
+    from boomi_mcp.models.process_ir_authoring import (
+        ProcessIRAuthoringContractPageV1,
+    )
+
+    index = build_process_ir_authoring_index()
+    served = _served_contract_page({"category": "capability"})
+    assert served is not None
+
+    shared = [
+        name
+        for name in ProcessIRAuthoringContractPageV1.model_fields
+        if name in index
+        and name in served
+        and name not in _QUERY_DEPENDENT_PAGE_FIELDS
+    ]
+    assert {"unlisted_placement_state", "unlisted_connector_action_state"} <= set(
+        shared
+    ), shared
+
+    for name in shared:
+        declared = ProcessIRAuthoringContractPageV1.model_fields[name].default
+        if name == "facets":
+            # The index publishes only the FILTERABLE facets; the page adds
+            # `entry_types`, which is informational — there is no `entry_type`
+            # selector. Compared over the index's own keys, with the asymmetry
+            # asserted rather than assumed.
+            assert set(index[name]) < set(served[name]), (
+                sorted(index[name]),
+                sorted(served[name]),
+            )
+            assert set(served[name]) - set(index[name]) == {"entry_types"}
+            for facet in index[name]:
+                assert _canonical(index[name][facet]) == _canonical(
+                    served[name][facet]
+                ), (facet, index[name][facet], served[name][facet])
+            continue
+        # Content, not order: the page model sorts `state_mappings` and the
+        # index emits registry order — a real, legitimate difference.
+        assert _canonical(index[name]) == _canonical(served[name]), (
+            name, index[name], served[name],
+        )
+        if declared not in (None, "", (), [], {}) and not callable(declared):
+            assert index[name] == declared, (name, index[name], declared)
+
+    # ...and the value a caller actually receives through the other surface.
+    # Through the registered tool, not the action beneath it — #520's shape,
+    # live on the adjacent surface: falsifying a rule in `server.list_capabilities`
+    # was green because every assertion entered one hop lower.
+    published = _await(server.list_capabilities())["authoring_contract"][SELECTOR]
+    # Every shared field, not the two this fix happened to touch: `shared` is
+    # an intersection and naming two of its members left the rest — including
+    # `state_mappings` — free to be overridden in the manifest.
+    for name in shared:
+        assert _canonical(published[name]) == _canonical(index[name]), (
+            name,
+            published[name],
+            index[name],
+        )
+    assert len(shared) >= 3, shared
+
+
+def _canonical(value):
+    """Order-insensitive for lists of rows; identity for everything else."""
+    import json
+
+    if isinstance(value, list):
+        return sorted(json.dumps(row, sort_keys=True) for row in value)
+    return value
+
+
+def _key(query):
+    """A stable, comparable identity for a fetch's kwargs."""
+    return tuple(sorted(query.items()))
+
+
+
+
+
+def _await(value):
+    """Resolve a coroutine from a registered async tool; pass values through."""
+    import asyncio
+    import inspect as _inspect
+
+    if not _inspect.isawaitable(value):
+        return value
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(value)
+    finally:
+        loop.close()
+
+
+def test_a_corrupted_page_is_refused_rather_than_served():
+    """#538. The re-validation mechanism itself had no pin — removing it was green.
+
+    It is what turns "this rule is correct by construction" from a statement
+    about the model into a statement about the payload, so it is the thing that
+    ends the value-space regress: no fetch list can cover ~10^11 pages, but a
+    validator runs on all of them. That deserves a test naming it.
+    """
+    from boomi_mcp.categories.meta_tools import _revalidated_contract_page
+
+    served = _served_contract_page({"category": "capability"})
+    assert served is not None
+
+    # A healthy page round-trips unchanged, byte for byte.
+    assert _revalidated_contract_page(dict(served)) == served
+
+    # ...and each corruption verb behaves as the comment says.
+    import pydantic
+
+    for field, corrupt in (
+        ("diagnostic_label_legend", ""),                      # blanked
+        ("diagnostic_label_legend", "A compile never returns parser text."),
+        ("unlisted_placement_state", "supported"),            # falsified
+        ("state_mappings", served["state_mappings"][:1]),     # cut
+        ("catalog_entry_count", served["matched_entry_count"]),
+        # `facets` was the one registry-validated rule this tuple omitted, so
+        # removing its validator branch — or misspelling its field name — was
+        # green. All three branches removed failed exactly ONE test, the same
+        # one the single removals failed, which is what exposed it.
+        (
+            "facets",
+            dict(served["facets"], workflow_stages=served["facets"]["workflow_stages"][:1]),
+        ),
+    ):
+        with pytest.raises(pydantic.ValidationError):
+            _revalidated_contract_page(dict(served, **{field: corrupt}))
+
+    # ...and every registry-validated rule is covered here, derived rather than
+    # listed, so a new one cannot be added without a corruption case for it.
+    from boomi_mcp.authoring.process_ir_projection import expected_page_rule
+
+    for rule in ("state_mappings", "catalog_entry_count", "facets"):
+        assert expected_page_rule(rule) is not None, rule
+    with pytest.raises(KeyError):
+        expected_page_rule("facetz")
+
+    # An INJECTED key is refused too.
+    with pytest.raises(pydantic.ValidationError):
+        _revalidated_contract_page(dict(served, surprise_field=1))
+
+    # A DROPPED rule is REFILLED from its default, not refused — a default
+    # repairs an omission and never reports one. Stated because the comment
+    # above the mechanism once claimed the opposite.
+    without = {k: v for k, v in served.items() if k != "diagnostic_label_legend"}
+    assert _revalidated_contract_page(without) == served
+
+
+def test_both_revalidation_call_sites_refuse_a_corrupted_page(monkeypatch):
+    """#538. The mechanism was pinned; its two CALL SITES were not.
+
+    Deleting either one was green, because the only test named the helper
+    directly. Each site covers layers the other cannot: the action's catches
+    corruption at or below the adapter, the wrapper's catches the three layers
+    above the action — including the wrapper itself.
+    """
+    import pydantic
+
+    from boomi_mcp.authoring import contract as authoring_contract
+    from boomi_mcp.categories import meta_tools as mt
+
+    healthy = _served_contract_page({"category": "capability"})
+    assert healthy is not None
+
+    # (1) Corrupt BELOW the action — the adapter's dump. The action's own
+    # re-validation is the only thing between this and the caller.
+    original_query = authoring_contract._LOCAL_BUILDERS["_process_ir_authoring_query"]
+
+    def poisoned(**filters):
+        page = original_query(**filters)
+        page["diagnostic_label_legend"] = ""
+        return page
+
+    monkeypatch.setitem(
+        authoring_contract._LOCAL_BUILDERS, "_process_ir_authoring_query", poisoned
+    )
+    with pytest.raises(pydantic.ValidationError):
+        mt.get_schema_template_action(schema_name=SELECTOR, category="capability")
+    monkeypatch.undo()
+
+    # (2) Corrupt ABOVE the action — everything the action already returned.
+    # Only the wrapper's re-validation stands between this and the caller.
+    original_action = mt.get_schema_template_action
+
+    def poisoned_action(**kwargs):
+        payload = original_action(**kwargs)
+        if isinstance(payload.get("contract_page"), dict):
+            payload["contract_page"]["unlisted_placement_state"] = "supported"
+        return payload
+
+    monkeypatch.setattr(server, "get_schema_template_action", poisoned_action)
+    with pytest.raises(pydantic.ValidationError):
+        server.get_schema_template(schema_name=SELECTOR, category="capability")

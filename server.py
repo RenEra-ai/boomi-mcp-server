@@ -3262,7 +3262,7 @@ if get_schema_template_action:
             get_schema_template(schema_name="process_ir_authoring", node_kind="branch") → the Branch rules
             get_schema_template(schema_name="process_ir_authoring", authoring_entry_id="capability.joins") → one entry
         """
-        return get_schema_template_action(
+        payload = get_schema_template_action(
             resource_type=resource_type,
             operation=operation,
             standard=standard,
@@ -3277,6 +3277,17 @@ if get_schema_template_action:
             after_entry_id=after_entry_id,
             limit=limit,
         )
+        # Re-validate at the LAST hop before the caller. The action below does
+        # the same on its own output, but three layers sit above that one —
+        # including this wrapper — and a rule blanked in any of them was served
+        # falsified. Re-checking here costs a fraction of a millisecond and
+        # changes no served byte.
+        page = payload.get("contract_page") if isinstance(payload, dict) else None
+        if isinstance(page, dict):
+            from boomi_mcp.categories.meta_tools import _revalidated_contract_page
+
+            payload["contract_page"] = _revalidated_contract_page(page)
+        return payload
 
     print("[INFO] Schema template tool registered successfully")
 

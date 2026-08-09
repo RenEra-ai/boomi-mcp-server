@@ -6743,10 +6743,32 @@ def _authoring_contract_schema(
     from ..authoring.process_ir_projection import ProcessIRAuthoringQueryError
 
     try:
-        payload["contract_page"] = query_builder(**(query or {}))
+        page = query_builder(**(query or {}))
     except ProcessIRAuthoringQueryError as exc:
         return _authoring_filter_value_error(schema_name, exc)
+
+    # RE-VALIDATE what is about to be served. The page model makes every
+    # page-level rule correct by construction — three by `Literal`, three by a
+    # registry validator — but the builder hands back a plain dict, and a dict
+    # is editable by every layer between here and the caller. Round-tripping it
+    # through the model extends that guarantee past the model layer.
+    #
+    # Precisely: a rule BLANKED or FALSIFIED downstream is refused, and an
+    # unexpected key INJECTED is refused (`extra='forbid'`). A rule DROPPED is
+    # not refused — the model refills it from its default and serves a correct
+    # page. A default repairs an omission; it never reports one, and an earlier
+    # version of this comment claimed otherwise.
+    payload["contract_page"] = _revalidated_contract_page(page)
     return payload
+
+
+def _revalidated_contract_page(page: Dict[str, Any]) -> Dict[str, Any]:
+    """Round-trip a served contract page through the model that declares it."""
+    from ..models.process_ir_authoring import ProcessIRAuthoringContractPageV1
+
+    return ProcessIRAuthoringContractPageV1.model_validate(page).model_dump(
+        mode="json"
+    )
 
 
 def _authoring_filter_error(schema_name: str, fields: List[str]) -> Dict[str, Any]:
