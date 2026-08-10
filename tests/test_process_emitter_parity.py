@@ -59,11 +59,13 @@ from __future__ import annotations
 
 import ast
 import copy
+import enum
 import inspect
 import itertools
 import json
 import re
 import sys
+import typing
 from pathlib import Path
 
 import pytest
@@ -81,8 +83,13 @@ from boomi_mcp.categories.components.builders import (
     process_flow_builder as _process_flow_builder_module,
 )
 from boomi_mcp.categories.components.builders.process_flow_builder import (
+    _SYNC_PIPELINE_ALLOWED_TOP_LEVEL,
+    _SYNC_PIPELINE_BINDING_KEYS,
+    _SYNC_PIPELINE_LISTENER_KEYS,
+    _SYNC_PIPELINE_MAP_KEYS,
     _SYNC_PIPELINE_STAGE_ALT_PRIMITIVE,
     _SYNC_PIPELINE_STAGE_PRIMITIVE,
+    StageSpec,
     ProcessFlowBuilder,
     SyncPipelineBuilder,
     WrapperSubprocessBuilder,
@@ -101,6 +108,7 @@ from boomi_mcp.models._process_ir_compat import (
     ConnectorResolutionContextV1,
     ir_to_legacy_flow_sequence,
 )
+from boomi_mcp.models.pipeline_models import PipelineEdgeSpec
 from boomi_mcp.models.process_ir import parse_process_ir_v1
 
 _FIXTURES = _ROOT / "tests" / "fixtures" / "process_ir"
@@ -301,6 +309,10 @@ _SYNC_STAGE_IDS = {
 #: length multiplies the probe count by |kind-primitive pairs| = 8. Measured --
 #: 4: ~0.05s, 5: +0.34s, 6: +3.23s, against a file that runs in well under 2s.
 #: 5 is affordable; 6 is not, for one more length of a limit that never closes.
+#: Chain lengths at or below which every derived enrichment is probed. Beyond it
+#: only the bare shape is sent -- see the allocation note in _sync_probe_shape.
+_SYNC_ENRICHED_MAX_LENGTH = 3
+
 _SYNC_CROSSCHECK_MAX_LENGTH = 5
 
 #: Golden fixtures under this prefix belong to the LEGACY listener arm, not to
@@ -320,13 +332,6 @@ def _sync_fingerprint(config):
     return "_".join(s["config"]["primitive"] for s in config["pipeline"]["stages"])
 
 
-def _sync_stage_primitives():
-    """``{stage kind: [primitive, ...]}`` straight from the builder's own tables."""
-    tables = (dict(_SYNC_PIPELINE_STAGE_PRIMITIVE), dict(_SYNC_PIPELINE_STAGE_ALT_PRIMITIVE))
-    kinds = sorted({k for table in tables for k in table})
-    return {k: [t[k] for t in tables if k in t] for k in kinds}
-
-
 #: Config enrichments the probes send in addition to the bare shape, because an
 #: acceptance condition keyed on a field the probes never set is invisible. That is
 #: not hypothetical: the architect review built such a bypass on ``description``,
@@ -341,63 +346,226 @@ def _sync_stage_primitives():
 #: This is BREADTH, not closure -- see THE HONEST LIMIT. No finite set can close the
 #: class, because acceptance can be keyed on a VALUE (``label == "magic"``) and not
 #: merely on a field's presence.
-_SYNC_PROBE_ENRICHMENTS = (
-    ("root:description", {"root": {"description": "probe description"}}),
-    ("root:process_extensions", {"root": {"process_extensions": {}}}),
-    (
-        "root:metadata",
-        {
-            "root": {
-                "process_type": "general",
-                "name": "probe",
-                "folder_name": "probe/folder",
-                "component_name": "probe",
-                "component_type": "process",
-            }
-        },
-    ),
-    ("stage:label", {"stage": {"label": "probe label"}}),
-    ("edge:ordinal", {"edge": {"ordinal": 1}}),
-    ("edge:edge_kind", {"edge": {"edge_kind": "ordering"}}),
+#: Structural root keys the probe supplies itself, excluded from enrichment.
+#: Everything else in the builder's own ``_SYNC_PIPELINE_ALLOWED_TOP_LEVEL`` is a
+#: root key accepted at input, so ROOT is derived like the other three levels.
+#:
+#: An earlier version hand-listed these on the stated premise that "nothing in the
+#: builder declares them". That premise was false -- the constant sits in the same
+#: module the derivation already imports its stage allow-lists from -- and although
+#: the hand list happened to be complete, it was complete by coincidence rather than
+#: by construction, which is the exact condition that produced every miss in this
+#: file's history. Gated keys never appear here because they are not in the
+#: allow-list.
+_SYNC_STRUCTURAL_ROOT_KEYS = frozenset({"pipeline", "process_kind"})
+
+#: Values tried for a field whose type declares no option set. One accepted value is
+#: kept from each group, giving a presence-keyed and a truthiness-keyed probe -- the
+#: only two predicates a guard can apply without knowing the value itself.
+_SYNC_TRUTHY_PROBE_VALUES = ("probe", {"probe": "value"}, 1, True)
+_SYNC_FALSY_PROBE_VALUES = ("", {}, 0, False)
+
+#: Derived fields the builder declares but for which no accepted value could be
+#: measured, so they are not probed. PINNED: a field that silently becomes
+#: unprobeable would shrink the sweep without anyone noticing. ``connector_type``
+#: needs a value matching the stage's connector family, ``map_id`` is only valid on
+#: a map stage, and ``component_ref`` needs a resolvable component -- none of which
+#: this generic probe can supply.
+_SYNC_UNPROBEABLE_FIELDS = frozenset(
+    {("stage_config", "connector_type"), ("stage_config", "map_id"), ("stage", "component_ref")}
 )
+
+
+def _sync_field_value_candidates(field):
+    """Values worth trying for a declared model field, cheapest-typed first.
+
+    Pulls ``Literal`` options and enum members out of the annotation so a typed
+    field is probed with a value it can actually take, rather than a generic string
+    that would always reject and quietly contribute nothing.
+    """
+    out = []
+    annotation = field.annotation
+    for arg in typing.get_args(annotation) or ():
+        for literal in typing.get_args(arg) or ():
+            if isinstance(literal, (str, int, bool)):
+                out.append(literal)
+        if isinstance(arg, type) and issubclass(arg, enum.Enum):
+            out.extend(member.value for member in arg)
+    for literal in typing.get_args(annotation) or ():
+        if isinstance(literal, (str, int, bool)) and literal not in out:
+            out.append(literal)
+    return out
+
+
+def _sync_derive_enrichments():
+    """DERIVE the probe enrichment set from the builder's own field declarations.
+
+    Hand-listing this set failed four times -- ``description`` (architect review),
+    then ``config.label`` and ``dependencies[].ordinal`` (live QA), then
+    ``dependencies[].label`` plus five ``StageSpec`` fields nobody had noticed were
+    accepted (architect review), and finally the root list itself, which was kept by
+    hand on the false premise that nothing declared it. Every miss was an accepted
+    input field nobody thought of, which is the signature of a hand-list. So all four
+    levels are now derived from the builder's own declarations:
+
+    * ROOT from ``_SYNC_PIPELINE_ALLOWED_TOP_LEVEL`` (minus the structural keys the
+      probe supplies itself);
+    * stage CONFIG from ``_SYNC_PIPELINE_BINDING_KEYS`` / ``_LISTENER_KEYS`` /
+      ``_MAP_KEYS``;
+    * stage LEVEL from ``StageSpec.model_fields``;
+    * EDGE from ``PipelineEdgeSpec.model_fields``.
+
+    ``PipelineSpec`` itself contributes nothing -- its fields are exactly ``stages``
+    and ``dependencies`` -- so these are all the levels the config tree has.
+
+    Each derived field is probed with candidate values, and EVERY accepted value
+    becomes its own enrichment. Taking only the first accepted value was a real hole:
+    ``Literal`` options are emitted in declaration order and the first is invariably
+    the neutral default, so the set sent ``side_effect="none"`` and never ``"write"``
+    -- backwards, since a guard is far likelier to key on the latter. That is not the
+    inherent value-space limit in THE HONEST LIMIT: these options are declared,
+    finite, and already enumerated here, and were simply being discarded.
+
+    Fields with no accepted value are pinned in ``_SYNC_UNPROBEABLE_FIELDS``.
+    """
+    stage_config = (
+        _SYNC_PIPELINE_BINDING_KEYS | _SYNC_PIPELINE_LISTENER_KEYS | _SYNC_PIPELINE_MAP_KEYS
+    ) - {"primitive", "connection_id", "operation_id", "action_type", "map_ref"}
+    levels = (
+        ("root", sorted(set(_SYNC_PIPELINE_ALLOWED_TOP_LEVEL) - _SYNC_STRUCTURAL_ROOT_KEYS), None),
+        ("stage_config", sorted(stage_config), None),
+        ("stage", sorted(set(StageSpec.model_fields) - {"key", "kind", "config"}), StageSpec.model_fields),
+        ("edge", sorted(set(PipelineEdgeSpec.model_fields) - {"from_stage", "to_stage"}), PipelineEdgeSpec.model_fields),
+    )
+    enrichments, unprobeable = [], set()
+    for level, names, fields in levels:
+        for name in names:
+            declared = _sync_field_value_candidates(fields[name]) if fields else []
+            if declared:
+                # A DECLARED option set is finite and every option is semantically
+                # distinct, so send them all. Sending only the first was a real hole:
+                # ``Literal`` options come in declaration order and the first is
+                # invariably the neutral default, so the probe sent
+                # ``side_effect="none"`` and never ``"write"`` -- backwards, since a
+                # guard is far likelier to key on the latter.
+                accepted = [v for v in declared if _sync_enrichment_is_accepted(level, name, v)]
+            else:
+                # UNDECLARED field: its value space is open, so enumerating it is the
+                # unreachable case THE HONEST LIMIT describes. Send the two predicates
+                # a guard can use WITHOUT knowing the value -- presence (truthy) and
+                # truthiness (falsy) -- and stop. More values here would buy nothing a
+                # value-keyed guard could not sidestep anyway.
+                accepted = []
+                for group in (_SYNC_TRUTHY_PROBE_VALUES, _SYNC_FALSY_PROBE_VALUES):
+                    hit = next(
+                        (v for v in group if _sync_enrichment_is_accepted(level, name, v)), None
+                    )
+                    if hit is not None:
+                        accepted.append(hit)
+            if not accepted:
+                unprobeable.add((level, name))
+                continue
+            for value in accepted:
+                enrichments.append((f"{level}:{name}={value!r}", {level: {name: value}}))
+    assert unprobeable == _SYNC_UNPROBEABLE_FIELDS, (
+        f"the set of declared-but-unprobeable enrichment fields changed to "
+        f"{sorted(unprobeable)} (pinned: {sorted(_SYNC_UNPROBEABLE_FIELDS)}). A field "
+        f"that silently becomes unprobeable shrinks the sweep; decide deliberately."
+    )
+    return tuple(enrichments)
+
+
+def _sync_enrichment_is_accepted(level, name, value):
+    """Does a minimal known-good chain still lower with this field set?"""
+    stages = [
+        {"key": "k0", "kind": "read", "config": {"primitive": "db_read", **_SYNC_STAGE_IDS["db_read"]}},
+        {"key": "k1", "kind": "send", "config": {"primitive": "rest_send", **_SYNC_STAGE_IDS["rest_send"]}},
+    ]
+    config = {
+        "process_kind": "sync_pipeline",
+        "pipeline": {
+            "stages": stages,
+            "dependencies": [{"from_stage": "k0", "to_stage": "k1"}],
+        },
+    }
+    _sync_apply_enrichment(config, {level: {name: value}})
+    try:
+        SyncPipelineBuilder.lower_config(copy.deepcopy(config))
+    except BuilderValidationError:
+        return False
+    return True
+
+
+def _sync_apply_enrichment(config, extra):
+    """Write one enrichment into a freshly built config, in place."""
+    config.update(copy.deepcopy(extra.get("root", {})))
+    for stage in config["pipeline"]["stages"]:
+        stage.update(copy.deepcopy(extra.get("stage", {})))
+        stage["config"].update(copy.deepcopy(extra.get("stage_config", {})))
+    for edge in config["pipeline"]["dependencies"]:
+        edge.update(copy.deepcopy(extra.get("edge", {})))
+    return config
+
+
+#: The derived enrichment set, computed once. See _sync_derive_enrichments.
+_SYNC_PROBE_ENRICHMENTS = _sync_derive_enrichments()
+
+
+def _sync_stage_primitives():
+    """``{stage kind: [primitive, ...]}`` straight from the builder's own tables."""
+    tables = (dict(_SYNC_PIPELINE_STAGE_PRIMITIVE), dict(_SYNC_PIPELINE_STAGE_ALT_PRIMITIVE))
+    kinds = sorted({k for table in tables for k in table})
+    return {k: [t[k] for t in tables if k in t] for k in kinds}
+
+
 
 
 def _sync_probe_shape(seq):
     """Every primitive assignment for one stage-kind sequence, through the real gate.
 
-    Each assignment is probed under every optional-root-key variant, so acceptance
-    conditioned on carried metadata cannot hide behind a single synthetic shape.
-    An assignment counts as accepted if ANY variant lowers.
+    Each assignment is probed under the enrichment variants IN TURN, stopping at the
+    first that lowers -- so acceptance conditioned on an input field cannot hide
+    behind a single synthetic shape. An assignment counts as accepted if ANY variant
+    lowers; the loop short-circuits because the question is existential, not a census
+    of which variants pass.
 
     Returns ``[(identity, raw_config, lowered_or_None, error_code_or_None), ...]``.
     """
     primitives = _sync_stage_primitives()
     results = []
-    variants = [("bare", {})] + list(_SYNC_PROBE_ENRICHMENTS)
+    # SAMPLING ALLOCATION, stated rather than implied. The sweep samples in two
+    # dimensions and cannot cover either exhaustively, so the budget goes where the
+    # findings came from: every enrichment at short lengths (where all five
+    # shape-keyed bypasses found in review lived, and where the grammar's own chains
+    # are), bare shape beyond. Full enrichment at every length costs ~9x for one more
+    # length of a limit that never closes -- measured 14.6s vs 1.9s.
+    #
+    # This is an allocation, NOT a claim that shape-keyed bypasses only occur at
+    # short lengths. Nothing rules that out; it is simply not affordable to sample.
+    variants = [("bare", {})] + (
+        list(_SYNC_PROBE_ENRICHMENTS) if len(seq) <= _SYNC_ENRICHED_MAX_LENGTH else []
+    )
 
     def build(extra):
         """A FRESH config each time -- built, never deep-copied. This sweep runs
         into six figures of candidates, and deepcopy dominated it."""
         stages = [
-            {
-                "key": f"k{i}",
-                "kind": k,
-                "config": {"primitive": p, **_SYNC_STAGE_IDS[p], **extra.get("stage", {})},
-            }
+            {"key": f"k{i}", "kind": k, "config": {"primitive": p, **_SYNC_STAGE_IDS[p]}}
             for i, (k, p) in enumerate(zip(seq, choice))
         ]
         keys = [s["key"] for s in stages]
-        return {
-            "process_kind": "sync_pipeline",
-            "pipeline": {
-                "stages": stages,
-                "dependencies": [
-                    {"from_stage": a, "to_stage": b, **extra.get("edge", {})}
-                    for a, b in zip(keys, keys[1:])
-                ],
+        return _sync_apply_enrichment(
+            {
+                "process_kind": "sync_pipeline",
+                "pipeline": {
+                    "stages": stages,
+                    "dependencies": [
+                        {"from_stage": a, "to_stage": b} for a, b in zip(keys, keys[1:])
+                    ],
+                },
             },
-            **copy.deepcopy(extra.get("root", {})),
-        }
+            extra,
+        )
 
     for choice in itertools.product(*[primitives[k] for k in seq]):
         identity = tuple(zip(seq, choice))
@@ -528,7 +696,7 @@ def _sync_probe_chain_space():
     cheap bounded cross-check then guards the extraction itself.
 
     THE HONEST LIMIT -- stated as a principle, because every attempt to state it as
-    a LIST of residual classes has itself been incomplete. Two successive drafts
+    a LIST of residual classes has itself been incomplete. Three successive drafts
     enumerated "the" residual classes and both were refuted within one review round;
     enumerating them is the same mistake as modelling the grammar, one level up.
 
@@ -558,13 +726,18 @@ def _sync_probe_chain_space():
       ``process_flow_builder`` and importing it removes the EXTRACTION half -- nothing
       left to misread -- but does not touch the class above, because under a bypass
       the extraction already returns the correct, byte-identical sequences.
-    * What would actually end the sequence is a different ORACLE, not more sampling:
-      run this probe corpus under a tracer and assert every branch on
-      ``lower_config``'s accept/reject path was exercised, so a bypass branch the
-      probes never trigger surfaces as an uncovered branch rather than as silence.
-      (Precedented in this repo by #144's AST+tracer proof.) That is materially
-      bigger than a test-only refactor and plausibly belongs to whichever slice owns
-      the lowering path.
+    * A different ORACLE would detect strictly more than more sampling does: run this
+      probe corpus under a tracer and assert every branch on ``lower_config``'s
+      accept/reject path was exercised, so a bypass branch the probes never trigger
+      surfaces as an uncovered branch rather than as silence. (Precedented in this
+      repo by #145's reachability tracer,
+      ``tests/test_recipe_registry.py::test_every_reachable_registry_build_defect_is_exercised_by_a_test``.)
+      It is NOT a completeness proof either, and an earlier draft here said it would
+      "end the sequence", which overclaimed: a value-keyed bypass folded into an
+      already-covered path -- a table lookup rather than a new branch -- introduces no
+      uncovered branch to find. It is an additional detector, materially bigger than a
+      test-only refactor, and plausibly belongs to whichever slice owns the lowering
+      path.
 
     **Re-run this attack when an acceptance path near the routing gate changes** --
     #139F and #140 both plausibly add one when ``start_listen`` is promoted -- because
@@ -629,8 +802,9 @@ def _sync_probe_chain_space():
 
 def _sync_case(case_name):
     """Resolve one case. ``lower_config`` is the SOLE normalizer for this dialect
-    and is called exactly once per case -- there is no inverse direction, and
-    #139E does not invent one."""
+    -- there is no inverse direction and #139E does not invent one. Deliberately NOT
+    "called exactly once per case": a test that also calls ``build()`` lowers again
+    inside it. The property is single-normalizer, never a call count."""
     case = SYNC_CASES[case_name]
     raw = copy.deepcopy(case["config"])
     lowered = SyncPipelineBuilder.lower_config(copy.deepcopy(case["config"]))

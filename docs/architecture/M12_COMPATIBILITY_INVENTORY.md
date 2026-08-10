@@ -1053,10 +1053,12 @@ No bounded sampling of the chain space is complete against a grammar that can ch
 extracts `lower_config`'s accepted stage-kind sequences from the builder's own source by AST,
 enumerates every primitive assignment over exactly those sequences, and lets the routing gate split
 the results. A bounded behavioural sweep then cross-checks that nothing accepted lives outside the
-extracted literal. A newly permitted stage **sequence**, and a new stage kind or primitive **added to
-those tables**, all fail the suite until the corpus grows — the qualifier matters: the tables are
-today's acceptance vocabulary because `_check_stage_primitive` derives from them, but nothing pins
-that, so a primitive admitted by some other mechanism is not covered by this claim.
+extracted literal. A newly permitted stage **sequence** fails the suite until the corpus grows, as does
+a new stage kind or primitive **added to those tables that yields an accepted grammar assignment**.
+Both qualifiers are load-bearing and were established by counter-example: a table-only key the
+supported-kind gate rejects before the primitive check ever runs (`shadow: db_read`) leaves the suite
+green, and so does a primitive admitted by any mechanism other than those tables — `_check_stage_primitive`
+derives from them today, but nothing pins that.
 
 4. **And reading it by AST was itself a fourth model — a *syntax* model.** The first extraction searched
    for a comparison that looked like the grammar and skipped anything else, so *extending* the guard
@@ -1085,10 +1087,29 @@ and is constructible in minutes. Three successive versions of the sampling were 
 chain length, then root-key shape, then stage/edge shape — and a fourth would be no harder. Adding
 dimensions moves the bypass; it never removes it.
 
-One selection error inside that is worth recording on its own, because it was the wrong *criterion*
-rather than a missing entry: the enrichment set was first chosen as "root keys `lower_config` accepts
-**and carries through**". Carriage is irrelevant — a bypass conditions on a value being *present in
-the input*, not on it surviving lowering. That single mistake hid five root keys.
+**Three selection errors inside that are worth recording, because every one was about the *criterion*
+rather than a missing entry** — the same failure the grammar had, one level over:
+
+1. The set was chosen as "root keys `lower_config` accepts **and carries through**". Carriage is
+   irrelevant: a bypass conditions on a value being *present in the input*, not on it surviving
+   lowering. That alone hid five root keys.
+2. It was a **hand list**, which missed `dependencies[].label` and five `StageSpec` fields nobody had
+   noticed were accepted (`cardinality`, `context_effect`, `failure_behavior`, `side_effect`).
+3. The root level was *kept* hand-listed on the stated premise that nothing in the builder declares
+   it. False — `_SYNC_PIPELINE_ALLOWED_TOP_LEVEL` sits in the same module the derivation already
+   imports its stage allow-lists from. The hand list happened to be complete, but complete *by
+   coincidence*, which is precisely the condition that produced the two misses above it.
+
+All four levels are now **derived** from the builder's own declarations — root from
+`_SYNC_PIPELINE_ALLOWED_TOP_LEVEL`, stage-config from its allow-lists, stage-level from
+`StageSpec.model_fields`, edge from `PipelineEdgeSpec.model_fields` — with declared-but-unprobeable
+fields pinned. (`PipelineSpec` contributes nothing: its fields are exactly `stages` and
+`dependencies`, so these are all the levels the config tree has.) A field is probed with **every
+declared option it accepts**, not just the first: `Literal` options come in declaration order and the
+first is invariably the neutral default, so the set was sending `side_effect="none"` and never
+`"write"` — backwards, since a guard is far likelier to key on the latter. Fields whose type declares
+no options get one truthy and one falsy accepted value, which are the only two predicates a guard can
+apply without knowing the value itself.
 
 **Two remedies are recorded here rather than done in #139E, and neither is a proof on its own:**
 
@@ -1098,11 +1119,15 @@ the input*, not on it surviving lowering. That single mistake hid five root keys
   **not** close the class above: under a bypass the extraction already returns the correct,
   byte-identical sequences, so an imported constant would too. An earlier draft claimed hoisting was
   "the end state that removes the class"; that was false, asserted from reasoning and never measured.
-- **What would actually end the sequence is a different oracle, not more sampling:** run the probe
-  corpus under a tracer and assert every branch on `lower_config`'s accept/reject path was exercised,
-  so a bypass branch the probes never trigger surfaces as an *uncovered branch* rather than as silence.
-  Precedented here by #144's AST+tracer proof. Materially bigger than a test-only refactor, and it
-  plausibly belongs to whichever slice owns the lowering path.
+- **A different oracle detects strictly more than more sampling does:** run the probe corpus under a
+  tracer and assert every branch on `lower_config`'s accept/reject path was exercised, so a bypass
+  branch the probes never trigger surfaces as an *uncovered branch* rather than as silence.
+  Precedented here by **#145**'s reachability tracer
+  (`tests/test_recipe_registry.py::test_every_reachable_registry_build_defect_is_exercised_by_a_test`).
+  **It is not a completeness proof either** — an earlier draft of this passage said it would "end the
+  sequence", which overclaimed: a value-keyed bypass folded into an already-covered path (a table
+  lookup rather than a new branch) introduces no uncovered branch to find. Materially bigger than a
+  test-only refactor, and it plausibly belongs to whichever slice owns the lowering path.
 
 **Re-entry criterion.** Re-run this attack when an acceptance path near the routing gate changes.
 **#139F and #140 both plausibly add one** when `start_listen` is promoted — that is the point at which
