@@ -33,10 +33,13 @@ TWO independent corpora live here; they share no machinery on purpose.
    #140/#146 did not change that: it enters through ``ir_to_legacy_flow_sequence``,
    whose frozen #136 codec requires a non-empty ``flow_sequence``, while the
    map-less sync chains have none. The only way in is the dialect's own
-   normalizer, so each case calls ``SyncPipelineBuilder.lower_config`` exactly
-   once. #139E deliberately does NOT invent a ProcessIR-to-``PipelineSpec``
-   inverse — no such direction exists anywhere in the tree, and building one
-   would be the second semantic compiler ADR-001 §6 forbids.
+   normalizer, and ``SyncPipelineBuilder.lower_config`` is the SOLE normalizer
+   used — there is no inverse. (Not "called exactly once per case": ``build()``
+   lowers again internally, so a case that also builds lowers twice. The property
+   that matters is that no OTHER normalization path exists, not the call count.)
+   #139E deliberately does NOT invent a ProcessIR-to-``PipelineSpec`` inverse — no
+   such direction exists anywhere in the tree, and building one would be the second
+   semantic compiler ADR-001 §6 forbids.
 
    The oracle is ``ProcessFlowBuilder`` on that same lowered core, which is
    genuinely independent because ``SyncPipelineBuilder.build`` intercepts BEFORE
@@ -324,37 +327,97 @@ def _sync_stage_primitives():
     return {k: [t[k] for t in tables if k in t] for k in kinds}
 
 
+#: Config enrichments the probes send in addition to the bare shape, because an
+#: acceptance condition keyed on a field the probes never set is invisible. That is
+#: not hypothetical: the architect review built such a bypass on ``description``,
+#: and live QA then built two more on ``config.label`` and ``dependencies[].ordinal``
+#: -- all at chain length 2, i.e. nowhere near the length bound.
+#:
+#: The selection criterion is "ACCEPTED AT INPUT", not "carried through to the
+#: lowered config". Carriage was the original criterion and it was simply the wrong
+#: one: a bypass conditions on a value being PRESENT IN THE INPUT, not on it
+#: surviving lowering. That mistake alone hid five root keys.
+#:
+#: This is BREADTH, not closure -- see THE HONEST LIMIT. No finite set can close the
+#: class, because acceptance can be keyed on a VALUE (``label == "magic"``) and not
+#: merely on a field's presence.
+_SYNC_PROBE_ENRICHMENTS = (
+    ("root:description", {"root": {"description": "probe description"}}),
+    ("root:process_extensions", {"root": {"process_extensions": {}}}),
+    (
+        "root:metadata",
+        {
+            "root": {
+                "process_type": "general",
+                "name": "probe",
+                "folder_name": "probe/folder",
+                "component_name": "probe",
+                "component_type": "process",
+            }
+        },
+    ),
+    ("stage:label", {"stage": {"label": "probe label"}}),
+    ("edge:ordinal", {"edge": {"ordinal": 1}}),
+    ("edge:edge_kind", {"edge": {"edge_kind": "ordering"}}),
+)
+
+
 def _sync_probe_shape(seq):
     """Every primitive assignment for one stage-kind sequence, through the real gate.
+
+    Each assignment is probed under every optional-root-key variant, so acceptance
+    conditioned on carried metadata cannot hide behind a single synthetic shape.
+    An assignment counts as accepted if ANY variant lowers.
 
     Returns ``[(identity, raw_config, lowered_or_None, error_code_or_None), ...]``.
     """
     primitives = _sync_stage_primitives()
     results = []
-    for choice in itertools.product(*[primitives[k] for k in seq]):
+    variants = [("bare", {})] + list(_SYNC_PROBE_ENRICHMENTS)
+
+    def build(extra):
+        """A FRESH config each time -- built, never deep-copied. This sweep runs
+        into six figures of candidates, and deepcopy dominated it."""
         stages = [
-            {"key": f"k{i}", "kind": k, "config": {"primitive": p, **_SYNC_STAGE_IDS[p]}}
+            {
+                "key": f"k{i}",
+                "kind": k,
+                "config": {"primitive": p, **_SYNC_STAGE_IDS[p], **extra.get("stage", {})},
+            }
             for i, (k, p) in enumerate(zip(seq, choice))
         ]
         keys = [s["key"] for s in stages]
-        raw = {
+        return {
             "process_kind": "sync_pipeline",
             "pipeline": {
                 "stages": stages,
                 "dependencies": [
-                    {"from_stage": a, "to_stage": b} for a, b in zip(keys, keys[1:])
+                    {"from_stage": a, "to_stage": b, **extra.get("edge", {})}
+                    for a, b in zip(keys, keys[1:])
                 ],
             },
+            **copy.deepcopy(extra.get("root", {})),
         }
-        try:
-            lowered = SyncPipelineBuilder.lower_config(copy.deepcopy(raw))
-        except BuilderValidationError as exc:
-            results.append((tuple(zip(seq, choice)), raw, None, exc.error_code))
-            continue
-        # Anything OTHER than BuilderValidationError propagates on purpose: a crash
-        # in the normalizer is a finding, not a rejection. Measured clean across the
-        # whole cross-checked space.
-        results.append((tuple(zip(seq, choice)), raw, lowered, None))
+
+    for choice in itertools.product(*[primitives[k] for k in seq]):
+        identity = tuple(zip(seq, choice))
+        accepted, last_code = None, None
+        for _label, extra in variants:
+            candidate = build(extra)
+            try:
+                lowered = SyncPipelineBuilder.lower_config(build(extra))
+            except BuilderValidationError as exc:
+                last_code = exc.error_code
+                continue
+            # Anything OTHER than BuilderValidationError propagates on purpose: a
+            # crash in the normalizer is a finding, not a rejection. Measured clean
+            # across the whole cross-checked space.
+            accepted = (candidate, lowered)
+            break
+        if accepted is None:
+            results.append((identity, build({}), None, last_code))
+        else:
+            results.append((identity, accepted[0], accepted[1], None))
     return results
 
 
@@ -400,6 +463,15 @@ def _sync_accepted_stage_sequences():
         f"this extraction cannot read, so it can no longer claim to know the "
         f"accepted sequences -- read the grammar where it now lives, or (better) "
         f"hoist it to a module constant and import it."
+    )
+    # The LEFT operand must be `kinds` itself, not merely something that mentions
+    # it. `sorted(kinds) not in (...)`, `kinds[1:] not in (...)` and friends all
+    # satisfy the statement locator and the bare-Compare check while comparing a
+    # DIFFERENT value against the literal -- at which point the sequences read here
+    # are not the sequences being matched.
+    assert isinstance(test.left, ast.Name) and test.left.id == "kinds", (
+        f"the stage-sequence guard compares `{ast.dump(test.left)[:60]}`, not `kinds` "
+        f"itself, so the literal read here is not what acceptance is matched against."
     )
     target = test.comparators[0]
     assert (
@@ -455,34 +527,48 @@ def _sync_probe_chain_space():
     exactly the accepted sequences and letting the routing gate split them. A
     cheap bounded cross-check then guards the extraction itself.
 
-    THE HONEST LIMIT. This is a fail-closed bridge, not a completeness proof, and
-    there are TWO distinct residual classes -- do not conflate them, because the
-    obvious remedy fixes only one.
+    THE HONEST LIMIT -- stated as a principle, because every attempt to state it as
+    a LIST of residual classes has itself been incomplete. Two successive drafts
+    enumerated "the" residual classes and both were refuted within one review round;
+    enumerating them is the same mistake as modelling the grammar, one level up.
 
-    * The EXTRACTION class. An AST pattern over an expression can never be a
-      completeness oracle: the set of forms it does not recognise is open-ended, so
-      the tightening in (4) buys only that an unrecognised form FAILS rather than
-      passes. Hoisting the accepted-sequence tuple to a module-level constant in
-      ``process_flow_builder`` and importing it would remove this class outright --
-      the test would compare against the very object the builder compares against,
-      with nothing left to extract. ~3 lines of production change, which is why it
-      is not in #139E (whose claim is zero production diff); the migration ledger
-      records it as the intended resolution for the next slice touching that file.
-    * The BYPASS class, which hoisting does NOT touch. An acceptance path that never
-      mentions ``kinds`` -- e.g. ``if len(order) == 5: pass`` ahead of the guard --
-      is invisible to any reading of the grammar statement, because the statement is
-      still there and still says exactly what it said. Measured: under such a bypass
-      the extraction returns the byte-identical ten sequences, so an imported
-      constant would too. The ONLY detector is the behavioural cross-check below,
-      and it is bounded (``_SYNC_CROSSCHECK_MAX_LENGTH``): the same bypass is caught
-      inside the bound and missed outside it.
+    What is PROVEN: for the chains this harness reaches, the corpus covers exactly
+    those the routing gate calls canonical. What is NOT proven, and cannot be by
+    anything here: that the harness reaches every chain the builder accepts. It
+    learns the accepted set from a statement in ``lower_config``, and it can only
+    detect acceptance happening elsewhere by trying inputs and observing -- so any
+    acceptance path the trials do not happen to exercise is invisible.
 
-    So the cross-check is not merely a guard on the extraction -- it is the sole
-    detector for the bypass class, and no bound closes that class. Widening buys one
-    more length at a stated cost, nothing more. **Re-run this attack when an
-    acceptance path near the routing gate changes** -- #139F and #140 both plausibly
-    add one when ``start_listen`` is promoted -- because that is when the bound stops
-    being a documented limit and becomes load-bearing.
+    The trials are bounded in chain LENGTH by a named constant
+    (``_SYNC_CROSSCHECK_MAX_LENGTH``), and merely SAMPLED in config shape
+    (``_SYNC_PROBE_ENRICHMENTS``) -- not bounded, sampled, and the difference is the
+    whole point. No finite variant set can close that dimension, because acceptance
+    can be keyed on a VALUE (``label == "magic"``) rather than on a field's presence,
+    so a bypass always exists and is constructible in minutes. Three successive
+    versions of this sampling were broken in review -- chain length, then root-key
+    shape, then stage/edge shape -- and a fourth would be no harder. Adding
+    dimensions moves the bypass; it never removes it. Do not read the enrichment
+    list as a frontier.
+
+    Every tightening here therefore buys fail-CLOSED behaviour on a named form, not
+    completeness. Two remedies are recorded in the migration ledger rather than done
+    here, and neither is a proof on its own:
+
+    * Hoisting the accepted-sequence tuple to a module-level constant in
+      ``process_flow_builder`` and importing it removes the EXTRACTION half -- nothing
+      left to misread -- but does not touch the class above, because under a bypass
+      the extraction already returns the correct, byte-identical sequences.
+    * What would actually end the sequence is a different ORACLE, not more sampling:
+      run this probe corpus under a tracer and assert every branch on
+      ``lower_config``'s accept/reject path was exercised, so a bypass branch the
+      probes never trigger surfaces as an uncovered branch rather than as silence.
+      (Precedented in this repo by #144's AST+tracer proof.) That is materially
+      bigger than a test-only refactor and plausibly belongs to whichever slice owns
+      the lowering path.
+
+    **Re-run this attack when an acceptance path near the routing gate changes** --
+    #139F and #140 both plausibly add one when ``start_listen`` is promoted -- because
+    that is when these limits stop being documented and become load-bearing.
 
     Listener chains are probed like everything else rather than skipped by name: the
     day #140 promotes ``start_listen`` they move from the legacy bucket to the

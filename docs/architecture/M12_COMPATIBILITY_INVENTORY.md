@@ -1009,8 +1009,10 @@ promoted.
 dialect, and #140/#146 did nothing to change it: the frozen #136 codec hard-requires a non-empty
 `flow_sequence`, while 5 of the 10 accepted sync chains are map-less (the #139C finding). The only way
 into this dialect is its own normalizer. #139E therefore adds a **separate** adapter-dialect harness in
-the same file, calling `SyncPipelineBuilder.lower_config` exactly once per case and comparing canonical
-emission against `ProcessFlowBuilder` on that same lowered core. It does **not** invent a
+the same file, using `SyncPipelineBuilder.lower_config` as the **sole** normalizer — there is no
+inverse — and comparing canonical emission against `ProcessFlowBuilder` on that same lowered core.
+(Not "exactly once per case": `build()` lowers again internally. The property that matters is that no
+other normalization path exists, not the call count.) It does **not** invent a
 ProcessIR-to-`PipelineSpec` inverse: no such direction exists in the tree, ADR-001 §6 forbids that
 second semantic compiler, and #139D already settled the point.
 
@@ -1050,9 +1052,11 @@ No bounded sampling of the chain space is complete against a grammar that can ch
 `test_sync_corpus_covers_every_canonical_chain` stopped sampling and now **reads the grammar**: it
 extracts `lower_config`'s accepted stage-kind sequences from the builder's own source by AST,
 enumerates every primitive assignment over exactly those sequences, and lets the routing gate split
-the results. A cheap bounded sweep cross-checks the *extraction* (nothing accepted may live outside
-the extracted literal). A newly permitted sequence, a new stage kind and a new primitive all fail the
-suite until the corpus grows.
+the results. A bounded behavioural sweep then cross-checks that nothing accepted lives outside the
+extracted literal. A newly permitted stage **sequence**, and a new stage kind or primitive **added to
+those tables**, all fail the suite until the corpus grows — the qualifier matters: the tables are
+today's acceptance vocabulary because `_check_stage_primitive` derives from them, but nothing pins
+that, so a primitive admitted by some other mechanism is not covered by this claim.
 
 4. **And reading it by AST was itself a fourth model — a *syntax* model.** The first extraction searched
    for a comparison that looked like the grammar and skipped anything else, so *extending* the guard
@@ -1062,28 +1066,43 @@ suite until the corpus grows.
    earlier two. The extraction now anchors on the guard **statement** and refuses any test it cannot
    read, so an unrecognised form kills instead of slipping through.
 
-**The honest limit, recorded rather than glossed — and there are TWO residual classes, which must not
-be conflated because the obvious remedy fixes only one.**
+**The honest limit — stated as a principle, because every attempt to state it as a LIST of residual
+classes has itself been incomplete.** Three successive drafts of this passage enumerated "the"
+residual classes and each was refuted within one review round; enumerating them is the same mistake as
+modelling the grammar, one level up.
 
-- **The extraction class.** An AST pattern over an expression cannot be a completeness oracle: the set
-  of forms it does not recognise is open-ended, so the tightening buys *fail-closed*, not *proof*.
-  **Hoisting the accepted-sequence tuple to a module-level constant in `process_flow_builder.py` and
-  importing it removes this class outright** — the test would then compare against the very object the
-  builder compares against, with nothing left to extract. ~3 lines of production change moving no
-  emitted byte and no MCP surface; deliberately not in #139E, whose claim is zero production diff, and
-  **the intended resolution for whichever slice next touches that file**.
-- **The bypass class, which hoisting does NOT touch.** An acceptance path that never mentions `kinds`
-  — e.g. `if len(order) == 5: pass` ahead of the guard — is invisible to *any* reading of the grammar
-  statement, because the statement is still present and still says exactly what it said. Measured
-  under such a bypass, the extraction returns the byte-identical ten sequences, so an imported
-  constant would too. Its **only** detector is the bounded behavioural cross-check: the same bypass is
-  caught inside `_SYNC_CROSSCHECK_MAX_LENGTH` and missed outside it (verified at 3 vs 5, then at 5 vs
-  6 after widening). **No bound closes this class**; widening buys one more length at a stated cost
-  (each length multiplies the probe count by 8: ~0.05s at 4, +0.34s at 5, +3.23s at 6).
+*What is proven:* for the chains the harness reaches, the corpus covers exactly those the routing gate
+calls canonical. *What is not proven, and cannot be by anything in the test:* that the harness reaches
+every chain the builder accepts. It learns the accepted set from a statement in `lower_config`, and it
+can only detect acceptance happening elsewhere by trying inputs and observing — so any acceptance path
+the trials do not exercise is invisible.
 
-An earlier draft of this section claimed hoisting was "the end state that removes the class". That was
-false, asserted from reasoning and not measured — the correction is itself an instance of the lesson
-below, since the claim was a model of the remedy rather than a measurement of it.
+The trials are **bounded** in chain length by a named constant (`_SYNC_CROSSCHECK_MAX_LENGTH`), and
+merely **sampled** in config shape (`_SYNC_PROBE_ENRICHMENTS`) — not bounded, *sampled*, and the
+difference is the whole point. No finite variant set closes that dimension, because acceptance can be
+keyed on a **value** (`label == "magic"`) rather than on a field's presence, so a bypass always exists
+and is constructible in minutes. Three successive versions of the sampling were broken in review —
+chain length, then root-key shape, then stage/edge shape — and a fourth would be no harder. Adding
+dimensions moves the bypass; it never removes it.
+
+One selection error inside that is worth recording on its own, because it was the wrong *criterion*
+rather than a missing entry: the enrichment set was first chosen as "root keys `lower_config` accepts
+**and carries through**". Carriage is irrelevant — a bypass conditions on a value being *present in
+the input*, not on it surviving lowering. That single mistake hid five root keys.
+
+**Two remedies are recorded here rather than done in #139E, and neither is a proof on its own:**
+
+- **Hoisting** the accepted-sequence tuple to a module-level constant in `process_flow_builder.py` and
+  importing it removes the *extraction* half — nothing left to misread. ~3 lines moving no emitted byte
+  and no MCP surface; **the intended resolution for whichever slice next touches that file**. It does
+  **not** close the class above: under a bypass the extraction already returns the correct,
+  byte-identical sequences, so an imported constant would too. An earlier draft claimed hoisting was
+  "the end state that removes the class"; that was false, asserted from reasoning and never measured.
+- **What would actually end the sequence is a different oracle, not more sampling:** run the probe
+  corpus under a tracer and assert every branch on `lower_config`'s accept/reject path was exercised,
+  so a bypass branch the probes never trigger surfaces as an *uncovered branch* rather than as silence.
+  Precedented here by #144's AST+tracer proof. Materially bigger than a test-only refactor, and it
+  plausibly belongs to whichever slice owns the lowering path.
 
 **Re-entry criterion.** Re-run this attack when an acceptance path near the routing gate changes.
 **#139F and #140 both plausibly add one** when `start_listen` is promoted — that is the point at which
