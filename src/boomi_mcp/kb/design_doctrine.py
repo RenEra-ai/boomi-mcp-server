@@ -1743,6 +1743,36 @@ def get_design_pattern(name: str) -> Optional[Dict[str, Any]]:
     return copy.deepcopy(entry) if entry is not None else None
 
 
+def design_doctrine_capability_rows() -> List[Dict[str, Any]]:
+    """The COMPACT rows the authoring projection needs, deepcopied.
+
+    Seven fields, not the whole entry: the projection derives capability facts
+    and ordering facts, and never serves doctrine prose (``problem``,
+    ``when_to_use``, ``when_not_to_use``, ``boomi_shape_mapping``) — a separate
+    guard asserts no verbatim prose reaches a served payload, so handing those
+    over would be handing over exactly what must not be published.
+
+    Deepcopied, like every accessor in this section. The projection previously
+    read ``DESIGN_DOCTRINE_ENTRIES`` directly and shallow-copied each entry, so
+    ``cross_refs`` and ``mutual_exclusion`` stayed shared with module state and
+    a perturbed sources snapshot could write through to the live catalog —
+    breaking the isolation this module documents two functions above.
+    """
+    fields = (
+        "name",
+        "category",
+        "capability_status",
+        "verification_status",
+        "provenance",
+        "cross_refs",
+        "mutual_exclusion",
+    )
+    return [
+        {field: copy.deepcopy(entry[field]) for field in fields if field in entry}
+        for _, entry in sorted(DESIGN_DOCTRINE_ENTRIES.items())
+    ]
+
+
 def list_design_doctrine_index() -> List[Dict[str, str]]:
     """Compact index rows for ``list_capabilities`` — no prose, just the
     name / category / capability_status triple per entry."""

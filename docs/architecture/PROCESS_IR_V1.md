@@ -371,10 +371,15 @@ Published as the immutable `PROCESS_IR_V1_CAPABILITIES` manifest (not an authore
 | `verified_write_replay_safety` — a stock write action classified replay-safe | gated | #142 — no authoritative classification (capture §G4) |
 | `listener_error_scope` | gated | #142 — the fused listener start rejects reliability composition |
 | `nested_try_catch` | gated | #142 — composition rewrites the outer error selection (capture §G6) |
-| keyed cache (`doc_cache_index`/`cache_key_values`/keyed `load_all_documents`) | gated | no live-captured wire shape (#119) |
-| `definedparameter` property source | gated | no verified wire shape |
-| joins, loops | gated | ADR-001 §8 |
-| caller-authored CFG edges, XML/layout/shape ids, secret values | unsupported (permanent) | ADR-001 §12 |
+| `parallel_branch_execution` — Branch legs executing concurrently | **unsupported** | #146 — legs are ordered and sequential by construction; concurrency is different semantics, not more speed |
+| `flow_control_parallel_chunks` — authoring a parallel-chunk flow-control setting | **unsupported** | #146 — the platform has the setting; this contract authors no field for it |
+| `keyed_cache` — `doc_cache_index`/`cache_key_values`/keyed `load_all_documents` | gated | no live-captured wire shape (#119) |
+| `definedparameter_property_source` — the `definedparameter` property source | gated | no verified wire shape |
+| `joins` | gated | ADR-001 §8 |
+| `loops` | gated | ADR-001 §8 |
+| `caller_authored_cfg_edges` | unsupported (permanent) | ADR-001 §12 |
+| `xml_or_layout_or_shape_ids` | unsupported (permanent) | ADR-001 §12 |
+| `secret_values` | unsupported (permanent) | ADR-001 §12 |
 
 **`unsupported` means "never", `gated` means "not yet".** #142 uses both deliberately: marking an
 impossibility as gated promises follow-up research that cannot conclude, and marking a deliberate

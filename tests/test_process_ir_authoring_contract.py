@@ -4206,3 +4206,50 @@ def test_a_dead_authority_is_reported_unavailable_not_served_short(monkeypatch):
     assert recovered["contract_page"]["returned_entry_count"] == (
         healthy["contract_page"]["returned_entry_count"]
     )
+
+
+def test_the_projection_cannot_write_through_to_the_doctrine_catalog():
+    """F5. The projection shallow-copied entries out of the live catalog.
+
+    `design_doctrine` documents that every accessor deepcopies so per-call
+    mutation cannot corrupt module state. The projection bypassed the
+    accessors and did `dict(entry)`, which is shallow — so `cross_refs` and
+    `mutual_exclusion` stayed aliased to the module's own lists.
+    """
+    import copy as _copy
+
+    from boomi_mcp.authoring.process_ir_projection import collect_projection_sources
+    from boomi_mcp.kb.design_doctrine import (
+        DESIGN_DOCTRINE_ENTRIES,
+        design_doctrine_capability_rows,
+    )
+
+    before = _copy.deepcopy(DESIGN_DOCTRINE_ENTRIES)
+    rows = collect_projection_sources().doctrine_rows
+    assert rows
+
+    mutated = 0
+    for row in rows:
+        for field in ("cross_refs", "mutual_exclusion"):
+            value = row.get(field)
+            if isinstance(value, list):
+                value.append("__MUTATED__")
+                mutated += 1
+    assert mutated, "no list-valued doctrine field was reachable to mutate"
+    assert DESIGN_DOCTRINE_ENTRIES == before, "the live catalog was written through"
+
+    # ...and the accessor hands over capability fields only — never prose.
+    served_fields = set()
+    for row in design_doctrine_capability_rows():
+        served_fields |= set(row)
+    assert served_fields <= {
+        "name",
+        "category",
+        "capability_status",
+        "verification_status",
+        "provenance",
+        "cross_refs",
+        "mutual_exclusion",
+    }, sorted(served_fields)
+    for prose in ("problem", "when_to_use", "when_not_to_use", "boomi_shape_mapping"):
+        assert prose not in served_fields, prose

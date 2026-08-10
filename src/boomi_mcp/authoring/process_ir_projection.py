@@ -145,7 +145,7 @@ def collect_projection_sources() -> ProjectionSourcesV1:
     from ..compiler.process_ir.error_handling import retry_rule_specs
     from ..compiler.process_ir.semantic_validation.findings import finding_specs
     from ..compiler.process_ir.semantic_validation.lineage import state_visibility_rows
-    from ..kb.design_doctrine import DESIGN_DOCTRINE_ENTRIES
+    from ..kb.design_doctrine import design_doctrine_capability_rows
     from ..models.cache_property_models import PROCESS_PROPERTY_SCOPE_V1
     from ..models.process_ir import (
         PROCESS_IR_V1_CAPABILITIES,
@@ -178,9 +178,11 @@ def collect_projection_sources() -> ProjectionSourcesV1:
         parse_specs=process_ir_v1_parse_diagnostic_specs(),
         finding_specs=finding_specs(),
         compiler_specs=compiler_diagnostic_specs(),
-        doctrine_rows=tuple(
-            dict(entry) for _, entry in sorted(DESIGN_DOCTRINE_ENTRIES.items())
-        ),
+        # Through the module's own accessor, which deepcopies and hands back
+        # only the capability fields. Reading the raw catalog and shallow-
+        # copying each entry left `cross_refs`/`mutual_exclusion` aliased to
+        # module state.
+        doctrine_rows=tuple(design_doctrine_capability_rows()),
         recipe_entries=recipe_entries,
         contribution_kinds=tuple(RECIPE_CONTRIBUTION_KINDS),
     )

@@ -921,3 +921,41 @@ def test_rewriting_the_label_legend_moves_the_revision():
         (_CONTRACT_FIXTURES / "process_ir_authoring_v1.contract.json").read_text()
     )
     assert committed["diagnostic_label_legend"] == DIAGNOSTIC_LABEL_LEGEND
+
+
+def test_the_published_capability_table_matches_the_registry_exactly():
+    """#146 F4. The §8 table went stale for the fourth consecutive slice.
+
+    `PROCESS_IR_V1.md` §8 calls itself "the immutable
+    `PROCESS_IR_V1_CAPABILITIES` manifest" and every slice (#140/#141/#142/#146)
+    hand-appended to it; #146 added two rows and forgot. Nothing recorded the
+    table as partial and no test compared it to the registry, so the drift was
+    silent — while a two-way parity test for the PROJECTION had existed all
+    along. This extends the same discipline to the document.
+
+    The four prose-grouped rows were split one-per-key so the comparison is
+    literally key-for-key and needs no alias map to go stale in turn.
+    """
+    import re
+
+    from boomi_mcp.models.process_ir import PROCESS_IR_V1_CAPABILITIES
+
+    doc = (
+        Path(__file__).resolve().parents[1]
+        / "docs"
+        / "architecture"
+        / "PROCESS_IR_V1.md"
+    ).read_text()
+    section = doc.split("## 8. Capability states", 1)[1].split("\n## 9.", 1)[0]
+
+    published = set()
+    for line in section.splitlines():
+        if not line.startswith("| `"):
+            continue
+        published.add(re.match(r"\| `([a-z0-9_]+)`", line).group(1))
+
+    assert published == set(PROCESS_IR_V1_CAPABILITIES), {
+        "in the doc only": sorted(published - set(PROCESS_IR_V1_CAPABILITIES)),
+        "in the registry only": sorted(set(PROCESS_IR_V1_CAPABILITIES) - published),
+    }
+    assert len(published) == 25, len(published)
