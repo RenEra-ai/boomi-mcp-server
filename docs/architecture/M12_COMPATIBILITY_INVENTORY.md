@@ -1120,11 +1120,15 @@ context_effect='new_connection'` — and both companions are fields the derivati
 real cause was that an enrichment wrote exactly ONE field, so the needed pair was not constructible;
 a rescue pass now retries each rejected option with one companion and reaches both (15 and 4 accepted
 combinations respectively). The lesson is cheap and general: **when a validator rejects a probe, its
-message is the specification for what the probe is missing** — read it before hypothesising. Fields whose type declares no
-options get one truthy and one falsy accepted value — the only two predicates a guard can apply
-without knowing the value — plus a combined all-root-metadata shape, because single-field enrichments
-cannot express a **co-presence** condition (dropping that shape when the set went one-field-at-a-time
-was itself a coverage regression, caught in review).
+message is the specification for what the probe is missing** — read it before hypothesising. Fields whose type declares no options get one truthy and one falsy accepted value — the **first**
+accepted value from each group, and nothing more. That covers presence- and truthiness-keyed
+conditions and no other value-blind predicate: a guard keying on type (`isinstance(x, dict)`), on
+`is None`, on length, or on internal structure is unsampled, verified rather than assumed — a
+type-gated `description` bypass survives this sweep today. (Earlier drafts called truthy/falsy "the
+only two predicates a guard can apply" and implied every accepted value was sent; both were wrong.)
+They are joined by a combined all-root-metadata shape, because single-field enrichments cannot express
+a **co-presence** condition — dropping that shape when the set went one-field-at-a-time was itself a
+coverage regression, caught in review.
 
 **What the shape sampling does NOT reach**, stated because naming it is not the same as covering it:
 it varies the four config levels' *fields*, never descending into structured values.
@@ -1136,7 +1140,7 @@ assignments the bare shape *rejects* — which is the bypass case, and is what m
 not "full enrichment". And the enrichment bound (`_SYNC_ENRICHED_MAX_LENGTH`) is **lower than** the
 sweep bound (`_SYNC_CROSSCHECK_MAX_LENGTH`), so a bypass at the top chain length gated on a config
 field is unsampled. That disagreement is a real hole, not a neutral allocation; making the two agree
-was measured at 36.8s for the file versus 4.9s and rejected on cost alone.
+was measured at 36.8s for the file versus its current 4.9s — 7.5× — and rejected on cost alone.
 
 **Two remedies are recorded here rather than done in #139E, and neither is a proof on its own:**
 

@@ -316,8 +316,10 @@ _SYNC_STAGE_IDS = {
 #: Measured, so the trade is visible instead of asserted: enriching to 3 runs the
 #: file in 1.7s, to 4 in 4.9s, to 5 in 36.8s. The last would make this bound and
 #: ``_SYNC_CROSSCHECK_MAX_LENGTH`` finally agree, and was rejected on cost alone --
-#: a >20x slowdown of the file to sample one more length of a limit that never
-#: closes. 4 is where the two ranges stop agreeing, and length 5 is bare-only.
+#: 7.5x the current file time, to sample one more length of a limit that never
+#: closes. (An earlier note called it ">20x", which compared 36.8s against the
+#: superseded 1.7s baseline rather than the 4.9s this file now costs -- a stale
+#: number carried across a change of baseline.) Length 5 is bare-only.
 _SYNC_ENRICHED_MAX_LENGTH = 4
 
 _SYNC_CROSSCHECK_MAX_LENGTH = 5
@@ -369,11 +371,13 @@ _SYNC_STRUCTURAL_ROOT_KEYS = frozenset({"pipeline", "process_kind"})
 #: Values tried for a field whose type declares no option set. The FIRST accepted
 #: value from each group is kept, giving one truthy and one falsy probe.
 #:
-#: That covers presence- and truthiness-keyed conditions. It does NOT cover every
-#: value-blind predicate -- a guard can also key on type, on ``is None``, on length,
-#: or on internal structure, and keeping only the first accepted value per group
-#: means those go unsampled. Do not restate this as "the only two predicates a guard
-#: can apply"; an earlier draft did, and it was simply wrong.
+#: That covers presence- and truthiness-keyed conditions, and NOTHING ELSE. Only the
+#: FIRST accepted value per group is kept, so a guard keying on type
+#: (``isinstance(x, dict)``), on ``is None``, on length, or on internal structure is
+#: unsampled -- verified, not assumed: a type-gated ``description`` bypass survives
+#: this sweep today. Do not restate this as "the only two predicates a guard can
+#: apply", nor as "every accepted value is sent"; earlier drafts did both, and both
+#: were wrong.
 _SYNC_TRUTHY_PROBE_VALUES = ("probe", {"probe": "value"}, 1, True)
 _SYNC_FALSY_PROBE_VALUES = ("", {}, 0, False)
 
@@ -674,8 +678,8 @@ def _sync_probe_shape(seq):
     #    outside-grammar sweep itself runs to _SYNC_CROSSCHECK_MAX_LENGTH. Those two
     #    bounds do NOT agree, and the gap is a real hole rather than a neutral
     #    allocation: a bypass at the top length gated on a config field is invisible
-    #    here. Making them agree was measured at 36.8s for this file versus 4.9s, and
-    #    rejected on that ground alone -- see the constant for the numbers;
+    #    here. Making them agree was measured at 36.8s for this file versus its
+    #    current 4.9s -- 7.5x -- and rejected on that ground alone;
     #  * the loop SHORT-CIRCUITS at the first variant that lowers, and `bare` is
     #    first, so an assignment the bare shape already accepts never sees an
     #    enrichment at all. That is correct for the question being asked -- "is this
