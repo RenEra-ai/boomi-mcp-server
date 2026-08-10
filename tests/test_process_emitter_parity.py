@@ -378,11 +378,10 @@ _SYNC_FALSY_PROBE_VALUES = ("", {}, 0, False)
 #: does not supply -- reaching them would require a purpose-built chain per option,
 #: which is the sampling limit, not a bug to fix here.
 _SYNC_OMITTED_OPTIONS = {
-    # Need companion stage metadata this generic chain does not supply.
-    "stage:failure_behavior": ["retry", "catch"],
-    # Rejected BY DESIGN: this dialect accepts only `ordering` edges, so the
-    # control-flow edge kinds are not reachable here at all. Pinned rather than
-    # filtered so the distinction stays visible.
+    # Rejected BY DESIGN and not rescuable by any companion: this dialect accepts
+    # only `ordering` edges, so the control-flow edge kinds are unreachable here.
+    # (`failure_behavior`'s `retry`/`catch` used to be listed too, on a reason that
+    # was wrong -- see the rescue pass, which now reaches them.)
     "edge:edge_kind": ["branch", "decision_true", "decision_false", "loop_back"],
 }
 
@@ -441,7 +440,11 @@ def _sync_derive_enrichments():
     inherent value-space limit in THE HONEST LIMIT: these options are declared,
     finite, and already enumerated here, and were simply being discarded.
 
-    Fields with no accepted value are pinned in ``_SYNC_UNPROBEABLE_FIELDS``.
+    A declared option rejected when set alone is then RETRIED with one companion
+    enrichment before being given up on -- the validator's message names what it
+    needs, and the companion is usually a field already probed here. Fields with no
+    accepted value at all are pinned in ``_SYNC_UNPROBEABLE_FIELDS``; options that
+    survive even the rescue are pinned in ``_SYNC_OMITTED_OPTIONS``.
     """
     stage_config = (
         _SYNC_PIPELINE_BINDING_KEYS | _SYNC_PIPELINE_LISTENER_KEYS | _SYNC_PIPELINE_MAP_KEYS
@@ -463,7 +466,7 @@ def _sync_derive_enrichments():
                 # invariably the neutral default, so the probe sent
                 # ``side_effect="none"`` and never ``"write"`` -- backwards, since a
                 # guard is far likelier to key on the latter.
-                accepted = [v for v in declared if _sync_enrichment_is_accepted(level, name, v)]
+                accepted = [v for v in declared if _sync_enrichment_is_accepted({level: {name: v}})]
                 # A declared option can be rejected here yet be valid WITH companion
                 # metadata this fixed probe chain does not supply, in which case it is
                 # silently dropped. _SYNC_UNPROBEABLE_FIELDS pins whole fields only,
@@ -481,7 +484,7 @@ def _sync_derive_enrichments():
                 accepted = []
                 for group in (_SYNC_TRUTHY_PROBE_VALUES, _SYNC_FALSY_PROBE_VALUES):
                     hit = next(
-                        (v for v in group if _sync_enrichment_is_accepted(level, name, v)), None
+                        (v for v in group if _sync_enrichment_is_accepted({level: {name: v}})), None
                     )
                     if hit is not None:
                         accepted.append(hit)
@@ -495,6 +498,32 @@ def _sync_derive_enrichments():
         f"{sorted(unprobeable)} (pinned: {sorted(_SYNC_UNPROBEABLE_FIELDS)}). A field "
         f"that silently becomes unprobeable shrinks the sweep; decide deliberately."
     )
+    # RESCUE rejected declared options with one companion, instead of dropping them.
+    # A rejected option is not necessarily unreachable: the validator's own message
+    # names what it needs -- `failure_behavior='retry' requires side_effect
+    # read/write/read_write`, `'catch' requires context_effect='new_connection'` --
+    # and both companions are fields already probed here. The first version of this
+    # pin asserted those two were "unreachable on a generic chain", which was simply
+    # not reading the rejection text: the real cause was that enrichments wrote
+    # exactly ONE field, so the needed pair was not constructible. Live QA caught it.
+    singles = list(enrichments)
+    still_omitted = {}
+    for key, skipped in sorted(omitted.items()):
+        level, name = key.split(":", 1)
+        for value in skipped:
+            rescue = None
+            for companion_label, companion_extra in singles:
+                merged = {lv: dict(fields) for lv, fields in companion_extra.items()}
+                merged.setdefault(level, {})[name] = value
+                if _sync_enrichment_is_accepted(merged):
+                    rescue = (companion_label, merged)
+                    break
+            if rescue is None:
+                still_omitted.setdefault(key, []).append(value)
+            else:
+                enrichments.append((f"{key}={value!r}+{rescue[0]}", rescue[1]))
+    omitted = still_omitted
+
     assert omitted == _SYNC_OMITTED_OPTIONS, (
         f"the set of declared-but-unsent OPTIONS changed to {omitted} (pinned: "
         f"{_SYNC_OMITTED_OPTIONS}). An option dropped here is a value the sweep no "
@@ -522,8 +551,13 @@ def _sync_derive_enrichments():
     return tuple(enrichments)
 
 
-def _sync_enrichment_is_accepted(level, name, value):
-    """Does a minimal known-good chain still lower with this field set?"""
+def _sync_enrichment_is_accepted(extra):
+    """Does a minimal known-good chain still lower with this enrichment applied?
+
+    Takes a whole ``{level: {field: value}}`` enrichment rather than one field, so a
+    declared option that is invalid ALONE but valid with a companion can be probed
+    as the pair it actually needs.
+    """
     stages = [
         {"key": "k0", "kind": "read", "config": {"primitive": "db_read", **_SYNC_STAGE_IDS["db_read"]}},
         {"key": "k1", "kind": "send", "config": {"primitive": "rest_send", **_SYNC_STAGE_IDS["rest_send"]}},
@@ -535,7 +569,7 @@ def _sync_enrichment_is_accepted(level, name, value):
             "dependencies": [{"from_stage": "k0", "to_stage": "k1"}],
         },
     }
-    _sync_apply_enrichment(config, {level: {name: value}})
+    _sync_apply_enrichment(config, extra)
     try:
         SyncPipelineBuilder.lower_config(copy.deepcopy(config))
     except BuilderValidationError:

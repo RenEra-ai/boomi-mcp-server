@@ -1107,11 +1107,17 @@ fields pinned. (`PipelineSpec` contributes nothing: its fields are exactly `stag
 `dependencies`, so these are all the levels the config tree has.) A field is probed with **every declared option that is accepted when set alone on the probe chain**,
 not just the first: `Literal` options come in declaration order and the first is invariably the
 neutral default, so the set was sending `side_effect="none"` and never `"write"` — backwards, since a
-guard is far likelier to key on the latter. The "when set alone" qualifier is load-bearing, and the
-pin that enforces it found a second case immediately: `failure_behavior`'s `retry`/`catch` need
-companion stage metadata the generic chain does not supply, and `edge_kind`'s control-flow options are
-rejected by this dialect by design. Both are pinned in `_SYNC_OMITTED_OPTIONS`, so an option silently
-dropping out of the sweep fails the suite rather than shrinking it. Fields whose type declares no
+guard is far likelier to key on the latter. Pinning the *omitted options per field* — not just wholly-unprobeable fields — is what made the
+remaining gaps visible, and it paid twice. It surfaced `edge_kind`'s four control-flow options
+(rejected by this dialect by design, so genuinely unreachable and still pinned), and it exposed a
+false reason I had written for `failure_behavior`'s `retry`/`catch`: I claimed they "need companion
+metadata this generic chain does not supply". **The validator's own rejection text said otherwise** —
+`failure_behavior='retry' requires side_effect read/write/read_write`, `'catch' requires
+context_effect='new_connection'` — and both companions are fields the derivation already probes. The
+real cause was that an enrichment wrote exactly ONE field, so the needed pair was not constructible;
+a rescue pass now retries each rejected option with one companion and reaches both (15 and 4 accepted
+combinations respectively). The lesson is cheap and general: **when a validator rejects a probe, its
+message is the specification for what the probe is missing** — read it before hypothesising. Fields whose type declares no
 options get one truthy and one falsy accepted value — the only two predicates a guard can apply
 without knowing the value — plus a combined all-root-metadata shape, because single-field enrichments
 cannot express a **co-presence** condition (dropping that shape when the set went one-field-at-a-time
