@@ -4681,38 +4681,31 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
         Path(__file__).resolve().parents[1]
         / "src" / "boomi_mcp" / "patterns" / "primitives"
     )
-    def _module_constants(tree):
-        return {
-            target.id: node.value.value
-            for node in tree.body
-            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
-            and isinstance(node.value.value, str)
-            for target in node.targets
-            if isinstance(target, ast.Name)
-        }
-
-    # Module-level string constants, resolved PACKAGE-WIDE. `_soap_common`
-    # writes `"connector_type": SOAP_CONNECTOR_ALIAS` — an `ast.Name`, not a
-    # literal — so a constant-only reader saw 3 of the 4 families and was blind
-    # to precisely the one this guard exists for. Per-FILE resolution fixed that
-    # one spelling and left the next: `soap_fetch` and `soap_send` already
-    # `from ._soap_common import SOAP_CONNECTOR_ALIAS`, so a family named by an
-    # imported constant would be invisible again.
-    trees = {source: ast.parse(source.read_text()) for source in primitives.glob("*.py")}
-    package_constants = {}
-    for tree in trees.values():
-        package_constants.update(_module_constants(tree))
+    # Names resolved in each module's OWN RUNTIME NAMESPACE, not by parsing.
+    #
+    # A static reader has to be taught every way a name can be bound, and this
+    # sweep was patched along that axis four times: bare literal, then a
+    # module-level constant, then one imported from a sibling, then an
+    # annotated assignment — each fix teaching it one more spelling while the
+    # next stayed invisible. `getattr` on the imported module knows all of them
+    # at once, including any the language grows later, and it also removes the
+    # glob-order ambiguity a package-wide constant map introduced. What stays
+    # out of reach is a family computed at runtime, which no static sweep could
+    # harvest either.
+    import importlib
 
     written = set()
-    for source, tree in trees.items():
-        constants = dict(package_constants)
-        constants.update(_module_constants(tree))  # the file's own wins
+    for source in primitives.glob("*.py"):
+        module = importlib.import_module(
+            f"boomi_mcp.patterns.primitives.{source.stem}"
+        )
+        tree = ast.parse(source.read_text())
 
-        def _value(node):
+        def _value(node, _module=module):
             if isinstance(node, ast.Constant):
                 return node.value
             if isinstance(node, ast.Name):
-                return constants.get(node.id)
+                return getattr(_module, node.id, None)
             return None
 
         for node in ast.walk(tree):
@@ -4730,6 +4723,7 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
             mode = literal.get("operation_mode")
             if isinstance(family, str) and isinstance(mode, str):
                 written.add((family, mode))
+
     assert written, "no primitive connector-action literals found"
     # ...and the reader really does see the constant-named family, or the
     # sweep below grades a set that silently excludes it.
