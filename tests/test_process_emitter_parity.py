@@ -26,7 +26,7 @@ TWO independent corpora live here; they share no machinery on purpose.
    its size is a measurement, and ``test_sync_corpus_covers_every_canonical_chain``
    recomputes it on every run — by READING the builder's accepted stage-kind
    sequences out of its own source and probing each through the real gate, never by
-   modelling the grammar. Three successive models of it each failed open; see
+   modelling the grammar. Four successive models of it each failed open; see
    ``_sync_probe_chain_space`` for what each one missed and who caught it.
 
    The direct-IR oracle above is structurally unreachable for this dialect and
@@ -309,9 +309,16 @@ _SYNC_STAGE_IDS = {
 #: length multiplies the probe count by |kind-primitive pairs| = 8. Measured --
 #: 4: ~0.05s, 5: +0.34s, 6: +3.23s, against a file that runs in well under 2s.
 #: 5 is affordable; 6 is not, for one more length of a limit that never closes.
-#: Chain lengths at or below which every derived enrichment is probed. Beyond it
-#: only the bare shape is sent -- see the allocation note in _sync_probe_shape.
-_SYNC_ENRICHED_MAX_LENGTH = 3
+#: Chain lengths at or below which the derived enrichments are offered. Beyond it
+#: only the bare shape is sent, so a bypass gated on a config FIELD at a length above
+#: this is unsampled -- a real gap, named here rather than implied by the constant.
+#:
+#: Measured, so the trade is visible instead of asserted: enriching to 3 runs the
+#: file in 1.7s, to 4 in 4.9s, to 5 in 36.8s. The last would make this bound and
+#: ``_SYNC_CROSSCHECK_MAX_LENGTH`` finally agree, and was rejected on cost alone --
+#: a >20x slowdown of the file to sample one more length of a limit that never
+#: closes. 4 is where the two ranges stop agreeing, and length 5 is bare-only.
+_SYNC_ENRICHED_MAX_LENGTH = 4
 
 _SYNC_CROSSCHECK_MAX_LENGTH = 5
 
@@ -359,9 +366,14 @@ def _sync_fingerprint(config):
 #: allow-list.
 _SYNC_STRUCTURAL_ROOT_KEYS = frozenset({"pipeline", "process_kind"})
 
-#: Values tried for a field whose type declares no option set. One accepted value is
-#: kept from each group, giving a presence-keyed and a truthiness-keyed probe -- the
-#: only two predicates a guard can apply without knowing the value itself.
+#: Values tried for a field whose type declares no option set. The FIRST accepted
+#: value from each group is kept, giving one truthy and one falsy probe.
+#:
+#: That covers presence- and truthiness-keyed conditions. It does NOT cover every
+#: value-blind predicate -- a guard can also key on type, on ``is None``, on length,
+#: or on internal structure, and keeping only the first accepted value per group
+#: means those go unsampled. Do not restate this as "the only two predicates a guard
+#: can apply"; an earlier draft did, and it was simply wrong.
 _SYNC_TRUTHY_PROBE_VALUES = ("probe", {"probe": "value"}, 1, True)
 _SYNC_FALSY_PROBE_VALUES = ("", {}, 0, False)
 
@@ -371,12 +383,15 @@ _SYNC_FALSY_PROBE_VALUES = ("", {}, 0, False)
 #: needs a value matching the stage's connector family, ``map_id`` is only valid on
 #: a map stage, and ``component_ref`` needs a resolvable component -- none of which
 #: this generic probe can supply.
-#: Declared options that exist on a field but are NOT accepted when set alone on the
-#: fixed probe chain, so the sweep never sends them. Pinned for the same reason as
-#: the field-level set above: a partial omission is a value the probe silently stops
-#: covering. ``retry``/``catch`` need companion stage metadata this generic chain
-#: does not supply -- reaching them would require a purpose-built chain per option,
-#: which is the sampling limit, not a bug to fix here.
+#: Declared options that survive even the companion-rescue pass, so the sweep never
+#: sends them. Pinned for the same reason as the field-level set above: a partial
+#: omission is a value the probe silently stops covering.
+#:
+#: ``failure_behavior``'s ``retry``/``catch`` were listed here on the stated reason
+#: that they "need companion metadata this generic chain does not supply". That was
+#: false -- the validator's rejection text names the companion outright, and both are
+#: fields already probed here -- and the rescue pass now reaches them. Only genuinely
+#: unreachable options belong in this dict.
 _SYNC_OMITTED_OPTIONS = {
     # Rejected BY DESIGN and not rescuable by any companion: this dialect accepts
     # only `ordering` edges, so the control-flow edge kinds are unreachable here.
@@ -617,11 +632,12 @@ def _sync_probe_shape(seq):
     # SAMPLING ALLOCATION, stated as what actually executes rather than as an ideal.
     # Two things bound it, and both matter:
     #
-    #  * the enrichments are OFFERED only at short chain lengths (where every
-    #    shape-keyed bypass found in review lived, and where the grammar's own chains
-    #    are); beyond that only the bare shape is sent. Offering them at every length
-    #    costs ~9x for one more length of a limit that never closes -- measured 14.6s
-    #    vs 1.9s;
+    #  * the enrichments are OFFERED only up to _SYNC_ENRICHED_MAX_LENGTH, while the
+    #    outside-grammar sweep itself runs to _SYNC_CROSSCHECK_MAX_LENGTH. Those two
+    #    bounds do NOT agree, and the gap is a real hole rather than a neutral
+    #    allocation: a bypass at the top length gated on a config field is invisible
+    #    here. Making them agree was measured at 36.8s for this file versus 4.9s, and
+    #    rejected on that ground alone -- see the constant for the numbers;
     #  * the loop SHORT-CIRCUITS at the first variant that lowers, and `bare` is
     #    first, so an assignment the bare shape already accepts never sees an
     #    enrichment at all. That is correct for the question being asked -- "is this
@@ -786,8 +802,8 @@ def _sync_probe_chain_space():
     cheap bounded cross-check then guards the extraction itself.
 
     THE HONEST LIMIT -- stated as a principle, because every attempt to state it as
-    a LIST of residual classes has itself been incomplete. Three successive drafts
-    enumerated "the" residual classes and both were refuted within one review round;
+    a LIST of residual classes has itself been incomplete. Every draft of this passage
+    that enumerated "the" residual classes was refuted within one review round;
     enumerating them is the same mistake as modelling the grammar, one level up.
 
     What is PROVEN: for the chains this harness reaches, the corpus covers exactly
@@ -807,7 +823,7 @@ def _sync_probe_chain_space():
     unsampled. Naming it is not the same as covering it: an arbitrarily nested value
     space is the same unreachable case as a value-keyed condition. No finite variant set can close that dimension, because acceptance
     can be keyed on a VALUE (``label == "magic"``) rather than on a field's presence,
-    so a bypass always exists and is constructible in minutes. Three successive
+    so a bypass always exists and is constructible in minutes. Successive
     versions of this sampling were broken in review -- chain length, then root-key
     shape, then stage/edge shape -- and a fourth would be no harder. Adding
     dimensions moves the bypass; it never removes it. Do not read the enrichment

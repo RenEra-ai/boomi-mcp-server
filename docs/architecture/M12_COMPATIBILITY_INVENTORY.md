@@ -1069,7 +1069,7 @@ derives from them today, but nothing pins that.
    read, so an unrecognised form kills instead of slipping through.
 
 **The honest limit — stated as a principle, because every attempt to state it as a LIST of residual
-classes has itself been incomplete.** Three successive drafts of this passage enumerated "the"
+classes has itself been incomplete.** Every draft of this passage that enumerated "the"
 residual classes and each was refuted within one review round; enumerating them is the same mistake as
 modelling the grammar, one level up.
 
@@ -1083,7 +1083,7 @@ The trials are **bounded** in chain length by a named constant (`_SYNC_CROSSCHEC
 merely **sampled** in config shape (`_SYNC_PROBE_ENRICHMENTS`) — not bounded, *sampled*, and the
 difference is the whole point. No finite variant set closes that dimension, because acceptance can be
 keyed on a **value** (`label == "magic"`) rather than on a field's presence, so a bypass always exists
-and is constructible in minutes. Three successive versions of the sampling were broken in review —
+and is constructible in minutes. Successive versions of the sampling were broken in review —
 chain length, then root-key shape, then stage/edge shape — and a fourth would be no harder. Adding
 dimensions moves the bypass; it never removes it.
 
@@ -1127,10 +1127,13 @@ was itself a coverage regression, caught in review).
 it varies the four config levels' *fields*, never descending into structured values.
 `process_extensions` carries a nested `connections[].fields[]` shape that `lower_config` passes
 through, and the probe sends it a scalar. An arbitrarily nested value space is the same unreachable
-case as a value-keyed condition. Nor is every enrichment applied to every candidate: the variant loop
-short-circuits at the first shape that lowers and the bare shape is first, so enrichments do their
-work exclusively on assignments the bare shape *rejects* — which is the bypass case, and is what makes
-them cheap, but is not "full enrichment".
+case as a value-keyed condition. Nor is every enrichment applied to every candidate, in two distinct ways. The variant loop
+short-circuits at the first shape that lowers and the bare shape is first, so enrichments act only on
+assignments the bare shape *rejects* — which is the bypass case, and is what makes them cheap, but is
+not "full enrichment". And the enrichment bound (`_SYNC_ENRICHED_MAX_LENGTH`) is **lower than** the
+sweep bound (`_SYNC_CROSSCHECK_MAX_LENGTH`), so a bypass at the top chain length gated on a config
+field is unsampled. That disagreement is a real hole, not a neutral allocation; making the two agree
+was measured at 36.8s for the file versus 4.9s and rejected on cost alone.
 
 **Two remedies are recorded here rather than done in #139E, and neither is a proof on its own:**
 
