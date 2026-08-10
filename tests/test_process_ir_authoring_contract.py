@@ -4681,17 +4681,10 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
         Path(__file__).resolve().parents[1]
         / "src" / "boomi_mcp" / "patterns" / "primitives"
     )
-    # Names resolved in each module's OWN RUNTIME NAMESPACE, not by parsing.
-    #
-    # A static reader has to be taught every way a name can be bound, and this
-    # sweep was patched along that axis four times: bare literal, then a
-    # module-level constant, then one imported from a sibling, then an
-    # annotated assignment — each fix teaching it one more spelling while the
-    # next stayed invisible. `getattr` on the imported module knows all of them
-    # at once, including any the language grows later, and it also removes the
-    # glob-order ambiguity a package-wide constant map introduced. What stays
-    # out of reach is a family computed at runtime, which no static sweep could
-    # harvest either.
+    # Values resolved in each module's OWN RUNTIME NAMESPACE, not by parsing.
+    # The accurate statement of what this reaches, and what it does not, is on
+    # `_value` below — one place, so the two cannot contradict each other the
+    # way an outer summary and an inner note already did once.
     import importlib
 
     written = set()
@@ -4743,7 +4736,19 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
             if isinstance(family, str) and isinstance(mode, str):
                 written.add((family, mode))
 
-    assert written, "no primitive connector-action literals found"
+    # The EXPECTED set, not merely a non-empty one. Aggregating and grading
+    # whatever was harvested fails OPEN: a family that stops being harvested —
+    # because its KEY is a constant, or the dict is built with `**base` — just
+    # silently leaves the set, and every downstream check then passes over a
+    # smaller universe. Three such spellings were measured, each breaking ten
+    # production tests while this guard stayed green. Pinning the set makes any
+    # of them a failure here, whatever the reader can or cannot parse.
+    assert written == {
+        ("database", "get"),
+        ("database", "send"),
+        ("rest", "execute"),
+        ("soap_client", "execute"),
+    }, sorted(written)
     # ...and the reader really does see the constant-named family, or the
     # sweep below grades a set that silently excludes it.
     assert any(
