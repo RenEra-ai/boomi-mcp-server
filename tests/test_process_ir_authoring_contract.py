@@ -4681,14 +4681,8 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
         Path(__file__).resolve().parents[1]
         / "src" / "boomi_mcp" / "patterns" / "primitives"
     )
-    written = set()
-    for source in primitives.glob("*.py"):
-        tree = ast.parse(source.read_text())
-        # Module-level string constants, resolved. `_soap_common` writes
-        # `"connector_type": SOAP_CONNECTOR_ALIAS` — an `ast.Name`, not a
-        # literal — so a constant-only reader saw 3 of the 4 families and was
-        # blind to precisely the one this guard exists for.
-        constants = {
+    def _module_constants(tree):
+        return {
             target.id: node.value.value
             for node in tree.body
             if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
@@ -4696,6 +4690,23 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
             for target in node.targets
             if isinstance(target, ast.Name)
         }
+
+    # Module-level string constants, resolved PACKAGE-WIDE. `_soap_common`
+    # writes `"connector_type": SOAP_CONNECTOR_ALIAS` — an `ast.Name`, not a
+    # literal — so a constant-only reader saw 3 of the 4 families and was blind
+    # to precisely the one this guard exists for. Per-FILE resolution fixed that
+    # one spelling and left the next: `soap_fetch` and `soap_send` already
+    # `from ._soap_common import SOAP_CONNECTOR_ALIAS`, so a family named by an
+    # imported constant would be invisible again.
+    trees = {source: ast.parse(source.read_text()) for source in primitives.glob("*.py")}
+    package_constants = {}
+    for tree in trees.values():
+        package_constants.update(_module_constants(tree))
+
+    written = set()
+    for source, tree in trees.items():
+        constants = dict(package_constants)
+        constants.update(_module_constants(tree))  # the file's own wins
 
         def _value(node):
             if isinstance(node, ast.Constant):

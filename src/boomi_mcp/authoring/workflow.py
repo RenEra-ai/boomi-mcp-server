@@ -247,8 +247,10 @@ def _action_type_from_config(config: Mapping[str, Any]) -> Optional[str]:
     substrings of the connector type, which is how a first version silently
     excluded SOAP: `soap_client` contains neither "rest" nor "database", so it
     fell through to a `None` the compiler then reported as an unsupported
-    action, citing a contract entry that publishes it as supported. Resolvers
-    keep each family's spelling out of this function.
+    action, citing a contract entry that publishes it as supported. The REST and
+    SOAP families are matched by resolver rather than by name; `database` is
+    still an inline literal here, exactly as it is in
+    `_classify_connector_action`.
 
     Two families are deliberately NOT derived. `wss` (the listener family) and
     plain `http` fall through to `None`, and that is the correct answer: they
