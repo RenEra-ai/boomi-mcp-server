@@ -234,38 +234,60 @@ def _action_type_from_config(config: Mapping[str, Any]) -> Optional[str]:
 
     Reading `config["action_type"]` alone was wrong: no primitive writes that
     key into a component config. `db_extract`/`db_write` write
-    `operation_mode`, the REST primitives write `operation_mode` plus `method`,
-    and `action_type` appears only inside `emit_fragment` — a different
-    structure. So every ProcessIR document over a real component plan came back
-    with no action at all: a `connector_call` was rejected as an unsupported
-    action, and `source`/`target` failed with "operation symbol is missing
-    derived connector metadata".
+    `operation_mode`, the REST primitives add `method`, the SOAP primitives
+    write `operation_mode: "execute"`, and `action_type` appears only inside
+    `emit_fragment` — a different structure. So every ProcessIR document over a
+    real component plan came back with no action at all: a `connector_call` was
+    rejected as an unsupported action, and `source`/`target` failed with
+    "operation symbol is missing derived connector metadata".
 
-    The derivation mirrors the one the legacy builder already uses
-    (`integration_builder._connector_ref_expectations`), rather than inventing a
-    second convention: database maps `operation_mode` get/send to the mixed-case
-    verbs the emitter writes, REST prefers `method`, and `action_type` stays an
-    accepted alias because the legacy path accepts it too.
+    Families are resolved through the CANONICAL resolvers, the same ones
+    `integration_builder._classify_connector_action` uses (an earlier version
+    of this docstring cited `_connector_ref_expectations`, which does not exist) — not by matching
+    substrings of the connector type, which is how a first version silently
+    excluded SOAP: `soap_client` contains neither "rest" nor "database", so it
+    fell through to a `None` the compiler then reported as an unsupported
+    action, citing a contract entry that publishes it as supported. Resolvers
+    cover every family the builders know, so the set cannot drift the way an
+    inline list of names does.
+
+    `action_type` stays an accepted alias because the legacy path accepts it —
+    except that the SOAP builder REJECTS it as an unsupported operation field,
+    so for SOAP the derivation is the only way through.
     """
+    from ..categories.components.builders.connector_builder import (
+        _resolve_rest_connector_type,
+        _resolve_soap_client_connector_type,
+    )
+
     declared = config.get("action_type") or config.get("actionType")
     declared = declared.strip() if isinstance(declared, str) else ""
 
-    family = config.get("connector_type")
-    family = family.strip().lower() if isinstance(family, str) else ""
+    connector_type = config.get("connector_type")
+    family = connector_type.strip().lower() if isinstance(connector_type, str) else ""
+
+    mode = config.get("operation_mode")
+    mode = mode.strip().lower() if isinstance(mode, str) else ""
 
     if family == "database":
-        mode = config.get("operation_mode")
-        mode = mode.strip().lower() if isinstance(mode, str) else ""
+        # The emitter writes these mixed-case verbs; the DB source's `Get`
+        # mirrors the write target's `Send`.
         if mode == "get":
             return "Get"
         if mode == "send":
             return "Send"
         return declared or None
 
-    if "rest" in family or "http" in family:
+    if _resolve_rest_connector_type(connector_type) is not None:
         method = config.get("method")
         if isinstance(method, str) and method.strip():
             return method.strip().upper()
+        return declared.upper() if declared else None
+
+    if _resolve_soap_client_connector_type(connector_type) is not None:
+        # SOAP Client exposes a single EXECUTE action and no per-request verb.
+        if mode == "execute":
+            return "EXECUTE"
         return declared.upper() if declared else None
 
     return declared or None

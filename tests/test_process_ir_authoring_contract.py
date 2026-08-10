@@ -4644,14 +4644,85 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
     assert _action_type_from_config(
         {"connector_type": "database", "operation_mode": "send"}
     ) == "Send"
+    # A REAL connector type, resolved through the canonical resolver. An
+    # earlier version of this test invented `officialboomi-X-rest-prod`, which
+    # no resolver recognises — the same mistake as the defects it guards.
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        _resolve_rest_connector_type,
+    )
+
+    rest_family = _resolve_rest_connector_type("rest")
+    assert rest_family, "no canonical REST connector type"
     assert _action_type_from_config(
-        {"connector_type": "officialboomi-X-rest-prod", "method": "patch"}
+        {"connector_type": rest_family, "operation_mode": "execute", "method": "patch"}
     ) == "PATCH"
+
+    # SOAP: derived from `operation_mode` alone, because the SOAP builder
+    # REJECTS `action_type` as an unsupported operation field — so for this
+    # family the derivation is the only way through, not a convenience.
+    assert _action_type_from_config(
+        {"connector_type": "soap_client", "operation_mode": "execute"}
+    ) == "EXECUTE"
+
     # `action_type` stays an accepted alias, because the legacy path accepts it.
     assert _action_type_from_config(
         {"connector_type": "wss", "action_type": "Listen"}
     ) == "Listen"
     # ...and a plan that declares nothing derivable claims nothing.
     assert _action_type_from_config({"connector_type": "database"}) is None
+
+    # Every family a connector primitive writes is covered — derived from the
+    # primitives, so a new family cannot be silently unhandled the way SOAP was.
+    import ast
+
+    primitives = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "boomi_mcp" / "patterns" / "primitives"
+    )
+    written = set()
+    for source in primitives.glob("*.py"):
+        for node in ast.walk(ast.parse(source.read_text())):
+            if not isinstance(node, ast.Dict):
+                continue
+            keys = [k.value for k in node.keys if isinstance(k, ast.Constant)]
+            if "connection_ref_key" not in keys:
+                continue
+            literal = {
+                k.value: v.value
+                for k, v in zip(node.keys, node.values)
+                if isinstance(k, ast.Constant) and isinstance(v, ast.Constant)
+            }
+            family = literal.get("connector_type")
+            mode = literal.get("operation_mode")
+            if isinstance(family, str) and isinstance(mode, str):
+                written.add((family, mode))
+    assert written, "no primitive connector-action literals found"
+
+    # Every family a primitive writes must be RECOGNISED. Not "yields an
+    # action from these two keys alone" — the REST primitives set `method`
+    # from a runtime value, so a literal-only config is legitimately
+    # incomplete. What must never happen again is a family falling through
+    # every branch unrecognised, which is exactly how SOAP produced a `None`
+    # the compiler then reported as an unsupported action.
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        _resolve_soap_client_connector_type,
+    )
+
+    unrecognised = sorted(
+        family
+        for family, _mode in written
+        if family != "database"
+        and _resolve_rest_connector_type(family) is None
+        and _resolve_soap_client_connector_type(family) is None
+    )
+    assert unrecognised == [], unrecognised
+
+    # ...and where the literal IS complete, it derives an action.
+    for family, mode in sorted(written):
+        if _resolve_rest_connector_type(family) is not None:
+            continue  # method is runtime-supplied
+        assert _action_type_from_config(
+            {"connector_type": family, "operation_mode": mode}
+        ), (family, mode)
 
 
