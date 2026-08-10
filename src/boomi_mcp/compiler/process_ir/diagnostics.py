@@ -173,9 +173,10 @@ _REMEDIATION = {
         "Provide a connector-action component symbol for this call's operation_ref."
     ),
     PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND: (
-        "Give the operation symbol the connection it is bound to in the component "
-        "plan, and provide a symbol for that connection. A connector-action "
-        "component does not declare its own connection, so it cannot be inferred."
+        "Name the connection on the OPERATION COMPONENT in the component plan: "
+        "set its `config.connection_key` to the key of the connector-settings "
+        "component it binds to, and include that component in the plan. The IR "
+        "does not author this edge, so it cannot be inferred from the node."
     ),
     PROCESS_IR_REFERENCE_CONNECTION_MISMATCH: (
         "Bind the operation to a connector-settings component of the SAME connector "

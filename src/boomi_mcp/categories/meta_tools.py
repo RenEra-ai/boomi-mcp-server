@@ -6746,6 +6746,14 @@ def _authoring_contract_schema(
         page = query_builder(**(query or {}))
     except ProcessIRAuthoringQueryError as exc:
         return _authoring_filter_value_error(schema_name, exc)
+    except (TypeError, ValueError, AttributeError) as exc:
+        # A bad filter VALUE is the caller's mistake, not an authority outage.
+        # The broad handler below reported an unhashable `authoring_entry_id`
+        # as `unavailable, retryable: true` — advice to retry an input that
+        # will fail identically every time.
+        return _authoring_filter_value_error(
+            schema_name, _InvalidFilterValue(sorted(query or {}), exc)
+        )
     except Exception as exc:  # noqa: BLE001
         # An AUTHORITY this projection reads failed to build. Reported as a
         # typed unavailable answer, exactly as `list_capabilities` already
@@ -6805,6 +6813,16 @@ def _authoring_filter_error(schema_name: str, fields: List[str]) -> Dict[str, An
             "get_schema_template(schema_name='process_ir_authoring', ...)."
         ),
     }
+
+
+class _InvalidFilterValue(Exception):
+    """A filter value the projection could not use, shaped for the typed error."""
+
+    def __init__(self, fields: List[str], cause: Exception) -> None:
+        super().__init__(str(cause))
+        self.field = ", ".join(fields)
+        self.allowed = ()
+        self.rule = f"a filter value was not usable ({type(cause).__name__})"
 
 
 def _authoring_source_unavailable(schema_name: str, exc: Any) -> Dict[str, Any]:

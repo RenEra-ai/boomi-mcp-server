@@ -4280,6 +4280,15 @@ def test_a_page_out_of_published_order_or_miscounted_is_refused():
     # ...unchanged, it round-trips.
     assert _revalidated_contract_page(dict(served)) == served
 
+    # An ADJACENT SWAP — the minimal genuine order violation. A full reversal
+    # on a TRUNCATED page is refused by the cursor validator added in the same
+    # commit, which masked the order check entirely: deleting the order
+    # validator left the whole suite green.
+    swapped = list(served["entries"])
+    swapped[0], swapped[1] = swapped[1], swapped[0]
+    with pytest.raises(pydantic.ValidationError):
+        _revalidated_contract_page(dict(served, entries=swapped))
+
     reversed_page = dict(served, entries=list(reversed(served["entries"])))
     with pytest.raises(pydantic.ValidationError):
         _revalidated_contract_page(reversed_page)
@@ -4305,3 +4314,110 @@ def test_a_page_out_of_published_order_or_miscounted_is_refused():
     ]
     with pytest.raises(pydantic.ValidationError):
         _revalidated_contract_page(dict(truncated, next_after_entry_id="zzz.not_last"))
+
+
+def test_a_compile_that_names_no_diagnostic_still_answers(monkeypatch):
+    """#547. The zero-diagnostics fallback is reachable and was pinned by nothing.
+
+    It is the one place the generic headline is correct — there is no authority
+    message to forward — and it reaches the caller as both the diagnostic
+    `message` and the envelope `error`.
+    """
+    from boomi_mcp.authoring.workflow import _COMPILE_GENERIC_MESSAGE
+    from boomi_mcp.compiler.process_ir import pipeline
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+
+    def _raise_bare(*_a, **_k):
+        raise ProcessIRCompileError(())
+
+    monkeypatch.setattr(pipeline, "compile_process_ir_v1", _raise_bare)
+
+    fixture = json.loads(
+        (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "authoring_contract"
+            / "clean_room"
+            / "decision_route_connector_map.json"
+        ).read_text()
+    )
+    payload = integration_builder._compile_authoring(
+        None, "p", {"authoring_request": fixture["request"]}
+    )
+    assert payload["_success"] is False
+    diagnostics = payload.get("authoring_diagnostics") or []
+    assert [d["message"] for d in diagnostics] == [_COMPILE_GENERIC_MESSAGE]
+    assert _COMPILE_GENERIC_MESSAGE in str(payload.get("error"))
+    # It BLOCKS. Downgrading a blocked compile to a warning kept every message
+    # assertion above true while changing what the answer means.
+    assert [d["severity"] for d in diagnostics] == ["error"]
+    assert payload["error_code"] == "AUTHORING_COMPILE_BLOCKED"
+    # ...and the headline is non-empty whatever the constant is reworded to.
+    assert _COMPILE_GENERIC_MESSAGE.strip()
+
+
+def test_an_unusable_filter_value_is_the_callers_mistake_not_an_outage():
+    """#548. A bad value was reported as a retryable authority outage.
+
+    `authoring_entry_id=["a"]` is unhashable, so the projection raised a
+    `TypeError` that F9's broad handler labelled
+    `AUTHORING_SCHEMA_SOURCE_UNAVAILABLE, retryable: true` — advice to retry an
+    input that fails identically every time.
+    """
+    from boomi_mcp.errors import AUTHORING_SCHEMA_SOURCE_UNAVAILABLE, INVALID_INPUT
+
+    for bad in ([], ["a"], {"k": 1}, {"a"}):
+        payload = server.get_schema_template(schema_name=SELECTOR, authoring_entry_id=bad)
+        assert payload["_success"] is False, bad
+        assert payload["error_code"] == INVALID_INPUT, (bad, payload["error_code"])
+        assert payload["error_code"] != AUTHORING_SCHEMA_SOURCE_UNAVAILABLE
+        assert payload.get("retryable") is not True, bad
+
+    # ...and a genuine outage keeps its own code, so the two are distinguishable.
+    assert server.get_schema_template(schema_name=SELECTOR)["_success"] is True
+
+
+def test_a_padded_connection_key_binds_rather_than_breaking_the_document():
+    """#544. F6 began reading a field that had never been read, un-normalized.
+
+    `config["connection_key"]` is plain caller text, so `f"$ref:{key}"` turned
+    surrounding whitespace into a value `ComponentSymbolV1` refuses — and the
+    caller got a raw pydantic string naming an internal compiler model with
+    their own value echoed back, the exact shape F1 had just removed one field
+    over. It also struck `source`/`target` documents, where the key is
+    irrelevant: a document that compiled before this field was read began
+    failing.
+    """
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+    from boomi_mcp.recipes.materialization import build_symbol_table
+
+    def _symbols(connection_key):
+        config = {"action_type": "Get", "connector_type": "database"}
+        if connection_key is not _ABSENT:
+            config["connection_key"] = connection_key
+        return {
+            s.ref: s
+            for s in build_symbol_table(
+                [
+                    IntegrationComponentSpec(
+                        key="conn", name="C", type="connector-settings",
+                        config={"connector_type": "database"},
+                    ),
+                    IntegrationComponentSpec(
+                        key="op", name="O", type="connector-action", config=config
+                    ),
+                ]
+            ).symbols
+        }
+
+    # Padded binds to the same symbol as unpadded.
+    assert _symbols("  conn  ")["$ref:op"].connection_ref == "$ref:conn"
+    assert _symbols("conn")["$ref:op"].connection_ref == "$ref:conn"
+
+    # Anything unusable leaves the symbol UNBOUND — which resolves to the typed
+    # "connection not found" diagnostic, never a pydantic string.
+    for unusable in ("", "   ", 7, ["a"], {"k": 1}, None, _ABSENT):
+        assert _symbols(unusable)["$ref:op"].connection_ref is None, unusable
+
+
+_ABSENT = object()

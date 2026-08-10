@@ -158,7 +158,20 @@ def build_symbol_table(
     for component in components:
         connector_type, action_type = metadata.get(component.key, (None, None))
         ref = f"{_REF_PREFIX}{component.key}"
-        connection_key = (component.config or {}).get("connection_key")
+        # NORMALIZED, and only used when it yields a usable key. `connection_key`
+        # is plain caller config with no upstream normalization, so interpolating
+        # it raw put `"$ref: src_conn"` — or `"$ref:"` — into a field whose
+        # validator refuses it, and the caller got a raw pydantic string naming
+        # an internal compiler model with their own value echoed back. It also
+        # struck `source`/`target` documents, where this key is irrelevant: a
+        # document that compiled before this field was read began failing.
+        # An unusable key leaves the symbol unbound, which resolves to the typed
+        # `..._CONNECTION_NOT_FOUND` diagnostic — the answer that already exists
+        # for "this operation names no connection".
+        raw_connection_key = (component.config or {}).get("connection_key")
+        connection_key = (
+            raw_connection_key.strip() if isinstance(raw_connection_key, str) else ""
+        )
         symbols.append(
             ComponentSymbolV1(
                 ref=ref,
