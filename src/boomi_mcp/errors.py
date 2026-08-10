@@ -342,6 +342,11 @@ RECIPE_REQUEST_INVALID = "RECIPE_REQUEST_INVALID"
 # taxonomies stay authoritative about their own domains while the caller still
 # learns which phase it must re-run.
 AUTHORING_SCHEMA_VERSION_UNAVAILABLE = "AUTHORING_SCHEMA_VERSION_UNAVAILABLE"
+#: An authoring selector cannot be built because an AUTHORITY it derives from
+#: failed. Distinct from a version that does not exist: the selector is real
+#: and the request was valid, so the honest answer is "unavailable, retry",
+#: not a short catalog that looks complete.
+AUTHORING_SCHEMA_SOURCE_UNAVAILABLE = "AUTHORING_SCHEMA_SOURCE_UNAVAILABLE"
 AUTHORING_CAPABILITY_REVISION_MISMATCH = "AUTHORING_CAPABILITY_REVISION_MISMATCH"
 AUTHORING_LIVE_DEPLOYMENT_DRIFT = "AUTHORING_LIVE_DEPLOYMENT_DRIFT"
 AUTHORING_REQUIRED_DECISION_MISSING = "AUTHORING_REQUIRED_DECISION_MISSING"

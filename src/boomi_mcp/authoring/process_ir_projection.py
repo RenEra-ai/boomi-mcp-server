@@ -156,10 +156,15 @@ def collect_projection_sources() -> ProjectionSourcesV1:
     from ..models.recipe_contributions import RECIPE_CONTRIBUTION_KINDS
     from ..recipes import production_registry
 
-    try:
-        recipe_entries = tuple(production_registry().snapshot().get("entries", ()))
-    except Exception:  # noqa: BLE001 — a registry that cannot build is reported empty
-        recipe_entries = ()
+    # NOT swallowed. Every other source here is unguarded and a failure
+    # degrades honestly one layer up, where `contract.py` reports the selector
+    # `unavailable`. Recipes alone converted an exception to an empty tuple, so
+    # a dead registry served 171 entries with ZERO recipe links, `_success:
+    # true`, `truncated: false` and nothing saying the contract was incomplete
+    # — a caller could not tell "this construct links no recipe" from "the
+    # registry that knows died". Reporting less than the contract claims is
+    # worse than reporting that it is unavailable.
+    recipe_entries = tuple(production_registry().snapshot().get("entries", ()))
 
     return ProjectionSourcesV1(
         node_kinds=process_ir_v1_node_kinds(),

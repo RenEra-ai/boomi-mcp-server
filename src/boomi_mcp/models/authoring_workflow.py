@@ -678,10 +678,23 @@ def parse_authoring_request_v1(raw_payload: Any) -> "AuthoringRequestV1":
         if (
             isinstance(intent, Mapping)
             and intent.get("intent_kind") == "process_ir"
-            and isinstance(intent.get("process_ir"), Mapping)
+            # PRESENCE, not shape. Gating on `Mapping` meant `process_ir: []`,
+            # a string, a number or `null` skipped the ProcessIR parser entirely
+            # — on plan, compile AND apply — and fell through to raw pydantic,
+            # which answers `model_type` at `intent.process_ir.process_ir` with
+            # no PROCESS_IR_* code, no remediation and no contract citations.
+            # `parse_process_ir_v1` has a purpose-built answer for exactly that
+            # input, so the shape gate discarded a diagnostic that already
+            # existed. Still a presence check and not an unconditional call: an
+            # ABSENT `process_ir` must stay pydantic's "missing" rather than
+            # become a misleading "payload must be a JSON object".
+            and "process_ir" in intent
         ):
+            authored = intent["process_ir"]
             try:
-                parse_process_ir_v1(dict(intent["process_ir"]))
+                parse_process_ir_v1(
+                    dict(authored) if isinstance(authored, Mapping) else authored
+                )
             except ProcessIRValidationError as exc:
                 raise AuthoringRequestProcessIRValidationError(
                     tuple(

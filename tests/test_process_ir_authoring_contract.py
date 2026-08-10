@@ -4109,3 +4109,100 @@ def test_the_compile_call_site_forwards_the_authority_message(monkeypatch):
     assert served == {authored}, served
     # The envelope headline a caller reads first carries it too.
     assert authored in str(payload.get("error"))
+
+
+@pytest.mark.parametrize("authored", [[], "x", 7, None, True])
+def test_a_non_object_process_ir_gets_the_canonical_diagnostic(authored):
+    """F1. The parser was gated on `Mapping`, so these skipped it entirely.
+
+    A non-object `process_ir` fell through to raw pydantic and answered
+    `model_type` at `intent.process_ir.process_ir` — no `PROCESS_IR_*` code, no
+    remediation, no contract citation — on plan, compile and apply, while
+    `parse_process_ir_v1` already had a purpose-built answer for that exact
+    input.
+    """
+    for action in (
+        integration_builder._plan_authoring,
+        integration_builder._compile_authoring,
+    ):
+        request = json.loads(json.dumps(_process_ir_request({"kind": "stop"})))
+        request["authoring_request"]["intent"]["process_ir"] = authored
+        payload = action(None, "p", request)
+
+        assert payload["_success"] is False
+        codes = {row["code"] for row in payload["validation_errors"]}
+        assert codes == {"PROCESS_IR_SCHEMA_INVALID"}, codes
+        assert {row["path"] for row in payload["validation_errors"]} == {
+            "/intent/process_ir"
+        }
+        diagnostics = payload["authoring_diagnostics"]
+        assert diagnostics
+        for diagnostic in diagnostics:
+            assert diagnostic["remediation"]
+            assert diagnostic["authoring_contract_entry_ids"]
+
+
+def test_an_absent_process_ir_still_reports_missing_not_a_shape_error():
+    """The other half of F1's fix: a PRESENCE check, not an unconditional call.
+
+    Calling the parser unconditionally would answer "payload must be a JSON
+    object" for a key the caller simply did not send, which is a worse answer
+    than pydantic's `missing`.
+    """
+    request = json.loads(json.dumps(_process_ir_request({"kind": "stop"})))
+    request["authoring_request"]["intent"].pop("process_ir")
+    payload = integration_builder._plan_authoring(None, "p", request)
+
+    assert payload["_success"] is False
+    rows = payload["validation_errors"]
+    assert rows and all(row.get("type") == "missing" for row in rows), rows
+    assert not any("JSON object" in json.dumps(row) for row in rows)
+
+
+def test_a_dead_authority_is_reported_unavailable_not_served_short(monkeypatch):
+    """F9. A failed recipe registry used to serve a catalog that looked whole.
+
+    The lone `try/except` in `collect_projection_sources` turned a registry
+    failure into an empty tuple, so the contract served 171 entries with ZERO
+    recipe links, `_success: true` and `truncated: false` — indistinguishable,
+    from the caller's side, from a contract where no construct links a recipe.
+    Every other source there is unguarded and already degrades honestly.
+
+    Deleting the swallow alone was not enough: it let a raw `RuntimeError`
+    cross the MCP boundary, which is a worse answer than the short catalog. So
+    the page path reports the same typed `unavailable` that
+    `list_capabilities` already reported for this exact condition.
+    """
+    from boomi_mcp.authoring import process_ir_projection as projection
+    from boomi_mcp.errors import AUTHORING_SCHEMA_SOURCE_UNAVAILABLE
+
+    healthy = server.get_schema_template(schema_name=SELECTOR, category="recipe")
+    assert healthy["_success"] is True
+    assert healthy["contract_page"]["returned_entry_count"] > 0
+
+    def _dead():
+        raise RuntimeError("registry is dead")
+
+    monkeypatch.setattr("boomi_mcp.recipes.production_registry", _dead)
+    projection.reset_process_ir_authoring_cache()
+    try:
+        payload = server.get_schema_template(schema_name=SELECTOR, category="recipe")
+        assert payload["_success"] is False
+        assert payload["error_code"] == AUTHORING_SCHEMA_SOURCE_UNAVAILABLE
+        assert payload.get("status") == "unavailable"
+        assert payload.get("retryable") is True
+        # No short catalog, and no authority text or traceback in the answer.
+        assert "contract_page" not in payload
+        assert "registry is dead" not in json.dumps(payload)
+        assert "Traceback" not in json.dumps(payload)
+    finally:
+        # monkeypatch only undoes at TEARDOWN, so the recovery assertion below
+        # would otherwise still run against the dead registry.
+        monkeypatch.undo()
+        projection.reset_process_ir_authoring_cache()
+
+    # ...and the surface recovers once the authority does.
+    recovered = server.get_schema_template(schema_name=SELECTOR, category="recipe")
+    assert recovered["contract_page"]["returned_entry_count"] == (
+        healthy["contract_page"]["returned_entry_count"]
+    )

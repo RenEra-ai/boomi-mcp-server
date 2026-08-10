@@ -6746,6 +6746,17 @@ def _authoring_contract_schema(
         page = query_builder(**(query or {}))
     except ProcessIRAuthoringQueryError as exc:
         return _authoring_filter_value_error(schema_name, exc)
+    except Exception as exc:  # noqa: BLE001
+        # An AUTHORITY this projection reads failed to build. Reported as a
+        # typed unavailable answer, exactly as `list_capabilities` already
+        # reports the same condition — never as a raw traceback across the MCP
+        # boundary, and never as a short catalog. A registry that cannot build
+        # used to be swallowed into an empty tuple here, so a dead recipe
+        # registry served the contract with ZERO recipe links and `_success:
+        # true`: a caller could not tell "this construct links no recipe" from
+        # "the registry that knows died". Serving less than the contract claims
+        # is worse than saying it is unavailable.
+        return _authoring_source_unavailable(schema_name, exc)
 
     # RE-VALIDATE what is about to be served. The page model makes all seven
     # page-level rules correct by construction — FOUR by `Literal`
@@ -6793,6 +6804,27 @@ def _authoring_filter_error(schema_name: str, fields: List[str]) -> Dict[str, An
             "Drop the filter arguments, or request "
             "get_schema_template(schema_name='process_ir_authoring', ...)."
         ),
+    }
+
+
+def _authoring_source_unavailable(schema_name: str, exc: Any) -> Dict[str, Any]:
+    """The selector cannot be built because an authority it reads failed.
+
+    Carries the exception TYPE and not its text: an authority's failure message
+    is not a published contract and could name a path or a value.
+    """
+    from ..errors import AUTHORING_SCHEMA_SOURCE_UNAVAILABLE
+
+    return {
+        "_success": False,
+        "error_code": AUTHORING_SCHEMA_SOURCE_UNAVAILABLE,
+        "schema_name": schema_name,
+        "status": "unavailable",
+        "error": (
+            f"The '{schema_name}' authoring contract cannot be built: an "
+            f"authority it derives from is unavailable ({type(exc).__name__})."
+        ),
+        "retryable": True,
     }
 
 
