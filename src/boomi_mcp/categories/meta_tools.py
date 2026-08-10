@@ -6740,19 +6740,25 @@ def _authoring_contract_schema(
             return _authoring_filter_error(schema_name, sorted(query))
         return payload
 
+    from pydantic import ValidationError as PydanticValidationError
+
     from ..authoring.process_ir_projection import ProcessIRAuthoringQueryError
 
     try:
         page = query_builder(**(query or {}))
     except ProcessIRAuthoringQueryError as exc:
         return _authoring_filter_value_error(schema_name, exc)
-    except (TypeError, ValueError, AttributeError) as exc:
-        # A bad filter VALUE is the caller's mistake, not an authority outage.
-        # The broad handler below reported an unhashable `authoring_entry_id`
-        # as `unavailable, retryable: true` — advice to retry an input that
-        # will fail identically every time.
+    except PydanticValidationError as exc:
+        # A bad filter VALUE is the caller's mistake, not an authority outage —
+        # but ONLY this exception says so. A first version caught
+        # `ValueError`/`TypeError`/`AttributeError`, which inverted the case it
+        # was written to fix: a dead authority that happens to raise
+        # `ValueError` was then reported as caller blame with `retryable`
+        # dropped. Pydantic's own error is the one the query model raises, and
+        # it already names the offending field, so the envelope can blame that
+        # field alone instead of every filter that happened to be present.
         return _authoring_filter_value_error(
-            schema_name, _InvalidFilterValue(sorted(query or {}), exc)
+            schema_name, _InvalidFilterValue(_offending_filters(exc, query), exc)
         )
     except Exception as exc:  # noqa: BLE001
         # An AUTHORITY this projection reads failed to build. Reported as a
@@ -6815,11 +6821,27 @@ def _authoring_filter_error(schema_name: str, fields: List[str]) -> Dict[str, An
     }
 
 
+def _offending_filters(exc: Any, query: Any) -> List[str]:
+    """The filter names pydantic actually objected to, not every one supplied.
+
+    Naming all of them blamed valid values sitting beside the bad one.
+    """
+    named = []
+    for error in getattr(exc, "errors", lambda: ())():
+        for part in error.get("loc", ()):
+            if isinstance(part, str) and part not in named:
+                named.append(part)
+    return named or sorted(query or {})
+
+
 class _InvalidFilterValue(Exception):
     """A filter value the projection could not use, shaped for the typed error."""
 
     def __init__(self, fields: List[str], cause: Exception) -> None:
-        super().__init__(str(cause))
+        # The cause's TYPE only. Its text carries the caller's own value, the
+        # internal query model's name and a pydantic docs URL — none of which
+        # is a published contract.
+        super().__init__(type(cause).__name__)
         self.field = ", ".join(fields)
         self.allowed = ()
         self.rule = f"a filter value was not usable ({type(cause).__name__})"

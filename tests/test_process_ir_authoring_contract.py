@@ -4421,3 +4421,89 @@ def test_a_padded_connection_key_binds_rather_than_breaking_the_document():
 
 
 _ABSENT = object()
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [ValueError, TypeError, AttributeError, RuntimeError, KeyError, OSError],
+)
+def test_a_dead_authority_keeps_its_own_code_whatever_it_raises(monkeypatch, raised):
+    """#549. The caller-blame handler swallowed half the authority failures.
+
+    Catching `ValueError`/`TypeError`/`AttributeError` inverted the very case
+    the handler was added for: a dead registry raising one of them was
+    reported as the CALLER's bad input, with `retryable` dropped. The suite
+    pinned exactly one exception type and it happened to land in the safe half.
+    """
+    from boomi_mcp.authoring import process_ir_projection as projection
+    from boomi_mcp.errors import AUTHORING_SCHEMA_SOURCE_UNAVAILABLE
+
+    def _dead():
+        raise raised("registry is dead")
+
+    monkeypatch.setattr("boomi_mcp.recipes.production_registry", _dead)
+    projection.reset_process_ir_authoring_cache()
+    try:
+        payload = server.get_schema_template(schema_name=SELECTOR, category="recipe")
+        assert payload["_success"] is False, raised
+        assert payload["error_code"] == AUTHORING_SCHEMA_SOURCE_UNAVAILABLE, (
+            raised,
+            payload["error_code"],
+        )
+        assert payload.get("retryable") is True, raised
+        assert "registry is dead" not in json.dumps(payload)
+    finally:
+        monkeypatch.undo()
+        projection.reset_process_ir_authoring_cache()
+
+
+def test_the_invalid_filter_envelope_says_what_it_claims_to_say():
+    """#551. The new envelope's CONTENT was graded by nothing.
+
+    Blanking `field`, blanking `rule`, and publishing the raw cause — which
+    carries the caller's own value, the internal query model's name and a
+    pydantic docs URL — all survived.
+    """
+    payload = server.get_schema_template(
+        schema_name=SELECTOR, authoring_entry_id=["a"], category="diagnostic"
+    )
+    assert payload["_success"] is False
+
+    # It blames the offending filter and ONLY that one.
+    assert payload["invalid_parameter"] == "authoring_entry_id"
+    assert "category" not in payload["invalid_parameter"]
+    assert "authoring_entry_id" in payload["error"]
+
+    blob = json.dumps(payload)
+    assert "ProcessIRAuthoringQueryV1" not in blob
+    assert "pydantic" not in blob.lower()
+    assert "errors.pydantic.dev" not in blob
+    # ...and it names the failure kind rather than staying blank.
+    assert "ValidationError" in blob
+
+
+def test_the_connection_remediation_names_the_field_that_binds_it():
+    """#552. Only the byte snapshot covered this, and it cannot verify truth.
+
+    A caller who hits `..._CONNECTION_NOT_FOUND` has no other way to learn that
+    the edge is authored as `config.connection_key` on the operation component:
+    the IR does not carry it and nothing else in the contract names it.
+    """
+    from boomi_mcp.compiler.process_ir.diagnostics import compiler_diagnostic_specs
+
+    remediation = next(
+        (spec.get("remediation") or "")
+        for spec in compiler_diagnostic_specs()
+        if spec["code"] == "PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND"
+    )
+    assert "config.connection_key" in remediation, remediation
+    assert "connector-settings" in remediation
+
+    served = [
+        entry
+        for entry in build_process_ir_authoring_entries()
+        if "config.connection_key" in " ".join(entry.ordering_facts)
+    ]
+    assert [e.contract_entry_id for e in served] == [
+        "diagnostic.process_ir_reference_connection_not_found"
+    ]
