@@ -4502,9 +4502,15 @@ def test_the_invalid_filter_envelope_says_what_it_claims_to_say():
     # detail, not a contract term.
     assert "ValidationError" not in blob
     # It routes through the same query-error envelope every other bad filter
-    # uses, so the caller gets the recovery step rather than a bare rejection.
+    # uses, so the caller gets a recovery step rather than a bare rejection —
+    # and specifically the RULE branch, not the facet branch. Two of the six
+    # fields this can blame (`authoring_entry_id`, `after_entry_id`) are exact
+    # values with no facet, so "fetch the facets and filter with a published
+    # value" would be circular advice.
     assert payload["suggestion"]
-    assert "get_schema_template" in payload["suggestion"]
+    assert payload["suggestion"] == payload["rule"]
+    assert "the type the contract" in payload["suggestion"]
+    assert "allowed_values" not in payload
 
 
 def test_the_connection_remediation_names_the_field_that_binds_it():

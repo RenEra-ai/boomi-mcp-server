@@ -29,7 +29,6 @@ exists to remove.
 from __future__ import annotations
 
 import json
-from pydantic import ValidationError as PydanticValidationError
 from typing import (
     Any,
     Dict,
@@ -40,6 +39,8 @@ from typing import (
     Optional,
     Tuple,
 )
+
+from pydantic import ValidationError as PydanticValidationError
 
 from ..models.process_ir_authoring import (
     DIAGNOSTIC_LABEL_LEGEND,
@@ -1674,7 +1675,17 @@ def _query_error_from(exc: Any) -> "ProcessIRAuthoringQueryError":
         for part in error.get("loc", ()):
             if isinstance(part, str) and part not in fields:
                 fields.append(part)
-    return ProcessIRAuthoringQueryError(", ".join(fields) or "query", ())
+    # A RULE, not a facet. Two of the six fields this can blame
+    # (`authoring_entry_id`, `after_entry_id`) are exact values with no facet to
+    # publish, so the enum template's "fetch the facets, then filter with a
+    # published value" would send that caller in a circle — the same shape the
+    # envelope's own comment already warns about for the cursor.
+    return ProcessIRAuthoringQueryError(
+        ", ".join(fields) or "query",
+        (),
+        "the value supplied for this filter was not of the type the contract "
+        "declares; send the type named in the tool schema",
+    )
 
 
 def query_process_ir_authoring_contract(

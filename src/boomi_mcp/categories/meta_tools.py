@@ -6807,32 +6807,6 @@ def _authoring_filter_error(schema_name: str, fields: List[str]) -> Dict[str, An
     }
 
 
-def _offending_filters(exc: Any, query: Any) -> List[str]:
-    """The filter names pydantic actually objected to, not every one supplied.
-
-    Naming all of them blamed valid values sitting beside the bad one.
-    """
-    named = []
-    for error in getattr(exc, "errors", lambda: ())():
-        for part in error.get("loc", ()):
-            if isinstance(part, str) and part not in named:
-                named.append(part)
-    return named or sorted(query or {})
-
-
-class _InvalidFilterValue(Exception):
-    """A filter value the projection could not use, shaped for the typed error."""
-
-    def __init__(self, fields: List[str], cause: Exception) -> None:
-        # The cause's TYPE only. Its text carries the caller's own value, the
-        # internal query model's name and a pydantic docs URL — none of which
-        # is a published contract.
-        super().__init__(type(cause).__name__)
-        self.field = ", ".join(fields)
-        self.allowed = ()
-        self.rule = f"a filter value was not usable ({type(cause).__name__})"
-
-
 def _authoring_source_unavailable(schema_name: str, exc: Any) -> Dict[str, Any]:
     """The selector cannot be built because an authority it reads failed.
 
