@@ -79,7 +79,7 @@
         {
           "config": {
             "action_type": "Get",
-            "connection_key": "src_conn",
+            "connection_ref_key": "src_conn",
             "connector_type": "database"
           },
           "key": "src_op",
@@ -97,7 +97,7 @@
         {
           "config": {
             "action_type": "PATCH",
-            "connection_key": "tgt_conn",
+            "connection_ref_key": "tgt_conn",
             "connector_type": "officialboomi-X3979C-rest-prod"
           },
           "key": "tgt_op",

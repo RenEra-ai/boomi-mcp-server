@@ -3969,7 +3969,7 @@ def test_the_operation_symbol_carries_the_connection_its_plan_declares():
             key="op", name="O", type="connector-action",
             config={
                 "action_type": "Get",
-                "connection_key": "conn",
+                "connection_ref_key": "conn",
                 "connector_type": "database",
             },
         ),
@@ -4380,7 +4380,7 @@ def test_an_unusable_filter_value_is_the_callers_mistake_not_an_outage():
 def test_a_padded_connection_key_binds_rather_than_breaking_the_document():
     """#544. F6 began reading a field that had never been read, un-normalized.
 
-    `config["connection_key"]` is plain caller text, so `f"$ref:{key}"` turned
+    `config["connection_ref_key"]` is plain caller text, so `f"$ref:{key}"` turned
     surrounding whitespace into a value `ComponentSymbolV1` refuses — and the
     caller got a raw pydantic string naming an internal compiler model with
     their own value echoed back, the exact shape F1 had just removed one field
@@ -4394,7 +4394,7 @@ def test_a_padded_connection_key_binds_rather_than_breaking_the_document():
     def _symbols(connection_key):
         config = {"action_type": "Get", "connector_type": "database"}
         if connection_key is not _ABSENT:
-            config["connection_key"] = connection_key
+            config["connection_ref_key"] = connection_key
         return {
             s.ref: s
             for s in build_symbol_table(
@@ -4517,7 +4517,7 @@ def test_the_connection_remediation_names_the_field_that_binds_it():
     """#552. Only the byte snapshot covered this, and it cannot verify truth.
 
     A caller who hits `..._CONNECTION_NOT_FOUND` has no other way to learn that
-    the edge is authored as `config.connection_key` on the operation component:
+    the edge is authored as `config.connection_ref_key` on the operation component:
     the IR does not carry it and nothing else in the contract names it.
     """
     from boomi_mcp.compiler.process_ir.diagnostics import compiler_diagnostic_specs
@@ -4527,14 +4527,75 @@ def test_the_connection_remediation_names_the_field_that_binds_it():
         for spec in compiler_diagnostic_specs()
         if spec["code"] == "PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND"
     )
-    assert "config.connection_key" in remediation, remediation
+    assert "config.connection_ref_key" in remediation, remediation
     assert "connector-settings" in remediation
 
     served = [
         entry
         for entry in build_process_ir_authoring_entries()
-        if "config.connection_key" in " ".join(entry.ordering_facts)
+        if "config.connection_ref_key" in " ".join(entry.ordering_facts)
     ]
     assert [e.contract_entry_id for e in served] == [
         "diagnostic.process_ir_reference_connection_not_found"
     ]
+
+
+def test_a_connection_binding_written_by_a_real_primitive_resolves():
+    """Codex r24 P1. F6 read a field NO production path writes.
+
+    Every connector primitive — `db_extract`, `db_write`, `rest_fetch`,
+    `rest_send`, `_soap_common` — stores the operation's connection under
+    `config["connection_ref_key"]`, and `integration_builder` already routes on
+    that name. The first version of the F6 fix read `connection_key`, which
+    exists only in hand-written clean-room fixtures: they passed, and every
+    plan a primitive builds still failed reference resolution.
+
+    So the field name is taken from the PRIMITIVES rather than from a fixture,
+    and asserted to be the one they emit — a fixture agreeing with the code is
+    no evidence when the same author wrote both.
+    """
+    import ast
+
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+    from boomi_mcp.recipes.materialization import build_symbol_table
+
+    primitives = Path(__file__).resolve().parents[1] / "src" / "boomi_mcp" / "patterns" / "primitives"
+    emitted = set()
+    for source in primitives.glob("*.py"):
+        for node in ast.walk(ast.parse(source.read_text())):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if node.value.endswith("connection_ref_key"):
+                    emitted.add(node.value)
+    assert "connection_ref_key" in emitted, sorted(emitted)
+
+    symbols = {
+        s.ref: s
+        for s in build_symbol_table(
+            [
+                IntegrationComponentSpec(
+                    key="conn", name="C", type="connector-settings",
+                    config={"connector_type": "database"},
+                ),
+                IntegrationComponentSpec(
+                    key="op", name="O", type="connector-action",
+                    config={
+                        "operation_mode": "get",
+                        "connector_type": "database",
+                        "connection_ref_key": "conn",
+                    },
+                ),
+            ]
+        ).symbols
+    }
+    assert symbols["$ref:op"].connection_ref == "$ref:conn"
+
+    # ...and the remediation a caller receives names that same field, so the
+    # contract and the primitives cannot drift apart silently.
+    from boomi_mcp.compiler.process_ir.diagnostics import compiler_diagnostic_specs
+
+    remediation = next(
+        spec["remediation"]
+        for spec in compiler_diagnostic_specs()
+        if spec["code"] == "PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND"
+    )
+    assert "config.connection_ref_key" in remediation

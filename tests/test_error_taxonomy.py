@@ -64,7 +64,28 @@ def test_every_taxonomy_entry_is_a_spec_with_required_fields():
         assert spec.category
         assert spec.summary
         assert spec.owner.startswith("#")
-        assert spec.retryable is False
+        assert isinstance(spec.retryable, bool)
+
+
+def test_exactly_the_intended_codes_advertise_a_retry():
+    """`retryable` is a declared field, so a True is legitimate — but rare.
+
+    This assertion used to live in the shape test as `spec.retryable is False`
+    for EVERY code, which was true only because no retryable code existed yet:
+    it pinned an accident of the catalog's contents as though it were a rule,
+    and the first genuinely retryable condition would have had to either lie in
+    the catalog or quietly weaken the guard. Naming the set keeps the teeth —
+    a new retryable code is a decision someone has to make here — without
+    forcing the catalog to misdescribe itself.
+    """
+    retryable = {code for code, spec in ERROR_TAXONOMY.items() if spec.retryable}
+    assert retryable == {
+        # An authority the authoring contract derives from failed. The selector
+        # is real and the request was valid, so retrying can genuinely succeed —
+        # unlike every other code here, which describes a caller mistake or a
+        # permanent platform limit.
+        "AUTHORING_SCHEMA_SOURCE_UNAVAILABLE",
+    }, sorted(retryable)
 
 
 def test_expected_codes_present():

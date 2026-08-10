@@ -1383,6 +1383,18 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             owner="#145",
         ),
         ErrorCodeSpec(
+            code=AUTHORING_SCHEMA_SOURCE_UNAVAILABLE,
+            category="authoring_surface",
+            retryable=True,
+            summary=(
+                "An authoring selector could not be built because an authority "
+                "it derives from failed. The selector is real and the request "
+                "was valid, so the honest answer is that it is temporarily "
+                "unavailable rather than a partial contract that looks whole."
+            ),
+            owner="#146",
+        ),
+        ErrorCodeSpec(
             code=AUTHORING_SCHEMA_VERSION_UNAVAILABLE,
             category="authoring_surface",
             retryable=False,

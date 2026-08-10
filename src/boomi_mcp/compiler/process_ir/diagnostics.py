@@ -174,7 +174,7 @@ _REMEDIATION = {
     ),
     PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND: (
         "Name the connection on the OPERATION COMPONENT in the component plan: "
-        "set its `config.connection_key` to the key of the connector-settings "
+        "set its `config.connection_ref_key` to the key of the connector-settings "
         "component it binds to, and include that component in the plan. The IR "
         "does not author this edge, so it cannot be inferred from the node."
     ),

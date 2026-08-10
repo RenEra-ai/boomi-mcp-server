@@ -168,7 +168,13 @@ def build_symbol_table(
         # An unusable key leaves the symbol unbound, which resolves to the typed
         # `..._CONNECTION_NOT_FOUND` diagnostic — the answer that already exists
         # for "this operation names no connection".
-        raw_connection_key = (component.config or {}).get("connection_key")
+        # `connection_ref_key` — the field every connector primitive writes
+        # (`db_extract`, `db_write`, `rest_fetch`, `rest_send`, `_soap_common`)
+        # and the one `integration_builder` already routes on. An earlier
+        # version read `connection_key`, which appears in NO production path:
+        # only in hand-written clean-room fixtures, which is why they passed
+        # while every plan a primitive builds still failed resolution.
+        raw_connection_key = (component.config or {}).get("connection_ref_key")
         connection_key = (
             raw_connection_key.strip() if isinstance(raw_connection_key, str) else ""
         )
