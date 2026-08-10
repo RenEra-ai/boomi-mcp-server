@@ -4673,150 +4673,47 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
     # ...and a plan that declares nothing derivable claims nothing.
     assert _action_type_from_config({"connector_type": "database"}) is None
 
-    # Every family a connector primitive writes is covered. Two directions, and
-    # they need different mechanisms — conflating them is why an earlier version
-    # of this comment claimed more reach than it had:
+    # THE PROPERTY THAT ACTUALLY FAILED, pinned directly.
     #
-    #   SUBTRACTION (a known family stops being harvested) is closed by pinning
-    #   the expected set below; the reason a value became unreadable does not
-    #   matter, because the set simply differs.
+    # #558 was not "a primitive writes a family": it was "the served contract
+    # publishes an action as SUPPORTED while this derivation returns None for
+    # it" — so a caller was told the action was available and then refused,
+    # with the rejection citing the very entry that promised it.
     #
-    #   ADDITION (production starts writing a family the derivation cannot
-    #   handle — the SOAP defect) is NOT closed by a set pin: a new family that
-    #   the reader also cannot see leaves the set unchanged. It is closed by the
-    #   floor below, which is keyed off the module's SOURCE TEXT rather than its
-    #   parse, so it has no next spelling level.
-    import ast
-
-    primitives = (
-        Path(__file__).resolve().parents[1]
-        / "src" / "boomi_mcp" / "patterns" / "primitives"
+    # Six rounds were spent instead grading a sweep over primitive SOURCE, and
+    # each round closed one spelling axis and opened the next: literal, module
+    # constant, sibling import, external import, AnnAssign, attribute,
+    # subscript, dict key, `**` spread, non-recursive glob, co-location. That
+    # sweep is gone. The allowlist is the contract's own published authority,
+    # it is a runtime registry rather than text, and it has no spelling axis at
+    # all — so this cannot be defeated by how a family is written down.
+    from boomi_mcp.compiler.process_ir.connector_capabilities import (
+        connector_capability_rows,
     )
-    # Values resolved in each module's OWN RUNTIME NAMESPACE, not by parsing.
-    # The accurate statement of what this reaches, and what it does not, is on
-    # `_value` below — one place, so the two cannot contradict each other the
-    # way an outer summary and an inner note already did once.
-    import importlib
 
-    per_source = {}
+    published = {(row["family"], row["action"]) for row in connector_capability_rows()}
+    assert len(published) >= 5, sorted(published)
 
-    def _families_in(source):
-        return per_source.get(source, set())
+    # A published family/action must be derivable from SOME component plan that
+    # names it. The mode is whatever the family's own convention is — that is
+    # what the derivation exists to translate.
+    modes = {"Get": "get", "Send": "send", "EXECUTE": "execute"}
+    underivable = []
+    for family, action in sorted(published):
+        config = {"connector_type": family, "operation_mode": modes.get(action, "execute")}
+        if action not in modes:
+            config["method"] = action  # REST carries the verb
+        if _action_type_from_config(config) != action:
+            underivable.append((family, action, _action_type_from_config(config)))
+    assert underivable == [], underivable
 
-    written = set()
-    for source in primitives.glob("*.py"):
-        module = importlib.import_module(
-            f"boomi_mcp.patterns.primitives.{source.stem}"
-        )
-        tree = ast.parse(source.read_text())
-
-        def _value(node, _module=module):
-            # Evaluated in the module's own namespace. Two enumerations lived
-            # in this function, not one: the BINDING form (how the constant is
-            # assigned) and the REFERENCE form (how the dict names it). Fixing
-            # the first four times left the second — `_helpers.FAMILY` and
-            # `_MAP["k"]` are compile-time constants that a Name/Constant
-            # reader cannot see. Evaluating the expression handles both.
-            #
-            # `ast.Call` is refused deliberately: importing a module is one
-            # thing, running an arbitrary call out of its source during a test
-            # sweep is another. What this still cannot reach is a family bound
-            # to `self.ATTR` or shadowed by a local — both are reference forms
-            # no module-level evaluation can resolve, and neither is closed
-            # here. Saying so precisely, because an earlier version of this
-            # note claimed a runtime-computed family was the only gap and that
-            # was wrong three ways.
-            if any(isinstance(child, ast.Call) for child in ast.walk(node)):
-                return None
-            try:
-                return eval(  # noqa: S307 — module's own source, Call excluded
-                    compile(ast.Expression(body=node), "<sweep>", "eval"),
-                    dict(vars(_module)),
-                )
-            except Exception:  # noqa: BLE001 — an unresolvable name is just absent
-                return None
-
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Dict):
-                continue
-            keys = [k.value for k in node.keys if isinstance(k, ast.Constant)]
-            if "connection_ref_key" not in keys:
-                continue
-            literal = {
-                k.value: _value(v)
-                for k, v in zip(node.keys, node.values)
-                if isinstance(k, ast.Constant)
-            }
-            family = literal.get("connector_type")
-            mode = literal.get("operation_mode")
-            if isinstance(family, str) and isinstance(mode, str):
-                written.add((family, mode))
-                per_source.setdefault(source, set()).add((family, mode))
-
-    # The EXPECTED set, not merely a non-empty one. Aggregating and grading
-    # whatever was harvested fails OPEN: a family that stops being harvested —
-    # because its KEY is a constant, or the dict is built with `**base` — just
-    # silently leaves the set, and every downstream check then passes over a
-    # smaller universe. Three such spellings were measured, each breaking ten
-    # production tests while this guard stayed green. Pinning the set makes any
-    # of them a failure here, whatever the reader can or cannot parse.
-    assert written == {
-        ("database", "get"),
-        ("database", "send"),
-        ("rest", "execute"),
-        ("soap_client", "execute"),
-    }, sorted(written)
-
-    # THE ADDITION FLOOR. Any primitive module whose source text mentions
-    # `connection_ref_key` builds a connector-action component, so it must
-    # contribute at least one harvested pair. Text, not parse: a family added
-    # in a spelling the reader cannot see leaves the pinned set untouched and
-    # would otherwise be invisible — which is the direction the SOAP defect
-    # came from, and the one a set pin alone does not cover.
-    harvested_from = {
-        source
-        for source in primitives.glob("*.py")
-        if any(
-            (family, mode) in written
-            for family, mode in _families_in(source)
-        )
-    }
-    builds_one = {
-        source
-        for source in primitives.glob("*.py")
-        if "connection_ref_key" in source.read_text()
-    }
-    assert builds_one, "no primitive mentions connection_ref_key"
-    assert builds_one <= harvested_from, sorted(
-        s.name for s in builds_one - harvested_from
-    )
-    # ...and the reader really does see the constant-named family, or the
-    # sweep below grades a set that silently excludes it.
-    assert any(
-        _resolve_soap_client_connector_type_check(family) for family, _ in written
-    ), sorted(written)
-
-    # Every family a primitive writes must be RECOGNISED. Not "yields an
-    # action from these two keys alone" — the REST primitives set `method`
-    # from a runtime value, so a literal-only config is legitimately
-    # incomplete. What must never happen again is a family falling through
-    # every branch unrecognised, which is exactly how SOAP produced a `None`
-    # the compiler then reported as an unsupported action.
-    unrecognised = sorted(
-        family
-        for family, _mode in written
-        if family != "database"
-        and _resolve_rest_connector_type(family) is None
-        and _resolve_soap_client_connector_type(family) is None
-    )
-    assert unrecognised == [], unrecognised
-
-    # ...and where the literal IS complete, it derives an action.
-    for family, mode in sorted(written):
-        if _resolve_rest_connector_type(family) is not None:
-            continue  # method is runtime-supplied
-        assert _action_type_from_config(
-            {"connector_type": family, "operation_mode": mode}
-        ), (family, mode)
+    # ...and a family the contract does NOT publish stays underived, so the
+    # derivation cannot quietly widen past what the allowlist promises.
+    assert _action_type_from_config(
+        {"connector_type": "wss", "operation_mode": "listen"}
+    ) is None
+    assert _action_type_from_config(
+        {"connector_type": "ftp", "operation_mode": "execute"}
+    ) is None
 
 
