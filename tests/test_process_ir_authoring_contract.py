@@ -4707,8 +4707,19 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
             underivable.append((family, action, _action_type_from_config(config)))
     assert underivable == [], underivable
 
-    # ...and a family the contract does NOT publish stays underived, so the
-    # derivation cannot quietly widen past what the allowlist promises.
+    # ...and an unpublished family derives nothing FROM `operation_mode` alone,
+    # which is the documented intent: `wss` and `http` are refused by absence
+    # rather than by a branch.
+    #
+    # This is NOT the allowlist gate, and saying so matters — an earlier
+    # version of this comment claimed it was, while forty lines above the same
+    # function asserts `wss` + `action_type` deriving "Listen". `action_type`
+    # is an accepted alias for ANY family, so the derivation can and does
+    # produce actions the allowlist never published. What refuses them is
+    # `lookup_capability` in `connector_resolution`, pinned by
+    # `test_unsupported_family_action_pairs_are_rejected`. A maintainer reading
+    # this for a gate would conclude that check is redundant; it is the one
+    # doing the work.
     assert _action_type_from_config(
         {"connector_type": "wss", "operation_mode": "listen"}
     ) is None
