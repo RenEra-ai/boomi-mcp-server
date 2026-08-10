@@ -1026,12 +1026,74 @@ asserting a completeness that measurement refuted.
 
 `tests/fixtures/process_ir/sync_pipeline_emitter_parity_cases.json` therefore carries **all 16**
 fingerprints plus one verb-casing duplicate (17 cases), and case names *are* the fingerprint
-(`<source_primitive>[_map]_<target_primitive>`) so an omission is visible by inspection. Crucially,
-`test_sync_corpus_covers_every_canonical_chain` **recomputes** the universe from
-`_SYNC_PIPELINE_STAGE_PRIMITIVE` / `_SYNC_PIPELINE_STAGE_ALT_PRIMITIVE` and puts each candidate
-through the real gate: a primitive added to either table fails the suite until the corpus grows, which
-a hand-maintained literal can never do. This is the #139D lesson applied — a recurring class needs a
-structural fix, not another enumeration.
+(`<source_primitive>[_map]_<target_primitive>`) so an omission is visible by inspection.
+
+**The derivation then failed open twice more, and only the third fix is durable.** Each time the
+*model* was the defect, not its parameters — the same shape as the original finding, one level deeper:
+
+1. The first fix recomputed the universe from `_SYNC_PIPELINE_STAGE_PRIMITIVE` /
+   `_SYNC_PIPELINE_STAGE_ALT_PRIMITIVE`, but still modelled the grammar as `source × target × ±map`,
+   assigning kinds to slots via the adapter's `_SOURCE_STAGE_KINDS` / `_TARGET_STAGE_KINDS`. The
+   **Codex impl-vs-plan review** found that a kind in *both* role sets is silently filed source-only
+   by the `if`/`elif`: give `fetch` a target role and permit `read → fetch`, and `db_read_rest_fetch`
+   is reachable, canonical and uncovered with every guard green.
+2. Dropping the role model left an **arity** model — lengths fixed to {2, 3}. Permitting a 4-stage
+   `fetch → map → map → send` left four canonical chains uncovered, and those are byte-**distinct**
+   (both map stages are dropped, emitting zero map shapes) while parity still holds, because
+   canonical and legacy drop them identically. That is exactly the uniform drift a differential
+   cannot see, so this missing coverage was real coverage — unlike the byte-identical case above it.
+3. Replacing the fixed lengths with a sweep that walked upward until a length was dry was *still* a
+   model: dryness is **local**. A grammar accepting 5-stage chains while 4 stays dry stops the sweep
+   at 4 and is missed entirely — verified reachable and canonical by mutation.
+
+No bounded sampling of the chain space is complete against a grammar that can change shape. So
+`test_sync_corpus_covers_every_canonical_chain` stopped sampling and now **reads the grammar**: it
+extracts `lower_config`'s accepted stage-kind sequences from the builder's own source by AST,
+enumerates every primitive assignment over exactly those sequences, and lets the routing gate split
+the results. A cheap bounded sweep cross-checks the *extraction* (nothing accepted may live outside
+the extracted literal). A newly permitted sequence, a new stage kind and a new primitive all fail the
+suite until the corpus grows.
+
+4. **And reading it by AST was itself a fourth model — a *syntax* model.** The first extraction searched
+   for a comparison that looked like the grammar and skipped anything else, so *extending* the guard
+   stayed invisible while the match count held at 1. Hoisting the tuple into a module constant
+   (`… and kinds not in _CONST`) or adding `… and len(kinds) != 5` both evaded it — and the first of
+   those is an ordinary cleanup no reviewer would question, which is why it was graded above the
+   earlier two. The extraction now anchors on the guard **statement** and refuses any test it cannot
+   read, so an unrecognised form kills instead of slipping through.
+
+**The honest limit, recorded rather than glossed — and there are TWO residual classes, which must not
+be conflated because the obvious remedy fixes only one.**
+
+- **The extraction class.** An AST pattern over an expression cannot be a completeness oracle: the set
+  of forms it does not recognise is open-ended, so the tightening buys *fail-closed*, not *proof*.
+  **Hoisting the accepted-sequence tuple to a module-level constant in `process_flow_builder.py` and
+  importing it removes this class outright** — the test would then compare against the very object the
+  builder compares against, with nothing left to extract. ~3 lines of production change moving no
+  emitted byte and no MCP surface; deliberately not in #139E, whose claim is zero production diff, and
+  **the intended resolution for whichever slice next touches that file**.
+- **The bypass class, which hoisting does NOT touch.** An acceptance path that never mentions `kinds`
+  — e.g. `if len(order) == 5: pass` ahead of the guard — is invisible to *any* reading of the grammar
+  statement, because the statement is still present and still says exactly what it said. Measured
+  under such a bypass, the extraction returns the byte-identical ten sequences, so an imported
+  constant would too. Its **only** detector is the bounded behavioural cross-check: the same bypass is
+  caught inside `_SYNC_CROSSCHECK_MAX_LENGTH` and missed outside it (verified at 3 vs 5, then at 5 vs
+  6 after widening). **No bound closes this class**; widening buys one more length at a stated cost
+  (each length multiplies the probe count by 8: ~0.05s at 4, +0.34s at 5, +3.23s at 6).
+
+An earlier draft of this section claimed hoisting was "the end state that removes the class". That was
+false, asserted from reasoning and not measured — the correction is itself an instance of the lesson
+below, since the claim was a model of the remedy rather than a measurement of it.
+
+**Re-entry criterion.** Re-run this attack when an acceptance path near the routing gate changes.
+**#139F and #140 both plausibly add one** when `start_listen` is promoted — that is the point at which
+the cross-check bound stops being a documented limit and becomes load-bearing.
+
+This is the #139D lesson applied four times over, and the transferable form is sharper than "fix the
+class": **when a guard describes a rule the product states independently, it is a model of that rule,
+and every model has an unmodelled region — so mutate the product's statement, not just the guard's
+inputs.** Every one of these holes was invisible to a mutation matrix that varied only the guard's own
+constants; each was found by mutating the builder instead.
 
 Four cases are anchored to committed raw-byte `golden_xml` components, and the harness asserts the
 **legacy** renderer against those bytes as well as the canonical one — the non-redundant half, because
@@ -1040,12 +1102,23 @@ moves both sides of a differential together. `tests/test_sync_pipeline_adapter_c
 its migrated set from the same fixture, so "which chains are canonical" has exactly **one** definition.
 
 The corpus is pinned **fail-closed in every direction**, because a harness that merely iterates a
-fixture fails *open*: coverage must equal the derived canonical universe (superset direction); exactly
-one case per fingerprint, with `soap_lowercase_execute` the single sanctioned duplicate (deletion and
-silent-duplicate directions); the claimed anchor set must equal the `sync_pipeline_*.xml` glob (so a
-new golden cannot arrive unclaimed); and `_sync_pipeline_is_canonical` must be `True` for every case,
-so a listener chain smuggled into the corpus cannot quietly turn the parity assertions into the legacy
-renderer compared with itself. All four guards were mutation-checked.
+fixture fails *open*: coverage must equal the derived canonical set (superset direction); exactly one
+case per fingerprint, with `soap_lowercase_execute` the single sanctioned duplicate (deletion and
+silent-duplicate directions); the primitive-only fingerprint must stay *injective* over the canonical
+set, or the corpus key can no longer identify a chain; the claimed anchors must equal the **canonical**
+`golden_xml` inventory; and `_sync_pipeline_is_canonical` must be `True` for every case, so a listener
+chain smuggled into the corpus cannot quietly turn the parity assertions into the legacy renderer
+compared with itself.
+
+The anchor inventory is split by prefix rather than globbing every `sync_pipeline_*.xml`, which the
+review showed would **deadlock #139F**: that slice must commit legacy-rendered
+`sync_pipeline_listener_*.xml` fixtures *before* it touches the routing gate (the same pre-cutover
+discipline that kept #139C's anchors from being self-confirming), and under a single glob the new
+fixture fails the equality while adding it as a corpus case fails the canonical-routing assertion. The
+legacy inventory is asserted **empty** rather than ignored, so those fixtures landing is a deliberate
+edit here, never a silently widened glob.
+
+Every guard was mutation-checked, including the two that had already survived an earlier round.
 
 **Capability reconciliation.** Re-verified at `1bd0b69`: `catcherrors` has canonical emission (#142),
 so the ledger no longer lists it as a blocker for the ordinary dialect. `start_listen`, connector

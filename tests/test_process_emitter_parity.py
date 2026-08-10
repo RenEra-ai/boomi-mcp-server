@@ -24,10 +24,10 @@ TWO independent corpora live here; they share no machinery on purpose.
 
    Heeding the warning above, this corpus states no case COUNT anywhere in prose:
    its size is a measurement, and ``test_sync_corpus_covers_every_canonical_chain``
-   recomputes it from the builder's and adapter's own stage tables on every run.
-   A literal here could only go stale — and #139E shipped a first draft that did
-   exactly that, inheriting #139C's stage-kind-level chain list while claiming
-   primitive-level completeness. Live QA caught it by measuring the universe.
+   recomputes it on every run — by READING the builder's accepted stage-kind
+   sequences out of its own source and probing each through the real gate, never by
+   modelling the grammar. Three successive models of it each failed open; see
+   ``_sync_probe_chain_space`` for what each one missed and who caught it.
 
    The direct-IR oracle above is structurally unreachable for this dialect and
    #140/#146 did not change that: it enters through ``ir_to_legacy_flow_sequence``,
@@ -54,7 +54,9 @@ become canonical, that test fails until this corpus grows to cover them.
 
 from __future__ import annotations
 
+import ast
 import copy
+import inspect
 import itertools
 import json
 import re
@@ -72,6 +74,9 @@ if str(_ROOT / "src") not in sys.path:
 from boomi_mcp.categories.components.builders.connector_builder import (
     BuilderValidationError,
 )
+from boomi_mcp.categories.components.builders import (
+    process_flow_builder as _process_flow_builder_module,
+)
 from boomi_mcp.categories.components.builders.process_flow_builder import (
     _SYNC_PIPELINE_STAGE_ALT_PRIMITIVE,
     _SYNC_PIPELINE_STAGE_PRIMITIVE,
@@ -86,8 +91,6 @@ from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTab
 from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
 from boomi_mcp.compiler.process_ir.legacy_adapters.emission import emit_legacy_result
 from boomi_mcp.compiler.process_ir.legacy_adapters.sync_pipeline import (
-    _SOURCE_STAGE_KINDS,
-    _TARGET_STAGE_KINDS,
     adapt_sync_pipeline,
 )
 from boomi_mcp.models._process_ir_compat import (
@@ -281,7 +284,25 @@ _SYNC_STAGE_IDS = {
     # carries no connection_id at all, which is half of why the canonical chain
     # cannot represent it.
     "wss_listen": {"operation_id": "$ref:wss_op"},
+    # The transform slot. Enumerated like any other kind -- an alt map primitive
+    # the builder accepts therefore produces candidates and must be covered, which
+    # is what keeps the transform slot from being the one unexamined position.
+    "map": {"map_ref": "$ref:field_map"},
 }
+
+#: How far the behavioural cross-check sweeps. NOT a claim about the grammar's
+#: maximum chain length, and NOT a completeness bound -- no bound can be one (see
+#: THE HONEST LIMIT in _sync_probe_chain_space). This sweep is the only detector
+#: for an acceptance path that bypasses the grammar statement entirely, so the
+#: number is load-bearing and its cost is stated rather than assumed: each extra
+#: length multiplies the probe count by |kind-primitive pairs| = 8. Measured --
+#: 4: ~0.05s, 5: +0.34s, 6: +3.23s, against a file that runs in well under 2s.
+#: 5 is affordable; 6 is not, for one more length of a limit that never closes.
+_SYNC_CROSSCHECK_MAX_LENGTH = 5
+
+#: Golden fixtures under this prefix belong to the LEGACY listener arm, not to
+#: this canonical corpus. #139F commits them before it touches the routing gate.
+_SYNC_LEGACY_GOLDEN_PREFIX = "sync_pipeline_listener_"
 
 _ANCHORED_SYNC_CASES = sorted(n for n, c in SYNC_CASES.items() if c["anchor"])
 
@@ -296,88 +317,27 @@ def _sync_fingerprint(config):
     return "_".join(s["config"]["primitive"] for s in config["pipeline"]["stages"])
 
 
-def _sync_candidate_universe():
-    """Recompute the candidate universe from the BUILDER's and ADAPTER's own tables.
-
-    Every (source primitive, target primitive, +/-map) triple the stage tables
-    admit. Nothing here is hand-listed: the KINDS come from the primitive tables'
-    own keys and are assigned to a slot by the adapter's ``_SOURCE_STAGE_KINDS`` /
-    ``_TARGET_STAGE_KINDS``, and the PRIMITIVES come from the tables' values.
-
-    Listener chains are deliberately INCLUDED as candidates rather than skipped by
-    name. This function must not decide canonicality itself -- that is the gate's
-    job, and the caller partitions on it. A ``kind == "listener"`` shortcut here
-    would buy no coverage today (measured: the canonical set is 16 either way) and
-    would silently cost the fail-closed property on the day #140 promotes
-    ``start_listen``, which is precisely when this test needs to fire.
-
-    Returns ``{fingerprint: raw_config}``.
-    """
+def _sync_stage_primitives():
+    """``{stage kind: [primitive, ...]}`` straight from the builder's own tables."""
     tables = (dict(_SYNC_PIPELINE_STAGE_PRIMITIVE), dict(_SYNC_PIPELINE_STAGE_ALT_PRIMITIVE))
-    kinds = {k for table in tables for k in table}
+    kinds = sorted({k for table in tables for k in table})
+    return {k: [t[k] for t in tables if k in t] for k in kinds}
 
-    # The transform slot is exempted from the classification below and generated
-    # with a fixed ``map`` primitive, which rests on an INVARIANT rather than on
-    # the gate: ``lower_config`` collapses a map stage to
-    # ``{"mode": "map_ref", "map_ref": ...}``, so the map primitive is a pure
-    # discriminator that never reaches emission -- an alt map primitive would emit
-    # byte-identical XML and generating cases for it would test nothing.
-    #
-    # That invariant is exactly the kind of unasserted assumption that produced the
-    # two coverage holes before it, so it is asserted rather than trusted: an alt
-    # map primitive would be added BECAUSE someone wants different emission, which
-    # is precisely when the exemption stops being safe.
-    assert "map" not in _SYNC_PIPELINE_STAGE_ALT_PRIMITIVE, (
-        "the sync_pipeline transform slot gained an alt primitive. Decide whether it "
-        "reaches emission: if it does, it must enter the candidate universe and this "
-        "corpus; if it is still a pure discriminator, relax this assert and say why."
-    )
 
-    # ``map`` is the transform slot, not an endpoint; every OTHER kind must be
-    # classifiable, or a new stage kind would be silently unreachable -- the exact
-    # shape of the bug this derivation exists to prevent, one level up from the
-    # primitive it already catches.
-    unclassified = sorted(
-        k for k in kinds if k != "map" and k not in _SOURCE_STAGE_KINDS | _TARGET_STAGE_KINDS
-    )
-    assert not unclassified, (
-        f"sync_pipeline stage kind(s) {unclassified} are admitted by the builder's "
-        f"primitive tables but fill neither slot in the adapter's "
-        f"_SOURCE_STAGE_KINDS/_TARGET_STAGE_KINDS. Classify them there, add ids to "
-        f"_SYNC_STAGE_IDS, and add a case per +/-map variant to "
-        f"sync_pipeline_emitter_parity_cases.json."
-    )
+def _sync_probe_shape(seq):
+    """Every primitive assignment for one stage-kind sequence, through the real gate.
 
-    sources, targets = [], []
-    for table in tables:
-        for kind, p in table.items():
-            if kind in _SOURCE_STAGE_KINDS:
-                sources.append((kind, p))
-            elif kind in _TARGET_STAGE_KINDS:
-                targets.append((kind, p))
-    # A primitive the tables admit but this file has no ids for would otherwise
-    # blow up with a bare KeyError deep in the loop. Say what to do instead: the
-    # whole point of deriving the universe is that a NEW primitive must land here
-    # as work-to-do, not as a puzzle.
-    missing = sorted(p for _kind, p in sources + targets if p not in _SYNC_STAGE_IDS)
-    assert not missing, (
-        f"sync_pipeline primitive(s) {missing} are admitted by the builder's stage "
-        f"tables but have no id vocabulary in _SYNC_STAGE_IDS. Add ids here AND a "
-        f"case per +/-map variant to sync_pipeline_emitter_parity_cases.json."
-    )
-
-    out = {}
-    for (skind, sp), (tkind, tp), with_map in itertools.product(
-        sources, targets, (False, True)
-    ):
-        stages = [{"key": "s", "kind": skind, "config": {"primitive": sp, **_SYNC_STAGE_IDS[sp]}}]
-        if with_map:
-            stages.append(
-                {"key": "m", "kind": "map", "config": {"primitive": "map", "map_ref": "$ref:field_map"}}
-            )
-        stages.append({"key": "t", "kind": tkind, "config": {"primitive": tp, **_SYNC_STAGE_IDS[tp]}})
+    Returns ``[(identity, raw_config, lowered_or_None, error_code_or_None), ...]``.
+    """
+    primitives = _sync_stage_primitives()
+    results = []
+    for choice in itertools.product(*[primitives[k] for k in seq]):
+        stages = [
+            {"key": f"k{i}", "kind": k, "config": {"primitive": p, **_SYNC_STAGE_IDS[p]}}
+            for i, (k, p) in enumerate(zip(seq, choice))
+        ]
         keys = [s["key"] for s in stages]
-        out[f"{sp}_{'map_' if with_map else ''}{tp}"] = {
+        raw = {
             "process_kind": "sync_pipeline",
             "pipeline": {
                 "stages": stages,
@@ -386,7 +346,199 @@ def _sync_candidate_universe():
                 ],
             },
         }
-    return out
+        try:
+            lowered = SyncPipelineBuilder.lower_config(copy.deepcopy(raw))
+        except BuilderValidationError as exc:
+            results.append((tuple(zip(seq, choice)), raw, None, exc.error_code))
+            continue
+        # Anything OTHER than BuilderValidationError propagates on purpose: a crash
+        # in the normalizer is a finding, not a rejection. Measured clean across the
+        # whole cross-checked space.
+        results.append((tuple(zip(seq, choice)), raw, lowered, None))
+    return results
+
+
+def _sync_accepted_stage_sequences():
+    """Read the builder's accepted stage-kind sequences from its OWN source.
+
+    ``lower_config`` states the grammar as a literal tuple of kind lists compared
+    against ``kinds`` (``process_flow_builder.py``, the ``if kinds not in (...)``
+    guard). There is no module constant to import, so this extracts that literal by
+    AST rather than restating it -- because every attempt to restate it has failed
+    open (see ``_sync_probe_chain_space``).
+
+    Extraction is fail-closed: it demands exactly one matching comparison. A
+    refactor that moves or computes the grammar breaks this LOUDLY, which is
+    correct -- the corpus's completeness claim genuinely depends on knowing the
+    accepted sequences, so it must not be able to go on quietly guessing them.
+    """
+    tree = ast.parse(inspect.getsource(_process_flow_builder_module))
+
+    # Locate the GUARD STATEMENT, not a matching expression. Searching for "some
+    # comparison that looks like the grammar" recognises a shape and skips past
+    # anything else, so EXTENDING the guard is invisible while the match count
+    # stays 1 -- fail-open. Two mutants proved it: hoisting the tuple into a module
+    # constant (`... and kinds not in _CONST`), and `... and len(kinds) != 5`,
+    # which adds no membership test at all. Anchoring on the statement means an
+    # unrecognised form is a KILL rather than a miss.
+    guards = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If)
+        and any(isinstance(x, ast.Name) and x.id == "kinds" for x in ast.walk(node.test))
+        and any(isinstance(x, ast.Raise) for x in node.body)
+    ]
+    assert len(guards) == 1, (
+        f"expected exactly ONE `if <kinds ...>: raise` stage-sequence guard in "
+        f"process_flow_builder, found {len(guards)}. The grammar moved or split; "
+        f"update _sync_accepted_stage_sequences to read it where it now lives."
+    )
+    test = guards[0].test
+    assert isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], ast.NotIn), (
+        f"the stage-sequence guard's test is {type(test).__name__}, not a bare "
+        f"`kinds not in (...)` comparison. Acceptance now depends on a condition "
+        f"this extraction cannot read, so it can no longer claim to know the "
+        f"accepted sequences -- read the grammar where it now lives, or (better) "
+        f"hoist it to a module constant and import it."
+    )
+    target = test.comparators[0]
+    assert (
+        isinstance(target, (ast.Tuple, ast.List))
+        and target.elts
+        and all(
+            isinstance(e, ast.List)
+            and e.elts
+            and all(isinstance(x, ast.Constant) and isinstance(x.value, str) for x in e.elts)
+            for e in target.elts
+        )
+    ), (
+        "the stage-sequence guard compares against something other than a literal "
+        "tuple of string lists; this extraction can no longer read the grammar."
+    )
+    return tuple(tuple(x.value for x in e.elts) for e in target.elts)
+
+
+def _sync_probe_chain_space():
+    """Partition every chain the builder ACCEPTS, using the builder's own grammar.
+
+    Reads the grammar rather than modelling it -- but see the honest limit at the
+    end: this is a fail-CLOSED bridge, not a proof. Four fail-open holes were closed
+    here, and each time the model, not its parameters, was the defect:
+
+    1. The first version reconstructed the grammar as ``source x target x +/-map``,
+       classifying kinds via the adapter's ``_SOURCE_STAGE_KINDS`` /
+       ``_TARGET_STAGE_KINDS``. A kind in BOTH sets was silently filed source-only
+       by the if/elif, so giving ``fetch`` a target role and permitting
+       ``read -> fetch`` made ``db_read_rest_fetch`` reachable, canonical and
+       uncovered with every guard green. (Codex impl-vs-plan review.)
+    2. Removing the ROLE model left an ARITY model -- lengths fixed to {2, 3} with
+       the transform kind in the middle. Permitting a 4-stage
+       ``fetch -> map -> map -> send`` left four canonical chains uncovered, and
+       those are byte-DISTINCT (both map stages are dropped, emitting zero map
+       shapes) with parity still holding, because canonical and legacy drop them
+       identically -- the uniform drift a differential cannot see. (Live QA.)
+    3. Replacing the fixed lengths with a sweep that walked upward until a length
+       was dry was still a model: dryness is LOCAL. A grammar accepting 5-stage
+       chains while 4 stays dry stops the sweep at 4 and is missed entirely --
+       verified reachable and canonical by mutation.
+    4. Reading the grammar by AST was, at first, a SYNTAX model: it searched for a
+       comparison that looked right and skipped anything else, so EXTENDING the
+       guard stayed invisible while the match count held at 1. Hoisting the tuple
+       into a module constant (``... and kinds not in _CONST``) or adding
+       ``... and len(kinds) != 5`` both evaded it. (Live QA.) It now anchors on the
+       guard STATEMENT and refuses any test it cannot read, so an unrecognised form
+       kills instead of slipping through.
+
+    No bounded sampling of the chain space is complete against a grammar that can
+    change shape, so this stops sampling and READS the grammar
+    (``_sync_accepted_stage_sequences``), enumerating primitive assignments over
+    exactly the accepted sequences and letting the routing gate split them. A
+    cheap bounded cross-check then guards the extraction itself.
+
+    THE HONEST LIMIT. This is a fail-closed bridge, not a completeness proof, and
+    there are TWO distinct residual classes -- do not conflate them, because the
+    obvious remedy fixes only one.
+
+    * The EXTRACTION class. An AST pattern over an expression can never be a
+      completeness oracle: the set of forms it does not recognise is open-ended, so
+      the tightening in (4) buys only that an unrecognised form FAILS rather than
+      passes. Hoisting the accepted-sequence tuple to a module-level constant in
+      ``process_flow_builder`` and importing it would remove this class outright --
+      the test would compare against the very object the builder compares against,
+      with nothing left to extract. ~3 lines of production change, which is why it
+      is not in #139E (whose claim is zero production diff); the migration ledger
+      records it as the intended resolution for the next slice touching that file.
+    * The BYPASS class, which hoisting does NOT touch. An acceptance path that never
+      mentions ``kinds`` -- e.g. ``if len(order) == 5: pass`` ahead of the guard --
+      is invisible to any reading of the grammar statement, because the statement is
+      still there and still says exactly what it said. Measured: under such a bypass
+      the extraction returns the byte-identical ten sequences, so an imported
+      constant would too. The ONLY detector is the behavioural cross-check below,
+      and it is bounded (``_SYNC_CROSSCHECK_MAX_LENGTH``): the same bypass is caught
+      inside the bound and missed outside it.
+
+    So the cross-check is not merely a guard on the extraction -- it is the sole
+    detector for the bypass class, and no bound closes that class. Widening buys one
+    more length at a stated cost, nothing more. **Re-run this attack when an
+    acceptance path near the routing gate changes** -- #139F and #140 both plausibly
+    add one when ``start_listen`` is promoted -- because that is when the bound stops
+    being a documented limit and becomes load-bearing.
+
+    Listener chains are probed like everything else rather than skipped by name: the
+    day #140 promotes ``start_listen`` they move from the legacy bucket to the
+    canonical one and the coverage assertion fires.
+
+    Returns ``(canonical, legacy_arm, rejected, grammar)``. Identity is the full
+    ``((kind, primitive), ...)`` sequence -- NOT the primitive-only fingerprint,
+    which cannot tell two kinds apart and would collide precisely in case 1.
+    """
+    primitives = _sync_stage_primitives()
+    kinds = sorted(primitives)
+
+    # A primitive the tables admit but this file has no ids for would otherwise
+    # blow up with a bare KeyError deep in the loop. Say what to do instead: a NEW
+    # primitive should arrive here as work-to-do, not as a puzzle.
+    missing = sorted(p for ps in primitives.values() for p in ps if p not in _SYNC_STAGE_IDS)
+    assert not missing, (
+        f"sync_pipeline primitive(s) {missing} are admitted by the builder's stage "
+        f"tables but have no id vocabulary in _SYNC_STAGE_IDS. Add ids here, and add "
+        f"a corpus case for every chain they make canonical."
+    )
+
+    grammar = _sync_accepted_stage_sequences()
+    canonical, legacy_arm, rejected = {}, {}, {}
+    for seq in grammar:
+        for identity, raw, lowered, code in _sync_probe_shape(seq):
+            if lowered is None:
+                rejected[identity] = code
+                continue
+            bucket = canonical if _sync_pipeline_is_canonical(lowered) else legacy_arm
+            bucket[identity] = raw
+
+    # The BEHAVIOURAL cross-check, and the only thing standing between this test and
+    # the two residual classes in the docstring. Reading the grammar is sound only
+    # while the grammar statement is the sole acceptance path; if the AST picked up
+    # a stale list, or if some path accepts chains without consulting that statement
+    # at all, those chains are accepted and otherwise invisible. So sweep every short
+    # kind sequence and assert nothing accepted lives outside the extracted grammar.
+    #
+    # Bounded, and the bound is a real limit rather than a formality -- a bypass is
+    # caught inside it and missed outside it. See _SYNC_CROSSCHECK_MAX_LENGTH for the
+    # measured cost of each extra length, and the docstring for why no bound closes
+    # the class.
+    outside = sorted(
+        seq
+        for length in range(2, _SYNC_CROSSCHECK_MAX_LENGTH + 1)
+        for seq in itertools.product(kinds, repeat=length)
+        if seq not in grammar
+        and any(lowered is not None for _i, _r, lowered, _c in _sync_probe_shape(seq))
+    )
+    assert not outside, (
+        f"stage sequence(s) {outside} are accepted by the builder but absent from the "
+        f"accepted-sequence literal this test extracts. The extraction is stale or is "
+        f"reading the wrong list -- fix _sync_accepted_stage_sequences."
+    )
+    return canonical, legacy_arm, rejected, grammar
 
 
 def _sync_case(case_name):
@@ -421,28 +573,43 @@ def test_sync_corpus_covers_every_canonical_chain():
     ``_SYNC_PIPELINE_STAGE_ALT_PRIMITIVE`` and this fails until the corpus grows --
     which a hand-maintained literal could never do.
     """
-    canonical, legacy_arm, rejected = {}, {}, {}
-    for fingerprint, raw in _sync_candidate_universe().items():
-        try:
-            lowered = SyncPipelineBuilder.lower_config(copy.deepcopy(raw))
-        except BuilderValidationError as exc:  # rejected upstream, by design
-            rejected[fingerprint] = exc.error_code
-            continue
-        bucket = canonical if _sync_pipeline_is_canonical(lowered) else legacy_arm
-        bucket[fingerprint] = raw
+    canonical, legacy_arm, rejected, grammar = _sync_probe_chain_space()
 
-    # Every candidate lands in exactly one of three buckets, and all three are
-    # pinned. A silent fourth outcome -- or a chain drifting between buckets --
-    # is what an unpinned partition would hide.
-    assert rejected == {
-        "db_read_db_write": "SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED",
-        "db_read_map_db_write": "SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED",
-    }
+    # The grammar READ from the builder, pinned by code. Coverage is derived from
+    # it, so a sequence added or removed there must be a conscious edit here too --
+    # and this is the assertion that says so, in the reviewer's own terms.
+    assert grammar == (
+        ("read", "send"),
+        ("read", "map", "send"),
+        ("fetch", "send"),
+        ("fetch", "map", "send"),
+        ("fetch", "write"),
+        ("fetch", "map", "write"),
+        ("listener", "send"),
+        ("listener", "map", "send"),
+        ("listener", "write"),
+        ("listener", "map", "write"),
+    )
+
+    # Identity carries the stage KIND; the corpus is keyed on the primitive-only
+    # fingerprint. That projection is only a valid identity while it stays
+    # injective -- a dual-role kind is exactly what would collapse two distinct
+    # chains onto one name and hide the second. Asserted on BOTH partitions, since
+    # the legacy arm is compared as a fingerprint set below.
+    for label, bucket in (("canonical", canonical), ("legacy_arm", legacy_arm)):
+        fps = [_sync_fingerprint(raw) for raw in bucket.values()]
+        assert len(set(fps)) == len(fps), (
+            f"two {label} chains share a primitive-only fingerprint; the corpus key "
+            f"can no longer identify a chain. Enrich _sync_fingerprint (and the case "
+            f"names) to carry the stage kind."
+        )
+    fingerprints = [_sync_fingerprint(raw) for raw in canonical.values()]
+
     # The legacy arm is exactly the WSS listener chains (#140 owns the fused
     # start_listen entry). When that lands, these move into `canonical` and the
-    # corpus assertion below fails until the corpus grows -- which is the whole
-    # reason listener candidates are generated rather than skipped by name.
-    assert set(legacy_arm) == {
+    # coverage assertion below fails until the corpus grows -- which is the whole
+    # reason listener candidates are probed rather than skipped by name.
+    assert {_sync_fingerprint(raw) for raw in legacy_arm.values()} == {
         "wss_listen_rest_send",
         "wss_listen_map_rest_send",
         "wss_listen_soap_send",
@@ -450,6 +617,22 @@ def test_sync_corpus_covers_every_canonical_chain():
         "wss_listen_db_write",
         "wss_listen_map_db_write",
     }
+    # The DB-to-DB chain is the one endpoint-shaped pairing the builder refuses on
+    # purpose (no archetype). It is not in the grammar, so it is never probed above
+    # -- assert the refusal directly, so "excluded by design" stays a tested claim
+    # rather than an absence anyone could read as an oversight.
+    for shape in (("read", "write"), ("read", "map", "write")):
+        assert shape not in grammar
+        assert all(
+            code == "SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED"
+            for _i, _r, _low, code in _sync_probe_shape(shape)
+        )
+
+    # Within the accepted grammar, every primitive assignment must lower. A
+    # rejection here means a sequence the builder advertises cannot actually be
+    # spelled -- worth knowing, and not silently tolerated.
+    assert rejected == {}
+
     # KEEP this literal. It looks like the redundant total that was removed from
     # test_sync_corpus_has_one_case_per_fingerprint..., but it is a different shape:
     # that one was IMPLIED by its neighbours, whereas this is an independent floor
@@ -459,7 +642,7 @@ def test_sync_corpus_covers_every_canonical_chain():
     assert len(canonical) == 16
 
     corpus = {_sync_fingerprint(c["config"]) for c in SYNC_CASES.values()}
-    assert corpus == set(canonical)
+    assert corpus == set(fingerprints)
 
 
 def test_sync_corpus_has_one_case_per_fingerprint_plus_the_verb_duplicate():
@@ -484,14 +667,35 @@ def test_sync_corpus_has_one_case_per_fingerprint_plus_the_verb_duplicate():
 
 
 def test_sync_corpus_anchors_every_committed_sync_golden():
-    """Fail-closed floor on the ADDITION direction: a new ``sync_pipeline_*``
-    golden cannot arrive without a parity case claiming it, and a case cannot
-    claim an anchor that does not exist."""
-    claimed = {c["anchor"] for c in SYNC_CASES.values() if c["anchor"]}
+    """Fail-closed on the ADDITION direction: a new CANONICAL ``sync_pipeline_*``
+    golden cannot arrive without a parity case claiming it, and a case cannot claim
+    an anchor that does not exist.
+
+    The inventory is split by prefix rather than globbing everything, because the
+    two arms are governed differently. #139F must commit legacy-rendered
+    ``sync_pipeline_listener_*.xml`` fixtures BEFORE it touches the routing gate --
+    that is the plan's own pre-cutover discipline, and how #139C avoided a
+    self-confirming anchor. A single glob would deadlock that step: the new fixture
+    fails this equality, and adding it as a corpus case instead fails
+    ``test_sync_case_routes_to_the_canonical_chain``, since a listener chain is by
+    definition not canonical yet. Raised by the Codex impl-vs-plan review.
+
+    The listener arm is asserted EMPTY rather than ignored, so those fixtures
+    landing is a deliberate edit here (moving the name into the legacy inventory)
+    rather than a silently widened glob.
+    """
     committed = {p.name for p in _GOLDEN_XML.glob("sync_pipeline_*.xml")}
-    assert claimed == committed
+    legacy = {n for n in committed if n.startswith(_SYNC_LEGACY_GOLDEN_PREFIX)}
+    canonical = committed - legacy
+
+    claimed = {c["anchor"] for c in SYNC_CASES.values() if c["anchor"]}
+    assert claimed == canonical
     for name in claimed:
         assert (_GOLDEN_XML / name).is_file()
+
+    # Empty until #139F. When it is not, the listener chains are still on the
+    # legacy arm and belong in a legacy inventory -- never in this canonical corpus.
+    assert legacy == set()
 
 
 @pytest.mark.parametrize("case_name", sorted(SYNC_CASES))
