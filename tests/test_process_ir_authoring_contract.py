@@ -4673,8 +4673,19 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
     # ...and a plan that declares nothing derivable claims nothing.
     assert _action_type_from_config({"connector_type": "database"}) is None
 
-    # Every family a connector primitive writes is covered — derived from the
-    # primitives, so a new family cannot be silently unhandled the way SOAP was.
+    # Every family a connector primitive writes is covered. Two directions, and
+    # they need different mechanisms — conflating them is why an earlier version
+    # of this comment claimed more reach than it had:
+    #
+    #   SUBTRACTION (a known family stops being harvested) is closed by pinning
+    #   the expected set below; the reason a value became unreadable does not
+    #   matter, because the set simply differs.
+    #
+    #   ADDITION (production starts writing a family the derivation cannot
+    #   handle — the SOAP defect) is NOT closed by a set pin: a new family that
+    #   the reader also cannot see leaves the set unchanged. It is closed by the
+    #   floor below, which is keyed off the module's SOURCE TEXT rather than its
+    #   parse, so it has no next spelling level.
     import ast
 
     primitives = (
@@ -4686,6 +4697,11 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
     # `_value` below — one place, so the two cannot contradict each other the
     # way an outer summary and an inner note already did once.
     import importlib
+
+    per_source = {}
+
+    def _families_in(source):
+        return per_source.get(source, set())
 
     written = set()
     for source in primitives.glob("*.py"):
@@ -4735,6 +4751,7 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
             mode = literal.get("operation_mode")
             if isinstance(family, str) and isinstance(mode, str):
                 written.add((family, mode))
+                per_source.setdefault(source, set()).add((family, mode))
 
     # The EXPECTED set, not merely a non-empty one. Aggregating and grading
     # whatever was harvested fails OPEN: a family that stops being harvested —
@@ -4749,6 +4766,30 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
         ("rest", "execute"),
         ("soap_client", "execute"),
     }, sorted(written)
+
+    # THE ADDITION FLOOR. Any primitive module whose source text mentions
+    # `connection_ref_key` builds a connector-action component, so it must
+    # contribute at least one harvested pair. Text, not parse: a family added
+    # in a spelling the reader cannot see leaves the pinned set untouched and
+    # would otherwise be invisible — which is the direction the SOAP defect
+    # came from, and the one a set pin alone does not cover.
+    harvested_from = {
+        source
+        for source in primitives.glob("*.py")
+        if any(
+            (family, mode) in written
+            for family, mode in _families_in(source)
+        )
+    }
+    builds_one = {
+        source
+        for source in primitives.glob("*.py")
+        if "connection_ref_key" in source.read_text()
+    }
+    assert builds_one, "no primitive mentions connection_ref_key"
+    assert builds_one <= harvested_from, sorted(
+        s.name for s in builds_one - harvested_from
+    )
     # ...and the reader really does see the constant-named family, or the
     # sweep below grades a set that silently excludes it.
     assert any(
