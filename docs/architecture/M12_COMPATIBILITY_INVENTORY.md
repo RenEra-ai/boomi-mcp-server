@@ -1079,9 +1079,12 @@ every chain the builder accepts. It learns the accepted set from a statement in 
 can only detect acceptance happening elsewhere by trying inputs and observing — so any acceptance path
 the trials do not exercise is invisible.
 
-The trials are **bounded** in chain length by a named constant (`_SYNC_CROSSCHECK_MAX_LENGTH`), and
-merely **sampled** in config shape (`_SYNC_PROBE_ENRICHMENTS`) — not bounded, *sampled*, and the
-difference is the whole point. No finite variant set closes that dimension, because acceptance can be
+The trials are limited in two dimensions. In **chain length** by *two* constants that deliberately
+disagree — the bare sweep runs to `_SYNC_CROSSCHECK_MAX_LENGTH`, the shape sampling only to
+`_SYNC_ENRICHED_MAX_LENGTH`; naming only the higher would imply a uniform limit, and the gap between
+them is exactly where a bypass hides (measured both ways: a config-field-gated bypass *at* the enriched
+bound is killed, the same bypass one length *above* it survives). And in **config shape**, which is not
+bounded but *sampled* (`_SYNC_PROBE_ENRICHMENTS`) — the difference is the whole point. No finite variant set closes that dimension, because acceptance can be
 keyed on a **value** (`label == "magic"`) rather than on a field's presence, so a bypass always exists
 and is constructible in minutes. Successive versions of the sampling were broken in review —
 chain length, then root-key shape, then stage/edge shape — and a fourth would be no harder. Adding

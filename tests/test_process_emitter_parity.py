@@ -401,7 +401,11 @@ _SYNC_OMITTED_OPTIONS = {
 }
 
 _SYNC_UNPROBEABLE_FIELDS = frozenset(
-    {("stage_config", "connector_type"), ("stage_config", "map_id"), ("stage", "component_ref")}
+    {
+        ("stage_config", "connector_type"),
+        ("stage_config", "map_id"),
+        ("stage", "component_ref"),
+    }
 )
 
 
@@ -462,13 +466,27 @@ def _sync_derive_enrichments():
     survive even the rescue are pinned in ``_SYNC_OMITTED_OPTIONS``.
     """
     stage_config = (
-        _SYNC_PIPELINE_BINDING_KEYS | _SYNC_PIPELINE_LISTENER_KEYS | _SYNC_PIPELINE_MAP_KEYS
+        _SYNC_PIPELINE_BINDING_KEYS
+        | _SYNC_PIPELINE_LISTENER_KEYS
+        | _SYNC_PIPELINE_MAP_KEYS
     ) - {"primitive", "connection_id", "operation_id", "action_type", "map_ref"}
     levels = (
-        ("root", sorted(set(_SYNC_PIPELINE_ALLOWED_TOP_LEVEL) - _SYNC_STRUCTURAL_ROOT_KEYS), None),
+        (
+            "root",
+            sorted(set(_SYNC_PIPELINE_ALLOWED_TOP_LEVEL) - _SYNC_STRUCTURAL_ROOT_KEYS),
+            None,
+        ),
         ("stage_config", sorted(stage_config), None),
-        ("stage", sorted(set(StageSpec.model_fields) - {"key", "kind", "config"}), StageSpec.model_fields),
-        ("edge", sorted(set(PipelineEdgeSpec.model_fields) - {"from_stage", "to_stage"}), PipelineEdgeSpec.model_fields),
+        (
+            "stage",
+            sorted(set(StageSpec.model_fields) - {"key", "kind", "config"}),
+            StageSpec.model_fields,
+        ),
+        (
+            "edge",
+            sorted(set(PipelineEdgeSpec.model_fields) - {"from_stage", "to_stage"}),
+            PipelineEdgeSpec.model_fields,
+        ),
     )
     enrichments, unprobeable, omitted = [], set(), {}
     for level, names, fields in levels:
@@ -481,7 +499,11 @@ def _sync_derive_enrichments():
                 # invariably the neutral default, so the probe sent
                 # ``side_effect="none"`` and never ``"write"`` -- backwards, since a
                 # guard is far likelier to key on the latter.
-                accepted = [v for v in declared if _sync_enrichment_is_accepted({level: {name: v}})]
+                accepted = [
+                    v
+                    for v in declared
+                    if _sync_enrichment_is_accepted({level: {name: v}})
+                ]
                 # A declared option can be rejected here yet be valid WITH companion
                 # metadata this fixed probe chain does not supply, in which case it is
                 # silently dropped. _SYNC_UNPROBEABLE_FIELDS pins whole fields only,
@@ -499,7 +521,12 @@ def _sync_derive_enrichments():
                 accepted = []
                 for group in (_SYNC_TRUTHY_PROBE_VALUES, _SYNC_FALSY_PROBE_VALUES):
                     hit = next(
-                        (v for v in group if _sync_enrichment_is_accepted({level: {name: v}})), None
+                        (
+                            v
+                            for v in group
+                            if _sync_enrichment_is_accepted({level: {name: v}})
+                        ),
+                        None,
                     )
                     if hit is not None:
                         accepted.append(hit)
@@ -574,8 +601,16 @@ def _sync_enrichment_is_accepted(extra):
     as the pair it actually needs.
     """
     stages = [
-        {"key": "k0", "kind": "read", "config": {"primitive": "db_read", **_SYNC_STAGE_IDS["db_read"]}},
-        {"key": "k1", "kind": "send", "config": {"primitive": "rest_send", **_SYNC_STAGE_IDS["rest_send"]}},
+        {
+            "key": "k0",
+            "kind": "read",
+            "config": {"primitive": "db_read", **_SYNC_STAGE_IDS["db_read"]},
+        },
+        {
+            "key": "k1",
+            "kind": "send",
+            "config": {"primitive": "rest_send", **_SYNC_STAGE_IDS["rest_send"]},
+        },
     ]
     config = {
         "process_kind": "sync_pipeline",
@@ -609,7 +644,10 @@ _SYNC_PROBE_ENRICHMENTS = _sync_derive_enrichments()
 
 def _sync_stage_primitives():
     """``{stage kind: [primitive, ...]}`` straight from the builder's own tables."""
-    tables = (dict(_SYNC_PIPELINE_STAGE_PRIMITIVE), dict(_SYNC_PIPELINE_STAGE_ALT_PRIMITIVE))
+    tables = (
+        dict(_SYNC_PIPELINE_STAGE_PRIMITIVE),
+        dict(_SYNC_PIPELINE_STAGE_ALT_PRIMITIVE),
+    )
     kinds = sorted({k for table in tables for k in table})
     return {k: [t[k] for t in tables if k in t] for k in kinds}
 
@@ -731,7 +769,11 @@ def _sync_accepted_stage_sequences():
         f"update _sync_accepted_stage_sequences to read it where it now lives."
     )
     test = guards[0].test
-    assert isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], ast.NotIn), (
+    assert (
+        isinstance(test, ast.Compare)
+        and len(test.ops) == 1
+        and isinstance(test.ops[0], ast.NotIn)
+    ), (
         f"the stage-sequence guard's test is {type(test).__name__}, not a bare "
         f"`kinds not in (...)` comparison. Acceptance now depends on a condition "
         f"this extraction cannot read, so it can no longer claim to know the "
@@ -754,7 +796,9 @@ def _sync_accepted_stage_sequences():
         and all(
             isinstance(e, ast.List)
             and e.elts
-            and all(isinstance(x, ast.Constant) and isinstance(x.value, str) for x in e.elts)
+            and all(
+                isinstance(x, ast.Constant) and isinstance(x.value, str) for x in e.elts
+            )
             for e in target.elts
         )
     ), (
@@ -813,21 +857,26 @@ def _sync_probe_chain_space():
     detect acceptance happening elsewhere by trying inputs and observing -- so any
     acceptance path the trials do not happen to exercise is invisible.
 
-    The trials are bounded in chain LENGTH by a named constant
-    (``_SYNC_CROSSCHECK_MAX_LENGTH``), and merely SAMPLED in config shape
-    (``_SYNC_PROBE_ENRICHMENTS``) -- not bounded, sampled, and the difference is the
-    whole point. The shape sampling reaches the four config levels' FIELDS; it does
-    not descend into structured values. ``process_extensions`` carries a nested
-    ``connections[].fields[]`` shape that ``lower_config`` passes through, and the
-    probe sends it a scalar -- so a condition keyed on that inner structure is
-    unsampled. Naming it is not the same as covering it: an arbitrarily nested value
-    space is the same unreachable case as a value-keyed condition. No finite variant set can close that dimension, because acceptance
-    can be keyed on a VALUE (``label == "magic"``) rather than on a field's presence,
-    so a bypass always exists and is constructible in minutes. Successive
-    versions of this sampling were broken in review -- chain length, then root-key
-    shape, then stage/edge shape -- and a fourth would be no harder. Adding
-    dimensions moves the bypass; it never removes it. Do not read the enrichment
-    list as a frontier.
+    The trials are limited in two dimensions, and BOTH limits are real:
+
+    * CHAIN LENGTH, bounded by two constants that deliberately DISAGREE. The bare
+      sweep runs to ``_SYNC_CROSSCHECK_MAX_LENGTH``; the shape sampling only to
+      ``_SYNC_ENRICHED_MAX_LENGTH``. Naming only the higher one would imply a uniform
+      length limit, and the gap between them is exactly where a bypass hides --
+      measured in both directions: a config-field-gated bypass AT the enriched bound
+      is killed, the same bypass one length ABOVE it survives.
+    * CONFIG SHAPE, which is not bounded but SAMPLED (``_SYNC_PROBE_ENRICHMENTS``),
+      and the difference is the whole point. No finite variant set closes it, because
+      a guard can key on a VALUE (``label == "magic"``) rather than a field's
+      presence, on a predicate other than presence or truthiness, or on structure
+      INSIDE a value -- ``process_extensions`` carries a nested
+      ``connections[].fields[]`` shape that ``lower_config`` passes through and the
+      probe sends a scalar to. Successive versions of this sampling were broken in
+      review -- chain length, then root-key shape, then stage/edge shape -- and the
+      next would be no harder.
+
+    Naming a residual is not the same as covering it, and adding dimensions moves the
+    bypass rather than removing it. Do not read the enrichment list as a frontier.
 
     Every tightening here therefore buys fail-CLOSED behaviour on a named form, not
     completeness. Two remedies are recorded in the migration ledger rather than done
@@ -868,7 +917,9 @@ def _sync_probe_chain_space():
     # A primitive the tables admit but this file has no ids for would otherwise
     # blow up with a bare KeyError deep in the loop. Say what to do instead: a NEW
     # primitive should arrive here as work-to-do, not as a puzzle.
-    missing = sorted(p for ps in primitives.values() for p in ps if p not in _SYNC_STAGE_IDS)
+    missing = sorted(
+        p for ps in primitives.values() for p in ps if p not in _SYNC_STAGE_IDS
+    )
     assert not missing, (
         f"sync_pipeline primitive(s) {missing} are admitted by the builder's stage "
         f"tables but have no id vocabulary in _SYNC_STAGE_IDS. Add ids here, and add "
