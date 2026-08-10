@@ -1104,12 +1104,27 @@ All four levels are now **derived** from the builder's own declarations — root
 `_SYNC_PIPELINE_ALLOWED_TOP_LEVEL`, stage-config from its allow-lists, stage-level from
 `StageSpec.model_fields`, edge from `PipelineEdgeSpec.model_fields` — with declared-but-unprobeable
 fields pinned. (`PipelineSpec` contributes nothing: its fields are exactly `stages` and
-`dependencies`, so these are all the levels the config tree has.) A field is probed with **every
-declared option it accepts**, not just the first: `Literal` options come in declaration order and the
-first is invariably the neutral default, so the set was sending `side_effect="none"` and never
-`"write"` — backwards, since a guard is far likelier to key on the latter. Fields whose type declares
-no options get one truthy and one falsy accepted value, which are the only two predicates a guard can
-apply without knowing the value itself.
+`dependencies`, so these are all the levels the config tree has.) A field is probed with **every declared option that is accepted when set alone on the probe chain**,
+not just the first: `Literal` options come in declaration order and the first is invariably the
+neutral default, so the set was sending `side_effect="none"` and never `"write"` — backwards, since a
+guard is far likelier to key on the latter. The "when set alone" qualifier is load-bearing, and the
+pin that enforces it found a second case immediately: `failure_behavior`'s `retry`/`catch` need
+companion stage metadata the generic chain does not supply, and `edge_kind`'s control-flow options are
+rejected by this dialect by design. Both are pinned in `_SYNC_OMITTED_OPTIONS`, so an option silently
+dropping out of the sweep fails the suite rather than shrinking it. Fields whose type declares no
+options get one truthy and one falsy accepted value — the only two predicates a guard can apply
+without knowing the value — plus a combined all-root-metadata shape, because single-field enrichments
+cannot express a **co-presence** condition (dropping that shape when the set went one-field-at-a-time
+was itself a coverage regression, caught in review).
+
+**What the shape sampling does NOT reach**, stated because naming it is not the same as covering it:
+it varies the four config levels' *fields*, never descending into structured values.
+`process_extensions` carries a nested `connections[].fields[]` shape that `lower_config` passes
+through, and the probe sends it a scalar. An arbitrarily nested value space is the same unreachable
+case as a value-keyed condition. Nor is every enrichment applied to every candidate: the variant loop
+short-circuits at the first shape that lowers and the bare shape is first, so enrichments do their
+work exclusively on assignments the bare shape *rejects* — which is the bypass case, and is what makes
+them cheap, but is not "full enrichment".
 
 **Two remedies are recorded here rather than done in #139E, and neither is a proof on its own:**
 
@@ -1119,7 +1134,7 @@ apply without knowing the value itself.
   **not** close the class above: under a bypass the extraction already returns the correct,
   byte-identical sequences, so an imported constant would too. An earlier draft claimed hoisting was
   "the end state that removes the class"; that was false, asserted from reasoning and never measured.
-- **A different oracle detects strictly more than more sampling does:** run the probe corpus under a
+- **A different oracle detects a different class than sampling does:** run the probe corpus under a
   tracer and assert every branch on `lower_config`'s accept/reject path was exercised, so a bypass
   branch the probes never trigger surfaces as an *uncovered branch* rather than as silence.
   Precedented here by **#145**'s reachability tracer

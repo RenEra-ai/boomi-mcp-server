@@ -371,6 +371,21 @@ _SYNC_FALSY_PROBE_VALUES = ("", {}, 0, False)
 #: needs a value matching the stage's connector family, ``map_id`` is only valid on
 #: a map stage, and ``component_ref`` needs a resolvable component -- none of which
 #: this generic probe can supply.
+#: Declared options that exist on a field but are NOT accepted when set alone on the
+#: fixed probe chain, so the sweep never sends them. Pinned for the same reason as
+#: the field-level set above: a partial omission is a value the probe silently stops
+#: covering. ``retry``/``catch`` need companion stage metadata this generic chain
+#: does not supply -- reaching them would require a purpose-built chain per option,
+#: which is the sampling limit, not a bug to fix here.
+_SYNC_OMITTED_OPTIONS = {
+    # Need companion stage metadata this generic chain does not supply.
+    "stage:failure_behavior": ["retry", "catch"],
+    # Rejected BY DESIGN: this dialect accepts only `ordering` edges, so the
+    # control-flow edge kinds are not reachable here at all. Pinned rather than
+    # filtered so the distinction stays visible.
+    "edge:edge_kind": ["branch", "decision_true", "decision_false", "loop_back"],
+}
+
 _SYNC_UNPROBEABLE_FIELDS = frozenset(
     {("stage_config", "connector_type"), ("stage_config", "map_id"), ("stage", "component_ref")}
 )
@@ -437,7 +452,7 @@ def _sync_derive_enrichments():
         ("stage", sorted(set(StageSpec.model_fields) - {"key", "kind", "config"}), StageSpec.model_fields),
         ("edge", sorted(set(PipelineEdgeSpec.model_fields) - {"from_stage", "to_stage"}), PipelineEdgeSpec.model_fields),
     )
-    enrichments, unprobeable = [], set()
+    enrichments, unprobeable, omitted = [], set(), {}
     for level, names, fields in levels:
         for name in names:
             declared = _sync_field_value_candidates(fields[name]) if fields else []
@@ -449,6 +464,14 @@ def _sync_derive_enrichments():
                 # ``side_effect="none"`` and never ``"write"`` -- backwards, since a
                 # guard is far likelier to key on the latter.
                 accepted = [v for v in declared if _sync_enrichment_is_accepted(level, name, v)]
+                # A declared option can be rejected here yet be valid WITH companion
+                # metadata this fixed probe chain does not supply, in which case it is
+                # silently dropped. _SYNC_UNPROBEABLE_FIELDS pins whole fields only,
+                # so partial omission needs its own pin or "every declared option"
+                # quietly stops being true.
+                skipped = [v for v in declared if v not in accepted]
+                if skipped:
+                    omitted[f"{level}:{name}"] = skipped
             else:
                 # UNDECLARED field: its value space is open, so enumerating it is the
                 # unreachable case THE HONEST LIMIT describes. Send the two predicates
@@ -472,6 +495,30 @@ def _sync_derive_enrichments():
         f"{sorted(unprobeable)} (pinned: {sorted(_SYNC_UNPROBEABLE_FIELDS)}). A field "
         f"that silently becomes unprobeable shrinks the sweep; decide deliberately."
     )
+    assert omitted == _SYNC_OMITTED_OPTIONS, (
+        f"the set of declared-but-unsent OPTIONS changed to {omitted} (pinned: "
+        f"{_SYNC_OMITTED_OPTIONS}). An option dropped here is a value the sweep no "
+        f"longer sends, so it must be a deliberate entry, not a silent filter."
+    )
+    # The combined shapes. Single-field enrichments cannot express a CO-PRESENCE
+    # condition ("process_type present AND name present"), and an earlier version of
+    # this set carried a bundled root-metadata variant that the move to one-field-at-
+    # a-time dropped -- a real coverage regression, restored here alongside the
+    # single-field probes rather than instead of them.
+    # Build it from TRUTHY values, keeping the FIRST accepted value per field. The
+    # first version of this used a dict comprehension that let each field's later
+    # falsy probe overwrite its truthy one, so every value in the combined shape was
+    # falsy and a `config.get(a) and config.get(b)` guard sailed straight past it --
+    # an inert variant that looked like coverage. Caught by mutation, not by reading.
+    combined_root = {}
+    for label, extra in enrichments:
+        if not label.startswith("root:"):
+            continue
+        for name, value in extra.get("root", {}).items():
+            if value and name not in combined_root:
+                combined_root[name] = value
+    if combined_root:
+        enrichments.append(("root:*combined*", {"root": combined_root}))
     return tuple(enrichments)
 
 
@@ -533,15 +580,24 @@ def _sync_probe_shape(seq):
     """
     primitives = _sync_stage_primitives()
     results = []
-    # SAMPLING ALLOCATION, stated rather than implied. The sweep samples in two
-    # dimensions and cannot cover either exhaustively, so the budget goes where the
-    # findings came from: every enrichment at short lengths (where all five
-    # shape-keyed bypasses found in review lived, and where the grammar's own chains
-    # are), bare shape beyond. Full enrichment at every length costs ~9x for one more
-    # length of a limit that never closes -- measured 14.6s vs 1.9s.
+    # SAMPLING ALLOCATION, stated as what actually executes rather than as an ideal.
+    # Two things bound it, and both matter:
     #
-    # This is an allocation, NOT a claim that shape-keyed bypasses only occur at
-    # short lengths. Nothing rules that out; it is simply not affordable to sample.
+    #  * the enrichments are OFFERED only at short chain lengths (where every
+    #    shape-keyed bypass found in review lived, and where the grammar's own chains
+    #    are); beyond that only the bare shape is sent. Offering them at every length
+    #    costs ~9x for one more length of a limit that never closes -- measured 14.6s
+    #    vs 1.9s;
+    #  * the loop SHORT-CIRCUITS at the first variant that lowers, and `bare` is
+    #    first, so an assignment the bare shape already accepts never sees an
+    #    enrichment at all. That is correct for the question being asked -- "is this
+    #    sequence acceptable AT ALL" is existential -- but it means the enrichments do
+    #    their work exclusively on assignments the bare shape REJECTS, which is
+    #    precisely the bypass case. Do not read this as "every enrichment is applied
+    #    to every candidate"; it never was.
+    #
+    # Both are allocations, NOT claims that shape-keyed bypasses only occur at short
+    # lengths or only on bare-rejected chains. Nothing rules either out.
     variants = [("bare", {})] + (
         list(_SYNC_PROBE_ENRICHMENTS) if len(seq) <= _SYNC_ENRICHED_MAX_LENGTH else []
     )
@@ -710,7 +766,12 @@ def _sync_probe_chain_space():
     The trials are bounded in chain LENGTH by a named constant
     (``_SYNC_CROSSCHECK_MAX_LENGTH``), and merely SAMPLED in config shape
     (``_SYNC_PROBE_ENRICHMENTS``) -- not bounded, sampled, and the difference is the
-    whole point. No finite variant set can close that dimension, because acceptance
+    whole point. The shape sampling reaches the four config levels' FIELDS; it does
+    not descend into structured values. ``process_extensions`` carries a nested
+    ``connections[].fields[]`` shape that ``lower_config`` passes through, and the
+    probe sends it a scalar -- so a condition keyed on that inner structure is
+    unsampled. Naming it is not the same as covering it: an arbitrarily nested value
+    space is the same unreachable case as a value-keyed condition. No finite variant set can close that dimension, because acceptance
     can be keyed on a VALUE (``label == "magic"``) rather than on a field's presence,
     so a bypass always exists and is constructible in minutes. Three successive
     versions of this sampling were broken in review -- chain length, then root-key
@@ -726,7 +787,7 @@ def _sync_probe_chain_space():
       ``process_flow_builder`` and importing it removes the EXTRACTION half -- nothing
       left to misread -- but does not touch the class above, because under a bypass
       the extraction already returns the correct, byte-identical sequences.
-    * A different ORACLE would detect strictly more than more sampling does: run this
+    * A different ORACLE detects a different CLASS than sampling does: run this
       probe corpus under a tracer and assert every branch on ``lower_config``'s
       accept/reject path was exercised, so a bypass branch the probes never trigger
       surfaces as an uncovered branch rather than as silence. (Precedented in this
