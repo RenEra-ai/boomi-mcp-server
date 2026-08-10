@@ -4702,11 +4702,30 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
         tree = ast.parse(source.read_text())
 
         def _value(node, _module=module):
-            if isinstance(node, ast.Constant):
-                return node.value
-            if isinstance(node, ast.Name):
-                return getattr(_module, node.id, None)
-            return None
+            # Evaluated in the module's own namespace. Two enumerations lived
+            # in this function, not one: the BINDING form (how the constant is
+            # assigned) and the REFERENCE form (how the dict names it). Fixing
+            # the first four times left the second — `_helpers.FAMILY` and
+            # `_MAP["k"]` are compile-time constants that a Name/Constant
+            # reader cannot see. Evaluating the expression handles both.
+            #
+            # `ast.Call` is refused deliberately: importing a module is one
+            # thing, running an arbitrary call out of its source during a test
+            # sweep is another. What this still cannot reach is a family bound
+            # to `self.ATTR` or shadowed by a local — both are reference forms
+            # no module-level evaluation can resolve, and neither is closed
+            # here. Saying so precisely, because an earlier version of this
+            # note claimed a runtime-computed family was the only gap and that
+            # was wrong three ways.
+            if any(isinstance(child, ast.Call) for child in ast.walk(node)):
+                return None
+            try:
+                return eval(  # noqa: S307 — module's own source, Call excluded
+                    compile(ast.Expression(body=node), "<sweep>", "eval"),
+                    dict(vars(_module)),
+                )
+            except Exception:  # noqa: BLE001 — an unresolvable name is just absent
+                return None
 
         for node in ast.walk(tree):
             if not isinstance(node, ast.Dict):
