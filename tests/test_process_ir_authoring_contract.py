@@ -4425,7 +4425,20 @@ _ABSENT = object()
 
 @pytest.mark.parametrize(
     "raised",
-    [ValueError, TypeError, AttributeError, RuntimeError, KeyError, OSError],
+    [
+        ValueError,
+        TypeError,
+        AttributeError,
+        RuntimeError,
+        KeyError,
+        OSError,
+        # The one that matters, and the one a type-narrowed handler could never
+        # get right: this projection builds every entry and the page itself
+        # through pydantic, so a malformed AUTHORITY raises exactly what a bad
+        # FILTER raises. A registry contributing one bad row was blamed on the
+        # caller, naming entry fields as if they were filters.
+        "pydantic",
+    ],
 )
 def test_a_dead_authority_keeps_its_own_code_whatever_it_raises(monkeypatch, raised):
     """#549. The caller-blame handler swallowed half the authority failures.
@@ -4439,6 +4452,12 @@ def test_a_dead_authority_keeps_its_own_code_whatever_it_raises(monkeypatch, rai
     from boomi_mcp.errors import AUTHORING_SCHEMA_SOURCE_UNAVAILABLE
 
     def _dead():
+        if raised == "pydantic":
+            from boomi_mcp.models.process_ir_authoring import (
+                ProcessIRAuthoringQueryV1,
+            )
+
+            ProcessIRAuthoringQueryV1(limit="not-an-int")
         raise raised("registry is dead")
 
     monkeypatch.setattr("boomi_mcp.recipes.production_registry", _dead)
@@ -4478,8 +4497,14 @@ def test_the_invalid_filter_envelope_says_what_it_claims_to_say():
     assert "ProcessIRAuthoringQueryV1" not in blob
     assert "pydantic" not in blob.lower()
     assert "errors.pydantic.dev" not in blob
-    # ...and it names the failure kind rather than staying blank.
-    assert "ValidationError" in blob
+    # ...and no internal exception type either. An earlier version published
+    # `ValidationError` in the served text, which is a Python implementation
+    # detail, not a contract term.
+    assert "ValidationError" not in blob
+    # It routes through the same query-error envelope every other bad filter
+    # uses, so the caller gets the recovery step rather than a bare rejection.
+    assert payload["suggestion"]
+    assert "get_schema_template" in payload["suggestion"]
 
 
 def test_the_connection_remediation_names_the_field_that_binds_it():

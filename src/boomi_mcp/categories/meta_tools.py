@@ -6740,26 +6740,12 @@ def _authoring_contract_schema(
             return _authoring_filter_error(schema_name, sorted(query))
         return payload
 
-    from pydantic import ValidationError as PydanticValidationError
-
     from ..authoring.process_ir_projection import ProcessIRAuthoringQueryError
 
     try:
         page = query_builder(**(query or {}))
     except ProcessIRAuthoringQueryError as exc:
         return _authoring_filter_value_error(schema_name, exc)
-    except PydanticValidationError as exc:
-        # A bad filter VALUE is the caller's mistake, not an authority outage —
-        # but ONLY this exception says so. A first version caught
-        # `ValueError`/`TypeError`/`AttributeError`, which inverted the case it
-        # was written to fix: a dead authority that happens to raise
-        # `ValueError` was then reported as caller blame with `retryable`
-        # dropped. Pydantic's own error is the one the query model raises, and
-        # it already names the offending field, so the envelope can blame that
-        # field alone instead of every filter that happened to be present.
-        return _authoring_filter_value_error(
-            schema_name, _InvalidFilterValue(_offending_filters(exc, query), exc)
-        )
     except Exception as exc:  # noqa: BLE001
         # An AUTHORITY this projection reads failed to build. Reported as a
         # typed unavailable answer, exactly as `list_capabilities` already

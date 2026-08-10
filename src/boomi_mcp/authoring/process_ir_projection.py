@@ -29,6 +29,7 @@ exists to remove.
 from __future__ import annotations
 
 import json
+from pydantic import ValidationError as PydanticValidationError
 from typing import (
     Any,
     Dict,
@@ -1666,6 +1667,16 @@ def _validated_limit(limit: Optional[int]) -> int:
     return limit
 
 
+def _query_error_from(exc: Any) -> "ProcessIRAuthoringQueryError":
+    """The caller-facing form of a rejected query, naming the field pydantic did."""
+    fields = []
+    for error in getattr(exc, "errors", lambda: ())():
+        for part in error.get("loc", ()):
+            if isinstance(part, str) and part not in fields:
+                fields.append(part)
+    return ProcessIRAuthoringQueryError(", ".join(fields) or "query", ())
+
+
 def query_process_ir_authoring_contract(
     *,
     authoring_entry_id: Optional[str] = None,
@@ -1718,15 +1729,25 @@ def query_process_ir_authoring_contract(
     if workflow_stage and workflow_stage not in facets.workflow_stages:
         raise ProcessIRAuthoringQueryError("workflow_stage", facets.workflow_stages)
 
-    query = ProcessIRAuthoringQueryV1(
-        authoring_entry_id=authoring_entry_id,
-        node_kind=node_kind,
-        category=category,
-        capability_id=capability_id,
-        workflow_stage=workflow_stage,
-        after_entry_id=after_entry_id,
-        limit=effective_limit,
-    )
+    # Converted HERE, at the one construction site where a pydantic failure can
+    # only mean the caller. Narrowing by exception TYPE at the serving layer
+    # could never work: this projection builds every entry and the page itself
+    # through pydantic, so a malformed AUTHORITY raises the identical
+    # `ValidationError` as a bad filter — and a recipe registry contributing one
+    # bad row was then blamed on the caller, naming "filters" that are really
+    # entry fields. Type does not partition the universe; the call site does.
+    try:
+        query = ProcessIRAuthoringQueryV1(
+            authoring_entry_id=authoring_entry_id,
+            node_kind=node_kind,
+            category=category,
+            capability_id=capability_id,
+            workflow_stage=workflow_stage,
+            after_entry_id=after_entry_id,
+            limit=effective_limit,
+        )
+    except PydanticValidationError as exc:
+        raise _query_error_from(exc) from None
 
     if not any(semantic):
         return ProcessIRAuthoringContractPageV1(
