@@ -529,6 +529,26 @@ SOURCE = {"kind": "source", "connection_ref": "$ref:c", "operation_ref": "$ref:o
             {"kind": "message", "text": "m", "unknown_extra": 1},
             "PROCESS_IR_SCHEMA_UNKNOWN_FIELD",
         ),
+        # The RETRY BOUND — one of the two cases the plan named that were only
+        # ever tested at the internal layer. The body is otherwise VALID, so
+        # this isolates the bound: a first draft used the wrong field names and
+        # raised four codes, of which the intended one was merely present.
+        (
+            {
+                "kind": "try_catch",
+                "scope": "connector",
+                "try_body": {
+                    "steps": [{"kind": "message", "text": "m"}],
+                    "terminal": {"kind": "stop"},
+                },
+                "catch_body": {
+                    "steps": [{"kind": "message", "text": "c"}],
+                    "terminal": {"kind": "stop"},
+                },
+                "retry": {"count": -1},
+            },
+            "PROCESS_IR_SCHEMA_RETRY_COUNT",
+        ),
     ],
 )
 def test_a_malformed_process_ir_reports_its_own_code_and_pointer(bad_step, expected_code):
@@ -537,8 +557,12 @@ def test_a_malformed_process_ir_reports_its_own_code_and_pointer(bad_step, expec
     )
     assert payload["_success"] is False
     assert payload["error_code"] == "INVALID_INPUT"
+    # The EXACT set, not membership. A first version of the two cases added
+    # here asserted `in` and passed on an incidental code while testing nothing
+    # the plan named — the same loose-check defect this contract keeps finding
+    # elsewhere.
     codes = {row["code"] for row in payload["validation_errors"]}
-    assert expected_code in codes
+    assert codes == {expected_code}, sorted(codes)
     for row in payload["validation_errors"]:
         assert row["path"].startswith("/intent/process_ir")
 
@@ -3957,3 +3981,131 @@ def test_the_operation_symbol_carries_the_connection_its_plan_declares():
     # A component that declares no connection must not invent one.
     assert symbols["$ref:conn"].connection_ref is None
     assert symbols["$ref:plain"].connection_ref is None
+
+
+def test_a_terminal_that_is_not_last_reports_its_own_code_at_the_body():
+    """The second case the plan named, only ever tested at the internal layer.
+
+    It cannot ride the parametrize above, which varies the LAST step: illegal
+    terminal placement is by definition about a terminal that is not last.
+    """
+    payload = integration_builder._plan_authoring(
+        None, "p", _process_ir_request({"kind": "stop"}, SOURCE)
+    )
+    assert payload["_success"] is False
+    rows = payload["validation_errors"]
+    assert {row["code"] for row in rows} == {"PROCESS_IR_SCHEMA_INVALID_CARDINALITY"}
+    assert {row["path"] for row in rows} == {"/intent/process_ir/body"}
+
+
+def test_a_compile_diagnostic_serves_the_message_its_authority_wrote():
+    """F2's pin. The compile phase used to overwrite every authority message.
+
+    `build_artifact_descriptors` hardcoded "Canonical compilation rejected this
+    process." for every diagnostic while forwarding only the remediation, and
+    `_authoring_error_envelope` puts that string in the envelope's top-level
+    `error` — so the generic sentence was the HEADLINE, and the compiler's real
+    statement never reached the caller. The semantic phase forwarded its
+    message correctly all along; only compile was wrong.
+
+    Asserted against the AUTHORITY TABLE, never a literal, so rewording a
+    compiler message cannot rot this test into passing on stale text.
+    """
+    from boomi_mcp.authoring.workflow import _compile_message
+    from boomi_mcp.compiler.process_ir.diagnostics import compiler_diagnostic_specs
+
+    authored = {
+        str(spec["code"]): (spec.get("message") or "").strip()
+        for spec in compiler_diagnostic_specs()
+    }
+    assert any(authored.values()), "the authority table carries no messages"
+
+    class _Diagnostic:
+        def __init__(self, code, message):
+            self.code = code
+            self.message = message
+
+    # Every code the compiler can raise WITH a message of its own is served
+    # with that message, not the generic headline.
+    covered = 0
+    for code, message in authored.items():
+        if not message:
+            continue
+        assert _compile_message(_Diagnostic(code, message)) == message, code
+        covered += 1
+    assert covered >= 20, covered
+
+    # ...and the generic headline survives exactly where it is correct: a
+    # diagnostic that names no message of its own.
+    from boomi_mcp.authoring.workflow import _COMPILE_GENERIC_MESSAGE
+
+    for empty in ("", "   ", None):
+        assert _compile_message(_Diagnostic("X", empty)) == _COMPILE_GENERIC_MESSAGE
+
+
+def test_the_compile_call_site_forwards_the_authority_message(monkeypatch):
+    """The CALL SITE, not the helper — reverting the fix must fail something.
+
+    A first version of this pin exercised `_compile_message` directly, so
+    putting the hardcoded string back at the call site was still green. That is
+    the same shape as the re-validation gap found earlier in this review: a
+    mechanism graded in isolation while the line that uses it is ungraded.
+
+    The compile phase is reached by monkeypatching the compiler to raise,
+    because the documents that fail reference resolution are caught earlier by
+    semantic validation and never get there.
+    """
+    from boomi_mcp.authoring import workflow as wf
+    from boomi_mcp.compiler.process_ir.diagnostics import (
+        CompilerDiagnostic,
+        ProcessIRCompileError,
+        compiler_diagnostic_specs,
+    )
+
+    spec = next(
+        s for s in compiler_diagnostic_specs() if (s.get("message") or "").strip()
+    )
+    authored = spec["message"].strip()
+
+    def _raise(*_args, **_kwargs):
+        raise ProcessIRCompileError(
+            (
+                CompilerDiagnostic(
+                    code=str(spec["code"]),
+                    phase="reference_resolution",
+                    path="/body/steps/0",
+                    node_identity="",
+                    message=authored,
+                    remediation=(spec.get("remediation") or ""),
+                ),
+            )
+        )
+
+    # It is imported inside the function, so patch it at its SOURCE module.
+    from boomi_mcp.compiler.process_ir import pipeline
+
+    monkeypatch.setattr(pipeline, "compile_process_ir_v1", _raise)
+
+    # A document that genuinely reaches the compiler. `_process_ir_request`
+    # declares no components, so anything built from it is stopped by semantic
+    # validation first and the patched compiler never runs — which is how the
+    # first draft of this test asserted a semantic message by mistake.
+    fixture = json.loads(
+        (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "authoring_contract"
+            / "clean_room"
+            / "decision_route_connector_map.json"
+        ).read_text()
+    )
+    request = {"authoring_request": fixture["request"]}
+    payload = integration_builder._compile_authoring(None, "p", request)
+
+    assert payload["_success"] is False
+    diagnostics = payload.get("authoring_diagnostics") or []
+    assert diagnostics, payload
+    served = {d["message"] for d in diagnostics}
+    assert served == {authored}, served
+    # The envelope headline a caller reads first carries it too.
+    assert authored in str(payload.get("error"))

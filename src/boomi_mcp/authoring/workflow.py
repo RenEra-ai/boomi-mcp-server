@@ -174,6 +174,30 @@ def _compile_remediation(diagnostic: Any) -> str:
     return own + _COMPILE_PHASE_NOTE
 
 
+#: The headline when the compiler names no message of its own.
+_COMPILE_GENERIC_MESSAGE = "Canonical compilation rejected this process."
+
+
+def _compile_message(diagnostic: Any) -> str:
+    """The compiler's OWN message for this diagnostic, or the generic headline.
+
+    The compile phase used to hardcode the generic string for every diagnostic
+    while forwarding only the remediation, so the authority's actual statement —
+    "no symbol resolves this authored reference", "emission plan is invalid" —
+    never reached the caller, and `_authoring_error_envelope` put the generic
+    string in the envelope's top-level `error` as the HEADLINE they read first.
+    The semantic phase forwards `finding.message` verbatim; this makes compile
+    match it.
+
+    Safe for the same reason the semantic forwarding is: every `message=` under
+    `compiler/process_ir/` is a static literal or a `_MESSAGES` table lookup —
+    no f-string, no interpolation — so a compiler message cannot carry an
+    authored value.
+    """
+    own = (getattr(diagnostic, "message", "") or "").strip()
+    return own or _COMPILE_GENERIC_MESSAGE
+
+
 def _contract_ids_for(code: str) -> Tuple[str, ...]:
     """The served authoring entries that explain ``code``.
 
@@ -1250,7 +1274,7 @@ def build_artifact_descriptors(
                     _diag(
                         AUTHORING_COMPILE_BLOCKED,
                         "error",
-                        message="Canonical compilation rejected this process.",
+                        message=_compile_message(diagnostic),
                         path=getattr(diagnostic, "path", "") or "",
                         subject_kind="process",
                         subject_id=component_key,
@@ -1279,7 +1303,10 @@ def build_artifact_descriptors(
                     _diag(
                         AUTHORING_COMPILE_BLOCKED,
                         "error",
-                        message="Canonical compilation rejected this process.",
+                        # The ONLY place the generic headline is correct: the
+                        # compiler raised without naming a single diagnostic, so
+                        # there is no authority message to forward.
+                        message=_COMPILE_GENERIC_MESSAGE,
                         subject_kind="process",
                         subject_id=component_key,
                     ),
