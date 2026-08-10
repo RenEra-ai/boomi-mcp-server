@@ -4649,8 +4649,10 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
     # no resolver recognises — the same mistake as the defects it guards.
     from boomi_mcp.categories.components.builders.connector_builder import (
         _resolve_rest_connector_type,
+        _resolve_soap_client_connector_type,
     )
 
+    _resolve_soap_client_connector_type_check = _resolve_soap_client_connector_type
     rest_family = _resolve_rest_connector_type("rest")
     assert rest_family, "no canonical REST connector type"
     assert _action_type_from_config(
@@ -4681,22 +4683,48 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
     )
     written = set()
     for source in primitives.glob("*.py"):
-        for node in ast.walk(ast.parse(source.read_text())):
+        tree = ast.parse(source.read_text())
+        # Module-level string constants, resolved. `_soap_common` writes
+        # `"connector_type": SOAP_CONNECTOR_ALIAS` — an `ast.Name`, not a
+        # literal — so a constant-only reader saw 3 of the 4 families and was
+        # blind to precisely the one this guard exists for.
+        constants = {
+            target.id: node.value.value
+            for node in tree.body
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+
+        def _value(node):
+            if isinstance(node, ast.Constant):
+                return node.value
+            if isinstance(node, ast.Name):
+                return constants.get(node.id)
+            return None
+
+        for node in ast.walk(tree):
             if not isinstance(node, ast.Dict):
                 continue
             keys = [k.value for k in node.keys if isinstance(k, ast.Constant)]
             if "connection_ref_key" not in keys:
                 continue
             literal = {
-                k.value: v.value
+                k.value: _value(v)
                 for k, v in zip(node.keys, node.values)
-                if isinstance(k, ast.Constant) and isinstance(v, ast.Constant)
+                if isinstance(k, ast.Constant)
             }
             family = literal.get("connector_type")
             mode = literal.get("operation_mode")
             if isinstance(family, str) and isinstance(mode, str):
                 written.add((family, mode))
     assert written, "no primitive connector-action literals found"
+    # ...and the reader really does see the constant-named family, or the
+    # sweep below grades a set that silently excludes it.
+    assert any(
+        _resolve_soap_client_connector_type_check(family) for family, _ in written
+    ), sorted(written)
 
     # Every family a primitive writes must be RECOGNISED. Not "yields an
     # action from these two keys alone" — the REST primitives set `method`
@@ -4704,10 +4732,6 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
     # incomplete. What must never happen again is a family falling through
     # every branch unrecognised, which is exactly how SOAP produced a `None`
     # the compiler then reported as an unsupported action.
-    from boomi_mcp.categories.components.builders.connector_builder import (
-        _resolve_soap_client_connector_type,
-    )
-
     unrecognised = sorted(
         family
         for family, _mode in written

@@ -248,8 +248,17 @@ def _action_type_from_config(config: Mapping[str, Any]) -> Optional[str]:
     excluded SOAP: `soap_client` contains neither "rest" nor "database", so it
     fell through to a `None` the compiler then reported as an unsupported
     action, citing a contract entry that publishes it as supported. Resolvers
-    cover every family the builders know, so the set cannot drift the way an
-    inline list of names does.
+    keep each family's spelling out of this function.
+
+    Two families are deliberately NOT derived. `wss` (the listener family) and
+    plain `http` fall through to `None`, and that is the correct answer: they
+    are absent from the connector-call allowlist, so the compiler refuses them
+    with `..._CONNECTOR_ACTION_UNSUPPORTED` and cites the entries that ARE
+    supported. That is an honest refusal, and the opposite of the SOAP bug —
+    there the contract published the action as supported while the derivation
+    silently produced nothing. So this consults two resolvers, not the three
+    `_classify_connector_action` uses; the set is deliberate, not exhaustive,
+    and an earlier version of this docstring claimed otherwise.
 
     `action_type` stays an accepted alias because the legacy path accepts it —
     except that the SOAP builder REJECTS it as an unsupported operation field,
