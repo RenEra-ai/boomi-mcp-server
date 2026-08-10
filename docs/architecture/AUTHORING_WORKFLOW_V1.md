@@ -90,8 +90,11 @@ Doctrine's `guidance_only` and `na` map to `unsupported` with `applicable: false
 not a capability that was withdrawn.
 
 **Every entry names its source** and whether it was `generated` from a named runtime registry or
-`parity_pinned` against one. See ADR-001 §6 for why the projection is admitted at all and what it may
-never carry.
+`parity_pinned` against one. `generated` is the stronger of the two — the facts are computed from the
+source, so they cannot disagree with it. `parity_pinned` marks a fact that has to be stated in prose:
+its identity and source are asserted two-way, and its served text is frozen in a committed snapshot
+so a change to it must be reviewed. The snapshot makes a rewrite visible; it cannot make it true.
+See ADR-001 §6 for why the projection is admitted at all and what it may never carry.
 
 ### Diagnostics carry their own repair
 

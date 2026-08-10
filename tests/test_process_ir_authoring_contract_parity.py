@@ -959,3 +959,36 @@ def test_the_published_capability_table_matches_the_registry_exactly():
         "in the registry only": sorted(set(PROCESS_IR_V1_CAPABILITIES) - published),
     }
     assert len(published) == 25, len(published)
+
+
+def test_every_semantic_rule_names_the_authority_it_states_a_fact_about():
+    """#146 F8. All seven hardcoded `runtime.process_ir_models`.
+
+    That module contains the word "intersection" zero times, yet the
+    convergence rule cited it — and swapping every rule to an unrelated source
+    failed nothing but the byte snapshot, because the attribution lived at one
+    construction site and no test compared it to anything.
+    """
+    from boomi_mcp.authoring.process_ir_projection import (
+        _SEMANTIC_RULE_SOURCES,
+        _SEMANTIC_RULES,
+    )
+
+    declared = {rule[0] for rule in _SEMANTIC_RULES}
+    assert set(_SEMANTIC_RULE_SOURCES) == declared, sorted(
+        set(_SEMANTIC_RULE_SOURCES) ^ declared
+    )
+
+    served = {
+        entry.contract_entry_id: tuple(sorted(s.source_id for s in entry.sources))
+        for entry in entries()
+        if entry.entry_type == "semantic_rule"
+    }
+    assert served == {
+        rule_id: tuple(sorted(source_ids))
+        for rule_id, source_ids in _SEMANTIC_RULE_SOURCES.items()
+    }
+
+    # ...and they are not all the same source again, which is the state this
+    # finding describes.
+    assert len({ids for ids in served.values()}) >= 4, served

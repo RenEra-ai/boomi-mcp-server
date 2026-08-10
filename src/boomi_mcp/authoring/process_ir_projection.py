@@ -1261,6 +1261,26 @@ def _state_visibility_entries(
     return entries
 
 
+#: The AUTHORITY each semantic rule states a fact about.
+#:
+#: Every rule used to name `runtime.process_ir_models`, which for most of them
+#: is simply not where the fact lives — that module contains the word
+#: "intersection" zero times, yet the convergence rule cited it. Swapping every
+#: rule to an unrelated source failed nothing but the byte snapshot, because the
+#: attribution was hardcoded at the single construction site below and pinned by
+#: nothing. A served `source_id` is a claim about provenance; a wrong one sends
+#: a caller to the wrong place to verify it.
+_SEMANTIC_RULE_SOURCES = {
+    "semantic_rule.branch.path_order": (SOURCE_STATE,),
+    "semantic_rule.control.no_continuation": (SOURCE_CAPABILITIES,),
+    "semantic_rule.control.depth_bound": (SOURCE_MODELS,),
+    "semantic_rule.state.convergence": (SOURCE_STATE,),
+    "semantic_rule.retry.replay_safety": (SOURCE_RETRY, SOURCE_CONNECTORS),
+    "semantic_rule.documents.explicit_split_combine": (SOURCE_CAPABILITIES,),
+    "semantic_rule.references.opaque": (SOURCE_MODELS,),
+}
+
+
 def _semantic_rule_entries(
     sources: ProjectionSourcesV1,
 ) -> List[ProcessIRAuthoringContractEntryV1]:
@@ -1275,14 +1295,15 @@ def _semantic_rule_entries(
             node_kinds=node_kinds,
             workflow_stages=("author", "plan", "repair"),
             related_entry_ids=related,
-            sources=(
+            sources=tuple(
                 _source(
-                    SOURCE_MODELS,
+                    source_id,
                     "parity_pinned",
                     "live_capture_attested",
                     "compiler",
                     entry_id,
-                ),
+                )
+                for source_id in _SEMANTIC_RULE_SOURCES[entry_id]
             ),
         )
         for entry_id, category, title, summary, node_kinds, related in _SEMANTIC_RULES

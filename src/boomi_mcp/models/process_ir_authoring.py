@@ -164,8 +164,13 @@ class ProcessIRAuthoringSourceV1(_ContractModel):
     * ``generated`` — the entry's facts are computed FROM the named source at
       build time, so they cannot disagree with it;
     * ``parity_pinned`` — the entry states something prose must say (a live-
-      captured platform behaviour, an ordering guarantee) and a CI test asserts
-      it against the named source in both directions.
+      captured platform behaviour, an ordering guarantee), so it cannot be
+      computed from the source and is instead held by CI: its identity and its
+      named source are asserted two-way, and its full served text is frozen in
+      a committed snapshot, so any change to it lands in a diff a reviewer must
+      approve. That is a REVIEW GATE on the wording, not a proof that the
+      wording is true — no test can derive an English sentence from a registry.
+      An earlier version of this description promised the stronger thing.
 
     ``revision_role`` records which of the three shipped revisions moves when
     this source moves, so a caller who sees a revision change can tell what kind
