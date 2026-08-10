@@ -18,6 +18,8 @@ catch a uniform drift that would move both sides of the differential together.
 from __future__ import annotations
 
 import copy
+import json
+from pathlib import Path
 
 import pytest
 
@@ -100,26 +102,32 @@ def _pipeline(stages, **top):
     }
 
 
-# The six chains #139C migrates to the canonical chain.
+# The six chains #139C migrates to the canonical chain, plus the SOAP family --
+# orthogonal to stage kind (it is declared by the stage's `primitive`) -- and the
+# non-uppercase `execute` verb the pre-#139C canonicalizer corrupted: eight cases
+# over six chains.
+#
+# #139E: loaded from the shared corpus rather than restated here. Two
+# hand-maintained copies of "which chains are canonical" is exactly the drift the
+# fixture removes, and the emitter-parity harness additionally pins the set at
+# BOTH ends -- a frozen literal of the eight names (so a deleted case cannot pass
+# unnoticed) and equality with the committed `sync_pipeline_*.xml` glob (so a new
+# golden cannot arrive unclaimed).
+#
+# Values are complete configs, NOT stage lists: `name`/`folder_name` cannot live
+# inside a config (lower_config drops them; _KNOWN_ROOT_KEYS would reject them),
+# so the corpus carries them as case metadata and the shared unit is the config.
 MIGRATED_CHAINS = {
-    "read_send": [_db_read(), _rest_send()],
-    "read_map_send": [_db_read(), _map(), _rest_send()],
-    "fetch_send": [_rest_fetch(), _rest_send()],
-    "fetch_map_send": [_rest_fetch(), _map(), _rest_send()],
-    "fetch_write": [_rest_fetch(), _db_write()],
-    "fetch_map_write": [_rest_fetch(), _map(), _db_write()],
+    name: case["config"]
+    for name, case in json.loads(
+        (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "process_ir"
+            / "sync_pipeline_emitter_parity_cases.json"
+        ).read_text()
+    )["cases"].items()
 }
-# ...plus the SOAP family, orthogonal to stage kind (declared by the primitive),
-# including the non-uppercase `execute` verb the pre-#139C canonicalizer corrupted.
-MIGRATED_CHAINS.update(
-    {
-        "soap_fetch_soap_send": [_soap_fetch(), _soap_send()],
-        "soap_lowercase_execute": [
-            _soap_fetch(action_type="execute"),
-            _soap_send(action_type="execute"),
-        ],
-    }
-)
 
 # The four chains that stay on the legacy renderer (#140).
 LISTENER_CHAINS = {
@@ -142,8 +150,8 @@ def test_cutover_is_byte_identical_to_the_legacy_renderer(chain):
     This identity held before the cut-over too (build() simply delegated), so it
     is a true before/after invariant rather than a tautology.
     """
-    cfg = _pipeline(copy.deepcopy(MIGRATED_CHAINS[chain]))
-    lowered = SyncPipelineBuilder.lower_config(cfg)
+    cfg = copy.deepcopy(MIGRATED_CHAINS[chain])
+    lowered = SyncPipelineBuilder.lower_config(copy.deepcopy(cfg))
     emitted = SyncPipelineBuilder.build(cfg, name="P", folder_name="F")
     assert emitted == ProcessFlowBuilder.build(lowered, name="P", folder_name="F")
     assert LEGACY_ADAPTER_ALIAS_PREFIX not in emitted
@@ -367,7 +375,7 @@ def test_adapter_refuses_a_listener_source(connector_type):
 def test_no_compatibility_noop_paths(chain):
     """The dialect's config gate is a strict allow-list at every level, so nothing
     is accepted-and-ignored. A failure here means someone loosened that gate."""
-    lowered = SyncPipelineBuilder.lower_config(_pipeline(copy.deepcopy(MIGRATED_CHAINS[chain])))
+    lowered = SyncPipelineBuilder.lower_config(copy.deepcopy(MIGRATED_CHAINS[chain]))
     assert adapt_sync_pipeline(lowered).compatibility_noop_paths == ()
 
 

@@ -639,9 +639,9 @@ mistyped. The `wrapper_subprocess` adapter builds its IR directly (resolved-ref 
 |---|---|---|---|---|---|---|---|
 | `wrapper_subprocess` | `wrapper_subprocess.py` | ordered process_calls + Stop/Return Documents; `wait`/`abort_on_error`/`label` | adapter/compile/emit defect → `PROCESS_XML_VALIDATION_FAILED`; `PROCESS_REF_MISSING`/`PROCESS_EXTENSIONS_INVALID` totality guards preserved (precede the adapter) | `processcall_standalone_parent.xml` | inside `emit_process` (`verify_process_graph`) | required | **canonical** |
 | `database_to_api_sync` / `flow_sequence` | `flow_sequence.py` | 11 linear kinds; terminal branch/decision/exception; nested branch/decision arms; Return-Documents (linear only); target-less cache_put staging legs | adapter/compile/emit defect → `PROCESS_XML_VALIDATION_FAILED`; step/config codes unchanged (validator runs first) | `flow_sequence_decision_branch_map.xml`, `flow_sequence_cache_load_retrieve_remove.xml`, `flow_sequence_exception_terminal.xml`, `set_properties_ddp_dpp_flow_sequence.xml`, `flow_sequence_cache_put_get.xml`, `m11_cache_property_basic.xml` (the M11 process; `m11_processproperty_map_function.xml` is a **processproperty component** built by `ProcessPropertyBuilder`, NOT the flow_sequence process — its process is exercised structurally, not as a byte golden) | inside `emit_process` | required | **canonical** |
-| composition process emission (`patterns/composition.py`) | (inherits `flow_sequence`) | main process rewritten to `database_to_api_sync` + `flow_sequence=[map_ref, terminal branch]` | via the flow_sequence adapter | archetype-composition suite (raw XML parity) | inside `emit_process` | required | **canonical-inherited** (recipe adapter pending #145) |
-| `sync_pipeline` + 4 sync archetypes | `sync_pipeline.py` (#139C) | the 6 NON-listener stage chains: `read\|fetch(rest_fetch\|soap_fetch)` → `[map]` → `send(rest_send\|soap_send)\|write(db_write)`. The 4 WSS **listener** chains stay on the legacy renderer behind an explicit routing gate (`_sync_pipeline_is_canonical`) — #140 owns the fused `start_listen` entry | adapter/compile/emit defect → `PROCESS_XML_VALIDATION_FAILED`; `SYNC_PIPELINE_*` codes unchanged and keep precedence (`lower_config` runs first) | `sync_pipeline_db_read_map_rest_send.xml`, `sync_pipeline_fetch_map_db_write.xml`, `sync_pipeline_fetch_rest_send_no_map.xml`, `sync_pipeline_soap_fetch_soap_send.xml` (+ `listener_wss_start.xml` on the legacy arm) | inside `emit_process` | required | **canonical** (listener arm pending #140) |
-| ordinary `database_to_api_sync` (single/linear, Try-Catch, dynamic path, listener) | reserved | — | unchanged | existing goldens | n/a | n/a | **pending-capability** (needs canonical start_listen / dynamic-path / catcherrors / notify emission). #139C's adapter is a *linear single-shape core* adapter deliberately shaped to be promoted here once those four close |
+| composition process emission (`patterns/composition.py`) | (inherits `flow_sequence`) | main process rewritten to `database_to_api_sync` + `flow_sequence=[map_ref, terminal branch]` | via the flow_sequence adapter | archetype-composition suite (raw XML parity) | inside `emit_process` | required | **canonical-inherited** through `flow_sequence`; the recipe adapter is **no longer pending** — #145 (M12.10) shipped the typed-recipe contribution surface and `patterns/composition.py` invokes typed recipes, so nothing here waits on it |
+| `sync_pipeline` + 4 sync archetypes | `sync_pipeline.py` (#139C) | the 6 NON-listener stage chains: `read\|fetch(rest_fetch\|soap_fetch)` → `[map]` → `send(rest_send\|soap_send)\|write(db_write)`. The 4 WSS **listener** chains stay on the legacy renderer behind an explicit routing gate (`_sync_pipeline_is_canonical`) — #140 owns the fused `start_listen` entry | adapter/compile/emit defect → `PROCESS_XML_VALIDATION_FAILED`; `SYNC_PIPELINE_*` codes unchanged and keep precedence (`lower_config` runs first) | `sync_pipeline_db_read_map_rest_send.xml`, `sync_pipeline_fetch_map_db_write.xml`, `sync_pipeline_fetch_rest_send_no_map.xml`, `sync_pipeline_soap_fetch_soap_send.xml` (+ `listener_wss_start.xml` on the legacy arm) | inside `emit_process` | required | **canonical** for **all 16** non-listener chains at the PRIMITIVE level (3 source primitives × 3 target primitives × ±map = 18, minus `db_read`→`db_write` ±map which is rejected upstream as `SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED`) — pinned since #139E by `tests/fixtures/process_ir/sync_pipeline_emitter_parity_cases.json` (17 cases / 16 fingerprints; the 17th repeats the SOAP chain with the non-uppercase `execute` verb), whose coverage is **derived from the builder's own primitive tables**, not enumerated. #139C's inline set described only the 6 *stage-kind* chains and covered 7 of these 16. The 4 WSS **listener** chains are **legacy / pending-capability** — NOT "pending #140": #140 landed and added no fused `start_listen`, so the registry still holds 18 keys with none of them `start_listen` |
+| ordinary `database_to_api_sync` (single/linear, Try-Catch, dynamic path, listener) | reserved | — | unchanged | existing goldens | n/a | n/a | **pending-capability**, re-verified at #139E (HEAD `1bd0b69`): `catcherrors` **now exists** canonically (#142 — `TryCatchNodeV1`, `CatchErrorsInputV1`, registry key `catcherrors`), but `start_listen`, connector `dynamic_path` and Notify remain **unrepresentable** — `_REGISTRATIONS` holds 18 keys with neither `start_listen` nor `notify`, and no connector input model carries a dynamic-path field. #139C's adapter is a *linear single-shape core* adapter deliberately shaped to be promoted here once those **three** close (not four) |
 | `emit_fragment` primitives | — | — | unchanged | — | n/a | n/a | **n/a** (never canonical) |
 | top-level `spec.pipeline` | secret scan only | — | `PLAINTEXT_SECRET_REJECTED` (value-free path) | — | n/a | required | **V1-inert; §11 secret gap CLOSED; strict `version="1.1"` selector ACTIVE (#139D) — V1 unchanged** |
 
@@ -675,14 +675,23 @@ needs no new derivation and no dialect coverage, so activation never depended on
 ### Deferred (issue stays OPEN)
 
 ~~sync_pipeline golden-baseline + adapter~~ (**DONE in #139C**), ~~authority activation~~ (**DONE in
-#139D**), ordinary database_to_api_sync (needs canonical listener / dynamic-path / catcherrors /
-notify emission — currently owned by #140/#142), the recipe/archetype named adapters (#145), and the
-final cutover that removes the remaining legacy XML dispatch. Full-#139 DOD requires either an
-ownership adjustment allowing parity-only support for those already-shipped capabilities or a
-milestone dependency change; the shipped slices do not fake completion around that gap.
+#139D**), ~~the recipe/archetype named adapters~~ (**DONE in #145** — `api_to_api_sync`,
+`api_to_database_sync` and `compose_archetypes` invoke typed recipes, and their process paths already
+run through the canonical sync / flow_sequence adapters), ~~extending the emitter-parity oracle to
+`sync_pipeline`~~ (**DONE in #139E**). Still deferred: the ordinary `database_to_api_sync` process
+dialect, and the final legacy-dispatch reachability audit that removes the remaining legacy XML
+dispatch (**#147**, which owns that criterion verbatim).
 
-**After #139D, every remaining #139 item is blocked on another issue** (#140 / #142 / #145) — none is
-work #139 can do on its own merits.
+**The "#140 / #142 / #145 blocker" note above was only PARTLY resolved, and #139E is its
+counter-example.** #142 shipped canonical `catcherrors` and #145 shipped the recipe adapters — but
+fused `start_listen`, connector `dynamic_path` and Notify have **no** canonical emission anywhere in
+the tree, so the ordinary dialect and the 4 WSS listener chains genuinely stay `pending-capability`,
+and those three are **unowned capability work rather than #139 adapter work** (issue #139 lists new
+capability as out of scope). What the note got wrong is the universal quantifier: the
+already-canonical non-listener `sync_pipeline` surface was never blocked at all, and #139E pinned it
+on its own merits without touching a single production file. `database_to_api_sync` additionally
+remains a distinct raw dialect because it reattaches `reliability` and `target.dynamic_path` **after**
+`SyncPipelineBuilder.lower_config`.
 
 **Deferred faithfulness items (do NOT affect any valid/deployable config):**
 
@@ -986,6 +995,66 @@ strict-only input form, `v1_deprecated: false`); the generated JSON schema indep
 `enum: ["1.0","1.1"]` with `default: "1.0"`. `docs/MCP_TOOL_DESIGN.md` carries the full outcome table.
 **V1 is not deprecated and emits no warning** — ADR-001 §9 permits this slice precisely because it
 withdraws no V1 acceptance.
+
+### #139E landed — sync_pipeline emitter-parity reachability and capability reconciliation
+
+**Test-and-docs only. Zero production diff:** no file under `src/` was touched, no golden was
+regenerated, no emitter / adapter / builder / archetype changed, and the emitter registry stays at 18
+keys. No `pending`/`reserved` row above becomes canonical in this slice, and no listener chain is
+promoted.
+
+**Why a second harness was needed.** The generic emitter-parity oracle
+(`tests/test_process_emitter_parity.py`) drives frozen `ProcessIRV1` documents through
+`ir_to_legacy_flow_sequence`. That oracle is **structurally unreachable** for the `sync_pipeline`
+dialect, and #140/#146 did nothing to change it: the frozen #136 codec hard-requires a non-empty
+`flow_sequence`, while 5 of the 10 accepted sync chains are map-less (the #139C finding). The only way
+into this dialect is its own normalizer. #139E therefore adds a **separate** adapter-dialect harness in
+the same file, calling `SyncPipelineBuilder.lower_config` exactly once per case and comparing canonical
+emission against `ProcessFlowBuilder` on that same lowered core. It does **not** invent a
+ProcessIR-to-`PipelineSpec` inverse: no such direction exists in the tree, ADR-001 §6 forbids that
+second semantic compiler, and #139D already settled the point.
+
+**The corpus, and why it is DERIVED rather than enumerated.** The first draft of this slice froze
+#139C's inline eight-case set verbatim and described it as the canonical set. Live QA graded the
+corpus's *universe* instead of its members and refuted that: at the primitive level there are **16**
+canonical non-listener chains (3 source primitives × 3 target primitives × ±map = 18, minus
+`db_read`→`db_write` ±map, rejected upstream), and the inherited set covered **7**. The gap was the
+map-ful SOAP chain plus every mixed-connector-family combination — precisely the surface the #139A
+cross-role connector guard and #139C's own family-conditional canonicalizer defect live on. No
+coverage had been *lost* (the set came straight from #139C), but the slice had newly added prose
+asserting a completeness that measurement refuted.
+
+`tests/fixtures/process_ir/sync_pipeline_emitter_parity_cases.json` therefore carries **all 16**
+fingerprints plus one verb-casing duplicate (17 cases), and case names *are* the fingerprint
+(`<source_primitive>[_map]_<target_primitive>`) so an omission is visible by inspection. Crucially,
+`test_sync_corpus_covers_every_canonical_chain` **recomputes** the universe from
+`_SYNC_PIPELINE_STAGE_PRIMITIVE` / `_SYNC_PIPELINE_STAGE_ALT_PRIMITIVE` and puts each candidate
+through the real gate: a primitive added to either table fails the suite until the corpus grows, which
+a hand-maintained literal can never do. This is the #139D lesson applied — a recurring class needs a
+structural fix, not another enumeration.
+
+Four cases are anchored to committed raw-byte `golden_xml` components, and the harness asserts the
+**legacy** renderer against those bytes as well as the canonical one — the non-redundant half, because
+nothing else in the tree pinned `ProcessFlowBuilder`'s own output against them, and a uniform drift
+moves both sides of a differential together. `tests/test_sync_pipeline_adapter_cutover.py` now loads
+its migrated set from the same fixture, so "which chains are canonical" has exactly **one** definition.
+
+The corpus is pinned **fail-closed in every direction**, because a harness that merely iterates a
+fixture fails *open*: coverage must equal the derived canonical universe (superset direction); exactly
+one case per fingerprint, with `soap_lowercase_execute` the single sanctioned duplicate (deletion and
+silent-duplicate directions); the claimed anchor set must equal the `sync_pipeline_*.xml` glob (so a
+new golden cannot arrive unclaimed); and `_sync_pipeline_is_canonical` must be `True` for every case,
+so a listener chain smuggled into the corpus cannot quietly turn the parity assertions into the legacy
+renderer compared with itself. All four guards were mutation-checked.
+
+**Capability reconciliation.** Re-verified at `1bd0b69`: `catcherrors` has canonical emission (#142),
+so the ledger no longer lists it as a blocker for the ordinary dialect. `start_listen`, connector
+`dynamic_path` and Notify do **not** — `_REGISTRATIONS` carries 18 keys with neither `start_listen` nor
+`notify`, and no connector input model has a dynamic-path field. Those three are **unowned capability
+work**, not #139 adapter work (#139 lists new capability as out of scope), and both the listener
+cutover and the ordinary `database_to_api_sync` adapter remain gated behind them. The listener routing
+and adapter-refusal tests are deliberately left byte-unchanged: they are the evidence that the legacy
+fallback is *intentional* rather than incidental.
 
 ## #140 M12.5 — first-class ConnectorCall and mixed linear flow
 
