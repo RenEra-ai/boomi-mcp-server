@@ -229,6 +229,48 @@ class _NormalizedIntent:
     connector_metadata: Mapping[str, Tuple[Optional[str], Optional[str]]]
 
 
+def _action_type_from_config(config: Mapping[str, Any]) -> Optional[str]:
+    """The connector ACTION a component plan declares, family-conditionally.
+
+    Reading `config["action_type"]` alone was wrong: no primitive writes that
+    key into a component config. `db_extract`/`db_write` write
+    `operation_mode`, the REST primitives write `operation_mode` plus `method`,
+    and `action_type` appears only inside `emit_fragment` — a different
+    structure. So every ProcessIR document over a real component plan came back
+    with no action at all: a `connector_call` was rejected as an unsupported
+    action, and `source`/`target` failed with "operation symbol is missing
+    derived connector metadata".
+
+    The derivation mirrors the one the legacy builder already uses
+    (`integration_builder._connector_ref_expectations`), rather than inventing a
+    second convention: database maps `operation_mode` get/send to the mixed-case
+    verbs the emitter writes, REST prefers `method`, and `action_type` stays an
+    accepted alias because the legacy path accepts it too.
+    """
+    declared = config.get("action_type") or config.get("actionType")
+    declared = declared.strip() if isinstance(declared, str) else ""
+
+    family = config.get("connector_type")
+    family = family.strip().lower() if isinstance(family, str) else ""
+
+    if family == "database":
+        mode = config.get("operation_mode")
+        mode = mode.strip().lower() if isinstance(mode, str) else ""
+        if mode == "get":
+            return "Get"
+        if mode == "send":
+            return "Send"
+        return declared or None
+
+    if "rest" in family or "http" in family:
+        method = config.get("method")
+        if isinstance(method, str) and method.strip():
+            return method.strip().upper()
+        return declared.upper() if declared else None
+
+    return declared or None
+
+
 def _connector_metadata_from_components(
     components: Sequence[IntegrationComponentSpec],
 ) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
@@ -244,7 +286,7 @@ def _connector_metadata_from_components(
     for component in components:
         config = component.config or {}
         connector_type = config.get("connector_type")
-        action_type = config.get("action_type")
+        action_type = _action_type_from_config(config)
         if connector_type or action_type:
             metadata[component.key] = (
                 str(connector_type) if connector_type else None,

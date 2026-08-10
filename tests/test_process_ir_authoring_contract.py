@@ -4540,62 +4540,118 @@ def test_the_connection_remediation_names_the_field_that_binds_it():
     ]
 
 
-def test_a_connection_binding_written_by_a_real_primitive_resolves():
-    """Codex r24 P1. F6 read a field NO production path writes.
+def _primitive_connector_action_config(module_name):
+    """The connector-action component config a primitive actually emits.
 
-    Every connector primitive — `db_extract`, `db_write`, `rest_fetch`,
-    `rest_send`, `_soap_common` — stores the operation's connection under
-    `config["connection_ref_key"]`, and `integration_builder` already routes on
-    that name. The first version of the F6 fix read `connection_key`, which
-    exists only in hand-written clean-room fixtures: they passed, and every
-    plan a primitive builds still failed reference resolution.
-
-    So the field name is taken from the PRIMITIVES rather than from a fixture,
-    and asserted to be the one they emit — a fixture agreeing with the code is
-    no evidence when the same author wrote both.
+    Read from the primitive's SOURCE, not copied. Two #146 defects were the
+    same mistake — reading `connection_key` and then `action_type`, neither of
+    which any primitive writes into a component config — and both survived
+    every round because the fixtures were hand-written with the same wrong
+    assumption. A fixture agreeing with the code is no evidence when one author
+    wrote both; the primitive is the authority.
     """
     import ast
 
-    from boomi_mcp.models.integration_models import IntegrationComponentSpec
-    from boomi_mcp.recipes.materialization import build_symbol_table
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "boomi_mcp" / "patterns" / "primitives" / f"{module_name}.py"
+    ).read_text()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Dict):
+            continue
+        keys = [k.value for k in node.keys if isinstance(k, ast.Constant)]
+        if "connection_ref_key" in keys and "operation_mode" in keys:
+            literal = {}
+            for key, value in zip(node.keys, node.values):
+                if isinstance(key, ast.Constant) and isinstance(value, ast.Constant):
+                    literal[key.value] = value.value
+            return keys, literal
+    raise AssertionError(f"no connector-action config literal found in {module_name}")
 
-    primitives = Path(__file__).resolve().parents[1] / "src" / "boomi_mcp" / "patterns" / "primitives"
-    emitted = set()
-    for source in primitives.glob("*.py"):
-        for node in ast.walk(ast.parse(source.read_text())):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                if node.value.endswith("connection_ref_key"):
-                    emitted.add(node.value)
-    assert "connection_ref_key" in emitted, sorted(emitted)
 
-    symbols = {
-        s.ref: s
-        for s in build_symbol_table(
-            [
-                IntegrationComponentSpec(
-                    key="conn", name="C", type="connector-settings",
-                    config={"connector_type": "database"},
-                ),
-                IntegrationComponentSpec(
-                    key="op", name="O", type="connector-action",
-                    config={
-                        "operation_mode": "get",
-                        "connector_type": "database",
-                        "connection_ref_key": "conn",
-                    },
-                ),
-            ]
-        ).symbols
+def test_a_plan_shaped_like_a_real_primitive_compiles_end_to_end():
+    """Codex r24 P1 and QA #555 — one class, two fields.
+
+    `build_symbol_table` read `connection_key` and
+    `_connector_metadata_from_components` read `action_type`. Neither is written
+    into a component config by any primitive: they write `connection_ref_key`,
+    `operation_mode` and (for REST) `method`. So NO ProcessIR document over a
+    real component plan compiled — `connector_call` was rejected as an
+    unsupported action, and `source`/`target` failed with "operation symbol is
+    missing derived connector metadata".
+    """
+    keys, literal = _primitive_connector_action_config("db_extract")
+    assert "action_type" not in keys, keys
+    assert literal.get("operation_mode") == "get", literal
+
+    config = {
+        "operation_mode": literal["operation_mode"],
+        "connector_type": "database",
+        "connection_ref_key": "src_conn",
     }
-    assert symbols["$ref:op"].connection_ref == "$ref:conn"
+    request = {
+        "authoring_request": {
+            "contract_version": "1",
+            "intent": {
+                "intent_kind": "process_ir",
+                "integration_name": "primitive-shaped",
+                "component_key": "p",
+                "components": [
+                    {
+                        "key": "src_conn", "name": "DB Conn",
+                        "type": "connector-settings",
+                        "config": {"connector_type": "database"},
+                    },
+                    {
+                        "key": "src_op", "name": "DB Get",
+                        "type": "connector-action", "config": config,
+                    },
+                ],
+                "process_ir": {
+                    "version": "1",
+                    "body": {
+                        "kind": "sequence",
+                        "steps": [
+                            {"kind": "connector_call", "operation_ref": "$ref:src_op"},
+                            {"kind": "stop"},
+                        ],
+                    },
+                },
+            },
+        }
+    }
+    for action in (
+        integration_builder._plan_authoring,
+        integration_builder._compile_authoring,
+    ):
+        payload = action(None, "p", request)
+        assert payload["_success"] is True, (
+            payload.get("error"),
+            [d.get("cause_codes") for d in (payload.get("authoring_diagnostics") or [])],
+        )
 
-    # ...and the remediation a caller receives names that same field, so the
-    # contract and the primitives cannot drift apart silently.
-    from boomi_mcp.compiler.process_ir.diagnostics import compiler_diagnostic_specs
 
-    remediation = next(
-        spec["remediation"]
-        for spec in compiler_diagnostic_specs()
-        if spec["code"] == "PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND"
-    )
-    assert "config.connection_ref_key" in remediation
+def test_the_action_type_derivation_matches_the_legacy_builder():
+    """QA #555. `action_type` is derived family-conditionally, not read.
+
+    The convention is the legacy builder's, not a second one invented here.
+    """
+    from boomi_mcp.authoring.workflow import _action_type_from_config
+
+    assert _action_type_from_config(
+        {"connector_type": "database", "operation_mode": "get"}
+    ) == "Get"
+    assert _action_type_from_config(
+        {"connector_type": "database", "operation_mode": "send"}
+    ) == "Send"
+    assert _action_type_from_config(
+        {"connector_type": "officialboomi-X-rest-prod", "method": "patch"}
+    ) == "PATCH"
+    # `action_type` stays an accepted alias, because the legacy path accepts it.
+    assert _action_type_from_config(
+        {"connector_type": "wss", "action_type": "Listen"}
+    ) == "Listen"
+    # ...and a plan that declares nothing derivable claims nothing.
+    assert _action_type_from_config({"connector_type": "database"}) is None
+
+

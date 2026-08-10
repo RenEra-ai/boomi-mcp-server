@@ -139,7 +139,7 @@ def build_symbol_table(
     receives, not one the IR authors.
 
     The operation->connection edge is the same kind of fact and is read from the
-    same place: an operation component's ``config["connection_key"]`` names the
+    same place: an operation component's ``config["connection_ref_key"]`` names the
     connection component it binds to, and that becomes the operation symbol's
     ``connection_ref``. ``connector_resolution`` resolves the connection off
     THAT field and nothing else, so leaving it unset made every first-class
@@ -158,7 +158,7 @@ def build_symbol_table(
     for component in components:
         connector_type, action_type = metadata.get(component.key, (None, None))
         ref = f"{_REF_PREFIX}{component.key}"
-        # NORMALIZED, and only used when it yields a usable key. `connection_key`
+        # NORMALIZED, and only used when it yields a usable key. The value
         # is plain caller config with no upstream normalization, so interpolating
         # it raw put `"$ref: src_conn"` — or `"$ref:"` — into a field whose
         # validator refuses it, and the caller got a raw pydantic string naming
@@ -174,9 +174,9 @@ def build_symbol_table(
         # version read `connection_key`, which appears in NO production path:
         # only in hand-written clean-room fixtures, which is why they passed
         # while every plan a primitive builds still failed resolution.
-        raw_connection_key = (component.config or {}).get("connection_ref_key")
-        connection_key = (
-            raw_connection_key.strip() if isinstance(raw_connection_key, str) else ""
+        raw_connection_ref_key = (component.config or {}).get("connection_ref_key")
+        connection_ref_key = (
+            raw_connection_ref_key.strip() if isinstance(raw_connection_ref_key, str) else ""
         )
         symbols.append(
             ComponentSymbolV1(
@@ -186,7 +186,7 @@ def build_symbol_table(
                 connector_type=connector_type,
                 action_type=action_type,
                 connection_ref=(
-                    f"{_REF_PREFIX}{connection_key}" if connection_key else None
+                    f"{_REF_PREFIX}{connection_ref_key}" if connection_ref_key else None
                 ),
             )
         )
