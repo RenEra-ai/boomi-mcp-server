@@ -555,10 +555,13 @@ _CLEAN_ROOM_COVERAGE = {
     "references": True,
     "branch": True,
     "state_lineage": True,
+    # Reachable only after #146 F6: a try/catch body admits `connector_call`
+    # and not `source`/`target`, so while every `connector_call` failed
+    # reference resolution, NO try/catch document was compilable at all.
+    "try_catch_retry": True,
     # Not yet exercised end-to-end. Each needs a compiling document of its own,
     # and each is named here so the gap is visible in CI output rather than
     # discovered by the next reviewer.
-    "try_catch_retry": False,
     "flow_control_batching": False,
     "split_combine": False,
     "process_call": False,
@@ -582,8 +585,13 @@ def test_the_clean_room_coverage_census_matches_the_fixtures():
         "_CLEAN_ROOM_COVERAGE when a family is added or removed",
         claimed ^ covered,
     )
-    # The uncovered families are recorded, not silently absent.
-    assert {name for name, done in _CLEAN_ROOM_COVERAGE.items() if not done}
+    # The uncovered families are RECORDED, not silently absent — every census
+    # name is accounted for on exactly one side. The earlier form asserted the
+    # uncovered set was non-empty, which made closing the last gap FAIL the
+    # test: it required the corpus to stay incomplete.
+    uncovered = {name for name, done in _CLEAN_ROOM_COVERAGE.items() if not done}
+    assert claimed | uncovered == set(_CLEAN_ROOM_COVERAGE)
+    assert claimed & uncovered == set()
 
 
 def test_a_first_class_connector_call_compiles_through_the_public_surface():

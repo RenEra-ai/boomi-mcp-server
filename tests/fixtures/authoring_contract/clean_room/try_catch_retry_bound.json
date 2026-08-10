@@ -1,0 +1,142 @@
+{
+ "covers": [
+  "try_catch_retry",
+  "connector",
+  "terminal",
+  "references"
+ ],
+ "design_decisions": [
+  {
+   "authored_path": "/intent/process_ir/body/steps/0",
+   "contract_entry_ids": [
+    "node.connector_call",
+    "connector_action.database.get"
+   ],
+   "decision_id": "the_first_class_connector_call_opens_the_sequence",
+   "why": "A try/catch body admits connector_call and not source/target, so the whole family is reachable only through the first-class node."
+  },
+  {
+   "authored_path": "/intent/process_ir/body/steps/1",
+   "contract_entry_ids": [
+    "node.try_catch",
+    "capability.scoped_try_catch"
+   ],
+   "decision_id": "the_scope_is_connector_not_process",
+   "why": "The protected work is one connector call, so the narrower scope is the honest one; process scope would claim to guard more."
+  },
+  {
+   "authored_path": "/intent/process_ir/body/steps/1/retry",
+   "contract_entry_ids": [
+    "capability.bounded_retry",
+    "semantic_rule.retry.replay_safety"
+   ],
+   "decision_id": "the_retry_count_is_zero_because_the_write_is_unclassified",
+   "why": "A positive count on a REST PATCH is REFUSED: the action has no established replay safety, so replaying it could duplicate an external effect. Zero is the only count this target admits until a classification exists."
+  },
+  {
+   "authored_path": "/intent/process_ir/body/steps/1/catch_body",
+   "contract_entry_ids": [
+    "placement.catch_body.step",
+    "placement.catch_body.terminal",
+    "node.stop"
+   ],
+   "decision_id": "the_catch_terminates_its_own_path",
+   "why": "Every divergent path terminates independently; v1 emits no join."
+  }
+ ],
+ "fixture_id": "try_catch_retry_bound",
+ "intent": "Read with a database Get, then write to a REST target inside a connector-scoped try/catch whose catch reports the failure and stops.",
+ "request": {
+  "contract_version": "1",
+  "intent": {
+   "component_key": "router",
+   "components": [
+    {
+     "config": {
+      "connector_type": "database"
+     },
+     "key": "src_conn",
+     "name": "CR DB Conn",
+     "type": "connector-settings"
+    },
+    {
+     "config": {
+      "action_type": "Get",
+      "connection_key": "src_conn",
+      "connector_type": "database"
+     },
+     "key": "src_op",
+     "name": "CR DB Get",
+     "type": "connector-action"
+    },
+    {
+     "config": {
+      "connector_type": "officialboomi-X3979C-rest-prod"
+     },
+     "key": "tgt_conn",
+     "name": "CR REST Conn",
+     "type": "connector-settings"
+    },
+    {
+     "config": {
+      "action_type": "PATCH",
+      "connection_key": "tgt_conn",
+      "connector_type": "officialboomi-X3979C-rest-prod"
+     },
+     "key": "tgt_op",
+     "name": "CR REST Patch",
+     "type": "connector-action"
+    },
+    {
+     "config": {},
+     "key": "xform",
+     "name": "CR Map",
+     "type": "transform.map"
+    }
+   ],
+   "integration_name": "clean-room-try-catch-retry",
+   "intent_kind": "process_ir",
+   "process_ir": {
+    "body": {
+     "kind": "sequence",
+     "steps": [
+      {
+       "kind": "connector_call",
+       "operation_ref": "$ref:src_op"
+      },
+      {
+       "catch_body": {
+        "steps": [
+         {
+          "kind": "message",
+          "text": "target write failed"
+         }
+        ],
+        "terminal": {
+         "kind": "stop"
+        }
+       },
+       "kind": "try_catch",
+       "retry": {
+        "count": 0
+       },
+       "scope": "connector",
+       "try_body": {
+        "steps": [
+         {
+          "kind": "connector_call",
+          "operation_ref": "$ref:tgt_op"
+         }
+        ],
+        "terminal": {
+         "kind": "stop"
+        }
+       }
+      }
+     ]
+    },
+    "version": "1"
+   }
+  }
+ }
+}
