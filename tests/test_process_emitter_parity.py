@@ -303,11 +303,22 @@ _SYNC_STAGE_IDS = {
 
 #: How far the behavioural cross-check sweeps. NOT a claim about the grammar's
 #: maximum chain length, and NOT a completeness bound -- no bound can be one (see
-#: THE HONEST LIMIT in _sync_probe_chain_space). This sweep is the only detector
-#: for an acceptance path that bypasses the grammar statement entirely, so the
-#: number is load-bearing and its cost is stated rather than assumed: each extra
-#: length multiplies the probe count by |kind-primitive pairs| = 8. Measured --
-#: 4: ~0.05s, 5: +0.34s, 6: +3.23s, against a file that runs in well under 2s.
+#: THE HONEST LIMIT in _sync_probe_chain_space). This sweep is the only detector for
+#: an acceptance path that bypasses the grammar statement entirely, so the number is
+#: load-bearing and its cost is stated rather than assumed.
+#:
+#: Measured probe time by bound: 3 = 0.38s, 4 = 3.72s, 5 = 4.74s, 6 = 14.34s.
+#: Note the shape, because it is NOT the geometric curve an earlier version of this
+#: comment described (`x8 per length`, with length 4 the cheap step at ~0.05s): the
+#: enrichments are offered up to _SYNC_ENRICHED_MAX_LENGTH, so length 4 is probed
+#: with all 39 of them (163,840 lowerings) while length 5 is bare-only (32,768).
+#: **Length 4 is now the most expensive increment (+3.34s), length 5 the cheaper one
+#: (+1.02s)** -- the reverse of what the old note implied, which would mislead anyone
+#: reasoning about moving either bound. Those numbers went stale when enrichment was
+#: extended to length 4 and were not re-derived here, only two lines below; a `sed`
+#: whose target does not match fails SILENTLY, so the check is to grep for the OLD
+#: string, never to re-read the new one.
+#:
 #: 5 is affordable; 6 is not, for one more length of a limit that never closes.
 #: Chain lengths at or below which the derived enrichments are offered. Beyond it
 #: only the bare shape is sent, so a bypass gated on a config FIELD at a length above
