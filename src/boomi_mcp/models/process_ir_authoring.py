@@ -40,6 +40,7 @@ from pydantic import (
     StrictBool,
     StrictInt,
     StringConstraints,
+    model_validator,
 )
 from typing_extensions import Annotated
 
@@ -416,6 +417,23 @@ def _matches_the_registry(field: str):
     return check
 
 
+def _entries_in_published_order(values):
+    """Refuse a page whose entries are out of order or repeated.
+
+    The contract promises `contract_entry_id` order and the cursor is a
+    strictly-greater comparison against the last id, so a reversed page makes
+    the cursor skip the rest of the result set. Nothing checked it: a reversed
+    page, a duplicated entry, and a page whose length contradicted
+    `returned_entry_count` all passed both re-validation hops.
+    """
+    ids = [entry.contract_entry_id for entry in values]
+    if ids != sorted(ids):
+        raise ValueError("page entries must be in contract_entry_id order")
+    if len(set(ids)) != len(ids):
+        raise ValueError("page entries must be unique by contract_entry_id")
+    return values
+
+
 class ProcessIRAuthoringContractPageV1(_ContractModel):
     """One bounded page of the authoring contract.
 
@@ -494,7 +512,41 @@ class ProcessIRAuthoringContractPageV1(_ContractModel):
     #: cursor pages through that order. Applying the generic set-sorter re-ordered
     #: a page by serialized JSON and silently broke pagination — the one tuple
     #: where "order is never meaningful" is false.
-    entries: Tuple[ProcessIRAuthoringContractEntryV1, ...] = ()
+    #:
+    #: ASSERTED, though, rather than merely relied on. The validator below
+    #: CHECKS the published order and refuses a violation; it does not sort.
+    #: Sorting would launder a downstream permutation instead of refusing it,
+    #: which is the whole point of re-validating a served page, and
+    #: de-duplicating would desync `entries` from `returned_entry_count`. It is
+    #: keyed on `contract_entry_id`, so it has nothing to do with the
+    #: JSON-serialization sorter that broke pagination — and it is a no-op on
+    #: every page the projector builds, because the projector already sorts.
+    entries: Annotated[
+        Tuple[ProcessIRAuthoringContractEntryV1, ...],
+        AfterValidator(_entries_in_published_order),
+    ] = ()
+
+    @model_validator(mode="after")
+    def _page_counts_and_cursor_agree(self):
+        """The three published numbers and the cursor must describe THIS page.
+
+        Same hole as the order check, one field over: nothing cross-checked
+        `returned_entry_count` against the entries actually carried, so a page
+        could report a count it did not contain, and `next_after_entry_id`
+        could name an entry that was not the last one — which is precisely the
+        value a caller feeds back as the cursor.
+        """
+        if self.returned_entry_count != len(self.entries):
+            raise ValueError(
+                "returned_entry_count must equal the number of entries carried"
+            )
+        if self.truncated and self.entries:
+            last = self.entries[-1].contract_entry_id
+            if self.next_after_entry_id != last:
+                raise ValueError(
+                    "next_after_entry_id must be the last entry on a truncated page"
+                )
+        return self
 
 
 def process_ir_authoring_contract_v1_json_schema() -> Dict[str, Any]:

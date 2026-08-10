@@ -4253,3 +4253,55 @@ def test_the_projection_cannot_write_through_to_the_doctrine_catalog():
     }, sorted(served_fields)
     for prose in ("problem", "when_to_use", "when_not_to_use", "boomi_shape_mapping"):
         assert prose not in served_fields, prose
+
+
+def test_a_page_out_of_published_order_or_miscounted_is_refused():
+    """F3. `entries` was the only tuple on the page model with no validator.
+
+    A reversed page, a duplicated entry, and a page whose length contradicted
+    `returned_entry_count` all passed BOTH re-validation hops. Output was
+    correct only because the projector sorts and slices — an unguarded
+    invariant, not a live wrong answer.
+
+    The guard CHECKS and refuses; it does not sort. Sorting would launder a
+    downstream permutation instead of refusing it, which is the whole point of
+    re-validating a served page, and de-duplicating would desync the count.
+    It is `contract_entry_id`-keyed, so it is unrelated to the generic
+    JSON-serialization sorter that once broke pagination — and it is a no-op on
+    every page the projector builds.
+    """
+    import pydantic
+
+    from boomi_mcp.categories.meta_tools import _revalidated_contract_page
+
+    served = _served_contract_page({"category": "capability"})
+    assert served is not None and len(served["entries"]) > 2
+
+    # ...unchanged, it round-trips.
+    assert _revalidated_contract_page(dict(served)) == served
+
+    reversed_page = dict(served, entries=list(reversed(served["entries"])))
+    with pytest.raises(pydantic.ValidationError):
+        _revalidated_contract_page(reversed_page)
+
+    duplicated = dict(
+        served,
+        entries=list(served["entries"]) + [served["entries"][-1]],
+        returned_entry_count=len(served["entries"]) + 1,
+    )
+    with pytest.raises(pydantic.ValidationError):
+        _revalidated_contract_page(duplicated)
+
+    miscounted = dict(served, returned_entry_count=len(served["entries"]) + 7)
+    with pytest.raises(pydantic.ValidationError):
+        _revalidated_contract_page(miscounted)
+
+    # A truncated page's cursor must be the last entry it carried — that is the
+    # value a caller feeds straight back.
+    truncated = _served_contract_page({"category": "diagnostic", "limit": 3})
+    assert truncated is not None and truncated["truncated"] is True
+    assert truncated["next_after_entry_id"] == truncated["entries"][-1][
+        "contract_entry_id"
+    ]
+    with pytest.raises(pydantic.ValidationError):
+        _revalidated_contract_page(dict(truncated, next_after_entry_id="zzz.not_last"))
