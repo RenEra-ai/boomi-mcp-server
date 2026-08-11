@@ -157,6 +157,36 @@ def test_cutover_is_byte_identical_to_the_legacy_renderer(chain):
     assert LEGACY_ADAPTER_ALIAS_PREFIX not in emitted
 
 
+#: Byte anchors for the legacy listener arm, captured through the legacy renderer
+#: BEFORE it is deleted. This is the last moment they can be obtained independently:
+#: the renderer is the only other implementation, so a golden written after its
+#: removal would confirm the canonical arm against itself. Named by their chain.
+_LISTENER_GOLDENS = {
+    "listener_send": "sync_pipeline_listener_send.xml",
+    "listener_map_send": "sync_pipeline_listener_map_send.xml",
+    "listener_write": "sync_pipeline_listener_write.xml",
+    "listener_map_write": "sync_pipeline_listener_map_write.xml",
+}
+
+
+@pytest.mark.parametrize("chain", sorted(LISTENER_CHAINS))
+def test_listener_chain_matches_its_committed_golden(chain):
+    """A raw-byte anchor per listener chain, independent of the differential.
+
+    The differential below compares two callers of the SAME renderer, so it cannot
+    see a drift in that renderer. These bytes were captured pre-deletion and pin the
+    fused ``start_listen`` entry that ProcessIR v1 still cannot express.
+    """
+    golden = (
+        Path(__file__).resolve().parent / "fixtures" / "golden_xml" / _LISTENER_GOLDENS[chain]
+    )
+    name = "Sync Listener " + chain.replace("listener_", "").replace("_", " ").title() + " Golden"
+    cfg = _pipeline(copy.deepcopy(LISTENER_CHAINS[chain]))
+    emitted = SyncPipelineBuilder.build(cfg, name=name, folder_name="Golden/Fixtures")
+    assert emitted == golden.read_text()
+    assert 'shapetype="start"' in emitted
+
+
 @pytest.mark.parametrize("chain", sorted(LISTENER_CHAINS))
 def test_listener_chains_still_match_the_legacy_renderer(chain):
     cfg = _pipeline(copy.deepcopy(LISTENER_CHAINS[chain]))

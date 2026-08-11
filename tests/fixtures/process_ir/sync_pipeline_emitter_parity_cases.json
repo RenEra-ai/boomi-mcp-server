@@ -105,9 +105,9 @@
   ],
   "cases": {
     "db_read_rest_send": {
-      "anchor": null,
-      "name": "Parity Db Read Rest Send",
-      "folder_name": "ParityFolder",
+      "anchor": "sync_pipeline_db_read_rest_send.xml",
+      "name": "Sync Db Read Rest Send Golden",
+      "folder_name": "Golden/Fixtures",
       "config": {
         "process_kind": "sync_pipeline",
         "pipeline": {
@@ -191,9 +191,9 @@
       }
     },
     "db_read_soap_send": {
-      "anchor": null,
-      "name": "Parity Db Read Soap Send",
-      "folder_name": "ParityFolder",
+      "anchor": "sync_pipeline_db_read_soap_send.xml",
+      "name": "Sync Db Read Soap Send Golden",
+      "folder_name": "Golden/Fixtures",
       "config": {
         "process_kind": "sync_pipeline",
         "pipeline": {
@@ -227,9 +227,9 @@
       }
     },
     "db_read_map_soap_send": {
-      "anchor": null,
-      "name": "Parity Db Read Map Soap Send",
-      "folder_name": "ParityFolder",
+      "anchor": "sync_pipeline_db_read_map_soap_send.xml",
+      "name": "Sync Db Read Map Soap Send Golden",
+      "folder_name": "Golden/Fixtures",
       "config": {
         "process_kind": "sync_pipeline",
         "pipeline": {
@@ -312,9 +312,9 @@
       }
     },
     "rest_fetch_map_rest_send": {
-      "anchor": null,
-      "name": "Parity Rest Fetch Map Rest Send",
-      "folder_name": "ParityFolder",
+      "anchor": "sync_pipeline_rest_fetch_map_rest_send.xml",
+      "name": "Sync Rest Fetch Map Rest Send Golden",
+      "folder_name": "Golden/Fixtures",
       "config": {
         "process_kind": "sync_pipeline",
         "pipeline": {
@@ -361,9 +361,9 @@
       }
     },
     "rest_fetch_soap_send": {
-      "anchor": null,
-      "name": "Parity Rest Fetch Soap Send",
-      "folder_name": "ParityFolder",
+      "anchor": "sync_pipeline_rest_fetch_soap_send.xml",
+      "name": "Sync Rest Fetch Soap Send Golden",
+      "folder_name": "Golden/Fixtures",
       "config": {
         "process_kind": "sync_pipeline",
         "pipeline": {
@@ -397,9 +397,9 @@
       }
     },
     "rest_fetch_map_soap_send": {
-      "anchor": null,
-      "name": "Parity Rest Fetch Map Soap Send",
-      "folder_name": "ParityFolder",
+      "anchor": "sync_pipeline_rest_fetch_map_soap_send.xml",
+      "name": "Sync Rest Fetch Map Soap Send Golden",
+      "folder_name": "Golden/Fixtures",
       "config": {
         "process_kind": "sync_pipeline",
         "pipeline": {
@@ -445,9 +445,9 @@
       }
     },
     "rest_fetch_db_write": {
-      "anchor": null,
-      "name": "Parity Rest Fetch Db Write",
-      "folder_name": "ParityFolder",
+      "anchor": "sync_pipeline_rest_fetch_db_write.xml",
+      "name": "Sync Rest Fetch Db Write Golden",
+      "folder_name": "Golden/Fixtures",
       "config": {
         "process_kind": "sync_pipeline",
         "pipeline": {
@@ -529,9 +529,9 @@
       }
     },
     "soap_fetch_rest_send": {
-      "anchor": null,
-      "name": "Parity Soap Fetch Rest Send",
-      "folder_name": "ParityFolder",
+      "anchor": "sync_pipeline_soap_fetch_rest_send.xml",
+      "name": "Sync Soap Fetch Rest Send Golden",
+      "folder_name": "Golden/Fixtures",
       "config": {
         "process_kind": "sync_pipeline",
         "pipeline": {
@@ -566,9 +566,9 @@
       }
     },
     "soap_fetch_map_rest_send": {
-      "anchor": null,
-      "name": "Parity Soap Fetch Map Rest Send",
-      "folder_name": "ParityFolder",
+      "anchor": "sync_pipeline_soap_fetch_map_rest_send.xml",
+      "name": "Sync Soap Fetch Map Rest Send Golden",
+      "folder_name": "Golden/Fixtures",
       "config": {
         "process_kind": "sync_pipeline",
         "pipeline": {
@@ -651,9 +651,9 @@
       }
     },
     "soap_fetch_map_soap_send": {
-      "anchor": null,
-      "name": "Parity Soap Fetch Map Soap Send",
-      "folder_name": "ParityFolder",
+      "anchor": "sync_pipeline_soap_fetch_map_soap_send.xml",
+      "name": "Sync Soap Fetch Map Soap Send Golden",
+      "folder_name": "Golden/Fixtures",
       "config": {
         "process_kind": "sync_pipeline",
         "pipeline": {
@@ -699,9 +699,9 @@
       }
     },
     "soap_fetch_db_write": {
-      "anchor": null,
-      "name": "Parity Soap Fetch Db Write",
-      "folder_name": "ParityFolder",
+      "anchor": "sync_pipeline_soap_fetch_db_write.xml",
+      "name": "Sync Soap Fetch Db Write Golden",
+      "folder_name": "Golden/Fixtures",
       "config": {
         "process_kind": "sync_pipeline",
         "pipeline": {
@@ -735,9 +735,9 @@
       }
     },
     "soap_fetch_map_db_write": {
-      "anchor": null,
-      "name": "Parity Soap Fetch Map Db Write",
-      "folder_name": "ParityFolder",
+      "anchor": "sync_pipeline_soap_fetch_map_db_write.xml",
+      "name": "Sync Soap Fetch Map Db Write Golden",
+      "folder_name": "Golden/Fixtures",
       "config": {
         "process_kind": "sync_pipeline",
         "pipeline": {
@@ -783,9 +783,9 @@
       }
     },
     "soap_lowercase_execute": {
-      "anchor": null,
-      "name": "Parity SOAP Lowercase Execute",
-      "folder_name": "ParityFolder",
+      "anchor": "sync_pipeline_soap_lowercase_execute.xml",
+      "name": "Sync Soap Lowercase Execute Golden",
+      "folder_name": "Golden/Fixtures",
       "config": {
         "process_kind": "sync_pipeline",
         "pipeline": {

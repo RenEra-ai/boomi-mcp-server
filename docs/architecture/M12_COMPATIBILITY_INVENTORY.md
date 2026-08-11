@@ -1170,7 +1170,18 @@ and every model has an unmodelled region — so mutate the product's statement, 
 inputs.** Every one of these holes was invisible to a mutation matrix that varied only the guard's own
 constants; each was found by mutating the builder instead.
 
-Four cases are anchored to committed raw-byte `golden_xml` components, and the harness asserts the
+**Every case is byte-anchored, and the timing was the point.** #139E's first draft anchored only 4 of
+17 cases; the other 13 were a differential against the legacy renderer and nothing else. Since that
+renderer is scheduled for deletion, those 13 would have evaporated silently at deletion, leaving the
+**surviving** `sync_pipeline` dialect anchored on 4 of its 16 primitive chains. All 13 were therefore
+generated **through the legacy renderer before its removal** — the only independent source of those
+bytes; a golden written afterwards would confirm the canonical arm against itself. The same reasoning
+applied to the **4 WSS listener chains**, which stay on the legacy arm: `sync_pipeline_listener_*.xml`
+are committed and asserted by `tests/test_sync_pipeline_adapter_cutover.py::test_listener_chain_matches_its_committed_golden`,
+and pin the fused `start_listen` entry ProcessIR v1 still cannot express. 21 `sync_pipeline_*.xml`
+goldens now exist where 4 did; all 17 additions were mutation-checked as live rather than inert.
+
+The anchored cases are asserted on BOTH renderers, and the harness asserts the
 **legacy** renderer against those bytes as well as the canonical one — the non-redundant half, because
 nothing else in the tree pinned `ProcessFlowBuilder`'s own output against them, and a uniform drift
 moves both sides of a differential together. `tests/test_sync_pipeline_adapter_cutover.py` now loads

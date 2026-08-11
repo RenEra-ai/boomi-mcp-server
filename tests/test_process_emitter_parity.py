@@ -1130,9 +1130,19 @@ def test_sync_corpus_anchors_every_committed_sync_golden():
     for name in claimed:
         assert (_GOLDEN_XML / name).is_file()
 
-    # Empty until #139F. When it is not, the listener chains are still on the
-    # legacy arm and belong in a legacy inventory -- never in this canonical corpus.
-    assert legacy == set()
+    # The legacy arm's OWN inventory, pinned by name. These four were captured
+    # through the legacy renderer while it still existed -- the pre-cutover
+    # discipline -- because it is the only INDEPENDENT source of those bytes: once
+    # the ordinary dialect and its renderer are deleted, any golden written for a
+    # listener chain would be confirming the canonical arm against itself. They stay
+    # out of the canonical corpus (a listener chain is not canonical yet) and are
+    # asserted by test_sync_pipeline_adapter_cutover.py instead.
+    assert legacy == {
+        "sync_pipeline_listener_send.xml",
+        "sync_pipeline_listener_map_send.xml",
+        "sync_pipeline_listener_write.xml",
+        "sync_pipeline_listener_map_write.xml",
+    }
 
 
 @pytest.mark.parametrize("case_name", sorted(SYNC_CASES))
