@@ -1184,7 +1184,9 @@ _COMPONENT_ENDPOINT_RE = re.compile(
 #: 59,763 string/bytes literals in the scan universe it matches ZERO of them, so
 #: the noise cost is nil, while a case-insensitive match would sweep up ordinary
 #: prose.
-_COMPONENT_COLLECTION_RE = re.compile(r"^Component$")
+#: `?`/`#` end the path just as end-of-string does — `Component?foo=bar` is the
+#: same collection URL, and anchoring on `$` alone let it through.
+_COMPONENT_COLLECTION_RE = re.compile(r"^Component(?=$|[?#])")
 
 
 def _folded_str(node: ast.AST) -> Optional[str]:

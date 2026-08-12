@@ -1054,6 +1054,19 @@ def test_the_component_endpoint_marker_is_a_path_segment_not_a_substring():
                   "ProcessIR/topology/component is validated"):
         assert not inv._COMPONENT_ENDPOINT_RE.search(prose), prose
 
+    # The BARE collection path — POST to it is the create route. A `?` or `#`
+    # ends the path exactly as end-of-string does, so anchoring on `$` alone let
+    # `Component?foo=bar` through.
+    def _matches(value):
+        return bool(inv._COMPONENT_ENDPOINT_RE.search(value)
+                    or inv._COMPONENT_COLLECTION_RE.match(value))
+
+    for collection in ("Component", "Component?foo=bar", "Component#frag"):
+        assert _matches(collection), collection
+    for not_a_path in ("Componentry", "Component is a thing", "component",
+                       "COMPONENT"):
+        assert not _matches(not_a_path), not_a_path
+
 
 def test_the_non_tool_mcp_surfaces_are_frozen(derived):
     """`list_tools()` is not the whole served MCP surface. Resources, prompts and
