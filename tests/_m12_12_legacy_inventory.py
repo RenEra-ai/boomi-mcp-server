@@ -76,7 +76,19 @@ FIXTURE_RELPATH = "tests/fixtures/m12_12/legacy_reachability_inventory.json"
 #: mechanism that actually catches a moved package is `python_source_count` /
 #: `example_document_count` in the same block — those are compared, this list is
 #: documentation.
-SCAN_ROOTS: Tuple[str, ...] = ("server.py", "src/boomi_mcp", "examples")
+SCAN_ROOTS: Tuple[str, ...] = ("*.py (repo root)", "src/boomi_mcp", "scripts", "examples")
+
+#: HTTP client modules a hand-rolled request can go through, bypassing the SDK
+#: entirely. `monitoring.py` already drives `httpx` against the platform with
+#: real credentials, so this is an in-repo idiom rather than a hypothetical: a
+#: POST to `/Component` through one of these is a Component-XML write route the
+#: SDK-derived sink vocabulary cannot see.
+_HTTP_CLIENT_MODULES: Tuple[str, ...] = ("httpx", "requests", "urllib", "aiohttp",
+                                         "http.client", "urllib3")
+
+#: The verbs on those clients that can carry a body to the platform.
+_HTTP_WRITE_VERBS: Tuple[str, ...] = ("post", "put", "patch", "delete", "request",
+                                      "send", "stream", "urlopen")
 
 CENSUS_KINDS: Tuple[str, ...] = (
     "registry_lookup",
@@ -85,6 +97,7 @@ CENSUS_KINDS: Tuple[str, ...] = (
     "legacy_emitter",
     "legacy_semantic_validation",
     "component_xml_write",
+    "http_client_call",
     "raw_api_invoker",
     "process_kind_producer",
     "process_kind_consumer",
@@ -102,6 +115,7 @@ ROUTE_CLASSIFICATIONS: Tuple[str, ...] = (
     "preserve",
     "dormant",
     "typed_non_process",
+    "external_transport",
 )
 
 SURFACE_CLASSES: Tuple[str, ...] = (
@@ -131,13 +145,24 @@ def repo_root() -> Path:
 
 
 def python_sources() -> Dict[str, str]:
-    """``{repo-relative posix path: source text}`` for every scanned Python file."""
+    """``{repo-relative posix path: source text}`` for every scanned Python file.
+
+    EVERY repo-root module, not just `server.py`. The root holds twelve more,
+    including the production entry point `server_http.py` and a set of runtime
+    patch modules; scanning only `server.py` left a legacy caller in any of them
+    invisible, and `python_source_count` could not move for an edit to one.
+    `scripts/` is scanned for the same reason — it is caller-reachable Python
+    that can construct a legacy config.
+    """
     out: Dict[str, str] = {}
-    server_py = _ROOT / "server.py"
-    if server_py.is_file():
-        out["server.py"] = server_py.read_text(encoding="utf-8")
-    for path in sorted((_ROOT / "src" / "boomi_mcp").rglob("*.py")):
-        out[path.relative_to(_ROOT).as_posix()] = path.read_text(encoding="utf-8")
+    for path in sorted(_ROOT.glob("*.py")):
+        out[path.name] = path.read_text(encoding="utf-8")
+    for root in ("src/boomi_mcp", "scripts"):
+        base = _ROOT / root
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*.py")):
+            out[path.relative_to(_ROOT).as_posix()] = path.read_text(encoding="utf-8")
     return dict(sorted(out.items()))
 
 
@@ -278,6 +303,7 @@ _CENSUS_PREFIX = {
     "legacy_emitter": "LE",
     "legacy_semantic_validation": "LV",
     "component_xml_write": "WR",
+    "http_client_call": "HT",
     "raw_api_invoker": "WR",
     "process_kind_producer": "PP",
     "process_kind_consumer": "PC",
@@ -287,13 +313,78 @@ _CENSUS_PREFIX = {
 }
 
 
+def _resolve_module_path(module: Optional[str], level: int, from_path: str,
+                         known: "frozenset[str]") -> Optional[str]:
+    """Repo-relative path of an imported module, or None if it is not ours.
+
+    A transitive callee's identity is `(path, symbol)`, not a bare name:
+    `_build_main_process` is defined in THREE archetype modules, so a bare-name
+    closure links whichever one is legacy-bearing to callers of the other two.
+    """
+    if level:
+        parts = from_path.split("/")[:-1]
+        for _ in range(level - 1):
+            parts = parts[:-1]
+        target = parts + (module.split(".") if module else [])
+    else:
+        if not module:
+            return None
+        head = module.split(".")
+        if head[0] != "boomi_mcp":
+            return None
+        target = ["src"] + head
+    for candidate in ("/".join(target) + ".py", "/".join(target) + "/__init__.py"):
+        if candidate in known:
+            return candidate
+    return None
+
+
+def reexport_index(trees: Dict[str, ast.AST]) -> Dict[Tuple[str, str], Tuple[str, str]]:
+    """`(importing module, local name) -> (source module, original name)`.
+
+    A barrel package re-exports a symbol, so the module a caller imports it FROM
+    is not the module it is DEFINED in. `get_process_flow_builder` lives in
+    `process_flow_builder.py` but every caller imports it from
+    `builders/__init__.py`; keying the closure on the import site therefore lost
+    the edge entirely — measured as two production caller sites silently
+    dropping their legacy edge. Following this index canonicalizes an import
+    site to its defining site.
+    """
+    known = frozenset(trees)
+    index: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    for path, tree in trees.items():
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            source = _resolve_module_path(node.module, node.level or 0, path, known)
+            if not source or source == path:
+                continue
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                local = alias.asname or alias.name
+                index[(path, local)] = (source, alias.name)
+    return index
+
+
+def canonical_definition(ref: Tuple[str, str],
+                         index: Dict[Tuple[str, str], Tuple[str, str]]) -> Tuple[str, str]:
+    """Follow re-export hops to the defining module (cycle-safe)."""
+    seen = set()
+    while ref in index and ref not in seen:
+        seen.add(ref)
+        ref = index[ref]
+    return ref
+
+
 class _Scanner(ast.NodeVisitor):
     """One pass per module; emits census rows keyed symbolically, not positionally."""
 
     def __init__(self, path: str, vocab: Dict[str, Tuple[str, ...]],
                  transitive_targets: "frozenset[Tuple[str, str]]" = frozenset(),
                  local_defs: "frozenset[str]" = frozenset(),
-                 known_paths: "frozenset[str]" = frozenset()) -> None:
+                 known_paths: "frozenset[str]" = frozenset(),
+                 reexports: Optional[Dict[Tuple[str, str], Tuple[str, str]]] = None) -> None:
         self.path = path
         self.v = vocab
         self._transitive = transitive_targets
@@ -302,6 +393,9 @@ class _Scanner(ast.NodeVisitor):
         self._qualified_origin: Dict[str, Tuple[str, str]] = {}
         self._module_paths: Dict[str, str] = {}
         self._known: "frozenset[str]" = known_paths
+        self._reexports = reexports or {}
+        self._http_vars: Dict[str, str] = {}
+        self._str_consts: Dict[str, str] = {}
         self._local_defs: Set[str] = set(local_defs)
         self.rows: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
         self._symbols: List[str] = []
@@ -361,6 +455,41 @@ class _Scanner(ast.NodeVisitor):
         if isinstance(node, ast.Attribute):
             return node.attr == "PROCESS_FLOW_BUILDERS"
         return False
+
+    def _as_str(self, node: Optional[ast.AST]) -> Optional[str]:
+        """A string literal, or a plain name bound to one earlier in the module.
+
+        `KEY = "process_kind"; cfg[KEY] = ...` is the same producer as the
+        literal form; accepting only `ast.Constant` let hoisting the selector
+        into a constant erase the row.
+        """
+        literal = _const_str(node)
+        if literal is not None:
+            return literal
+        if isinstance(node, ast.Name):
+            return self._str_consts.get(node.id)
+        return None
+
+    def _is_http_client(self, func: ast.AST) -> bool:
+        """True when a call's receiver traces back to an HTTP client module.
+
+        Walks the attribute chain to its root Name and checks what that name was
+        imported as, so `httpx.post(...)`, `client.post(...)` where
+        `client = httpx.Client()`, and `requests.request(...)` all match while an
+        unrelated `queue.send(...)` does not.
+        """
+        if not isinstance(func, ast.Attribute):
+            return False
+        root = func.value
+        while isinstance(root, (ast.Attribute, ast.Call, ast.Subscript)):
+            root = getattr(root, "value", None) or getattr(root, "func", None)
+            if root is None:
+                return False
+        if not isinstance(root, ast.Name):
+            return False
+        origin = self._modules.get(root.id) or self._http_vars.get(root.id) or root.id
+        return any(origin == mod or origin.startswith(mod + ".")
+                   for mod in _HTTP_CLIENT_MODULES)
 
     def _qualified_callee(self, func: ast.AST) -> Optional[Tuple[str, str]]:
         """`(defining path, symbol)` for a statically resolvable call, else None.
@@ -437,29 +566,7 @@ class _Scanner(ast.NodeVisitor):
 
     # -- imports -------------------------------------------------------
     def _resolve_module(self, module: Optional[str], level: int) -> Optional[str]:
-        """Repo-relative path of an imported module, or None if it is not ours.
-
-        Needed because a transitive callee's identity is `(path, symbol)`, not a
-        bare name: `_build_main_process` is defined in THREE archetype modules,
-        so a bare-name closure links whichever one happens to be legacy-bearing
-        to callers of the other two.
-        """
-        if level:
-            parts = self.path.split("/")[:-1]
-            for _ in range(level - 1):
-                parts = parts[:-1]
-            target = parts + (module.split(".") if module else [])
-        else:
-            if not module:
-                return None
-            head = module.split(".")
-            if head[0] != "boomi_mcp":
-                return None
-            target = ["src"] + head
-        for candidate in ("/".join(target) + ".py", "/".join(target) + "/__init__.py"):
-            if candidate in self._known:
-                return candidate
-        return None
+        return _resolve_module_path(module, level, self.path, self._known)
 
     def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
         for alias in node.names:
@@ -488,6 +595,10 @@ class _Scanner(ast.NodeVisitor):
                 self._module_paths[local] = submodule
             elif package:
                 self._qualified_origin[local] = (package, alias.name)
+            # Non-repo modules matter too: `from urllib import request` binds a
+            # MODULE whose dotted origin is what identifies it as an HTTP client.
+            if node.module and not node.level:
+                self._modules.setdefault(local, "%s.%s" % (node.module, alias.name))
             if alias.name in self._watched:
                 self._aliases[local] = alias.name
             if alias.name in self._builders:
@@ -530,10 +641,31 @@ class _Scanner(ast.NodeVisitor):
                 if isinstance(tgt, ast.Name):
                     self._builder_vars.add(tgt.id)
 
+        # `client = httpx.Client()` binds an HTTP client to a local name.
+        if isinstance(value, ast.Call):
+            root = value.func
+            while isinstance(root, ast.Attribute):
+                root = root.value
+            if isinstance(root, ast.Name):
+                origin = self._modules.get(root.id, root.id)
+                if any(origin == mod or origin.startswith(mod + ".")
+                       for mod in _HTTP_CLIENT_MODULES):
+                    for tgt in node.targets:
+                        if isinstance(tgt, ast.Name):
+                            self._http_vars[tgt.id] = origin
+
+        # `KEY = "process_kind"` then `cfg[KEY] = ...`. Constant propagation for
+        # plain string names only — without it, hoisting the selector into a
+        # constant hid the producer from the census entirely.
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Name):
+                    self._str_consts[tgt.id] = value.value
+
         # `cfg["process_kind"] = ...` is a producer write.
         for tgt in node.targets:
             if isinstance(tgt, ast.Subscript):
-                key = _const_str(tgt.slice)
+                key = self._as_str(tgt.slice)
                 if key in self._selectors:
                     self._emit(
                         "process_kind_producer",
@@ -544,6 +676,36 @@ class _Scanner(ast.NodeVisitor):
         self.generic_visit(node)
 
     # -- expressions ---------------------------------------------------
+    def _bind_http_context(self, node: Any) -> None:
+        """`with httpx.Client(...) as client:` binds a client without an Assign.
+
+        The context-manager form is how this repo actually opens HTTP clients
+        (`schema_discovery.py:458`), so handling only `client = httpx.Client()`
+        saw none of them.
+        """
+        for item in getattr(node, "items", []):
+            target = item.optional_vars
+            value = item.context_expr
+            if not isinstance(target, ast.Name) or not isinstance(value, ast.Call):
+                continue
+            root = value.func
+            while isinstance(root, ast.Attribute):
+                root = root.value
+            if isinstance(root, ast.Name):
+                origin = self._modules.get(root.id) or self._http_vars.get(root.id) \
+                    or root.id
+                if any(origin == mod or origin.startswith(mod + ".")
+                       for mod in _HTTP_CLIENT_MODULES):
+                    self._http_vars[target.id] = origin
+
+    def visit_With(self, node: ast.With) -> None:  # noqa: N802
+        self._bind_http_context(node)
+        self.generic_visit(node)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:  # noqa: N802
+        self._bind_http_context(node)
+        self.generic_visit(node)
+
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
         dotted = self._dotted(node.func)
         base = (dotted or "").split(".")[-1]
@@ -598,6 +760,9 @@ class _Scanner(ast.NodeVisitor):
             self._emit("component_xml_write", "%s(...)" % _tail(dotted, 2), node.lineno)
         elif base in self._invokers:
             self._emit("raw_api_invoker", "%s(...)" % base, node.lineno)
+        elif base in _HTTP_WRITE_VERBS and self._is_http_client(node.func):
+            self._emit("http_client_call", "%s (hand-rolled HTTP)" % _tail(dotted, 2),
+                       node.lineno)
         elif base == "getattr":
             # Two ways a `getattr` reaches a legacy path, and BOTH must be
             # recorded or the documented fail-closed residue rule is a claim
@@ -633,6 +798,13 @@ class _Scanner(ast.NodeVisitor):
             elif has_name_arg and not name_is_constant and target_is_builder:
                 self._emit("unclassified_dynamic",
                            "getattr(<builder>, <dynamic>)", node.lineno)
+        elif base == "setattr" and len(node.args) > 1:
+            attr = self._as_str(node.args[1])
+            if attr in self._selectors:
+                self._emit("process_kind_producer",
+                           "setattr %s=%s" % (attr, _const_repr(node.args[2])
+                                              if len(node.args) > 2 else "<expr>"),
+                           node.lineno)
         elif base == "IntegrationComponentSpec":
             for kw in node.keywords:
                 if kw.arg == "type" and _const_str(kw.value) == "process":
@@ -647,6 +819,8 @@ class _Scanner(ast.NodeVisitor):
         # matching it on the bare name made `validate_config` alone produce 48
         # rows across unrelated builder classes.
         callee = self._qualified_callee(node.func)
+        if callee:
+            callee = canonical_definition(callee, self._reexports)
         if callee and callee in self._transitive \
                 and (self.path, self.symbol) != callee:
             self._emit("legacy_transitive_call",
@@ -667,7 +841,7 @@ class _Scanner(ast.NodeVisitor):
         # WRITES one — it is a producer, and treating it as a read would let a
         # new default-injecting producer land without a producer row.
         if base in {"get", "setdefault", "pop"} and node.args:
-            key = _const_str(node.args[0])
+            key = self._as_str(node.args[0])
             if key in self._selectors:
                 if base == "setdefault":
                     # EVERY setdefault writes: the one-argument form inserts the
@@ -685,7 +859,7 @@ class _Scanner(ast.NodeVisitor):
 
     def visit_Dict(self, node: ast.Dict) -> None:  # noqa: N802
         for key, value in zip(node.keys, node.values):
-            name = _const_str(key)
+            name = self._as_str(key)
             if name in self._selectors:
                 self._emit(
                     "process_kind_producer",
@@ -700,7 +874,7 @@ class _Scanner(ast.NodeVisitor):
                 self._emit("registry_lookup", "PROCESS_FLOW_BUILDERS[...]", node.lineno)
                 self._skip.add(id(node.value))
             else:
-                key = _const_str(node.slice)
+                key = self._as_str(node.slice)
                 if key in self._selectors:
                     self._emit("process_kind_consumer",
                                "%s[%r]" % (_tail(self._dotted(node.value), 2) or "<expr>", key),
@@ -777,6 +951,7 @@ def scan_sources(sources: Dict[str, str], vocab: Dict[str, Tuple[str, ...]]) -> 
     trees: Dict[str, ast.AST] = {}
     rows: List[Dict[str, Any]] = []
     known = frozenset(sources)
+    reexports: Dict[Tuple[str, str], Tuple[str, str]] = {}
     for path in sorted(sources):
         try:
             trees[path] = ast.parse(sources[path], filename=path)
@@ -786,6 +961,8 @@ def scan_sources(sources: Dict[str, str], vocab: Dict[str, Tuple[str, ...]]) -> 
                            known_paths=known)
         scanner.visit(trees[path])
         rows.extend(scanner.rows.values())
+
+    reexports = reexport_index(trees)
 
     module_level = {
         path: _module_level_functions(tree) for path, tree in trees.items()
@@ -806,7 +983,8 @@ def scan_sources(sources: Dict[str, str], vocab: Dict[str, Tuple[str, ...]]) -> 
         found = []
         for path in sorted(trees):
             scanner = _Scanner(path, vocab, transitive_targets=frozenset(bearing),
-                               local_defs=module_level[path], known_paths=known)
+                               local_defs=module_level[path], known_paths=known,
+                               reexports=reexports)
             scanner.visit(trees[path])
             found.extend(r for r in scanner.rows.values()
                          if r["census"] == "legacy_transitive_call")
@@ -1173,6 +1351,48 @@ WRITE_ROUTES: Tuple[Dict[str, Any], ...] = (
                                      "route unnoticed.",
     },
     {
+        "route_id": "WRT-external-transport-oauth-callback",
+        "locations": ("server.py::web_callback",),
+        "classification": "external_transport",
+        "summary": "OAuth callback posts to the identity provider's token endpoint via a "
+                   "hand-rolled HTTP client. Never targets the Boomi Component API.",
+        "owning_issue": "#160",
+        "post_retraction_assertion": "unchanged — assert the target host/path is the "
+                                     "configured token endpoint, never /Component.",
+    },
+    {
+        "route_id": "WRT-external-transport-listener-probe",
+        "locations": ("src/boomi_mcp/categories/deployment/orchestration.py::"
+                      "_listener_probe",),
+        "classification": "external_transport",
+        "summary": "Probes a deployed listener's own URL with `urllib.request.urlopen` to "
+                   "confirm it is serving. Not a platform API call.",
+        "owning_issue": "#160",
+        "post_retraction_assertion": "unchanged — the URL comes from the listener's "
+                                     "endpoint, never from a Component route.",
+    },
+    {
+        "route_id": "WRT-external-transport-marketplace",
+        "locations": ("src/boomi_mcp/categories/marketplace.py::"
+                      "search_marketplace_recipes_action",),
+        "classification": "external_transport",
+        "summary": "Public, unauthenticated Marketplace GraphQL query over httpx. Carries no "
+                   "platform credentials and has no install/write path.",
+        "owning_issue": "#160",
+        "post_retraction_assertion": "unchanged — assert the endpoint is the Marketplace "
+                                     "GraphQL host and no component XML is submitted.",
+    },
+    {
+        "route_id": "WRT-external-transport-schema-discovery",
+        "locations": ("src/boomi_mcp/categories/schema_discovery.py::_fetch",),
+        "classification": "external_transport",
+        "summary": "Fetches a caller-supplied OpenAPI/WSDL/OData document over httpx under "
+                   "the SSRF/redirect guards. Reads a third-party URL, never the platform.",
+        "owning_issue": "#160",
+        "post_retraction_assertion": "unchanged — the SSRF guard already forbids platform "
+                                     "hosts; assert no /Component target is reachable.",
+    },
+    {
         "route_id": "WRT-raw-api-component",
         "locations": ("server.py::invoke_boomi_api",
                       "src/boomi_mcp/categories/meta_tools.py::invoke_api"),
@@ -1205,7 +1425,8 @@ def reconcile_routes(rows: Sequence[Dict[str, Any]]) -> Dict[str, List[str]]:
     """
     located: Set[str] = {
         "%s::%s" % (r["path"], r["symbol"].split(".")[0])
-        for r in rows if r["census"] in ("component_xml_write", "raw_api_invoker")
+        for r in rows
+        if r["census"] in ("component_xml_write", "http_client_call", "raw_api_invoker")
     }
     claims: Dict[str, List[str]] = {}
     for route in WRITE_ROUTES:
@@ -1439,6 +1660,19 @@ def collect_served_artifacts() -> List[Dict[str, Any]]:
             "SS-MCP-DESCRIPTIONS", "server.mcp.list_tools()",
             "%s.parameters" % name, tool.parameters or {}))
 
+    # EXHAUSTIVE identity over the ENTIRE registered surface, token filter or
+    # not. The filter decides which tools get a full frozen value; this decides
+    # nothing — every registered tool's description and parameter schema is
+    # digested, so a tool that starts steering callers at the legacy route in
+    # words the token list does not contain still fails the freeze.
+    artifacts.append(_artifact(
+        "SS-MCP-DESCRIPTIONS", "server.mcp.list_tools() [all tools]",
+        "registered_surface_digest",
+        {tool_name: {
+            "description": _sha256(canonical_json(tool.description or "")),
+            "parameters": _sha256(canonical_json(tool.parameters or {})),
+        } for tool_name, tool in sorted(tools.items())}))
+
     # --- SS-SCHEMA-TEMPLATES -----------------------------------------
     for selector, payload in sorted(_schema_template_surfaces(meta_tools).items()):
         if _mentions_legacy(payload) or selector in _ALWAYS_FROZEN_TEMPLATES:
@@ -1449,6 +1683,19 @@ def collect_served_artifacts() -> List[Dict[str, Any]]:
     artifacts.append(_artifact(
         "SS-SCHEMA-TEMPLATES", "server.get_schema_template.__doc__",
         "wrapper_docstring", _server_mod.get_schema_template.__doc__ or ""))
+
+    # EXHAUSTIVE identity over the whole walked template surface, so detection
+    # does not depend on the token filter. A template can acquire legacy
+    # guidance in words `_LEGACY_TOKENS` does not list — measured: adding
+    # "pass the complete component XML document in config['xml']" to a served
+    # description produced zero artifact churn. Full values stay reserved for
+    # the in-scope surfaces; every OTHER surface is pinned by digest, so any
+    # change to any of them fails the freeze and gets read by a human.
+    artifacts.append(_artifact(
+        "SS-SCHEMA-TEMPLATES", "meta_tools.get_schema_template_action(...) [all axes]",
+        "walked_surface_digest",
+        {selector: _sha256(canonical_json(payload))
+         for selector, payload in sorted(_schema_template_surfaces(meta_tools).items())}))
 
     # --- SS-CAPABILITY-CATALOG ---------------------------------------
     catalog = meta_tools.list_capabilities_action()
@@ -1578,6 +1825,10 @@ def _schema_template_surfaces(meta_tools: Any) -> Dict[str, Any]:
                 surfaces["%s|protocol=%s" % (key, protocol)] = \
                     meta_tools.get_schema_template_action(
                         resource_type=resource_type, operation=operation, protocol=protocol)
+            for standard in _standard_axis(payload):
+                surfaces["%s|standard=%s" % (key, standard)] = \
+                    meta_tools.get_schema_template_action(
+                        resource_type=resource_type, operation=operation, standard=standard)
             for component_type in _echoed_list(payload, "valid_component_types",
                                                "component_types") or component_types:
                 ct_key = "%s|component_type=%s" % (key, component_type)
@@ -1592,6 +1843,11 @@ def _schema_template_surfaces(meta_tools: Any) -> Dict[str, Any]:
                         meta_tools.get_schema_template_action(
                             resource_type=resource_type, operation=operation,
                             component_type=component_type, protocol=protocol)
+                for standard in _standard_axis(ct_payload):
+                    surfaces["%s|standard=%s" % (ct_key, standard)] = \
+                        meta_tools.get_schema_template_action(
+                            resource_type=resource_type, operation=operation,
+                            component_type=component_type, standard=standard)
 
     assert_schema_surface_axes_non_vacuous(surfaces)
     return surfaces
@@ -1629,13 +1885,27 @@ def assert_schema_surface_axes_non_vacuous(surfaces: Dict[str, Any]) -> None:
 #: carries the LEGACY protocol list; `available_protocols` carries the connector
 #: ones. Following only `valid_protocols` walked neither.
 _PROTOCOL_ECHO_KEYS = ("valid_protocols", "process_protocols", "available_protocols",
-                       "protocols", "available_standards", "valid_standards")
+                       "protocols")
+
+#: `standard` is a SEPARATE selector from `protocol`. Folding these keys into the
+#: protocol list would have passed a standard as `protocol=`, which the action
+#: does not accept — a dormant miswalk rather than coverage.
+_STANDARD_ECHO_KEYS = ("valid_standards", "available_standards", "standards")
 
 
 def _protocol_axis(payload: Any) -> List[str]:
-    """Union of every protocol/standard axis the payload advertises."""
+    """Union of every protocol axis the payload advertises."""
     found: List[str] = []
     for key in _PROTOCOL_ECHO_KEYS:
+        for value in _echoed_list(payload, key):
+            if value not in found:
+                found.append(value)
+    return found
+
+
+def _standard_axis(payload: Any) -> List[str]:
+    found: List[str] = []
+    for key in _STANDARD_ECHO_KEYS:
         for value in _echoed_list(payload, key):
             if value not in found:
                 found.append(value)
@@ -1839,6 +2109,7 @@ _CENSUS_DEFAULT_OWNER = {
     "legacy_emitter": "#160",
     "legacy_semantic_validation": "#160",
     "component_xml_write": "#160",
+    "http_client_call": "#160",
     "raw_api_invoker": "#160",
     "process_kind_producer": "#159",
     "process_kind_consumer": "#160",
@@ -1906,7 +2177,7 @@ def _own(path: str, census: str, symbol: str = "") -> Tuple[str, str]:
     # does not own, which is how §11 acquired contradictory guidance.
     if census == "legacy_transitive_call":
         return (_CENSUS_DEFAULT_OWNER[census], _DEFAULT_DISPOSITION[census])
-    if census in ("component_xml_write", "raw_api_invoker"):
+    if census in ("component_xml_write", "http_client_call", "raw_api_invoker"):
         routed = _route_disposition(path, symbol)
         if routed:
             return routed
@@ -1927,6 +2198,7 @@ _DEFAULT_DISPOSITION = {
     "legacy_emitter": "delete with the legacy emitters",
     "legacy_semantic_validation": "delete with the legacy semantic shell",
     "component_xml_write": "guard behind the shared process-content classifier",
+    "http_client_call": "hand-rolled HTTP: prove it never reaches /Component, or guard it",
     "raw_api_invoker": "guard behind the canonical endpoint parser",
     "process_kind_producer": "migrate the producer to canonical ProcessIR",
     "process_kind_consumer": "delete with the legacy consumer",
@@ -2339,7 +2611,7 @@ _LEDGER_SECTIONS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
                       "unclassified_dynamic")),
     ("producers", ("process_kind_producer", "process_kind_consumer",
                    "example_producer", "authoring_boundary")),
-    ("writes", ("component_xml_write", "raw_api_invoker")),
+    ("writes", ("component_xml_write", "http_client_call", "raw_api_invoker")),
 )
 
 

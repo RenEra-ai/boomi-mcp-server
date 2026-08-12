@@ -446,6 +446,126 @@ def test_a_wrapper_around_a_legacy_path_is_reported(census_only, label, body):
         "%s escaped the freeze: %s" % (label, diff.report())
 
 
+def test_a_wrapper_importing_through_a_barrel_reexport_is_reported(census_only):
+    """A package `__init__` re-export makes the import site differ from the
+    defining site.
+
+    `get_process_flow_builder` is DEFINED in `process_flow_builder.py` and
+    imported by every caller from `builders/__init__.py`. Keying the closure on
+    the import site lost the edge outright — measured as two production callers
+    (`_resolve_preservation_policy`, `build_structured_update_xml`) silently
+    dropping it. Callees are canonicalized through a re-export index.
+    """
+    diff = _added(census_only, "_m12_12_synthetic_barrel", (
+        "from .components.builders import get_process_flow_builder\n"
+        "def wrap(kind):\n"
+        "    return get_process_flow_builder(kind)\n"
+    ))
+    kinds = {r.split(" | ")[0] for r in diff.added}
+    assert "legacy_transitive_call" in kinds, diff.report()
+
+
+def test_the_barrel_reexport_edges_exist_at_head(baseline):
+    """Guard the guard: the two production sites the regression removed."""
+    edges = {
+        (r["path"], r["symbol"]) for r in baseline["census"]
+        if r["census"] == "legacy_transitive_call"
+        and "get_process_flow_builder" in r["form"]
+    }
+    for symbol in ("_resolve_preservation_policy", "build_structured_update_xml"):
+        assert ("src/boomi_mcp/categories/integration_builder.py", symbol) in edges, symbol
+
+
+def test_every_repo_root_module_and_script_is_scanned():
+    """`server.py` was the only root module scanned, so a legacy caller in
+    `server_http.py` — a production entry point — was invisible, and
+    `python_source_count` could not move for an edit to it."""
+    scanned = set(inv.python_sources())
+    for required in ("server.py", "server_http.py"):
+        assert required in scanned, required
+    roots = {p.name for p in inv.repo_root().glob("*.py")}
+    assert roots <= scanned, sorted(roots - scanned)
+    scripts = {p.relative_to(inv.repo_root()).as_posix()
+               for p in (inv.repo_root() / "scripts").rglob("*.py")}
+    assert scripts <= scanned, sorted(scripts - scanned)
+
+
+@pytest.mark.parametrize("body", [
+    # module-level client, plain assignment
+    "import httpx\n"
+    "_C = httpx.Client()\n"
+    "def push(xml):\n"
+    "    return _C.post('https://api.boomi.com/Component', content=xml)\n",
+    # context-manager binding — how this repo actually opens clients
+    "import httpx\n"
+    "def push(xml):\n"
+    "    with httpx.Client() as client:\n"
+    "        return client.post('https://api.boomi.com/Component', content=xml)\n",
+    # stdlib
+    "from urllib import request\n"
+    "def push(xml):\n"
+    "    return request.urlopen('https://api.boomi.com/Component', data=xml)\n",
+])
+def test_a_hand_rolled_http_client_is_reported(census_only, body):
+    """The sink vocabulary derives from the Boomi SDK, so a POST to /Component
+    through `httpx`/`requests`/`urllib` bypasses it entirely — and this repo
+    already drives `httpx` against remote hosts in four places, so it is an
+    in-repo idiom rather than a hypothetical."""
+    diff = _added(census_only, "_m12_12_synthetic_http", body)
+    assert "http_client_call" in {r.split(" | ")[0] for r in diff.added}, diff.report()
+
+
+def test_a_selector_hoisted_into_a_constant_is_still_a_producer(census_only):
+    """`KEY = "process_kind"; cfg[KEY] = ...` writes a process_kind.
+
+    Accepting only `ast.Constant` at the subscript let hoisting the selector
+    into a module constant erase the producer row.
+    """
+    diff = _added(census_only, "_m12_12_synthetic_const_key", (
+        "KEY = 'process_kind'\n"
+        "def prepare(config):\n"
+        "    config[KEY] = 'sync_pipeline'\n"
+        "    return config\n"
+    ))
+    assert "process_kind_producer" in {r.split(" | ")[0] for r in diff.added}, diff.added
+
+
+def test_a_setattr_producer_is_reported(census_only):
+    diff = _added(census_only, "_m12_12_synthetic_setattr", (
+        "def prepare(spec):\n"
+        "    setattr(spec, 'process_kind', 'sync_pipeline')\n"
+        "    return spec\n"
+    ))
+    assert "process_kind_producer" in {r.split(" | ")[0] for r in diff.added}, diff.added
+
+
+def test_the_served_digests_cover_every_surface_not_just_token_matches(derived):
+    """Detection must not depend on the token filter.
+
+    `_LEGACY_TOKENS` is a fixed substring list, and served text can acquire
+    legacy guidance in words it does not contain — measured: adding "pass the
+    complete component XML document in config['xml']" to a tool description
+    produced zero artifact churn. The filter now decides only which surfaces
+    carry a full frozen VALUE; every registered tool and every walked template
+    surface is pinned by digest, so any change to any of them fails the freeze.
+    """
+    by_selector = {a["selector"]: a for a in derived["served_artifacts"]}
+
+    registered = by_selector["registered_surface_digest"]["value"]
+    assert set(registered) == set(inv._served_tools()), \
+        "the registered-surface digest is not exhaustive"
+    assert len(registered) > 40
+
+    walked = by_selector["walked_surface_digest"]["value"]
+    from boomi_mcp.categories import meta_tools
+    assert set(walked) == set(inv._schema_template_surfaces(meta_tools)), \
+        "the walked-surface digest is not exhaustive"
+    assert len(walked) > 200
+
+    # And the digests are identities, not placeholders.
+    assert all(len(v) == 64 for v in walked.values())
+
+
 def test_a_module_qualified_wrapper_is_reported(census_only):
     """`import mod; mod.build_structured_update_xml(...)`.
 
@@ -594,6 +714,8 @@ def test_a_new_tool_that_advertises_a_legacy_path_is_collected():
         a["selector"].rsplit(".", 1)[0]
         for a in inv.load_baseline()["served_artifacts"]
         if a["surface_class"] == "SS-MCP-DESCRIPTIONS"
+        # The exhaustive digest is a whole-surface artifact, not a per-tool one.
+        and a["selector"] != "registered_surface_digest"
     }
     assert steering == collected, (
         "registered tools carrying legacy guidance are not the ones frozen.\n"
