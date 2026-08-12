@@ -2305,6 +2305,15 @@
     {
       "census": "unclassified_reference",
       "count": 1,
+      "evidence_line": 578,
+      "form": "'Component/dependency verification, plus compiler and artifact provenance for typed builds.' (unclassified Component-endpoint literal)",
+      "path": "src/boomi_mcp/authoring/contract.py",
+      "row_id": "UR-6bb4a0ef",
+      "symbol": "authoring_workflow_contract"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
       "evidence_line": 413,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/authoring/workflow.py",
@@ -3123,6 +3132,15 @@
     },
     {
       "census": "unclassified_reference",
+      "count": 3,
+      "evidence_line": 1495,
+      "form": "send_request (as target_send) (unclassified reference)",
+      "path": "src/boomi_mcp/patterns/archetypes/api_to_api_sync.py",
+      "row_id": "UR-bf9062e5",
+      "symbol": "ApiToApiSyncArchetype.emit_spec"
+    },
+    {
+      "census": "unclassified_reference",
       "count": 1,
       "evidence_line": 1495,
       "form": "send_request (unclassified attribute)",
@@ -3141,6 +3159,15 @@
     },
     {
       "census": "unclassified_reference",
+      "count": 6,
+      "evidence_line": 1002,
+      "form": "send_request (as send) (unclassified reference)",
+      "path": "src/boomi_mcp/patterns/archetypes/api_to_api_sync.py",
+      "row_id": "UR-d3a3be4a",
+      "symbol": "_build_rest_send_params"
+    },
+    {
+      "census": "unclassified_reference",
       "count": 1,
       "evidence_line": 1002,
       "form": "send_request (unclassified attribute)",
@@ -3156,6 +3183,15 @@
       "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
       "row_id": "UR-8e8086d3",
       "symbol": "DatabaseToApiSyncArchetype"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 3671,
+      "form": "send_request (as target_send) (unclassified reference)",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "row_id": "UR-ed3d3c1f",
+      "symbol": "DatabaseToApiSyncArchetype.emit_spec"
     },
     {
       "census": "unclassified_reference",
@@ -3204,12 +3240,30 @@
     },
     {
       "census": "unclassified_reference",
+      "count": 8,
+      "evidence_line": 2796,
+      "form": "send_request (as send) (unclassified reference)",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "row_id": "UR-e55772de",
+      "symbol": "_build_dynamic_path"
+    },
+    {
+      "census": "unclassified_reference",
       "count": 1,
       "evidence_line": 2796,
       "form": "send_request (unclassified attribute)",
       "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
       "row_id": "UR-580d70e6",
       "symbol": "_build_dynamic_path"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 3,
+      "evidence_line": 3195,
+      "form": "send_request (as send) (unclassified reference)",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "row_id": "UR-53170ac2",
+      "symbol": "_build_operational_intent"
     },
     {
       "census": "unclassified_reference",
@@ -3222,12 +3276,30 @@
     },
     {
       "census": "unclassified_reference",
+      "count": 6,
+      "evidence_line": 2594,
+      "form": "send_request (as send) (unclassified reference)",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "row_id": "UR-baac6a10",
+      "symbol": "_build_rest_send_params"
+    },
+    {
+      "census": "unclassified_reference",
       "count": 1,
       "evidence_line": 2594,
       "form": "send_request (unclassified attribute)",
       "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
       "row_id": "UR-c0a127b7",
       "symbol": "_build_rest_send_params"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 2892,
+      "form": "send_request (as send) (unclassified reference)",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "row_id": "UR-0db21589",
+      "symbol": "_build_sync_pipeline_adapter_config"
     },
     {
       "census": "unclassified_reference",
@@ -3255,6 +3327,15 @@
       "path": "src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py",
       "row_id": "UR-73283940",
       "symbol": "HttpListenerToRestArchetype.emit_spec"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 4,
+      "evidence_line": 695,
+      "form": "send_request (as send) (unclassified reference)",
+      "path": "src/boomi_mcp/patterns/composition.py",
+      "row_id": "UR-c3e6aa2b",
+      "symbol": "_fanout_target_params"
     },
     {
       "census": "unclassified_reference",
@@ -5674,6 +5755,19 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 578,
+      "forms": [
+        "'Component/dependency verification, plus compiler and artifact provenance for typed builds.' (unclassified Component-endpoint literal)"
+      ],
+      "ledger_id": "LG-8cf67bd6",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/authoring/contract.py",
+      "sites": 1,
+      "symbol": "authoring_workflow_contract"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
       "evidence_line": 413,
       "forms": [
         "'process_kind' (unclassified selector literal)"
@@ -6199,12 +6293,13 @@
       "disposition": "migrate the archetype to canonical ProcessIR",
       "evidence_line": 1495,
       "forms": [
+        "send_request (as target_send) (unclassified reference)",
         "send_request (unclassified attribute)"
       ],
       "ledger_id": "LG-c23b1925",
       "owning_issue": "#159",
       "path": "src/boomi_mcp/patterns/archetypes/api_to_api_sync.py",
-      "sites": 1,
+      "sites": 4,
       "symbol": "ApiToApiSyncArchetype.emit_spec"
     },
     {
@@ -6225,12 +6320,13 @@
       "disposition": "migrate the archetype to canonical ProcessIR",
       "evidence_line": 1002,
       "forms": [
+        "send_request (as send) (unclassified reference)",
         "send_request (unclassified attribute)"
       ],
       "ledger_id": "LG-4166bdd1",
       "owning_issue": "#159",
       "path": "src/boomi_mcp/patterns/archetypes/api_to_api_sync.py",
-      "sites": 1,
+      "sites": 7,
       "symbol": "_build_rest_send_params"
     },
     {
@@ -6251,12 +6347,13 @@
       "disposition": "migrate the archetype to canonical ProcessIR",
       "evidence_line": 3671,
       "forms": [
+        "send_request (as target_send) (unclassified reference)",
         "send_request (unclassified attribute)"
       ],
       "ledger_id": "LG-b9ecf83d",
       "owning_issue": "#159",
       "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
-      "sites": 1,
+      "sites": 3,
       "symbol": "DatabaseToApiSyncArchetype.emit_spec"
     },
     {
@@ -6304,12 +6401,13 @@
       "disposition": "migrate the archetype to canonical ProcessIR",
       "evidence_line": 2796,
       "forms": [
+        "send_request (as send) (unclassified reference)",
         "send_request (unclassified attribute)"
       ],
       "ledger_id": "LG-176df664",
       "owning_issue": "#159",
       "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
-      "sites": 1,
+      "sites": 9,
       "symbol": "_build_dynamic_path"
     },
     {
@@ -6317,12 +6415,13 @@
       "disposition": "migrate the archetype to canonical ProcessIR",
       "evidence_line": 3195,
       "forms": [
+        "send_request (as send) (unclassified reference)",
         "send_request (unclassified attribute)"
       ],
       "ledger_id": "LG-f58c90b7",
       "owning_issue": "#159",
       "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
-      "sites": 1,
+      "sites": 4,
       "symbol": "_build_operational_intent"
     },
     {
@@ -6330,12 +6429,13 @@
       "disposition": "migrate the archetype to canonical ProcessIR",
       "evidence_line": 2594,
       "forms": [
+        "send_request (as send) (unclassified reference)",
         "send_request (unclassified attribute)"
       ],
       "ledger_id": "LG-2b21dfd2",
       "owning_issue": "#159",
       "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
-      "sites": 1,
+      "sites": 7,
       "symbol": "_build_rest_send_params"
     },
     {
@@ -6343,12 +6443,13 @@
       "disposition": "migrate the archetype to canonical ProcessIR",
       "evidence_line": 2892,
       "forms": [
+        "send_request (as send) (unclassified reference)",
         "send_request (unclassified attribute)"
       ],
       "ledger_id": "LG-05070148",
       "owning_issue": "#159",
       "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
-      "sites": 1,
+      "sites": 3,
       "symbol": "_build_sync_pipeline_adapter_config"
     },
     {
@@ -6382,12 +6483,13 @@
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
       "evidence_line": 695,
       "forms": [
+        "send_request (as send) (unclassified reference)",
         "send_request (unclassified attribute)"
       ],
       "ledger_id": "LG-d6d3360b",
       "owning_issue": "#160",
       "path": "src/boomi_mcp/patterns/composition.py",
-      "sites": 1,
+      "sites": 5,
       "symbol": "_fanout_target_params"
     },
     {

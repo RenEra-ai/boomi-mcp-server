@@ -1993,8 +1993,8 @@ fails if anyone hand-edits them apart from the machine record.
 | Capture date | 2026-08-12 |
 | Schema / scanner version | 1 / 1 |
 | Scan roots | `server.py`, `src/boomi_mcp/**/*.py` (206 files), `examples/**/*.json` (8 files) |
-| Census rows | 374 |
-| Ledger rows (§11.2–§11.4 grain) | 212 |
+| Census rows | 383 |
+| Ledger rows (§11.2–§11.4 grain) | 213 |
 | Component-XML write routes | 25 |
 | Frozen served artifacts | 108 |
 | Machine record | `tests/fixtures/m12_12/legacy_reachability_inventory.json` |
@@ -2149,6 +2149,7 @@ rather than aspirational.
 | LG-bfc762c3 | renderer_call | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_main_process | 1 | 2955 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-08a97ecd | renderer_call | src/boomi_mcp/patterns/composition.py | compose_archetypes | 1 | 1103 | #160 | delete with the legacy renderer |
 | LG-a1863ac0 | unclassified_reference | server.py | <module> | 3 | 390 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-8cf67bd6 | unclassified_reference | src/boomi_mcp/authoring/contract.py | authoring_workflow_contract | 1 | 578 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-0a2735c3 | unclassified_reference | src/boomi_mcp/authoring/workflow.py | _normalize_intent | 1 | 413 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-a3b03f12 | unclassified_reference | src/boomi_mcp/categories/components/builders/__init__.py | <module> | 5 | 57 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-bd39ea58 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | <module> | 17 | 5275 | #160 | delete the legacy semantic shell |
@@ -2185,21 +2186,21 @@ rather than aspirational.
 | LG-f26f5a1c | unclassified_reference | src/boomi_mcp/models/_process_ir_compat.py | legacy_flow_sequence_to_ir | 2 | 678 | #159 | migrate the compatibility codec, then delete |
 | LG-aef88b5e | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiTarget | 1 | 300 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-fd0fb833 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype | 2 | 1357 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-c23b1925 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype.emit_spec | 1 | 1495 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-c23b1925 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype.emit_spec | 4 | 1495 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-c65a6048 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | _build_pipeline_dict | 1 | 1129 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-4166bdd1 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | _build_rest_send_params | 1 | 1002 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-4166bdd1 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | _build_rest_send_params | 7 | 1002 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-a34a1a82 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncArchetype | 2 | 3479 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-b9ecf83d | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncArchetype.emit_spec | 1 | 3671 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-b9ecf83d | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncArchetype.emit_spec | 3 | 3671 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-12c696f9 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncParameters._enforce_watermark_consistency | 1 | 2129 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-a209f251 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncParameters._validate_transform_refs | 7 | 2206 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-45d2d0f9 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | RestTarget | 1 | 1158 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-176df664 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_dynamic_path | 1 | 2796 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-f58c90b7 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_operational_intent | 1 | 3195 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-2b21dfd2 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_rest_send_params | 1 | 2594 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-05070148 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_sync_pipeline_adapter_config | 1 | 2892 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-176df664 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_dynamic_path | 9 | 2796 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-f58c90b7 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_operational_intent | 4 | 3195 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-2b21dfd2 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_rest_send_params | 7 | 2594 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-05070148 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_sync_pipeline_adapter_config | 3 | 2892 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-e4d03e77 | unclassified_reference | src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py | HttpListenerToRestArchetype | 1 | 327 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-91586a36 | unclassified_reference | src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py | HttpListenerToRestArchetype.emit_spec | 2 | 378 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-d6d3360b | unclassified_reference | src/boomi_mcp/patterns/composition.py | _fanout_target_params | 1 | 695 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-d6d3360b | unclassified_reference | src/boomi_mcp/patterns/composition.py | _fanout_target_params | 5 | 695 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-48a0cf76 | unclassified_reference | src/boomi_mcp/patterns/composition.py | compose_archetypes | 5 | 968 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-1dd09f43 | unclassified_reference | src/boomi_mcp/patterns/composition.py | validate_composition | 2 | 584 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-c5756eb3 | unclassified_reference | src/boomi_mcp/patterns/primitives/branch.py | BranchPrimitive | 1 | 135 | #160 | residue: a watched name mentioned in a shape the census does not classify |
@@ -2394,7 +2395,7 @@ over the census, so a row cannot be silently orphaned when a file moves.
 | #160 | delete with the legacy renderer | 3 |
 | #160 | delete with the legacy semantic shell | 2 |
 | #160 | follow the callee's row; this is an edge, not a site | 60 |
-| #160 | residue: a watched name mentioned in a shape the census does not classify | 29 |
+| #160 | residue: a watched name mentioned in a shape the census does not classify | 30 |
 | #160 | retract the served legacy guidance / guard the raw route | 2 |
 
 Owner semantics: **#151** neutral extraction and `flow_sequence` parity/reachability; **#153**

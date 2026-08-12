@@ -1049,29 +1049,43 @@ def test_every_watched_mention_is_classified_or_residue():
     selectors = set(vocab["producer_selectors"])
 
     sources = inv.python_sources()
-    rows = inv.scan_sources(sources, vocab)
-    by_path = {}
-    for row in rows:
-        by_path.setdefault(row["path"], []).append(row)
 
+    # PER-OCCURRENCE, not per module. A module-level check is satisfied by any
+    # single row, so a newly missed shape added to a file that already emits
+    # rows — `integration_builder.py`, say — left the assertion green while the
+    # occurrence was accounted for by nothing.
     unaccounted = []
     for path, text in sources.items():
         tree = _ast.parse(text, filename=path)
-        mentions = 0
+        scanner = inv._Scanner(
+            path, vocab, local_defs=inv._module_level_functions(tree),
+            known_paths=frozenset(sources))
+        scanner.visit(tree)
+        residue = inv._ResidueScanner(path, vocab, scanner._consumed,
+                                      aliases=scanner._aliases)
+        residue.visit(tree)
+        accounted = set(scanner._consumed) | set(residue._reported)
+
         for node in _ast.walk(tree):
-            if isinstance(node, _ast.Name) and node.id in watched:
-                mentions += 1
-            elif isinstance(node, _ast.Attribute) and (
-                    node.attr in watched or node.attr in selectors):
-                mentions += 1
-            elif isinstance(node, _ast.Constant) and isinstance(node.value, str) \
-                    and node.value in (watched | selectors):
-                mentions += 1
-        if mentions and not by_path.get(path):
-            unaccounted.append(path)
+            mention = None
+            if isinstance(node, _ast.Name):
+                if scanner._aliases.get(node.id, node.id) in watched:
+                    mention = node.id
+            elif isinstance(node, _ast.Attribute):
+                if node.attr in watched or node.attr in selectors:
+                    mention = node.attr
+            elif isinstance(node, _ast.Constant) and isinstance(node.value, str):
+                if node.value in (watched | selectors):
+                    mention = node.value
+            if mention is not None and id(node) not in accounted \
+                    and id(node) not in residue._docstrings:
+                unaccounted.append("%s:%s %s" % (path, getattr(node, "lineno", "?"),
+                                                 mention))
+
     assert unaccounted == [], (
-        "these modules mention the watched vocabulary but produced NO census row of "
-        "any kind — the accounting invariant is broken: %s" % unaccounted)
+        "%d watched occurrence(s) are neither consumed by a classified row nor "
+        "emitted as residue — the accounting invariant is broken:\n  %s"
+        % (len(unaccounted), "\n  ".join(unaccounted[:20])))
 
 
 def test_an_unresolvable_dynamic_sink_access_is_reported_not_ignored(census_only):

@@ -195,7 +195,8 @@ def unscanned_assets() -> List[str]:
     silent widening of the unmodelled region.
     """
     out: List[str] = []
-    for root, keep in (("src/boomi_mcp", {".py"}), ("examples", {".json"})):
+    for root, keep in (("src/boomi_mcp", {".py"}), ("scripts", {".py"}),
+                       ("examples", {".json"})):
         base = _ROOT / root
         if not base.is_dir():
             continue
@@ -1117,8 +1118,11 @@ class _Scanner(ast.NodeVisitor):
 #: A trailing SPACE means prose ("… ProcessIR/topology/component is validated …"),
 #: not a path. A real endpoint literal continues with `/`, `?`, `#`, a quote, or
 #: ends. `Component/bulk` is matched in its own right.
+#: `^Component/` also matches: with a base-URL-configured client,
+#: `client.post("Component/{id}", …)` is a valid relative call to the Component
+#: API. Anchored at string start so the bare word in prose does not match.
 _COMPONENT_ENDPOINT_RE = re.compile(
-    r"(?<!<)/component(?![a-z0-9_ ])|component/bulk", re.IGNORECASE)
+    r"(?<!<)/component(?![a-z0-9_ ])|component/bulk|^component/", re.IGNORECASE)
 
 
 def _folded_str(node: ast.AST) -> Optional[str]:
@@ -1151,12 +1155,22 @@ class _ResidueScanner(ast.NodeVisitor):
     """
 
     def __init__(self, path: str, vocab: Dict[str, Tuple[str, ...]],
-                 consumed: Set[int]) -> None:
+                 consumed: Set[int],
+                 aliases: Optional[Dict[str, str]] = None) -> None:
         self.path = path
+        # An ALIASED watched import (`… import get_process_flow_builder as g`)
+        # is spelled `g` at every use site, so matching the raw `node.id` saw
+        # nothing and the whole path — dispatch table included — produced neither
+        # a census row nor residue. The residue pass gets the scanner's alias
+        # table for exactly this reason.
+        self._aliases = dict(aliases or {})
         self.rows: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
         self._consumed = consumed
         self._symbols: List[str] = []
         self._docstrings: Set[int] = set()
+        #: Node ids this pass accounted for, so conservation can be checked
+        #: per OCCURRENCE rather than per module.
+        self._reported: Set[int] = set()
         self._watched = (
             set(vocab["registry_names"]) | set(vocab["builder_classes"])
             | set(vocab["legacy_emitters"]) | set(vocab["legacy_semantic_validation"])
@@ -1212,15 +1226,20 @@ class _ResidueScanner(ast.NodeVisitor):
         self._scoped(node, node.name)
 
     def visit_Name(self, node: ast.Name) -> None:  # noqa: N802
-        if id(node) not in self._consumed and node.id in self._watched:
-            self._emit("%s (unclassified reference)" % node.id, node.lineno)
+        resolved = self._aliases.get(node.id, node.id)
+        if id(node) not in self._consumed and resolved in self._watched:
+            label = resolved if resolved == node.id else "%s (as %s)" % (resolved, node.id)
+            self._reported.add(id(node))
+            self._emit("%s (unclassified reference)" % label, node.lineno)
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:  # noqa: N802
         if id(node) not in self._consumed:
             if node.attr in self._watched:
+                self._reported.add(id(node))
                 self._emit("%s (unclassified attribute)" % node.attr, node.lineno)
             elif node.attr in self._selectors:
+                self._reported.add(id(node))
                 # `spec.process_kind = "sync_pipeline"` — a typed producer, which
                 # the subscript-shaped producer branch never saw.
                 self._emit("%s (unclassified selector attribute)" % node.attr,
@@ -1251,8 +1270,10 @@ class _ResidueScanner(ast.NodeVisitor):
         if id(node) in self._consumed or id(node) in self._docstrings:
             return
         if isinstance(node.value, str):
+            self._reported.add(id(node))
             self._check_string(node.value, node.lineno)
         elif isinstance(node.value, (bytes, bytearray)):
+            self._reported.add(id(node))
             # `b"/Component"` / `b"process_kind"` are the same evidence.
             try:
                 self._check_string(bytes(node.value).decode("utf-8"), node.lineno)
@@ -1314,7 +1335,8 @@ def scan_sources(sources: Dict[str, str], vocab: Dict[str, Tuple[str, ...]]) -> 
                            known_paths=known)
         scanner.visit(trees[path])
         rows.extend(scanner.rows.values())
-        residue = _ResidueScanner(path, vocab, scanner._consumed)
+        residue = _ResidueScanner(path, vocab, scanner._consumed,
+                                  aliases=scanner._aliases)
         residue.visit(trees[path])
         rows.extend(residue.rows.values())
 
@@ -1950,6 +1972,36 @@ def _mcp_tool_surface(tool: Any) -> Any:
     return {"description": tool.description or "", "parameters": tool.parameters or {}}
 
 
+def _mcp_wire_model(item: Any) -> Any:
+    """The item's served wire model, whatever `to_mcp_*()` it exposes."""
+    for accessor in ("to_mcp_prompt", "to_mcp_resource", "to_mcp_template",
+                     "to_mcp_resource_template"):
+        method = getattr(item, accessor, None)
+        if callable(method):
+            try:
+                served = method()
+            except Exception:  # pragma: no cover - defensive
+                continue
+            dump = getattr(served, "model_dump", None)
+            if callable(dump):
+                return dump(exclude_none=True, mode="json")
+    dump = getattr(item, "model_dump", None)
+    if callable(dump):
+        try:
+            return dump(exclude_none=True, mode="json")
+        except Exception:  # pragma: no cover - defensive
+            pass
+    return {"repr": type(item).__name__}
+
+
+def _non_tool_key(item: Any, index: int) -> str:
+    for attr in ("name", "uri_template", "uriTemplate", "uri"):
+        value = getattr(item, attr, None)
+        if value:
+            return str(value)
+    return str(index)
+
+
 def _non_tool_mcp_surface() -> Dict[str, Any]:
     """Digest of every non-tool MCP surface the server registers."""
     import server
@@ -1969,12 +2021,14 @@ def _non_tool_mcp_surface() -> Dict[str, Any]:
             except Exception as exc:  # pragma: no cover - defensive
                 out[label] = "<error: %s>" % type(exc).__name__
                 continue
+            # The FULL wire model, as for tools: prompt arguments/title/meta,
+            # resource MIME type/annotations/icons and a template's
+            # `uriTemplate` are all machine-served, and templates expose no
+            # `.uri` at all — hashing description+uri would have frozen almost
+            # nothing once a surface was actually registered.
             out[label] = {
-                str(getattr(item, "name", None) or getattr(item, "uri", index)):
-                    _sha256(canonical_json({
-                        "description": getattr(item, "description", None) or "",
-                        "uri": str(getattr(item, "uri", "") or ""),
-                    }))
+                _non_tool_key(item, index): _sha256(canonical_json(
+                    _mcp_wire_model(item)))
                 for index, item in enumerate(items)
             }
     finally:
@@ -2931,7 +2985,8 @@ def compare(current: Dict[str, Any], baseline: Dict[str, Any]) -> Diff:
         if cur_a[aid]["sha256"] != base_a[aid]["sha256"]:
             diff.artifact_changed.append(aid)
 
-    for field in ("python_source_count", "example_document_count"):
+    for field in ("python_source_count", "example_document_count",
+                  "unscanned_asset_count"):
         c = (current.get("scan_contract") or {}).get(field)
         b = (baseline.get("scan_contract") or {}).get(field)
         if c != b:
