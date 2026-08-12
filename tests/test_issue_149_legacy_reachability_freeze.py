@@ -48,14 +48,20 @@ def _transport_bomb():
     def bomb(*args, **kwargs):
         raise AssertionError("the #149 derivation reached the Boomi transport")
 
+    # DERIVED from the same vocabulary the census watches, plus the read verbs.
+    # A hand-listed sentinel drifts from the watched set the moment the set
+    # grows: `stream_request` joined the vocabulary and the sentinel did not,
+    # leaving a transport verb the "transport-free" test could not have caught.
+    watched = set(inv.legacy_sink_vocabulary()["component_xml_write_sinks"])
+    reads = {"get_component", "get_component_raw", "query_component_metadata"}
     patches = [
         (ComponentService, name, getattr(ComponentService, name))
-        for name in ("send_request", "send_request_raw", "create_component",
-                     "create_component_raw", "update_component",
-                     "update_component_raw", "get_component", "get_component_raw",
-                     "bulk_component", "bulk_component_raw")
+        for name in sorted(watched | reads)
         if hasattr(ComponentService, name)
     ]
+    assert any(n == "stream_request" for _, n, _ in patches) or \
+        not hasattr(ComponentService, "stream_request"), \
+        "stream_request exists but is not sentinelled"
     for owner, name, _ in patches:
         setattr(owner, name, bomb)
     return patches
@@ -124,7 +130,10 @@ def test_baseline_identity_and_schema_are_frozen(baseline):
     for row in baseline["census"]:
         assert row["census"] in inv.CENSUS_KINDS
     for row in baseline["ledger_rows"]:
-        assert row["owning_issue"] in inv.OWNING_ISSUES
+        # A row at a location several routes claim inherits every claiming
+        # route's owner, joined with `/` — e.g. `#153/#160`.
+        for issue in str(row["owning_issue"]).split("/"):
+            assert issue in inv.OWNING_ISSUES, (row["ledger_id"], issue)
         assert row["disposition"], "every ledger row needs a disposition"
     for route in baseline["component_xml_write_routes"]:
         assert route["classification"] in inv.ROUTE_CLASSIFICATIONS
@@ -435,6 +444,86 @@ def test_a_wrapper_around_a_legacy_path_is_reported(census_only, label, body):
     diff = _added(census_only, "_m12_12_synthetic_wrapper", body)
     assert "legacy_transitive_call" in {r.split(" | ")[0] for r in diff.added}, \
         "%s escaped the freeze: %s" % (label, diff.report())
+
+
+def test_a_module_qualified_wrapper_is_reported(census_only):
+    """`import mod; mod.build_structured_update_xml(...)`.
+
+    The closure once admitted only `ast.Name` callees, so a module-qualified
+    wrapper reached the legacy renderer with no census row at all.
+    """
+    diff = _added(census_only, "_m12_12_synthetic_qualified_wrapper", (
+        "from . import integration_builder as ib\n"
+        "def wrap(comp, xml):\n"
+        "    return ib.build_structured_update_xml(comp, xml)\n"
+    ))
+    assert "legacy_transitive_call" in {r.split(" | ")[0] for r in diff.added}, diff.report()
+
+
+def test_an_unrelated_function_sharing_a_bearing_name_is_not_reported(census_only):
+    """Transitive identity is `(path, symbol)`, not a bare name.
+
+    `_build_main_process` is defined in THREE archetype modules. A bare-name
+    closure links whichever one is legacy-bearing to callers of the other two —
+    edges that are true only by coincidence, and false in general.
+    """
+    diff = _added(census_only, "_m12_12_synthetic_name_collision", (
+        "def _build_main_process(spec):\n"
+        "    return spec\n"
+        "def caller(spec):\n"
+        "    return _build_main_process(spec)\n"
+    ))
+    assert diff.added == [], diff.added
+
+
+def test_a_one_argument_setdefault_is_still_a_producer(census_only):
+    """`d.setdefault(k)` inserts `k` with `None` — it writes, so it produces."""
+    diff = _added(census_only, "_m12_12_synthetic_setdefault_1arg", (
+        "def prepare(config):\n"
+        "    config.setdefault('process_kind')\n"
+        "    return config\n"
+    ))
+    assert "process_kind_producer" in {r.split(" | ")[0] for r in diff.added}, diff.added
+
+
+def test_the_legacy_process_protocol_templates_are_frozen(derived):
+    """`get_schema_template(resource_type='process', operation='create')` echoes
+    `process_protocols: ['database_to_api_sync','wrapper_subprocess','sync_pipeline']`
+    — the legacy protocol list the issue puts in scope.
+
+    The axis walk once followed only `valid_protocols`, so it descended no
+    protocol axis at all and froze none of these templates.
+    """
+    frozen = {a["selector"] for a in derived["served_artifacts"]
+              if a["surface_class"] == "SS-SCHEMA-TEMPLATES"}
+    for protocol in ("database_to_api_sync", "wrapper_subprocess", "sync_pipeline"):
+        selector = "resource_type=process|operation=create|protocol=%s" % protocol
+        assert selector in frozen, "legacy protocol template %r is not frozen" % protocol
+    assert sum(1 for s in frozen if "|protocol=" in s) >= 8
+
+
+def test_no_ledger_row_contradicts_its_write_route(baseline):
+    """§11 must give #160 ONE instruction per site.
+
+    A generic census disposition once told the sweep to "guard behind the shared
+    process-content classifier" at `_get_channel_raw_json` — a deliberate
+    lossless GET whose route says leave it unchanged — while telling its caller
+    to "delete or re-home". Ledger dispositions for write sites now come from
+    the route table, and transitive rows say plainly that they are edges.
+    """
+    routed = {loc: r for r in baseline["component_xml_write_routes"]
+              for loc in r["locations"]}
+    for row in baseline["ledger_rows"]:
+        location = "%s::%s" % (row["path"], row["symbol"].split(".")[0])
+        if row["census"] in ("component_xml_write", "raw_api_invoker") \
+                and location in routed:
+            assert routed[location]["route_id"] in row["disposition"] \
+                or any(r["route_id"] in row["disposition"]
+                       for r in baseline["component_xml_write_routes"]
+                       if location in r["locations"]), (
+                "%s: ledger disposition does not come from its route" % row["ledger_id"])
+        if row["census"] == "legacy_transitive_call":
+            assert "edge, not a site" in row["disposition"], row["ledger_id"]
 
 
 def test_a_setdefault_producer_is_reported(census_only):

@@ -291,13 +291,17 @@ class _Scanner(ast.NodeVisitor):
     """One pass per module; emits census rows keyed symbolically, not positionally."""
 
     def __init__(self, path: str, vocab: Dict[str, Tuple[str, ...]],
-                 transitive_targets: "frozenset[str]" = frozenset(),
-                 local_defs: "frozenset[str]" = frozenset()) -> None:
+                 transitive_targets: "frozenset[Tuple[str, str]]" = frozenset(),
+                 local_defs: "frozenset[str]" = frozenset(),
+                 known_paths: "frozenset[str]" = frozenset()) -> None:
         self.path = path
         self.v = vocab
         self._transitive = transitive_targets
         self._imported: Set[str] = set()
         self._import_origin: Dict[str, str] = {}
+        self._qualified_origin: Dict[str, Tuple[str, str]] = {}
+        self._module_paths: Dict[str, str] = {}
+        self._known: "frozenset[str]" = known_paths
         self._local_defs: Set[str] = set(local_defs)
         self.rows: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
         self._symbols: List[str] = []
@@ -358,6 +362,28 @@ class _Scanner(ast.NodeVisitor):
             return node.attr == "PROCESS_FLOW_BUILDERS"
         return False
 
+    def _qualified_callee(self, func: ast.AST) -> Optional[Tuple[str, str]]:
+        """`(defining path, symbol)` for a statically resolvable call, else None.
+
+        Three resolvable shapes, and only these:
+          `f(...)`        where f is defined in this module
+          `f(...)`        where f was imported by name (possibly aliased)
+          `mod.f(...)`    where mod was imported as a module we can place
+        Everything else — method dispatch, calls through parameters, dynamic
+        attributes — is left unresolved rather than guessed at.
+        """
+        if isinstance(func, ast.Name):
+            if func.id in self._qualified_origin:
+                return self._qualified_origin[func.id]
+            if func.id in self._local_defs:
+                return (self.path, func.id)
+            return None
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            module_path = self._module_paths.get(func.value.id)
+            if module_path:
+                return (module_path, func.attr)
+        return None
+
     def _yields_builder(self, node: ast.AST) -> bool:
         """True when the expression evaluates to a process-flow builder class."""
         if isinstance(node, ast.Call):
@@ -410,13 +436,42 @@ class _Scanner(ast.NodeVisitor):
         self._scoped(node, node.name)
 
     # -- imports -------------------------------------------------------
+    def _resolve_module(self, module: Optional[str], level: int) -> Optional[str]:
+        """Repo-relative path of an imported module, or None if it is not ours.
+
+        Needed because a transitive callee's identity is `(path, symbol)`, not a
+        bare name: `_build_main_process` is defined in THREE archetype modules,
+        so a bare-name closure links whichever one happens to be legacy-bearing
+        to callers of the other two.
+        """
+        if level:
+            parts = self.path.split("/")[:-1]
+            for _ in range(level - 1):
+                parts = parts[:-1]
+            target = parts + (module.split(".") if module else [])
+        else:
+            if not module:
+                return None
+            head = module.split(".")
+            if head[0] != "boomi_mcp":
+                return None
+            target = ["src"] + head
+        for candidate in ("/".join(target) + ".py", "/".join(target) + "/__init__.py"):
+            if candidate in self._known:
+                return candidate
+        return None
+
     def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
         for alias in node.names:
             local = alias.asname or alias.name.split(".")[0]
             self._modules[local] = alias.name
+            resolved = self._resolve_module(alias.name, 0)
+            if resolved:
+                self._module_paths[local] = resolved
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
+        package = self._resolve_module(node.module, node.level or 0)
         for alias in node.names:
             local = alias.asname or alias.name
             self._imported.add(local)
@@ -424,6 +479,15 @@ class _Scanner(ast.NodeVisitor):
             # bearing set — an aliased wrapper is exactly the escape this
             # closure exists to catch.
             self._import_origin[local] = alias.name
+            # `from . import integration_builder as ib` binds a MODULE, so a
+            # later `ib.build_structured_update_xml(...)` must resolve too.
+            submodule = self._resolve_module(
+                "%s.%s" % (node.module, alias.name) if node.module else alias.name,
+                node.level or 0)
+            if submodule:
+                self._module_paths[local] = submodule
+            elif package:
+                self._qualified_origin[local] = (package, alias.name)
             if alias.name in self._watched:
                 self._aliases[local] = alias.name
             if alias.name in self._builders:
@@ -582,12 +646,12 @@ class _Scanner(ast.NodeVisitor):
         # excluded — the callee cannot be resolved without type inference, and
         # matching it on the bare name made `validate_config` alone produce 48
         # rows across unrelated builder classes.
-        if isinstance(node.func, ast.Name) \
-                and (node.func.id in self._imported or node.func.id in self._local_defs):
-            callee = self._import_origin.get(node.func.id, node.func.id)
-            if callee in self._transitive and self.symbol.split(".")[-1] != callee:
-                self._emit("legacy_transitive_call",
-                           "%s(...) [legacy-bearing]" % callee, node.lineno)
+        callee = self._qualified_callee(node.func)
+        if callee and callee in self._transitive \
+                and (self.path, self.symbol) != callee:
+            self._emit("legacy_transitive_call",
+                       "%s(...) [legacy-bearing, %s]" % (callee[1], callee[0]),
+                       node.lineno)
 
         for kw in node.keywords:
             if kw.arg in self._selectors:
@@ -605,13 +669,17 @@ class _Scanner(ast.NodeVisitor):
         if base in {"get", "setdefault", "pop"} and node.args:
             key = _const_str(node.args[0])
             if key in self._selectors:
-                if base == "setdefault" and len(node.args) > 1:
+                if base == "setdefault":
+                    # EVERY setdefault writes: the one-argument form inserts the
+                    # key with `None` when absent, so it produces a process_kind
+                    # just as surely as the two-argument form.
+                    default = (_const_repr(node.args[1]) if len(node.args) > 1
+                               else "None")
                     self._emit("process_kind_producer",
-                               "setdefault %s=%s" % (key, _const_repr(node.args[1])),
-                               node.lineno)
+                               "setdefault %s=%s" % (key, default), node.lineno)
                 else:
                     self._emit("process_kind_consumer",
-                               "%s.%s(%r)" % (_tail(dotted, 2), base, key), node.lineno)
+                               "%s(%r)" % (_tail(dotted, 2), key), node.lineno)
 
         self.generic_visit(node)
 
@@ -708,12 +776,14 @@ def scan_sources(sources: Dict[str, str], vocab: Dict[str, Tuple[str, ...]]) -> 
     """
     trees: Dict[str, ast.AST] = {}
     rows: List[Dict[str, Any]] = []
+    known = frozenset(sources)
     for path in sorted(sources):
         try:
             trees[path] = ast.parse(sources[path], filename=path)
         except SyntaxError as exc:  # pragma: no cover - defensive
             raise AssertionError("cannot parse %s for the #149 census: %s" % (path, exc))
-        scanner = _Scanner(path, vocab, local_defs=_module_level_functions(trees[path]))
+        scanner = _Scanner(path, vocab, local_defs=_module_level_functions(trees[path]),
+                           known_paths=known)
         scanner.visit(trees[path])
         rows.extend(scanner.rows.values())
 
@@ -723,25 +793,25 @@ def scan_sources(sources: Dict[str, str], vocab: Dict[str, Tuple[str, ...]]) -> 
     # Only MODULE-LEVEL functions can bear transitively: a method's callers
     # cannot be resolved from a bare name.
     bearing = {
-        r["symbol"]
+        (r["path"], r["symbol"])
         for r in rows
         if r["census"] in _REACHABILITY_KINDS
         and "." not in r["symbol"] and r["symbol"] != "<module>"
         and r["symbol"] in module_level.get(r["path"], frozenset())
     }
-    seen: Set[str] = set()
+    seen: Set[Tuple[str, str]] = set()
     found: List[Dict[str, Any]] = []
     while bearing - seen:
         seen |= bearing
         found = []
         for path in sorted(trees):
             scanner = _Scanner(path, vocab, transitive_targets=frozenset(bearing),
-                               local_defs=module_level[path])
+                               local_defs=module_level[path], known_paths=known)
             scanner.visit(trees[path])
             found.extend(r for r in scanner.rows.values()
                          if r["census"] == "legacy_transitive_call")
         bearing = bearing | {
-            r["symbol"] for r in found
+            (r["path"], r["symbol"]) for r in found
             if "." not in r["symbol"] and r["symbol"] != "<module>"
             and r["symbol"] in module_level.get(r["path"], frozenset())
         }
@@ -1496,19 +1566,32 @@ def _schema_template_surfaces(meta_tools: Any) -> Dict[str, Any]:
         for operation in operations:
             payload = meta_tools.get_schema_template_action(
                 resource_type=resource_type, operation=operation)
-            surfaces["resource_type=%s|operation=%s" % (resource_type, operation)] = payload
-            for protocol in _echoed_list(payload, "valid_protocols", "protocols"):
-                surfaces["resource_type=%s|operation=%s|protocol=%s"
-                         % (resource_type, operation, protocol)] = \
+            key = "resource_type=%s|operation=%s" % (resource_type, operation)
+            surfaces[key] = payload
+            # `process_protocols` on the process-create payload IS the legacy
+            # protocol list — `['database_to_api_sync','wrapper_subprocess',
+            # 'sync_pipeline']` — and connector payloads use
+            # `available_protocols`. Following only `valid_protocols` walked
+            # neither, so the templates the issue calls out as "advertising
+            # legacy protocols" were never frozen.
+            for protocol in _protocol_axis(payload):
+                surfaces["%s|protocol=%s" % (key, protocol)] = \
                     meta_tools.get_schema_template_action(
                         resource_type=resource_type, operation=operation, protocol=protocol)
             for component_type in _echoed_list(payload, "valid_component_types",
                                                "component_types") or component_types:
-                surfaces["resource_type=%s|operation=%s|component_type=%s"
-                         % (resource_type, operation, component_type)] = \
-                    meta_tools.get_schema_template_action(
-                        resource_type=resource_type, operation=operation,
-                        component_type=component_type)
+                ct_key = "%s|component_type=%s" % (key, component_type)
+                ct_payload = meta_tools.get_schema_template_action(
+                    resource_type=resource_type, operation=operation,
+                    component_type=component_type)
+                surfaces[ct_key] = ct_payload
+                # Connector protocols hang off the component_type payload, one
+                # level deeper than the operation payload.
+                for protocol in _protocol_axis(ct_payload):
+                    surfaces["%s|protocol=%s" % (ct_key, protocol)] = \
+                        meta_tools.get_schema_template_action(
+                            resource_type=resource_type, operation=operation,
+                            component_type=component_type, protocol=protocol)
 
     assert_schema_surface_axes_non_vacuous(surfaces)
     return surfaces
@@ -1523,7 +1606,7 @@ def assert_schema_surface_axes_non_vacuous(surfaces: Dict[str, Any]) -> None:
     the overviews, none of them is pinned and the SS-SCHEMA-TEMPLATES class is
     decorative.
     """
-    for axis in ("|operation=", "|component_type="):
+    for axis in ("|operation=", "|component_type=", "|protocol="):
         if not any(axis in key for key in surfaces):
             raise AssertionError(
                 "the schema-template walk descended no %s axis — the served "
@@ -1540,6 +1623,23 @@ def assert_schema_surface_axes_non_vacuous(surfaces: Dict[str, Any]) -> None:
                 "the served template %r was not collected — issue #149 names it "
                 "explicitly (raw_xml_escape_hatch / _COMPONENT_CREATE / "
                 "_COMPONENT_CLONE)" % required)
+
+
+#: Every key a served payload uses to echo its protocol axis. `process_protocols`
+#: carries the LEGACY protocol list; `available_protocols` carries the connector
+#: ones. Following only `valid_protocols` walked neither.
+_PROTOCOL_ECHO_KEYS = ("valid_protocols", "process_protocols", "available_protocols",
+                       "protocols", "available_standards", "valid_standards")
+
+
+def _protocol_axis(payload: Any) -> List[str]:
+    """Union of every protocol/standard axis the payload advertises."""
+    found: List[str] = []
+    for key in _PROTOCOL_ECHO_KEYS:
+        for value in _echoed_list(payload, key):
+            if value not in found:
+                found.append(value)
+    return found
 
 
 def _echoed_list(payload: Any, *keys: str) -> List[str]:
@@ -1776,7 +1876,40 @@ _OWNERSHIP_RULES: Tuple[Tuple[str, Optional[Tuple[str, ...]], str, str], ...] = 
 )
 
 
-def _own(path: str, census: str) -> Tuple[str, str]:
+def _route_disposition(path: str, symbol: str) -> Optional[Tuple[str, str]]:
+    """The owning issue and disposition of the write ROUTE claiming this symbol.
+
+    The classification table is the authority for Component-XML write sites, so
+    the ledger projection must consult it instead of falling through to a census
+    default. Without this, `shared_resources.py::_get_channel_raw_json` — a
+    deliberate lossless GET classified `typed_non_process` / "leave unchanged" —
+    was ALSO given the generic "guard behind the shared process-content
+    classifier" disposition, while its caller was told to "delete or re-home".
+    §11 then handed #160 three instructions for one function, one of which would
+    have removed a preservation-critical read.
+    """
+    location = "%s::%s" % (path, symbol.split(".")[0])
+    claiming = [r for r in WRITE_ROUTES if location in r["locations"]]
+    if not claiming:
+        return None
+    issues = sorted({r["owning_issue"] for r in claiming})
+    dispositions = sorted({
+        "%s: %s" % (r["route_id"], r["post_retraction_assertion"]) for r in claiming
+    })
+    return ("/".join(issues), " · ".join(dispositions))
+
+
+def _own(path: str, census: str, symbol: str = "") -> Tuple[str, str]:
+    # A transitive row is an EDGE and its fate follows its callee, so it never
+    # takes a path-scoped disposition of its own — a path rule would have it
+    # issue an instruction ("delete the legacy semantic shell") for a site it
+    # does not own, which is how §11 acquired contradictory guidance.
+    if census == "legacy_transitive_call":
+        return (_CENSUS_DEFAULT_OWNER[census], _DEFAULT_DISPOSITION[census])
+    if census in ("component_xml_write", "raw_api_invoker"):
+        routed = _route_disposition(path, symbol)
+        if routed:
+            return routed
     for prefix, kinds, issue, disposition in _OWNERSHIP_RULES:
         if path.startswith(prefix) and (kinds is None or census in kinds):
             return issue, disposition
@@ -1784,7 +1917,11 @@ def _own(path: str, census: str) -> Tuple[str, str]:
 
 
 _DEFAULT_DISPOSITION = {
-    "legacy_transitive_call": "delete or re-home with the callee",
+    # A transitive row is an EDGE, not a site: it exists because its callee
+    # bears a legacy path. Phrasing it as an instruction ("delete or re-home")
+    # contradicted the callee's own row whenever that row said "leave unchanged"
+    # — which is exactly the case for the lossless channel GET.
+    "legacy_transitive_call": "follow the callee's row; this is an edge, not a site",
     "registry_lookup": "delete with the legacy registry",
     "renderer_call": "delete with the legacy renderer",
     "legacy_emitter": "delete with the legacy emitters",
@@ -1811,7 +1948,7 @@ def ledger_rows(census_rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
         key = (row["census"], row["path"], row["symbol"])
         entry = grouped.get(key)
         if entry is None:
-            issue, disposition = _own(row["path"], row["census"])
+            issue, disposition = _own(row["path"], row["census"], row["symbol"])
             grouped[key] = {
                 "ledger_id": _row_id("LG", key),
                 "census": row["census"],
