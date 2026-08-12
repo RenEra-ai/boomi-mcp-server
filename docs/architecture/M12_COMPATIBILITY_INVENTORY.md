@@ -1993,8 +1993,8 @@ fails if anyone hand-edits them apart from the machine record.
 | Capture date | 2026-08-12 |
 | Schema / scanner version | 1 / 1 |
 | Scan roots | `server.py`, `src/boomi_mcp/**/*.py` (206 files), `examples/**/*.json` (8 files) |
-| Census rows | 243 |
-| Ledger rows (§11.2–§11.4 grain) | 138 |
+| Census rows | 254 |
+| Ledger rows (§11.2–§11.4 grain) | 148 |
 | Component-XML write routes | 25 |
 | Frozen served artifacts | 107 |
 | Machine record | `tests/fixtures/m12_12/legacy_reachability_inventory.json` |
@@ -2076,15 +2076,20 @@ rather than aspirational.
 | LG-28410386 | legacy_transitive_call | scripts/provision_qa_noop_fixture.py | <module> | 1 | 537 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-cae1b442 | legacy_transitive_call | scripts/provision_qa_noop_fixture.py | build_noop_process_xml | 1 | 151 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-3f3b8e58 | legacy_transitive_call | scripts/provision_qa_noop_fixture.py | main | 1 | 527 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-8cbce0ea | legacy_transitive_call | scripts/provision_qa_noop_fixture.py | provision | 1 | 392 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-8cbce0ea | legacy_transitive_call | scripts/provision_qa_noop_fixture.py | provision | 2 | 392 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-48cc5eb8 | legacy_transitive_call | server.py | analyze_component | 1 | 1892 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-853101d8 | legacy_transitive_call | server.py | apply_component_edit | 1 | 2050 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-b6bb8a5c | legacy_transitive_call | server.py | build_integration | 1 | 2481 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-489d0ece | legacy_transitive_call | server.py | compose_archetypes | 1 | 2604 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-a389d52e | legacy_transitive_call | server.py | discover_odata_metadata | 1 | 3024 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-1a0b93dd | legacy_transitive_call | server.py | discover_openapi_spec | 1 | 2923 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-97044988 | legacy_transitive_call | server.py | discover_soap_wsdl | 1 | 2975 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-f5622f58 | legacy_transitive_call | server.py | invoke_boomi_api | 1 | 3411 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-963c3aaf | legacy_transitive_call | server.py | manage_component | 1 | 1791 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-2976fe39 | legacy_transitive_call | server.py | manage_connector | 1 | 2154 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-4ce172f4 | legacy_transitive_call | server.py | orchestrate_deploy | 3 | 4310 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-ceea4ac3 | legacy_transitive_call | server.py | prepare_component_edit | 1 | 1970 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-334a4633 | legacy_transitive_call | server.py | search_marketplace_recipes | 1 | 2292 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-af3aef13 | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | _legacy_plan_echo | 1 | 662 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-b7cd58ae | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | compile_authoring_request_v1 | 1 | 1444 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-14572d6c | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | plan_authoring_request_v1 | 1 | 1144 | #160 | follow the callee's row; this is an edge, not a site |
@@ -2106,6 +2111,8 @@ rather than aspirational.
 | LG-dce7aa49 | legacy_transitive_call | src/boomi_mcp/categories/components/safe_edit_component.py | _compute_merged_xml | 1 | 314 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-a3fb531d | legacy_transitive_call | src/boomi_mcp/categories/components/safe_edit_component.py | apply_component_edit_action | 1 | 544 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-0b6058fb | legacy_transitive_call | src/boomi_mcp/categories/components/safe_edit_component.py | prepare_component_edit_action | 1 | 381 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-205964b1 | legacy_transitive_call | src/boomi_mcp/categories/deployment/orchestration.py | _run_listener_verify_stage | 2 | 1639 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-ab50f45d | legacy_transitive_call | src/boomi_mcp/categories/deployment/orchestration.py | orchestrate_deploy_action | 1 | 4894 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-77376652 | legacy_transitive_call | src/boomi_mcp/categories/integration_authoring.py | compose_archetypes_action | 1 | 479 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-3cf79d6e | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _apply_plan | 3 | 6896 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-3a7213a4 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _authored_process_validation_error | 1 | 5221 | #160 | follow the callee's row; this is an edge, not a site |
@@ -2117,6 +2124,9 @@ rather than aspirational.
 | LG-4ef294c2 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _resolve_preservation_policy | 1 | 1234 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-1f766152 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | build_integration_action | 4 | 7959 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-8796f643 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | build_structured_update_xml | 1 | 3152 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-06774e06 | legacy_transitive_call | src/boomi_mcp/categories/schema_discovery.py | discover_odata_metadata_action | 1 | 1763 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-eb660e0c | legacy_transitive_call | src/boomi_mcp/categories/schema_discovery.py | discover_openapi_spec_action | 1 | 1705 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-2a6651d0 | legacy_transitive_call | src/boomi_mcp/categories/schema_discovery.py | discover_soap_wsdl_action | 1 | 1735 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-568713cc | legacy_transitive_call | src/boomi_mcp/categories/shared_resources.py | _action_update_channel | 1 | 471 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-dec16977 | legacy_transitive_call | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | evaluate_pipeline_authority | 2 | 392 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-8c220ac8 | legacy_transitive_call | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype.emit_spec | 1 | 1668 | #160 | follow the callee's row; this is an edge, not a site |
@@ -2319,7 +2329,7 @@ over the census, so a row cannot be silently orphaned when a file moves.
 | #160 | delete with the legacy consumer | 10 |
 | #160 | delete with the legacy renderer | 3 |
 | #160 | delete with the legacy semantic shell | 2 |
-| #160 | follow the callee's row; this is an edge, not a site | 50 |
+| #160 | follow the callee's row; this is an edge, not a site | 60 |
 | #160 | retract the served legacy guidance / guard the raw route | 1 |
 
 Owner semantics: **#151** neutral extraction and `flow_sequence` parity/reachability; **#153**
@@ -2421,6 +2431,16 @@ value either way.
 | **Mutation:** a selector hoisted into a constant is still a producer | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_selector_hoisted_into_a_constant_is_still_a_producer` |
 | **Mutation:** a `setattr` producer is reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_setattr_producer_is_reported` |
 | Served digests are exhaustive, not token-filtered | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_served_digests_cover_every_surface_not_just_token_matches` |
+| **Mutation:** an edge from `scripts/` into a root module is reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_an_edge_from_a_script_into_a_root_module_is_reported` |
+| **Guard the guard:** the real script→server edge exists at HEAD | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_real_script_to_server_edge_exists_at_head` |
+| A tool registered inside a module-level conditional can bear | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_tool_registered_inside_a_module_level_conditional_can_bear` |
+| **Mutation:** re-pointing an HTTP call at /Component breaks the freeze | `tests/test_issue_149_legacy_reachability_freeze.py::test_re_pointing_an_http_call_at_the_component_api_breaks_the_freeze` |
+| **Mutation:** a directly imported HTTP write function is reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_directly_imported_http_write_function_is_reported` |
+| **Mutation:** a wrapper over a hand-rolled HTTP sink is reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_wrapper_over_a_hand_rolled_http_sink_is_reported` |
+| **Precision:** a function-local constant cannot shadow a module selector | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_function_local_constant_cannot_shadow_a_module_selector` |
+| **Precision:** a function-local import is not a re-export | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_function_local_import_is_not_treated_as_a_reexport` |
+| The trading-partner standard templates are frozen | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_trading_partner_standard_templates_are_frozen` |
+| The MCP digest covers every served field | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_mcp_digest_covers_every_served_field` |
 
 **Darkness.** This slice changes nothing under `src/boomi_mcp/` or `server.py`:
 `git diff 9711a9c0cb6c88dda41ada94d88694915b659f36 -- src/boomi_mcp server.py` is empty. The only

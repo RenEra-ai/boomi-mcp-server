@@ -515,6 +515,154 @@ def test_a_hand_rolled_http_client_is_reported(census_only, body):
     assert "http_client_call" in {r.split(" | ")[0] for r in diff.added}, diff.report()
 
 
+def test_an_edge_from_a_script_into_a_root_module_is_reported(census_only):
+    """`import server` in `scripts/` must resolve.
+
+    The absolute-import branch accepted only `boomi_mcp.*`, so a script importing
+    a root module got no module path and its calls produced no edge — while the
+    root modules had just been added to the scan universe. The real case is
+    `scripts/provision_qa_noop_fixture.py` calling `server.manage_component(...)`.
+    """
+    diff = _added(census_only, "_m12_12_synthetic_script_edge",
+                  "import server\n"
+                  "def go(*a):\n"
+                  "    return server.analyze_component(*a)\n")
+    assert "legacy_transitive_call" in {r.split(" | ")[0] for r in diff.added}, diff.report()
+
+
+def test_the_real_script_to_server_edge_exists_at_head(baseline):
+    """Guard the guard for the case the review named."""
+    edges = {(r["path"], r["symbol"]) for r in baseline["census"]
+             if r["census"] == "legacy_transitive_call" and "server.py" in r["form"]}
+    assert ("scripts/provision_qa_noop_fixture.py", "provision") in edges, sorted(edges)[:5]
+
+
+def test_a_tool_registered_inside_a_module_level_conditional_can_bear(baseline):
+    """`server.py` registers most MCP tools inside `if invoke_api:`.
+
+    Collecting module-level functions from `tree.body` alone left every one of
+    them non-bearing, so no caller of them could ever produce an edge.
+    """
+    import ast as _ast
+    tree = _ast.parse(inv.python_sources()["server.py"])
+    top_level = {n.name for n in tree.body
+                 if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))}
+    namespace = inv._module_level_functions(tree)
+    assert namespace > top_level, "no server.py tool is registered conditionally?"
+    assert "manage_component" in namespace
+
+
+def test_re_pointing_an_http_call_at_the_component_api_breaks_the_freeze(census_only):
+    """The census key carries the request TARGET.
+
+    Keying on the verb alone let an existing `external_transport` route be
+    re-pointed at `/Component` with no census row, no count change and no
+    reconciliation change — the stale route claim stayed green while the call
+    became a Component-XML write.
+    """
+    before = _overlay("_m12_12_synthetic_repoint",
+                      "import httpx\n"
+                      "def call(x):\n"
+                      "    return httpx.post('https://example.test/ping', content=x)\n")
+    after = _overlay("_m12_12_synthetic_repoint",
+                     "import httpx\n"
+                     "def call(x):\n"
+                     "    return httpx.post('https://api.boomi.com/Component', content=x)\n")
+    diff = inv.compare(inv.build_inventory(sources=after, include_served=False),
+                       inv.build_inventory(sources=before, include_served=False))
+    assert not diff.empty(), "re-pointing an HTTP call at /Component did not move the census"
+    assert any("COMPONENT-API" in row for row in diff.added), diff.report()
+
+
+@pytest.mark.parametrize("body", [
+    "from httpx import post\n"
+    "def push(x):\n"
+    "    return post('https://api.boomi.com/Component', content=x)\n",
+    "from urllib.request import urlopen\n"
+    "def push(x):\n"
+    "    return urlopen('https://api.boomi.com/Component', data=x)\n",
+])
+def test_a_directly_imported_http_write_function_is_reported(census_only, body):
+    """`from httpx import post; post(...)` — a bare Name callee was rejected
+    outright even though its import origin was already recorded."""
+    diff = _added(census_only, "_m12_12_synthetic_direct_http", body)
+    assert "http_client_call" in {r.split(" | ")[0] for r in diff.added}, diff.report()
+
+
+def test_a_wrapper_over_a_hand_rolled_http_sink_is_reported(census_only):
+    """HTTP sinks must bear transitively like SDK-backed writers do."""
+    diff = _added(census_only, "_m12_12_synthetic_http_wrapper", (
+        "import httpx\n"
+        "def sink(x):\n"
+        "    return httpx.post('https://api.boomi.com/Component', content=x)\n"
+        "def public(x):\n"
+        "    return sink(x)\n"
+    ))
+    kinds = {r.split(" | ")[0] for r in diff.added}
+    assert {"http_client_call", "legacy_transitive_call"} <= kinds, diff.report()
+
+
+def test_a_function_local_constant_cannot_shadow_a_module_selector(census_only):
+    """One scanner-wide constant map let a function-local `KEY = 'other'`
+    overwrite the module constant and erase a producer row elsewhere."""
+    diff = _added(census_only, "_m12_12_synthetic_shadow", (
+        "KEY = 'process_kind'\n"
+        "def helper():\n"
+        "    KEY = 'other'\n"
+        "    return KEY\n"
+        "def prepare(config):\n"
+        "    config[KEY] = 'sync_pipeline'\n"
+        "    return config\n"
+    ))
+    assert "process_kind_producer" in {r.split(" | ")[0] for r in diff.added}, diff.added
+
+
+def test_a_function_local_import_is_not_treated_as_a_reexport():
+    """The re-export index must be built from module-namespace imports only.
+
+    `ast.walk` also reaches imports nested in functions, which bind a LOCAL
+    name; indexing one rewrites `(module, f)` to an unrelated function and drops
+    the real edge for every caller of the module-level `f`.
+    """
+    import ast as _ast
+    tree = _ast.parse(
+        "def f(x):\n"
+        "    return x\n"
+        "def helper():\n"
+        "    from .other import f\n"
+        "    return f\n"
+    )
+    index = inv.reexport_index({"src/boomi_mcp/categories/m.py": tree,
+                                "src/boomi_mcp/categories/other.py": _ast.parse("def f(x):\n    return x\n")})
+    assert ("src/boomi_mcp/categories/m.py", "f") not in index, index
+
+
+def test_the_trading_partner_standard_templates_are_frozen(derived):
+    """`_TP_OVERVIEW` advertises the standards; the `operation=create` payload
+    does not. Seeding the axis from the operation payload alone left edifact,
+    hl7 and the rest outside the digest entirely."""
+    by_selector = {a["selector"]: a for a in derived["served_artifacts"]}
+    walked = by_selector["walked_surface_digest"]["value"]
+    for standard in ("x12", "edifact", "hl7"):
+        key = "resource_type=trading_partner|operation=create|standard=%s" % standard
+        assert key in walked, "standard template %r is not digested" % standard
+
+
+def test_the_mcp_digest_covers_every_served_field(derived):
+    """FastMCP serves `outputSchema`, `title`, `annotations` and `meta` beside
+    `description`/`inputSchema`; this repo already has a non-null output schema
+    on `plan_integration_design`."""
+    tools = inv._served_tools()
+    surface = inv._mcp_tool_surface(tools["plan_integration_design"])
+    assert set(surface) >= {"description", "inputSchema"}, sorted(surface)
+    assert "outputSchema" in surface, sorted(surface)
+    # And the digest is computed over that surface, not a two-field subset.
+    digest = {a["selector"]: a for a in derived["served_artifacts"]}[
+        "registered_surface_digest"]["value"]
+    assert digest["plan_integration_design"] == \
+        inv._sha256(inv.canonical_json(surface))
+
+
 def test_a_selector_hoisted_into_a_constant_is_still_a_producer(census_only):
     """`KEY = "process_kind"; cfg[KEY] = ...` writes a process_kind.
 

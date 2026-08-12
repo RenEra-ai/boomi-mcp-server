@@ -330,13 +330,47 @@ def _resolve_module_path(module: Optional[str], level: int, from_path: str,
         if not module:
             return None
         head = module.split(".")
-        if head[0] != "boomi_mcp":
+        if head[0] == "boomi_mcp":
+            target = ["src"] + head
+        else:
+            # The scan universe now includes repo-root modules and `scripts/`,
+            # so `import server` and `import scripts.x` are OURS too. Rejecting
+            # everything outside the `boomi_mcp` package left a real edge
+            # invisible: `scripts/provision_qa_noop_fixture.py` imports `server`
+            # and calls `server.manage_component(...)`.
+            for prefix in ([], ["scripts"]):
+                candidate_head = prefix + head
+                for suffix in (".py", "/__init__.py"):
+                    if "/".join(candidate_head) + suffix in known:
+                        return "/".join(candidate_head) + suffix
             return None
-        target = ["src"] + head
     for candidate in ("/".join(target) + ".py", "/".join(target) + "/__init__.py"):
         if candidate in known:
             return candidate
     return None
+
+
+def _module_namespace_nodes(tree: ast.AST) -> List[ast.AST]:
+    """Statements that bind the MODULE namespace.
+
+    The module body plus module-level `if`/`try`/`with` bodies — conditional
+    imports at module level are still re-exports — but never a function or class
+    body, whose imports are local bindings.
+    """
+    out: List[ast.AST] = []
+
+    def walk(body: Iterable[ast.AST]) -> None:
+        for node in body:
+            out.append(node)
+            if isinstance(node, (ast.If, ast.Try, ast.With, ast.AsyncWith)):
+                walk(getattr(node, "body", []))
+                walk(getattr(node, "orelse", []))
+                walk(getattr(node, "finalbody", []))
+                for handler in getattr(node, "handlers", []):
+                    walk(handler.body)
+
+    walk(getattr(tree, "body", []))
+    return out
 
 
 def reexport_index(trees: Dict[str, ast.AST]) -> Dict[Tuple[str, str], Tuple[str, str]]:
@@ -353,7 +387,12 @@ def reexport_index(trees: Dict[str, ast.AST]) -> Dict[Tuple[str, str], Tuple[str
     known = frozenset(trees)
     index: Dict[Tuple[str, str], Tuple[str, str]] = {}
     for path, tree in trees.items():
-        for node in ast.walk(tree):
+        # MODULE-NAMESPACE imports only. `ast.walk` also reaches imports nested
+        # inside functions and classes, which bind a LOCAL name, not a
+        # re-export; indexing one of those rewrites `(module, f)` to an
+        # unrelated function and silently drops the real edge for every caller
+        # of the module-level `f`.
+        for node in _module_namespace_nodes(tree):
             if not isinstance(node, ast.ImportFrom):
                 continue
             source = _resolve_module_path(node.module, node.level or 0, path, known)
@@ -395,7 +434,8 @@ class _Scanner(ast.NodeVisitor):
         self._known: "frozenset[str]" = known_paths
         self._reexports = reexports or {}
         self._http_vars: Dict[str, str] = {}
-        self._str_consts: Dict[str, str] = {}
+        self._module_consts: Dict[str, str] = {}
+        self._local_consts: List[Dict[str, str]] = []
         self._local_defs: Set[str] = set(local_defs)
         self.rows: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
         self._symbols: List[str] = []
@@ -467,8 +507,53 @@ class _Scanner(ast.NodeVisitor):
         if literal is not None:
             return literal
         if isinstance(node, ast.Name):
-            return self._str_consts.get(node.id)
+            # Innermost binding wins, exactly as Python resolves it. One
+            # scanner-wide map let a function-local `KEY = "other"` overwrite the
+            # module constant and erase a producer row in an unrelated function.
+            for scope in reversed(self._local_consts):
+                if node.id in scope:
+                    return scope[node.id]
+            return self._module_consts.get(node.id)
         return None
+
+    def _request_target(self, node: ast.Call) -> str:
+        """A normalized, frozen description of what an HTTP call targets.
+
+        Statically-known URL literals are reduced to `scheme://host/path`; an
+        f-string keeps its literal segments; anything unresolvable becomes
+        `<dynamic>`. The point is that re-pointing a call at `/Component` MOVES
+        this string, so it cannot happen without failing the freeze.
+        """
+        if isinstance(node.func, ast.Attribute):
+            verb = node.func.attr
+        elif isinstance(node.func, ast.Name):
+            verb = node.func.id
+        else:  # pragma: no cover - defensive
+            verb = "call"
+        method = verb.upper()
+        args = list(node.args)
+        if verb in ("request", "stream") and args:
+            literal = self._as_str(args[0])
+            if literal:
+                method = literal.upper()
+                args = args[1:]
+        url = "<dynamic>"
+        for candidate in args + [kw.value for kw in node.keywords
+                                 if kw.arg in ("url", "endpoint")]:
+            literal = self._as_str(candidate)
+            if literal:
+                url = literal
+                break
+            if isinstance(candidate, ast.JoinedStr):
+                url = "".join(
+                    part.value if isinstance(part, ast.Constant)
+                    and isinstance(part.value, str) else "{}"
+                    for part in candidate.values)
+                break
+        if url != "<dynamic>":
+            url = url.split("?", 1)[0].split("#", 1)[0]
+        targets_component = "/component" in url.lower()
+        return "%s %s%s" % (method, url, " [COMPONENT-API]" if targets_component else "")
 
     def _is_http_client(self, func: ast.AST) -> bool:
         """True when a call's receiver traces back to an HTTP client module.
@@ -478,6 +563,14 @@ class _Scanner(ast.NodeVisitor):
         `client = httpx.Client()`, and `requests.request(...)` all match while an
         unrelated `queue.send(...)` does not.
         """
+        # A DIRECTLY IMPORTED write function — `from httpx import post; post(...)`
+        # or `from urllib.request import urlopen; urlopen(...)`. Rejecting every
+        # bare Name let both of those bypass the census outright, even though the
+        # import origin needed to identify them was already recorded.
+        if isinstance(func, ast.Name):
+            origin = self._modules.get(func.id, "")
+            return any(origin == mod or origin.startswith(mod + ".")
+                       for mod in _HTTP_CLIENT_MODULES)
         if not isinstance(func, ast.Attribute):
             return False
         root = func.value
@@ -552,7 +645,9 @@ class _Scanner(ast.NodeVisitor):
     # -- scopes --------------------------------------------------------
     def _scoped(self, node: ast.AST, name: str) -> None:
         self._symbols.append(name)
+        self._local_consts.append({})
         self.generic_visit(node)
+        self._local_consts.pop()
         self._symbols.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
@@ -658,9 +753,10 @@ class _Scanner(ast.NodeVisitor):
         # plain string names only — without it, hoisting the selector into a
         # constant hid the producer from the census entirely.
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            scope = self._local_consts[-1] if self._local_consts else self._module_consts
             for tgt in node.targets:
                 if isinstance(tgt, ast.Name):
-                    self._str_consts[tgt.id] = value.value
+                    scope[tgt.id] = value.value
 
         # `cfg["process_kind"] = ...` is a producer write.
         for tgt in node.targets:
@@ -761,7 +857,15 @@ class _Scanner(ast.NodeVisitor):
         elif base in self._invokers:
             self._emit("raw_api_invoker", "%s(...)" % base, node.lineno)
         elif base in _HTTP_WRITE_VERBS and self._is_http_client(node.func):
-            self._emit("http_client_call", "%s (hand-rolled HTTP)" % _tail(dotted, 2),
+            # The TARGET is part of the frozen identity. Keying on the verb
+            # alone let an existing `external_transport` route be re-pointed at
+            # `/Component` with no census row, no count change and no
+            # reconciliation change — the stale route claim stayed green while
+            # the call became a Component-XML write.
+            self._emit("http_client_call",
+                       "%s -> %s (hand-rolled HTTP)"
+                       % (_tail(dotted, 2) if dotted else base,
+                          self._request_target(node)),
                        node.lineno)
         elif base == "getattr":
             # Two ways a `getattr` reaches a legacy path, and BOTH must be
@@ -930,7 +1034,8 @@ def _const_repr(node: ast.AST) -> str:
 #: caller of it is itself on a legacy path.
 _REACHABILITY_KINDS = (
     "registry_lookup", "renderer_call", "legacy_emitter",
-    "legacy_semantic_validation", "component_xml_write", "legacy_transitive_call",
+    "legacy_semantic_validation", "component_xml_write", "http_client_call",
+    "legacy_transitive_call",
 )
 
 
@@ -1000,8 +1105,15 @@ def scan_sources(sources: Dict[str, str], vocab: Dict[str, Tuple[str, ...]]) -> 
 
 
 def _module_level_functions(tree: ast.AST) -> "frozenset[str]":
+    """Functions bound in the MODULE namespace.
+
+    Reading only `tree.body` missed every def inside a module-level `if`/`try` —
+    which is how `server.py` registers most of its MCP tools (`if invoke_api:`).
+    Those functions were therefore never legacy-BEARING, so a script importing
+    `server` and calling one produced no edge even once the import resolved.
+    """
     return frozenset(
-        node.name for node in getattr(tree, "body", [])
+        node.name for node in _module_namespace_nodes(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     )
 
@@ -1565,6 +1677,28 @@ def _mentions_legacy(value: Any) -> bool:
     return any(token in blob for token in _LEGACY_TOKENS)
 
 
+def _mcp_tool_surface(tool: Any) -> Any:
+    """Everything FastMCP actually serves for a tool, not just two fields.
+
+    `to_mcp_tool()` emits `outputSchema`, `title`, `annotations`, `meta` and more
+    alongside `description`/`inputSchema` — this repo already has a non-null
+    output schema on `plan_integration_design` and annotations on many tools.
+    Digesting only description+parameters left those machine-served fields free
+    to change while the digest claimed to be exhaustive.
+    """
+    to_mcp = getattr(tool, "to_mcp_tool", None)
+    if callable(to_mcp):
+        try:
+            served = to_mcp()
+        except Exception:  # pragma: no cover - defensive
+            served = None
+        if served is not None:
+            dump = getattr(served, "model_dump", None)
+            if callable(dump):
+                return dump(exclude_none=True, mode="json")
+    return {"description": tool.description or "", "parameters": tool.parameters or {}}
+
+
 def _served_tools() -> Dict[str, Any]:
     import server
     loop = asyncio.new_event_loop()
@@ -1668,10 +1802,8 @@ def collect_served_artifacts() -> List[Dict[str, Any]]:
     artifacts.append(_artifact(
         "SS-MCP-DESCRIPTIONS", "server.mcp.list_tools() [all tools]",
         "registered_surface_digest",
-        {tool_name: {
-            "description": _sha256(canonical_json(tool.description or "")),
-            "parameters": _sha256(canonical_json(tool.parameters or {})),
-        } for tool_name, tool in sorted(tools.items())}))
+        {tool_name: _sha256(canonical_json(_mcp_tool_surface(tool)))
+         for tool_name, tool in sorted(tools.items())}))
 
     # --- SS-SCHEMA-TEMPLATES -----------------------------------------
     for selector, payload in sorted(_schema_template_surfaces(meta_tools).items()):
@@ -1804,6 +1936,12 @@ def _schema_template_surfaces(meta_tools: Any) -> Dict[str, Any]:
             "operations", "actions")
         component_types = _echoed_list(overview, "valid_component_types",
                                        "component_types")
+        # Some axes are advertised ONLY by the overview. `_TP_OVERVIEW` lists the
+        # trading-partner `standards` while its `operation=create` payload just
+        # defaults to x12 and lists none — so seeding the standard axis from the
+        # operation payload alone left edifact, hl7 and the rest outside the
+        # digest entirely.
+        overview_standards = _standard_axis(overview)
 
         for component_type in component_types:
             surfaces["resource_type=%s|component_type=%s" % (resource_type, component_type)] = \
@@ -1825,7 +1963,7 @@ def _schema_template_surfaces(meta_tools: Any) -> Dict[str, Any]:
                 surfaces["%s|protocol=%s" % (key, protocol)] = \
                     meta_tools.get_schema_template_action(
                         resource_type=resource_type, operation=operation, protocol=protocol)
-            for standard in _standard_axis(payload):
+            for standard in (_standard_axis(payload) or overview_standards):
                 surfaces["%s|standard=%s" % (key, standard)] = \
                     meta_tools.get_schema_template_action(
                         resource_type=resource_type, operation=operation, standard=standard)
@@ -1862,7 +2000,7 @@ def assert_schema_surface_axes_non_vacuous(surfaces: Dict[str, Any]) -> None:
     the overviews, none of them is pinned and the SS-SCHEMA-TEMPLATES class is
     decorative.
     """
-    for axis in ("|operation=", "|component_type=", "|protocol="):
+    for axis in ("|operation=", "|component_type=", "|protocol=", "|standard="):
         if not any(axis in key for key in surfaces):
             raise AssertionError(
                 "the schema-template walk descended no %s axis — the served "
