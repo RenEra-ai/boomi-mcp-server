@@ -207,14 +207,24 @@ def _repository_files() -> Optional["frozenset[str]"]:
     import subprocess
 
     try:
+        # `-z` is load-bearing, not a style choice. Under git's default
+        # `core.quotePath=true` a path containing any non-ASCII byte comes back
+        # C-QUOTED — `"src/boomi_mcp/na\303\257ve.py"` — which never matches the
+        # plain path, so a TRACKED source file was silently dropped from the
+        # scan and the freeze stayed green over its legacy calls. That
+        # re-created the machine-dependence this scoping exists to remove, keyed
+        # on the developer's git config instead of their working copy. With `-z`
+        # git never quotes, and embedded newlines are handled too.
         result = subprocess.run(
-            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
-            cwd=str(_ROOT), capture_output=True, text=True, timeout=30, check=False)
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            cwd=str(_ROOT), capture_output=True, timeout=30, check=False)
     except (OSError, subprocess.SubprocessError):  # pragma: no cover - defensive
         return None
     if result.returncode != 0:
         return None
-    return frozenset(line.strip() for line in result.stdout.splitlines() if line.strip())
+    return frozenset(
+        entry.decode("utf-8", "surrogateescape")
+        for entry in result.stdout.split(b"\0") if entry)
 
 
 def unscanned_assets() -> List[str]:
@@ -226,6 +236,7 @@ def unscanned_assets() -> List[str]:
     exist today; freezing the count makes their arrival a diff rather than a
     silent widening of the unmodelled region.
     """
+    visible = _repository_files()
     out: List[str] = []
     for root, keep in (("src/boomi_mcp", {".py"}), ("scripts", {".py"}),
                        ("examples", {".json"})):
@@ -234,6 +245,13 @@ def unscanned_assets() -> List[str]:
             continue
         for path in sorted(base.rglob("*")):
             if not path.is_file() or path.suffix in keep:
+                continue
+            # Same universe as the source scan. Gitignored build output
+            # (`*.so`, `*.log`, `*_local_secrets.json` are all live patterns)
+            # otherwise moved this count — fail-closed noise, but it made the
+            # "machine-independent" claim false for a second reason.
+            if visible is not None \
+                    and path.relative_to(_ROOT).as_posix() not in visible:
                 continue
             if "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}:
                 continue
@@ -256,8 +274,12 @@ def example_documents() -> Dict[str, Any]:
     examples = _ROOT / "examples"
     if not examples.is_dir():
         return out
+    visible = _repository_files()
     for path in sorted(examples.rglob("*.json")):
-        out[path.relative_to(_ROOT).as_posix()] = json.loads(path.read_text(encoding="utf-8"))
+        rel = path.relative_to(_ROOT).as_posix()
+        if visible is not None and rel not in visible:
+            continue
+        out[rel] = json.loads(path.read_text(encoding="utf-8"))
     return dict(sorted(out.items()))
 
 
@@ -1158,9 +1180,10 @@ _COMPONENT_ENDPOINT_RE = re.compile(
 
 #: The BARE collection path. `client.post("Component", data=xml)` against a
 #: base-URL client IS the create route, and relative sub-resources were covered
-#: while the collection itself was not. Case-SENSITIVE and exact: exactly one
-#: such literal exists in the whole scan universe, so the noise cost is nil,
-#: while a case-insensitive match would sweep up ordinary prose.
+#: while the collection itself was not. Case-SENSITIVE and exact: measured over
+#: 59,763 string/bytes literals in the scan universe it matches ZERO of them, so
+#: the noise cost is nil, while a case-insensitive match would sweep up ordinary
+#: prose.
 _COMPONENT_COLLECTION_RE = re.compile(r"^Component$")
 
 

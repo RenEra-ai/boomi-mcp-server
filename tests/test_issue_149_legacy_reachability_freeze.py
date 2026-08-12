@@ -496,6 +496,23 @@ def test_every_repo_root_module_and_script_is_scanned():
     visible = inv._repository_files()
     universe = visible if visible is not None else scanned
 
+    # EVERY visible `.py` under EVERY declared root, `src/boomi_mcp/**` included.
+    # Covering only the repo root and `scripts/` meant a file dropped from
+    # `src/boomi_mcp/**` left this node green — and the `python_source_count`
+    # arm is blind to a file that never enters the scan at all, which is exactly
+    # how a C-quoted path went missing.
+    for root_glob in ("*.py",):
+        expected = {p.name for p in inv.repo_root().glob(root_glob)} & universe
+        assert expected <= scanned, sorted(expected - scanned)
+    for root in ("src/boomi_mcp", "scripts"):
+        base = inv.repo_root() / root
+        if not base.is_dir():
+            continue
+        expected = {p.relative_to(inv.repo_root()).as_posix()
+                    for p in base.rglob("*.py")} & universe
+        assert expected, "no repository-visible module under %s was scanned" % root
+        assert expected <= scanned, sorted(expected - scanned)
+
     roots = {p.name for p in inv.repo_root().glob("*.py")} & universe
     assert roots <= scanned, sorted(roots - scanned)
     scripts = {p.relative_to(inv.repo_root()).as_posix()
@@ -1051,11 +1068,45 @@ def test_the_non_tool_mcp_surfaces_are_frozen(derived):
 
 def test_the_unscanned_asset_universe_is_frozen_and_machine_independent(baseline):
     """Non-Python assets are read by no census; their COUNT is frozen so their
-    arrival is a diff. Dotfiles are excluded — a frozen count containing
-    `.DS_Store` would pin a per-machine accident."""
+    arrival is a diff.
+
+    Machine-independence has TWO axes and both are enforced here: dotfiles
+    (`.DS_Store`) are excluded, and — like the source scan and the example
+    census — the universe is what git considers part of the repository, so
+    gitignored build output (`*.so`, `*.log`, `*_local_secrets.json` are all
+    live patterns) cannot move the count either. All three universes go through
+    the same helper, per the structural-fix rule.
+    """
     assets = inv.unscanned_assets()
     assert baseline["scan_contract"]["unscanned_asset_count"] == len(assets)
     assert not any(part.startswith(".") for path in assets for part in path.split("/"))
+
+    visible = inv._repository_files()
+    if visible is not None:
+        assert set(assets) <= visible, sorted(set(assets) - visible)
+        assert set(inv.example_documents()) <= visible
+        assert set(inv.python_sources()) <= visible
+
+
+def test_a_c_quotable_path_is_not_silently_dropped():
+    """`git ls-files` C-quotes non-ASCII paths under the default
+    `core.quotePath=true`, so a plain-newline split never matched them and a
+    TRACKED source file vanished from the scan while the freeze stayed green.
+
+    `-z` is what makes the listing faithful; this pins that it is used, since the
+    failure mode is silence rather than an error.
+    """
+    import inspect as _inspect
+
+    source = _inspect.getsource(inv._repository_files)
+    assert '"-z"' in source, "git ls-files must use -z or C-quoted paths are dropped"
+    assert "split(b" in source, "the -z listing must be split on NUL"
+
+    visible = inv._repository_files()
+    if visible is not None:
+        # Nothing in the listing is a C-quoted artefact.
+        assert not any(path.startswith('"') and path.endswith('"') for path in visible), \
+            [p for p in visible if p.startswith('"')][:3]
 
 
 def test_every_watched_mention_is_classified_or_residue():

@@ -1992,7 +1992,7 @@ fails if anyone hand-edits them apart from the machine record.
 | Baseline commit | `9711a9c0cb6c88dda41ada94d88694915b659f36` (branch `dev`) |
 | Capture date | 2026-08-12 |
 | Schema / scanner version | 1 / 1 |
-| Scan roots | `server.py`, `src/boomi_mcp/**/*.py` (205 files), `examples/**/*.json` (8 files) |
+| Scan roots | every repo-root `*.py`, `src/boomi_mcp/**/*.py`, `scripts/**/*.py` (205 files total), `examples/**/*.json` (8 files) — scoped to what **git** considers part of the repository, so a gitignored working-copy file cannot enter the baseline |
 | Census rows | 398 |
 | Ledger rows (§11.2–§11.4 grain) | 213 |
 | Component-XML write routes | 25 |
@@ -2514,6 +2514,7 @@ value either way.
 | Resources, prompts and resource templates are frozen | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_non_tool_mcp_surfaces_are_frozen` |
 | The unscanned-asset universe is frozen and machine-independent | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_unscanned_asset_universe_is_frozen_and_machine_independent` |
 | **Guard the guard:** a root-module import resolves from a script | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_root_module_import_resolves_from_a_script` |
+| **Regression:** a C-quotable path is not silently dropped | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_c_quotable_path_is_not_silently_dropped` |
 
 **Darkness.** This slice changes nothing under `src/boomi_mcp/` or `server.py`:
 `git diff 9711a9c0cb6c88dda41ada94d88694915b659f36 -- src/boomi_mcp server.py` is empty. The only
