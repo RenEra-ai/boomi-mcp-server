@@ -1993,8 +1993,8 @@ fails if anyone hand-edits them apart from the machine record.
 | Capture date | 2026-08-12 |
 | Schema / scanner version | 1 / 1 |
 | Scan roots | `server.py`, `src/boomi_mcp/**/*.py` (206 files), `examples/**/*.json` (8 files) |
-| Census rows | 254 |
-| Ledger rows (§11.2–§11.4 grain) | 148 |
+| Census rows | 383 |
+| Ledger rows (§11.2–§11.4 grain) | 217 |
 | Component-XML write routes | 25 |
 | Frozen served artifacts | 107 |
 | Machine record | `tests/fixtures/m12_12/legacy_reachability_inventory.json` |
@@ -2148,6 +2148,75 @@ rather than aspirational.
 | LG-819f78b4 | renderer_call | src/boomi_mcp/compiler/process_ir/legacy_adapters/sync_pipeline.py | adapt_sync_pipeline_config | 1 | 481 | #151 | re-home onto the neutral extraction |
 | LG-bfc762c3 | renderer_call | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_main_process | 1 | 2955 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-08a97ecd | renderer_call | src/boomi_mcp/patterns/composition.py | compose_archetypes | 1 | 1103 | #160 | delete with the legacy renderer |
+| LG-a1863ac0 | unclassified_reference | server.py | <module> | 3 | 390 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-0a2735c3 | unclassified_reference | src/boomi_mcp/authoring/workflow.py | _normalize_intent | 2 | 413 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-b4cb6bd2 | unclassified_reference | src/boomi_mcp/authoring/workflow.py | plan_authoring_request_v1 | 1 | 1172 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-a3b03f12 | unclassified_reference | src/boomi_mcp/categories/components/builders/__init__.py | <module> | 5 | 57 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-bd39ea58 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | <module> | 17 | 5275 | #160 | delete the legacy semantic shell |
+| LG-36bd73fc | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.validate_config | 3 | 656 | #160 | delete the legacy semantic shell |
+| LG-3bd11d29 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder | 1 | 5301 | #160 | delete the legacy semantic shell |
+| LG-42425307 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.lower_config | 1 | 5488 | #160 | delete the legacy semantic shell |
+| LG-513dee34 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.validate_config | 3 | 5976 | #160 | delete the legacy semantic shell |
+| LG-65e5dfbc | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | WrapperSubprocessBuilder | 1 | 4967 | #160 | delete the legacy semantic shell |
+| LG-69d179d0 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | WrapperSubprocessBuilder.validate_config | 3 | 5006 | #160 | delete the legacy semantic shell |
+| LG-67ac22ad | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _reliability_requests_try_catch | 1 | 2412 | #160 | delete the legacy semantic shell |
+| LG-b4eb25cd | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _source_dynamic_path_connector_scope_error | 1 | 1969 | #160 | delete the legacy semantic shell |
+| LG-98073b97 | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _authored_process_validation_error | 2 | 5215 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-cd5de55e | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _bracketed_naming_warning | 2 | 4845 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-32fcd45b | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _build_plan | 3 | 5803 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-994f0a04 | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _execute_component | 3 | 3529 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-66c9297f | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _process_component_preflight | 7 | 5304 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-61ad1e75 | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _process_models_error_handling | 3 | 4198 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-378bc32b | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _resolve_preservation_policy | 2 | 1226 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-81ba94b9 | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _scan_top_level_pipeline_secrets | 1 | 5129 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-a6339083 | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _synthesize_wrapper_subprocess_edges | 3 | 550 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-df05d9d2 | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _synthesize_wrapper_subprocess_extensions | 3 | 714 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-2ae43575 | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | build_structured_update_xml | 3 | 3135 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-1ffb629c | unclassified_reference | src/boomi_mcp/categories/integration_import.py | _derive_preset_parameters | 1 | 1058 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-feb448d7 | unclassified_reference | src/boomi_mcp/categories/meta_tools.py | <module> | 7 | 767 | #160 | retract the served legacy guidance / guard the raw route |
+| LG-3b9a3513 | unclassified_reference | src/boomi_mcp/categories/meta_tools.py | _recipe_contributions_schema | 1 | 6583 | #160 | retract the served legacy guidance / guard the raw route |
+| LG-b453fb4f | unclassified_reference | src/boomi_mcp/categories/meta_tools.py | list_capabilities_action | 2 | 10205 | #160 | retract the served legacy guidance / guard the raw route |
+| LG-de5e36cb | unclassified_reference | src/boomi_mcp/compiler/process_ir/emitter_registry.py | <module> | 15 | 596 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-ea29df03 | unclassified_reference | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | <module> | 2 | 114 | #151 | re-home onto the neutral extraction |
+| LG-1e6a1bac | unclassified_reference | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _core_from_authored_pipeline | 1 | 253 | #151 | re-home onto the neutral extraction |
+| LG-e2f5e378 | unclassified_reference | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _core_from_submitted_config | 3 | 276 | #151 | re-home onto the neutral extraction |
+| LG-53796dd2 | unclassified_reference | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _resolve_process_kind | 2 | 217 | #151 | re-home onto the neutral extraction |
+| LG-7426e6bc | unclassified_reference | src/boomi_mcp/compiler/process_ir/legacy_adapters/sync_pipeline.py | <module> | 1 | 62 | #151 | re-home onto the neutral extraction |
+| LG-ca32b52e | unclassified_reference | src/boomi_mcp/compiler/process_ir/legacy_adapters/wrapper_subprocess.py | <module> | 2 | 31 | #151 | re-home onto the neutral extraction |
+| LG-b1c701ea | unclassified_reference | src/boomi_mcp/compiler/process_ir/semantic_validation/legacy_bridge.py | <module> | 2 | 150 | #151 | re-home onto the neutral extraction |
+| LG-8f2f93ef | unclassified_reference | src/boomi_mcp/compiler/system_topology/findings.py | <module> | 1 | 107 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-cf15d311 | unclassified_reference | src/boomi_mcp/models/_process_ir_compat.py | <module> | 4 | 216 | #159 | migrate the compatibility codec, then delete |
+| LG-f26f5a1c | unclassified_reference | src/boomi_mcp/models/_process_ir_compat.py | legacy_flow_sequence_to_ir | 2 | 678 | #159 | migrate the compatibility codec, then delete |
+| LG-aef88b5e | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiTarget | 1 | 300 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-fd0fb833 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype | 2 | 1357 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-c23b1925 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype.emit_spec | 1 | 1495 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-c65a6048 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | _build_pipeline_dict | 1 | 1129 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-4166bdd1 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | _build_rest_send_params | 1 | 1002 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-a34a1a82 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncArchetype | 2 | 3479 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-b9ecf83d | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncArchetype.emit_spec | 1 | 3671 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-12c696f9 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncParameters._enforce_watermark_consistency | 1 | 2129 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-a209f251 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncParameters._validate_transform_refs | 7 | 2206 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-45d2d0f9 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | RestTarget | 1 | 1158 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-176df664 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_dynamic_path | 1 | 2796 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-f58c90b7 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_operational_intent | 1 | 3195 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-2b21dfd2 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_rest_send_params | 1 | 2594 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-05070148 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_sync_pipeline_adapter_config | 1 | 2892 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-e4d03e77 | unclassified_reference | src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py | HttpListenerToRestArchetype | 1 | 327 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-91586a36 | unclassified_reference | src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py | HttpListenerToRestArchetype.emit_spec | 2 | 378 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-28ae7ec8 | unclassified_reference | src/boomi_mcp/patterns/composition.py | CompositionOptions | 1 | 247 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-d6d3360b | unclassified_reference | src/boomi_mcp/patterns/composition.py | _fanout_target_params | 1 | 695 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-48a0cf76 | unclassified_reference | src/boomi_mcp/patterns/composition.py | compose_archetypes | 5 | 968 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-1dd09f43 | unclassified_reference | src/boomi_mcp/patterns/composition.py | validate_composition | 2 | 584 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-c5756eb3 | unclassified_reference | src/boomi_mcp/patterns/primitives/branch.py | BranchPrimitive | 1 | 135 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-a554a9c4 | unclassified_reference | src/boomi_mcp/patterns/primitives/data_process.py | DataProcessPrimitive | 1 | 212 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-e38ae137 | unclassified_reference | src/boomi_mcp/patterns/primitives/decision.py | DecisionPrimitive | 1 | 178 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-756523de | unclassified_reference | src/boomi_mcp/patterns/primitives/document_cache_lookup.py | DocumentCacheLookupPrimitive | 1 | 87 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-dd69301a | unclassified_reference | src/boomi_mcp/patterns/primitives/document_cache_put.py | DocumentCachePutPrimitive | 1 | 86 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-7063ef77 | unclassified_reference | src/boomi_mcp/patterns/primitives/document_cache_remove.py | DocumentCacheRemovePrimitive | 1 | 118 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-6a39c73a | unclassified_reference | src/boomi_mcp/patterns/primitives/document_cache_retrieve.py | DocumentCacheRetrievePrimitive | 1 | 121 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-7e4e86fe | unclassified_reference | src/boomi_mcp/patterns/primitives/flow_control.py | FlowControlPrimitive | 1 | 100 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-4cfdfe60 | unclassified_reference | src/boomi_mcp/patterns/primitives/return_documents.py | ReturnDocumentsPrimitive | 1 | 95 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-7e87f855 | unclassified_reference | src/boomi_mcp/patterns/primitives/throw_exception.py | ThrowExceptionPrimitive | 1 | 130 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 
 ## 11.3 Legacy `process_kind` producer census
 
@@ -2300,13 +2369,13 @@ over the census, so a row cannot be silently orphaned when a file moves.
 
 | Owning issue | Disposition | Ledger rows |
 |---|---|---|
-| #151 | re-home onto the neutral extraction | 6 |
+| #151 | re-home onto the neutral extraction | 13 |
 | #153 | WRT-build-integration-preservation-merge: preserved, re-homed onto the canonical apply path. | 1 |
 | #153 | replace with canonical ProcessIR materialization/apply | 7 |
 | #153/#160 | WRT-build-integration-generic: content guard at BOTH plan and apply boundaries, placed BEFORE all type dispatch (the process and connector arms dispatch before the fall-through ever runs); mutation-tested with an unknown/future declared type. · WRT-build-integration-structured-process: replaced by canonical ProcessIR materialization/apply. · WRT-build-integration-typed-nonprocess: unchanged — the content guard never matches these roots. | 1 |
-| #159 | migrate the archetype to canonical ProcessIR | 15 |
+| #159 | migrate the archetype to canonical ProcessIR | 31 |
 | #159 | migrate the boundary to canonical ProcessIR | 4 |
-| #159 | migrate the compatibility codec, then delete | 2 |
+| #159 | migrate the compatibility codec, then delete | 4 |
 | #159 | migrate the example to canonical ProcessIR | 4 |
 | #160 | WRT-analyze-component-merge: REJECT when the target is a process OR the source/merged root is a process — the merged root IS the source root, so a target-only check never sees a process-root source over a non-process target. | 1 |
 | #160 | WRT-connector-typed-build: unchanged — the content guard never matches a connector root. · WRT-manage-connector-create: content-based refusal on a process XML root. | 1 |
@@ -2325,12 +2394,13 @@ over the census, so a row cannot be silently orphaned when a file moves.
 | #160 | WRT-shared-channel-lossless-read: unchanged — the endpoint is not /Component and the call is a read, so the process-content classifier never applies; it is inventoried so a future edit cannot turn a hand-rolled transport into a write route unnoticed. | 1 |
 | #160 | WRT-shared-dormant-writer: sits behind the two-sided guard, or is deleted. | 1 |
 | #160 | WRT-shared-raw-create-sink: the shared process-content classifier is enforced at or before this sink for every caller. | 1 |
-| #160 | delete the legacy semantic shell | 14 |
+| #160 | delete the legacy semantic shell | 23 |
 | #160 | delete with the legacy consumer | 10 |
 | #160 | delete with the legacy renderer | 3 |
 | #160 | delete with the legacy semantic shell | 2 |
 | #160 | follow the callee's row; this is an edge, not a site | 60 |
-| #160 | retract the served legacy guidance / guard the raw route | 1 |
+| #160 | residue: a watched name mentioned in a shape the census does not classify | 32 |
+| #160 | retract the served legacy guidance / guard the raw route | 4 |
 
 Owner semantics: **#151** neutral extraction and `flow_sequence` parity/reachability; **#153**
 canonical ProcessIR component materialization/apply; **#154** grammar/effect foundation; **#155**
@@ -2441,6 +2511,9 @@ value either way.
 | **Precision:** a function-local import is not a re-export | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_function_local_import_is_not_treated_as_a_reexport` |
 | The trading-partner standard templates are frozen | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_trading_partner_standard_templates_are_frozen` |
 | The MCP digest covers every served field | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_mcp_digest_covers_every_served_field` |
+| **Structural:** every known escape shape is at least residue | `tests/test_issue_149_legacy_reachability_freeze.py::test_every_known_escape_shape_is_at_least_residue` |
+| **Negative control:** an unrelated append produces nothing | `tests/test_issue_149_legacy_reachability_freeze.py::test_an_unrelated_append_still_produces_nothing` |
+| **Invariant:** every watched mention is classified or residue | `tests/test_issue_149_legacy_reachability_freeze.py::test_every_watched_mention_is_classified_or_residue` |
 
 **Darkness.** This slice changes nothing under `src/boomi_mcp/` or `server.py`:
 `git diff 9711a9c0cb6c88dda41ada94d88694915b659f36 -- src/boomi_mcp server.py` is empty. The only

@@ -104,6 +104,7 @@ CENSUS_KINDS: Tuple[str, ...] = (
     "example_producer",
     "authoring_boundary",
     "unclassified_dynamic",
+    "unclassified_reference",
 )
 
 PRODUCER_SELECTORS: Tuple[str, ...] = ("process_kind", "process_type")
@@ -310,6 +311,7 @@ _CENSUS_PREFIX = {
     "example_producer": "PX",
     "authoring_boundary": "PB",
     "unclassified_dynamic": "UD",
+    "unclassified_reference": "UR",
 }
 
 
@@ -443,6 +445,9 @@ class _Scanner(ast.NodeVisitor):
         self._modules: Dict[str, str] = {}     # local name -> module dotted path
         self._builder_vars: Set[str] = set()   # locals bound to a builder class
         self._skip: Set[int] = set()
+        #: Nodes positively classified into a census kind. Everything else that
+        #: MENTIONS a watched name becomes residue — see `_ResidueScanner`.
+        self._consumed: Set[int] = set()
 
         self._registry = set(vocab["registry_names"])
         self._builders = set(vocab["builder_classes"])
@@ -478,6 +483,13 @@ class _Scanner(ast.NodeVisitor):
         else:
             row["count"] += 1
             row["evidence_line"] = min(row["evidence_line"], line)
+
+    def _consume(self, node: Optional[ast.AST]) -> None:
+        """Mark a node and its subtree as positively classified."""
+        if node is None:
+            return
+        for descendant in ast.walk(node):
+            self._consumed.add(id(descendant))
 
     def _resolve(self, name: str) -> str:
         return self._aliases.get(name, name)
@@ -700,6 +712,7 @@ class _Scanner(ast.NodeVisitor):
                 self._builder_vars.add(local)
             if alias.name in self._emitters:
                 self._emit("legacy_emitter", "import %s" % alias.name, node.lineno)
+            self._consume(node)
         self.generic_visit(node)
 
     # -- assignments ---------------------------------------------------
@@ -769,6 +782,7 @@ class _Scanner(ast.NodeVisitor):
                         node.lineno,
                     )
                     self._skip.add(id(tgt))
+                    self._consume(tgt)
         self.generic_visit(node)
 
     # -- expressions ---------------------------------------------------
@@ -803,6 +817,7 @@ class _Scanner(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+        _before = len(self.rows) + sum(r["count"] for r in self.rows.values())
         dotted = self._dotted(node.func)
         base = (dotted or "").split(".")[-1]
         head = (dotted or "").split(".")[0]
@@ -931,6 +946,9 @@ class _Scanner(ast.NodeVisitor):
                        "%s(...) [legacy-bearing, %s]" % (callee[1], callee[0]),
                        node.lineno)
 
+        if (len(self.rows) + sum(r["count"] for r in self.rows.values())) != _before:
+            self._consume(node.func)
+
         for kw in node.keywords:
             if kw.arg in self._selectors:
                 self._emit(
@@ -970,6 +988,7 @@ class _Scanner(ast.NodeVisitor):
                     "dict-literal %s=%s" % (name, _const_repr(value)),
                     getattr(key, "lineno", node.lineno),
                 )
+                self._consume(key)
         self.generic_visit(node)
 
     def visit_Subscript(self, node: ast.Subscript) -> None:  # noqa: N802
@@ -977,9 +996,11 @@ class _Scanner(ast.NodeVisitor):
             if self._is_registry(node.value):
                 self._emit("registry_lookup", "PROCESS_FLOW_BUILDERS[...]", node.lineno)
                 self._skip.add(id(node.value))
+                self._consume(node.value)
             else:
                 key = self._as_str(node.slice)
                 if key in self._selectors:
+                    self._consume(node.slice)
                     self._emit("process_kind_consumer",
                                "%s[%r]" % (_tail(self._dotted(node.value), 2) or "<expr>", key),
                                node.lineno)
@@ -990,6 +1011,7 @@ class _Scanner(ast.NodeVisitor):
             return
         if isinstance(node.ctx, ast.Load) and self._resolve(node.id) == "PROCESS_FLOW_BUILDERS":
             self._emit("registry_lookup", "PROCESS_FLOW_BUILDERS (read)", node.lineno)
+            self._consume(node)
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:  # noqa: N802
@@ -999,7 +1021,9 @@ class _Scanner(ast.NodeVisitor):
                 self._emit("legacy_emitter", "%s (reference)" % dotted.split(".")[-1],
                            node.lineno)
                 self._skip.add(id(node.value))
+                self._consume(node)
             elif node.attr == "PROCESS_FLOW_BUILDERS":
+                self._consume(node)
                 # A qualified READ — `sorted(builders.PROCESS_FLOW_BUILDERS)`.
                 # `visit_Name` catches the bare spelling, but a module-qualified
                 # one is an Attribute and reached nothing, so it was
@@ -1010,6 +1034,146 @@ class _Scanner(ast.NodeVisitor):
                 self._emit("registry_lookup", "PROCESS_FLOW_BUILDERS (read)",
                            node.lineno)
         self.generic_visit(node)
+
+
+#: Literal markers for the RESOURCE this inventory protects. Keying residue on
+#: the Component API path — not on a list of HTTP client libraries or verbs —
+#: is what makes an unknown transport mechanism visible: `client.post(".../Component")`
+#: mentions no watched SYMBOL, but it names the endpoint, and the endpoint is the
+#: thing #160 must guard.
+_COMPONENT_ENDPOINT_MARKERS: Tuple[str, ...] = ("/component", "component/bulk")
+
+
+def _folded_str(node: ast.AST) -> Optional[str]:
+    """A string literal, including a simple `"a" + "b"` concatenation."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _folded_str(node.left), _folded_str(node.right)
+        if left is not None and right is not None:
+            return left + right
+    return None
+
+
+class _ResidueScanner(ast.NodeVisitor):
+    """Total accounting: every mention of a watched name that was NOT classified.
+
+    This is the structural replacement for enumerating recognized shapes. Five
+    consecutive review rounds each found a NEW spelling that the scanner did not
+    recognize and therefore emitted nothing for — a dispatch dict, an attribute
+    assignment, a client on `self`, an aliased import, a cross-module constant.
+    Each was fixed individually and the class recurred, which the repo's
+    structural-fix rule says to stop doing.
+
+    The invariant here is derived from the SOURCE, not from a list of shapes:
+    *every syntactic occurrence of a watched name or selector is either
+    positively classified into a census kind or recorded as residue.* A new
+    spelling can no longer vanish — at worst it lands in `unclassified_reference`
+    and, because the residue set is frozen, still fails the gate. It converts an
+    unbounded "shapes we forgot" problem into a bounded, visible one.
+    """
+
+    def __init__(self, path: str, vocab: Dict[str, Tuple[str, ...]],
+                 consumed: Set[int]) -> None:
+        self.path = path
+        self.rows: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
+        self._consumed = consumed
+        self._symbols: List[str] = []
+        self._docstrings: Set[int] = set()
+        self._watched = (
+            set(vocab["registry_names"]) | set(vocab["builder_classes"])
+            | set(vocab["legacy_emitters"]) | set(vocab["legacy_semantic_validation"])
+            | set(vocab["component_xml_write_sinks"]) | set(vocab["raw_api_invokers"])
+        )
+        self._selectors = set(vocab["producer_selectors"])
+
+    @property
+    def symbol(self) -> str:
+        return ".".join(self._symbols) if self._symbols else "<module>"
+
+    def _note_docstring(self, node: ast.AST) -> None:
+        body = getattr(node, "body", None)
+        if body and isinstance(body[0], ast.Expr) \
+                and isinstance(body[0].value, ast.Constant) \
+                and isinstance(body[0].value.value, str):
+            self._docstrings.add(id(body[0].value))
+
+    def _emit(self, form: str, line: int) -> None:
+        key = ("unclassified_reference", self.path, self.symbol, form)
+        row = self.rows.get(key)
+        if row is None:
+            self.rows[key] = {
+                "row_id": _row_id("UR", key),
+                "census": "unclassified_reference",
+                "path": self.path,
+                "symbol": self.symbol,
+                "form": form,
+                "count": 1,
+                "evidence_line": line,
+            }
+        else:
+            row["count"] += 1
+            row["evidence_line"] = min(row["evidence_line"], line)
+
+    def visit_Module(self, node: ast.Module) -> None:  # noqa: N802
+        self._note_docstring(node)
+        self.generic_visit(node)
+
+    def _scoped(self, node: ast.AST, name: str) -> None:
+        self._note_docstring(node)
+        self._symbols.append(name)
+        self.generic_visit(node)
+        self._symbols.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+        self._scoped(node, node.name)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+        self._scoped(node, node.name)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
+        self._scoped(node, node.name)
+
+    def visit_Name(self, node: ast.Name) -> None:  # noqa: N802
+        if id(node) not in self._consumed and node.id in self._watched:
+            self._emit("%s (unclassified reference)" % node.id, node.lineno)
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:  # noqa: N802
+        if id(node) not in self._consumed:
+            if node.attr in self._watched:
+                self._emit("%s (unclassified attribute)" % node.attr, node.lineno)
+            elif node.attr in self._selectors:
+                # `spec.process_kind = "sync_pipeline"` — a typed producer, which
+                # the subscript-shaped producer branch never saw.
+                self._emit("%s (unclassified selector attribute)" % node.attr,
+                           node.lineno)
+        self.generic_visit(node)
+
+    def visit_BinOp(self, node: ast.BinOp) -> None:  # noqa: N802
+        folded = _folded_str(node)
+        if folded is not None and id(node) not in self._consumed:
+            self._check_string(folded, node.lineno, concatenated=True)
+            return
+        self.generic_visit(node)
+
+    def _check_string(self, value: str, line: int, concatenated: bool = False) -> None:
+        note = " (concatenated)" if concatenated else ""
+        if value in self._selectors:
+            self._emit("%r (unclassified selector literal%s)" % (value, note), line)
+        elif value in self._watched:
+            # A watched SYMBOL reached as a string — `globals()["..."]`,
+            # `getattr(m, "...")`, a dispatch table key.
+            self._emit("%r (unclassified symbolic literal%s)" % (value, note), line)
+        elif any(marker in value.lower() for marker in _COMPONENT_ENDPOINT_MARKERS):
+            self._emit("%r (unclassified Component-endpoint literal%s)" % (value, note),
+                       line)
+
+    def visit_Constant(self, node: ast.Constant) -> None:  # noqa: N802
+        if id(node) in self._consumed or id(node) in self._docstrings:
+            return
+        if isinstance(node.value, str):
+            self._check_string(node.value, node.lineno)
 
 
 def _tail(dotted: Optional[str], n: int) -> str:
@@ -1066,6 +1230,9 @@ def scan_sources(sources: Dict[str, str], vocab: Dict[str, Tuple[str, ...]]) -> 
                            known_paths=known)
         scanner.visit(trees[path])
         rows.extend(scanner.rows.values())
+        residue = _ResidueScanner(path, vocab, scanner._consumed)
+        residue.visit(trees[path])
+        rows.extend(residue.rows.values())
 
     reexports = reexport_index(trees)
 
@@ -2254,6 +2421,7 @@ _CENSUS_DEFAULT_OWNER = {
     "example_producer": "#159",
     "authoring_boundary": "#159",
     "unclassified_dynamic": "#160",
+    "unclassified_reference": "#160",
 }
 
 #: Path-scoped ownership overrides, most specific first. Each entry is
@@ -2343,6 +2511,7 @@ _DEFAULT_DISPOSITION = {
     "example_producer": "migrate the example to canonical ProcessIR",
     "authoring_boundary": "migrate the boundary to canonical ProcessIR",
     "unclassified_dynamic": "resolve or guard the dynamic access",
+    "unclassified_reference": "residue: a watched name mentioned in a shape the census does not classify",
 }
 
 
@@ -2746,7 +2915,7 @@ def _table(headers: Sequence[str], rows: Iterable[Sequence[Any]]) -> str:
 _LEDGER_SECTIONS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("reachability", ("registry_lookup", "renderer_call", "legacy_transitive_call",
                       "legacy_emitter", "legacy_semantic_validation",
-                      "unclassified_dynamic")),
+                      "unclassified_dynamic", "unclassified_reference")),
     ("producers", ("process_kind_producer", "process_kind_consumer",
                    "example_producer", "authoring_boundary")),
     ("writes", ("component_xml_write", "http_client_call", "raw_api_invoker")),

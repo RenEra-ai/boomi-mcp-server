@@ -902,6 +902,121 @@ def test_the_comparator_reads_every_frozen_section(baseline):
         assert any(section in line for line in diff.scalar_changes), diff.report()
 
 
+#: The escape shapes five consecutive review rounds produced, one per new spelling.
+#: They are parametrized together deliberately: the point of the residue invariant is
+#: that it covers the CLASS, so they must all be closed by one mechanism rather than by
+#: eight more branches.
+_ESCAPE_SHAPES = [
+    ("typed attribute assignment",
+     "def f(spec):\n    spec.process_kind = 'sync_pipeline'\n    return spec\n"),
+    ("selector hoisted into a constant",
+     "SEL = 'process_kind'\ndef f(c):\n    c[SEL] = 'sync_pipeline'\n    return c\n"),
+    ("HTTP call through an injected client",
+     "def f(client, x):\n"
+     "    return client.post('https://api.boomi.com/Component', content=x)\n"),
+    ("HTTP client held on self",
+     "import httpx\n"
+     "class C:\n"
+     "    def __init__(self):\n"
+     "        self._c = httpx.Client()\n"
+     "    def go(self, x):\n"
+     "        return self._c.post('https://api.boomi.com/Component', content=x)\n"),
+    ("aliased direct HTTP import",
+     "from httpx import post as _p\n"
+     "def go(x):\n    return _p('https://api.boomi.com/Component', content=x)\n"),
+    ("registry behind a dispatch dict",
+     "from .categories.components.builders import get_process_flow_builder\n"
+     "def f(k, c):\n"
+     "    return {'f': get_process_flow_builder}['f'](k).build(c, name='x')\n"),
+    ("symbol reached through globals()",
+     "def f(k):\n    return globals()['get_process_flow_builder'](k)\n"),
+    ("concatenated selector literal",
+     "def f(c):\n    c['process' + '_kind'] = 'sync_pipeline'\n    return c\n"),
+]
+
+
+def _appended(census_only, body):
+    """Append to an existing zero-row module.
+
+    Adding a FILE moves `python_source_count`, which makes any diff non-empty
+    regardless of the body — so an escape probe that adds a file measures nothing.
+    Appending keeps the count fixed, so a reported row is attributable to the body.
+    """
+    sources = dict(inv.python_sources())
+    target = "src/boomi_mcp/__init__.py"
+    sources[target] = sources[target] + "\n\n" + body
+    current = inv.build_inventory(sources=sources, include_served=False)
+    return inv.compare(current, census_only)
+
+
+@pytest.mark.parametrize("label,body", _ESCAPE_SHAPES,
+                         ids=[label for label, _ in _ESCAPE_SHAPES])
+def test_every_known_escape_shape_is_at_least_residue(census_only, label, body):
+    """No new spelling may vanish.
+
+    Each of these reached a legacy path, a `process_kind` producer or the Component
+    API while naming nothing the shape-matching census recognized, so each produced
+    ZERO rows and the freeze stayed green. They are closed as a class by the
+    total-accounting invariant: classified, or `unclassified_reference` residue.
+    """
+    diff = _appended(census_only, body)
+    kinds = {row.split(" | ")[0] for row in diff.added}
+    assert kinds, "%s produced no census row at all — it escaped the freeze" % label
+    assert "unclassified_reference" in kinds or kinds - {"unclassified_reference"}, kinds
+
+
+def test_an_unrelated_append_still_produces_nothing(census_only):
+    """Negative control for the residue invariant: it must report MENTIONS of the
+    watched vocabulary, not merely that a file changed."""
+    diff = _appended(census_only, "def harmless(x):\n    return x + 1\n")
+    assert diff.empty(), diff.report()
+
+
+def test_every_watched_mention_is_classified_or_residue():
+    """The conservation invariant, stated directly.
+
+    For every scanned module: each syntactic occurrence of a watched symbol, a
+    producer selector, or a Component-endpoint literal is either consumed by a
+    positively-classified census row or emitted as residue. This is what replaced
+    enumerating recognized shapes — the property is derived from the source, so a
+    spelling nobody anticipated lands in residue instead of nowhere.
+    """
+    import ast as _ast
+
+    vocab = inv.legacy_sink_vocabulary()
+    watched = (set(vocab["registry_names"]) | set(vocab["builder_classes"])
+               | set(vocab["legacy_emitters"])
+               | set(vocab["legacy_semantic_validation"])
+               | set(vocab["component_xml_write_sinks"])
+               | set(vocab["raw_api_invokers"]))
+    selectors = set(vocab["producer_selectors"])
+
+    sources = inv.python_sources()
+    rows = inv.scan_sources(sources, vocab)
+    by_path = {}
+    for row in rows:
+        by_path.setdefault(row["path"], []).append(row)
+
+    unaccounted = []
+    for path, text in sources.items():
+        tree = _ast.parse(text, filename=path)
+        mentions = 0
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.Name) and node.id in watched:
+                mentions += 1
+            elif isinstance(node, _ast.Attribute) and (
+                    node.attr in watched or node.attr in selectors):
+                mentions += 1
+            elif isinstance(node, _ast.Constant) and isinstance(node.value, str) \
+                    and node.value in (watched | selectors):
+                mentions += 1
+        if mentions and not by_path.get(path):
+            unaccounted.append(path)
+    assert unaccounted == [], (
+        "these modules mention the watched vocabulary but produced NO census row of "
+        "any kind — the accounting invariant is broken: %s" % unaccounted)
+
+
 def test_an_unresolvable_dynamic_sink_access_is_reported_not_ignored(census_only):
     """Fail-closed residue: a watched name reached through `getattr` cannot be
     statically resolved, so it is RECORDED as unclassified rather than dropped."""

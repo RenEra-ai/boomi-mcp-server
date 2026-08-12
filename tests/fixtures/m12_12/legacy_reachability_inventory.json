@@ -2292,6 +2292,1167 @@
       "path": "src/boomi_mcp/patterns/composition.py",
       "row_id": "LR-b5fd790b",
       "symbol": "compose_archetypes"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 3,
+      "evidence_line": 390,
+      "form": "invoke_api (unclassified reference)",
+      "path": "server.py",
+      "row_id": "UR-d25b3a44",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 416,
+      "form": "'/intent/integration_spec/components/' (unclassified Component-endpoint literal)",
+      "path": "src/boomi_mcp/authoring/workflow.py",
+      "row_id": "UR-81f63e61",
+      "symbol": "_normalize_intent"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 413,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/authoring/workflow.py",
+      "row_id": "UR-8b2712eb",
+      "symbol": "_normalize_intent"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 1172,
+      "form": "'/components/' (unclassified Component-endpoint literal)",
+      "path": "src/boomi_mcp/authoring/workflow.py",
+      "row_id": "UR-06aa073b",
+      "symbol": "plan_authoring_request_v1"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 63,
+      "form": "'PROCESS_FLOW_BUILDERS' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/categories/components/builders/__init__.py",
+      "row_id": "UR-11d9010e",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 57,
+      "form": "'ProcessFlowBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/categories/components/builders/__init__.py",
+      "row_id": "UR-cd0006f3",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 59,
+      "form": "'SyncPipelineBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/categories/components/builders/__init__.py",
+      "row_id": "UR-12f0b574",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 58,
+      "form": "'WrapperSubprocessBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/categories/components/builders/__init__.py",
+      "row_id": "UR-3f886dc4",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 67,
+      "form": "'get_process_flow_builder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/categories/components/builders/__init__.py",
+      "row_id": "UR-1fb3adfb",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 6159,
+      "form": "'PROCESS_FLOW_BUILDERS' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-e8179527",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 6156,
+      "form": "'ProcessFlowBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-e79baecd",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 6158,
+      "form": "'SyncPipelineBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-9ea5e934",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 6157,
+      "form": "'WrapperSubprocessBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-ae78d786",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 6160,
+      "form": "'get_process_flow_builder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-2ca4aab3",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5275,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-27eb897c",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5276,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-bfc0b0e8",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 6116,
+      "form": "PROCESS_FLOW_BUILDERS (unclassified reference)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-fe6b7165",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 3,
+      "evidence_line": 6117,
+      "form": "ProcessFlowBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-707c60da",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 3,
+      "evidence_line": 6119,
+      "form": "SyncPipelineBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-8af1b075",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 3,
+      "evidence_line": 6118,
+      "form": "WrapperSubprocessBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-7b298ebf",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 656,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-7065c393",
+      "symbol": "ProcessFlowBuilder.validate_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 656,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-e2d593a2",
+      "symbol": "ProcessFlowBuilder.validate_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5301,
+      "form": "ProcessFlowBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-314d9050",
+      "symbol": "SyncPipelineBuilder"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5488,
+      "form": "ProcessFlowBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-c6ac4f5d",
+      "symbol": "SyncPipelineBuilder.lower_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 5976,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-fda30e22",
+      "symbol": "SyncPipelineBuilder.validate_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5976,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-14ea1b1b",
+      "symbol": "SyncPipelineBuilder.validate_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 4967,
+      "form": "ProcessFlowBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-66e80fc5",
+      "symbol": "WrapperSubprocessBuilder"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 5006,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-5b68211d",
+      "symbol": "WrapperSubprocessBuilder.validate_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5006,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-79261f95",
+      "symbol": "WrapperSubprocessBuilder.validate_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 2412,
+      "form": "ProcessFlowBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-f217fb4d",
+      "symbol": "_reliability_requests_try_catch"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 1969,
+      "form": "ProcessFlowBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-5dc5ade2",
+      "symbol": "_source_dynamic_path_connector_scope_error"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5215,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-552ab0c8",
+      "symbol": "_authored_process_validation_error"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5215,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-efeb1e84",
+      "symbol": "_authored_process_validation_error"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 4845,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-bfccf421",
+      "symbol": "_bracketed_naming_warning"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 4845,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-ad8d292d",
+      "symbol": "_bracketed_naming_warning"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5803,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-9a34a4e3",
+      "symbol": "_build_plan"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5803,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-43bc6a4f",
+      "symbol": "_build_plan"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 6327,
+      "form": "ProcessFlowBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-257e0ae4",
+      "symbol": "_build_plan"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 3529,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-27157a57",
+      "symbol": "_execute_component"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 3529,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-3ee64ea8",
+      "symbol": "_execute_component"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5427,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-142ade12",
+      "symbol": "_process_component_preflight"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 4,
+      "evidence_line": 5304,
+      "form": "ProcessFlowBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-62f9bdcd",
+      "symbol": "_process_component_preflight"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5477,
+      "form": "SyncPipelineBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-72bd52b2",
+      "symbol": "_process_component_preflight"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5464,
+      "form": "WrapperSubprocessBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-b4d881e8",
+      "symbol": "_process_component_preflight"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 4198,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-c0dedee7",
+      "symbol": "_process_models_error_handling"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 4198,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-45fcc23c",
+      "symbol": "_process_models_error_handling"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 4200,
+      "form": "ProcessFlowBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-352e92e4",
+      "symbol": "_process_models_error_handling"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 1226,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-9eb05735",
+      "symbol": "_resolve_preservation_policy"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 1226,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-54f1e91d",
+      "symbol": "_resolve_preservation_policy"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5129,
+      "form": "ProcessFlowBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-ac199858",
+      "symbol": "_scan_top_level_pipeline_secrets"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 550,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-afae80da",
+      "symbol": "_synthesize_wrapper_subprocess_edges"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 550,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-ade5c611",
+      "symbol": "_synthesize_wrapper_subprocess_edges"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 551,
+      "form": "WrapperSubprocessBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-928cd8e9",
+      "symbol": "_synthesize_wrapper_subprocess_edges"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 714,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-09cf6b73",
+      "symbol": "_synthesize_wrapper_subprocess_extensions"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 714,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-f7a99034",
+      "symbol": "_synthesize_wrapper_subprocess_extensions"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 715,
+      "form": "WrapperSubprocessBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-51591344",
+      "symbol": "_synthesize_wrapper_subprocess_extensions"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 3135,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-f3da9b48",
+      "symbol": "build_structured_update_xml"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 3135,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-3e5c5362",
+      "symbol": "build_structured_update_xml"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 1058,
+      "form": "'send_request' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/categories/integration_import.py",
+      "row_id": "UR-c95f5a65",
+      "symbol": "_derive_preset_parameters"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 767,
+      "form": "'<Component xmlns=\"http://api.platform.boomi.com/\"\\n    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\\n    name=\"Component Name\"\\n    type=\"process\"\\n    folderName=\"Home\">\\n  <description>Component description</description>\\n  <object>\\n    <!-- Type-specific XML structure here -->\\n  </object>\\n</Component>' (unclassified Component-endpoint literal)",
+      "path": "src/boomi_mcp/categories/meta_tools.py",
+      "row_id": "UR-6ad768aa",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5219,
+      "form": "'Partial edit: config holds ONLY metadata fields (name/component_name, description, folder_name, folder_id). The live root is smart-merged in place, so you change just those fields and everything else is preserved verbatim.' (unclassified Component-endpoint literal)",
+      "path": "src/boomi_mcp/categories/meta_tools.py",
+      "row_id": "UR-8b27cbe7",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 5,
+      "evidence_line": 8004,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/categories/meta_tools.py",
+      "row_id": "UR-10de511e",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 6583,
+      "form": "'These are the ONLY values a registered recipe may return. They carry opaque references and closed enumerations — never configuration, credentials, headers, SQL, raw XML, executable code, JSON pointers, or caller-authored graph edges. Recipe output is validated exactly as direct ProcessIR/topology/component authoring and cannot be exempted.' (unclassified Component-endpoint literal)",
+      "path": "src/boomi_mcp/categories/meta_tools.py",
+      "row_id": "UR-c2b56435",
+      "symbol": "_recipe_contributions_schema"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 10205,
+      "form": "'manage_component(profile=\"prod\", action=\"create\", config=\\'{\"xml\": \"<Component>...</Component>\"}\\')' (unclassified Component-endpoint literal)",
+      "path": "src/boomi_mcp/categories/meta_tools.py",
+      "row_id": "UR-b775b41f",
+      "symbol": "list_capabilities_action"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 11188,
+      "form": "'read_boomi_doc_page(page_key=\"companion://OfficialBoomi/boomi-integration/references/components/map_component.md\")' (unclassified Component-endpoint literal)",
+      "path": "src/boomi_mcp/categories/meta_tools.py",
+      "row_id": "UR-d396ff59",
+      "symbol": "list_capabilities_action"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 605,
+      "form": "_emit_branch (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-5a756388",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 607,
+      "form": "_emit_catcherrors (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-a154f9d0",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 599,
+      "form": "_emit_dataprocess (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-a7ceae01",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 606,
+      "form": "_emit_decision (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-49bf579b",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 600,
+      "form": "_emit_doccacheload (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-b767d23e",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 602,
+      "form": "_emit_doccacheremove (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-a92bf099",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 601,
+      "form": "_emit_doccacheretrieve (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-688b8a54",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 608,
+      "form": "_emit_exception (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-524f34f4",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 598,
+      "form": "_emit_flowcontrol (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-9c933362",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 597,
+      "form": "_emit_map (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-ff9294a1",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 596,
+      "form": "_emit_message (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-8a1177ad",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 604,
+      "form": "_emit_processcall (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-b6e4be49",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 610,
+      "form": "_emit_returndocuments (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-5cfe1e40",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 603,
+      "form": "_emit_setproperties (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-0b3b3cf0",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 609,
+      "form": "_emit_stop (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-2df1446f",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 114,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py",
+      "row_id": "UR-3b3a60c6",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 130,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py",
+      "row_id": "UR-2f4c6831",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 253,
+      "form": "SyncPipelineBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py",
+      "row_id": "UR-44fd47de",
+      "symbol": "_core_from_authored_pipeline"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 301,
+      "form": "ProcessFlowBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py",
+      "row_id": "UR-6cf4c5e6",
+      "symbol": "_core_from_submitted_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 276,
+      "form": "SyncPipelineBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py",
+      "row_id": "UR-1de2e159",
+      "symbol": "_core_from_submitted_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 338,
+      "form": "WrapperSubprocessBuilder (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py",
+      "row_id": "UR-410ebc90",
+      "symbol": "_core_from_submitted_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 217,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py",
+      "row_id": "UR-42bfac5b",
+      "symbol": "_resolve_process_kind"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 217,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py",
+      "row_id": "UR-b8009db9",
+      "symbol": "_resolve_process_kind"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 62,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/sync_pipeline.py",
+      "row_id": "UR-62db3bb6",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 31,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/wrapper_subprocess.py",
+      "row_id": "UR-d621f1e8",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 32,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/wrapper_subprocess.py",
+      "row_id": "UR-812ec04e",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 150,
+      "form": "'blocking_codes' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/compiler/process_ir/semantic_validation/legacy_bridge.py",
+      "row_id": "UR-8a61587b",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 150,
+      "form": "'validate_legacy_process_config' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/compiler/process_ir/semantic_validation/legacy_bridge.py",
+      "row_id": "UR-1a41cf81",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 107,
+      "form": "\"Three cases, fixed in three different places. Under '/relations/N/ROLE' the role names an object key this document does not declare: declare that object here, or point the role at one that exists. Under '/objects/N/component_ref' a '$ref:KEY' is judged against the ComponentPlan symbol table, so add that component to the ComponentPlan — the object itself is already declared. A literal id, environment_ref or runtime_ref is judged against the capture: correct the id, or capture the platform fact, in this document's credential profile.\" (unclassified Component-endpoint literal)",
+      "path": "src/boomi_mcp/compiler/system_topology/findings.py",
+      "row_id": "UR-a99cdd30",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 216,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/models/_process_ir_compat.py",
+      "row_id": "UR-f6561c76",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 217,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/models/_process_ir_compat.py",
+      "row_id": "UR-9f5259ff",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 678,
+      "form": "'process_kind' (unclassified selector literal)",
+      "path": "src/boomi_mcp/models/_process_ir_compat.py",
+      "row_id": "UR-c82b8d52",
+      "symbol": "legacy_flow_sequence_to_ir"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 678,
+      "form": "'process_type' (unclassified selector literal)",
+      "path": "src/boomi_mcp/models/_process_ir_compat.py",
+      "row_id": "UR-1e99cf01",
+      "symbol": "legacy_flow_sequence_to_ir"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 300,
+      "form": "send_request (unclassified reference)",
+      "path": "src/boomi_mcp/patterns/archetypes/api_to_api_sync.py",
+      "row_id": "UR-e1e67a92",
+      "symbol": "ApiTarget"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 1357,
+      "form": "'send_request' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/patterns/archetypes/api_to_api_sync.py",
+      "row_id": "UR-078ccd03",
+      "symbol": "ApiToApiSyncArchetype"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 1495,
+      "form": "send_request (unclassified attribute)",
+      "path": "src/boomi_mcp/patterns/archetypes/api_to_api_sync.py",
+      "row_id": "UR-cdaf5c8c",
+      "symbol": "ApiToApiSyncArchetype.emit_spec"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 1129,
+      "form": "send_request (unclassified attribute)",
+      "path": "src/boomi_mcp/patterns/archetypes/api_to_api_sync.py",
+      "row_id": "UR-52fa6fa8",
+      "symbol": "_build_pipeline_dict"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 1002,
+      "form": "send_request (unclassified attribute)",
+      "path": "src/boomi_mcp/patterns/archetypes/api_to_api_sync.py",
+      "row_id": "UR-fc2260cb",
+      "symbol": "_build_rest_send_params"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 3479,
+      "form": "'send_request' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "row_id": "UR-8e8086d3",
+      "symbol": "DatabaseToApiSyncArchetype"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 3671,
+      "form": "send_request (unclassified attribute)",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "row_id": "UR-c95aa253",
+      "symbol": "DatabaseToApiSyncArchetype.emit_spec"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 2129,
+      "form": "send_request (unclassified attribute)",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "row_id": "UR-c2d46d29",
+      "symbol": "DatabaseToApiSyncParameters._enforce_watermark_consistency"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 2206,
+      "form": "send_request (unclassified attribute)",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "row_id": "UR-dcb2111b",
+      "symbol": "DatabaseToApiSyncParameters._validate_transform_refs"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 6,
+      "evidence_line": 2206,
+      "form": "send_request (unclassified reference)",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "row_id": "UR-b798d71f",
+      "symbol": "DatabaseToApiSyncParameters._validate_transform_refs"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 1158,
+      "form": "send_request (unclassified reference)",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "row_id": "UR-2cbb9f90",
+      "symbol": "RestTarget"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 2796,
+      "form": "send_request (unclassified attribute)",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "row_id": "UR-580d70e6",
+      "symbol": "_build_dynamic_path"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 3195,
+      "form": "send_request (unclassified attribute)",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "row_id": "UR-481b47f8",
+      "symbol": "_build_operational_intent"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 2594,
+      "form": "send_request (unclassified attribute)",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "row_id": "UR-c0a127b7",
+      "symbol": "_build_rest_send_params"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 2892,
+      "form": "send_request (unclassified attribute)",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "row_id": "UR-50ae7836",
+      "symbol": "_build_sync_pipeline_adapter_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 327,
+      "form": "'send_request' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py",
+      "row_id": "UR-a91828a1",
+      "symbol": "HttpListenerToRestArchetype"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 378,
+      "form": "send_request (unclassified attribute)",
+      "path": "src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py",
+      "row_id": "UR-73283940",
+      "symbol": "HttpListenerToRestArchetype.emit_spec"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 247,
+      "form": "'Archetype NamingConfig payload (integration_name, component_prefix, optional folder_path/component_names/convention/runtime_hints).' (unclassified Component-endpoint literal)",
+      "path": "src/boomi_mcp/patterns/composition.py",
+      "row_id": "UR-73baddc6",
+      "symbol": "CompositionOptions"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 695,
+      "form": "send_request (unclassified attribute)",
+      "path": "src/boomi_mcp/patterns/composition.py",
+      "row_id": "UR-4b496fdf",
+      "symbol": "_fanout_target_params"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 5,
+      "evidence_line": 968,
+      "form": "send_request (unclassified attribute)",
+      "path": "src/boomi_mcp/patterns/composition.py",
+      "row_id": "UR-87e19f3e",
+      "symbol": "compose_archetypes"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 584,
+      "form": "send_request (unclassified attribute)",
+      "path": "src/boomi_mcp/patterns/composition.py",
+      "row_id": "UR-adfb1440",
+      "symbol": "validate_composition"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 135,
+      "form": "'ProcessFlowBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/patterns/primitives/branch.py",
+      "row_id": "UR-355343c0",
+      "symbol": "BranchPrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 212,
+      "form": "'ProcessFlowBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/patterns/primitives/data_process.py",
+      "row_id": "UR-f5b7ce1e",
+      "symbol": "DataProcessPrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 178,
+      "form": "'ProcessFlowBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/patterns/primitives/decision.py",
+      "row_id": "UR-4fd22c33",
+      "symbol": "DecisionPrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 87,
+      "form": "'ProcessFlowBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/patterns/primitives/document_cache_lookup.py",
+      "row_id": "UR-010044e7",
+      "symbol": "DocumentCacheLookupPrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 86,
+      "form": "'ProcessFlowBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/patterns/primitives/document_cache_put.py",
+      "row_id": "UR-a036aff3",
+      "symbol": "DocumentCachePutPrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 118,
+      "form": "'ProcessFlowBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/patterns/primitives/document_cache_remove.py",
+      "row_id": "UR-5101a41a",
+      "symbol": "DocumentCacheRemovePrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 121,
+      "form": "'ProcessFlowBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/patterns/primitives/document_cache_retrieve.py",
+      "row_id": "UR-0ea5284d",
+      "symbol": "DocumentCacheRetrievePrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 100,
+      "form": "'ProcessFlowBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/patterns/primitives/flow_control.py",
+      "row_id": "UR-259c8876",
+      "symbol": "FlowControlPrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 95,
+      "form": "'ProcessFlowBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/patterns/primitives/return_documents.py",
+      "row_id": "UR-5ddfea96",
+      "symbol": "ReturnDocumentsPrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 130,
+      "form": "'ProcessFlowBuilder' (unclassified symbolic literal)",
+      "path": "src/boomi_mcp/patterns/primitives/throw_exception.py",
+      "row_id": "UR-93cf72ae",
+      "symbol": "ThrowExceptionPrimitive"
     }
   ],
   "component_xml_write_routes": [
@@ -4577,6 +5738,963 @@
       "path": "src/boomi_mcp/patterns/composition.py",
       "sites": 1,
       "symbol": "compose_archetypes"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 390,
+      "forms": [
+        "invoke_api (unclassified reference)"
+      ],
+      "ledger_id": "LG-a1863ac0",
+      "owning_issue": "#160",
+      "path": "server.py",
+      "sites": 3,
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 413,
+      "forms": [
+        "'/intent/integration_spec/components/' (unclassified Component-endpoint literal)",
+        "'process_kind' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-0a2735c3",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/authoring/workflow.py",
+      "sites": 2,
+      "symbol": "_normalize_intent"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 1172,
+      "forms": [
+        "'/components/' (unclassified Component-endpoint literal)"
+      ],
+      "ledger_id": "LG-b4cb6bd2",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/authoring/workflow.py",
+      "sites": 1,
+      "symbol": "plan_authoring_request_v1"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 57,
+      "forms": [
+        "'PROCESS_FLOW_BUILDERS' (unclassified symbolic literal)",
+        "'ProcessFlowBuilder' (unclassified symbolic literal)",
+        "'SyncPipelineBuilder' (unclassified symbolic literal)",
+        "'WrapperSubprocessBuilder' (unclassified symbolic literal)",
+        "'get_process_flow_builder' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-a3b03f12",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/components/builders/__init__.py",
+      "sites": 5,
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "delete the legacy semantic shell",
+      "evidence_line": 5275,
+      "forms": [
+        "'PROCESS_FLOW_BUILDERS' (unclassified symbolic literal)",
+        "'ProcessFlowBuilder' (unclassified symbolic literal)",
+        "'SyncPipelineBuilder' (unclassified symbolic literal)",
+        "'WrapperSubprocessBuilder' (unclassified symbolic literal)",
+        "'get_process_flow_builder' (unclassified symbolic literal)",
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)",
+        "PROCESS_FLOW_BUILDERS (unclassified reference)",
+        "ProcessFlowBuilder (unclassified reference)",
+        "SyncPipelineBuilder (unclassified reference)",
+        "WrapperSubprocessBuilder (unclassified reference)"
+      ],
+      "ledger_id": "LG-bd39ea58",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "sites": 17,
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "delete the legacy semantic shell",
+      "evidence_line": 656,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-36bd73fc",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "sites": 3,
+      "symbol": "ProcessFlowBuilder.validate_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "delete the legacy semantic shell",
+      "evidence_line": 5301,
+      "forms": [
+        "ProcessFlowBuilder (unclassified reference)"
+      ],
+      "ledger_id": "LG-3bd11d29",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "sites": 1,
+      "symbol": "SyncPipelineBuilder"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "delete the legacy semantic shell",
+      "evidence_line": 5488,
+      "forms": [
+        "ProcessFlowBuilder (unclassified reference)"
+      ],
+      "ledger_id": "LG-42425307",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "sites": 1,
+      "symbol": "SyncPipelineBuilder.lower_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "delete the legacy semantic shell",
+      "evidence_line": 5976,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-513dee34",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "sites": 3,
+      "symbol": "SyncPipelineBuilder.validate_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "delete the legacy semantic shell",
+      "evidence_line": 4967,
+      "forms": [
+        "ProcessFlowBuilder (unclassified reference)"
+      ],
+      "ledger_id": "LG-65e5dfbc",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "sites": 1,
+      "symbol": "WrapperSubprocessBuilder"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "delete the legacy semantic shell",
+      "evidence_line": 5006,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-69d179d0",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "sites": 3,
+      "symbol": "WrapperSubprocessBuilder.validate_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "delete the legacy semantic shell",
+      "evidence_line": 2412,
+      "forms": [
+        "ProcessFlowBuilder (unclassified reference)"
+      ],
+      "ledger_id": "LG-67ac22ad",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "sites": 1,
+      "symbol": "_reliability_requests_try_catch"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "delete the legacy semantic shell",
+      "evidence_line": 1969,
+      "forms": [
+        "ProcessFlowBuilder (unclassified reference)"
+      ],
+      "ledger_id": "LG-b4eb25cd",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "sites": 1,
+      "symbol": "_source_dynamic_path_connector_scope_error"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 5215,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-98073b97",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "sites": 2,
+      "symbol": "_authored_process_validation_error"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 4845,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-cd5de55e",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "sites": 2,
+      "symbol": "_bracketed_naming_warning"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 5803,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)",
+        "ProcessFlowBuilder (unclassified reference)"
+      ],
+      "ledger_id": "LG-32fcd45b",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "sites": 3,
+      "symbol": "_build_plan"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 3529,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-994f0a04",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "sites": 3,
+      "symbol": "_execute_component"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 5304,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "ProcessFlowBuilder (unclassified reference)",
+        "SyncPipelineBuilder (unclassified reference)",
+        "WrapperSubprocessBuilder (unclassified reference)"
+      ],
+      "ledger_id": "LG-66c9297f",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "sites": 7,
+      "symbol": "_process_component_preflight"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 4198,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)",
+        "ProcessFlowBuilder (unclassified reference)"
+      ],
+      "ledger_id": "LG-61ad1e75",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "sites": 3,
+      "symbol": "_process_models_error_handling"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 1226,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-378bc32b",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "sites": 2,
+      "symbol": "_resolve_preservation_policy"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 5129,
+      "forms": [
+        "ProcessFlowBuilder (unclassified reference)"
+      ],
+      "ledger_id": "LG-81ba94b9",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "sites": 1,
+      "symbol": "_scan_top_level_pipeline_secrets"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 550,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)",
+        "WrapperSubprocessBuilder (unclassified reference)"
+      ],
+      "ledger_id": "LG-a6339083",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "sites": 3,
+      "symbol": "_synthesize_wrapper_subprocess_edges"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 714,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)",
+        "WrapperSubprocessBuilder (unclassified reference)"
+      ],
+      "ledger_id": "LG-df05d9d2",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "sites": 3,
+      "symbol": "_synthesize_wrapper_subprocess_extensions"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 3135,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-2ae43575",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "sites": 3,
+      "symbol": "build_structured_update_xml"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 1058,
+      "forms": [
+        "'send_request' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-1ffb629c",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/integration_import.py",
+      "sites": 1,
+      "symbol": "_derive_preset_parameters"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "retract the served legacy guidance / guard the raw route",
+      "evidence_line": 767,
+      "forms": [
+        "'<Component xmlns=\"http://api.platform.boomi.com/\"\\n    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\\n    name=\"Component Name\"\\n    type=\"process\"\\n    folderName=\"Home\">\\n  <description>Component description</description>\\n  <object>\\n    <!-- Type-specific XML structure here -->\\n  </object>\\n</Component>' (unclassified Component-endpoint literal)",
+        "'Partial edit: config holds ONLY metadata fields (name/component_name, description, folder_name, folder_id). The live root is smart-merged in place, so you change just those fields and everything else is preserved verbatim.' (unclassified Component-endpoint literal)",
+        "'process_kind' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-feb448d7",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/meta_tools.py",
+      "sites": 7,
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "retract the served legacy guidance / guard the raw route",
+      "evidence_line": 6583,
+      "forms": [
+        "'These are the ONLY values a registered recipe may return. They carry opaque references and closed enumerations — never configuration, credentials, headers, SQL, raw XML, executable code, JSON pointers, or caller-authored graph edges. Recipe output is validated exactly as direct ProcessIR/topology/component authoring and cannot be exempted.' (unclassified Component-endpoint literal)"
+      ],
+      "ledger_id": "LG-3b9a3513",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/meta_tools.py",
+      "sites": 1,
+      "symbol": "_recipe_contributions_schema"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "retract the served legacy guidance / guard the raw route",
+      "evidence_line": 10205,
+      "forms": [
+        "'manage_component(profile=\"prod\", action=\"create\", config=\\'{\"xml\": \"<Component>...</Component>\"}\\')' (unclassified Component-endpoint literal)",
+        "'read_boomi_doc_page(page_key=\"companion://OfficialBoomi/boomi-integration/references/components/map_component.md\")' (unclassified Component-endpoint literal)"
+      ],
+      "ledger_id": "LG-b453fb4f",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/meta_tools.py",
+      "sites": 2,
+      "symbol": "list_capabilities_action"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 596,
+      "forms": [
+        "_emit_branch (unclassified reference)",
+        "_emit_catcherrors (unclassified reference)",
+        "_emit_dataprocess (unclassified reference)",
+        "_emit_decision (unclassified reference)",
+        "_emit_doccacheload (unclassified reference)",
+        "_emit_doccacheremove (unclassified reference)",
+        "_emit_doccacheretrieve (unclassified reference)",
+        "_emit_exception (unclassified reference)",
+        "_emit_flowcontrol (unclassified reference)",
+        "_emit_map (unclassified reference)",
+        "_emit_message (unclassified reference)",
+        "_emit_processcall (unclassified reference)",
+        "_emit_returndocuments (unclassified reference)",
+        "_emit_setproperties (unclassified reference)",
+        "_emit_stop (unclassified reference)"
+      ],
+      "ledger_id": "LG-de5e36cb",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "sites": 15,
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "re-home onto the neutral extraction",
+      "evidence_line": 114,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-ea29df03",
+      "owning_issue": "#151",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py",
+      "sites": 2,
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "re-home onto the neutral extraction",
+      "evidence_line": 253,
+      "forms": [
+        "SyncPipelineBuilder (unclassified reference)"
+      ],
+      "ledger_id": "LG-1e6a1bac",
+      "owning_issue": "#151",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py",
+      "sites": 1,
+      "symbol": "_core_from_authored_pipeline"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "re-home onto the neutral extraction",
+      "evidence_line": 276,
+      "forms": [
+        "ProcessFlowBuilder (unclassified reference)",
+        "SyncPipelineBuilder (unclassified reference)",
+        "WrapperSubprocessBuilder (unclassified reference)"
+      ],
+      "ledger_id": "LG-e2f5e378",
+      "owning_issue": "#151",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py",
+      "sites": 3,
+      "symbol": "_core_from_submitted_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "re-home onto the neutral extraction",
+      "evidence_line": 217,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-53796dd2",
+      "owning_issue": "#151",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py",
+      "sites": 2,
+      "symbol": "_resolve_process_kind"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "re-home onto the neutral extraction",
+      "evidence_line": 62,
+      "forms": [
+        "'process_kind' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-7426e6bc",
+      "owning_issue": "#151",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/sync_pipeline.py",
+      "sites": 1,
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "re-home onto the neutral extraction",
+      "evidence_line": 31,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-ca32b52e",
+      "owning_issue": "#151",
+      "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/wrapper_subprocess.py",
+      "sites": 2,
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "re-home onto the neutral extraction",
+      "evidence_line": 150,
+      "forms": [
+        "'blocking_codes' (unclassified symbolic literal)",
+        "'validate_legacy_process_config' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-b1c701ea",
+      "owning_issue": "#151",
+      "path": "src/boomi_mcp/compiler/process_ir/semantic_validation/legacy_bridge.py",
+      "sites": 2,
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 107,
+      "forms": [
+        "\"Three cases, fixed in three different places. Under '/relations/N/ROLE' the role names an object key this document does not declare: declare that object here, or point the role at one that exists. Under '/objects/N/component_ref' a '$ref:KEY' is judged against the ComponentPlan symbol table, so add that component to the ComponentPlan — the object itself is already declared. A literal id, environment_ref or runtime_ref is judged against the capture: correct the id, or capture the platform fact, in this document's credential profile.\" (unclassified Component-endpoint literal)"
+      ],
+      "ledger_id": "LG-8f2f93ef",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/compiler/system_topology/findings.py",
+      "sites": 1,
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the compatibility codec, then delete",
+      "evidence_line": 216,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-cf15d311",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/models/_process_ir_compat.py",
+      "sites": 4,
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the compatibility codec, then delete",
+      "evidence_line": 678,
+      "forms": [
+        "'process_kind' (unclassified selector literal)",
+        "'process_type' (unclassified selector literal)"
+      ],
+      "ledger_id": "LG-f26f5a1c",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/models/_process_ir_compat.py",
+      "sites": 2,
+      "symbol": "legacy_flow_sequence_to_ir"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 300,
+      "forms": [
+        "send_request (unclassified reference)"
+      ],
+      "ledger_id": "LG-aef88b5e",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/api_to_api_sync.py",
+      "sites": 1,
+      "symbol": "ApiTarget"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 1357,
+      "forms": [
+        "'send_request' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-fd0fb833",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/api_to_api_sync.py",
+      "sites": 2,
+      "symbol": "ApiToApiSyncArchetype"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 1495,
+      "forms": [
+        "send_request (unclassified attribute)"
+      ],
+      "ledger_id": "LG-c23b1925",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/api_to_api_sync.py",
+      "sites": 1,
+      "symbol": "ApiToApiSyncArchetype.emit_spec"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 1129,
+      "forms": [
+        "send_request (unclassified attribute)"
+      ],
+      "ledger_id": "LG-c65a6048",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/api_to_api_sync.py",
+      "sites": 1,
+      "symbol": "_build_pipeline_dict"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 1002,
+      "forms": [
+        "send_request (unclassified attribute)"
+      ],
+      "ledger_id": "LG-4166bdd1",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/api_to_api_sync.py",
+      "sites": 1,
+      "symbol": "_build_rest_send_params"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 3479,
+      "forms": [
+        "'send_request' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-a34a1a82",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "sites": 2,
+      "symbol": "DatabaseToApiSyncArchetype"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 3671,
+      "forms": [
+        "send_request (unclassified attribute)"
+      ],
+      "ledger_id": "LG-b9ecf83d",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "sites": 1,
+      "symbol": "DatabaseToApiSyncArchetype.emit_spec"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 2129,
+      "forms": [
+        "send_request (unclassified attribute)"
+      ],
+      "ledger_id": "LG-12c696f9",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "sites": 1,
+      "symbol": "DatabaseToApiSyncParameters._enforce_watermark_consistency"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 2206,
+      "forms": [
+        "send_request (unclassified attribute)",
+        "send_request (unclassified reference)"
+      ],
+      "ledger_id": "LG-a209f251",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "sites": 7,
+      "symbol": "DatabaseToApiSyncParameters._validate_transform_refs"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 1158,
+      "forms": [
+        "send_request (unclassified reference)"
+      ],
+      "ledger_id": "LG-45d2d0f9",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "sites": 1,
+      "symbol": "RestTarget"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 2796,
+      "forms": [
+        "send_request (unclassified attribute)"
+      ],
+      "ledger_id": "LG-176df664",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "sites": 1,
+      "symbol": "_build_dynamic_path"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 3195,
+      "forms": [
+        "send_request (unclassified attribute)"
+      ],
+      "ledger_id": "LG-f58c90b7",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "sites": 1,
+      "symbol": "_build_operational_intent"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 2594,
+      "forms": [
+        "send_request (unclassified attribute)"
+      ],
+      "ledger_id": "LG-2b21dfd2",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "sites": 1,
+      "symbol": "_build_rest_send_params"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 2892,
+      "forms": [
+        "send_request (unclassified attribute)"
+      ],
+      "ledger_id": "LG-05070148",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+      "sites": 1,
+      "symbol": "_build_sync_pipeline_adapter_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 327,
+      "forms": [
+        "'send_request' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-e4d03e77",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py",
+      "sites": 1,
+      "symbol": "HttpListenerToRestArchetype"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "migrate the archetype to canonical ProcessIR",
+      "evidence_line": 378,
+      "forms": [
+        "send_request (unclassified attribute)"
+      ],
+      "ledger_id": "LG-91586a36",
+      "owning_issue": "#159",
+      "path": "src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py",
+      "sites": 2,
+      "symbol": "HttpListenerToRestArchetype.emit_spec"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 247,
+      "forms": [
+        "'Archetype NamingConfig payload (integration_name, component_prefix, optional folder_path/component_names/convention/runtime_hints).' (unclassified Component-endpoint literal)"
+      ],
+      "ledger_id": "LG-28ae7ec8",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/patterns/composition.py",
+      "sites": 1,
+      "symbol": "CompositionOptions"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 695,
+      "forms": [
+        "send_request (unclassified attribute)"
+      ],
+      "ledger_id": "LG-d6d3360b",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/patterns/composition.py",
+      "sites": 1,
+      "symbol": "_fanout_target_params"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 968,
+      "forms": [
+        "send_request (unclassified attribute)"
+      ],
+      "ledger_id": "LG-48a0cf76",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/patterns/composition.py",
+      "sites": 5,
+      "symbol": "compose_archetypes"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 584,
+      "forms": [
+        "send_request (unclassified attribute)"
+      ],
+      "ledger_id": "LG-1dd09f43",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/patterns/composition.py",
+      "sites": 2,
+      "symbol": "validate_composition"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 135,
+      "forms": [
+        "'ProcessFlowBuilder' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-c5756eb3",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/patterns/primitives/branch.py",
+      "sites": 1,
+      "symbol": "BranchPrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 212,
+      "forms": [
+        "'ProcessFlowBuilder' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-a554a9c4",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/patterns/primitives/data_process.py",
+      "sites": 1,
+      "symbol": "DataProcessPrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 178,
+      "forms": [
+        "'ProcessFlowBuilder' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-e38ae137",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/patterns/primitives/decision.py",
+      "sites": 1,
+      "symbol": "DecisionPrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 87,
+      "forms": [
+        "'ProcessFlowBuilder' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-756523de",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/patterns/primitives/document_cache_lookup.py",
+      "sites": 1,
+      "symbol": "DocumentCacheLookupPrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 86,
+      "forms": [
+        "'ProcessFlowBuilder' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-dd69301a",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/patterns/primitives/document_cache_put.py",
+      "sites": 1,
+      "symbol": "DocumentCachePutPrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 118,
+      "forms": [
+        "'ProcessFlowBuilder' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-7063ef77",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/patterns/primitives/document_cache_remove.py",
+      "sites": 1,
+      "symbol": "DocumentCacheRemovePrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 121,
+      "forms": [
+        "'ProcessFlowBuilder' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-6a39c73a",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/patterns/primitives/document_cache_retrieve.py",
+      "sites": 1,
+      "symbol": "DocumentCacheRetrievePrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 100,
+      "forms": [
+        "'ProcessFlowBuilder' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-7e4e86fe",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/patterns/primitives/flow_control.py",
+      "sites": 1,
+      "symbol": "FlowControlPrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 95,
+      "forms": [
+        "'ProcessFlowBuilder' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-4cfdfe60",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/patterns/primitives/return_documents.py",
+      "sites": 1,
+      "symbol": "ReturnDocumentsPrimitive"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 130,
+      "forms": [
+        "'ProcessFlowBuilder' (unclassified symbolic literal)"
+      ],
+      "ledger_id": "LG-7e87f855",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/patterns/primitives/throw_exception.py",
+      "sites": 1,
+      "symbol": "ThrowExceptionPrimitive"
     }
   ],
   "route_reconciliation": {
@@ -4604,7 +6722,8 @@
       "process_kind_consumer",
       "example_producer",
       "authoring_boundary",
-      "unclassified_dynamic"
+      "unclassified_dynamic",
+      "unclassified_reference"
     ],
     "example_document_count": 8,
     "excluded_from_equality": [
