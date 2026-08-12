@@ -2318,6 +2318,7 @@ in the suite. Drift detection is unaffected — the hash covers the complete can
 | Ledger sections partition every census kind | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_ledger_sections_partition_every_census_kind` |
 | The tables are regenerable from the JSON | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_markdown_tables_are_regenerable_from_the_json` |
 | **Mutation:** every module-qualified registry spelling is reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_every_module_qualified_registry_spelling_is_reported` |
+| **Precision:** a generic method name on an unrelated target is not reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_generic_method_name_on_an_unrelated_target_is_not_reported` |
 
 **Darkness.** This slice changes nothing under `src/boomi_mcp/` or `server.py`:
 `git diff 9711a9c0cb6c88dda41ada94d88694915b659f36 -- src/boomi_mcp server.py` is empty. The only

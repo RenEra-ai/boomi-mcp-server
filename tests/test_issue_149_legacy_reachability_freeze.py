@@ -384,6 +384,28 @@ def test_a_builder_method_reached_through_getattr_is_reported(census_only):
     assert "unclassified_dynamic" in {r.split(" | ")[0] for r in dynamic.added}
 
 
+def test_a_generic_method_name_on_an_unrelated_target_is_not_reported(census_only):
+    """`build` is a generic name and says nothing on its own.
+
+    Precision matters as much as recall for a FROZEN census: reporting
+    `getattr(plugin, "build")` in unrelated code would fail the gate for an edit
+    with no legacy reachability at all, and a gate that cries wolf gets
+    re-baselined without reading. Distinctive names (`get_process_flow_builder`,
+    `_create_component_raw`) still match on the name alone.
+    """
+    unrelated = _added(census_only, "_m12_12_synthetic_generic_name", (
+        "def f(plugin):\n"
+        "    return getattr(plugin, 'build')()\n"
+    ))
+    assert unrelated.added == [], unrelated.added
+
+    distinctive = _added(census_only, "_m12_12_synthetic_distinctive_name", (
+        "def f(mod):\n"
+        "    return getattr(mod, 'get_process_flow_builder')('sync_pipeline')\n"
+    ))
+    assert "unclassified_dynamic" in {r.split(" | ")[0] for r in distinctive.added}
+
+
 def test_a_bulk_component_caller_is_reported_as_a_write_sink(census_only):
     """`bulk_component` is not a read.
 

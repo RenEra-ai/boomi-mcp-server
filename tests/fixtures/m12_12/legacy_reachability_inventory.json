@@ -3160,46 +3160,46 @@
     },
     {
       "artifact_id": "SS-BUILDER-DIAGNOSTICS:PROCESS_KIND_REQUIRED",
-      "canonical_length": 416,
+      "canonical_length": 414,
       "producer": "integration_builder plan preflight",
       "selector": "PROCESS_KIND_REQUIRED",
-      "sha256": "9e91552d28a413bbce8e08df16e1341e9bcb44bd8d626673ec8f00a5268f94b7",
+      "sha256": "5ddc39bd95841fe8a00523ea4c345088bd38b3a9a72b9aefee9568e1f2603584",
       "surface_class": "SS-BUILDER-DIAGNOSTICS",
       "value": {
+        "error": "Process components must set config.process_kind; legacy freeform process JSON authoring has been removed.",
         "error_code": "PROCESS_KIND_REQUIRED",
         "field": "config.process_kind",
-        "hint": "Use list_integration_archetypes()/build_from_archetype(), or set process_kind to one of ['database_to_api_sync', 'sync_pipeline', 'wrapper_subprocess']. Use manage_component with raw XML only as an explicit escape hatch.",
-        "message": "Process components must set config.process_kind; legacy freeform process JSON authoring has been removed."
+        "hint": "Use list_integration_archetypes()/build_from_archetype(), or set process_kind to one of ['database_to_api_sync', 'sync_pipeline', 'wrapper_subprocess']. Use manage_component with raw XML only as an explicit escape hatch."
       },
       "value_omitted": false
     },
     {
       "artifact_id": "SS-BUILDER-DIAGNOSTICS:PROCESS_KIND_UNSUPPORTED",
-      "canonical_length": 234,
+      "canonical_length": 232,
       "producer": "integration_builder plan preflight",
       "selector": "PROCESS_KIND_UNSUPPORTED",
-      "sha256": "d7884984672b6ab07b78bba644461f9d74781761ad04e7f729167344778147ea",
+      "sha256": "0f45d32856f504a0a5d2b7aa8098c481ebd3f3c3f86bdee0e63ed87641366ce7",
       "surface_class": "SS-BUILDER-DIAGNOSTICS",
       "value": {
+        "error": "process_kind '__not_a_real_kind__' is not supported.",
         "error_code": "PROCESS_KIND_UNSUPPORTED",
         "field": "process_kind",
-        "hint": "Supported process_kind values: ['database_to_api_sync', 'sync_pipeline', 'wrapper_subprocess'].",
-        "message": "process_kind '__not_a_real_kind__' is not supported."
+        "hint": "Supported process_kind values: ['database_to_api_sync', 'sync_pipeline', 'wrapper_subprocess']."
       },
       "value_omitted": false
     },
     {
       "artifact_id": "SS-BUILDER-DIAGNOSTICS:PROCESS_KIND_XML_CONFLICT",
-      "canonical_length": 325,
+      "canonical_length": 323,
       "producer": "integration_builder plan preflight",
       "selector": "PROCESS_KIND_XML_CONFLICT",
-      "sha256": "7975f6a518a0b2f0b4e06d3d21d03784fa48404e5e0f4ab1111343934f4b3ef1",
+      "sha256": "5337b5c3c338a2a5bb8f6f9b6c3a9c7a5825d767c2ceb60ad5219e69d3b3d028",
       "surface_class": "SS-BUILDER-DIAGNOSTICS",
       "value": {
+        "error": "process_kind and config.xml are mutually exclusive.",
         "error_code": "PROCESS_KIND_XML_CONFLICT",
         "field": "config.xml",
-        "hint": "Choose one: set process_kind for the structured process-flow builder, OR drop the process_kind and author raw process XML through manage_component (type=\"component\", config.xml) instead.",
-        "message": "process_kind and config.xml are mutually exclusive."
+        "hint": "Choose one: set process_kind for the structured process-flow builder, OR drop the process_kind and author raw process XML through manage_component (type=\"component\", config.xml) instead."
       },
       "value_omitted": false
     },

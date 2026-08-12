@@ -521,10 +521,21 @@ class _Scanner(ast.NodeVisitor):
             has_name_arg = len(node.args) > 1
             probe = _const_str(node.args[1]) if has_name_arg else None
             name_is_constant = has_name_arg and isinstance(node.args[1], ast.Constant)
-            if probe and (probe in self._watched or probe in self._methods):
+            target_is_builder = bool(node.args) and self._names_a_builder(node.args[0])
+            if probe and probe in self._watched:
+                # A DISTINCTIVE name — `get_process_flow_builder`,
+                # `_create_component_raw`, `process_kind`. The name alone is
+                # evidence, whatever the target.
                 self._emit("unclassified_dynamic", "getattr(..., %r)" % probe, node.lineno)
-            elif has_name_arg and not name_is_constant \
-                    and self._names_a_builder(node.args[0]):
+            elif probe and probe in self._methods and target_is_builder:
+                # A GENERIC name — `build`, `validate_config`, `lower_config`.
+                # These say nothing on their own: `getattr(plugin, "build")` in
+                # unrelated code is not legacy reachability, and reporting it
+                # would fail the frozen census for a harmless edit. The target
+                # must be a builder.
+                self._emit("unclassified_dynamic", "getattr(<builder>, %r)" % probe,
+                           node.lineno)
+            elif has_name_arg and not name_is_constant and target_is_builder:
                 self._emit("unclassified_dynamic",
                            "getattr(<builder>, <dynamic>)", node.lineno)
         elif base == "IntegrationComponentSpec":
@@ -1309,22 +1320,26 @@ def _echoed_list(payload: Any, key: str) -> List[str]:
 
 
 def _builder_diagnostic_envelopes() -> Dict[str, Any]:
-    """Served builder diagnostics, reached through the plan-time authority.
+    """Served builder diagnostics, snapshotted as CALLERS actually receive them.
 
-    `_process_component_preflight` is the function at `integration_builder.py:5422`
-    that this inventory's own dispatch census records; it takes no client and
-    returns the `BuilderValidationError` whose text is served to callers.
+    Driven through the PUBLIC plan path, not the private preflight. An earlier
+    draft called `_process_component_preflight` directly and synthesized a
+    `{message, error_code, field, hint}` value — but a caller receives `{error,
+    error_code, field, hint}` (plus an optional `details`) nested under
+    `steps[].validation_error`. Pinning the internal exception rather than the
+    wrapper meant a change to the planner's serialization could alter the served
+    contract without moving this artifact, which is precisely the drift this
+    surface exists to catch.
 
     **Nothing here is caught.** An earlier draft wrapped the probe in a bare
     `except Exception` and stored `{"_probe_error": type(exc).__name__}` — which
-    silently froze THREE of these four artifacts as `{"_probe_error":
+    silently froze all three of these artifacts as `{"_probe_error":
     "TypeError"}`, so the served text they were supposed to pin was never pinned
     at all, and the transport bomb's `AssertionError` would have been swallowed
     the same way. A probe that cannot reach its envelope must fail the
     derivation, loudly, not record its own failure as the contract.
     """
     from boomi_mcp.categories import integration_builder
-    from boomi_mcp.models.integration_models import IntegrationComponentSpec
 
     probes = {
         "PROCESS_KIND_REQUIRED": {},
@@ -1334,25 +1349,31 @@ def _builder_diagnostic_envelopes() -> Dict[str, Any]:
     }
     out: Dict[str, Any] = {}
     for selector, config in probes.items():
-        comp = IntegrationComponentSpec(
-            key="p", type="process", name="P", action="create", config=config)
-        error = integration_builder._process_component_preflight(
-            comp, config, config.get("process_kind"), "create", {"p": comp})
-        if error is None:
+        plan = integration_builder._build_plan(None, {"components": [{
+            "key": "p", "type": "process", "name": "P",
+            # The explicit component_id is what keeps the PUBLIC plan path
+            # offline — without one, `_resolve_existing_components` queries
+            # component metadata and the probe cannot run without a client. The
+            # action is not load-bearing (create with an id is client-free too);
+            # the envelopes are identical either way.
+            "action": "update", "component_id": "00000000-0000-0000-0000-000000000000",
+            "config": config,
+        }]})
+        envelopes = [
+            step["validation_error"] for step in (plan.get("steps") or [])
+            if isinstance(step, dict) and step.get("validation_error")
+        ]
+        if len(envelopes) != 1:
             raise AssertionError(
-                "the %s probe no longer reaches its envelope — the served "
-                "diagnostic it pins would silently stop being frozen" % selector)
-        out[selector] = {
-            "message": str(error),
-            "error_code": getattr(error, "error_code", None),
-            "field": getattr(error, "field", None),
-            "hint": getattr(error, "hint", None),
-        }
-        if out[selector]["error_code"] != selector:
+                "the %s probe yielded %d validation envelopes through the public "
+                "plan path — the served diagnostic it pins would silently stop "
+                "being frozen" % (selector, len(envelopes)))
+        out[selector] = envelopes[0]
+        if envelopes[0].get("error_code") != selector:
             raise AssertionError(
                 "the %s probe now yields %r — an earlier gate is firing first, so "
                 "this artifact would pin the wrong served text"
-                % (selector, out[selector]["error_code"]))
+                % (selector, envelopes[0].get("error_code")))
     return out
 
 
