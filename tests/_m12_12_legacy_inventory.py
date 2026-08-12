@@ -173,16 +173,48 @@ def python_sources() -> Dict[str, str]:
     `scripts/` is scanned for the same reason — it is caller-reachable Python
     that can construct a legacy config.
     """
+    visible = _repository_files()
     out: Dict[str, str] = {}
     for path in sorted(_ROOT.glob("*.py")):
-        out[path.name] = path.read_text(encoding="utf-8")
+        rel = path.name
+        if visible is None or rel in visible:
+            out[rel] = path.read_text(encoding="utf-8")
     for root in ("src/boomi_mcp", "scripts"):
         base = _ROOT / root
         if not base.is_dir():
             continue
         for path in sorted(base.rglob("*.py")):
-            out[path.relative_to(_ROOT).as_posix()] = path.read_text(encoding="utf-8")
+            rel = path.relative_to(_ROOT).as_posix()
+            if visible is None or rel in visible:
+                out[rel] = path.read_text(encoding="utf-8")
     return dict(sorted(out.items()))
+
+
+def _repository_files() -> Optional["frozenset[str]"]:
+    """Paths git considers part of the repository, or None if git is unavailable.
+
+    The scan walked the FILESYSTEM, so it swept up gitignored files — notably
+    `scripts/provision_qa_noop_fixture.py`, which contributed census rows, ledger
+    rows and `python_source_count` to the committed baseline. On a clean checkout
+    that file does not exist and the freeze test FAILED: the fixture pinned a
+    working-copy accident. Tracked plus untracked-not-ignored is exactly "files
+    that belong to the repo".
+
+    `None` (git absent, e.g. inside a `git archive` export) falls back to the
+    plain walk — correct there, because an ignored file is not in the export
+    either, so both answers agree.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+            cwd=str(_ROOT), capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):  # pragma: no cover - defensive
+        return None
+    if result.returncode != 0:
+        return None
+    return frozenset(line.strip() for line in result.stdout.splitlines() if line.strip())
 
 
 def unscanned_assets() -> List[str]:
@@ -1124,6 +1156,13 @@ class _Scanner(ast.NodeVisitor):
 _COMPONENT_ENDPOINT_RE = re.compile(
     r"(?<!<)/component(?![a-z0-9_ ])|component/bulk|^component/", re.IGNORECASE)
 
+#: The BARE collection path. `client.post("Component", data=xml)` against a
+#: base-URL client IS the create route, and relative sub-resources were covered
+#: while the collection itself was not. Case-SENSITIVE and exact: exactly one
+#: such literal exists in the whole scan universe, so the noise cost is nil,
+#: while a case-insensitive match would sweep up ordinary prose.
+_COMPONENT_COLLECTION_RE = re.compile(r"^Component$")
+
 
 def _folded_str(node: ast.AST) -> Optional[str]:
     """A string literal, including a simple `"a" + "b"` concatenation."""
@@ -1227,10 +1266,26 @@ class _ResidueScanner(ast.NodeVisitor):
 
     def visit_Name(self, node: ast.Name) -> None:  # noqa: N802
         resolved = self._aliases.get(node.id, node.id)
-        if id(node) not in self._consumed and resolved in self._watched:
-            label = resolved if resolved == node.id else "%s (as %s)" % (resolved, node.id)
+        if id(node) not in self._consumed:
+            if resolved in self._watched:
+                label = (resolved if resolved == node.id
+                         else "%s (as %s)" % (resolved, node.id))
+                self._reported.add(id(node))
+                self._emit("%s (unclassified reference)" % label, node.lineno)
+            elif resolved in self._selectors:
+                # `process_kind: str = "sync_pipeline"` — an annotated field on a
+                # typed spec, which is the spelling M12's own direction produces.
+                # `visit_Attribute` and `_check_string` both tested selectors;
+                # this branch tested only `_watched`, so 40 live occurrences were
+                # accounted for by nothing.
+                self._reported.add(id(node))
+                self._emit("%s (unclassified selector name)" % resolved, node.lineno)
+        self.generic_visit(node)
+
+    def visit_arg(self, node: ast.arg) -> None:  # noqa: N802
+        if node.arg in self._selectors and id(node) not in self._consumed:
             self._reported.add(id(node))
-            self._emit("%s (unclassified reference)" % label, node.lineno)
+            self._emit("%s (unclassified selector parameter)" % node.arg, node.lineno)
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:  # noqa: N802
@@ -1262,7 +1317,8 @@ class _ResidueScanner(ast.NodeVisitor):
             # A watched SYMBOL reached as a string — `globals()["..."]`,
             # `getattr(m, "...")`, a dispatch table key.
             self._emit("%r (unclassified symbolic literal%s)" % (value, note), line)
-        elif _COMPONENT_ENDPOINT_RE.search(value):
+        elif _COMPONENT_ENDPOINT_RE.search(value) \
+                or _COMPONENT_COLLECTION_RE.match(value):
             self._emit("%r (unclassified Component-endpoint literal%s)" % (value, note),
                        line)
 

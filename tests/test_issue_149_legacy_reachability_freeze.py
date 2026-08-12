@@ -483,11 +483,28 @@ def test_every_repo_root_module_and_script_is_scanned():
     scanned = set(inv.python_sources())
     for required in ("server.py", "server_http.py"):
         assert required in scanned, required
-    roots = {p.name for p in inv.repo_root().glob("*.py")}
+
+    # Scoped to what GIT considers part of the repository. A filesystem walk
+    # swept in gitignored working-copy files, and the baseline that pinned one
+    # failed on a clean checkout.
+    #
+    # `None` means git is unavailable — a source export with no `.git`, which is
+    # exactly where a clean-checkout reproduction runs. The fallback to the plain
+    # walk is CORRECT there (an ignored file is not in the export either), so
+    # requiring git here would fail the very environment the fix exists to
+    # support.
+    visible = inv._repository_files()
+    universe = visible if visible is not None else scanned
+
+    roots = {p.name for p in inv.repo_root().glob("*.py")} & universe
     assert roots <= scanned, sorted(roots - scanned)
     scripts = {p.relative_to(inv.repo_root()).as_posix()
-               for p in (inv.repo_root() / "scripts").rglob("*.py")}
+               for p in (inv.repo_root() / "scripts").rglob("*.py")} & universe
+    assert scripts, "no repository-visible script was scanned"
     assert scripts <= scanned, sorted(scripts - scanned)
+    if visible is not None:
+        assert not (scanned - visible), \
+            "the scan includes files git does not: %s" % sorted(scanned - visible)[:5]
 
 
 @pytest.mark.parametrize("body", [
@@ -530,11 +547,23 @@ def test_an_edge_from_a_script_into_a_root_module_is_reported(census_only):
     assert "legacy_transitive_call" in {r.split(" | ")[0] for r in diff.added}, diff.report()
 
 
-def test_the_real_script_to_server_edge_exists_at_head(baseline):
-    """Guard the guard for the case the review named."""
-    edges = {(r["path"], r["symbol"]) for r in baseline["census"]
-             if r["census"] == "legacy_transitive_call" and "server.py" in r["form"]}
-    assert ("scripts/provision_qa_noop_fixture.py", "provision") in edges, sorted(edges)[:5]
+def test_a_root_module_import_resolves_from_a_script():
+    """Guard the guard for the case the review named — at the RESOLVER.
+
+    The concrete instance the review cited, `scripts/provision_qa_noop_fixture.py`
+    calling `server.manage_component(...)`, is no longer in the census: that file
+    is gitignored (`.gitignore:140`), and the scan now takes its universe from
+    git rather than from the filesystem, because the previous baseline pinned
+    that working-copy-only file and therefore FAILED on a clean checkout. The
+    mechanism it demonstrated is still pinned — here at the resolver, and by
+    `test_an_edge_from_a_script_into_a_root_module_is_reported` end-to-end.
+    """
+    known = frozenset(inv.python_sources()) | {"scripts/probe.py"}
+    assert inv._resolve_module_path("server", 0, "scripts/probe.py", known) == "server.py"
+    assert inv._resolve_module_path("server_http", 0, "scripts/probe.py", known) \
+        == "server_http.py"
+    # A genuinely third-party module is still not ours.
+    assert inv._resolve_module_path("requests", 0, "scripts/probe.py", known) is None
 
 
 def test_a_tool_registered_inside_a_module_level_conditional_can_bear(baseline):
@@ -1069,8 +1098,15 @@ def test_every_watched_mention_is_classified_or_residue():
         for node in _ast.walk(tree):
             mention = None
             if isinstance(node, _ast.Name):
-                if scanner._aliases.get(node.id, node.id) in watched:
+                resolved = scanner._aliases.get(node.id, node.id)
+                # `selectors` too: the guard's Name branch omitted them while its
+                # Attribute branch included them, so it could not see the very
+                # hole it was meant to detect.
+                if resolved in watched or resolved in selectors:
                     mention = node.id
+            elif isinstance(node, _ast.arg):
+                if node.arg in selectors:
+                    mention = node.arg
             elif isinstance(node, _ast.Attribute):
                 if node.attr in watched or node.attr in selectors:
                     mention = node.attr

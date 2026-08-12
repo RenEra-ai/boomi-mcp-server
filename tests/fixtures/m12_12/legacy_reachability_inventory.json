@@ -874,51 +874,6 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 537,
-      "form": "main(...) [legacy-bearing, scripts/provision_qa_noop_fixture.py]",
-      "path": "scripts/provision_qa_noop_fixture.py",
-      "row_id": "LT-6ef20688",
-      "symbol": "<module>"
-    },
-    {
-      "census": "legacy_transitive_call",
-      "count": 1,
-      "evidence_line": 151,
-      "form": "_emit_linear_shapes(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
-      "path": "scripts/provision_qa_noop_fixture.py",
-      "row_id": "LT-c69152b5",
-      "symbol": "build_noop_process_xml"
-    },
-    {
-      "census": "legacy_transitive_call",
-      "count": 1,
-      "evidence_line": 527,
-      "form": "provision(...) [legacy-bearing, scripts/provision_qa_noop_fixture.py]",
-      "path": "scripts/provision_qa_noop_fixture.py",
-      "row_id": "LT-b4c9d5ad",
-      "symbol": "main"
-    },
-    {
-      "census": "legacy_transitive_call",
-      "count": 1,
-      "evidence_line": 392,
-      "form": "build_noop_process_xml(...) [legacy-bearing, scripts/provision_qa_noop_fixture.py]",
-      "path": "scripts/provision_qa_noop_fixture.py",
-      "row_id": "LT-1767a9fe",
-      "symbol": "provision"
-    },
-    {
-      "census": "legacy_transitive_call",
-      "count": 1,
-      "evidence_line": 394,
-      "form": "manage_component(...) [legacy-bearing, server.py]",
-      "path": "scripts/provision_qa_noop_fixture.py",
-      "row_id": "LT-05fc39b6",
-      "symbol": "provision"
-    },
-    {
-      "census": "legacy_transitive_call",
-      "count": 1,
       "evidence_line": 1892,
       "form": "analyze_component_action(...) [legacy-bearing, src/boomi_mcp/categories/components/analyze_component.py]",
       "path": "server.py",
@@ -2484,6 +2439,15 @@
     },
     {
       "census": "unclassified_reference",
+      "count": 3,
+      "evidence_line": 656,
+      "form": "process_kind (unclassified selector name)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-0a55db58",
+      "symbol": "ProcessFlowBuilder.validate_config"
+    },
+    {
+      "census": "unclassified_reference",
       "count": 1,
       "evidence_line": 5301,
       "form": "ProcessFlowBuilder (unclassified reference)",
@@ -2520,6 +2484,15 @@
     },
     {
       "census": "unclassified_reference",
+      "count": 3,
+      "evidence_line": 5975,
+      "form": "process_kind (unclassified selector name)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-59f648bc",
+      "symbol": "SyncPipelineBuilder.validate_config"
+    },
+    {
+      "census": "unclassified_reference",
       "count": 1,
       "evidence_line": 4967,
       "form": "ProcessFlowBuilder (unclassified reference)",
@@ -2547,6 +2520,15 @@
     },
     {
       "census": "unclassified_reference",
+      "count": 3,
+      "evidence_line": 5005,
+      "form": "process_kind (unclassified selector name)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-a80149bc",
+      "symbol": "WrapperSubprocessBuilder.validate_config"
+    },
+    {
+      "census": "unclassified_reference",
       "count": 1,
       "evidence_line": 2412,
       "form": "ProcessFlowBuilder (unclassified reference)",
@@ -2565,6 +2547,24 @@
     },
     {
       "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 6150,
+      "form": "process_kind (unclassified selector name)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-81d88cd1",
+      "symbol": "get_process_flow_builder"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 6148,
+      "form": "process_kind (unclassified selector parameter)",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "row_id": "UR-d75ee4b6",
+      "symbol": "get_process_flow_builder"
+    },
+    {
+      "census": "unclassified_reference",
       "count": 1,
       "evidence_line": 5215,
       "form": "'process_kind' (unclassified selector literal)",
@@ -2579,6 +2579,15 @@
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-efeb1e84",
+      "symbol": "_authored_process_validation_error"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 5214,
+      "form": "process_kind (unclassified selector name)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-91ead14e",
       "symbol": "_authored_process_validation_error"
     },
     {
@@ -2629,6 +2638,15 @@
     {
       "census": "unclassified_reference",
       "count": 2,
+      "evidence_line": 5802,
+      "form": "process_kind (unclassified selector name)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-f9bf77bc",
+      "symbol": "_build_plan"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 2,
       "evidence_line": 3529,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
@@ -2642,6 +2660,15 @@
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-3ee64ea8",
+      "symbol": "_execute_component"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 4,
+      "evidence_line": 3528,
+      "form": "process_kind (unclassified selector name)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-289e945f",
       "symbol": "_execute_component"
     },
     {
@@ -2682,6 +2709,42 @@
     },
     {
       "census": "unclassified_reference",
+      "count": 5,
+      "evidence_line": 5296,
+      "form": "process_kind (unclassified selector name)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-848e2adc",
+      "symbol": "_process_component_preflight"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5264,
+      "form": "process_kind (unclassified selector parameter)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-31c89c01",
+      "symbol": "_process_component_preflight"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5578,
+      "form": "process_kind (unclassified selector name)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-c5ca1bed",
+      "symbol": "_process_ir_semantic_error"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 5558,
+      "form": "process_kind (unclassified selector parameter)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-93745e9b",
+      "symbol": "_process_ir_semantic_error"
+    },
+    {
+      "census": "unclassified_reference",
       "count": 1,
       "evidence_line": 4198,
       "form": "'process_kind' (unclassified selector literal)",
@@ -2709,6 +2772,15 @@
     },
     {
       "census": "unclassified_reference",
+      "count": 2,
+      "evidence_line": 4197,
+      "form": "process_kind (unclassified selector name)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-7719f4b8",
+      "symbol": "_process_models_error_handling"
+    },
+    {
+      "census": "unclassified_reference",
       "count": 1,
       "evidence_line": 1226,
       "form": "'process_kind' (unclassified selector literal)",
@@ -2723,6 +2795,15 @@
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-54f1e91d",
+      "symbol": "_resolve_preservation_policy"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 3,
+      "evidence_line": 1225,
+      "form": "process_kind (unclassified selector name)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-67617a0c",
       "symbol": "_resolve_preservation_policy"
     },
     {
@@ -2804,6 +2885,15 @@
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-3e5c5362",
+      "symbol": "build_structured_update_xml"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 4,
+      "evidence_line": 3134,
+      "form": "process_kind (unclassified selector name)",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "row_id": "UR-15bbe49f",
       "symbol": "build_structured_update_xml"
     },
     {
@@ -3078,6 +3168,42 @@
     },
     {
       "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 51,
+      "form": "process_kind (unclassified selector name)",
+      "path": "src/boomi_mcp/compiler/process_ir/semantic_validation/legacy_bridge.py",
+      "row_id": "UR-6f3f8277",
+      "symbol": "_adapter_for_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 44,
+      "form": "process_kind (unclassified selector parameter)",
+      "path": "src/boomi_mcp/compiler/process_ir/semantic_validation/legacy_bridge.py",
+      "row_id": "UR-f72d7873",
+      "symbol": "_adapter_for_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 109,
+      "form": "process_kind (unclassified selector name)",
+      "path": "src/boomi_mcp/compiler/process_ir/semantic_validation/legacy_bridge.py",
+      "row_id": "UR-ad0468e1",
+      "symbol": "validate_legacy_process_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 100,
+      "form": "process_kind (unclassified selector parameter)",
+      "path": "src/boomi_mcp/compiler/process_ir/semantic_validation/legacy_bridge.py",
+      "row_id": "UR-ec8cfb60",
+      "symbol": "validate_legacy_process_config"
+    },
+    {
+      "census": "unclassified_reference",
       "count": 2,
       "evidence_line": 216,
       "form": "'process_kind' (unclassified selector literal)",
@@ -3110,6 +3236,15 @@
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/models/_process_ir_compat.py",
       "row_id": "UR-1e99cf01",
+      "symbol": "legacy_flow_sequence_to_ir"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 3,
+      "evidence_line": 678,
+      "form": "process_kind (unclassified selector name)",
+      "path": "src/boomi_mcp/models/_process_ir_compat.py",
+      "row_id": "UR-5dd797d5",
       "symbol": "legacy_flow_sequence_to_ir"
     },
     {
@@ -4320,59 +4455,6 @@
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "sites": 1,
       "symbol": "_process_ir_semantic_error"
-    },
-    {
-      "census": "legacy_transitive_call",
-      "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 537,
-      "forms": [
-        "main(...) [legacy-bearing, scripts/provision_qa_noop_fixture.py]"
-      ],
-      "ledger_id": "LG-28410386",
-      "owning_issue": "#160",
-      "path": "scripts/provision_qa_noop_fixture.py",
-      "sites": 1,
-      "symbol": "<module>"
-    },
-    {
-      "census": "legacy_transitive_call",
-      "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 151,
-      "forms": [
-        "_emit_linear_shapes(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]"
-      ],
-      "ledger_id": "LG-cae1b442",
-      "owning_issue": "#160",
-      "path": "scripts/provision_qa_noop_fixture.py",
-      "sites": 1,
-      "symbol": "build_noop_process_xml"
-    },
-    {
-      "census": "legacy_transitive_call",
-      "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 527,
-      "forms": [
-        "provision(...) [legacy-bearing, scripts/provision_qa_noop_fixture.py]"
-      ],
-      "ledger_id": "LG-3f3b8e58",
-      "owning_issue": "#160",
-      "path": "scripts/provision_qa_noop_fixture.py",
-      "sites": 1,
-      "symbol": "main"
-    },
-    {
-      "census": "legacy_transitive_call",
-      "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 392,
-      "forms": [
-        "build_noop_process_xml(...) [legacy-bearing, scripts/provision_qa_noop_fixture.py]",
-        "manage_component(...) [legacy-bearing, server.py]"
-      ],
-      "ledger_id": "LG-8cbce0ea",
-      "owning_issue": "#160",
-      "path": "scripts/provision_qa_noop_fixture.py",
-      "sites": 2,
-      "symbol": "provision"
     },
     {
       "census": "legacy_transitive_call",
@@ -5824,12 +5906,13 @@
       "evidence_line": 656,
       "forms": [
         "'process_kind' (unclassified selector literal)",
-        "'process_type' (unclassified selector literal)"
+        "'process_type' (unclassified selector literal)",
+        "process_kind (unclassified selector name)"
       ],
       "ledger_id": "LG-36bd73fc",
       "owning_issue": "#160",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
-      "sites": 3,
+      "sites": 6,
       "symbol": "ProcessFlowBuilder.validate_config"
     },
     {
@@ -5861,15 +5944,16 @@
     {
       "census": "unclassified_reference",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 5976,
+      "evidence_line": 5975,
       "forms": [
         "'process_kind' (unclassified selector literal)",
-        "'process_type' (unclassified selector literal)"
+        "'process_type' (unclassified selector literal)",
+        "process_kind (unclassified selector name)"
       ],
       "ledger_id": "LG-513dee34",
       "owning_issue": "#160",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
-      "sites": 3,
+      "sites": 6,
       "symbol": "SyncPipelineBuilder.validate_config"
     },
     {
@@ -5888,15 +5972,16 @@
     {
       "census": "unclassified_reference",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 5006,
+      "evidence_line": 5005,
       "forms": [
         "'process_kind' (unclassified selector literal)",
-        "'process_type' (unclassified selector literal)"
+        "'process_type' (unclassified selector literal)",
+        "process_kind (unclassified selector name)"
       ],
       "ledger_id": "LG-69d179d0",
       "owning_issue": "#160",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
-      "sites": 3,
+      "sites": 6,
       "symbol": "WrapperSubprocessBuilder.validate_config"
     },
     {
@@ -5927,16 +6012,31 @@
     },
     {
       "census": "unclassified_reference",
+      "disposition": "delete the legacy semantic shell",
+      "evidence_line": 6148,
+      "forms": [
+        "process_kind (unclassified selector name)",
+        "process_kind (unclassified selector parameter)"
+      ],
+      "ledger_id": "LG-943d38e3",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+      "sites": 3,
+      "symbol": "get_process_flow_builder"
+    },
+    {
+      "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 5215,
+      "evidence_line": 5214,
       "forms": [
         "'process_kind' (unclassified selector literal)",
-        "'process_type' (unclassified selector literal)"
+        "'process_type' (unclassified selector literal)",
+        "process_kind (unclassified selector name)"
       ],
       "ledger_id": "LG-98073b97",
       "owning_issue": "#160",
       "path": "src/boomi_mcp/categories/integration_builder.py",
-      "sites": 2,
+      "sites": 4,
       "symbol": "_authored_process_validation_error"
     },
     {
@@ -5956,75 +6056,95 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 5803,
+      "evidence_line": 5802,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
-        "ProcessFlowBuilder (unclassified reference)"
+        "ProcessFlowBuilder (unclassified reference)",
+        "process_kind (unclassified selector name)"
       ],
       "ledger_id": "LG-32fcd45b",
       "owning_issue": "#160",
       "path": "src/boomi_mcp/categories/integration_builder.py",
-      "sites": 3,
+      "sites": 5,
       "symbol": "_build_plan"
     },
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 3529,
+      "evidence_line": 3528,
       "forms": [
         "'process_kind' (unclassified selector literal)",
-        "'process_type' (unclassified selector literal)"
+        "'process_type' (unclassified selector literal)",
+        "process_kind (unclassified selector name)"
       ],
       "ledger_id": "LG-994f0a04",
       "owning_issue": "#160",
       "path": "src/boomi_mcp/categories/integration_builder.py",
-      "sites": 3,
+      "sites": 7,
       "symbol": "_execute_component"
     },
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 5304,
+      "evidence_line": 5264,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "ProcessFlowBuilder (unclassified reference)",
         "SyncPipelineBuilder (unclassified reference)",
-        "WrapperSubprocessBuilder (unclassified reference)"
+        "WrapperSubprocessBuilder (unclassified reference)",
+        "process_kind (unclassified selector name)",
+        "process_kind (unclassified selector parameter)"
       ],
       "ledger_id": "LG-66c9297f",
       "owning_issue": "#160",
       "path": "src/boomi_mcp/categories/integration_builder.py",
-      "sites": 7,
+      "sites": 13,
       "symbol": "_process_component_preflight"
     },
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 4198,
+      "evidence_line": 5558,
+      "forms": [
+        "process_kind (unclassified selector name)",
+        "process_kind (unclassified selector parameter)"
+      ],
+      "ledger_id": "LG-79c56926",
+      "owning_issue": "#160",
+      "path": "src/boomi_mcp/categories/integration_builder.py",
+      "sites": 2,
+      "symbol": "_process_ir_semantic_error"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
+      "evidence_line": 4197,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
-        "ProcessFlowBuilder (unclassified reference)"
+        "ProcessFlowBuilder (unclassified reference)",
+        "process_kind (unclassified selector name)"
       ],
       "ledger_id": "LG-61ad1e75",
       "owning_issue": "#160",
       "path": "src/boomi_mcp/categories/integration_builder.py",
-      "sites": 3,
+      "sites": 5,
       "symbol": "_process_models_error_handling"
     },
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 1226,
+      "evidence_line": 1225,
       "forms": [
         "'process_kind' (unclassified selector literal)",
-        "'process_type' (unclassified selector literal)"
+        "'process_type' (unclassified selector literal)",
+        "process_kind (unclassified selector name)"
       ],
       "ledger_id": "LG-378bc32b",
       "owning_issue": "#160",
       "path": "src/boomi_mcp/categories/integration_builder.py",
-      "sites": 2,
+      "sites": 5,
       "symbol": "_resolve_preservation_policy"
     },
     {
@@ -6073,15 +6193,16 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 3135,
+      "evidence_line": 3134,
       "forms": [
         "'process_kind' (unclassified selector literal)",
-        "'process_type' (unclassified selector literal)"
+        "'process_type' (unclassified selector literal)",
+        "process_kind (unclassified selector name)"
       ],
       "ledger_id": "LG-2ae43575",
       "owning_issue": "#160",
       "path": "src/boomi_mcp/categories/integration_builder.py",
-      "sites": 3,
+      "sites": 7,
       "symbol": "build_structured_update_xml"
     },
     {
@@ -6236,6 +6357,34 @@
     },
     {
       "census": "unclassified_reference",
+      "disposition": "re-home onto the neutral extraction",
+      "evidence_line": 44,
+      "forms": [
+        "process_kind (unclassified selector name)",
+        "process_kind (unclassified selector parameter)"
+      ],
+      "ledger_id": "LG-f6ce64dd",
+      "owning_issue": "#151",
+      "path": "src/boomi_mcp/compiler/process_ir/semantic_validation/legacy_bridge.py",
+      "sites": 2,
+      "symbol": "_adapter_for_config"
+    },
+    {
+      "census": "unclassified_reference",
+      "disposition": "re-home onto the neutral extraction",
+      "evidence_line": 100,
+      "forms": [
+        "process_kind (unclassified selector name)",
+        "process_kind (unclassified selector parameter)"
+      ],
+      "ledger_id": "LG-c2f0b85e",
+      "owning_issue": "#151",
+      "path": "src/boomi_mcp/compiler/process_ir/semantic_validation/legacy_bridge.py",
+      "sites": 2,
+      "symbol": "validate_legacy_process_config"
+    },
+    {
+      "census": "unclassified_reference",
       "disposition": "migrate the compatibility codec, then delete",
       "evidence_line": 216,
       "forms": [
@@ -6254,12 +6403,13 @@
       "evidence_line": 678,
       "forms": [
         "'process_kind' (unclassified selector literal)",
-        "'process_type' (unclassified selector literal)"
+        "'process_type' (unclassified selector literal)",
+        "process_kind (unclassified selector name)"
       ],
       "ledger_id": "LG-f26f5a1c",
       "owning_issue": "#159",
       "path": "src/boomi_mcp/models/_process_ir_compat.py",
-      "sites": 2,
+      "sites": 5,
       "symbol": "legacy_flow_sequence_to_ir"
     },
     {
@@ -6694,7 +6844,7 @@
       "symbol",
       "form"
     ],
-    "python_source_count": 206,
+    "python_source_count": 205,
     "roots": [
       "*.py (repo root)",
       "src/boomi_mcp",
