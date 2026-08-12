@@ -1969,3 +1969,348 @@ family — canonical ProcessIR / topology / recipe codes travel verbatim as valu
 - `tests/test_m12_11_revision_binding.py` — every stale/mismatched/replayed binding refused, zero mutation
 - `tests/test_m12_11_apply_verify.py` — preflight-before-materializer ordering, provenance, drift
 - `tests/test_m12_11_diagnostics_security.py` — ordering, secret exclusion, terminology
+
+
+---
+
+# 11. Issue #149 (M12.12) — pre-deletion legacy reachability inventory and allowlist baseline
+
+This section is the **instrument** that makes #160's deletion a checked-off subtraction rather
+than a discovery exercise. It PASSES with every legacy path still present: post-deletion
+zero-reachability enforcement (the `M12_LEGACY_PATH_REACHABLE` gate) belongs to #160, not here.
+
+Everything below is DERIVED. The tables in §11.2–§11.6 are emitted from
+`tests/fixtures/m12_12/legacy_reachability_inventory.json` by
+`tests/_m12_12_legacy_inventory.py --emit-markdown` and pasted verbatim;
+`tests/test_issue_149_legacy_reachability_freeze.py::test_the_markdown_tables_are_regenerable_from_the_json`
+fails if anyone hand-edits them apart from the machine record.
+
+## 11.1 Baseline identity and derivation contract
+
+| Field | Value |
+|---|---|
+| Baseline commit | `9711a9c0cb6c88dda41ada94d88694915b659f36` (branch `dev`) |
+| Capture date | 2026-08-12 |
+| Schema / scanner version | 1 / 1 |
+| Scan roots | `server.py`, `src/boomi_mcp/**/*.py` (187 files), `examples/**/*.json` (8 files) |
+| Census rows | 162 |
+| Ledger rows (§11.2–§11.4 grain) | 81 |
+| Component-XML write routes | 20 |
+| Frozen served artifacts | 67 |
+| Machine record | `tests/fixtures/m12_12/legacy_reachability_inventory.json` |
+
+**The watched vocabulary is derived from the runtime authority, never typed out.** Builders come
+from `PROCESS_FLOW_BUILDERS` and `builders.__all__`, legacy emitters from
+`dir(process_emitters.legacy)`, legacy semantic validation from the `legacy_bridge` module, and the
+raw Component-XML sinks from the installed SDK's `ComponentService` (mutating verbs only). A builder
+that #151–#158 registers is therefore watched the day it registers, not the day someone remembers to
+extend a list. `assert_vocabulary_non_vacuous()` fails the suite if any family derives empty, so the
+derivation cannot fail open.
+
+**Nothing positional is frozen.** The semantic key is `(census, path, symbol, form)` plus a call
+count. Line numbers ride along as `evidence_line` for human navigation and are excluded from
+equality — an inserted blank line never breaks the gate (pinned by
+`test_an_inserted_blank_line_does_not_break_the_freeze`), while a second call inside an existing
+function always does (pinned by
+`test_a_second_call_in_an_existing_function_is_reported_as_a_count_change`). **Baseline line numbers
+in the tables below will rot as files grow; the row IDs and qualified symbols are authoritative.**
+
+**Re-baselining after an intentional change** (same doctrine as §1's #135 freeze):
+
+```bash
+PYTHONPATH=src .venv/bin/python tests/_m12_12_legacy_inventory.py \
+    --write tests/fixtures/m12_12/legacy_reachability_inventory.json
+PYTHONPATH=src .venv/bin/python tests/_m12_12_legacy_inventory.py --emit-markdown
+```
+
+then paste the regenerated tables into §11.2–§11.6 **in the same change**. The pin and the ledger
+move together or `test_the_ledger_and_the_json_are_two_way_complete` fails.
+
+### Two corrections to the issue text, on the record
+
+1. **`integration_builder.py:3520` does not dispatch caller raw XML.** Issue #149 states that the
+   process and connector-settings branches "dispatch raw XML before the `:4140` fall-through ever
+   runs". Verified at HEAD: `:3520-3564` is the structured `comp.type == "process"` arm — it reads
+   `payload["process_kind"]`/`["process_type"]`, resolves a builder at `:3532` and calls
+   `builder_cls.build(...)` at `:3561`. Caller `config.xml` is never forwarded there. The
+   *conclusion* the issue draws is still correct and unchanged: #160's content guard must precede
+   all type dispatch, because the **connector** arm and the **generic fall-through** are both
+   raw-process-capable (routes `WRT-manage-connector-create`, `WRT-manage-connector-update`,
+   `WRT-build-integration-generic`).
+2. **`_update_component_xml` dormancy is production-scoped.** It has zero callers under `src/` or in
+   `server.py`, which is what `test_the_dormant_shared_writer_has_no_production_callers` enforces. It
+   does have two deliberate callers in `tests/test_component_raw_transport.py:59,71`, which are
+   evidence the transport works, not violations.
+
+## 11.2 Legacy renderer and semantic-validation reachability
+
+Registry lookups, renderer calls, legacy `_emit_*` reachability, legacy semantic validation, and the
+fail-closed residue class. The four registry-resolution sites #149 names —
+`integration_builder.py` `_resolve_preservation_policy` (`:1234`), `build_structured_update_xml`
+(`:3152`), `_execute_component` (`:3532`) and `_process_component_preflight` (`:5422`) — are pinned
+individually by `test_the_scan_universe_is_complete_and_non_vacuous`.
+
+The WSS-listener fallback is `SyncPipelineBuilder.build` delegating to `ProcessFlowBuilder.build`
+(`process_flow_builder.py:6049-6050`), gated by `_sync_pipeline_is_canonical` at `:5201-5219` — the
+row `renderer_call | …process_flow_builder.py | SyncPipelineBuilder.build | ProcessFlowBuilder.build(...)`
+below.
+
+`unclassified_dynamic` is the **fail-closed residue class**: a watched name reached through
+`getattr` cannot be resolved statically, so it is recorded rather than dropped, and the set is
+frozen. `test_an_unresolvable_dynamic_sink_access_is_reported_not_ignored` proves the class is live
+rather than aspirational.
+
+| Ledger ID | Census | Path | Symbol | Sites | Baseline line | Owning issue | Disposition |
+|---|---|---|---|---|---|---|---|
+| LG-aee1eb03 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_emitters/legacy.py | _emit_setproperties | 3 | 532 | #160 | delete with the legacy renderer |
+| LG-420f1954 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_emitters/legacy.py | _emit_setproperties_step | 3 | 472 | #160 | delete with the legacy renderer |
+| LG-a8efa464 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | <module> | 29 | 72 | #160 | delete the legacy semantic shell |
+| LG-e3bb78f3 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_branch_shapes | 1 | 3560 | #160 | delete the legacy semantic shell |
+| LG-09c051cf | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_catch_leg | 5 | 4647 | #160 | delete the legacy semantic shell |
+| LG-43cb4e79 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_connector_scoped_try_catch_shapes | 3 | 4761 | #160 | delete the legacy semantic shell |
+| LG-51f10b57 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_decision_shapes | 1 | 3637 | #160 | delete the legacy semantic shell |
+| LG-e1ff295b | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_flow_shape | 14 | 3457 | #160 | delete the legacy semantic shell |
+| LG-e9731d65 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_try_catch_shapes | 2 | 4517 | #160 | delete the legacy semantic shell |
+| LG-599ecc0d | legacy_semantic_validation | src/boomi_mcp/categories/integration_builder.py | _process_ir_semantic_error | 1 | 5578 | #160 | delete with the legacy semantic shell |
+| LG-a6b08ee4 | registry_lookup | src/boomi_mcp/categories/components/builders/process_flow_builder.py | get_process_flow_builder | 2 | 6152 | #160 | delete the legacy semantic shell |
+| LG-e131eb91 | registry_lookup | src/boomi_mcp/categories/integration_builder.py | _execute_component | 3 | 3532 | #153 | replace with canonical ProcessIR materialization/apply |
+| LG-85b86f7b | registry_lookup | src/boomi_mcp/categories/integration_builder.py | _process_component_preflight | 3 | 5318 | #153 | replace with canonical ProcessIR materialization/apply |
+| LG-f76e62cd | registry_lookup | src/boomi_mcp/categories/integration_builder.py | _resolve_preservation_policy | 1 | 1234 | #153 | replace with canonical ProcessIR materialization/apply |
+| LG-4e882820 | registry_lookup | src/boomi_mcp/categories/integration_builder.py | build_structured_update_xml | 3 | 3148 | #153 | replace with canonical ProcessIR materialization/apply |
+| LG-e4a0a304 | renderer_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.build | 1 | 6050 | #160 | delete the legacy semantic shell |
+| LG-088efd1d | renderer_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.validate_config | 1 | 5994 | #160 | delete the legacy semantic shell |
+| LG-9532f2cf | renderer_call | src/boomi_mcp/categories/integration_builder.py | _execute_component | 1 | 3561 | #153 | replace with canonical ProcessIR materialization/apply |
+| LG-e5f61bc6 | renderer_call | src/boomi_mcp/categories/integration_builder.py | _process_component_preflight | 2 | 5446 | #153 | replace with canonical ProcessIR materialization/apply |
+| LG-7c23f2fd | renderer_call | src/boomi_mcp/categories/integration_builder.py | build_structured_update_xml | 1 | 3165 | #153 | replace with canonical ProcessIR materialization/apply |
+| LG-8e9df2b4 | renderer_call | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _core_from_authored_pipeline | 1 | 252 | #151 | re-home onto the neutral extraction |
+| LG-f973cf28 | renderer_call | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _core_from_submitted_config | 4 | 289 | #151 | re-home onto the neutral extraction |
+| LG-819f78b4 | renderer_call | src/boomi_mcp/compiler/process_ir/legacy_adapters/sync_pipeline.py | adapt_sync_pipeline_config | 1 | 481 | #151 | re-home onto the neutral extraction |
+| LG-bfc762c3 | renderer_call | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_main_process | 1 | 2955 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-08a97ecd | renderer_call | src/boomi_mcp/patterns/composition.py | compose_archetypes | 1 | 1103 | #160 | delete with the legacy renderer |
+
+## 11.3 Legacy `process_kind` producer census
+
+`process_kind_producer` rows are **writes** — a dict-literal key, a subscript assignment, a keyword
+argument, or an `IntegrationComponentSpec(type="process")` construction. `process_kind_consumer`
+rows are reads, listed separately because a read is dispatch evidence, not production. Archetype and
+example producers are globbed, never enumerated: a sixth example is a diff, not a silent pass.
+
+| Ledger ID | Census | Path | Symbol | Sites | Baseline line | Owning issue | Disposition |
+|---|---|---|---|---|---|---|---|
+| LG-a4f2eecb | authoring_boundary | server.py | build_from_archetype | 1 | - | #159 | migrate the boundary to canonical ProcessIR |
+| LG-702def56 | authoring_boundary | server.py | build_integration | 1 | - | #159 | migrate the boundary to canonical ProcessIR |
+| LG-e2d1badd | authoring_boundary | server.py | compose_archetypes | 1 | - | #159 | migrate the boundary to canonical ProcessIR |
+| LG-4b265c33 | authoring_boundary | server.py | import_integration_draft | 1 | - | #159 | migrate the boundary to canonical ProcessIR |
+| LG-03af32a7 | authoring_boundary | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | api_to_api_sync | 1 | - | #159 | migrate the archetype to canonical ProcessIR |
+| LG-3a04479d | authoring_boundary | src/boomi_mcp/patterns/archetypes/api_to_database_sync.py | api_to_database_sync | 1 | - | #159 | migrate the archetype to canonical ProcessIR |
+| LG-55c06295 | authoring_boundary | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | database_to_api_sync | 1 | - | #159 | migrate the archetype to canonical ProcessIR |
+| LG-d2c9b0c8 | authoring_boundary | src/boomi_mcp/patterns/archetypes/http_listener_to_db.py | http_listener_to_db | 1 | - | #159 | migrate the archetype to canonical ProcessIR |
+| LG-3aa639d0 | authoring_boundary | src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py | http_listener_to_rest | 1 | - | #159 | migrate the archetype to canonical ProcessIR |
+| LG-8cbd0b5b | example_producer | examples/m11/cache_property_authoring_basic.integration.json | integration_spec.components[0].config.process_kind | 1 | - | #159 | migrate the example to canonical ProcessIR |
+| LG-04ef53a3 | example_producer | examples/m11/cache_property_authoring_join.integration.json | integration_spec.components[2].config.process_kind | 1 | - | #159 | migrate the example to canonical ProcessIR |
+| LG-3740584a | example_producer | examples/m8/cache_handoff_staged_fanout.integration.json | integration_spec.components[10].config.process_kind | 1 | - | #159 | migrate the example to canonical ProcessIR |
+| LG-637793a5 | example_producer | examples/m8/composed_db_to_api_fanout.integration.json | integration_spec.components[9].config.process_kind | 1 | - | #159 | migrate the example to canonical ProcessIR |
+| LG-851b002a | process_kind_consumer | src/boomi_mcp/authoring/workflow.py | _normalize_intent | 1 | 413 | #160 | delete with the legacy consumer |
+| LG-65a53d30 | process_kind_consumer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.validate_config | 2 | 656 | #160 | delete the legacy semantic shell |
+| LG-bba865c6 | process_kind_consumer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.validate_config | 2 | 5976 | #160 | delete the legacy semantic shell |
+| LG-42e9928c | process_kind_consumer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | WrapperSubprocessBuilder.validate_config | 2 | 5006 | #160 | delete the legacy semantic shell |
+| LG-18b251bf | process_kind_consumer | src/boomi_mcp/categories/integration_builder.py | _authored_process_validation_error | 2 | 5215 | #160 | delete with the legacy consumer |
+| LG-0f6e121e | process_kind_consumer | src/boomi_mcp/categories/integration_builder.py | _bracketed_naming_warning | 2 | 4845 | #160 | delete with the legacy consumer |
+| LG-adf3120a | process_kind_consumer | src/boomi_mcp/categories/integration_builder.py | _build_plan | 2 | 5803 | #160 | delete with the legacy consumer |
+| LG-79a2008e | process_kind_consumer | src/boomi_mcp/categories/integration_builder.py | _execute_component | 2 | 3529 | #160 | delete with the legacy consumer |
+| LG-7e8d39d2 | process_kind_consumer | src/boomi_mcp/categories/integration_builder.py | _process_models_error_handling | 2 | 4198 | #160 | delete with the legacy consumer |
+| LG-f633058d | process_kind_consumer | src/boomi_mcp/categories/integration_builder.py | _resolve_preservation_policy | 2 | 1226 | #160 | delete with the legacy consumer |
+| LG-331a98ac | process_kind_consumer | src/boomi_mcp/categories/integration_builder.py | _synthesize_wrapper_subprocess_edges | 2 | 550 | #160 | delete with the legacy consumer |
+| LG-76727309 | process_kind_consumer | src/boomi_mcp/categories/integration_builder.py | _synthesize_wrapper_subprocess_extensions | 2 | 714 | #160 | delete with the legacy consumer |
+| LG-0e50752e | process_kind_consumer | src/boomi_mcp/categories/integration_builder.py | build_structured_update_xml | 2 | 3135 | #160 | delete with the legacy consumer |
+| LG-f82294a9 | process_kind_consumer | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _resolve_process_kind | 2 | 217 | #151 | re-home onto the neutral extraction |
+| LG-af904e61 | process_kind_consumer | src/boomi_mcp/models/_process_ir_compat.py | legacy_flow_sequence_to_ir | 2 | 678 | #159 | migrate the compatibility codec, then delete |
+| LG-885d1a16 | process_kind_producer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.lower_config | 1 | 5488 | #160 | delete the legacy semantic shell |
+| LG-e846e889 | process_kind_producer | src/boomi_mcp/categories/meta_tools.py | <module> | 6 | 7692 | #160 | retract the served legacy guidance / guard the raw route |
+| LG-275fe665 | process_kind_producer | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _canonical_core | 1 | 230 | #151 | re-home onto the neutral extraction |
+| LG-826a5241 | process_kind_producer | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _core_from_authored_pipeline | 1 | 253 | #151 | re-home onto the neutral extraction |
+| LG-036eebde | process_kind_producer | src/boomi_mcp/models/_process_ir_compat.py | ir_to_legacy_flow_sequence | 2 | 1067 | #159 | migrate the compatibility codec, then delete |
+| LG-135ab897 | process_kind_producer | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype.emit_spec | 1 | 1704 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-6bbdfefd | process_kind_producer | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | _build_main_process | 2 | 1158 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-dc90b5ae | process_kind_producer | src/boomi_mcp/patterns/archetypes/api_to_database_sync.py | ApiToDatabaseSyncArchetype.emit_spec | 1 | 879 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-76cde1a2 | process_kind_producer | src/boomi_mcp/patterns/archetypes/api_to_database_sync.py | _build_main_process | 2 | 521 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-0bf8b950 | process_kind_producer | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_main_process | 1 | 3065 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-22b7f2cc | process_kind_producer | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_sync_pipeline_adapter_config | 1 | 2894 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-78a58f1a | process_kind_producer | src/boomi_mcp/patterns/archetypes/http_listener_to_db.py | HttpListenerToDbArchetype.emit_spec | 1 | 1104 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-2749063b | process_kind_producer | src/boomi_mcp/patterns/archetypes/http_listener_to_db.py | _build_listener_main_process | 2 | 746 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-1e119c4f | process_kind_producer | src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py | HttpListenerToRestArchetype.emit_spec | 1 | 537 | #159 | migrate the archetype to canonical ProcessIR |
+
+## 11.4 Caller-reachable Component-XML write routes
+
+The **sinks** are derived by the scanner; this table only says what each one MEANS and who owns it.
+`reconcile_routes()` proves the join is total in both directions — no derived sink location is
+unclassified (`unclassified == []`) and no route cites a call site the scanner cannot find
+(`stale_claims == []`) — so #160 cannot inherit a route this ledger forgot, nor a citation that has
+moved.
+
+Five locations legitimately host several routes (a single function containing both the raw-XML arm
+and the typed builders). That is recorded rather than rejected, and the exact set is frozen, so a
+NEW sharing is a diff instead of a silent reclassification:
+
+- `src/boomi_mcp/categories/components/connectors.py::create_connector -> WRT-connector-typed-build, WRT-manage-connector-create`
+- `src/boomi_mcp/categories/components/connectors.py::update_connector -> WRT-manage-connector-metadata, WRT-manage-connector-update`
+- `src/boomi_mcp/categories/components/manage_component.py::create_component -> WRT-manage-component-create, WRT-manage-component-typed-create`
+- `src/boomi_mcp/categories/components/manage_component.py::update_component -> WRT-manage-component-metadata, WRT-manage-component-update`
+- `src/boomi_mcp/categories/integration_builder.py::_execute_component -> WRT-build-integration-generic, WRT-build-integration-structured-process, WRT-build-integration-typed-nonprocess`
+
+| Route ID | Derived sink location(s) | Classification | Summary | Owning issue | Required post-retraction assertion |
+|---|---|---|---|---|---|
+| WRT-manage-component-dispatch | src/boomi_mcp/categories/components/manage_component.py::manage_component_action | raw_process_capable | Caller-facing dispatcher: forwards `config.xml` verbatim to the create and update arms with no component-type restriction. | #160 | the shared process-content classifier runs at the dispatcher, before either arm. |
+| WRT-manage-component-create | src/boomi_mcp/categories/components/manage_component.py::create_component | raw_process_capable | Caller `config.xml` is posted verbatim, so `<Component type="process">` mints a process. The same function also hosts the typed non-process builders (shared location). | #160 | create with a process XML root is REJECTED by the shared process-content classifier, whatever the declared type. |
+| WRT-manage-component-typed-create | src/boomi_mcp/categories/components/manage_component.py::create_component | typed_non_process | The typed builder arms of the same function emit connector/profile/operation XML, never a process root. | #160 | unchanged — the content guard never matches these roots. |
+| WRT-manage-component-update | src/boomi_mcp/categories/components/manage_component.py::update_component | raw_process_capable | Caller `config.xml` full-replaces the named component (shared location with the metadata smart-merge). | #160 | two-sided check — payload root `process` OR live target type `process` refuses; lookup/parse failure fails closed. |
+| WRT-manage-component-metadata | src/boomi_mcp/categories/components/manage_component.py::update_component | preserve | Metadata smart-merge: reads live XML, rewrites name/folder/description, resubmits the full document. | #160 | semantic-body identity under the single shared projection. |
+| WRT-manage-component-clone | src/boomi_mcp/categories/components/manage_component.py::clone_component | platform_sourced_rematerialization | Re-posts platform-sourced XML with the identity attributes stripped, creating a NEW component with a NEW server-assigned id — a second unattested materialization, not metadata drift. | #160 | process-typed clone REJECTED; non-process clone preserved. |
+| WRT-manage-connector-create | src/boomi_mcp/categories/components/connectors.py::create_connector | raw_process_capable | Raw-XML create posts caller XML with NO type check, so `<Component type="process">` mints a process (shared location with the typed connector builders). | #160 | content-based refusal on a process XML root. |
+| WRT-connector-typed-build | src/boomi_mcp/categories/components/connectors.py::create_connector | typed_non_process | Typed connector / connector-operation builders emit connector-family XML only. | #160 | unchanged — the content guard never matches a connector root. |
+| WRT-manage-connector-update | src/boomi_mcp/categories/components/connectors.py::update_connector | raw_process_capable | Raw-XML update full-replaces ANY `component_id`, including a process (shared location with the metadata smart-merge). | #160 | two-sided payload-OR-live-target refusal. |
+| WRT-manage-connector-metadata | src/boomi_mcp/categories/components/connectors.py::update_connector | preserve | Metadata smart-merge over the live connector XML. | #160 | semantic-body identity under the shared projection. |
+| WRT-build-integration-generic | src/boomi_mcp/categories/integration_builder.py::_execute_component | raw_process_capable | Generic create/update fall-through forwards `config.xml` for ANY unhandled declared type — `IntegrationComponentSpec.type` is unrestricted, so the type="process" plan gates (which key off `comp.type == "process"`) are skipped entirely. | #160 | content guard at BOTH plan and apply boundaries, placed BEFORE all type dispatch (the process and connector arms dispatch before the fall-through ever runs); mutation-tested with an unknown/future declared type. |
+| WRT-build-integration-structured-process | src/boomi_mcp/categories/integration_builder.py::_execute_component | legacy_structured_process | The structured `comp.type == "process"` arm resolves a legacy builder and renders `<process>`. It does NOT forward caller raw XML — the issue text's claim that this branch dispatches raw XML is incorrect (see the §11.2 note); the guard still belongs before all type dispatch because the connector and generic arms are raw-process-capable. | #153 | replaced by canonical ProcessIR materialization/apply. |
+| WRT-build-integration-typed-nonprocess | src/boomi_mcp/categories/integration_builder.py::_execute_component | typed_non_process | Typed connector/profile/map/operation arms of the same executor. | #160 | unchanged — the content guard never matches these roots. |
+| WRT-build-integration-preservation-merge | src/boomi_mcp/categories/integration_builder.py::_apply_structured_update | preserve | Read-merge-write update preservation over the live document; the process BODY it merges is produced by `build_structured_update_xml`, which rides the legacy builder. | #153 | preserved, re-homed onto the canonical apply path. |
+| WRT-safe-edit-metadata | src/boomi_mcp/categories/components/safe_edit_component.py::apply_component_edit_action | preserve | The FOURTH administrative writer: metadata edits reserialize and re-submit the FULL live process XML as a full-replace update (the #45/#50 merge). Its process BODY edits ride the legacy builder via `build_structured_update_xml`. | #160 | route-sensitive projection — the permitted subset is exactly the requested name/folderId/folderName/immediate description; process BODY edits are REJECTED in favour of canonical ProcessIR apply. |
+| WRT-analyze-component-merge | src/boomi_mcp/categories/components/analyze_component.py::merge_versions | platform_sourced_rematerialization | Version/branch merge writes the SOURCE version's body into the target — a semantic change to the target by design, with no caller XML. | #160 | REJECT when the target is a process OR the source/merged root is a process — the merged root IS the source root, so a target-only check never sees a process-root source over a non-process target. |
+| WRT-folders-move-component | src/boomi_mcp/categories/folders.py::_action_move_component | preserve | folderId-only rewrite of the live XML, then verify. | #160 | semantic-body identity under the shared projection. |
+| WRT-shared-raw-create-sink | src/boomi_mcp/categories/components/_shared.py::_create_component_raw | raw_process_capable | The single shared create sink every raw and typed create funnels through; posts the XML byte-for-byte via the SDK. | #160 | the shared process-content classifier is enforced at or before this sink for every caller. |
+| WRT-shared-dormant-writer | src/boomi_mcp/categories/components/_shared.py::_update_component_xml | dormant | A full-raw-XML update through the SDK with ZERO production callers at HEAD — inventoried precisely BECAUSE it is dormant, so a future caller cannot revive an unguarded raw write route. Its only callers are the transport tests (tests/test_component_raw_transport.py:59,71). | #160 | sits behind the two-sided guard, or is deleted. |
+| WRT-raw-api-component | server.py::invoke_boomi_api | raw_process_capable | The generic raw invoker reaches POST/PUT `/Component` unrestricted by type; gated only by `confirm_write=true`. Classification splits its own copy of the endpoint while transport interpolates the raw string. | #160 | ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check. |
+
+Every derived write-sink CALL SITE, at ledger grain — the rows #160 checks off. The route table
+above says what each location means; this one says exactly where the calls are.
+
+| Ledger ID | Census | Path | Symbol | Sites | Baseline line | Owning issue | Disposition |
+|---|---|---|---|---|---|---|---|
+| LG-4e092c94 | component_xml_write | src/boomi_mcp/categories/components/_shared.py | _create_component_raw | 1 | 387 | #160 | guard behind the shared process-content classifier |
+| LG-c7a85e57 | component_xml_write | src/boomi_mcp/categories/components/_shared.py | _update_component_xml | 1 | 419 | #160 | guard behind the shared process-content classifier |
+| LG-08665fc8 | component_xml_write | src/boomi_mcp/categories/components/analyze_component.py | merge_versions | 1 | 658 | #160 | guard behind the shared process-content classifier |
+| LG-b091f264 | component_xml_write | src/boomi_mcp/categories/components/connectors.py | create_connector | 3 | 382 | #160 | guard behind the shared process-content classifier |
+| LG-91d77b6a | component_xml_write | src/boomi_mcp/categories/components/connectors.py | update_connector | 2 | 560 | #160 | guard behind the shared process-content classifier |
+| LG-eb7e27c9 | component_xml_write | src/boomi_mcp/categories/components/manage_component.py | clone_component | 1 | 376 | #160 | guard behind the shared process-content classifier |
+| LG-87f4dbe2 | component_xml_write | src/boomi_mcp/categories/components/manage_component.py | create_component | 6 | 66 | #160 | guard behind the shared process-content classifier |
+| LG-f1dd2559 | component_xml_write | src/boomi_mcp/categories/components/manage_component.py | manage_component_action | 2 | 459 | #160 | guard behind the shared process-content classifier |
+| LG-56fa02b3 | component_xml_write | src/boomi_mcp/categories/components/manage_component.py | update_component | 3 | 232 | #160 | guard behind the shared process-content classifier |
+| LG-2a29dc0c | component_xml_write | src/boomi_mcp/categories/components/safe_edit_component.py | apply_component_edit_action | 1 | 553 | #160 | retract the served raw-XML steer; body edits move to canonical apply |
+| LG-8f886cf4 | component_xml_write | src/boomi_mcp/categories/folders.py | _action_move_component | 1 | 324 | #160 | guard behind the shared process-content classifier |
+| LG-5f228a61 | component_xml_write | src/boomi_mcp/categories/integration_builder.py | _apply_structured_update | 1 | 3063 | #160 | guard behind the shared process-content classifier |
+| LG-c45135b8 | component_xml_write | src/boomi_mcp/categories/integration_builder.py | _execute_component | 10 | 3575 | #160 | guard behind the shared process-content classifier |
+| LG-c3bf6d69 | raw_api_invoker | server.py | invoke_boomi_api | 1 | 3411 | #160 | guard behind the canonical endpoint parser |
+
+**SDK evidence** (derived by reading the installed SDK's own method bodies — semantic facts only, no
+vendor line numbers, which drift independently under `boomi>=3.0.1`):
+
+| Fact | Derived value |
+|---|---|
+| `create_component` | `POST` `/Component`, `Accept: application/xml` |
+| `update_component` | `POST` `/Component/{componentId}`, `Accept: application/xml` — **POST to the id, there is no PUT** |
+| `bulk_component` | `POST` `/Component/bulk`, `Accept: application/xml` — the bulk **READ** route, XML forced |
+| `ComponentBulkRequestType` members | `CREATE`, `DELETE`, `GET`, `UPDATE` — envelope-parses is **not** read-only |
+| `ComponentBulkRequest` optional init params | `request`, `type_` — both fields optional |
+| Component write verbs | `create_component`, `create_component_raw`, `update_component`, `update_component_raw` |
+
+The installed version STRING is deliberately not frozen: `server.py:206-207` appends a sibling
+`../boomi-python/src` checkout to `sys.path` when one exists, so
+`importlib.metadata.version("boomi")` answers differently before and after `import server` on a
+developer machine that has the checkout (measured: `3.0.1` then `2.1.0`). The imported module is
+unaffected — every fact above is read from the installed distribution — but pinning the metadata
+string would freeze a machine-local accident. The shape facts are the better upgrade signal anyway.
+
+## 11.5 Allowlist and endgame ownership
+
+Every ledger row carries an owning endgame issue and a disposition; **no cell reads "unknown"**
+(`test_no_owner_or_disposition_cell_is_left_unfilled`). Ownership is assigned by path-scoped rules
+over the census, so a row cannot be silently orphaned when a file moves.
+
+| Owning issue | Disposition | Ledger rows |
+|---|---|---|
+| #151 | re-home onto the neutral extraction | 6 |
+| #153 | replace with canonical ProcessIR materialization/apply | 7 |
+| #159 | migrate the archetype to canonical ProcessIR | 15 |
+| #159 | migrate the boundary to canonical ProcessIR | 4 |
+| #159 | migrate the compatibility codec, then delete | 2 |
+| #159 | migrate the example to canonical ProcessIR | 4 |
+| #160 | delete the legacy semantic shell | 14 |
+| #160 | delete with the legacy consumer | 10 |
+| #160 | delete with the legacy renderer | 3 |
+| #160 | delete with the legacy semantic shell | 1 |
+| #160 | guard behind the canonical endpoint parser | 1 |
+| #160 | guard behind the shared process-content classifier | 12 |
+| #160 | retract the served legacy guidance / guard the raw route | 1 |
+| #160 | retract the served raw-XML steer; body edits move to canonical apply | 1 |
+
+Owner semantics: **#151** neutral extraction and `flow_sequence` parity/reachability; **#153**
+canonical ProcessIR component materialization/apply; **#154** grammar/effect foundation; **#155**
+connector dynamic-path/capability transfer; **#156** Notify/recovery transfer; **#157** authoring
+envelope/governance; **#158** WSS listener entry/fallback replacement; **#159** archetype, recipe,
+composition, example and internal-producer migration; **#160** final legacy deletion, Component-XML
+guards/rejections, raw-API protection, and served-text retraction.
+
+## 11.6 Served-surface retraction matrix
+
+One row per served surface CLASS, each with its caller-visible producer, its HEAD source anchors,
+the count of frozen artifacts pinning its text, and the assertion #160 must satisfy after
+retraction. **#160 can execute the sweep from this matrix alone** —
+`test_the_retraction_matrix_is_executable_from_the_matrix_alone` checks every anchor resolves at
+HEAD and every row names a producer, the guidance it exposes, and a post-retraction assertion.
+
+A deleted-name grep is NOT the acceptance mechanism: obsolete guidance survives under names that are
+never deleted. That is why the freeze snapshots the **served values** — 67 artifacts collected
+by calling the real read-only producers (`server.mcp.list_tools()`,
+`meta_tools.get_schema_template_action`, `list_capabilities_action`,
+`list_integration_archetypes_action`, `IntegrationComponentSpec.model_json_schema()`, and pure
+error-envelope probes) and comparing them by value and by SHA-256.
+`test_the_served_collection_cannot_touch_boomi_transport` runs the whole collection with every SDK
+request/create/update method replaced by a raising spy, so "read-only" is measured, not asserted.
+
+Large payloads (canonical length over 8192 characters) store their SHA-256 plus every string
+that carries a legacy token, instead of a second verbatim copy of a schema already pinned elsewhere
+in the suite. Drift detection is unaffected — the hash covers the complete canonical value.
+
+| Surface ID | Surface class | Caller-visible producer/selector | HEAD source anchor(s) | Frozen artifacts | Legacy guidance exposed | Owning endgame step | Required post-retraction assertion |
+|---|---|---|---|---|---|---|---|
+| SS-PYDANTIC | Pydantic schema / field descriptions | IntegrationComponentSpec.model_json_schema() | src/boomi_mcp/models/integration_models.py:20-34 (description string :22-33) | 1 | steers callers to "manage_component for an explicit raw process XML escape hatch" and advertises process_kind | #160 | the served config description names no raw process XML escape hatch and no legacy process_kind. |
+| SS-BUILDER-DIAGNOSTICS | Builder error texts and hints | integration_builder plan preflight envelopes | src/boomi_mcp/categories/integration_builder.py:3148<br>src/boomi_mcp/categories/integration_builder.py:3162<br>src/boomi_mcp/categories/integration_builder.py:3544<br>src/boomi_mcp/categories/integration_builder.py:3610<br>src/boomi_mcp/categories/integration_builder.py:5318<br>src/boomi_mcp/categories/integration_builder.py:5403-5430 | 4 | PROCESS_KIND_* hints enumerate sorted(PROCESS_FLOW_BUILDERS) and PROCESS_KIND_XML_CONFLICT actively steers raw process XML onto manage_component(type="component", config.xml) | #160 | no served builder envelope names a legacy process_kind value or routes raw process XML to another tool. |
+| SS-MCP-DESCRIPTIONS | Registered MCP tool descriptions and parameter schemas | server.mcp.list_tools() | server.py:1383-1385 (manage_process)<br>server.py:1712 (manage_component tool)<br>server.py:1731-1732 (manage_component escape-hatch blessing)<br>server.py:2098 (manage_connector raw create)<br>server.py:2103 (manage_connector raw update) | 22 | tool descriptions bless raw process XML as an escape hatch and advertise raw-XML connector create/update | #160 | no registered tool description blesses raw process XML. |
+| SS-SAFE-EDIT | Safe-edit guidance | safe_edit_component._validate_patch_shape(...) | src/boomi_mcp/categories/components/safe_edit_component.py:176-191 | 1 | the raw-XML refusal steers callers to manage_component(action='update') with config.xml | #160 | the refusal names no full-replacement escape hatch. |
+| SS-SCHEMA-TEMPLATES | get_schema_template templates | meta_tools.get_schema_template_action(...) | src/boomi_mcp/categories/meta_tools.py:595-598 (raw_xml_escape_hatch)<br>src/boomi_mcp/categories/meta_tools.py:762-785 (_COMPONENT_CREATE, type="process" at :770, workflow step 4 at :778-784)<br>src/boomi_mcp/categories/meta_tools.py:4989 (force-clear hint)<br>src/boomi_mcp/categories/meta_tools.py:5180-5190 (_COMPONENT_CLONE)<br>src/boomi_mcp/categories/meta_tools.py:8867 (serves _COMPONENT_CREATE)<br>src/boomi_mcp/categories/meta_tools.py:8880 (serves _COMPONENT_CLONE) | 26 | served templates carry type="process" raw XML, the raw_xml_escape_hatch text, and legacy process protocols | #160 | no served template emits a process-typed raw XML skeleton or a raw-XML escape-hatch instruction. |
+| SS-RAW-API | Raw-API catalog and typed-alternative entries | meta_tools._raw_write_confirmation_guard / _classify_raw_api_request / _typed_alternatives_for_endpoint | src/boomi_mcp/categories/meta_tools.py:5622 (_classify_raw_api_request)<br>src/boomi_mcp/categories/meta_tools.py:5728-5760 (_raw_write_confirmation_guard)<br>src/boomi_mcp/categories/meta_tools.py:5763 (invoke_api)<br>src/boomi_mcp/categories/meta_tools.py:5811 (transport interpolation) | 3 | the raw invoker is type-unrestricted, so POST/PUT to /Component can mint or replace a process; classification splits its own copy of the endpoint while transport interpolates the raw string | #160 | ONE canonical endpoint parser feeds classification, ID extraction AND transport; every update-shaped call runs the two-sided process check; `bulk` is matched before the <id> arm and never treated as a componentId. |
+| SS-CAPABILITY-CATALOG | list_capabilities catalog entries, workflows and hints | meta_tools.list_capabilities_action() | src/boomi_mcp/categories/meta_tools.py:10145 (list_capabilities_action) | 5 | catalog entries, workflow steps and hints reference legacy process protocols and the raw-XML route | #160 | no catalog entry, workflow step or hint references a legacy process_kind or the raw process XML route. |
+| SS-ARCHETYPE-CATALOG | Served archetype descriptors and parameter schemas | authoring.contract.list_archetype_registry() | src/boomi_mcp/authoring/contract.py:335 (list_archetype_registry)<br>src/boomi_mcp/categories/integration_authoring.py:205 (list_integration_archetypes_action) | 5 | every registered archetype whose emitted spec carries a legacy process_kind advertises it through the served descriptor | #159 | no served archetype descriptor emits or documents a legacy process_kind. |
+
+## 11.7 Freeze evidence and re-baselining
+
+| Property | Regression test |
+|---|---|
+| Baseline identity, unique IDs, closed vocabularies | `tests/test_issue_149_legacy_reachability_freeze.py::test_baseline_identity_and_schema_are_frozen` |
+| No owner/disposition cell left unfilled | `tests/test_issue_149_legacy_reachability_freeze.py::test_no_owner_or_disposition_cell_is_left_unfilled` |
+| Scan universe complete and non-vacuous | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_scan_universe_is_complete_and_non_vacuous` |
+| Vocabulary derived from the live runtime | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_vocabulary_is_derived_from_the_live_runtime` |
+| Census matches the frozen baseline | `tests/test_issue_149_legacy_reachability_freeze.py::test_legacy_callers_and_process_kind_producers_match_the_baseline` |
+| Derivation is deterministic | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_derivation_is_deterministic` |
+| **Mutation:** a synthetic legacy caller breaks the freeze | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_synthetic_legacy_caller_breaks_the_freeze` |
+| **Mutation:** a renderer off a registry subscript is reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_renderer_invoked_straight_off_a_registry_subscript_is_reported` |
+| **Mutation:** a new emitter/write-sink caller breaks the freeze | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_new_legacy_emitter_or_write_sink_caller_breaks_the_freeze` |
+| **Mutation:** unresolvable dynamic access is reported, not ignored | `tests/test_issue_149_legacy_reachability_freeze.py::test_an_unresolvable_dynamic_sink_access_is_reported_not_ignored` |
+| **Negative control:** an unrelated addition does not break it | `tests/test_issue_149_legacy_reachability_freeze.py::test_an_unrelated_addition_does_not_break_the_freeze` |
+| A duplicated call site is reported as a count change | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_second_call_in_an_existing_function_is_reported_as_a_count_change` |
+| An inserted blank line does not break it | `tests/test_issue_149_legacy_reachability_freeze.py::test_an_inserted_blank_line_does_not_break_the_freeze` |
+| Every write sink classified, no stale route claim | `tests/test_issue_149_legacy_reachability_freeze.py::test_every_component_xml_sink_is_classified_and_no_route_is_stale` |
+| The dormant raw writer has no production caller | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_dormant_shared_writer_has_no_production_callers` |
+| Served artifacts match the committed values | `tests/test_issue_149_legacy_reachability_freeze.py::test_served_artifacts_match_the_committed_values` |
+| Large artifacts keep identity and a legacy excerpt | `tests/test_issue_149_legacy_reachability_freeze.py::test_large_served_artifacts_keep_identity_and_a_legacy_excerpt` |
+| The served collection reaches no transport | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_served_collection_cannot_touch_boomi_transport` |
+| Every artifact belongs to exactly one matrix class | `tests/test_issue_149_legacy_reachability_freeze.py::test_every_served_artifact_belongs_to_exactly_one_matrix_class` |
+| The matrix is executable from the matrix alone | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_retraction_matrix_is_executable_from_the_matrix_alone` |
+| Ledger sections partition every census kind | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_ledger_sections_partition_every_census_kind` |
+| Ledger and JSON are two-way complete | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_ledger_and_the_json_are_two_way_complete` |
+| The tables are regenerable from the JSON | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_markdown_tables_are_regenerable_from_the_json` |
+
+**Darkness.** This slice changes nothing under `src/boomi_mcp/` or `server.py`:
+`git diff 9711a9c0cb6c88dda41ada94d88694915b659f36 -- src/boomi_mcp server.py` is empty. The only
+deliverables are this section, the batched §7/§12 corrections in
+`TYPED_RECIPE_CONTRIBUTIONS_V1.md`, the test-only helper, the fixture, and the freeze suite.

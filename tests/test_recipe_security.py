@@ -827,11 +827,13 @@ def test_a_masking_serializer_no_longer_helps():
     stored value with an adapter it built itself, so what the author's serializer
     would have said is irrelevant.
 
-    Removing the ban also removed six false rejections. ``SecretStr``,
+    Removing the ban also removed seven false rejections. ``SecretStr``,
     ``AnyUrl``, ``IPv4Address``, ``IPv4Network``, ``re.Pattern``, ``deque`` and
     ``Path`` all carry built-in ser schemas and were refused by it — and
     ``SecretStr`` is the type an author *should* reach for, so refusing it pushed
-    them toward plain ``str`` (issue #145, live QA).
+    them toward plain ``str`` (issue #145, live QA). Five of those seven are
+    still refused, by the separate wrap/plain VALIDATOR ban; only ``SecretStr``
+    and ``Path`` register again.
     """
     _SMUGGLED_RAW.clear()
     _EXECUTOR_CALLS.clear()
@@ -898,9 +900,17 @@ def test_the_wrap_ban_still_over_fires_on_these(name):
     current behaviour keeps the cost visible and makes this test fail — loudly,
     and in the right place — the moment the ban is narrowed or removed.
 
-    ``deque`` was listed here once and does NOT belong: it is refused by the
-    CLOSEDNESS gate, a different check, so crediting it to the wrap ban would have
-    left this test passing by accident after the ban was removed.
+    ``deque`` belongs to the same defect class but is NOT parametrised here.
+    ``Deque[str]`` compiles to a ``function-wrap`` node and is refused by this
+    same wrap/plain ban — measured, not assumed. An earlier version of this
+    docstring credited it to the CLOSEDNESS gate, which is wrong and contradicted
+    the sibling docstring twenty lines up.
+
+    So do not read the four parameters as the whole family. The measured family
+    is twelve annotations (``Sequence``, ``Deque``, ``DefaultDict``, ``AnyUrl``,
+    ``re.Pattern``, ``Fraction`` and all six ``ipaddress`` types); this test pins
+    four of them. Narrowing the ban so it stopped refusing the other eight would
+    leave this test green — see §7 of TYPED_RECIPE_CONTRIBUTIONS_V1.md.
     """
     import ipaddress
     import re

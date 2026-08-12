@@ -523,17 +523,30 @@ added afterwards kept reading those same artifacts through less-forgeable **acce
 about the *content* being author-written. A registration-time gate loses to one assignment after a
 class body. Findings of this shape are **accepted residue**, not bugs.
 
-**The criterion, decidable from a repro script alone:** does the reproduction require author class
-machinery — a metaclass, a descriptor or plain class attribute under a field name, a redefined
-`__dict__` / `__pydantic_extra__`, a post-hoc rewrite of `__pydantic_fields__[...].annotation`, an
-`__instancecheck__` or `__hash__` that writes? If yes it is residue. If the payload arrives through
-an honest declaration and caller data alone, it is a bug. **Refusing ordinary supported Python is
-always a bug, and ranks above both** — this layer shipped five such refusals (`OrderedDict`, a
-`NamedTuple` field, `Counter`, `defaultdict`, every `__slots__` dataclass, `cached_property`), three
-of them introduced by hardening against residue and two hitting this repository's own types.
-The exact-type container rule that caused the last of them was relaxed back to an `isinstance` test:
-a subclass overriding its own enumeration is residue, and refusing supported Python to close residue
-is the wrong trade in both directions.
+**The criterion, decidable from the reproduction itself:** if the repro works using only
+JSON-compatible request data against the unchanged production catalog, it is a **caller bug**. If it
+requires changing or adding Python behaviour in a registered model, executor, schema hook, or class,
+it is **TCB behaviour** — the class this document otherwise calls accepted residue.
+
+The criterion is deliberately about *what the repro needs*, not about which language features it
+uses. The previous wording asked whether the reproduction required "author class machinery" and
+enumerated the forms (a metaclass, a descriptor or plain class attribute under a field name, a
+redefined `__dict__` / `__pydantic_extra__`, a post-hoc rewrite of
+`__pydantic_fields__[...].annotation`, an `__instancecheck__` or `__hash__` that writes). That test
+is not mechanically decidable: descriptors, validators, dataclasses and ordinary container
+subclasses are all "class machinery" and all legitimate, so applying it needed an intent judgement
+about the author. The request-data-versus-registered-Python boundary needs none — it is the same
+boundary §5 already draws, and it reads off the repro.
+
+**Treat false rejection as a separate axis, not as an exception to this classification.** Refusing
+ordinary supported Python is a bug whatever side of the boundary it sits on, and it stays a bug even
+when the refusal was introduced while hardening TCB behaviour. This layer shipped **six** such
+refusals — `OrderedDict`, a `NamedTuple` field, `Counter`, `defaultdict`, every `__slots__`
+dataclass, and `cached_property` — three of them introduced by hardening against residue and two
+hitting this repository's own types. The exact-type container rule that caused the last of them was
+relaxed back to an `isinstance` test, and the reason is the separate axis rather than the
+classification: a subclass overriding its own enumeration is TCB behaviour, *and* refusing supported
+Python to close it is independently defective.
 
 **Measured per item, because "all of them are fixed now" was published here once and was false.**
 `OrderedDict`, a `NamedTuple` field, every `__slots__` dataclass and `cached_property` are accepted
@@ -547,9 +560,16 @@ parametrises its KEY instead" named a hypothetical that turned out to be in the 
 `function-plain`/`function-wrap` validator node, so the wrap/plain validator ban rejects it at
 REGISTRATION, exactly as it rejects `Sequence[str]`, `Deque[str]`, `AnyUrl`, `re.Pattern`, `Fraction` and all
 SIX `ipaddress` types (`IPv4Address`/`Network`/`Interface` and their v6 counterparts) — twelve
-annotations, and the list is the family rather than a sample of it. That ban is
-recorded below as known, measured and still open; it is named here too because a reader checking
-"is `defaultdict` supported?" should not have to find the answer two subsections away.
+annotations, each verified to carry such a node.
+
+**The regression test pins four of those twelve, not all of them.**
+`test_the_wrap_ban_still_over_fires_on_these` is parametrised over `AnyUrl`, `IPv4Address`,
+`IPv4Network` and `re.Pattern`. `Sequence`, `Deque`, `DefaultDict`, `Fraction` and the remaining
+three `ipaddress` forms are measured observations, not pinned behaviour: narrowing the ban so it
+stopped refusing them would leave that test green. The twelve are the measured family; the four are
+the regression surface. That ban is recorded below as known, measured and still open; it is named
+here too because a reader checking "is `defaultdict` supported?" should not have to find the answer
+two subsections away.
 
 Why residue is the right disposition rather than a defeat: **every one of those attacks is dominated
 by a channel §12 already accepts.** A registered model that stashes the caller's raw mapping in a
@@ -803,8 +823,14 @@ legitimate dict.
 
 Cost after all of that is ~21 µs per invocation against ~2.4 µs for `model_validate`, with
 annotation introspection memoised; the adapters and the unwrapping are both built once per
-annotation. Cost is ~10 µs per invocation against ~2.5 µs for `model_validate` — 4x the
-validation it guards, and ~7x the `model_dump` sweep it replaced.
+annotation. This supersedes the earlier ~10 µs / ~2.5 µs figure, which was measured before the
+later guards were added and was left standing next to this one — two adjacent sentences reporting
+incompatible costs as though both were current.
+
+**Neither number is reproduced by a committed benchmark.** Both were measured ad hoc during
+implementation; nothing in `tests/` re-derives them, so a regression in this path would not be
+caught here. Read them as an order-of-magnitude statement — the check costs roughly ten times
+`model_validate`, not roughly one — and not as maintenance evidence.
 
 That the adapters are the engine's own is the whole design, and it is the conclusion of five
 retired checks rather than a preference:
@@ -834,8 +860,9 @@ and is not fixed by it. The value-first check appears to subsume what that ban g
 object of exactly the registered type, with no extras, whose every field matches its
 annotation, is indistinguishable from an honestly validated one — but removing a gate that took
 four review rounds to get right is a separate decision with its own evidence, not a side effect
-of this one. `test_the_wrap_ban_still_over_fires_on_these` pins the current cost so it stays
-visible.
+of this one. `test_the_wrap_ban_still_over_fires_on_these` pins four of the twelve — `AnyUrl`,
+`IPv4Address`, `IPv4Network` and `re.Pattern` — so the cost stays visible; the other eight are
+measured observations rather than pinned behaviour (§7).
 
 This check moves one failure from **build time to first use**, and that is inherent rather than
 an oversight: what a validator returns is a runtime fact and cannot be read off the schema at
@@ -972,10 +999,24 @@ that was dropped. Each states what changed and why.
 **`.codex/plans/issue-145.md` is deliberately NOT edited to match.** That file is the architect's
 design plan as written before implementation; rewriting it to agree with the outcome would destroy
 the only record of what was originally intended and make every future "did we deviate?" question
-unanswerable. This section is the reconciliation surface instead — where the plan and the shipped
-system differ, the difference is recorded HERE. Two such differences are recorded immediately below,
-both raised by the §6 architect review; the plan's own wording at `:297`, `:384` and `:568` stands
-as the historical statement it is.
+unanswerable. The plan's own wording at `:297`, `:384` and `:568` stands as the historical statement
+it is.
+
+**This section is not an exhaustive deviation ledger, and no longer claims to be.** It records the
+material plan-versus-shipped differences whose natural home is nowhere else; other shipped
+differences are documented at their OWNING section, because duplicating them here would create a
+second copy of details that section already maintains. The ones a reader is most likely to come
+looking for:
+
+* the **tenth** `RECIPE_*` error code, `RECIPE_REQUEST_INVALID` — §8, which states plainly that the
+  design plan specified nine;
+* the **module-source widening** of `implementation_sha256` — §5, where the hash is defined as
+  covering the function's source *and its defining module's source*;
+* the **alternate-registry seam** and the independently rebuilt **determinism** input — the two
+  entries immediately below, both raised by the §6 architect review.
+
+Those owning sections plus this list are the shipped record; the design plan remains historical
+intent.
 
 * **The plan says "no runtime/public registration API exists"; the shipped claim is "no
   MCP-ACCESSIBLE registrar".** `RecipeRegistry`, `RecipeRegistrationV1` and
