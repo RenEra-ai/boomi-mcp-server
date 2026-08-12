@@ -658,9 +658,10 @@ def test_served_artifacts_match_the_committed_values(derived, baseline):
     assert changed == [], (
         "served surface(s) drifted: %s. A name-based grep would have missed this "
         "— obsolete guidance survives under names that are never deleted." % changed)
+    # Values are always stored (see `test_every_served_artifact_stores_its_exact_value`),
+    # so this compares every artifact, not a subset.
     for aid, artifact in current.items():
-        if not artifact["value_omitted"]:
-            assert artifact["value"] == frozen[aid]["value"]
+        assert artifact["value"] == frozen[aid]["value"]
 
 
 def test_every_served_artifact_stores_its_exact_value(baseline):

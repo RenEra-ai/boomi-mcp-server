@@ -2303,9 +2303,10 @@ guards/rejections, raw-API protection, and served-text retraction.
 
 ## 11.6 Served-surface retraction matrix
 
-One row per served surface CLASS, each with its caller-visible producer, its HEAD source anchors,
-the count of frozen artifacts pinning its text, and the assertion #160 must satisfy after
-retraction. **#160 can execute the sweep from this matrix alone** —
+One row per served surface CLASS, each with its caller-visible producer(s), its HEAD source
+anchors, **the IDs of the frozen artifacts pinning its text**, and the assertion #160 must satisfy
+after retraction. The IDs, not a count: a count tells the sweep how many strings to retract without
+telling it which. **#160 can execute the sweep from this matrix alone** —
 `test_the_retraction_matrix_is_executable_from_the_matrix_alone` checks every anchor resolves at
 HEAD and every row names a producer, the guidance it exposes, and a post-retraction assertion.
 
@@ -2318,9 +2319,11 @@ error-envelope probes) and comparing them by value and by SHA-256.
 `test_the_served_collection_cannot_touch_boomi_transport` runs the whole collection with every SDK
 request/create/update method replaced by a raising spy, so "read-only" is measured, not asserted.
 
-Large payloads (canonical length over 8192 characters) store their SHA-256 plus every string
-that carries a legacy token, instead of a second verbatim copy of a schema already pinned elsewhere
-in the suite. Drift detection is unaffected — the hash covers the complete canonical value.
+**Every artifact stores its exact value**, because a failure has to be reviewable: a changed hash on
+an 80 KB schema otherwise tells you that something moved without telling you what. Payloads over
+8192 canonical characters additionally carry a `legacy_excerpt` — every string in them that
+names a legacy token — as a convenience for the sweep. The SHA-256 covers the complete canonical
+value either way.
 
 | Surface ID | Surface class | Caller-visible producer(s) | HEAD source anchor(s) | Frozen artifact IDs | Legacy guidance exposed | Owning endgame step | Required post-retraction assertion |
 |---|---|---|---|---|---|---|---|
