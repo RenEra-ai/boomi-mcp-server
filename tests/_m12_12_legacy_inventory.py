@@ -81,6 +81,7 @@ SCAN_ROOTS: Tuple[str, ...] = ("server.py", "src/boomi_mcp", "examples")
 CENSUS_KINDS: Tuple[str, ...] = (
     "registry_lookup",
     "renderer_call",
+    "legacy_transitive_call",
     "legacy_emitter",
     "legacy_semantic_validation",
     "component_xml_write",
@@ -184,11 +185,25 @@ def legacy_sink_vocabulary() -> Dict[str, Tuple[str, ...]]:
 
     legacy_emitters = tuple(sorted(n for n in dir(legacy_mod) if n.startswith("_emit_")))
 
-    legacy_semantic = tuple(sorted(
+    # Public callables of the legacy bridge PLUS the builder-side semantic
+    # entry points. `_process_ir_semantic_error` (integration_builder) is named
+    # by the design plan and is private, so a public-only filter over one module
+    # missed it entirely — the legacy semantic route had exactly one watched
+    # name instead of two.
+    from boomi_mcp.categories import integration_builder
+
+    legacy_semantic_names = {
         n for n, obj in vars(legacy_bridge).items()
         if callable(obj) and getattr(obj, "__module__", "") == legacy_bridge.__name__
         and not n.startswith("_")
-    ))
+    }
+    legacy_semantic_names |= {
+        n for n, obj in vars(integration_builder).items()
+        if callable(obj)
+        and getattr(obj, "__module__", "") == integration_builder.__name__
+        and ("process_ir_semantic" in n or "legacy_process_config" in n)
+    }
+    legacy_semantic = tuple(sorted(legacy_semantic_names))
 
     # Raw Component-XML sinks: the repo's own shared writers plus the installed
     # SDK's mutating ComponentService verbs.
@@ -214,7 +229,11 @@ def legacy_sink_vocabulary() -> Dict[str, Tuple[str, ...]]:
         sdk_writers = {
             m for m in dir(ComponentService)
             if not m.startswith("_")
-            and (m.split("_", 1)[0] in {"create", "update"} or m.startswith("bulk_"))
+            and (m.split("_", 1)[0] in {"create", "update"} or m.startswith("bulk_")
+                 # The generic transports underneath every typed verb. Without
+                 # them a hand-rolled `Serializer(...)` + `send_request()` POST
+                 # to /Component is a Component-XML write the census cannot see.
+                 or m.startswith("send_request") or m == "stream_request")
         }
     except Exception:  # pragma: no cover - SDK always present in this repo
         sdk_writers = set()
@@ -255,6 +274,7 @@ def _row_id(prefix: str, semantic_key: Tuple[str, ...]) -> str:
 _CENSUS_PREFIX = {
     "registry_lookup": "LR",
     "renderer_call": "LR",
+    "legacy_transitive_call": "LT",
     "legacy_emitter": "LE",
     "legacy_semantic_validation": "LV",
     "component_xml_write": "WR",
@@ -270,9 +290,15 @@ _CENSUS_PREFIX = {
 class _Scanner(ast.NodeVisitor):
     """One pass per module; emits census rows keyed symbolically, not positionally."""
 
-    def __init__(self, path: str, vocab: Dict[str, Tuple[str, ...]]) -> None:
+    def __init__(self, path: str, vocab: Dict[str, Tuple[str, ...]],
+                 transitive_targets: "frozenset[str]" = frozenset(),
+                 local_defs: "frozenset[str]" = frozenset()) -> None:
         self.path = path
         self.v = vocab
+        self._transitive = transitive_targets
+        self._imported: Set[str] = set()
+        self._import_origin: Dict[str, str] = {}
+        self._local_defs: Set[str] = set(local_defs)
         self.rows: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
         self._symbols: List[str] = []
         self._aliases: Dict[str, str] = {}     # local name -> watched base name
@@ -393,6 +419,11 @@ class _Scanner(ast.NodeVisitor):
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
         for alias in node.names:
             local = alias.asname or alias.name
+            self._imported.add(local)
+            # The ORIGINAL name, so `import x as y` still resolves against the
+            # bearing set — an aliased wrapper is exactly the escape this
+            # closure exists to catch.
+            self._import_origin[local] = alias.name
             if alias.name in self._watched:
                 self._aliases[local] = alias.name
             if alias.name in self._builders:
@@ -544,6 +575,20 @@ class _Scanner(ast.NodeVisitor):
                     self._emit("process_kind_producer",
                                "IntegrationComponentSpec(type='process')", node.lineno)
 
+        # Transitive pass. Only a PLAIN-NAME call to a module-level function
+        # that this module defines or imports counts: those are statically
+        # resolvable, and they are exactly the wrapper shape the leaf census
+        # misses. Method dispatch (`obj.validate_config()`) is deliberately
+        # excluded — the callee cannot be resolved without type inference, and
+        # matching it on the bare name made `validate_config` alone produce 48
+        # rows across unrelated builder classes.
+        if isinstance(node.func, ast.Name) \
+                and (node.func.id in self._imported or node.func.id in self._local_defs):
+            callee = self._import_origin.get(node.func.id, node.func.id)
+            if callee in self._transitive and self.symbol.split(".")[-1] != callee:
+                self._emit("legacy_transitive_call",
+                           "%s(...) [legacy-bearing]" % callee, node.lineno)
+
         for kw in node.keywords:
             if kw.arg in self._selectors:
                 self._emit(
@@ -554,12 +599,19 @@ class _Scanner(ast.NodeVisitor):
             if kw.arg is None and isinstance(kw.value, ast.Dict):
                 pass  # handled by visit_Dict
 
-        # `cfg.get("process_kind")` is a consumer.
-        if base == "get" and node.args:
+        # `cfg.get("process_kind")` reads; `cfg.setdefault("process_kind", ...)`
+        # WRITES one — it is a producer, and treating it as a read would let a
+        # new default-injecting producer land without a producer row.
+        if base in {"get", "setdefault", "pop"} and node.args:
             key = _const_str(node.args[0])
             if key in self._selectors:
-                self._emit("process_kind_consumer", "%s.get(%r)" % (_tail(dotted, 2), key),
-                           node.lineno)
+                if base == "setdefault" and len(node.args) > 1:
+                    self._emit("process_kind_producer",
+                               "setdefault %s=%s" % (key, _const_repr(node.args[1])),
+                               node.lineno)
+                else:
+                    self._emit("process_kind_consumer",
+                               "%s.%s(%r)" % (_tail(dotted, 2), base, key), node.lineno)
 
         self.generic_visit(node)
 
@@ -632,25 +684,98 @@ def _const_repr(node: ast.AST) -> str:
     return "<expr>"
 
 
+#: Census kinds that make the enclosing function a legacy-bearing symbol, so a
+#: caller of it is itself on a legacy path.
+_REACHABILITY_KINDS = (
+    "registry_lookup", "renderer_call", "legacy_emitter",
+    "legacy_semantic_validation", "component_xml_write", "legacy_transitive_call",
+)
+
+
 def scan_sources(sources: Dict[str, str], vocab: Dict[str, Tuple[str, ...]]) -> List[Dict[str, Any]]:
-    """Run the AST census over ``{path: source}``. A syntax error is a hard
-    failure, never a silent skip."""
+    """Run the AST census over ``{path: source}``, then close it over callers.
+
+    A syntax error is a hard failure, never a silent skip.
+
+    The leaf pass alone is fail-open: a new function that merely CALLS
+    `build_structured_update_xml` reaches the legacy renderer, but names no
+    watched sink itself, so it produced no row and the freeze stayed green. The
+    census is therefore closed to a fixed point — any function containing a
+    reachability row becomes a legacy-bearing symbol, and calls to it are
+    recorded as `legacy_transitive_call`, which itself makes ITS caller
+    legacy-bearing. That is the invariant version of the four wrapper entry
+    points an earlier draft hand-listed.
+    """
+    trees: Dict[str, ast.AST] = {}
     rows: List[Dict[str, Any]] = []
     for path in sorted(sources):
         try:
-            tree = ast.parse(sources[path], filename=path)
+            trees[path] = ast.parse(sources[path], filename=path)
         except SyntaxError as exc:  # pragma: no cover - defensive
             raise AssertionError("cannot parse %s for the #149 census: %s" % (path, exc))
-        scanner = _Scanner(path, vocab)
-        scanner.visit(tree)
+        scanner = _Scanner(path, vocab, local_defs=_module_level_functions(trees[path]))
+        scanner.visit(trees[path])
         rows.extend(scanner.rows.values())
+
+    module_level = {
+        path: _module_level_functions(tree) for path, tree in trees.items()
+    }
+    # Only MODULE-LEVEL functions can bear transitively: a method's callers
+    # cannot be resolved from a bare name.
+    bearing = {
+        r["symbol"]
+        for r in rows
+        if r["census"] in _REACHABILITY_KINDS
+        and "." not in r["symbol"] and r["symbol"] != "<module>"
+        and r["symbol"] in module_level.get(r["path"], frozenset())
+    }
+    seen: Set[str] = set()
+    found: List[Dict[str, Any]] = []
+    while bearing - seen:
+        seen |= bearing
+        found = []
+        for path in sorted(trees):
+            scanner = _Scanner(path, vocab, transitive_targets=frozenset(bearing),
+                               local_defs=module_level[path])
+            scanner.visit(trees[path])
+            found.extend(r for r in scanner.rows.values()
+                         if r["census"] == "legacy_transitive_call")
+        bearing = bearing | {
+            r["symbol"] for r in found
+            if "." not in r["symbol"] and r["symbol"] != "<module>"
+            and r["symbol"] in module_level.get(r["path"], frozenset())
+        }
+    rows = [r for r in rows if r["census"] != "legacy_transitive_call"] + found
+
     rows.sort(key=lambda r: (r["census"], r["path"], r["symbol"], r["form"]))
     return rows
+
+
+def _module_level_functions(tree: ast.AST) -> "frozenset[str]":
+    return frozenset(
+        node.name for node in getattr(tree, "body", [])
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    )
 
 
 # ======================================================================
 # Example / boundary producer census
 # ======================================================================
+
+def _json_key_lines(text: str, selectors: Iterable[str]) -> Dict[str, List[int]]:
+    """Line numbers of each selector key in a JSON document's raw text.
+
+    The acceptance criterion asks for `file:line`. An earlier draft stamped
+    `evidence_line: 0` on every example-producer row, which rendered as `-` in
+    the ledger and gave #160 a file with no line to look at.
+    """
+    out: Dict[str, List[int]] = {}
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        for selector in selectors:
+            if '"%s"' % selector in line:
+                out.setdefault(selector, []).append(lineno)
+    return out
+
 
 def _json_paths_with_selector(doc: Any, selectors: Iterable[str], prefix: str = "") -> List[Tuple[str, str]]:
     found: List[Tuple[str, str]] = []
@@ -670,7 +795,16 @@ def _json_paths_with_selector(doc: Any, selectors: Iterable[str], prefix: str = 
 def scan_examples(documents: Dict[str, Any]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for path in sorted(documents):
+        raw = (_ROOT / path).read_text(encoding="utf-8") if (_ROOT / path).is_file() else ""
+        key_lines = _json_key_lines(raw, PRODUCER_SELECTORS)
+        used: Dict[str, int] = {}
         for jpath, value in _json_paths_with_selector(documents[path], PRODUCER_SELECTORS):
+            selector = jpath.rsplit(".", 1)[-1].split("[", 1)[0]
+            candidates = key_lines.get(selector, [])
+            index = used.get(selector, 0)
+            used[selector] = index + 1
+            line = candidates[index] if index < len(candidates) else (
+                candidates[0] if candidates else 0)
             key = ("example_producer", path, jpath, value)
             rows.append({
                 "row_id": _row_id("PX", key),
@@ -679,7 +813,7 @@ def scan_examples(documents: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "symbol": jpath,
                 "form": value,
                 "count": 1,
-                "evidence_line": 0,
+                "evidence_line": line,
             })
     rows.sort(key=lambda r: (r["path"], r["symbol"], r["form"]))
     return rows
@@ -692,7 +826,23 @@ def authoring_boundaries() -> List[Dict[str, Any]]:
 
     rows: List[Dict[str, Any]] = []
 
-    def add(path: str, symbol: str, form: str) -> None:
+    def _def_line(path: str, symbol: str) -> int:
+        """Line of `def <symbol>` in `path`, so every boundary row carries a real
+        `file:line` rather than a placeholder zero."""
+        target = _ROOT / path
+        if not target.is_file():
+            return 0
+        try:
+            tree = ast.parse(target.read_text(encoding="utf-8"), filename=path)
+        except SyntaxError:  # pragma: no cover - defensive
+            return 0
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                    and node.name == symbol:
+                return node.lineno
+        return 0
+
+    def add(path: str, symbol: str, form: str, line: Optional[int] = None) -> None:
         key = ("authoring_boundary", path, symbol, form)
         rows.append({
             "row_id": _row_id("PB", key),
@@ -701,7 +851,7 @@ def authoring_boundaries() -> List[Dict[str, Any]]:
             "symbol": symbol,
             "form": form,
             "count": 1,
-            "evidence_line": 0,
+            "evidence_line": _def_line(path, symbol) if line is None else line,
         })
 
     add("server.py", "build_integration", "hand-authored IntegrationSpecV1 config")
@@ -715,7 +865,7 @@ def authoring_boundaries() -> List[Dict[str, Any]]:
             continue
         module = "src/boomi_mcp/patterns/archetypes/%s.py" % name
         if (_ROOT / module).is_file():
-            add(module, str(name), "registered archetype")
+            add(module, str(name), "registered archetype", line=1)
     rows.sort(key=lambda r: (r["path"], r["symbol"], r["form"]))
     return rows
 
@@ -936,8 +1086,26 @@ WRITE_ROUTES: Tuple[Dict[str, Any], ...] = (
         "post_retraction_assertion": "sits behind the two-sided guard, or is deleted.",
     },
     {
+        "route_id": "WRT-shared-channel-lossless-read",
+        "locations": ("src/boomi_mcp/categories/shared_resources.py::"
+                      "_get_channel_raw_json",),
+        "classification": "typed_non_process",
+        "summary": "A deliberate SDK bypass (`Serializer` + `send_request`) that reads a "
+                   "SharedCommunicationChannelComponent as raw JSON, because the typed GET "
+                   "hydrates into a model whose round-trip DROPS nested protocol config. "
+                   "It targets the SharedCommunicationChannelComponent endpoint, never "
+                   "/Component, and it is a READ feeding the update merge.",
+        "owning_issue": "#160",
+        "post_retraction_assertion": "unchanged — the endpoint is not /Component and the "
+                                     "call is a read, so the process-content classifier "
+                                     "never applies; it is inventoried so a future edit "
+                                     "cannot turn a hand-rolled transport into a write "
+                                     "route unnoticed.",
+    },
+    {
         "route_id": "WRT-raw-api-component",
-        "locations": ("server.py::invoke_boomi_api",),
+        "locations": ("server.py::invoke_boomi_api",
+                      "src/boomi_mcp/categories/meta_tools.py::invoke_api"),
         "classification": "raw_process_capable",
         "summary": "The generic raw invoker reaches POST/PUT `/Component` unrestricted by type; "
                    "gated only by `confirm_write=true`. Classification splits its own copy of "
@@ -1055,18 +1223,15 @@ def _assert_value_clean(artifact_id: str, canonical: str) -> None:
                 % (artifact_id, pattern.pattern))
 
 
-#: Canonical length above which an artifact stores identity + a legacy-token
-#: excerpt instead of its whole value.
+#: Canonical length above which an artifact ALSO records a legacy-token excerpt
+#: alongside its exact value.
 #:
-#: Drift detection is UNAFFECTED — `sha256` always covers the complete canonical
-#: value, so any change anywhere in a large payload still fails the gate. What
-#: the rule trades is the size of the committed diff: a handful of served
-#: schemas (the authoring request schema, the recipe-contribution schema, the
-#: capability catalog) are tens of kilobytes each and are already pinned
-#: elsewhere in the suite, so storing a second verbatim copy here would add
-#: ~600 KB and make one schema change produce two large diffs. The excerpt keeps
-#: exactly the part this issue owns — every string that carries a legacy token —
-#: reviewable inline.
+#: An earlier draft OMITTED the value above this threshold and kept only the hash
+#: plus the excerpt. That detected drift but not what drifted: a reviewer facing
+#: a changed hash on an 80 KB schema had to re-extract the value to see the
+#: change — the precise drawback for which the design plan rejected hash-only
+#: snapshots. The value is now always stored; the threshold only decides whether
+#: a convenience excerpt of the legacy-bearing strings rides along.
 _INLINE_VALUE_LIMIT = 8192
 
 
@@ -1097,11 +1262,9 @@ def _artifact(surface_class: str, producer: str, selector: str, value: Any) -> D
         "sha256": _sha256(canonical),
         "canonical_length": len(canonical),
     }
-    if len(canonical) <= _INLINE_VALUE_LIMIT:
-        record["value"] = _sorted_deep(value)
-        record["value_omitted"] = False
-    else:
-        record["value_omitted"] = True
+    record["value"] = _sorted_deep(value)
+    record["value_omitted"] = False
+    if len(canonical) > _INLINE_VALUE_LIMIT:
         record["legacy_excerpt"] = _legacy_excerpt(value)
     return record
 
@@ -1208,7 +1371,7 @@ def collect_served_artifacts() -> List[Dict[str, Any]]:
 
     # --- SS-SCHEMA-TEMPLATES -----------------------------------------
     for selector, payload in sorted(_schema_template_surfaces(meta_tools).items()):
-        if _mentions_legacy(payload):
+        if _mentions_legacy(payload) or selector in _ALWAYS_FROZEN_TEMPLATES:
             artifacts.append(_artifact(
                 "SS-SCHEMA-TEMPLATES", "meta_tools.get_schema_template_action(...)",
                 selector, payload))
@@ -1279,6 +1442,22 @@ def collect_served_artifacts() -> List[Dict[str, Any]]:
     return artifacts
 
 
+#: Served templates frozen whatever their text says, because issue #149 names
+#: them as advertised Component-XML write routes that #160 must retract.
+#:
+#: The token filter is the wrong instrument for these: `_COMPONENT_CLONE`'s
+#: served payload is a bare `{name, folder_name, folder_id, description}`
+#: skeleton with no legacy vocabulary in it at all — yet clone re-posts
+#: platform-sourced XML with the identity attributes stripped (route
+#: `WRT-manage-component-clone`), so its advertisement is exactly what the sweep
+#: has to find. A surface can advertise a legacy route without naming one.
+_ALWAYS_FROZEN_TEMPLATES: Tuple[str, ...] = (
+    "resource_type=process|operation=create",
+    "resource_type=component|operation=create",
+    "resource_type=component|operation=clone",
+)
+
+
 def _schema_template_surfaces(meta_tools: Any) -> Dict[str, Any]:
     """Derive the served schema-template universe by probing the runtime, not by
     hand-listing selectors (the `_specialized_surfaces()` technique from
@@ -1292,30 +1471,86 @@ def _schema_template_surfaces(meta_tools: Any) -> Dict[str, Any]:
     for resource_type in meta_tools._VALID_RESOURCE_TYPES:
         overview = meta_tools.get_schema_template_action(resource_type=resource_type)
         surfaces["resource_type=%s" % resource_type] = overview
-        for operation in _echoed_list(overview, "valid_operations"):
+
+        # The OVERVIEW is the wrong place to read the operation axis from. The
+        # process overview echoes `available_actions: ['list','get']` — the
+        # read-only MCP actions, not the template operations, which are
+        # `['create','list']` — so following it could never reach
+        # `operation='create'`, the surface carrying the raw-XML escape hatch
+        # this issue exists to freeze. The authoritative list is echoed on the
+        # REFUSAL envelope, so probe with a deliberately invalid operation and
+        # read it back; the overview keys stay as a fallback.
+        refusal = meta_tools.get_schema_template_action(
+            resource_type=resource_type, operation="__m12_12_invalid__")
+        operations = _echoed_list(refusal, "valid_operations") or _echoed_list(
+            overview, "valid_operations", "available_actions", "valid_actions",
+            "operations", "actions")
+        component_types = _echoed_list(overview, "valid_component_types",
+                                       "component_types")
+
+        for component_type in component_types:
+            surfaces["resource_type=%s|component_type=%s" % (resource_type, component_type)] = \
+                meta_tools.get_schema_template_action(
+                    resource_type=resource_type, component_type=component_type)
+
+        for operation in operations:
             payload = meta_tools.get_schema_template_action(
                 resource_type=resource_type, operation=operation)
             surfaces["resource_type=%s|operation=%s" % (resource_type, operation)] = payload
-            for protocol in _echoed_list(payload, "valid_protocols"):
+            for protocol in _echoed_list(payload, "valid_protocols", "protocols"):
                 surfaces["resource_type=%s|operation=%s|protocol=%s"
                          % (resource_type, operation, protocol)] = \
                     meta_tools.get_schema_template_action(
                         resource_type=resource_type, operation=operation, protocol=protocol)
-            for component_type in _echoed_list(payload, "valid_component_types"):
+            for component_type in _echoed_list(payload, "valid_component_types",
+                                               "component_types") or component_types:
                 surfaces["resource_type=%s|operation=%s|component_type=%s"
                          % (resource_type, operation, component_type)] = \
                     meta_tools.get_schema_template_action(
                         resource_type=resource_type, operation=operation,
                         component_type=component_type)
+
+    assert_schema_surface_axes_non_vacuous(surfaces)
     return surfaces
 
 
-def _echoed_list(payload: Any, key: str) -> List[str]:
+def assert_schema_surface_axes_non_vacuous(surfaces: Dict[str, Any]) -> None:
+    """A walk that descends no axis freezes only the overviews.
+
+    Guard the guard: the acceptance criteria name specific served templates —
+    the process-create `raw_xml_escape_hatch`, the `_COMPONENT_CREATE` skeleton
+    carrying `type="process"`, and `_COMPONENT_CLONE`. If the axis walk stops at
+    the overviews, none of them is pinned and the SS-SCHEMA-TEMPLATES class is
+    decorative.
+    """
+    for axis in ("|operation=", "|component_type="):
+        if not any(axis in key for key in surfaces):
+            raise AssertionError(
+                "the schema-template walk descended no %s axis — the served "
+                "templates this inventory must freeze would not be collected. "
+                "An echo key was probably renamed; add the alias." % axis.strip("|="))
+    # The three selectors issue #149 names by file:line. Their absence is the
+    # exact vacuity that shipped once: the walk ran, produced overviews, and
+    # froze none of the templates the retraction sweep has to retract.
+    for required in ("resource_type=process|operation=create",
+                     "resource_type=component|operation=create",
+                     "resource_type=component|operation=clone"):
+        if required not in surfaces:
+            raise AssertionError(
+                "the served template %r was not collected — issue #149 names it "
+                "explicitly (raw_xml_escape_hatch / _COMPONENT_CREATE / "
+                "_COMPONENT_CLONE)" % required)
+
+
+def _echoed_list(payload: Any, *keys: str) -> List[str]:
+    """First echoed list of strings found under any of ``keys``."""
     if not isinstance(payload, dict):
         return []
-    values = payload.get(key)
-    if isinstance(values, (list, tuple)):
-        return [str(v) for v in values]
+    for key in keys:
+        values = payload.get(key)
+        if isinstance(values, (list, tuple)) and values \
+                and all(isinstance(v, str) for v in values):
+            return [str(v) for v in values]
     return []
 
 
@@ -1500,6 +1735,7 @@ def sdk_evidence() -> Dict[str, Any]:
 _CENSUS_DEFAULT_OWNER = {
     "registry_lookup": "#160",
     "renderer_call": "#160",
+    "legacy_transitive_call": "#160",
     "legacy_emitter": "#160",
     "legacy_semantic_validation": "#160",
     "component_xml_write": "#160",
@@ -1548,6 +1784,7 @@ def _own(path: str, census: str) -> Tuple[str, str]:
 
 
 _DEFAULT_DISPOSITION = {
+    "legacy_transitive_call": "delete or re-home with the callee",
     "registry_lookup": "delete with the legacy registry",
     "renderer_call": "delete with the legacy renderer",
     "legacy_emitter": "delete with the legacy emitters",
@@ -1960,8 +2197,9 @@ def _table(headers: Sequence[str], rows: Iterable[Sequence[Any]]) -> str:
 #: be frozen in the JSON while appearing nowhere in the document #160 reads.
 #: `test_the_ledger_sections_partition_every_census_kind` enforces it.
 _LEDGER_SECTIONS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
-    ("reachability", ("registry_lookup", "renderer_call", "legacy_emitter",
-                      "legacy_semantic_validation", "unclassified_dynamic")),
+    ("reachability", ("registry_lookup", "renderer_call", "legacy_transitive_call",
+                      "legacy_emitter", "legacy_semantic_validation",
+                      "unclassified_dynamic")),
     ("producers", ("process_kind_producer", "process_kind_consumer",
                    "example_producer", "authoring_boundary")),
     ("writes", ("component_xml_write", "raw_api_invoker")),
@@ -1995,17 +2233,30 @@ def emit_route_table(document: Dict[str, Any]) -> str:
 
 
 def emit_matrix_table(document: Dict[str, Any]) -> str:
+    """The retraction matrix, carrying the frozen artifact IDs themselves.
+
+    The plan's column spec says "Frozen artifact IDs" and the acceptance
+    criterion says #160 executes the sweep from the matrix alone. A COUNT
+    satisfies neither: it tells the reader how many strings to retract without
+    telling them which. The `producer` column likewise names every producer that
+    actually contributes to the row, derived from the artifacts rather than
+    hand-written, so it cannot drift from what was collected.
+    """
     artifacts_by_class: Dict[str, List[str]] = {}
+    producers_by_class: Dict[str, Set[str]] = {}
     for artifact in document.get("served_artifacts", []):
         artifacts_by_class.setdefault(artifact["surface_class"], []).append(
             artifact["artifact_id"])
+        producers_by_class.setdefault(artifact["surface_class"], set()).add(
+            artifact["producer"])
     return _table(
-        ("Surface ID", "Surface class", "Caller-visible producer/selector",
-         "HEAD source anchor(s)", "Frozen artifacts", "Legacy guidance exposed",
+        ("Surface ID", "Surface class", "Caller-visible producer(s)",
+         "HEAD source anchor(s)", "Frozen artifact IDs", "Legacy guidance exposed",
          "Owning endgame step", "Required post-retraction assertion"),
-        [(r["surface_id"], r["surface_class"], r["producer"],
+        [(r["surface_id"], r["surface_class"],
+          "<br>".join(sorted(producers_by_class.get(r["surface_id"], set()))) or "—",
           "<br>".join(r["anchors"]),
-          len(artifacts_by_class.get(r["surface_id"], [])),
+          "<br>".join(sorted(artifacts_by_class.get(r["surface_id"], []))) or "—",
           r["legacy_guidance"], r["owning_issue"], r["post_retraction_assertion"])
          for r in document["served_surface_retraction_matrix"]],
     )

@@ -406,6 +406,71 @@ def test_a_generic_method_name_on_an_unrelated_target_is_not_reported(census_onl
     assert "unclassified_dynamic" in {r.split(" | ")[0] for r in distinctive.added}
 
 
+@pytest.mark.parametrize("label,body", [
+    ("aliased wrapper around a legacy-bearing function",
+     "from .integration_builder import build_structured_update_xml as bsux\n"
+     "def wrap(comp, xml):\n"
+     "    return bsux(comp, xml)\n"),
+    ("wrapper around the public build entry point",
+     "from .integration_builder import build_integration_action\n"
+     "def wrap(client, profile, action, config):\n"
+     "    return build_integration_action(client, profile, action, config)\n"),
+    ("a wrapper AROUND the wrapper (second hop)",
+     "from .integration_builder import build_structured_update_xml\n"
+     "def inner(comp, xml):\n"
+     "    return build_structured_update_xml(comp, xml)\n"
+     "def outer(comp, xml):\n"
+     "    return inner(comp, xml)\n"),
+])
+def test_a_wrapper_around_a_legacy_path_is_reported(census_only, label, body):
+    """The leaf census alone is fail-open.
+
+    A function that merely CALLS `build_structured_update_xml` reaches the legacy
+    renderer but names no watched sink itself, so it produced no row and the
+    freeze stayed green — a new entry point onto the legacy path, invisible. The
+    census is now closed to a fixed point over legacy-bearing module-level
+    functions, which is why the second-hop case is parametrised here too: a
+    one-hop rule would let `outer` hide behind `inner`.
+    """
+    diff = _added(census_only, "_m12_12_synthetic_wrapper", body)
+    assert "legacy_transitive_call" in {r.split(" | ")[0] for r in diff.added}, \
+        "%s escaped the freeze: %s" % (label, diff.report())
+
+
+def test_a_setdefault_producer_is_reported(census_only):
+    """`config.setdefault("process_kind", ...)` WRITES a process_kind.
+
+    Treating every `.setdefault` as a read put a default-injecting producer in
+    the consumer column, where the producer census would never see it.
+    """
+    diff = _added(census_only, "_m12_12_synthetic_setdefault", (
+        "def prepare(config):\n"
+        "    config.setdefault('process_kind', 'sync_pipeline')\n"
+        "    return config\n"
+    ))
+    assert "process_kind_producer" in {r.split(" | ")[0] for r in diff.added}
+
+
+def test_a_hand_rolled_transport_post_is_reported_as_a_write_sink(census_only):
+    """A direct `send_request` bypasses every typed create/update verb."""
+    diff = _added(census_only, "_m12_12_synthetic_transport", (
+        "def post(client, xml):\n"
+        "    return client.component.send_request(xml)\n"
+    ))
+    assert "component_xml_write" in {r.split(" | ")[0] for r in diff.added}
+
+
+def test_a_legacy_semantic_validation_caller_is_reported(census_only):
+    """`_process_ir_semantic_error` is named by the design plan and is private,
+    so a public-only filter over the bridge module missed it."""
+    diff = _added(census_only, "_m12_12_synthetic_semantic", (
+        "from .integration_builder import _process_ir_semantic_error\n"
+        "def check(kind, config):\n"
+        "    return _process_ir_semantic_error(kind, config)\n"
+    ))
+    assert "legacy_semantic_validation" in {r.split(" | ")[0] for r in diff.added}
+
+
 def test_a_bulk_component_caller_is_reported_as_a_write_sink(census_only):
     """`bulk_component` is not a read.
 
@@ -598,20 +663,25 @@ def test_served_artifacts_match_the_committed_values(derived, baseline):
             assert artifact["value"] == frozen[aid]["value"]
 
 
-def test_large_served_artifacts_keep_identity_and_a_legacy_excerpt(baseline):
-    """The size rule is applied consistently, and omission never costs drift
-    detection: `sha256` always covers the whole canonical value."""
+def test_every_served_artifact_stores_its_exact_value(baseline):
+    """The plan chose exact values over hashes so a failure is REVIEWABLE.
+
+    An earlier draft omitted the value above 8192 canonical characters and kept
+    only the hash plus a token excerpt — drift was still detected, but a
+    reviewer facing a changed hash on an 80 KB schema had to re-extract the
+    value to see what moved, which is the exact drawback the plan rejected
+    hash-only snapshots for. Large artifacts now keep the value AND gain the
+    excerpt as a convenience.
+    """
     for artifact in baseline["served_artifacts"]:
         assert artifact["sha256"]
-        if artifact["value_omitted"]:
-            assert artifact["canonical_length"] > inv._INLINE_VALUE_LIMIT
-            assert "value" not in artifact
-            assert artifact["legacy_excerpt"], (
-                "%s was omitted but carries no legacy excerpt — it would not "
-                "have been collected at all" % artifact["artifact_id"])
-        else:
-            assert artifact["canonical_length"] <= inv._INLINE_VALUE_LIMIT
-            assert "value" in artifact
+        assert artifact["value_omitted"] is False
+        assert "value" in artifact, artifact["artifact_id"]
+        assert inv._sha256(inv.canonical_json(artifact["value"])) == artifact["sha256"], (
+            "%s: the stored value does not hash to the stored identity"
+            % artifact["artifact_id"])
+        if artifact["canonical_length"] > inv._INLINE_VALUE_LIMIT:
+            assert "legacy_excerpt" in artifact
 
 
 def test_the_served_collection_cannot_touch_boomi_transport(baseline):
@@ -707,6 +777,68 @@ def test_every_served_artifact_belongs_to_exactly_one_matrix_class(derived):
         assert owned.get(surface_id), (
             "retraction-matrix row %s owns no frozen artifact, so nothing pins "
             "its text" % surface_id)
+
+
+def test_the_templates_issue_149_names_are_frozen(derived):
+    """The acceptance criteria name specific served templates by file:line.
+
+    The axis walk once followed `available_actions` on the process overview —
+    `['list','get']`, the read-only MCP actions, not the template operations
+    `['create','list']` — so it could never reach `operation='create'` and froze
+    none of these. The operation axis is now derived from the REFUSAL envelope's
+    `valid_operations`, which is the authoritative list.
+    """
+    frozen = {a["selector"] for a in derived["served_artifacts"]
+              if a["surface_class"] == "SS-SCHEMA-TEMPLATES"}
+    for selector in inv._ALWAYS_FROZEN_TEMPLATES:
+        assert selector in frozen, (
+            "issue #149 names the served template %r (raw_xml_escape_hatch / "
+            "_COMPONENT_CREATE / _COMPONENT_CLONE) and it is not frozen" % selector)
+
+    # The two that carry the escape-hatch text must actually contain it, or the
+    # artifact is pinning the wrong payload.
+    by_selector = {a["selector"]: a for a in derived["served_artifacts"]}
+    for selector in ("resource_type=process|operation=create",
+                     "resource_type=component|operation=create"):
+        blob = inv.canonical_json(by_selector[selector]["value"])
+        assert "process_kind" in blob or "config.xml" in blob, selector
+
+
+def test_the_schema_template_walk_descends_its_axes(derived):
+    """Guard the guard: a walk that stops at the overviews freezes nothing that
+    matters, and does so silently."""
+    selectors = {a["selector"] for a in derived["served_artifacts"]
+                 if a["surface_class"] == "SS-SCHEMA-TEMPLATES"}
+    assert any("|operation=" in s for s in selectors)
+    assert any("|component_type=" in s for s in selectors)
+    assert len(selectors) > 20, len(selectors)
+
+
+def test_the_retraction_matrix_carries_artifact_ids_not_counts(baseline):
+    """#160 executes the sweep from the matrix alone, so the matrix must say
+    WHICH strings to retract, not how many."""
+    table = inv.emit_matrix_table(baseline)
+    assert "Frozen artifact IDs" in table
+    ids = {a["artifact_id"] for a in baseline["served_artifacts"]}
+    for surface_id in inv.SURFACE_CLASSES:
+        owned = sorted(a["artifact_id"] for a in baseline["served_artifacts"]
+                       if a["surface_class"] == surface_id)
+        assert owned, surface_id
+        # Every owned ID appears in the row (Markdown-escaped, since selectors
+        # contain the `|` that delimits table cells).
+        for artifact_id in owned:
+            assert inv._cell(artifact_id) in table, (surface_id, artifact_id)
+    assert ids  # non-vacuity
+
+
+def test_every_ledger_row_carries_a_real_line(baseline):
+    """`file:line`, per the acceptance criteria — not `file:0`.
+
+    Producer and boundary rows once hard-coded `evidence_line: 0`, which the
+    ledger rendered as `-`.
+    """
+    zero = [r["ledger_id"] for r in baseline["ledger_rows"] if not r["evidence_line"]]
+    assert zero == [], "ledger rows with no line: %s" % zero
 
 
 def test_the_retraction_matrix_is_executable_from_the_matrix_alone(derived):

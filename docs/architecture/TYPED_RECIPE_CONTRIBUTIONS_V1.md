@@ -565,7 +565,8 @@ annotations, each verified to carry such a node.
 **The regression test pins four of those twelve, not all of them.**
 `test_the_wrap_ban_still_over_fires_on_these` is parametrised over `AnyUrl`, `IPv4Address`,
 `IPv4Network` and `re.Pattern`. `Sequence`, `Deque`, `DefaultDict`, `Fraction` and the remaining
-three `ipaddress` forms are measured observations, not pinned behaviour: narrowing the ban so it
+four `ipaddress` forms — `IPv4Interface`, `IPv6Address`, `IPv6Network` and `IPv6Interface` —
+are measured observations, not pinned behaviour: narrowing the ban so it
 stopped refusing them would leave that test green. The twelve are the measured family; the four are
 the regression surface. That ban is recorded below as known, measured and still open; it is named
 here too because a reader checking "is `defaultdict` supported?" should not have to find the answer
