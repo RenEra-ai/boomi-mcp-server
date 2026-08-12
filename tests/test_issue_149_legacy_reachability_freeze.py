@@ -30,6 +30,61 @@ if _TESTS not in sys.path:
 import _m12_12_legacy_inventory as inv  # noqa: E402
 
 
+def _transport_bomb():
+    """Replace every Boomi TRANSPORT entry point with a raising sentinel.
+
+    Scoped to the SDK's `ComponentService`, deliberately. The repo-side helpers
+    `_shared._create_component_raw` / `_update_component_xml` are NOT patched:
+    every path through them reaches `ComponentService.create_component` /
+    `update_component`, which are bombed here, so patching them adds no coverage
+    — and it actively breaks the derivation. `legacy_sink_vocabulary()` reflects
+    `_shared` and keeps only members whose `__module__` is `_shared`; a sentinel
+    defined in this test module fails that test, silently dropping both writers
+    from the watched vocabulary and taking three real call sites out of the
+    census with them.
+    """
+    from boomi.services.component import ComponentService
+
+    def bomb(*args, **kwargs):
+        raise AssertionError("the #149 derivation reached the Boomi transport")
+
+    patches = [
+        (ComponentService, name, getattr(ComponentService, name))
+        for name in ("send_request", "send_request_raw", "create_component",
+                     "create_component_raw", "update_component",
+                     "update_component_raw", "get_component", "get_component_raw",
+                     "bulk_component", "bulk_component_raw")
+        if hasattr(ComponentService, name)
+    ]
+    for owner, name, _ in patches:
+        setattr(owner, name, bomb)
+    return patches
+
+
+def _disarm(patches):
+    for owner, name, original in patches:
+        setattr(owner, name, original)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def transport_guard():
+    """Arm the transport sentinel for the WHOLE module, not one test node.
+
+    The `derived` fixture and the determinism test each run a full served
+    collection. With the guard installed only inside
+    `test_the_served_collection_cannot_touch_boomi_transport`, those collections
+    ran unprotected and a producer that regressed into transport would have made
+    a real call before any test noticed. Module-scoped and autouse, so every
+    derivation in this file is covered — the read-only claim is enforced
+    continuously rather than sampled once.
+    """
+    patches = _transport_bomb()
+    try:
+        yield
+    finally:
+        _disarm(patches)
+
+
 @pytest.fixture(scope="module")
 def baseline():
     return inv.load_baseline()
@@ -261,6 +316,146 @@ def test_a_new_legacy_emitter_or_write_sink_caller_breaks_the_freeze(census_only
     assert "component_xml_write" in {row.split(" | ")[0] for row in writer.added}
 
 
+def test_a_renderer_reached_through_a_module_qualified_registry_is_reported(census_only):
+    """`builders.PROCESS_FLOW_BUILDERS['sync_pipeline'].build(config)`.
+
+    The subscript roots in an `ast.Attribute` rather than an `ast.Name`, and with
+    a constant registry key there is no `process_kind` access either — so an
+    earlier draft produced NO census row at all for a complete legacy renderer
+    path. Both spellings of the registry must resolve.
+    """
+    diff = _added(census_only, "_m12_12_synthetic_qualified", (
+        "from .components import builders\n"
+        "def render(config):\n"
+        "    return builders.PROCESS_FLOW_BUILDERS['sync_pipeline'].build(config)\n"
+    ))
+    kinds = {row.split(" | ")[0] for row in diff.added}
+    assert {"registry_lookup", "renderer_call"} <= kinds, sorted(kinds)
+
+
+@pytest.mark.parametrize("body", [
+    # a qualified `.get` lookup
+    "from .components import builders\n"
+    "def render(c):\n"
+    "    return builders.PROCESS_FLOW_BUILDERS.get(c['process_kind']).build(c)\n",
+    # a qualified subscript bound to a variable first
+    "from .components import builders\n"
+    "def render(c):\n"
+    "    cls = builders.PROCESS_FLOW_BUILDERS[c['process_kind']]\n"
+    "    return cls.build(c)\n",
+    # a qualified READ-ONLY reference — no call at all
+    "from .components import builders\n"
+    "def hint():\n"
+    "    return sorted(builders.PROCESS_FLOW_BUILDERS)\n",
+])
+def test_every_module_qualified_registry_spelling_is_reported(census_only, body):
+    """Recognition routes through one predicate, so no spelling escapes.
+
+    Three separate shapes had leaked past shape-specific checks — a qualified
+    `.get`, a qualified subscript bound to a variable, and a bare qualified read.
+    The read is the one that mattered most: it produced NO row of any kind, so a
+    file consulting the legacy registry was indistinguishable from a harmless
+    one. Production carries no qualified reference today; this is the gate
+    closing before the case arrives, not a repair of a live undercount.
+    """
+    diff = _added(census_only, "_m12_12_synthetic_qualified_variants", body)
+    assert "registry_lookup" in {row.split(" | ")[0] for row in diff.added}, diff.report()
+
+
+def test_a_builder_method_reached_through_getattr_is_reported(census_only):
+    """`getattr(SyncPipelineBuilder, 'build')(config)` and its dynamic sibling.
+
+    Both invoke the legacy renderer without a registry lookup or a `process_kind`
+    read. The constant form escaped because the watched set excluded the builder
+    METHODS; the dynamic form escaped because the branch was a literal no-op.
+    """
+    constant = _added(census_only, "_m12_12_synthetic_getattr_const", (
+        "from .components.builders import SyncPipelineBuilder as B\n"
+        "def render(config):\n"
+        "    return getattr(B, 'build')(config)\n"
+    ))
+    assert "unclassified_dynamic" in {r.split(" | ")[0] for r in constant.added}
+
+    dynamic = _added(census_only, "_m12_12_synthetic_getattr_dyn", (
+        "from .components.builders import SyncPipelineBuilder as B\n"
+        "def render(config, name):\n"
+        "    return getattr(B, name)(config)\n"
+    ))
+    assert "unclassified_dynamic" in {r.split(" | ")[0] for r in dynamic.added}
+
+
+def test_a_bulk_component_caller_is_reported_as_a_write_sink(census_only):
+    """`bulk_component` is not a read.
+
+    This inventory's own `sdk_evidence` records that `ComponentBulkRequestType`
+    admits CREATE, UPDATE and DELETE, so a production caller could mutate through
+    the bulk route. Excluding the bulk verbs on a create_/update_ name prefix
+    would have let that happen with no `component_xml_write` row and no entry in
+    route reconciliation.
+    """
+    diff = _added(census_only, "_m12_12_synthetic_bulk", (
+        "def f(client, envelope):\n"
+        "    return client.component.bulk_component(envelope)\n"
+    ))
+    assert "component_xml_write" in {r.split(" | ")[0] for r in diff.added}
+
+
+def test_a_new_tool_that_advertises_a_legacy_path_is_collected():
+    """Served-contract growth must be visible.
+
+    The MCP snapshot is derived from the full registry, not a fixed name list, so
+    a tool that STARTS advertising `process_kind` or raw process XML becomes a new
+    artifact and fails the freeze. Asserting the derivation covers every
+    registered legacy-bearing tool is the checkable form of that claim.
+    """
+    tools = inv._served_tools()
+    steering = {
+        name for name, tool in tools.items()
+        if inv._mentions_legacy(tool.description or "")
+        or inv._mentions_legacy(tool.parameters or {})
+    }
+    collected = {
+        a["selector"].rsplit(".", 1)[0]
+        for a in inv.load_baseline()["served_artifacts"]
+        if a["surface_class"] == "SS-MCP-DESCRIPTIONS"
+    }
+    assert steering == collected, (
+        "registered tools carrying legacy guidance are not the ones frozen.\n"
+        "advertising but not frozen: %s\nfrozen but no longer advertising: %s"
+        % (sorted(steering - collected), sorted(collected - steering)))
+    assert set(inv._LEGACY_STEERING_TOOL_FLOOR) <= steering
+
+
+def test_the_comparator_reads_every_frozen_section(baseline):
+    """A section the inventory declares frozen but the comparator never reads is
+    not frozen. Perturb each one and require `compare()` to report it."""
+    import copy
+
+    perturbations = {
+        "sdk_evidence":
+            lambda d: d["sdk_evidence"]["call_shapes"]["update_component"]
+            .__setitem__("http_method", "PUT"),
+        "ledger_rows":
+            lambda d: d["ledger_rows"][0].__setitem__("owning_issue", "#151"),
+        "component_xml_write_routes":
+            lambda d: d["component_xml_write_routes"][0]
+            .__setitem__("classification", "preserve"),
+        "served_surface_retraction_matrix":
+            lambda d: d["served_surface_retraction_matrix"][0]
+            .__setitem__("owning_issue", "#151"),
+        "route_reconciliation":
+            lambda d: d["route_reconciliation"]["unclassified"].append("x::y"),
+    }
+    for section, perturb in perturbations.items():
+        mutated = copy.deepcopy(baseline)
+        perturb(mutated)
+        diff = inv.compare(mutated, baseline)
+        assert not diff.empty(), (
+            "compare() does not read %s — that section is documented as frozen "
+            "but nothing would fail if it changed" % section)
+        assert any(section in line for line in diff.scalar_changes), diff.report()
+
+
 def test_an_unresolvable_dynamic_sink_access_is_reported_not_ignored(census_only):
     """Fail-closed residue: a watched name reached through `getattr` cannot be
     statically resolved, so it is RECORDED as unclassified rather than dropped."""
@@ -397,28 +592,82 @@ def test_large_served_artifacts_keep_identity_and_a_legacy_excerpt(baseline):
             assert "value" in artifact
 
 
-def test_the_served_collection_cannot_touch_boomi_transport(monkeypatch):
+def test_the_served_collection_cannot_touch_boomi_transport(baseline):
     """Every served producer must return without reaching the platform.
 
-    Patched through the SAME bare-`boomi_mcp` import the collector uses — the
-    `src.`-prefixed spelling is a second module object and would patch nothing.
+    The sentinel is already armed for the whole module (`transport_guard`);
+    this node states the property explicitly and compares BY VALUE.
+
+    Comparing only the artifact COUNT would have been vacuous: the diagnostic
+    probes used to swallow every exception into a `{"_probe_error": ...}`
+    artifact, so a probe that hit the sentinel produced an artifact of the same
+    shape and the count matched. The probes no longer catch anything, and this
+    node now checks hashes, so a sentinel hit fails the derivation outright.
     """
-    from boomi.services.component import ComponentService
-    from boomi_mcp.categories.components import _shared
-
-    def bomb(*args, **kwargs):
-        raise AssertionError("the #149 served collection reached the Boomi transport")
-
-    for name in ("send_request", "send_request_raw", "create_component",
-                 "create_component_raw", "update_component", "update_component_raw",
-                 "get_component", "get_component_raw", "bulk_component"):
-        monkeypatch.setattr(ComponentService, name, bomb, raising=False)
-    monkeypatch.setattr(_shared, "_create_component_raw", bomb, raising=False)
-    monkeypatch.setattr(_shared, "_update_component_xml", bomb, raising=False)
-
     artifacts = inv.collect_served_artifacts()
     assert artifacts, "the served collection produced nothing under the transport bomb"
-    assert len(artifacts) == len(inv.load_baseline()["served_artifacts"])
+
+    frozen = {a["artifact_id"]: a["sha256"] for a in baseline["served_artifacts"]}
+    current = {a["artifact_id"]: a["sha256"] for a in artifacts}
+    assert current == frozen, (
+        "the served collection differs under the transport bomb — a producer "
+        "reached, or tried to reach, the platform")
+
+    blob = inv.canonical_json(artifacts)
+    assert "_probe_error" not in blob, (
+        "a served artifact recorded its own probe failure instead of the served "
+        "text it is supposed to pin")
+
+
+def test_the_transport_sentinel_is_actually_armed():
+    """Guard the guard: prove the bomb fires, so the node above is not passing
+    because the patch silently missed its target."""
+    from boomi.services.component import ComponentService
+
+    with pytest.raises(AssertionError, match="reached the Boomi transport"):
+        ComponentService.create_component(object(), "<Component/>")
+
+
+def test_the_sdk_evidence_survives_the_transport_sentinel(derived, baseline):
+    """The SDK shapes must be read from the class's SOURCE FILE, not its live
+    attributes.
+
+    This module patches `ComponentService.create_component` and friends for its
+    whole lifetime. An earlier draft resolved call shapes by inspecting those
+    attributes, so under the sentinel every verb resolved to the bomb's body and
+    the evidence silently became `resolved: false` — evidence that depends on
+    whether a test has patched the class is not evidence.
+    """
+    shapes = derived["sdk_evidence"]["call_shapes"]
+    for verb in ("create_component", "update_component", "bulk_component"):
+        assert shapes[verb]["resolved"], "%s shape unresolved under the sentinel" % verb
+    assert shapes == baseline["sdk_evidence"]["call_shapes"]
+    # The two facts the issue's raw-API analysis rests on.
+    assert shapes["update_component"]["http_method"] == "POST"
+    assert shapes["update_component"]["url_template"] == "/Component/{componentId}"
+    assert shapes["bulk_component"]["url_template"] == "/Component/bulk"
+    assert shapes["bulk_component"]["accept_header"] == "application/xml"
+
+
+def test_section_11_7_cites_every_test_in_this_module():
+    """The evidence table must not drift from the suite.
+
+    `tests/test_m12_migration_matrix_evidence.py::test_every_cited_regression_test_resolves`
+    already proves each CITED node exists; this is the other direction — a node
+    added here without a §11.7 row would leave the ledger understating its own
+    evidence.
+    """
+    import inspect as _inspect
+
+    defined = {
+        name for name, obj in globals().items()
+        if name.startswith("test_") and _inspect.isfunction(obj)
+        and obj.__module__ == __name__
+    }
+    body = inv.section_11_text()
+    missing = sorted(n for n in defined if n not in body)
+    assert missing == [], (
+        "these test nodes are not cited in §11.7 of %s: %s" % (inv.INVENTORY_DOC, missing))
 
 
 def test_every_served_artifact_belongs_to_exactly_one_matrix_class(derived):

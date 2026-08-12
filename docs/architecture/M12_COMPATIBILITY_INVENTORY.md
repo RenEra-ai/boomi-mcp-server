@@ -1996,7 +1996,7 @@ fails if anyone hand-edits them apart from the machine record.
 | Census rows | 162 |
 | Ledger rows (§11.2–§11.4 grain) | 81 |
 | Component-XML write routes | 20 |
-| Frozen served artifacts | 67 |
+| Frozen served artifacts | 63 |
 | Machine record | `tests/fixtures/m12_12/legacy_reachability_inventory.json` |
 
 **The watched vocabulary is derived from the runtime authority, never typed out.** Builders come
@@ -2259,7 +2259,7 @@ retraction. **#160 can execute the sweep from this matrix alone** —
 HEAD and every row names a producer, the guidance it exposes, and a post-retraction assertion.
 
 A deleted-name grep is NOT the acceptance mechanism: obsolete guidance survives under names that are
-never deleted. That is why the freeze snapshots the **served values** — 67 artifacts collected
+never deleted. That is why the freeze snapshots the **served values** — 63 artifacts collected
 by calling the real read-only producers (`server.mcp.list_tools()`,
 `meta_tools.get_schema_template_action`, `list_capabilities_action`,
 `list_integration_archetypes_action`, `IntegrationComponentSpec.model_json_schema()`, and pure
@@ -2275,7 +2275,7 @@ in the suite. Drift detection is unaffected — the hash covers the complete can
 |---|---|---|---|---|---|---|---|
 | SS-PYDANTIC | Pydantic schema / field descriptions | IntegrationComponentSpec.model_json_schema() | src/boomi_mcp/models/integration_models.py:20-34 (description string :22-33) | 1 | steers callers to "manage_component for an explicit raw process XML escape hatch" and advertises process_kind | #160 | the served config description names no raw process XML escape hatch and no legacy process_kind. |
 | SS-BUILDER-DIAGNOSTICS | Builder error texts and hints | integration_builder plan preflight envelopes | src/boomi_mcp/categories/integration_builder.py:3148<br>src/boomi_mcp/categories/integration_builder.py:3162<br>src/boomi_mcp/categories/integration_builder.py:3544<br>src/boomi_mcp/categories/integration_builder.py:3610<br>src/boomi_mcp/categories/integration_builder.py:5318<br>src/boomi_mcp/categories/integration_builder.py:5403-5430 | 4 | PROCESS_KIND_* hints enumerate sorted(PROCESS_FLOW_BUILDERS) and PROCESS_KIND_XML_CONFLICT actively steers raw process XML onto manage_component(type="component", config.xml) | #160 | no served builder envelope names a legacy process_kind value or routes raw process XML to another tool. |
-| SS-MCP-DESCRIPTIONS | Registered MCP tool descriptions and parameter schemas | server.mcp.list_tools() | server.py:1383-1385 (manage_process)<br>server.py:1712 (manage_component tool)<br>server.py:1731-1732 (manage_component escape-hatch blessing)<br>server.py:2098 (manage_connector raw create)<br>server.py:2103 (manage_connector raw update) | 22 | tool descriptions bless raw process XML as an escape hatch and advertise raw-XML connector create/update | #160 | no registered tool description blesses raw process XML. |
+| SS-MCP-DESCRIPTIONS | Registered MCP tool descriptions and parameter schemas | server.mcp.list_tools() | server.py:1383-1385 (manage_process)<br>server.py:1712 (manage_component tool)<br>server.py:1731-1732 (manage_component escape-hatch blessing)<br>server.py:2098 (manage_connector raw create)<br>server.py:2103 (manage_connector raw update) | 18 | tool descriptions bless raw process XML as an escape hatch and advertise raw-XML connector create/update | #160 | no registered tool description blesses raw process XML. |
 | SS-SAFE-EDIT | Safe-edit guidance | safe_edit_component._validate_patch_shape(...) | src/boomi_mcp/categories/components/safe_edit_component.py:176-191 | 1 | the raw-XML refusal steers callers to manage_component(action='update') with config.xml | #160 | the refusal names no full-replacement escape hatch. |
 | SS-SCHEMA-TEMPLATES | get_schema_template templates | meta_tools.get_schema_template_action(...) | src/boomi_mcp/categories/meta_tools.py:595-598 (raw_xml_escape_hatch)<br>src/boomi_mcp/categories/meta_tools.py:762-785 (_COMPONENT_CREATE, type="process" at :770, workflow step 4 at :778-784)<br>src/boomi_mcp/categories/meta_tools.py:4989 (force-clear hint)<br>src/boomi_mcp/categories/meta_tools.py:5180-5190 (_COMPONENT_CLONE)<br>src/boomi_mcp/categories/meta_tools.py:8867 (serves _COMPONENT_CREATE)<br>src/boomi_mcp/categories/meta_tools.py:8880 (serves _COMPONENT_CLONE) | 26 | served templates carry type="process" raw XML, the raw_xml_escape_hatch text, and legacy process protocols | #160 | no served template emits a process-typed raw XML skeleton or a raw-XML escape-hatch instruction. |
 | SS-RAW-API | Raw-API catalog and typed-alternative entries | meta_tools._raw_write_confirmation_guard / _classify_raw_api_request / _typed_alternatives_for_endpoint | src/boomi_mcp/categories/meta_tools.py:5622 (_classify_raw_api_request)<br>src/boomi_mcp/categories/meta_tools.py:5728-5760 (_raw_write_confirmation_guard)<br>src/boomi_mcp/categories/meta_tools.py:5763 (invoke_api)<br>src/boomi_mcp/categories/meta_tools.py:5811 (transport interpolation) | 3 | the raw invoker is type-unrestricted, so POST/PUT to /Component can mint or replace a process; classification splits its own copy of the endpoint while transport interpolates the raw string | #160 | ONE canonical endpoint parser feeds classification, ID extraction AND transport; every update-shaped call runs the two-sided process check; `bulk` is matched before the <id> arm and never treated as a componentId. |
@@ -2295,6 +2295,11 @@ in the suite. Drift detection is unaffected — the hash covers the complete can
 | **Mutation:** a synthetic legacy caller breaks the freeze | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_synthetic_legacy_caller_breaks_the_freeze` |
 | **Mutation:** a renderer off a registry subscript is reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_renderer_invoked_straight_off_a_registry_subscript_is_reported` |
 | **Mutation:** a new emitter/write-sink caller breaks the freeze | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_new_legacy_emitter_or_write_sink_caller_breaks_the_freeze` |
+| **Mutation:** a module-qualified registry lookup is reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_renderer_reached_through_a_module_qualified_registry_is_reported` |
+| **Mutation:** a builder method reached via `getattr` is reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_builder_method_reached_through_getattr_is_reported` |
+| **Mutation:** a `bulk_component` caller is a write sink | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_bulk_component_caller_is_reported_as_a_write_sink` |
+| A tool that starts advertising a legacy path is collected | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_new_tool_that_advertises_a_legacy_path_is_collected` |
+| The comparator reads every frozen section | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_comparator_reads_every_frozen_section` |
 | **Mutation:** unresolvable dynamic access is reported, not ignored | `tests/test_issue_149_legacy_reachability_freeze.py::test_an_unresolvable_dynamic_sink_access_is_reported_not_ignored` |
 | **Negative control:** an unrelated addition does not break it | `tests/test_issue_149_legacy_reachability_freeze.py::test_an_unrelated_addition_does_not_break_the_freeze` |
 | A duplicated call site is reported as a count change | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_second_call_in_an_existing_function_is_reported_as_a_count_change` |
@@ -2304,11 +2309,15 @@ in the suite. Drift detection is unaffected — the hash covers the complete can
 | Served artifacts match the committed values | `tests/test_issue_149_legacy_reachability_freeze.py::test_served_artifacts_match_the_committed_values` |
 | Large artifacts keep identity and a legacy excerpt | `tests/test_issue_149_legacy_reachability_freeze.py::test_large_served_artifacts_keep_identity_and_a_legacy_excerpt` |
 | The served collection reaches no transport | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_served_collection_cannot_touch_boomi_transport` |
+| **Guard the guard:** the transport sentinel really fires | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_transport_sentinel_is_actually_armed` |
+| SDK evidence is read from source, not patched attributes | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_sdk_evidence_survives_the_transport_sentinel` |
+| This table cites every test in the suite | `tests/test_issue_149_legacy_reachability_freeze.py::test_section_11_7_cites_every_test_in_this_module` |
 | Every artifact belongs to exactly one matrix class | `tests/test_issue_149_legacy_reachability_freeze.py::test_every_served_artifact_belongs_to_exactly_one_matrix_class` |
 | The matrix is executable from the matrix alone | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_retraction_matrix_is_executable_from_the_matrix_alone` |
-| Ledger sections partition every census kind | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_ledger_sections_partition_every_census_kind` |
 | Ledger and JSON are two-way complete | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_ledger_and_the_json_are_two_way_complete` |
+| Ledger sections partition every census kind | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_ledger_sections_partition_every_census_kind` |
 | The tables are regenerable from the JSON | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_markdown_tables_are_regenerable_from_the_json` |
+| **Mutation:** every module-qualified registry spelling is reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_every_module_qualified_registry_spelling_is_reported` |
 
 **Darkness.** This slice changes nothing under `src/boomi_mcp/` or `server.py`:
 `git diff 9711a9c0cb6c88dda41ada94d88694915b659f36 -- src/boomi_mcp server.py` is empty. The only

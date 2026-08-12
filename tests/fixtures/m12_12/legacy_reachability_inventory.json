@@ -2866,6 +2866,8 @@
       "component_xml_write_sinks": [
         "_create_component_raw",
         "_update_component_xml",
+        "bulk_component",
+        "bulk_component_raw",
         "create_component",
         "create_component_raw",
         "update_component",
@@ -3158,37 +3160,46 @@
     },
     {
       "artifact_id": "SS-BUILDER-DIAGNOSTICS:PROCESS_KIND_REQUIRED",
-      "canonical_length": 28,
+      "canonical_length": 416,
       "producer": "integration_builder plan preflight",
       "selector": "PROCESS_KIND_REQUIRED",
-      "sha256": "d292301b512721839087c37dcc535363aa7c2fff8a0cd4d1b11aff59cd836c59",
+      "sha256": "9e91552d28a413bbce8e08df16e1341e9bcb44bd8d626673ec8f00a5268f94b7",
       "surface_class": "SS-BUILDER-DIAGNOSTICS",
       "value": {
-        "_probe_error": "TypeError"
+        "error_code": "PROCESS_KIND_REQUIRED",
+        "field": "config.process_kind",
+        "hint": "Use list_integration_archetypes()/build_from_archetype(), or set process_kind to one of ['database_to_api_sync', 'sync_pipeline', 'wrapper_subprocess']. Use manage_component with raw XML only as an explicit escape hatch.",
+        "message": "Process components must set config.process_kind; legacy freeform process JSON authoring has been removed."
       },
       "value_omitted": false
     },
     {
       "artifact_id": "SS-BUILDER-DIAGNOSTICS:PROCESS_KIND_UNSUPPORTED",
-      "canonical_length": 28,
+      "canonical_length": 234,
       "producer": "integration_builder plan preflight",
       "selector": "PROCESS_KIND_UNSUPPORTED",
-      "sha256": "d292301b512721839087c37dcc535363aa7c2fff8a0cd4d1b11aff59cd836c59",
+      "sha256": "d7884984672b6ab07b78bba644461f9d74781761ad04e7f729167344778147ea",
       "surface_class": "SS-BUILDER-DIAGNOSTICS",
       "value": {
-        "_probe_error": "TypeError"
+        "error_code": "PROCESS_KIND_UNSUPPORTED",
+        "field": "process_kind",
+        "hint": "Supported process_kind values: ['database_to_api_sync', 'sync_pipeline', 'wrapper_subprocess'].",
+        "message": "process_kind '__not_a_real_kind__' is not supported."
       },
       "value_omitted": false
     },
     {
       "artifact_id": "SS-BUILDER-DIAGNOSTICS:PROCESS_KIND_XML_CONFLICT",
-      "canonical_length": 28,
+      "canonical_length": 325,
       "producer": "integration_builder plan preflight",
       "selector": "PROCESS_KIND_XML_CONFLICT",
-      "sha256": "d292301b512721839087c37dcc535363aa7c2fff8a0cd4d1b11aff59cd836c59",
+      "sha256": "7975f6a518a0b2f0b4e06d3d21d03784fa48404e5e0f4ab1111343934f4b3ef1",
       "surface_class": "SS-BUILDER-DIAGNOSTICS",
       "value": {
-        "_probe_error": "TypeError"
+        "error_code": "PROCESS_KIND_XML_CONFLICT",
+        "field": "config.xml",
+        "hint": "Choose one: set process_kind for the structured process-flow builder, OR drop the process_kind and author raw process XML through manage_component (type=\"component\", config.xml) instead.",
+        "message": "process_kind and config.xml are mutually exclusive."
       },
       "value_omitted": false
     },
@@ -3475,173 +3486,6 @@
       "value_omitted": true
     },
     {
-      "artifact_id": "SS-MCP-DESCRIPTIONS:apply_component_edit.description",
-      "canonical_length": 933,
-      "producer": "server.mcp.list_tools()",
-      "selector": "apply_component_edit.description",
-      "sha256": "d13c3eb269ceaa3cf152cec0ad09739f70b24fa3c94baf9963357e87fe64e7d0",
-      "surface_class": "SS-MCP-DESCRIPTIONS",
-      "value": "Commit a previewed safe edit to an existing component — WRITES to Boomi.\n\nPhase 2 of the safe edit workflow. Requires confirm_apply=true plus the\nconfirmation_token from prepare_component_edit and the SAME patch. Re-fetches\nthe component and ABORTS (no mutation) if it drifted since preview or the\npatch changed; otherwise pushes the merged XML through the typed builder +\n#45/#50 preservation path and returns a version comparison.\n\nArgs:\n    profile: Boomi profile name (required)\n    component_id: Component to edit (required)\n    patch: JSON string — the exact patch previewed by prepare_component_edit.\n    confirmation_token: The token returned by prepare_component_edit (required).\n    confirm_apply: Must be true to commit. Defaults to false (no-op gate).\n    max_diff_lines: Cap any fallback diff in the response (default 200).\n\nReturns:\n    base_version, new_version, version_comparison, and update_mode.",
-      "value_omitted": false
-    },
-    {
-      "artifact_id": "SS-MCP-DESCRIPTIONS:apply_component_edit.parameters",
-      "canonical_length": 355,
-      "producer": "server.mcp.list_tools()",
-      "selector": "apply_component_edit.parameters",
-      "sha256": "bd95f3a6994419c20a194051647b2c6de6cc81ee8f86fa1c53a77db3f26ea387",
-      "surface_class": "SS-MCP-DESCRIPTIONS",
-      "value": {
-        "additionalProperties": false,
-        "properties": {
-          "component_id": {
-            "type": "string"
-          },
-          "confirm_apply": {
-            "default": false,
-            "type": "boolean"
-          },
-          "confirmation_token": {
-            "type": "string"
-          },
-          "max_diff_lines": {
-            "default": 200,
-            "type": "integer"
-          },
-          "patch": {
-            "type": "string"
-          },
-          "profile": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "profile",
-          "component_id",
-          "patch",
-          "confirmation_token"
-        ],
-        "type": "object"
-      },
-      "value_omitted": false
-    },
-    {
-      "artifact_id": "SS-MCP-DESCRIPTIONS:build_from_archetype.description",
-      "canonical_length": 855,
-      "producer": "server.mcp.list_tools()",
-      "selector": "build_from_archetype.description",
-      "sha256": "b5e122ea7f0e728a5ff9f2add2fe99762c425d0bc0837e2dcf34e0dded4d0560",
-      "surface_class": "SS-MCP-DESCRIPTIONS",
-      "value": "Build an IntegrationSpecV1 from an archetype WITHOUT calling Boomi.\n\nRead-only. Does not mutate Boomi. The returned `integration_spec`\ncan be passed to `build_integration(action='plan', config=...)` to\npreview steps before applying.\n\nArgs:\n    name: Archetype name (see `list_integration_archetypes`).\n    parameters: Dict matching the archetype's parameter_schema.\n        None uses archetype defaults.\n    recipe_version: Optional EXACT version of the EXECUTABLE recipe to\n        pin for a migrated archetype — the version shown in\n        `recipe_registry.entries`, not the compatibility adapter's.\n        Validated BEFORE the spec is emitted, so a pin that cannot be\n        honoured never returns a spec, and it is carried through to\n        execution: `recipe_provenance.executable` reports the version\n        that actually ran.",
-      "value_omitted": false
-    },
-    {
-      "artifact_id": "SS-MCP-DESCRIPTIONS:build_from_archetype.parameters",
-      "canonical_length": 230,
-      "producer": "server.mcp.list_tools()",
-      "selector": "build_from_archetype.parameters",
-      "sha256": "1646bee12ae868e091939fb3ab534393777c4ffc7dd460975bf130b343eab204",
-      "surface_class": "SS-MCP-DESCRIPTIONS",
-      "value": {
-        "additionalProperties": false,
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "parameters": {
-            "additionalProperties": true,
-            "default": null,
-            "type": "object"
-          },
-          "recipe_version": {
-            "default": null,
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "type": "object"
-      },
-      "value_omitted": false
-    },
-    {
-      "artifact_id": "SS-MCP-DESCRIPTIONS:build_integration.description",
-      "canonical_length": 7369,
-      "producer": "server.mcp.list_tools()",
-      "selector": "build_integration.description",
-      "sha256": "f21d4d57217eb8d1ded734b9d3108e8a737333e71eebb04271d0f7e77034b882",
-      "surface_class": "SS-MCP-DESCRIPTIONS",
-      "value": "Build Boomi integrations from component-oriented JSON specs.\n\nArgs:\n    profile: Boomi profile name (required)\n    action: One of: plan, compile, apply, verify\n    config: JSON string with action-specific payload\n\nTyped authoring (issue #146, OPT-IN — legacy requests are unchanged):\n    Put an AuthoringRequestV1 under config.authoring_request to author\n    ProcessIR, a topology adjunct, or typed recipe invocations directly.\n    Fetch its exact schema with\n    get_schema_template(schema_name=\"AuthoringRequestV1\").\n\n    config.authoring_request is the ONLY new config key. The three\n    binding values are fields OF that object (they are AuthoringRequestV1\n    fields), not siblings of it — placed at the config root they are\n    ignored and a typed apply fails with\n    AUTHORING_APPLY_VALIDATION_REQUIRED:\n\n        config = {\n          \"authoring_request\": {\n            \"contract_version\": \"1\",\n            \"intent\": {...},\n            \"expected_capability_revision\": \"sha256:...\",  # typed apply: REQUIRED\n            \"expected_compile_hash\": \"sha256:...\",         # typed apply: REQUIRED\n            \"expected_plan_hash\": \"sha256:...\"             # optional staleness check\n          },\n          \"dry_run\": false\n        }\n\n    config.authoring_request is mutually exclusive with EVERY legacy\n    root that drives the legacy planner — integration_spec,\n    source_description, components, name, mode and conflict_policy —\n    sending both is rejected rather than silently resolved by precedence.\n    (conflict_policy is the consequential one: at the config root it\n    would be silently replaced by the typed intent's own value.)\n\nActions:\n    plan:\n        - Performs ZERO remote mutation\n        - Normalize and validate integration spec\n        - Build deterministic execution order\n        - Resolve current component existence for conflict handling\n        - With config.authoring_request: semantic validation, resolved\n          references, capability gaps, required decisions, and the\n          IntegrationSpecV1 ComponentPlan preview\n        Example:\n            config='{\"mode\":\"lift_shift\",\"components\":[{\"key\":\"conn\",\"type\":\"connector-settings\",\"name\":\"HTTP API\",\"action\":\"create\",\"config\":{\"connector_type\":\"http\",\"component_name\":\"HTTP API\",\"url\":\"https://api.example.com\"}}]}'\n\n    compile:\n        - Performs ZERO remote mutation, and returns NO build_id\n          (nothing is created, so there is no build to identify)\n        - Requires config.authoring_request\n        - Canonically compiles every authored process and returns the\n          normalized intent, deterministic artifact fingerprints, the\n          validation report, and the compile hash an apply must bind to\n        Example:\n            config='{\"authoring_request\":{\"contract_version\":\"1\",\"intent\":{\"intent_kind\":\"process_ir\",\"integration_name\":\"Order Sync\",\"component_key\":\"proc\",\"process_ir\":{...},\"components\":[...]}}}'\n\n    apply:\n        - Execute plan in dependency order\n        - Honors conflict_policy: reuse | clone | fail\n        - dry_run defaults to true\n        Example:\n            config='{\"dry_run\":false,\"conflict_policy\":\"reuse\",\"integration_spec\":{\"name\":\"Order Sync\",\"mode\":\"lift_shift\",\"components\":[...]}}'\n\n    verify:\n        - Verify components exist and declared dependencies were resolved\n        - Parses each built/updated process component's graph and reports\n          verification[<process_key>].process_graph\n          ({errors, warnings, shapes_checked}); graph errors fail\n          verification, GUI/runtime attribute lints are warnings only\n        - For builds created through the typed path, adds\n          authoring_provenance with the revision binding, artifact\n          fingerprints, and a live comparison that reports revision skew\n          separately from component drift. Absent for legacy builds.\n        Example:\n            config='{\"build_id\":\"<uuid-from-apply>\"}'\n\nMutation boundary: plan and compile never write to Boomi. apply is the\nfirst phase that can, and a TYPED apply re-parses the raw request,\nrecompiles it in this profile, and compares the binding before its first\nwrite — a stale or mismatched binding mutates nothing.\n\nA typed apply reports how sure it is, because \"must I reconcile?\" and\n\"is this safe to retry?\" are different questions:\n\n    mutation_status=\"performed\" - a writing step SUCCEEDED and returned a\n                                  component id; the write was observed.\n                                  Reconcile.\n                                  Note: an id alone is NOT enough. A\n                                  failed update carries the target id it\n                                  was aiming at (a pre-write component\n                                  GET that times out returns one), so\n                                  that case is \"possible\", not\n                                  \"performed\".\n                                  Do not infer the status from the\n                                  presence of an id — read the field.\n    mutation_status=\"possible\"  - a write was attempted and this server\n                                  cannot confirm the outcome: the step\n                                  failed, or succeeded without returning\n                                  an id. It may or may not have\n                                  committed. Check before retrying — a\n                                  retry duplicates under\n                                  conflict_policy=\"clone\".\n                                  Which sub-case you got is readable:\n                                  if the step FAILED, its own\n                                  retryable/error_code evidence is in\n                                  partial_results[<key>].result. If the\n                                  apply SUCCEEDED, there is no\n                                  partial_results — look for\n                                  results[<key>].component_id being\n                                  null, meaning the step reported success\n                                  without returning an id. That is still\n                                  UNCONFIRMED — reconcile rather than\n                                  assume the component exists.\n    mutation_status=\"none\"      - nothing was attempted (only reuse, or\n                                  refused before any write). A FAILURE in\n                                  this state is retry-safe. Its error_code\n                                  is whichever the refusal named —\n                                  AUTHORING_PLAN_STALE,\n                                  AUTHORING_CAPABILITY_REVISION_MISMATCH,\n                                  INVALID_INPUT — and\n                                  AUTHORING_APPLY_VALIDATION_REQUIRED only\n                                  when nothing more specific applied.\n                                  Branch on mutation_status, not on one\n                                  code: every \"none\" refusal is retry-safe.\n\nmutation_performed is the boolean shorthand (true for performed and\npossible). Legacy applies carry neither field.",
-      "value_omitted": false
-    },
-    {
-      "artifact_id": "SS-MCP-DESCRIPTIONS:build_integration.parameters",
-      "canonical_length": 190,
-      "producer": "server.mcp.list_tools()",
-      "selector": "build_integration.parameters",
-      "sha256": "ed2524a2ee42ad3ff267dc6036e4d812afec01c9585dfaaab7858780e106c4de",
-      "surface_class": "SS-MCP-DESCRIPTIONS",
-      "value": {
-        "additionalProperties": false,
-        "properties": {
-          "action": {
-            "type": "string"
-          },
-          "config": {
-            "default": null,
-            "type": "string"
-          },
-          "profile": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "profile",
-          "action"
-        ],
-        "type": "object"
-      },
-      "value_omitted": false
-    },
-    {
-      "artifact_id": "SS-MCP-DESCRIPTIONS:compose_archetypes.description",
-      "canonical_length": 1232,
-      "producer": "server.mcp.list_tools()",
-      "selector": "compose_archetypes.description",
-      "sha256": "ddeb7845d8c8cfa8ab845f33ed04ed31b345a989094e0a94971237324deba001",
-      "surface_class": "SS-MCP-DESCRIPTIONS",
-      "value": "Compose archetype parts into ONE IntegrationSpecV1 WITHOUT calling Boomi.\n\nRead-only. Does not mutate Boomi. v1 composes the topology\ndb_source -> transform -> rest_fanout (2..25 REST targets): the shared\ntransform feeds a Branch with one REST target per leg. Links may\ndeclare handoff.mode='document_cache' on transform -> rest_target\nedges (M8.1 / #132): the Branch then stages mapped documents through\nan auto-emitted in-spec Document Cache (target-less cache_put staging\nleg + all-documents cache_get before each consuming REST send; keyed\nretrieval stays gated). Cross-part contract validation (COMPOSITION_*\nerror codes) fails BEFORE any spec is emitted; the returned\n`integration_spec` deploys through the normal\nbuild_integration(action='plan'/'apply') -> orchestrate_deploy path.\n\nArgs:\n    parts: List of part objects {key, kind, label?, parameters}. Kinds:\n        db_source (archetype 'source' payload), transform (archetype\n        'transform' payload), rest_target (archetype 'target' payload).\n    options: {naming: {integration_name, component_prefix, ...},\n        execution?: {...}, links?: [{from_part, to_part, handoff?}]}.\n        See get_schema_template(schema_name='compose_archetypes').",
-      "value_omitted": false
-    },
-    {
-      "artifact_id": "SS-MCP-DESCRIPTIONS:compose_archetypes.parameters",
-      "canonical_length": 189,
-      "producer": "server.mcp.list_tools()",
-      "selector": "compose_archetypes.parameters",
-      "sha256": "0b226c840c184edab924daf4507273190f6db4e0779e0dc6c1f1b979ddb20dac",
-      "surface_class": "SS-MCP-DESCRIPTIONS",
-      "value": {
-        "additionalProperties": false,
-        "properties": {
-          "options": {
-            "additionalProperties": true,
-            "default": null,
-            "type": "object"
-          },
-          "parts": {
-            "items": {},
-            "type": "array"
-          }
-        },
-        "required": [
-          "parts"
-        ],
-        "type": "object"
-      },
-      "value_omitted": false
-    },
-    {
       "artifact_id": "SS-MCP-DESCRIPTIONS:get_schema_template.description",
       "canonical_length": 5856,
       "producer": "server.mcp.list_tools()",
@@ -3719,20 +3563,59 @@
       "value_omitted": false
     },
     {
-      "artifact_id": "SS-MCP-DESCRIPTIONS:import_integration_draft.description",
-      "canonical_length": 2161,
+      "artifact_id": "SS-MCP-DESCRIPTIONS:index_profile_component.description",
+      "canonical_length": 1662,
       "producer": "server.mcp.list_tools()",
-      "selector": "import_integration_draft.description",
-      "sha256": "825438af13df1bd94dcd00d5b3f6361b7ff7b4df91a05adfdf00152aca8c53ee",
+      "selector": "index_profile_component.description",
+      "sha256": "df82cac3268f606489b511e1fc30f83dcd831f458145a87da39681224e8f59b8",
       "surface_class": "SS-MCP-DESCRIPTIONS",
-      "value": "Convert an existing integration description into reviewable drafts (M7.2).\n\nRead-only MIGRATION DISCOVERY. Does NOT call Boomi, mutate anything,\nconstruct an SDK client, or read credentials. Turns a STRUCTURED\nmigration description into a semantic pipeline_draft (PipelineSpec\nvocabulary), the closest EXISTING archetype preset with derived\npreset_parameters, and — only when zero blocking gaps remain — an\nIntegrationSpecV1 integration_spec_draft ready for\nbuild_integration(action='plan'). Blocking gaps suppress the spec\ndraft, so the tool never emits a broken build input. Product/version\nidentifiers from export summaries are preserved as input_provenance\nonly — they never fork presets or templates.\n\nLiteral existing-profile UUIDs are resolved ONLY through a live\nindex_profile_component field index (issue #95) supplied in the\nartifact; otherwise a MIGRATION_IMPORT_PROFILE_INDEX_REQUIRED gap is\nemitted — map keys are never invented.\n\nArgs:\n    source_type: One of:\n        generic_integration_description — a hand-authored structured\n            description ({name, source, target, trigger, mappings,\n            transforms, error_handling, deployment}).\n        source_tool_export_summary — a source-tool export summary;\n            product/vendor/tool/version keys are lifted into\n            input_provenance and the flow is read from the same keys\n            (optionally nested under 'flow').\n    artifact: The structured description (dict or JSON-object string).\n        Free-form text is rejected with MIGRATION_IMPORT_INVALID_INPUT.\n    options: Optional dict OR JSON-object string with:\n        integration_name, component_prefix.\n\nReturns:\n    _success + read_only/boomi_mutation/raw_xml_exposed flags,\n    source_type, input_provenance, ready_for_build, confirmed_facts[],\n    inferred_assumptions[], gaps[] ({code, severity, field, message,\n    hint, details}), pipeline_draft, selected_preset,\n    preset_parameters, integration_spec_draft (only when build-ready),\n    next_steps[]; or a MIGRATION_IMPORT_INVALID_INPUT error envelope\n    (still carrying the safety flags) for malformed tool input.",
+      "value": "Index a live existing Boomi profile component's fields (read-only, M7.5).\n\nREAD-ONLY DISCOVERY. Fetches a live profile component\n(profile.json / profile.xml / profile.db) and parses its exported XML\ninto the canonical field index — platform keys, key paths, name paths,\nmappable flags, and the profile component type — the same\n`field_index_by_path` shape the generated-profile builders emit. This\nlets a transform.map that references a literal existing-profile UUID be\nvalidated against real fields (see build_integration): supply the\nreturned index to `IntegrationSpecV1.profile_indexes_by_component_id`, or\nrely on build_integration discovering it. Structural containers\n(objects/arrays/parent elements) are reported non-mappable so they are\nrejected as map endpoints before any mutation.\n\nThe DEFAULT response is the normalized field index, NOT raw XML. The\nexported component XML is returned only when `include_raw_xml=true`.\nNever mutates. This is a separate surface from `infer_profile_fields`\n(which stays artifact-based and never calls Boomi).\n\nArgs:\n    profile: Boomi credential profile name (REQUIRED - no default).\n    component_id: UUID of a profile.json / profile.xml / profile.db component.\n    include_raw_xml: When true, also return the exported XML under\n        `raw_xml` (default false).\n\nReturns:\n    {_success, read_only, boomi_mutation, component_id,\n     profile_component_type, field_index_by_path, mappable_paths,\n     raw_xml_exposed [, raw_xml]}, or a structured read-only error\n     envelope (MAP_PROFILE_INDEX_UNAVAILABLE / PROFILE_INDEX_* /\n     INDEX_PROFILE_COMPONENT_* — never exposing raw XML).",
       "value_omitted": false
     },
     {
-      "artifact_id": "SS-MCP-DESCRIPTIONS:import_integration_draft.parameters",
+      "artifact_id": "SS-MCP-DESCRIPTIONS:index_profile_component.parameters",
+      "canonical_length": 213,
+      "producer": "server.mcp.list_tools()",
+      "selector": "index_profile_component.parameters",
+      "sha256": "ccd9a94b6ae79a4bbac48952534eca92789d5d0d60128e1c0319b1908ce29447",
+      "surface_class": "SS-MCP-DESCRIPTIONS",
+      "value": {
+        "additionalProperties": false,
+        "properties": {
+          "component_id": {
+            "type": "string"
+          },
+          "include_raw_xml": {
+            "default": false,
+            "type": "boolean"
+          },
+          "profile": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile",
+          "component_id"
+        ],
+        "type": "object"
+      },
+      "value_omitted": false
+    },
+    {
+      "artifact_id": "SS-MCP-DESCRIPTIONS:infer_profile_fields.description",
+      "canonical_length": 2129,
+      "producer": "server.mcp.list_tools()",
+      "selector": "infer_profile_fields.description",
+      "sha256": "b6860bbedf5304b428c749e336dc83e97695cf5de624bc1daa0d1aa961b86793",
+      "surface_class": "SS-MCP-DESCRIPTIONS",
+      "value": "Infer issue-#43 builder-ready profile fields from a discovered artifact.\n\nRead-only DISCOVERY. Does NOT call Boomi, mutate anything, construct an\nSDK client, read credentials, or expose raw XML. Turns a caller-supplied\nartifact into a profile-field contract (profile_config + field_index +\nmappable_paths) that profile/map builders can consume, plus a parallel\n`fields` list with confidence / ambiguity / confirmation_required notes.\nSample VALUES are never echoed back.\n\nAmbiguous sample-derived fields are marked confirmation_required=true and\nforce ready_for_builder=false — confirm them before applying. This tool\ndoes NOT index arbitrary existing live Boomi profile XML for literal-UUID\ntransform.map refs (still deferred).\n\nArgs:\n    source_type: One of:\n        profile_from_db_metadata — artifact is a column summary\n            ({\"columns\"|\"fields\"|\"result_columns\": [{name, data_type|\n            db_type|jdbc_type|type, nullable?/required?}]} or a bare list).\n        profile_from_sample_json — artifact is a JSON string or a parsed\n            object/array of objects.\n        profile_from_xsd — artifact is an XSD string (conservative\n            same-document subset; targetNamespace + xs:attribute\n            supported; choice/all/any/group/mixed/extension and\n            foreign-namespace type refs rejected).\n        profile_from_sample_xml — artifact is an XML string; namespaces\n            and attributes are supported (mixed content rejected).\n    artifact: The metadata/sample/schema to infer from (dict/list or str).\n    options: Optional dict OR JSON-object string with: component_name,\n        root_name, array_item_name, datetime_detection (bool),\n        max_input_chars, max_nodes, max_fields.\n\nReturns:\n    Structured contract with _success, read_only/boomi_mutation/\n    raw_xml_exposed flags, generation_mode, component_type, profile_type,\n    profile_config, field_index_by_path, mappable_paths, fields[],\n    ready_for_builder, issues[], truncated/truncation; or a structured\n    PROFILE_INFERENCE_* error envelope (still carrying the safety flags).",
+      "value_omitted": false
+    },
+    {
+      "artifact_id": "SS-MCP-DESCRIPTIONS:infer_profile_fields.parameters",
       "canonical_length": 280,
       "producer": "server.mcp.list_tools()",
-      "selector": "import_integration_draft.parameters",
+      "selector": "infer_profile_fields.parameters",
       "sha256": "fc3325aa06e8b793fbd4be7f52b7840418ee779f4e70f73573bcb7ac379b159f",
       "surface_class": "SS-MCP-DESCRIPTIONS",
       "value": {
@@ -3998,6 +3881,41 @@
           "profile",
           "component_id",
           "patch"
+        ],
+        "type": "object"
+      },
+      "value_omitted": false
+    },
+    {
+      "artifact_id": "SS-MCP-DESCRIPTIONS:review_transformation.description",
+      "canonical_length": 1811,
+      "producer": "server.mcp.list_tools()",
+      "selector": "review_transformation.description",
+      "sha256": "dc5437a3a5b430614de87c1dab222b537e6569e848f4c1d7bc27352d46965d89",
+      "surface_class": "SS-MCP-DESCRIPTIONS",
+      "value": "Inspect a transform spec BEFORE build_integration(action='apply').\n\nRead-only. Does NOT call Boomi, mutate anything, or expose raw\nSQL/XML/credentials/script bodies. Operates on an IntegrationSpecV1\nproduced by build_from_archetype / build_integration (either a\ndatabase_to_api_sync transform flow or in-spec transform.map +\ngenerated profile components).\n\nArgs:\n    action: One of: list_fields | validate_unmapped | mapping_diff |\n        generate_test_payload | compare_expected_actual\n    config: JSON string with action-specific configuration.\n\nActions and config:\n\n    list_fields - source/target fields with path + type metadata:\n        config='{\"integration_spec\": {...}}'\n\n    validate_unmapped - find mapping gaps (unknown/non-mappable fields,\n        duplicate targets, required leaves left unmapped, unsupported\n        routes, map_function arity/parameter problems). Returns\n        valid=false with structured issues; the tool call still\n        succeeds when the review itself runs:\n        config='{\"integration_spec\": {...}}'\n\n    mapping_diff - normalize current mappings and optionally diff them\n        against a previous spec:\n        config='{\"integration_spec\": {...}, \"previous_spec\": {...}}'\n\n    generate_test_payload - deterministic synthetic input/output\n        skeletons from declared profile fields only:\n        config='{\"integration_spec\": {...}}'\n\n    compare_expected_actual - structural diff of two caller payloads:\n        config='{\"expected_payload\": {...}, \"actual_payload\": {...},\n                 \"ignored_paths\": [], \"allow_extra\": false,\n                 \"strict_types\": true}'\n\nReturns:\n    Action result with _success, read_only/boomi_mutation/\n    raw_xml_exposed flags, and action-specific data/issues.",
+      "value_omitted": false
+    },
+    {
+      "artifact_id": "SS-MCP-DESCRIPTIONS:review_transformation.parameters",
+      "canonical_length": 152,
+      "producer": "server.mcp.list_tools()",
+      "selector": "review_transformation.parameters",
+      "sha256": "794b3bb4312855b2d916c585a5dc5c25fdf362e05eadcd2b37fb01e88f6023b5",
+      "surface_class": "SS-MCP-DESCRIPTIONS",
+      "value": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "config": {
+            "default": null,
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
         ],
         "type": "object"
       },

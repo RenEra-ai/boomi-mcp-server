@@ -49,6 +49,7 @@ import hashlib  # noqa: E402
 import json  # noqa: E402
 import re  # noqa: E402
 import sys  # noqa: E402
+import textwrap  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple  # noqa: E402
 
@@ -71,8 +72,10 @@ CAPTURE_DATE = "2026-08-12"
 
 FIXTURE_RELPATH = "tests/fixtures/m12_12/legacy_reachability_inventory.json"
 
-#: Roots the scanner walks. Recorded into the baseline so a future issue that
-#: moves a package fails loudly instead of silently shrinking the census.
+#: Roots the scanner walks, recorded into the baseline for the reader. The
+#: mechanism that actually catches a moved package is `python_source_count` /
+#: `example_document_count` in the same block — those are compared, this list is
+#: documentation.
 SCAN_ROOTS: Tuple[str, ...] = ("server.py", "src/boomi_mcp", "examples")
 
 CENSUS_KINDS: Tuple[str, ...] = (
@@ -200,11 +203,18 @@ def legacy_sink_vocabulary() -> Dict[str, Tuple[str, ...]]:
         and n.lstrip("_").split("_", 1)[0] in {"create", "update"}
         and ("component_raw" in n or "component_xml" in n)
     }
+    # The bulk verbs are write sinks too, and this inventory proves it in its own
+    # `sdk_evidence`: `ComponentBulkRequestType` admits CREATE, UPDATE and DELETE,
+    # so "the envelope parses" is not the same as "the call is a read". Excluding
+    # them on a create_/update_ prefix would let a future production caller mutate
+    # components through `bulk_component` without ever producing a
+    # `component_xml_write` row or entering route reconciliation.
     try:
         from boomi.services.component import ComponentService
         sdk_writers = {
             m for m in dir(ComponentService)
-            if not m.startswith("_") and m.split("_", 1)[0] in {"create", "update"}
+            if not m.startswith("_")
+            and (m.split("_", 1)[0] in {"create", "update"} or m.startswith("bulk_"))
         }
     except Exception:  # pragma: no cover - SDK always present in this repo
         sdk_writers = set()
@@ -308,19 +318,41 @@ class _Scanner(ast.NodeVisitor):
     def _resolve(self, name: str) -> str:
         return self._aliases.get(name, name)
 
+    def _is_registry(self, node: ast.AST) -> bool:
+        """True for the registry reached by ANY spelling.
+
+        Both the bare import (`PROCESS_FLOW_BUILDERS[k]`) and the
+        module-qualified form (`builders.PROCESS_FLOW_BUILDERS[k]`) must resolve.
+        Accepting only `ast.Name` let the qualified spelling produce no census row
+        at all — a whole legacy renderer path invisible to the gate.
+        """
+        if isinstance(node, ast.Name):
+            return self._resolve(node.id) == "PROCESS_FLOW_BUILDERS"
+        if isinstance(node, ast.Attribute):
+            return node.attr == "PROCESS_FLOW_BUILDERS"
+        return False
+
     def _yields_builder(self, node: ast.AST) -> bool:
         """True when the expression evaluates to a process-flow builder class."""
         if isinstance(node, ast.Call):
             dotted = self._dotted(node.func) or ""
-            if dotted.split(".")[-1] == "get_process_flow_builder":
+            parts = dotted.split(".")
+            if parts[-1] == "get_process_flow_builder":
                 return True
-            if dotted.split(".")[0] == "PROCESS_FLOW_BUILDERS" \
-                    and dotted.split(".")[-1] == "get":
+            if parts[-1] == "get" and len(parts) > 1 \
+                    and parts[-2] == "PROCESS_FLOW_BUILDERS":
                 return True
-        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) \
-                and self._resolve(node.value.id) == "PROCESS_FLOW_BUILDERS":
+        if isinstance(node, ast.Subscript) and self._is_registry(node.value):
             return True
         return False
+
+    def _names_a_builder(self, node: ast.AST) -> bool:
+        """True when the expression names a builder class or the registry."""
+        if isinstance(node, ast.Name):
+            return self._resolve(node.id) in self._builders or node.id in self._builder_vars
+        if isinstance(node, ast.Attribute):
+            return node.attr in self._builders or node.attr == "PROCESS_FLOW_BUILDERS"
+        return self._yields_builder(node)
 
     def _dotted(self, node: ast.AST) -> Optional[str]:
         parts: List[str] = []
@@ -375,16 +407,18 @@ class _Scanner(ast.NodeVisitor):
 
         # `x = get_process_flow_builder(...)` / `PROCESS_FLOW_BUILDERS[k]` /
         # `PROCESS_FLOW_BUILDERS.get(k)` binds x to a builder class.
+        # Every registry spelling goes through `_is_registry` / `_yields_builder`
+        # so a variable bound to a module-qualified lookup is tracked exactly like
+        # one bound to the bare form.
         bound = False
         if isinstance(value, ast.Call):
             dotted = self._dotted(value.func)
-            if dotted == "get_process_flow_builder":
+            if dotted and dotted.split(".")[-1] == "get_process_flow_builder":
                 bound = True
-            elif dotted and dotted.split(".")[-1] == "get" \
-                    and dotted.split(".")[0] == "PROCESS_FLOW_BUILDERS":
+            elif isinstance(value.func, ast.Attribute) and value.func.attr == "get" \
+                    and self._is_registry(value.func.value):
                 bound = True
-        elif isinstance(value, ast.Subscript) and isinstance(value.value, ast.Name) \
-                and self._resolve(value.value.id) == "PROCESS_FLOW_BUILDERS":
+        elif isinstance(value, ast.Subscript) and self._is_registry(value.value):
             bound = True
         elif isinstance(value, (ast.Name, ast.Attribute)):
             dotted = self._dotted(value)
@@ -432,7 +466,12 @@ class _Scanner(ast.NodeVisitor):
 
         if base == "get_process_flow_builder":
             self._emit("registry_lookup", "get_process_flow_builder(...)", node.lineno)
-        elif head == "PROCESS_FLOW_BUILDERS" and base in {"get", "keys", "values", "items"}:
+        elif base in {"get", "keys", "values", "items"} \
+                and isinstance(node.func, ast.Attribute) \
+                and self._is_registry(node.func.value):
+            # Matches the bare AND the module-qualified spelling: keying off the
+            # dotted HEAD only saw `PROCESS_FLOW_BUILDERS.get(...)` and missed
+            # `builders.PROCESS_FLOW_BUILDERS.get(...)`.
             self._emit("registry_lookup", "PROCESS_FLOW_BUILDERS.%s(...)" % base, node.lineno)
         elif base in self._methods and isinstance(node.func, ast.Attribute):
             owner = node.func.value
@@ -465,14 +504,29 @@ class _Scanner(ast.NodeVisitor):
         elif base in self._invokers:
             self._emit("raw_api_invoker", "%s(...)" % base, node.lineno)
         elif base == "getattr":
-            probe = _const_str(node.args[1]) if len(node.args) > 1 else None
-            if probe and probe in self._watched:
+            # Two ways a `getattr` reaches a legacy path, and BOTH must be
+            # recorded or the documented fail-closed residue rule is a claim
+            # rather than a property:
+            #   getattr(mod, 'get_process_flow_builder')(kind)   -- watched NAME
+            #   getattr(SyncPipelineBuilder, name)(config)       -- watched TARGET
+            # An earlier draft handled only the first, and only against a
+            # `_watched` set that excluded the builder METHODS — so
+            # `getattr(SyncPipelineBuilder, 'build')(config)` invoked the legacy
+            # renderer and emitted nothing at all.
+            # The target branch fires ONLY when the attribute name is not a
+            # constant. `getattr(builder_cls, "PRESERVATION_POLICY", None)` is
+            # fully resolved at read time and is an ordinary policy read, not a
+            # renderer invocation — reporting it as unresolvable residue would be
+            # false, and this file has twelve such call sites.
+            has_name_arg = len(node.args) > 1
+            probe = _const_str(node.args[1]) if has_name_arg else None
+            name_is_constant = has_name_arg and isinstance(node.args[1], ast.Constant)
+            if probe and (probe in self._watched or probe in self._methods):
                 self._emit("unclassified_dynamic", "getattr(..., %r)" % probe, node.lineno)
-            elif len(node.args) > 1 and not isinstance(node.args[1], ast.Constant):
-                # A computed attribute name cannot be resolved statically. Only
-                # report it when the surrounding module traffics in watched
-                # names at all, so the residue class stays about legacy paths.
-                pass
+            elif has_name_arg and not name_is_constant \
+                    and self._names_a_builder(node.args[0]):
+                self._emit("unclassified_dynamic",
+                           "getattr(<builder>, <dynamic>)", node.lineno)
         elif base == "IntegrationComponentSpec":
             for kw in node.keywords:
                 if kw.arg == "type" and _const_str(kw.value) == "process":
@@ -511,8 +565,7 @@ class _Scanner(ast.NodeVisitor):
 
     def visit_Subscript(self, node: ast.Subscript) -> None:  # noqa: N802
         if id(node) not in self._skip:
-            if isinstance(node.value, ast.Name) \
-                    and self._resolve(node.value.id) == "PROCESS_FLOW_BUILDERS":
+            if self._is_registry(node.value):
                 self._emit("registry_lookup", "PROCESS_FLOW_BUILDERS[...]", node.lineno)
                 self._skip.add(id(node.value))
             else:
@@ -537,6 +590,16 @@ class _Scanner(ast.NodeVisitor):
                 self._emit("legacy_emitter", "%s (reference)" % dotted.split(".")[-1],
                            node.lineno)
                 self._skip.add(id(node.value))
+            elif node.attr == "PROCESS_FLOW_BUILDERS":
+                # A qualified READ — `sorted(builders.PROCESS_FLOW_BUILDERS)`.
+                # `visit_Name` catches the bare spelling, but a module-qualified
+                # one is an Attribute and reached nothing, so it was
+                # indistinguishable from a harmless file. Third instance of the
+                # same defect class (subscript, `.get`, bare read), so recognition
+                # now routes through `_is_registry` in every position rather than
+                # being patched per shape.
+                self._emit("registry_lookup", "PROCESS_FLOW_BUILDERS (read)",
+                           node.lineno)
         self.generic_visit(node)
 
 
@@ -1047,12 +1110,37 @@ def _served_tools() -> Dict[str, Any]:
     return {t.name: t for t in tools}
 
 
-#: Registered MCP tools whose served text steers callers at a legacy path.
-_WATCHED_TOOLS: Tuple[str, ...] = (
-    "manage_process", "manage_component", "manage_connector",
-    "build_integration", "build_from_archetype", "compose_archetypes",
-    "import_integration_draft", "prepare_component_edit", "apply_component_edit",
-    "invoke_boomi_api", "get_schema_template",
+#: Tools whose served text MENTIONS a legacy token today — which is not the same
+#: as steering callers at a legacy path: `index_profile_component` and
+#: `infer_profile_fields` match on a NEGATED mention ("never exposing raw XML").
+#: They are frozen anyway, because over-inclusion is the safe direction for a
+#: retraction sweep: a false positive costs a fixture row, a false negative costs
+#: #160 a missed retraction.
+#:
+#: This is a FLOOR, not the collection set: `collect_served_artifacts` snapshots
+#: every registered tool whose description or parameter schema carries a legacy
+#: token, derived from the full FastMCP registry, and only asserts that each name
+#: below is among them.
+#:
+#: The distinction is the whole point. With a fixed list, giving an UNLISTED tool
+#: a description that advertises `config.process_kind` or raw process XML would
+#: change no source-file count and no frozen artifact — served-contract growth
+#: invisible to the gate this issue exists to provide. Deriving makes the new
+#: tool appear as a new artifact, which fails the freeze.
+#: MEASURED, not hand-listed. An earlier draft asserted a floor containing
+#: `build_integration`, `build_from_archetype`, `compose_archetypes`,
+#: `import_integration_draft` and `apply_component_edit`; deriving showed that
+#: none of them carries a legacy token in its served MCP text at all — their
+#: legacy steering lives in the `IntegrationComponentSpec.config` field
+#: description (SS-PYDANTIC) and in the schema templates (SS-SCHEMA-TEMPLATES),
+#: both captured separately. Conversely the derivation found three surfaces the
+#: hand-list never had: `index_profile_component`, `infer_profile_fields` and
+#: `review_transformation`. Both directions of that correction are the argument
+#: for deriving.
+_LEGACY_STEERING_TOOL_FLOOR: Tuple[str, ...] = (
+    "get_schema_template", "index_profile_component", "infer_profile_fields",
+    "invoke_boomi_api", "manage_component", "manage_connector", "manage_process",
+    "prepare_component_edit", "review_transformation",
 )
 
 
@@ -1076,13 +1164,29 @@ def collect_served_artifacts() -> List[Dict[str, Any]]:
             ))
 
     # --- SS-MCP-DESCRIPTIONS -----------------------------------------
+    # DERIVED from the full registry: every registered tool whose served text
+    # carries a legacy token is snapshotted, so a tool that STARTS advertising
+    # one becomes a new artifact and fails the freeze.
     tools = _served_tools()
-    for name in _WATCHED_TOOLS:
-        if name not in tools:
-            raise AssertionError(
-                "watched MCP tool %r is not registered — the census would silently "
-                "lose a served surface. Update the watch list in the same change "
-                "that renames or removes the tool." % name)
+    steering = sorted(
+        name for name, tool in tools.items()
+        if _mentions_legacy(tool.description or "")
+        or _mentions_legacy(tool.parameters or {})
+    )
+    missing_floor = [n for n in _LEGACY_STEERING_TOOL_FLOOR if n not in tools]
+    if missing_floor:
+        raise AssertionError(
+            "MCP tool(s) %s are no longer registered — a served surface this "
+            "inventory pins has disappeared. Update the floor in the same change "
+            "that renames or removes the tool." % missing_floor)
+    dropped = [n for n in _LEGACY_STEERING_TOOL_FLOOR if n not in steering]
+    if dropped:
+        raise AssertionError(
+            "MCP tool(s) %s no longer carry any legacy token in their served "
+            "text. That may be genuine progress (#160's retraction sweep), but it "
+            "must be recorded deliberately: drop them from the floor in the same "
+            "change." % dropped)
+    for name in steering:
         tool = tools[name]
         artifacts.append(_artifact(
             "SS-MCP-DESCRIPTIONS", "server.mcp.list_tools()",
@@ -1205,72 +1309,83 @@ def _echoed_list(payload: Any, key: str) -> List[str]:
 
 
 def _builder_diagnostic_envelopes() -> Dict[str, Any]:
-    """Served builder diagnostics reached with a `None` client — each arm returns
-    its envelope during plan validation, before any platform access."""
-    from boomi_mcp.categories import integration_builder
+    """Served builder diagnostics, reached through the plan-time authority.
 
-    out: Dict[str, Any] = {}
+    `_process_component_preflight` is the function at `integration_builder.py:5422`
+    that this inventory's own dispatch census records; it takes no client and
+    returns the `BuilderValidationError` whose text is served to callers.
+
+    **Nothing here is caught.** An earlier draft wrapped the probe in a bare
+    `except Exception` and stored `{"_probe_error": type(exc).__name__}` — which
+    silently froze THREE of these four artifacts as `{"_probe_error":
+    "TypeError"}`, so the served text they were supposed to pin was never pinned
+    at all, and the transport bomb's `AssertionError` would have been swallowed
+    the same way. A probe that cannot reach its envelope must fail the
+    derivation, loudly, not record its own failure as the contract.
+    """
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
     probes = {
-        "PROCESS_KIND_REQUIRED": {"key": "p", "type": "process", "config": {}},
-        "PROCESS_KIND_UNSUPPORTED": {
-            "key": "p", "type": "process",
-            "config": {"process_kind": "__not_a_real_kind__"}},
+        "PROCESS_KIND_REQUIRED": {},
+        "PROCESS_KIND_UNSUPPORTED": {"process_kind": "__not_a_real_kind__"},
         "PROCESS_KIND_XML_CONFLICT": {
-            "key": "p", "type": "process",
-            "config": {"process_kind": "sync_pipeline", "xml": "<Component/>"}},
+            "process_kind": "sync_pipeline", "xml": "<Component/>"},
     }
-    for selector, comp in probes.items():
-        spec = {"components": [comp]}
-        try:
-            result = integration_builder.build_integration_action(
-                None, "p", spec, dry_run=True)
-        except Exception as exc:  # pragma: no cover - defensive
-            result = {"_probe_error": type(exc).__name__}
-        out[selector] = result
+    out: Dict[str, Any] = {}
+    for selector, config in probes.items():
+        comp = IntegrationComponentSpec(
+            key="p", type="process", name="P", action="create", config=config)
+        error = integration_builder._process_component_preflight(
+            comp, config, config.get("process_kind"), "create", {"p": comp})
+        if error is None:
+            raise AssertionError(
+                "the %s probe no longer reaches its envelope — the served "
+                "diagnostic it pins would silently stop being frozen" % selector)
+        out[selector] = {
+            "message": str(error),
+            "error_code": getattr(error, "error_code", None),
+            "field": getattr(error, "field", None),
+            "hint": getattr(error, "hint", None),
+        }
+        if out[selector]["error_code"] != selector:
+            raise AssertionError(
+                "the %s probe now yields %r — an earlier gate is firing first, so "
+                "this artifact would pin the wrong served text"
+                % (selector, out[selector]["error_code"]))
     return out
 
 
-def _unwrap_sdk_method(method: Any) -> Any:
-    """Return the real SDK method behind its decorator.
+def _sdk_method_sources() -> Dict[str, str]:
+    """Method-name -> source text, read from the SDK CLASS's own source file.
 
-    ``bulk_component`` is wrapped by the SDK's ``cast_models`` decorator, which
-    sets no ``__wrapped__`` — so ``inspect.unwrap`` is a no-op and ``getsource``
-    hands back the wrapper, whose body contains none of the call-shape markers.
-    The original is reachable through the wrapper's closure, so follow it: a
-    silently unresolved shape would read as "the SDK does not force XML", the
-    opposite of the fact this evidence exists to record.
+    Read from the class, not from its attributes, on purpose. The freeze suite
+    arms a transport sentinel over `ComponentService.create_component` and
+    friends for the whole module; resolving shapes through the live attributes
+    would then read the SENTINEL's body and record `resolved: false` for every
+    verb — the evidence would depend on whether a test had patched the class.
+    A class's source file does not move when its attributes are reassigned.
+
+    Reading the class source also retires the closure-walking the decorated
+    `bulk_component` used to need: the file carries the real body, decorator
+    and all.
     """
     import inspect as _inspect
 
-    # Breadth-first over closures. Name matching is NOT usable: the SDK's
-    # `cast_models` wrapper carries no `functools.wraps`, so its `__name__` is
-    # `wrapper` while the function it closes over keeps the real name.
-    seen: Set[int] = set()
-    queue = [_inspect.unwrap(method)]
-    fallback = queue[0]
-    while queue:
-        candidate = queue.pop(0)
-        if id(candidate) in seen:
-            continue
-        seen.add(id(candidate))
-        try:
-            if ".set_method(" in _inspect.getsource(candidate):
-                return candidate
-        except (OSError, TypeError):  # pragma: no cover - defensive
-            pass
-        for cell in getattr(candidate, "__closure__", None) or ():
-            try:
-                content = cell.cell_contents
-            except ValueError:  # pragma: no cover - empty cell
-                continue
-            if _inspect.isfunction(content):
-                queue.append(content)
-    return fallback
+    from boomi.services.component import ComponentService
+
+    source = _inspect.getsource(ComponentService)
+    tree = ast.parse(textwrap.dedent(source))
+    out: Dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            out[node.name] = ast.get_source_segment(
+                textwrap.dedent(source), node) or ""
+    return out
 
 
-def _sdk_call_shape(method: Any) -> Dict[str, Any]:
-    """Read the HTTP verb, URL template and Accept header straight out of the
-    installed SDK method's own source.
+def _sdk_call_shape(name: str, sources: Dict[str, str]) -> Dict[str, Any]:
+    """The HTTP verb, URL template and Accept header a verb actually sends.
 
     Derived, never asserted: an earlier draft carried
     ``"update_is_post_to_component_id": True`` as a literal, which is a second
@@ -1278,20 +1393,20 @@ def _sdk_call_shape(method: Any) -> Dict[str, Any]:
     exists to close. The URL template is a vendor STRING, not a vendor line
     number, so it stays stable across the patch releases ``boomi>=3.0.1`` admits.
     """
-    import inspect as _inspect
-
-    target = _unwrap_sdk_method(method)
-    try:
-        source = _inspect.getsource(target)
-    except (OSError, TypeError):  # pragma: no cover - defensive
+    source = sources.get(name)
+    if not source:
         return {"resolved": False}
 
     verbs = re.findall(r'\.set_method\(\s*["\']([A-Z]+)["\']', source)
     urls = re.findall(r'Environment\.DEFAULT\.url\}(/[^"\']*)', source)
     accepts = re.findall(r'\.add_header\(\s*["\']Accept["\']\s*,\s*["\']([^"\']+)["\']', source)
+    if not verbs:
+        # A verb whose shape cannot be read is not evidence of anything, and
+        # `resolved: false` silently reads as "the SDK does not force XML".
+        return {"resolved": False}
     return {
         "resolved": True,
-        "http_method": verbs[0] if verbs else None,
+        "http_method": verbs[0],
         "url_template": urls[0].replace("{{", "{").replace("}}", "}") if urls else None,
         "accept_header": accepts[0] if accepts else None,
     }
@@ -1317,6 +1432,8 @@ def sdk_evidence() -> Dict[str, Any]:
 
     from boomi.models import component_bulk_request as cbr_module
     from boomi.services.component import ComponentService
+
+    method_sources = _sdk_method_sources()
 
     # The envelope's `type` enum: found by scanning the model's own module for a
     # member enum, so a rename inside the vendor package surfaces as a diff.
@@ -1347,7 +1464,7 @@ def sdk_evidence() -> Dict[str, Any]:
         "component_bulk_request_optional_init_params": optional_init_params,
         "component_bulk_request_enums": enums,
         "call_shapes": {
-            name: _sdk_call_shape(getattr(ComponentService, name))
+            name: _sdk_call_shape(name, method_sources)
             for name in ("create_component", "update_component", "bulk_component")
         },
     }
@@ -1723,7 +1840,70 @@ def compare(current: Dict[str, Any], baseline: Dict[str, Any]) -> Diff:
             diff.scalar_changes.append(
                 "scan_contract.vocabulary.%s: %s -> %s"
                 % (family, bv.get(family), cv.get(family)))
+
+    # Every remaining frozen section, compared by canonical value.
+    #
+    # An earlier draft stopped after the census, the artifact hashes and two
+    # counts — so an allowed `boomi>=3.0.1` upgrade that moved `update_component`
+    # from POST to PUT, or an edit to an ownership rule that re-assigned a path
+    # from #160 to #151, left `diff.empty()` true while the ledger tests kept
+    # comparing the DOCUMENT against the old fixture. A section the inventory
+    # declares frozen and the comparator does not read is not frozen.
+    for section in ("sdk_evidence", "ledger_rows", "component_xml_write_routes",
+                    "served_surface_retraction_matrix", "route_reconciliation"):
+        c = _without_evidence_lines(current.get(section))
+        b = _without_evidence_lines(baseline.get(section))
+        if canonical_json(c) != canonical_json(b):
+            diff.scalar_changes.extend(_section_delta(section, c, b))
     return diff
+
+
+def _without_evidence_lines(value: Any) -> Any:
+    """Drop `evidence_line` before comparing a section.
+
+    `ledger_rows` carries it for human navigation, and the scan contract says
+    plainly that line numbers are excluded from equality. Comparing rows verbatim
+    would put that brittleness straight back: inserting a blank line at the top of
+    `integration_builder.py` shifts every downstream row and would fail the gate
+    for an edit that changed no reachability at all.
+    """
+    if isinstance(value, dict):
+        return {k: _without_evidence_lines(v)
+                for k, v in value.items() if k != "evidence_line"}
+    if isinstance(value, list):
+        return [_without_evidence_lines(v) for v in value]
+    return value
+
+
+def _identity_of(section: str, row: Any) -> Optional[str]:
+    if not isinstance(row, dict):
+        return None
+    for key in ("ledger_id", "route_id", "surface_id", "artifact_id"):
+        if key in row:
+            return str(row[key])
+    return None
+
+
+def _section_delta(section: str, current: Any, baseline: Any) -> List[str]:
+    """Row-level detail for a changed section, so the failure names WHAT moved
+    rather than just WHICH section did."""
+    if isinstance(current, list) and isinstance(baseline, list) \
+            and all(_identity_of(section, r) for r in current + baseline):
+        cur = {_identity_of(section, r): r for r in current}
+        base = {_identity_of(section, r): r for r in baseline}
+        out = ["%s: added %s" % (section, rid) for rid in sorted(set(cur) - set(base))]
+        out += ["%s: removed %s" % (section, rid) for rid in sorted(set(base) - set(cur))]
+        out += ["%s: changed %s" % (section, rid)
+                for rid in sorted(set(cur) & set(base))
+                if canonical_json(cur[rid]) != canonical_json(base[rid])]
+        return out
+    if isinstance(current, dict) and isinstance(baseline, dict):
+        return ["%s.%s: %s -> %s" % (section, key,
+                                     canonical_json(baseline.get(key)),
+                                     canonical_json(current.get(key)))
+                for key in sorted(set(current) | set(baseline))
+                if canonical_json(current.get(key)) != canonical_json(baseline.get(key))]
+    return ["%s changed" % section]
 
 
 def load_baseline(path: Optional[Path] = None) -> Dict[str, Any]:
