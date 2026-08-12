@@ -34,6 +34,24 @@ than merely documented here:
    producers, but only ones that reach no transport: the FastMCP registry, pure
    schema/catalog functions, pydantic schema generation, and error envelopes
    that provably return before touching a client.
+
+**The invariant and its universe.** Every syntactic occurrence of a watched
+symbol, a producer selector, or a Component-API endpoint literal is either
+positively classified into a census kind or emitted as ``unclassified_reference``
+residue — so a spelling nobody anticipated becomes visible rather than vanishing.
+That is a property of the SOURCE TEXT, and the universe is bounded accordingly:
+
+* Python files under the scan roots, parsed with :mod:`ast`. A wholly computed
+  identifier with no literal anywhere (``"".join(["get_process_flow_", "builder"])``,
+  ``"get_process_flow_%s" % "builder"``) has nothing to observe and is an inherent
+  limit of a static scan, not an oversight.
+* Non-Python assets are NOT read; their count is frozen by
+  :func:`unscanned_assets` so their arrival is a diff.
+* Runtime behaviour is not modelled at all — this instrument reports where the
+  legacy paths ARE, and #160 owns enforcement.
+
+Stating the boundary is part of the contract: an inventory that claims
+completeness it cannot have is exactly the failure this slice exists to prevent.
 """
 
 import os
@@ -165,6 +183,35 @@ def python_sources() -> Dict[str, str]:
         for path in sorted(base.rglob("*.py")):
             out[path.relative_to(_ROOT).as_posix()] = path.read_text(encoding="utf-8")
     return dict(sorted(out.items()))
+
+
+def unscanned_assets() -> List[str]:
+    """Files under the scan roots that NO census reads.
+
+    The scanner walks `*.py`; the producer census walks `examples/**/*.json`.
+    Anything else living under those roots — a YAML manifest, a fixture, a
+    template — is invisible to both and to every `scan_contract` scalar. Zero
+    exist today; freezing the count makes their arrival a diff rather than a
+    silent widening of the unmodelled region.
+    """
+    out: List[str] = []
+    for root, keep in (("src/boomi_mcp", {".py"}), ("examples", {".json"})):
+        base = _ROOT / root
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*")):
+            if not path.is_file() or path.suffix in keep:
+                continue
+            if "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}:
+                continue
+            # Dotfiles are machine-local droppings (`.DS_Store`), not project
+            # assets. Freezing a count that includes them would pin a
+            # per-machine accident — the same defect as freezing the installed
+            # SDK version string.
+            if any(part.startswith(".") for part in path.relative_to(_ROOT).parts):
+                continue
+            out.append(path.relative_to(_ROOT).as_posix())
+    return out
 
 
 def example_documents() -> Dict[str, Any]:
@@ -485,11 +532,31 @@ class _Scanner(ast.NodeVisitor):
             row["evidence_line"] = min(row["evidence_line"], line)
 
     def _consume(self, node: Optional[ast.AST]) -> None:
-        """Mark a node and its subtree as positively classified."""
+        """Mark exactly what an emitted row accounts for — never a whole subtree.
+
+        Walking the subtree swallowed any watched mention nested inside a
+        classified node, which made the total-accounting invariant FALSE and was
+        exploitable on real frozen sites with zero census movement: wrapping a
+        receiver in `_pick(ns, _create_component_raw)._emit_x(...)` preserved the
+        row's form and count while smuggling a Component-XML write sink through
+        the receiver, and `httpx.Client(base_url=".../Component").post(...)` hid
+        an endpoint re-point the same way.
+
+        Only the attribute/name SPINE of the classified expression is consumed;
+        arguments, slices and nested calls stay accountable and fall to residue.
+        """
         if node is None:
             return
-        for descendant in ast.walk(node):
-            self._consumed.add(id(descendant))
+        cur: Optional[ast.AST] = node
+        while cur is not None:
+            self._consumed.add(id(cur))
+            if isinstance(cur, ast.Attribute):
+                cur = cur.value
+            elif isinstance(cur, ast.Subscript) and self._is_registry(cur.value):
+                self._consumed.add(id(cur.value))
+                cur = None
+            else:
+                cur = None
 
     def _resolve(self, name: str) -> str:
         return self._aliases.get(name, name)
@@ -782,7 +849,7 @@ class _Scanner(ast.NodeVisitor):
                         node.lineno,
                     )
                     self._skip.add(id(tgt))
-                    self._consume(tgt)
+                    self._consume(tgt.slice)
         self.generic_visit(node)
 
     # -- expressions ---------------------------------------------------
@@ -1041,7 +1108,17 @@ class _Scanner(ast.NodeVisitor):
 #: is what makes an unknown transport mechanism visible: `client.post(".../Component")`
 #: mentions no watched SYMBOL, but it names the endpoint, and the endpoint is the
 #: thing #160 must guard.
-_COMPONENT_ENDPOINT_MARKERS: Tuple[str, ...] = ("/component", "component/bulk")
+#: `/component` as a real path SEGMENT. A bare substring test matched prose and
+#: unrelated paths — `/intent/integration_spec/components/`, `name/component_name`,
+#: `references/components/map_component.md` — and the `</Component>` closing tag in
+#: served XML examples: 7 of 9 endpoint rows were false positives, so an unrelated
+#: prose edit tripped the freeze. The segment must not be followed by another
+#: identifier character, and must not be a closing tag.
+#: A trailing SPACE means prose ("… ProcessIR/topology/component is validated …"),
+#: not a path. A real endpoint literal continues with `/`, `?`, `#`, a quote, or
+#: ends. `Component/bulk` is matched in its own right.
+_COMPONENT_ENDPOINT_RE = re.compile(
+    r"(?<!<)/component(?![a-z0-9_ ])|component/bulk", re.IGNORECASE)
 
 
 def _folded_str(node: ast.AST) -> Optional[str]:
@@ -1154,7 +1231,8 @@ class _ResidueScanner(ast.NodeVisitor):
         folded = _folded_str(node)
         if folded is not None and id(node) not in self._consumed:
             self._check_string(folded, node.lineno, concatenated=True)
-            return
+        # ALWAYS descend: returning early when the fold did not match hid a
+        # matching child inside a non-matching concatenation.
         self.generic_visit(node)
 
     def _check_string(self, value: str, line: int, concatenated: bool = False) -> None:
@@ -1165,7 +1243,7 @@ class _ResidueScanner(ast.NodeVisitor):
             # A watched SYMBOL reached as a string — `globals()["..."]`,
             # `getattr(m, "...")`, a dispatch table key.
             self._emit("%r (unclassified symbolic literal%s)" % (value, note), line)
-        elif any(marker in value.lower() for marker in _COMPONENT_ENDPOINT_MARKERS):
+        elif _COMPONENT_ENDPOINT_RE.search(value):
             self._emit("%r (unclassified Component-endpoint literal%s)" % (value, note),
                        line)
 
@@ -1174,6 +1252,12 @@ class _ResidueScanner(ast.NodeVisitor):
             return
         if isinstance(node.value, str):
             self._check_string(node.value, node.lineno)
+        elif isinstance(node.value, (bytes, bytearray)):
+            # `b"/Component"` / `b"process_kind"` are the same evidence.
+            try:
+                self._check_string(bytes(node.value).decode("utf-8"), node.lineno)
+            except UnicodeDecodeError:  # pragma: no cover - defensive
+                pass
 
 
 def _tail(dotted: Optional[str], n: int) -> str:
@@ -1866,6 +1950,38 @@ def _mcp_tool_surface(tool: Any) -> Any:
     return {"description": tool.description or "", "parameters": tool.parameters or {}}
 
 
+def _non_tool_mcp_surface() -> Dict[str, Any]:
+    """Digest of every non-tool MCP surface the server registers."""
+    import server
+
+    loop = asyncio.new_event_loop()
+    out: Dict[str, Any] = {}
+    try:
+        for label, accessor in (("resources", "list_resources"),
+                                ("prompts", "list_prompts"),
+                                ("resource_templates", "list_resource_templates")):
+            method = getattr(server.mcp, accessor, None)
+            if method is None:
+                out[label] = "<accessor absent>"
+                continue
+            try:
+                items = loop.run_until_complete(method())
+            except Exception as exc:  # pragma: no cover - defensive
+                out[label] = "<error: %s>" % type(exc).__name__
+                continue
+            out[label] = {
+                str(getattr(item, "name", None) or getattr(item, "uri", index)):
+                    _sha256(canonical_json({
+                        "description": getattr(item, "description", None) or "",
+                        "uri": str(getattr(item, "uri", "") or ""),
+                    }))
+                for index, item in enumerate(items)
+            }
+    finally:
+        loop.close()
+    return out
+
+
 def _served_tools() -> Dict[str, Any]:
     import server
     loop = asyncio.new_event_loop()
@@ -1966,6 +2082,14 @@ def collect_served_artifacts() -> List[Dict[str, Any]]:
     # nothing — every registered tool's description and parameter schema is
     # digested, so a tool that starts steering callers at the legacy route in
     # words the token list does not contain still fails the freeze.
+    # Resources, prompts and resource templates are served MCP surfaces that
+    # `list_tools()` does not cover. All three are empty today and nothing
+    # asserted they stay empty, so registering a legacy-steering resource was
+    # served-surface growth with no freeze movement.
+    artifacts.append(_artifact(
+        "SS-MCP-DESCRIPTIONS", "server.mcp.list_{resources,prompts,resource_templates}()",
+        "non_tool_surface_digest", _non_tool_mcp_surface()))
+
     artifacts.append(_artifact(
         "SS-MCP-DESCRIPTIONS", "server.mcp.list_tools() [all tools]",
         "registered_surface_digest",
@@ -2711,6 +2835,11 @@ def build_inventory(sources: Optional[Dict[str, str]] = None,
             "roots": list(SCAN_ROOTS),
             "python_source_count": len(src),
             "example_document_count": len(ex),
+            # Non-Python assets under the scan roots are read by NOTHING here.
+            # Zero exist today, so this is latent — but #152/#157/#159 land
+            # manifests and fixtures, and a count nobody freezes is growth the
+            # gate cannot see.
+            "unscanned_asset_count": len(unscanned_assets()),
             "census_kinds": list(CENSUS_KINDS),
             "frozen_key": ["census", "path", "symbol", "form"],
             "excluded_from_equality": [

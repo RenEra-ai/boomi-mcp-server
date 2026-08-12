@@ -862,8 +862,9 @@ def test_a_new_tool_that_advertises_a_legacy_path_is_collected():
         a["selector"].rsplit(".", 1)[0]
         for a in inv.load_baseline()["served_artifacts"]
         if a["surface_class"] == "SS-MCP-DESCRIPTIONS"
-        # The exhaustive digest is a whole-surface artifact, not a per-tool one.
-        and a["selector"] != "registered_surface_digest"
+        # Whole-surface digests are not per-tool artifacts.
+        and a["selector"] not in ("registered_surface_digest",
+                                  "non_tool_surface_digest")
     }
     assert steering == collected, (
         "registered tools carrying legacy guidance are not the ones frozen.\n"
@@ -970,6 +971,62 @@ def test_an_unrelated_append_still_produces_nothing(census_only):
     watched vocabulary, not merely that a file changed."""
     diff = _appended(census_only, "def harmless(x):\n    return x + 1\n")
     assert diff.empty(), diff.report()
+
+
+def test_a_watched_mention_nested_in_a_classified_call_is_not_swallowed(census_only):
+    """Consumption marks the SPINE, never the subtree.
+
+    Walking the subtree swallowed any watched mention nested inside a classified
+    node, which made the accounting invariant FALSE and was exploitable on real
+    frozen sites: wrapping a receiver preserves the emitted row's form AND count,
+    so `_pick(ns, _create_component_raw)._emit_x(...)` smuggled a Component-XML
+    write sink past the gate with zero census movement.
+    """
+    sources = dict(inv.python_sources())
+    target = ("src/boomi_mcp/categories/components/builders/process_emitters/"
+              "legacy.py")
+    mutated = sources[target].replace(
+        '_emit_documentproperty_assignment("ddp"',
+        '_pick(_ns, _create_component_raw)._emit_documentproperty_assignment("ddp"', 1)
+    assert mutated != sources[target], "the real call site moved — re-anchor this test"
+    sources[target] = mutated
+
+    diff = inv.compare(inv.build_inventory(sources=sources, include_served=False),
+                       census_only)
+    assert not diff.empty(), "a receiver-wrapped sink was swallowed by consumption"
+    assert "unclassified_reference" in {r.split(" | ")[0] for r in diff.added}, diff.report()
+
+
+def test_the_component_endpoint_marker_is_a_path_segment_not_a_substring():
+    """Precision: a bare substring test made 7 of 9 endpoint rows false positives,
+    so an unrelated prose edit tripped the freeze."""
+    for real in ("https://api.boomi.com/Component", "/Component/{componentId}",
+                 "Component/bulk", "POST /Component"):
+        assert inv._COMPONENT_ENDPOINT_RE.search(real), real
+    for prose in ("/intent/integration_spec/components/", "name/component_name",
+                  "references/components/map_component.md", "</Component>",
+                  "ProcessIR/topology/component is validated"):
+        assert not inv._COMPONENT_ENDPOINT_RE.search(prose), prose
+
+
+def test_the_non_tool_mcp_surfaces_are_frozen(derived):
+    """`list_tools()` is not the whole served MCP surface. Resources, prompts and
+    resource templates are all empty today and nothing asserted they stay that
+    way, so registering a legacy-steering resource was invisible growth."""
+    surface = {a["selector"]: a for a in derived["served_artifacts"]}[
+        "non_tool_surface_digest"]["value"]
+    assert set(surface) == {"resources", "prompts", "resource_templates"}, surface
+    for label, value in surface.items():
+        assert isinstance(value, dict), (label, value)
+
+
+def test_the_unscanned_asset_universe_is_frozen_and_machine_independent(baseline):
+    """Non-Python assets are read by no census; their COUNT is frozen so their
+    arrival is a diff. Dotfiles are excluded — a frozen count containing
+    `.DS_Store` would pin a per-machine accident."""
+    assets = inv.unscanned_assets()
+    assert baseline["scan_contract"]["unscanned_asset_count"] == len(assets)
+    assert not any(part.startswith(".") for path in assets for part in path.split("/"))
 
 
 def test_every_watched_mention_is_classified_or_residue():

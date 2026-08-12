@@ -2305,29 +2305,11 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 416,
-      "form": "'/intent/integration_spec/components/' (unclassified Component-endpoint literal)",
-      "path": "src/boomi_mcp/authoring/workflow.py",
-      "row_id": "UR-81f63e61",
-      "symbol": "_normalize_intent"
-    },
-    {
-      "census": "unclassified_reference",
-      "count": 1,
       "evidence_line": 413,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "UR-8b2712eb",
       "symbol": "_normalize_intent"
-    },
-    {
-      "census": "unclassified_reference",
-      "count": 1,
-      "evidence_line": 1172,
-      "form": "'/components/' (unclassified Component-endpoint literal)",
-      "path": "src/boomi_mcp/authoring/workflow.py",
-      "row_id": "UR-06aa073b",
-      "symbol": "plan_authoring_request_v1"
     },
     {
       "census": "unclassified_reference",
@@ -2826,57 +2808,12 @@
     },
     {
       "census": "unclassified_reference",
-      "count": 1,
-      "evidence_line": 767,
-      "form": "'<Component xmlns=\"http://api.platform.boomi.com/\"\\n    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\\n    name=\"Component Name\"\\n    type=\"process\"\\n    folderName=\"Home\">\\n  <description>Component description</description>\\n  <object>\\n    <!-- Type-specific XML structure here -->\\n  </object>\\n</Component>' (unclassified Component-endpoint literal)",
-      "path": "src/boomi_mcp/categories/meta_tools.py",
-      "row_id": "UR-6ad768aa",
-      "symbol": "<module>"
-    },
-    {
-      "census": "unclassified_reference",
-      "count": 1,
-      "evidence_line": 5219,
-      "form": "'Partial edit: config holds ONLY metadata fields (name/component_name, description, folder_name, folder_id). The live root is smart-merged in place, so you change just those fields and everything else is preserved verbatim.' (unclassified Component-endpoint literal)",
-      "path": "src/boomi_mcp/categories/meta_tools.py",
-      "row_id": "UR-8b27cbe7",
-      "symbol": "<module>"
-    },
-    {
-      "census": "unclassified_reference",
       "count": 5,
       "evidence_line": 8004,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "UR-10de511e",
       "symbol": "<module>"
-    },
-    {
-      "census": "unclassified_reference",
-      "count": 1,
-      "evidence_line": 6583,
-      "form": "'These are the ONLY values a registered recipe may return. They carry opaque references and closed enumerations — never configuration, credentials, headers, SQL, raw XML, executable code, JSON pointers, or caller-authored graph edges. Recipe output is validated exactly as direct ProcessIR/topology/component authoring and cannot be exempted.' (unclassified Component-endpoint literal)",
-      "path": "src/boomi_mcp/categories/meta_tools.py",
-      "row_id": "UR-c2b56435",
-      "symbol": "_recipe_contributions_schema"
-    },
-    {
-      "census": "unclassified_reference",
-      "count": 1,
-      "evidence_line": 10205,
-      "form": "'manage_component(profile=\"prod\", action=\"create\", config=\\'{\"xml\": \"<Component>...</Component>\"}\\')' (unclassified Component-endpoint literal)",
-      "path": "src/boomi_mcp/categories/meta_tools.py",
-      "row_id": "UR-b775b41f",
-      "symbol": "list_capabilities_action"
-    },
-    {
-      "census": "unclassified_reference",
-      "count": 1,
-      "evidence_line": 11188,
-      "form": "'read_boomi_doc_page(page_key=\"companion://OfficialBoomi/boomi-integration/references/components/map_component.md\")' (unclassified Component-endpoint literal)",
-      "path": "src/boomi_mcp/categories/meta_tools.py",
-      "row_id": "UR-d396ff59",
-      "symbol": "list_capabilities_action"
     },
     {
       "census": "unclassified_reference",
@@ -3132,15 +3069,6 @@
     },
     {
       "census": "unclassified_reference",
-      "count": 1,
-      "evidence_line": 107,
-      "form": "\"Three cases, fixed in three different places. Under '/relations/N/ROLE' the role names an object key this document does not declare: declare that object here, or point the role at one that exists. Under '/objects/N/component_ref' a '$ref:KEY' is judged against the ComponentPlan symbol table, so add that component to the ComponentPlan — the object itself is already declared. A literal id, environment_ref or runtime_ref is judged against the capture: correct the id, or capture the platform fact, in this document's credential profile.\" (unclassified Component-endpoint literal)",
-      "path": "src/boomi_mcp/compiler/system_topology/findings.py",
-      "row_id": "UR-a99cdd30",
-      "symbol": "<module>"
-    },
-    {
-      "census": "unclassified_reference",
       "count": 2,
       "evidence_line": 216,
       "form": "'process_kind' (unclassified selector literal)",
@@ -3327,15 +3255,6 @@
       "path": "src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py",
       "row_id": "UR-73283940",
       "symbol": "HttpListenerToRestArchetype.emit_spec"
-    },
-    {
-      "census": "unclassified_reference",
-      "count": 1,
-      "evidence_line": 247,
-      "form": "'Archetype NamingConfig payload (integration_name, component_prefix, optional folder_path/component_names/convention/runtime_hints).' (unclassified Component-endpoint literal)",
-      "path": "src/boomi_mcp/patterns/composition.py",
-      "row_id": "UR-73baddc6",
-      "symbol": "CompositionOptions"
     },
     {
       "census": "unclassified_reference",
@@ -5757,27 +5676,13 @@
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
       "evidence_line": 413,
       "forms": [
-        "'/intent/integration_spec/components/' (unclassified Component-endpoint literal)",
         "'process_kind' (unclassified selector literal)"
       ],
       "ledger_id": "LG-0a2735c3",
       "owning_issue": "#160",
       "path": "src/boomi_mcp/authoring/workflow.py",
-      "sites": 2,
-      "symbol": "_normalize_intent"
-    },
-    {
-      "census": "unclassified_reference",
-      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 1172,
-      "forms": [
-        "'/components/' (unclassified Component-endpoint literal)"
-      ],
-      "ledger_id": "LG-b4cb6bd2",
-      "owning_issue": "#160",
-      "path": "src/boomi_mcp/authoring/workflow.py",
       "sites": 1,
-      "symbol": "plan_authoring_request_v1"
+      "symbol": "_normalize_intent"
     },
     {
       "census": "unclassified_reference",
@@ -6101,44 +6006,15 @@
     {
       "census": "unclassified_reference",
       "disposition": "retract the served legacy guidance / guard the raw route",
-      "evidence_line": 767,
+      "evidence_line": 8004,
       "forms": [
-        "'<Component xmlns=\"http://api.platform.boomi.com/\"\\n    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\\n    name=\"Component Name\"\\n    type=\"process\"\\n    folderName=\"Home\">\\n  <description>Component description</description>\\n  <object>\\n    <!-- Type-specific XML structure here -->\\n  </object>\\n</Component>' (unclassified Component-endpoint literal)",
-        "'Partial edit: config holds ONLY metadata fields (name/component_name, description, folder_name, folder_id). The live root is smart-merged in place, so you change just those fields and everything else is preserved verbatim.' (unclassified Component-endpoint literal)",
         "'process_kind' (unclassified selector literal)"
       ],
       "ledger_id": "LG-feb448d7",
       "owning_issue": "#160",
       "path": "src/boomi_mcp/categories/meta_tools.py",
-      "sites": 7,
+      "sites": 5,
       "symbol": "<module>"
-    },
-    {
-      "census": "unclassified_reference",
-      "disposition": "retract the served legacy guidance / guard the raw route",
-      "evidence_line": 6583,
-      "forms": [
-        "'These are the ONLY values a registered recipe may return. They carry opaque references and closed enumerations — never configuration, credentials, headers, SQL, raw XML, executable code, JSON pointers, or caller-authored graph edges. Recipe output is validated exactly as direct ProcessIR/topology/component authoring and cannot be exempted.' (unclassified Component-endpoint literal)"
-      ],
-      "ledger_id": "LG-3b9a3513",
-      "owning_issue": "#160",
-      "path": "src/boomi_mcp/categories/meta_tools.py",
-      "sites": 1,
-      "symbol": "_recipe_contributions_schema"
-    },
-    {
-      "census": "unclassified_reference",
-      "disposition": "retract the served legacy guidance / guard the raw route",
-      "evidence_line": 10205,
-      "forms": [
-        "'manage_component(profile=\"prod\", action=\"create\", config=\\'{\"xml\": \"<Component>...</Component>\"}\\')' (unclassified Component-endpoint literal)",
-        "'read_boomi_doc_page(page_key=\"companion://OfficialBoomi/boomi-integration/references/components/map_component.md\")' (unclassified Component-endpoint literal)"
-      ],
-      "ledger_id": "LG-b453fb4f",
-      "owning_issue": "#160",
-      "path": "src/boomi_mcp/categories/meta_tools.py",
-      "sites": 2,
-      "symbol": "list_capabilities_action"
     },
     {
       "census": "unclassified_reference",
@@ -6262,19 +6138,6 @@
       "owning_issue": "#151",
       "path": "src/boomi_mcp/compiler/process_ir/semantic_validation/legacy_bridge.py",
       "sites": 2,
-      "symbol": "<module>"
-    },
-    {
-      "census": "unclassified_reference",
-      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 107,
-      "forms": [
-        "\"Three cases, fixed in three different places. Under '/relations/N/ROLE' the role names an object key this document does not declare: declare that object here, or point the role at one that exists. Under '/objects/N/component_ref' a '$ref:KEY' is judged against the ComponentPlan symbol table, so add that component to the ComponentPlan — the object itself is already declared. A literal id, environment_ref or runtime_ref is judged against the capture: correct the id, or capture the platform fact, in this document's credential profile.\" (unclassified Component-endpoint literal)"
-      ],
-      "ledger_id": "LG-8f2f93ef",
-      "owning_issue": "#160",
-      "path": "src/boomi_mcp/compiler/system_topology/findings.py",
-      "sites": 1,
       "symbol": "<module>"
     },
     {
@@ -6517,19 +6380,6 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 247,
-      "forms": [
-        "'Archetype NamingConfig payload (integration_name, component_prefix, optional folder_path/component_names/convention/runtime_hints).' (unclassified Component-endpoint literal)"
-      ],
-      "ledger_id": "LG-28ae7ec8",
-      "owning_issue": "#160",
-      "path": "src/boomi_mcp/patterns/composition.py",
-      "sites": 1,
-      "symbol": "CompositionOptions"
-    },
-    {
-      "census": "unclassified_reference",
-      "disposition": "residue: a watched name mentioned in a shape the census does not classify",
       "evidence_line": 695,
       "forms": [
         "send_request (unclassified attribute)"
@@ -6749,6 +6599,7 @@
       "scripts",
       "examples"
     ],
+    "unscanned_asset_count": 0,
     "vocabulary": {
       "builder_classes": [
         "ProcessFlowBuilder",
@@ -9644,6 +9495,20 @@
           "action"
         ],
         "type": "object"
+      },
+      "value_omitted": false
+    },
+    {
+      "artifact_id": "SS-MCP-DESCRIPTIONS:non_tool_surface_digest",
+      "canonical_length": 53,
+      "producer": "server.mcp.list_{resources,prompts,resource_templates}()",
+      "selector": "non_tool_surface_digest",
+      "sha256": "c12aa275f3eff00b0033ff9d4e2a0d99a92891a2024c759eb43cb216130c4739",
+      "surface_class": "SS-MCP-DESCRIPTIONS",
+      "value": {
+        "prompts": {},
+        "resource_templates": {},
+        "resources": {}
       },
       "value_omitted": false
     },
