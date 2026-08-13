@@ -936,6 +936,14 @@ def test_the_whole_scan_contract_block_is_frozen(baseline):
         "frozen_key": lambda c: c.__setitem__("frozen_key", ["census"]),
         "python_source_count": lambda c: c.__setitem__("python_source_count", 1),
         "<a field added later>": lambda c: c.__setitem__("m12_12_probe", "x"),
+        # `.get()` cannot tell an absent key from a present null one, so a
+        # `null`-valued addition compared equal on both sides and slipped past a
+        # comparator that claims to freeze the whole block.
+        "<a null field added later>": lambda c: c.__setitem__("m12_12_null", None),
+        "<a null vocabulary family>":
+            lambda c: c["vocabulary"].__setitem__("m12_12_nullfam", None),
+        "<a removed field>": lambda c: c.pop("roots"),
+        "<a removed vocabulary family>": lambda c: c["vocabulary"].pop("registry_names"),
     }
     for label, mutate in mutations.items():
         mutated = _copy.deepcopy(baseline)

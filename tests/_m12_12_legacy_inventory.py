@@ -3497,23 +3497,36 @@ def compare(current: Dict[str, Any], baseline: Dict[str, Any]) -> Diff:
     # already learned one section down ("a section the inventory declares frozen
     # and the comparator does not read is not frozen"), applied there to
     # SECTIONS and left as an enumeration here for FIELDS.
+    # A SENTINEL, not `.get()`: a field or vocabulary family added with JSON
+    # `null` reads as `None` on both sides, so an absent baseline key and a
+    # present null key compared equal and the addition passed a comparator that
+    # claims to freeze the whole block.
+    absent = object()
     cur_contract = current.get("scan_contract") or {}
     base_contract = baseline.get("scan_contract") or {}
     for field in sorted(set(cur_contract) | set(base_contract)):
-        c = cur_contract.get(field)
-        b = base_contract.get(field)
-        if canonical_json(c) == canonical_json(b):
+        c = cur_contract.get(field, absent)
+        b = base_contract.get(field, absent)
+        if c is not absent and b is not absent \
+                and canonical_json(c) == canonical_json(b):
             continue
-        if field == "vocabulary":
-            for family in sorted(set(c or {}) | set(b or {})):
-                if (c or {}).get(family) != (b or {}).get(family):
-                    diff.scalar_changes.append(
-                        "scan_contract.vocabulary.%s: %s -> %s"
-                        % (family, (b or {}).get(family), (c or {}).get(family)))
+        if field == "vocabulary" and isinstance(c, dict) and isinstance(b, dict):
+            for family in sorted(set(c) | set(b)):
+                cf = c.get(family, absent)
+                bf = b.get(family, absent)
+                if cf is not absent and bf is not absent and cf == bf:
+                    continue
+                diff.scalar_changes.append(
+                    "scan_contract.vocabulary.%s: %s -> %s"
+                    % (family,
+                       "<absent>" if bf is absent else bf,
+                       "<absent>" if cf is absent else cf))
         else:
             diff.scalar_changes.append(
                 "scan_contract.%s: %s -> %s"
-                % (field, canonical_json(b), canonical_json(c)))
+                % (field,
+                   "<absent>" if b is absent else canonical_json(b),
+                   "<absent>" if c is absent else canonical_json(c)))
 
     # Every remaining frozen section, compared by canonical value.
     #
