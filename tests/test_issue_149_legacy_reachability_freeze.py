@@ -750,9 +750,15 @@ def test_the_served_digests_cover_every_surface_not_just_token_matches(derived):
     by_selector = {a["selector"]: a for a in derived["served_artifacts"]}
 
     registered = by_selector["registered_surface_digest"]["value"]
-    assert set(registered) == set(inv._served_tools()), \
+    # Exhaustive over the surface that does not depend on a feature flag. The
+    # gated five are excluded by PRESENCE only — their names are frozen as their
+    # own artifact, asserted just below, so the pair is still total.
+    gated = set(inv.flag_gated_mcp_surface())
+    assert set(registered) == set(inv._served_tools()) - gated, \
         "the registered-surface digest is not exhaustive"
     assert len(registered) > 40
+    assert set(by_selector["flag_gated_surface"]["value"]) == gated, \
+        "the flag-gated name set is not frozen alongside the digest"
 
     walked = by_selector["walked_surface_digest"]["value"]
     from boomi_mcp.categories import meta_tools
@@ -978,28 +984,33 @@ def test_the_served_limits_name_every_deferred_case(baseline):
     assert "Named, bounded scope-model limits" in module_doc
     assert "#163" in module_doc, "the deferral has no follow-up pointer"
 
-    # A DISTINCT marker per limit. Three generic substrings left the
-    # parameter-shadow bullet unchecked entirely, and one `global` token could
-    # not tell the two separate `global` limits apart — so removing either left
-    # the suite green and #160's named-limit contract could regress silently.
-    # Docstrings are excluded from `compare()`, so this test is their only guard.
-    for marker in ("[LIMIT-global-nested]", "[LIMIT-class-restore]",
-                   "[LIMIT-global-credit]", "[LIMIT-class-typeparams]",
-                   "[LIMIT-param-shadow]"):
+    # DERIVED, not pinned. Hard-coding the five markers meant a SIXTH limit
+    # could be added — or a named one dropped — with the suite still green, and
+    # that is exactly what happened: the last-wins fail-open was admitted in
+    # prose for three rounds while carrying no marker at all, so neither this
+    # test nor the served claim ever saw it. The docstring is the authority;
+    # every consumer reads `named_limits()`.
+    markers = inv.named_limits()
+    assert len(markers) >= 5, markers
+    assert len(set(markers)) == len(markers), "duplicate limit marker: %s" % (markers,)
+    for marker in markers:
         assert marker in module_doc, "deferred limit %s is not named" % marker
+        # A limit without a measured exposure is an assertion, not a finding.
+        bullet = module_doc.split(marker, 1)[1].split("[LIMIT-")[0]
+        assert "Corpus" in bullet or "exposure" in bullet, \
+            "%s states no measured corpus exposure" % marker
 
-    # And the served claim itself carries the exception rather than overstating.
+    # And the served claim carries EVERY marker rather than a chosen subset.
     ordering = [e for e in baseline["scan_contract"]["excluded_from_equality"]
                 if "ordering" in e]
     assert len(ordering) == 1, ordering
-    # The exception must name the scopes that are ACTUALLY broken. A `global`
-    # inside a function's own `match` case is handled since the case traversal
-    # landed, so claiming it as a blind spot under-states the instrument.
-    # The exception must name the scopes that ACTUALLY erase. It has now been
-    # wrong in both directions: "every scope" over-claimed the guarantee, then
-    # "nested function or class body" over-claimed the HOLE — a module-level
-    # class body is never restored, so its `global` survives.
-    assert "nested" in ordering[0] and "enclosed by one" in ordering[0], ordering[0]
+    # The exception has been wrong in both directions before: "every scope"
+    # over-claimed the guarantee, "nested function or class body" over-claimed
+    # the HOLE, and the marker-free spelling omitted the last-wins case that IS
+    # an ordering sensitivity. Deriving it removes the choice.
+    for marker in markers:
+        assert marker in ordering[0], \
+            "served ordering exception omits %s: %s" % (marker, ordering[0])
     assert "#163" in ordering[0], ordering[0]
 
 
@@ -1044,6 +1055,88 @@ def test_the_whole_scan_contract_block_is_frozen(baseline):
     assert inv.compare(_copy.deepcopy(baseline), baseline).empty()
 
 
+def test_a_null_valued_addition_is_frozen_in_every_dict_section(baseline):
+    """The absent-vs-present-`null` rule must hold for EVERY dict section.
+
+    It was fixed once, with a local sentinel, for `scan_contract` — while every
+    other dict section kept comparing with `.get()`, which reads a missing key
+    and a present `null` identically. Adding `"m12_12_future": null` to
+    `sdk_evidence` or `route_reconciliation` therefore left `--check` reporting
+    no drift. Second instance of one defect class, so it is asserted over the
+    sections themselves rather than at the two sites that happened to be found.
+    """
+    import copy as _copy
+
+    sections = sorted(k for k, v in baseline.items() if isinstance(v, dict))
+    assert len(sections) >= 3, sections
+    for section in sections:
+        for label, value in (("null", None), ("value", "m12_12")):
+            mutated = _copy.deepcopy(baseline)
+            mutated[section]["m12_12_future"] = value
+            diff = inv.compare(mutated, baseline)
+            assert not diff.empty(), \
+                "a %s-valued addition to %s is not frozen" % (label, section)
+
+    # Guard the guard: an unperturbed copy must still report clean.
+    assert inv.compare(_copy.deepcopy(baseline), baseline).empty()
+
+
+def test_the_last_wins_limit_still_measures_zero_exposure():
+    """`[LIMIT-last-wins]` claims zero corpus exposure — re-derive it.
+
+    The limit is real and fail-OPEN: a name bound twice in one scope keeps only
+    the textually last binding, so a legacy value bound FIRST is lost. It is
+    deferred to #163 on the strength of a measurement, and a measurement recited
+    from a docstring is not one — an earlier draft quoted a count ("58") that no
+    harness reproduces. This asserts the load-bearing predicate instead: no
+    multi-bound name is both called in its scope and bound to a watched symbol.
+    """
+    import ast
+
+    vocabulary = inv.legacy_sink_vocabulary()
+    watched = set().union(*[set(v) for k, v in vocabulary.items()
+                            if k != "producer_selectors"])
+
+    def _tail(node):
+        parts = []
+        while isinstance(node, ast.Attribute):
+            parts.append(node.attr)
+            node = node.value
+        if isinstance(node, ast.Name):
+            parts.append(node.id)
+        return parts[0] if parts else ""
+
+    exposed, multi = [], 0
+    for path, text in inv.python_sources().items():
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:  # pragma: no cover - the corpus parses
+            continue
+        scopes = [n for n in ast.walk(tree)
+                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        for scope in scopes:
+            bindings = {}
+            for statement in inv._scope_body_nodes(scope):
+                targets, value = inv._assign_parts(statement)
+                if value is None:
+                    continue
+                for target in targets:
+                    bindings.setdefault(target, []).append(value)
+            called = {c.func.id for c in ast.walk(scope)
+                      if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
+            for name, values in bindings.items():
+                if len(values) < 2:
+                    continue
+                multi += 1
+                if name in called and any(
+                        isinstance(v, (ast.Name, ast.Attribute))
+                        and _tail(v) in watched for v in values):
+                    exposed.append("%s:%s:%s" % (path, scope.name, name))
+
+    assert multi > 0, "the harness found no multi-bindings at all — it is inert"
+    assert not exposed, "[LIMIT-last-wins] now has live exposure: %s" % exposed
+
+
 def test_the_scan_contract_scopes_its_ordering_claim_to_what_it_does(baseline):
     """The served claim must match the scanner exactly.
 
@@ -1080,6 +1173,37 @@ def test_the_scan_contract_scopes_its_ordering_claim_to_what_it_does(baseline):
      "def m12_12_p(u, x):\n"
      "    return _m12_12_p9(u, content=x)\n",
      "http_client_call"),
+    # The IMPORT half was fixed by exempting published names from the restore;
+    # the ASSIGNMENT half kept writing into the scope map `_scoped` pops, so
+    # `global A; A = build_structured_update_xml` still added a real legacy
+    # caller with neither a row nor residue. Three placements, one rule.
+    ("a legacy alias ASSIGNED under `global`",
+     "from ...categories.integration_builder import build_structured_update_xml\n"
+     "def m12_12_ga():\n"
+     "    global _m12_12_ga1\n"
+     "    _m12_12_ga1 = build_structured_update_xml\n"
+     "def m12_12_gau(c, x):\n"
+     "    return _m12_12_ga1(c, x)\n",
+     "legacy_transitive_call"),
+    ("a legacy alias ASSIGNED under `nonlocal`",
+     "from ...categories.integration_builder import build_structured_update_xml\n"
+     "def m12_12_no():\n"
+     "    _m12_12_nl = None\n"
+     "    def m12_12_ni():\n"
+     "        nonlocal _m12_12_nl\n"
+     "        _m12_12_nl = build_structured_update_xml\n"
+     "    def m12_12_nu(c, x):\n"
+     "        return _m12_12_nl(c, x)\n"
+     "    return m12_12_ni, m12_12_nu\n",
+     "legacy_transitive_call"),
+    ("a legacy alias ASSIGNED under `global` in a module-level class body",
+     "from ...categories.integration_builder import build_structured_update_xml\n"
+     "class M12_12_CB:\n"
+     "    global _m12_12_cb1\n"
+     "    _m12_12_cb1 = build_structured_update_xml\n"
+     "def m12_12_cbu(c, x):\n"
+     "    return _m12_12_cb1(c, x)\n",
+     "legacy_transitive_call"),
 ])
 def test_a_name_published_outward_survives_scope_restore(census_only, label, body,
                                                          expect):
@@ -1149,6 +1273,14 @@ def test_repointing_any_composed_http_spelling_breaks_the_freeze(form):
 @pytest.mark.parametrize("form", [
     "'%s/Component/%s' % (_M12_12_H, cid)",
     "'{}/Component/{}'.format(_M12_12_H, cid)",
+    # `+` folds left-associatively, so a dynamic TAIL discarded the resolved
+    # head and the whole target collapsed to `<dynamic>` — the one composed
+    # spelling the placeholder rule had not reached.
+    "_M12_12_H + '/Component/' + cid",
+    # A MAPPING operand is not a tuple: treating it as one raised inside `%`
+    # and fell back to `<dynamic>`, so the NAMED spelling was re-pointable
+    # while the positional one was caught.
+    "'%(host)s/Component/%(id)s' % {'host': _M12_12_H, 'id': cid}",
 ])
 def test_a_dynamic_field_does_not_discard_the_resolved_host(form):
     """An unresolved field must not throw away the resolved ones.
@@ -1454,18 +1586,23 @@ def test_a_new_tool_that_advertises_a_legacy_path_is_collected():
     registered legacy-bearing tool is the checkable form of that claim.
     """
     tools = inv._served_tools()
+    # Normalised exactly as the collector does: with the KB flags on — which
+    # unrelated test modules turn on at import time — the raw text carries a
+    # steering suffix the frozen values do not.
     steering = {
         name for name, tool in tools.items()
-        if inv._mentions_legacy(tool.description or "")
-        or inv._mentions_legacy(tool.parameters or {})
+        if inv._mentions_legacy(inv._strip_optional_hints(tool.description or ""))
+        or inv._mentions_legacy(inv._strip_optional_hints(tool.parameters or {}))
     }
     collected = {
         a["selector"].rsplit(".", 1)[0]
         for a in inv.load_baseline()["served_artifacts"]
         if a["surface_class"] == "SS-MCP-DESCRIPTIONS"
-        # Whole-surface digests are not per-tool artifacts.
-        and a["selector"] not in ("registered_surface_digest",
-                                  "non_tool_surface_digest")
+        # Whole-surface artifacts are not per-tool ones, and the producer already
+        # distinguishes them by SHAPE: a per-tool selector is `<tool>.<field>`.
+        # Listing the two known digest names by hand meant adding a third
+        # whole-surface artifact silently read as a tool named after it.
+        and "." in a["selector"]
     }
     assert steering == collected, (
         "registered tools carrying legacy guidance are not the ones frozen.\n"

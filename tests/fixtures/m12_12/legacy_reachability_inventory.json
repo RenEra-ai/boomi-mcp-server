@@ -6835,8 +6835,10 @@
       "formatting",
       "comments and docstrings",
       "argument values",
-      "intra-file ordering of module- and function-scope bindings (except a name published by `global` from inside a nested function, or a class body enclosed by one, which that function's restore erases — see the module docstring's named limits and #163)",
-      "vendor SDK paths and line numbers"
+      "intra-file ordering of module- and function-scope bindings (except the named limits [LIMIT-class-restore], [LIMIT-class-typeparams], [LIMIT-global-credit], [LIMIT-global-nested], [LIMIT-last-wins], [LIMIT-param-shadow] — see the module docstring and #163)",
+      "vendor SDK paths and line numbers",
+      "environment-gated KB/gotcha steering hints in served tool text",
+      "presence of MCP surfaces registered behind a feature flag"
     ],
     "frozen_key": [
       "census",
@@ -9390,6 +9392,24 @@
           ]
         }
       },
+      "value_omitted": false
+    },
+    {
+      "artifact_id": "SS-MCP-DESCRIPTIONS:flag_gated_surface",
+      "canonical_length": 188,
+      "producer": "server.py [AST: registrations under a feature flag]",
+      "selector": "flag_gated_surface",
+      "sha256": "1e82caa80fad612d6e5bb9fbe86ce55efd6afd715b5809106e9f155f04320176",
+      "surface_class": "SS-MCP-DESCRIPTIONS",
+      "value": [
+        "boomi_docs_corpus",
+        "boomi_operational_gotchas_catalog",
+        "kb://boomi-docs/corpus",
+        "kb://boomi-operational-gotchas/catalog",
+        "read_boomi_doc_page",
+        "search_boomi_docs",
+        "search_boomi_gotchas"
+      ],
       "value_omitted": false
     },
     {
@@ -30978,6 +30998,7 @@
         "server.py:2103 (manage_connector raw update)"
       ],
       "artifact_ids": [
+        "SS-MCP-DESCRIPTIONS:flag_gated_surface",
         "SS-MCP-DESCRIPTIONS:get_schema_template.description",
         "SS-MCP-DESCRIPTIONS:get_schema_template.parameters",
         "SS-MCP-DESCRIPTIONS:index_profile_component.description",
@@ -31005,7 +31026,8 @@
       "producers": [
         "server.mcp.list_tools()",
         "server.mcp.list_tools() [all tools]",
-        "server.mcp.list_{resources,prompts,resource_templates}()"
+        "server.mcp.list_{resources,prompts,resource_templates}()",
+        "server.py [AST: registrations under a feature flag]"
       ],
       "source_modules": [
         "server.py"
