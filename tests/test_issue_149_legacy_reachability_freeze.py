@@ -1088,14 +1088,22 @@ def test_the_last_wins_limit_still_measures_zero_exposure():
     the textually last binding, so a legacy value bound FIRST is lost. It is
     deferred to #163 on the strength of a measurement, and a measurement recited
     from a docstring is not one — an earlier draft quoted a count ("58") that no
-    harness reproduces. This asserts the load-bearing predicate instead: no
-    multi-bound name is both called in its scope and bound to a watched symbol.
+    harness reproduces.
+
+    Measured over ALL THREE consumers of a single-valued map, not just one: the
+    callee origin (a legacy transitive call), the producer SELECTOR constant
+    (`KEY = "process_kind"`, where the ordering decides whether a producer row is
+    emitted at all), and the request TARGET (a host literal that decides whether
+    a call reads as the Component API). Checking only callees declared zero
+    exposure while two of the three ways a last-wins binding matters went
+    unmeasured.
     """
     import ast
 
     vocabulary = inv.legacy_sink_vocabulary()
     watched = set().union(*[set(v) for k, v in vocabulary.items()
                             if k != "producer_selectors"])
+    selectors = set(vocabulary["producer_selectors"])
 
     def _tail(node):
         parts = []
@@ -1128,10 +1136,23 @@ def test_the_last_wins_limit_still_measures_zero_exposure():
                 if len(values) < 2:
                     continue
                 multi += 1
+                literals = [v.value for v in values
+                            if isinstance(v, ast.Constant)
+                            and isinstance(v.value, str)]
+                reasons = []
                 if name in called and any(
                         isinstance(v, (ast.Name, ast.Attribute))
                         and _tail(v) in watched for v in values):
-                    exposed.append("%s:%s:%s" % (path, scope.name, name))
+                    reasons.append("callee")
+                # A selector constant needs no call: `cfg[KEY] = …` reads it.
+                if any(text in selectors for text in literals):
+                    reasons.append("selector")
+                if any(inv._mentions_component_endpoint(text) or "://" in text
+                       for text in literals):
+                    reasons.append("request-target")
+                if reasons:
+                    exposed.append("%s:%s:%s (%s)"
+                                   % (path, scope.name, name, ",".join(reasons)))
 
     assert multi > 0, "the harness found no multi-bindings at all — it is inert"
     assert not exposed, "[LIMIT-last-wins] now has live exposure: %s" % exposed

@@ -6835,7 +6835,7 @@
       "formatting",
       "comments and docstrings",
       "argument values",
-      "intra-file ordering of module- and function-scope bindings (except the named limits [LIMIT-class-restore], [LIMIT-class-typeparams], [LIMIT-global-credit], [LIMIT-global-nested], [LIMIT-last-wins], [LIMIT-param-shadow] — see the module docstring and #163)",
+      "intra-file ordering of module- and function-scope bindings (except the named limits [LIMIT-class-restore], [LIMIT-class-typeparams], [LIMIT-global-credit], [LIMIT-last-wins], [LIMIT-param-shadow] — see the module docstring and #163)",
       "vendor SDK paths and line numbers",
       "environment-gated KB/gotcha steering hints in served tool text",
       "presence of MCP surfaces registered behind a feature flag"
@@ -9390,6 +9390,37 @@
             "4. analyze_component(action='dependencies', component_id='...') → check dependencies",
             "5. search_boomi_gotchas(query='<observed symptom phrase>') → match the failure against known silent-failure modes / field traps when logs and dependencies are inconclusive"
           ]
+        }
+      },
+      "value_omitted": false
+    },
+    {
+      "artifact_id": "SS-MCP-DESCRIPTIONS:flag_gated_declarations",
+      "canonical_length": 670,
+      "producer": "server.py [AST: gated declarations]",
+      "selector": "flag_gated_declarations",
+      "sha256": "3dd595f00fc5006b093dde7ff84b494d361050ff95fab146488ac2a66f94d905",
+      "surface_class": "SS-MCP-DESCRIPTIONS",
+      "value": {
+        "boomi_docs_corpus": {
+          "declaration_sha256": "0f856009fe2d4a390ee6f0fbbb19d059948f43e0a4feb74860b843e87073102c",
+          "kind": "mcp.resource"
+        },
+        "boomi_operational_gotchas_catalog": {
+          "declaration_sha256": "e11b7b7baaa241654d92238e10ae377c64212b8aaee9a5b0fd741387e25c37f2",
+          "kind": "mcp.resource"
+        },
+        "read_boomi_doc_page": {
+          "declaration_sha256": "af10e3f60620f11090abe366d0f9be81690c2b78807c8d52381755ff21005f29",
+          "kind": "mcp.tool"
+        },
+        "search_boomi_docs": {
+          "declaration_sha256": "3fa828a9536e6613d6c1c33208c7030e135bc11525f33061c2625af0be16ba1c",
+          "kind": "mcp.tool"
+        },
+        "search_boomi_gotchas": {
+          "declaration_sha256": "ddaae6d130ea25ff552b29dede57b934b5219fd7f4ddb4ccb0cd19f8cbd2e347",
+          "kind": "mcp.tool"
         }
       },
       "value_omitted": false
@@ -30998,6 +31029,7 @@
         "server.py:2103 (manage_connector raw update)"
       ],
       "artifact_ids": [
+        "SS-MCP-DESCRIPTIONS:flag_gated_declarations",
         "SS-MCP-DESCRIPTIONS:flag_gated_surface",
         "SS-MCP-DESCRIPTIONS:get_schema_template.description",
         "SS-MCP-DESCRIPTIONS:get_schema_template.parameters",
@@ -31027,6 +31059,7 @@
         "server.mcp.list_tools()",
         "server.mcp.list_tools() [all tools]",
         "server.mcp.list_{resources,prompts,resource_templates}()",
+        "server.py [AST: gated declarations]",
         "server.py [AST: registrations under a feature flag]"
       ],
       "source_modules": [

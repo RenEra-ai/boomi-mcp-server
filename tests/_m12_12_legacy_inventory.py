@@ -49,7 +49,11 @@ That is a property of the SOURCE TEXT, and the universe is bounded accordingly:
   :func:`unscanned_assets` so their arrival is a diff.
 * **Statement order is excluded at module and function scope — NOT in a class
   body.** Bindings are pre-indexed before any body is scanned: ``visit_Module``
-  for the module namespace and ``_scoped`` for each function's own locals. A
+  for the module namespace, ``_scoped`` for each function's own locals, and
+  ``_published_binding_nodes`` for what a NESTED scope publishes outward with
+  ``global``/``nonlocal`` — without that third pass a caller written above its
+  publisher was scanned before the name existed, which made the claim on this
+  very line false. A
   class body is deliberately left statement-ordered because Python executes it
   that way and it falls back to globals, so pre-indexing there would hide a real
   call made earlier in the body under an enclosing binding. The residual class
@@ -81,18 +85,13 @@ That is a property of the SOURCE TEXT, and the universe is bounded accordingly:
     a request target. (A raw multi-binding COUNT is deliberately not quoted here
     — an earlier draft shipped "58", which no harness reproduces; the exposure
     predicate is the load-bearing claim and the freeze suite re-measures it.)
-  - ``[LIMIT-global-nested]`` A name published with ``global`` from inside a
-    NESTED function — or a class body ENCLOSED by a function — is restored away
-    when the ENCLOSING function exits: that outer scope's restore knows nothing
-    of the inner declaration, so the edge is lost with neither a row nor
-    residue. Three placements that sound similar ARE handled: a ``global`` in a
-    module-level function's own body (including inside an ``if``/``try``/
-    ``match`` case at that level), a ``global`` in a MODULE-LEVEL class body,
-    and — for ASSIGNMENT bindings as well as imports — the ``nonlocal`` publish
-    into the immediately enclosing scope, since ``_binding_maps`` routes each
-    published name to the map that actually owns it.
-    Corpus: 11 ``global``/``nonlocal`` declarations, 10 nested, **zero**
-    import-bound; 4 assign-bound, **none** binding a watched symbol.
+  *(``[LIMIT-global-nested]`` was declared here for four rounds and is now
+  WITHDRAWN, not restated: ``_published_binding_nodes`` pre-indexes every
+  ``global``/``nonlocal`` publication from nested scopes into the namespace that
+  owns it, and ``_enclosing_function_maps`` resolves ``nonlocal`` past class
+  scopes the way Python does. All four spellings — nested assign, nested import,
+  class-in-function assign, class-in-function import — now emit a row, in either
+  textual order. A limit that has been closed is deleted, not reworded.)*
   - ``[LIMIT-class-restore]`` A CLASS body's imports are never scope-restored,
     so a class-body re-import of a module-level name can erase a later real
     edge. Corpus: **zero** class-body imports.
@@ -131,6 +130,7 @@ import argparse  # noqa: E402
 import ast  # noqa: E402
 import asyncio  # noqa: E402
 import hashlib  # noqa: E402
+import inspect  # noqa: E402
 import json  # noqa: E402
 import re  # noqa: E402
 import sys  # noqa: E402
@@ -355,7 +355,9 @@ def example_documents() -> Dict[str, Any]:
 # Watched vocabulary — DERIVED from the runtime authority
 # ======================================================================
 
-_LIMIT_MARKER_RE = re.compile(r"\[LIMIT-[a-z0-9-]+\]")
+#: A limit DECLARATION: the marker opening its own bullet. A bare mention
+#: elsewhere in the prose is a cross-reference, not a declaration.
+_LIMIT_DECL_RE = re.compile(r"^\s*-\s+``(\[LIMIT-[a-z0-9-]+\])``", re.MULTILINE)
 
 
 def named_limits() -> Tuple[str, ...]:
@@ -368,8 +370,21 @@ def named_limits() -> Tuple[str, ...]:
     it in opposite directions: the served claim omitted `[LIMIT-last-wins]`
     entirely, and the test pinned five markers by hand, so a sixth limit could be
     added (or a named one dropped) with the suite still green.
+
+    DECLARATIONS only. Matching every mention counted the cross-reference in the
+    ordering bullet as if it were the limit itself, so deleting the actual
+    `[LIMIT-last-wins]` bullet would have left this list — and therefore the
+    served marker set — completely unchanged. A duplicate declaration is an
+    error rather than something `set()` quietly absorbs.
     """
-    return tuple(sorted(set(_LIMIT_MARKER_RE.findall(__doc__ or ""))))
+    declared = _LIMIT_DECL_RE.findall(__doc__ or "")
+    duplicates = sorted({m for m in declared if declared.count(m) > 1})
+    if duplicates:
+        raise AssertionError(
+            "limit marker(s) declared more than once: %s — one bullet per limit, "
+            "or the served set silently collapses two limits into one."
+            % duplicates)
+    return tuple(sorted(declared))
 
 
 def legacy_sink_vocabulary() -> Dict[str, Tuple[str, ...]]:
@@ -576,6 +591,75 @@ def _scope_body_nodes(node: ast.AST) -> List[ast.AST]:
     return out
 
 
+#: A printf conversion, with its flags/width/precision and mapping key.
+_CONVERSION_RE = re.compile(
+    r"%(\([^)]*\))?([-#0-9.*+ ]*)([diouxXeEfFgGcrsa])")
+
+
+def _as_string_conversions(template: Optional[str]) -> Optional[str]:
+    """Rewrite every printf conversion in `template` to a plain `%s`.
+
+    Unresolved fields are substituted as the STRING `"{}"`, so a numeric or
+    repr conversion raised inside `%` and threw away the segments that WERE
+    resolved. Normalising the conversion keeps the fold total: `%%` is left
+    alone because it is an escaped literal, not a conversion.
+    """
+    if template is None:
+        return None
+    out, index = [], 0
+    while index < len(template):
+        if template.startswith("%%", index):
+            out.append("%%")
+            index += 2
+            continue
+        match = _CONVERSION_RE.match(template, index)
+        if match:
+            out.append("%" + (match.group(1) or "") + "s")
+            index = match.end()
+            continue
+        out.append(template[index])
+        index += 1
+    return "".join(out)
+
+
+def _published_binding_nodes(tree: ast.AST, keyword: type) -> List[ast.AST]:
+    """Statements in NESTED scopes that bind a name published outward.
+
+    A ``global``/``nonlocal`` declaration makes an assignment or import inside a
+    function body bind an OUTER namespace, so the outer prepass has to see it —
+    otherwise the binding exists only while that function is being visited, and
+    a caller written ABOVE the publisher was already scanned under nothing:
+
+        def use():  return A(...)          # scanned first — A unresolved
+        def init(): global A; A = legacy   # publishes A, too late
+
+    That is precisely the ordering dependence the served contract excludes, and
+    the promotion fix alone did not close it: promotion routes a binding to the
+    right map, but the PREPASS is what makes position stop mattering.
+    """
+    out: List[ast.AST] = []
+
+    def walk(node: ast.AST) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                  ast.ClassDef)):
+                names = {n for st in _scope_body_nodes(child)
+                         if isinstance(st, keyword) for n in st.names}
+                if names:
+                    for statement in _scope_body_nodes(child):
+                        targets, value = _assign_parts(statement)
+                        if value is not None and any(t in names for t in targets):
+                            out.append(statement)
+                        elif isinstance(statement, (ast.Import, ast.ImportFrom)) \
+                                and any((a.asname or a.name.split(".")[0]) in names
+                                        for a in statement.names):
+                            out.append(statement)
+            walk(child)
+
+    walk(tree)
+    return out
+
+
 def _module_namespace_nodes(tree: ast.AST) -> List[ast.AST]:
     """Statements that bind the MODULE namespace.
 
@@ -672,6 +756,10 @@ class _Scanner(ast.NodeVisitor):
         # Per-scope map of names this scope publishes OUTWARD (`global` /
         # `nonlocal`) to the (consts, origins) pair that actually owns them.
         self._promoted: List[Dict[str, Tuple[Dict, Dict]]] = []
+        #: "function" | "class", parallel to `_local_consts`/`_local_origins`.
+        #: `nonlocal` SKIPS class scopes, so the enclosing target cannot be read
+        #: off the stack by position alone.
+        self._scope_kinds: List[str] = []
         self._local_defs: Set[str] = set(local_defs)
         self.rows: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
         self._symbols: List[str] = []
@@ -783,7 +871,13 @@ class _Scanner(ast.NodeVisitor):
         # `"%s/Component" % BASE` — the `+` spelling was folded while four others
         # stayed `<dynamic>`, so a re-point through them moved no census row.
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
-            template = self._resolved_str(node.left)
+            # Every conversion is rewritten to `%s` BEFORE substitution, because
+            # the placeholder for an unresolved field is a string: `"%(id)d" %
+            # {"id": "{}"}` raises, the branch bailed, and re-pointing the host
+            # through a numeric-format target moved nothing. The resolved
+            # segments are what this instrument reads; the conversion type is
+            # not part of the request target.
+            template = _as_string_conversions(self._resolved_str(node.left))
             if template is not None and isinstance(node.right, ast.Dict):
                 # A MAPPING operand is not a tuple. Treating it as one made
                 # `"%(host)s/Component/%(id)s" % {"host": BASE, ...}` raise
@@ -1074,6 +1168,7 @@ class _Scanner(ast.NodeVisitor):
         origins: Dict[str, Tuple[str, str]] = {}
         self._local_consts.append(consts)
         self._local_origins.append(origins)
+        self._scope_kinds.append("function")
         # Assignments land in the scope maps above, but imports route through
         # `_bind_import*`, which write scanner-wide — so a function-local
         # `from … import X as N` erased a LATER function's real module-level
@@ -1096,20 +1191,26 @@ class _Scanner(ast.NodeVisitor):
         # enclosing scope — routing both to the map that owns them keeps the
         # single-place restore honest instead of adding a second exemption rule.
         module_maps = (self._module_consts, self._qualified_origin)
-        outer_maps = ((self._local_consts[-2], self._local_origins[-2])
-                      if len(self._local_origins) > 1 else module_maps)
         promoted = {n: module_maps for n in published[ast.Global]}
-        promoted.update({n: outer_maps for n in published[ast.Nonlocal]
+        promoted.update({n: self._enclosing_function_maps()
+                         for n in published[ast.Nonlocal]
                          if n not in published[ast.Global]})
         self._promoted.append(promoted)
         saved = (dict(self._qualified_origin), dict(self._module_paths),
                  dict(self._modules), dict(self._import_origin),
                  set(self._imported))
-        self._index_bindings(body_nodes, consts, origins)
+        # This scope's own bindings, plus what a nested scope publishes INTO it
+        # with `nonlocal` — the function-scope half of the module-level fix, and
+        # for the same reason: a closure that CALLS the name may be written above
+        # the closure that binds it.
+        self._index_bindings(
+            body_nodes + _published_binding_nodes(node, ast.Nonlocal),
+            consts, origins)
         for statement in node.body:
             self.visit(statement)
         self._restore_scope(saved, declared)
         self._promoted.pop()
+        self._scope_kinds.pop()
         self._local_origins.pop()
         self._local_consts.pop()
         self._symbols.pop()
@@ -1135,12 +1236,12 @@ class _Scanner(ast.NodeVisitor):
         self._symbols.append(node.name)
         self._local_consts.append({})
         self._local_origins.append({})
+        self._scope_kinds.append("class")
         # A class body publishes `global`/`nonlocal` names outward exactly like a
         # function body does, and its own maps are popped, so it needs the same
         # promotion — statement-ordered or not.
         module_maps = (self._module_consts, self._qualified_origin)
-        outer_maps = ((self._local_consts[-2], self._local_origins[-2])
-                      if len(self._local_origins) > 1 else module_maps)
+        outer_maps = self._enclosing_function_maps()
         self._promoted.append({
             n: (module_maps if isinstance(st, ast.Global) else outer_maps)
             for st in _scope_body_nodes(node)
@@ -1150,6 +1251,7 @@ class _Scanner(ast.NodeVisitor):
         for statement in node.body:
             self.visit(statement)
         self._promoted.pop()
+        self._scope_kinds.pop()
         self._local_origins.pop()
         self._local_consts.pop()
         self._symbols.pop()
@@ -1173,8 +1275,13 @@ class _Scanner(ast.NodeVisitor):
         local defs the round before), so it is fixed for ALL binding kinds here
         rather than one more per round.
         """
-        self._index_bindings(_module_namespace_nodes(node),
-                             self._module_consts, self._qualified_origin)
+        # The module namespace, plus every binding a nested scope PUBLISHES into
+        # it with `global`. Without the second pass a caller written above its
+        # publisher resolved to nothing — position still mattered at exactly the
+        # scope the contract says it does not.
+        self._index_bindings(
+            _module_namespace_nodes(node) + _published_binding_nodes(node, ast.Global),
+            self._module_consts, self._qualified_origin)
         self.generic_visit(node)
 
     def _restore_scope(self, saved: Tuple[Any, ...],
@@ -1196,6 +1303,21 @@ class _Scanner(ast.NodeVisitor):
             if name not in saved[4] and name not in declared:
                 self._imported.discard(name)
         self._imported.update(saved[4])
+
+    def _enclosing_function_maps(self) -> Tuple[Dict, Dict]:
+        """The (consts, origins) pair a `nonlocal` in the CURRENT scope binds.
+
+        Python resolves `nonlocal` through the nearest enclosing FUNCTION that
+        binds the name and skips class scopes entirely. Taking the stack entry
+        one position out instead wrote a setter's binding into the enclosing
+        CLASS map for `def outer(): class C: def set(): nonlocal x` — a map that
+        is discarded when the class body ends, so a later call in `outer` saw
+        nothing. Falls back to the module maps when no enclosing function exists.
+        """
+        for index in range(len(self._scope_kinds) - 2, -1, -1):
+            if self._scope_kinds[index] == "function":
+                return (self._local_consts[index], self._local_origins[index])
+        return (self._module_consts, self._qualified_origin)
 
     def _binding_maps(self, name: str,
                       consts: Dict[str, str],
@@ -2621,6 +2743,7 @@ def flag_gated_mcp_surface() -> Tuple[str, ...]:
                         uri = _const_str(call_args[0]) if call_args else None
                         if uri:
                             found.append(uri)
+                        break
                 found += _walk(node.body, gated)
             elif isinstance(node, _ast.ClassDef):
                 continue
@@ -2629,6 +2752,51 @@ def flag_gated_mcp_surface() -> Tuple[str, ...]:
         return found
 
     return tuple(sorted(set(_walk(tree.body, False))))
+
+
+def flag_gated_static_surface() -> Dict[str, Dict[str, str]]:
+    """A flag-INDEPENDENT wire identity for each feature-gated MCP surface.
+
+    Excluding a gated surface from the runtime digests removed its payload from
+    the freeze entirely: re-declaring `search_boomi_gotchas` from `@mcp.tool` to
+    `@mcp.prompt`, or editing its schema or served text without renaming it,
+    produced no drift in EITHER flag state, because both digests apply the same
+    name filter. The runtime cannot supply that payload when the gate is off, so
+    it is taken from `server.py`'s source instead: the registration KIND (which
+    catches the tool→prompt swap) and a digest of the declaration itself (which
+    catches signature, annotation and docstring edits).
+    """
+    tree = ast.parse((_ROOT / "server.py").read_text(encoding="utf-8"))
+    flags = {"BOOMI_DOCS_ENABLED", "BOOMI_GOTCHAS_ENABLED"}
+    out: Dict[str, Dict[str, str]] = {}
+
+    def _walk(nodes: Iterable[Any], gated: bool) -> None:
+        for node in nodes:
+            if isinstance(node, ast.If):
+                named = {n.id for n in ast.walk(node.test)
+                         if isinstance(n, ast.Name)} & flags
+                _walk(node.body, gated or bool(named))
+                _walk(node.orelse, gated)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if gated:
+                    for decorator in node.decorator_list:
+                        text = ast.unparse(decorator)
+                        if not text.startswith(("mcp.tool", "mcp.resource",
+                                                "mcp.prompt")):
+                            continue
+                        out[node.name] = {
+                            "kind": text.split("(", 1)[0],
+                            "declaration_sha256": _sha256(ast.unparse(node)),
+                        }
+                        break
+                _walk(node.body, gated)
+            elif isinstance(node, ast.ClassDef):
+                continue
+            elif hasattr(node, "body"):
+                _walk(node.body, gated)
+
+    _walk(tree.body, False)
+    return out
 
 
 def _is_flag_gated(key: Any) -> bool:
@@ -2704,26 +2872,41 @@ def optional_steering_hints() -> Tuple[str, ...]:
     inventory measures. The snapshot passed in isolation and failed in the
     repo's own full suite for that reason alone.
 
-    The suffix is read back from the hook rather than re-typed, so it cannot
-    drift from the runtime: hand the hook a sentinel docstring and keep whatever
-    it appended. When the flag is off the hook is a no-op and there is nothing
-    to strip — which is exactly the state the value was captured in.
+    Read from `server.py`'s SOURCE, not by calling the hook. Calling it only
+    yields a suffix when the gate is already on — which is never the case in the
+    documented standalone `--check` — so the legacy-token assertion below was
+    vacuous exactly when it mattered: editing `_kb_hint` to append "use raw XML"
+    would have changed nothing here while a docs-enabled deployment served it.
+    Static extraction sees the literal in both states.
     """
-    import server
+    import server as _server
+
+    try:
+        tree = ast.parse(inspect.getsource(_server))
+    except (OSError, TypeError, SyntaxError):  # pragma: no cover - defensive
+        return ()
 
     suffixes: List[str] = []
-    for hook_name in ("_kb_hint", "_gotcha_hint"):
-        hook = getattr(server, hook_name, None)
-        if not callable(hook):
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-
-        def _probe() -> None:
-            pass
-
-        _probe.__doc__ = _HINT_PROBE_DOC
-        appended = getattr(hook(_probe), "__doc__", "") or ""
-        if appended != _HINT_PROBE_DOC:
-            suffixes.append(appended[len(_HINT_PROBE_DOC.rstrip()):])
+        if node.name not in ("_kb_hint", "_gotcha_hint"):
+            continue
+        # The appended text is the right operand of the `__doc__` assignment.
+        # `_assign_parts` is deliberately not used: its targets are plain names,
+        # and this one is the ATTRIBUTE `func.__doc__`.
+        for statement in ast.walk(node):
+            if not isinstance(statement, ast.Assign):
+                continue
+            if not any(isinstance(t, ast.Attribute) and t.attr == "__doc__"
+                       for t in statement.targets):
+                continue
+            value = statement.value
+            while isinstance(value, ast.BinOp) and isinstance(value.op, ast.Add):
+                literal = _const_str(value.right)
+                if literal:
+                    suffixes.append(literal)
+                value = value.left
     return tuple(suffixes)
 
 
@@ -2870,12 +3053,17 @@ def collect_served_artifacts() -> List[Dict[str, Any]]:
          for tool_name, tool in sorted(tools.items())
          if not _is_flag_gated(tool_name)}))
 
-    # The gated NAME SET is frozen even though its presence is not, so adding a
-    # sixth gated surface — or moving an existing tool behind a flag to keep it
-    # out of the digest — still fails the freeze.
+    # Only the PRESENCE of a gated surface is excluded. Its name set, its
+    # registration kind and a digest of its declaration are all frozen from
+    # source, so adding a sixth gated surface, moving an existing tool behind a
+    # flag to keep it out of the digest, or editing a gated tool's schema or
+    # served text all still fail the freeze.
     artifacts.append(_artifact(
         "SS-MCP-DESCRIPTIONS", "server.py [AST: registrations under a feature flag]",
         "flag_gated_surface", list(flag_gated_mcp_surface())))
+    artifacts.append(_artifact(
+        "SS-MCP-DESCRIPTIONS", "server.py [AST: gated declarations]",
+        "flag_gated_declarations", flag_gated_static_surface()))
 
     # --- SS-SCHEMA-TEMPLATES -----------------------------------------
     for selector, payload in sorted(_schema_template_surfaces(meta_tools).items()):
@@ -3857,8 +4045,20 @@ def compare(current: Dict[str, Any], baseline: Dict[str, Any]) -> Diff:
     # already consume.
     handled = {"census", "served_artifacts", "scan_contract"}
     for section in sorted((set(current) | set(baseline)) - handled):
-        c = _without_evidence_lines(current.get(section))
-        b = _without_evidence_lines(baseline.get(section))
+        # The sentinel belongs at THIS level too. Taking the union of keys and
+        # then reading both sides with `.get()` re-created the exact hole the
+        # union was added to close: a top-level section added as `null` read as
+        # `None` on both sides and compared equal.
+        c = current.get(section, _ABSENT)
+        b = baseline.get(section, _ABSENT)
+        if c is _ABSENT or b is _ABSENT:
+            diff.scalar_changes.append(
+                "%s: %s -> %s" % (section,
+                                  "<absent>" if b is _ABSENT else canonical_json(b),
+                                  "<absent>" if c is _ABSENT else canonical_json(c)))
+            continue
+        c = _without_evidence_lines(c)
+        b = _without_evidence_lines(b)
         if canonical_json(c) != canonical_json(b):
             diff.scalar_changes.extend(_section_delta(section, c, b))
     return diff
