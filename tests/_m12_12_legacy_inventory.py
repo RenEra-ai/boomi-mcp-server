@@ -622,6 +622,63 @@ def _as_string_conversions(template: Optional[str]) -> Optional[str]:
     return "".join(out)
 
 
+def _declared_names(scope: ast.AST, keyword: type) -> Set[str]:
+    """Names `scope` publishes outward with `global` or `nonlocal`."""
+    return {n for st in _scope_body_nodes(scope)
+            if isinstance(st, keyword) for n in st.names}
+
+
+def _bound_names(scope: ast.AST) -> Set[str]:
+    """Every name this scope binds, read off Store/Del CONTEXT.
+
+    Covers assignment, tuple and starred unpacking, `for` targets,
+    `with … as`, `except … as`, the walrus, augmented assignment, `match`
+    captures, imports and nested `def`/`class` names — because Python marks all
+    of them `ast.Store`, not because any of them is listed here.
+
+    Nested functions, lambdas, class bodies and comprehensions are their own
+    scopes and are NOT descended into; a comprehension target in particular is
+    a local of the comprehension, not of the enclosing function.
+    """
+    names: Set[str] = set()
+
+    def walk(node: ast.AST) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                  ast.ClassDef)):
+                names.add(child.name)   # the NAME binds here; the body does not
+                continue
+            if isinstance(child, (ast.Lambda, ast.ListComp, ast.SetComp,
+                                  ast.DictComp, ast.GeneratorExp)):
+                continue
+            if isinstance(child, ast.Name) and isinstance(child.ctx,
+                                                          (ast.Store, ast.Del)):
+                names.add(child.id)
+            elif isinstance(child, ast.ExceptHandler) and child.name:
+                names.add(child.name)
+            elif isinstance(child, (ast.Import, ast.ImportFrom)):
+                for alias in child.names:
+                    names.add(alias.asname or alias.name.split(".")[0])
+            elif type(child).__name__ in ("MatchAs", "MatchStar", "MatchMapping") \
+                    and getattr(child, "name", None):
+                names.add(child.name)
+            walk(child)
+
+    for statement in _scope_body_nodes(scope):
+        walk(statement)
+        if isinstance(statement, ast.Name) and isinstance(statement.ctx,
+                                                          (ast.Store, ast.Del)):
+            names.add(statement.id)
+        elif isinstance(statement, (ast.Import, ast.ImportFrom)):
+            for alias in statement.names:
+                names.add(alias.asname or alias.name.split(".")[0])
+    for child in ast.iter_child_nodes(scope):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                              ast.ClassDef)):
+            names.add(child.name)
+    return names
+
+
 def _published_binding_nodes(tree: ast.AST, keyword: type) -> List[ast.AST]:
     """Statements in NESTED scopes that bind a name published outward.
 
@@ -664,7 +721,26 @@ def _published_binding_nodes(tree: ast.AST, keyword: type) -> List[ast.AST]:
         return found
 
     def _owns(scope: ast.AST, name: str) -> bool:
-        """True when `scope` binds `name` as one of its own locals."""
+        """True when `scope` binds `name` as one of its own locals.
+
+        DERIVED from binding CONTEXT, never from a list of statement kinds.
+        Enumerating five spellings (`x = …`, `x: T = …`, import alias, parameter,
+        nested def/class name) meant a scope that genuinely owns the name through
+        a `for` target, `with … as`, `except … as`, a walrus, an augmented
+        assign, a `match` capture or tuple/starred unpacking was judged NOT to
+        own it. The `nonlocal` owner search then fell PAST the real owner to an
+        outer function and indexed the publication into that scope's prepass,
+        where it could overwrite the outer scope's own binding — the misrouting
+        this helper exists to prevent. Sixth instance of the enumeration defect
+        in this file, so ownership is now read off `ast.Store`/`ast.Del`
+        contexts, which is where Python itself decides it.
+
+        Over-recognising is the safe direction: it keeps a publication LOCAL
+        rather than sending it outward to clobber someone else's binding.
+        """
+        declared_here = _declared_names(scope, ast.Global) | _declared_names(scope, ast.Nonlocal)
+        if name in declared_here:
+            return False  # published outward, so not a local of this scope
         arguments = getattr(scope, "args", None)
         if isinstance(arguments, ast.arguments):
             for argument in (list(arguments.posonlyargs) + list(arguments.args)
@@ -672,23 +748,10 @@ def _published_binding_nodes(tree: ast.AST, keyword: type) -> List[ast.AST]:
                              + [a for a in (arguments.vararg, arguments.kwarg) if a]):
                 if argument.arg == name:
                     return True
-        for statement in _scope_body_nodes(scope):
-            targets, value = _assign_parts(statement)
-            if value is not None and name in targets:
-                return True
-            if isinstance(statement, (ast.Import, ast.ImportFrom)) \
-                    and any((a.asname or a.name.split(".")[0]) == name
-                            for a in statement.names):
-                return True
-        for child in ast.iter_child_nodes(scope):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
-                                  ast.ClassDef)) and child.name == name:
-                return True
-        return False
+        return name in _bound_names(scope)
 
     def _declared(scope: ast.AST) -> Set[str]:
-        return {n for st in _scope_body_nodes(scope)
-                if isinstance(st, keyword) for n in st.names}
+        return _declared_names(scope, keyword)
 
     def walk(node: ast.AST, chain: List[ast.AST]) -> None:
         for child in ast.iter_child_nodes(node):
@@ -1381,6 +1444,26 @@ class _Scanner(ast.NodeVisitor):
                 return (self._local_consts[index], self._local_origins[index])
         return (self._module_consts, self._qualified_origin)
 
+    def _statement_ordered_maps(self) -> Optional[Tuple[Dict, Dict]]:
+        """The maps a CLASS body binds into, or None anywhere else.
+
+        A class body is the one scope with NO prepass: Python executes it in
+        statement order and does not hoist its names, so ``visit_ClassDef``
+        deliberately scans it in traversal order and pre-indexing there would
+        hide a real call made earlier in the body under an enclosing binding.
+
+        Deleting the traversal-time binding write to make the prepass the sole
+        authority was therefore right for module and function scope and wrong
+        here: it left class bodies binding NOTHING. A class-body alias to a
+        legacy sink emitted no census row AND no residue where the previous
+        revision emitted `legacy_transitive_call`, and a class-body selector
+        constant lost its typed `process_kind_producer` row. Only the scope that
+        has no prepass still binds as it walks.
+        """
+        if self._scope_kinds and self._scope_kinds[-1] == "class":
+            return (self._local_consts[-1], self._local_origins[-1])
+        return None
+
     def _binding_maps(self, name: str,
                       consts: Dict[str, str],
                       origins: Dict[str, Tuple[str, str]]) -> Tuple[Dict, Dict]:
@@ -1493,18 +1576,23 @@ class _Scanner(ast.NodeVisitor):
             # nothing and added a real legacy caller with zero diff. The plan
             # names simple assignment aliases as a resolution form; carry the
             # qualified identity across the rebind.
-            # NO traversal-time origin write. The prepass owns every name→value
-            # binding, at module AND function scope, and writing again on the way
-            # past re-introduced the exact ordering bug the prepass exists to
-            # remove — one scope down from where it had already been fixed:
+            # No traversal-time origin write at module or function scope — the
+            # prepass owns those, and writing again on the way past re-introduced
+            # the ordering bug it exists to remove, one scope down from where it
+            # had already been fixed:
             #
             #     def o(): A = safe; def u(): A(...); A = legacy
             #
-            # The prepass correctly resolves `A` to `legacy` (last wins), then
-            # traversal reached `A = safe` FIRST, overwrote it, and scanned `u`
-            # under the safe callee — so no row appeared for ANY value of `A`,
-            # and re-pointing it moved nothing. A twice-bound name was simply
-            # invisible.
+            # The prepass resolves `A` to `legacy` (last wins), then traversal
+            # reached `A = safe` FIRST, overwrote it, and scanned `u` under the
+            # safe callee — no row for ANY value of `A`. A CLASS body has no
+            # prepass at all, though, so it binds here or nowhere.
+            qualified = self._qualified_callee(value)
+            class_maps = self._statement_ordered_maps()
+            if qualified is not None and class_maps is not None:
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name):
+                        self._binding_maps(tgt.id, *class_maps)[1][tgt.id] = qualified
             if base in self._builders:
                 bound = True
 
@@ -1529,10 +1617,16 @@ class _Scanner(ast.NodeVisitor):
         # `KEY = "process_kind"` then `cfg[KEY] = ...`. Constant propagation for
         # plain string names only — without it, hoisting the selector into a
         # constant hid the producer from the census entirely.
-        # Constants are bound by the prepass too, for the same reason and at both
-        # scopes: the fix was applied to MODULE scope one round earlier and left
-        # in place for function scope, where traversal kept overwriting the
-        # last binding with the first one on the way past.
+        # Constants follow the same rule: the prepass binds them at module and
+        # function scope, and a CLASS body — which has no prepass — binds here.
+        # Without this a class-body `KEY = "process_kind"` lost its typed
+        # `process_kind_producer` row and fell back to bare residue.
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            class_maps = self._statement_ordered_maps()
+            if class_maps is not None:
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name):
+                        self._binding_maps(tgt.id, *class_maps)[0][tgt.id] = value.value
 
         # `cfg["process_kind"] = ...` is a producer write.
         for tgt in node.targets:

@@ -2541,6 +2541,9 @@ value either way.
 | The served limit text names every deferred case and points at #163 | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_served_limits_name_every_deferred_case` |
 | **Mutation:** a `null`-valued addition is frozen in every dict section | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_null_valued_addition_is_frozen_in_every_dict_section` |
 | `[LIMIT-last-wins]` is re-measured, not recited (zero live exposure) | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_last_wins_limit_still_measures_zero_exposure` |
+| **Mutation:** a class body still binds its own names (no prepass runs there) | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_class_body_still_binds_its_own_names` |
+| **Mutation:** a `nonlocal` publication is not misrouted past its owner | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_nonlocal_publication_is_not_misrouted_past_its_owner` |
+| **Guard the guard:** every Python binding form counts as ownership | `tests/test_issue_149_legacy_reachability_freeze.py::test_every_python_binding_form_is_recognised_as_ownership` |
 
 **Darkness.** This slice changes nothing under `src/boomi_mcp/` or `server.py`:
 `git diff 9711a9c0cb6c88dda41ada94d88694915b659f36 -- src/boomi_mcp server.py` is empty. The only

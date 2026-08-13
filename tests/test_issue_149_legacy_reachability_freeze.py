@@ -1259,6 +1259,128 @@ def test_a_name_published_outward_survives_scope_restore(census_only, label, bod
     assert expect in {r.split(" | ")[0] for r in diff.added}, (label, diff.report())
 
 
+@pytest.mark.parametrize("label,body,expect", [
+    ("an alias bound and CALLED inside a class body",
+     "from ...categories.integration_builder import build_structured_update_xml as _m12_cb\n"
+     "class M12ClassAlias:\n"
+     "    _bound = _m12_cb\n"
+     "    _result = _bound(1, 2)\n",
+     "legacy_transitive_call"),
+    ("a selector constant hoisted into a class body",
+     "class M12ClassSelector:\n"
+     "    KEY = 'process_kind'\n"
+     "    cfg = {}\n"
+     "    cfg[KEY] = 'sync_pipeline'\n",
+     "process_kind_producer"),
+])
+def test_a_class_body_still_binds_its_own_names(census_only, label, body, expect):
+    """A class body is the ONE scope with no prepass, so it binds as it walks.
+
+    Making the prepass the sole binding authority was right for module and
+    function scope — it closed a twice-bound name being resolved under its FIRST
+    value — but `visit_ClassDef` runs no prepass at all, because Python executes
+    a class body in statement order rather than hoisting it. Deleting the
+    traversal-time write therefore left class bodies binding NOTHING: this
+    alias produced no census row AND no residue where the previous revision
+    produced `legacy_transitive_call`, and the selector constant fell back to
+    bare `unclassified_reference`. Both spellings are pinned here because the
+    origin map and the constant map were lost by the same edit.
+    """
+    sources = dict(inv.python_sources())
+    target = "src/boomi_mcp/categories/components/processes.py"
+    sources[target] = sources[target] + "\n\n" + body
+    diff = inv.compare(inv.build_inventory(sources=sources, include_served=False),
+                       census_only)
+    assert expect in {r.split(" | ")[0] for r in diff.added}, (label, diff.report())
+
+
+@pytest.mark.parametrize("label,binding", [
+    ("a `for` target", "for A in []:\n            pass"),
+    ("a `with … as`", "with open('f') as A:\n            pass"),
+    ("an `except … as`", "try:\n            pass\n        except Exception as A:\n            pass"),
+    ("a walrus", "_q = (A := 1)"),
+    ("an augmented assign", "A = 0\n        A += 1"),
+    ("tuple unpacking", "A, _z = (1, 2)"),
+])
+def test_a_nonlocal_publication_is_not_misrouted_past_its_owner(label, binding):
+    """`nonlocal` binds the nearest enclosing function that OWNS the name.
+
+    Ownership was decided from a list of five statement kinds, so a scope that
+    really owns the name through any of the spellings below was judged not to,
+    the owner search fell PAST it to an outer function, and the publication was
+    indexed into that outer scope's prepass — where it overwrote the outer
+    scope's own binding and a re-point of that binding moved nothing. Ownership
+    is now read off `ast.Store`/`ast.Del` context, so the set of spellings is
+    Python's, not a list kept here.
+    """
+    sources = inv.python_sources()
+    target = "src/boomi_mcp/categories/components/processes.py"
+    head = ("from ...categories.integration_builder import "
+            "build_structured_update_xml as _m12_leg\n"
+            "def _m12_safe(c, x):\n    return None\n")
+
+    def _tree(outer_value):
+        body = (
+            "def m12_outer():\n"
+            "    A = _m12_safe\n"
+            "    def m12_use(c, x):\n"
+            "        return A(c, x)\n"
+            "    def m12_middle():\n"
+            "        %s\n"
+            "        def m12_inner():\n"
+            "            nonlocal A\n"
+            "            A = _m12_safe\n"
+            "        return m12_inner\n"
+            "    A = %s\n"
+            "    return m12_use, m12_middle\n" % (binding, outer_value))
+        overlay = dict(sources)
+        overlay[target] = sources[target] + "\n\n" + head + body
+        return inv.build_inventory(sources=overlay, include_served=False)
+
+    diff = inv.compare(_tree("_m12_leg"), _tree("_m12_safe"))
+    assert not diff.empty(), (
+        "an inner `nonlocal` publication was misrouted past a middle scope that "
+        "owns the name via %s, so re-pointing the OUTER binding moved nothing" % label)
+
+
+def test_every_python_binding_form_is_recognised_as_ownership():
+    """Guard the guard: `_bound_names` must read Python's binding contexts.
+
+    Enumerating statement kinds is what broke owner resolution; this asserts the
+    replacement covers the forms the enumeration missed, and — just as important
+    — that it does NOT over-claim: a comprehension target is a local of the
+    comprehension, not of the enclosing function.
+    """
+    import ast as _ast
+
+    forms = {
+        "plain assign": "A = 1",
+        "annotated assign": "A: int = 1",
+        "for target": "for A in []:\n        pass",
+        "tuple unpack": "A, _z = (1, 2)",
+        "starred unpack": "*A, _z = [1, 2]",
+        "with as": "with open('f') as A:\n        pass",
+        "except as": "try:\n        pass\n    except Exception as A:\n        pass",
+        "walrus": "_q = (A := 1)",
+        "augmented assign": "A = 0\n    A += 1",
+        "match capture": "match _v:\n        case A:\n            pass",
+        "import alias": "import os as A",
+        "nested def": "def A():\n        pass",
+        "nested class": "class A:\n        pass",
+        "del": "A = 1\n    del A",
+    }
+    for label, statement in forms.items():
+        scope = _ast.parse("def s():\n    %s\n" % statement).body[0]
+        assert "A" in inv._bound_names(scope), "%s is not recognised" % label
+
+    negative = _ast.parse("def s():\n    B = 1\n").body[0]
+    assert "A" not in inv._bound_names(negative), "ownership claimed with no binding"
+
+    comprehension = _ast.parse("def s():\n    _c = [A for A in []]\n").body[0]
+    assert "A" not in inv._bound_names(comprehension), \
+        "a comprehension target is not a local of the enclosing function"
+
+
 def test_a_function_local_import_does_not_erase_a_later_module_level_edge(census_only):
     """`_index_bindings` routes imports through `_bind_import*`, which write
     scanner-wide — so a function-local `from … import X as N` clobbered the
