@@ -827,6 +827,78 @@ def test_repointing_any_composed_http_spelling_breaks_the_freeze(form):
     assert not diff.empty(), "re-point via %s did not move the census" % form
 
 
+@pytest.mark.parametrize("form", [
+    "'%s/Component/%s' % (_M12_12_H, cid)",
+    "'{}/Component/{}'.format(_M12_12_H, cid)",
+])
+def test_a_dynamic_field_does_not_discard_the_resolved_host(form):
+    """An unresolved field must not throw away the resolved ones.
+
+    `"%s/Component/%s" % (BASE, component_id)` has a runtime `component_id`, and
+    bailing to `<dynamic>` on that meant re-pointing BASE moved neither the HTTP
+    row nor the (unchanged) endpoint-literal residue. The f-string branch already
+    substituted a placeholder; the others now do too.
+    """
+    def _tree(host):
+        sources = dict(inv.python_sources())
+        target = "src/boomi_mcp/categories/components/processes.py"
+        sources[target] = sources[target] + (
+            "\n\nimport httpx\n_M12_12_H = '%s'\n"
+            "def go(x, cid):\n    return httpx.post(%s, content=x)\n" % (host, form))
+        return inv.build_inventory(sources=sources, include_served=False)
+
+    diff = inv.compare(_tree("https://api.boomi.com"), _tree("https://example.test"))
+    assert not diff.empty(), "re-point via %s did not move the census" % form
+
+
+def test_a_module_binding_rebound_after_its_use_keeps_the_final_value():
+    """The prepass records the LAST module binding, as Python does — and
+    traversal must not overwrite it with the first one on the way past."""
+    def _tree(host):
+        sources = dict(inv.python_sources())
+        target = "src/boomi_mcp/categories/components/processes.py"
+        sources[target] = sources[target] + (
+            "\n\nimport httpx\n_M12_12_R = 'placeholder.invalid'\n"
+            "def push(x):\n    return httpx.post(_M12_12_R + '/Component', content=x)\n"
+            "_M12_12_R = '%s'\n" % host)
+        return inv.build_inventory(sources=sources, include_served=False)
+
+    diff = inv.compare(_tree("https://api.boomi.com"), _tree("https://example.test"))
+    assert not diff.empty(), "the final module binding was not the one recorded"
+
+
+def test_a_registry_bound_builder_declared_below_its_caller_is_reported(census_only):
+    """`def render(c): return B.build(c)` then `B = PROCESS_FLOW_BUILDERS[...]`.
+
+    The prepass recognized fewer binding shapes than `visit_Assign`, so `B`
+    entered `_builder_vars` only after `render` had been visited and the renderer
+    call produced neither a row nor residue.
+    """
+    sources = dict(inv.python_sources())
+    target = "src/boomi_mcp/categories/components/processes.py"
+    sources[target] = sources[target] + (
+        "\n\nfrom ..builders import PROCESS_FLOW_BUILDERS as _M12_12_REG\n"
+        "def render(c):\n    return _M12_12_B.build(c)\n"
+        "_M12_12_B = _M12_12_REG['sync_pipeline']\n")
+    diff = inv.compare(inv.build_inventory(sources=sources, include_served=False),
+                       census_only)
+    assert "renderer_call" in {r.split(" | ")[0] for r in diff.added}, diff.report()
+
+
+def test_an_unresolvable_format_falls_back_instead_of_aborting():
+    """The scanner walks unreachable and conditional bodies, so a statically
+    resolvable but nonsensical format (`'{0.host}'.format('x')`, a wrong arity)
+    must degrade to `<dynamic>` — not abort the entire inventory."""
+    sources = dict(inv.python_sources())
+    target = "src/boomi_mcp/categories/components/processes.py"
+    sources[target] = sources[target] + (
+        "\n\nimport httpx\n"
+        "def f(x):\n    return httpx.post('{0.host}/Component'.format('x'), content=x)\n"
+        "def g(x):\n    return httpx.post('%s/%s/Component' % ('a',), content=x)\n")
+    document = inv.build_inventory(sources=sources, include_served=False)
+    assert document["census"], "the inventory aborted on an unresolvable format"
+
+
 def test_the_axis_walk_unions_payload_and_overview_listings():
     """An `or` let a payload advertising its own protocols suppress the
     overview's entirely."""

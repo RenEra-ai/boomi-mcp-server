@@ -662,12 +662,20 @@ class _Scanner(ast.NodeVisitor):
             if template is not None:
                 operands = (node.right.elts if isinstance(node.right, ast.Tuple)
                             else [node.right])
-                values = [self._resolved_str(o) for o in operands]
-                if all(v is not None for v in values):
-                    try:
-                        return template % tuple(values)
-                    except (TypeError, ValueError, KeyError):  # pragma: no cover
-                        return None
+                # An unresolved field must NOT discard the resolved ones. Bailing
+                # to `<dynamic>` on `"%s/Component/%s" % (BASE, component_id)`
+                # meant re-pointing BASE moved nothing — the same re-point the
+                # `+` and f-string branches catch. Substitute a placeholder, as
+                # the f-string branch already does.
+                values = [v if v is not None else "{}"
+                          for v in (self._resolved_str(o) for o in operands)]
+                try:
+                    return template % tuple(values)
+                except Exception:
+                    # A statically resolvable but nonsensical format (`{0.host}`,
+                    # a wrong arity) must fall back, never abort the inventory —
+                    # the scanner walks unreachable and conditional bodies too.
+                    return None
         # `"{}/Component".format(BASE)`
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
                 and node.func.attr == "format":
@@ -676,12 +684,13 @@ class _Scanner(ast.NodeVisitor):
                 args = [self._resolved_str(a) for a in node.args]
                 kwargs = {kw.arg: self._resolved_str(kw.value)
                           for kw in node.keywords if kw.arg}
-                if all(a is not None for a in args) \
-                        and all(v is not None for v in kwargs.values()):
-                    try:
-                        return template.format(*args, **kwargs)
-                    except (IndexError, KeyError, ValueError):  # pragma: no cover
-                        return None
+                args = [a if a is not None else "{}" for a in args]
+                kwargs = {k: (v if v is not None else "{}")
+                          for k, v in kwargs.items()}
+                try:
+                    return template.format(*args, **kwargs)
+                except Exception:
+                    return None
         if isinstance(node, ast.JoinedStr):
             parts = []
             for value in node.values:
@@ -785,6 +794,28 @@ class _Scanner(ast.NodeVisitor):
         origin = self._modules.get(root.id) or self._http_vars.get(root.id) or root.id
         return any(origin == mod or origin.startswith(mod + ".")
                    for mod in _HTTP_CLIENT_MODULES)
+
+    def _binds_builder(self, value: Optional[ast.AST]) -> bool:
+        """True when the value evaluates to a process-flow builder class.
+
+        Shared by `visit_Assign` and the `visit_Module` prepass so both agree —
+        the prepass recognizing fewer shapes than the visitor is what let a
+        registry-bound builder declared below its caller escape.
+        """
+        if isinstance(value, ast.Call):
+            dotted = self._dotted(value.func)
+            if dotted and dotted.split(".")[-1] == "get_process_flow_builder":
+                return True
+            if isinstance(value.func, ast.Attribute) and value.func.attr == "get" \
+                    and self._is_registry(value.func.value):
+                return True
+        if isinstance(value, ast.Subscript) and self._is_registry(value.value):
+            return True
+        if isinstance(value, (ast.Name, ast.Attribute)):
+            dotted = self._dotted(value)
+            if dotted and dotted.split(".")[-1] in self._builders:
+                return True
+        return False
 
     def _qualified_callee(self, func: ast.AST) -> Optional[Tuple[str, str]]:
         """`(defining path, symbol)` for a statically resolvable call, else None.
@@ -902,12 +933,18 @@ class _Scanner(ast.NodeVisitor):
                     self._module_consts[tgt] = literal
         for statement in namespace:
             targets, value = _assign_parts(statement)
-            if value is None or not isinstance(value, (ast.Name, ast.Attribute)):
+            if value is None:
                 continue
-            qualified = self._qualified_callee(value)
-            if qualified is not None:
-                for tgt in targets:
-                    self._qualified_origin[tgt] = qualified
+            if isinstance(value, (ast.Name, ast.Attribute)):
+                qualified = self._qualified_callee(value)
+                if qualified is not None:
+                    for tgt in targets:
+                        self._qualified_origin[tgt] = qualified
+            # A registry-bound builder declared BELOW its caller entered
+            # `_builder_vars` only after that caller had been visited, so the
+            # renderer call produced neither a row nor residue.
+            if self._binds_builder(value):
+                self._builder_vars.update(targets)
         self.generic_visit(node)
 
     def _bind_import(self, node: ast.Import) -> None:
@@ -959,17 +996,8 @@ class _Scanner(ast.NodeVisitor):
         # Every registry spelling goes through `_is_registry` / `_yields_builder`
         # so a variable bound to a module-qualified lookup is tracked exactly like
         # one bound to the bare form.
-        bound = False
-        if isinstance(value, ast.Call):
-            dotted = self._dotted(value.func)
-            if dotted and dotted.split(".")[-1] == "get_process_flow_builder":
-                bound = True
-            elif isinstance(value.func, ast.Attribute) and value.func.attr == "get" \
-                    and self._is_registry(value.func.value):
-                bound = True
-        elif isinstance(value, ast.Subscript) and self._is_registry(value.value):
-            bound = True
-        elif isinstance(value, (ast.Name, ast.Attribute)):
+        bound = self._binds_builder(value)
+        if isinstance(value, (ast.Name, ast.Attribute)):
             dotted = self._dotted(value)
             base = (dotted or "").split(".")[-1]
             if base in self._watched:
@@ -988,11 +1016,11 @@ class _Scanner(ast.NodeVisitor):
                 # binding let a helper's `alias = safe` overwrite a module-level
                 # `alias = legacy_sink`, so a LATER function's `alias(...)`
                 # resolved to the safe callee and the real edge vanished.
-                scope = (self._local_origins[-1] if self._local_origins
-                         else self._qualified_origin)
-                for tgt in node.targets:
-                    if isinstance(tgt, ast.Name):
-                        scope[tgt.id] = qualified
+                # Module scope is likewise owned by the prepass.
+                if self._local_origins:
+                    for tgt in node.targets:
+                        if isinstance(tgt, ast.Name):
+                            self._local_origins[-1][tgt.id] = qualified
             if base in self._builders:
                 bound = True
 
@@ -1018,10 +1046,14 @@ class _Scanner(ast.NodeVisitor):
         # plain string names only — without it, hoisting the selector into a
         # constant hid the producer from the census entirely.
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            scope = self._local_consts[-1] if self._local_consts else self._module_consts
-            for tgt in node.targets:
-                if isinstance(tgt, ast.Name):
-                    scope[tgt.id] = value.value
+            # MODULE scope is owned by the `visit_Module` prepass, which records
+            # the LAST binding as Python does. Letting traversal write here
+            # re-introduced the ordering bug the prepass exists to remove: it
+            # overwrote the final value with the first one on the way past.
+            if self._local_consts:
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name):
+                        self._local_consts[-1][tgt.id] = value.value
 
         # `cfg["process_kind"] = ...` is a producer write.
         for tgt in node.targets:

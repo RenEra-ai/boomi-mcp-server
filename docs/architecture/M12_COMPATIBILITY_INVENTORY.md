@@ -2526,6 +2526,10 @@ value either way.
 | **Mutation:** a binding declared below its use is still resolved | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_binding_declared_below_its_use_is_still_resolved` |
 | **Mutation:** re-pointing any composed HTTP spelling breaks the freeze | `tests/test_issue_149_legacy_reachability_freeze.py::test_repointing_any_composed_http_spelling_breaks_the_freeze` |
 | The axis walk unions payload and overview listings | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_axis_walk_unions_payload_and_overview_listings` |
+| **Mutation:** a dynamic field does not discard the resolved host | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_dynamic_field_does_not_discard_the_resolved_host` |
+| **Mutation:** a rebound module binding keeps its final value | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_module_binding_rebound_after_its_use_keeps_the_final_value` |
+| **Mutation:** a registry-bound builder declared below its caller is reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_registry_bound_builder_declared_below_its_caller_is_reported` |
+| **Robustness:** an unresolvable format falls back, never aborts | `tests/test_issue_149_legacy_reachability_freeze.py::test_an_unresolvable_format_falls_back_instead_of_aborting` |
 
 **Darkness.** This slice changes nothing under `src/boomi_mcp/` or `server.py`:
 `git diff 9711a9c0cb6c88dda41ada94d88694915b659f36 -- src/boomi_mcp server.py` is empty. The only
