@@ -2537,6 +2537,8 @@ value either way.
 | **Mutation:** a local import does not erase a later module-level edge | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_function_local_import_does_not_erase_a_later_module_level_edge` |
 | **Mutation:** a name published with `global`/`nonlocal` survives scope restore | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_name_published_outward_survives_scope_restore` |
 | The whole scan_contract block is frozen (the gate covers its own terms) | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_whole_scan_contract_block_is_frozen` |
+| **Mutation:** a `match`-case binding is order-insensitive at both scopes | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_match_case_binding_is_order_insensitive` |
+| The served limit text names every deferred case and points at #163 | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_served_limits_name_every_deferred_case` |
 
 **Darkness.** This slice changes nothing under `src/boomi_mcp/` or `server.py`:
 `git diff 9711a9c0cb6c88dda41ada94d88694915b659f36 -- src/boomi_mcp server.py` is empty. The only

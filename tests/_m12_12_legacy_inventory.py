@@ -68,6 +68,28 @@ That is a property of the SOURCE TEXT, and the universe is bounded accordingly:
   safety. Measured at zero occurrences in the scanned corpus (of 58
   function-local multi-bindings, none is called in scope and none binds a
   watched symbol or URL).
+* **Named, bounded scope-model limits — deferred to issue #163, not silently
+  carried.** The scope model is deliberately frozen here: four consecutive
+  refinement rounds each introduced a fresh defect in this one organ, and every
+  case below measures ZERO live exposure in the scanned corpus. Re-run the
+  census harnesses before touching it; if the counters are still zero, re-affirm
+  the limit rather than refine the model.
+
+  - A name published with ``global`` from BELOW the top level of its function
+    (a nested ``def``, or a ``match`` case) is restored away when the enclosing
+    scope exits — ``global`` binds the MODULE, not that function — so the edge
+    is lost with neither a row nor residue. Corpus: 11 ``global``/``nonlocal``
+    declarations, 10 nested, **none** import-bound.
+  - A CLASS body's imports are never scope-restored, so a class-body re-import
+    of a module-level name can erase a later real edge. Corpus: **zero**
+    class-body imports.
+  - ``global X; from Y import X`` is credited as if the initializer ran; if it
+    never does, the module name is still the legacy one and the row is dropped.
+  - ``visit_ClassDef`` does not walk PEP 695 ``type_params`` (``_scoped`` does),
+    so a legacy call in a class type-param bound is invisible. Corpus: **zero**.
+  - A function parameter shadowing a module-level aliased HTTP verb emits a
+    spurious ``http_client_call`` — fail-CLOSED, over-preserving.
+
 * Runtime behaviour is not modelled at all — this instrument reports where the
   legacy paths ARE, and #160 owns enforcement.
 
@@ -501,6 +523,12 @@ def _scope_body_nodes(node: ast.AST) -> List[ast.AST]:
                 walk(getattr(statement, attr, []) or [])
             for handler in getattr(statement, "handlers", []):
                 walk(handler.body)
+            # `match` cases bind THIS scope exactly as `if`/`try` bodies do.
+            # Omitting them made the served ordering claim false at function
+            # scope: a `match`-case-local import reordered against a nested
+            # `def` silently dropped a `legacy_transitive_call`.
+            for case in getattr(statement, "cases", []) or []:
+                walk(getattr(case, "body", []) or [])
 
     walk(getattr(node, "body", []) or [])
     return out
@@ -518,12 +546,15 @@ def _module_namespace_nodes(tree: ast.AST) -> List[ast.AST]:
     def walk(body: Iterable[ast.AST]) -> None:
         for node in body:
             out.append(node)
-            if isinstance(node, (ast.If, ast.Try, ast.With, ast.AsyncWith)):
+            if isinstance(node, (ast.If, ast.Try, ast.With, ast.AsyncWith)) \
+                    or type(node).__name__ == "Match":
                 walk(getattr(node, "body", []))
                 walk(getattr(node, "orelse", []))
                 walk(getattr(node, "finalbody", []))
                 for handler in getattr(node, "handlers", []):
                     walk(handler.body)
+                for case in getattr(node, "cases", []) or []:
+                    walk(getattr(case, "body", []) or [])
 
     walk(getattr(tree, "body", []))
     return out
@@ -3366,7 +3397,9 @@ def build_inventory(sources: Optional[Dict[str, str]] = None,
                 # Claiming "every scope" was false the moment `visit_ClassDef`
                 # stopped using the prepass, and the code's own docstring said
                 # so one screen down.
-                "intra-file ordering of module- and function-scope bindings",
+                "intra-file ordering of module- and function-scope bindings"
+                " (except a name published by `global` below the top level of its"
+                " function — see the module docstring's named limits and #163)",
                 "vendor SDK paths and line numbers",
             ],
             "vocabulary": {k: list(v) for k, v in sorted(vocab.items())},

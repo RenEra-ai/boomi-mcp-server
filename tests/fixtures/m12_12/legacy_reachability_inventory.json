@@ -6835,7 +6835,7 @@
       "formatting",
       "comments and docstrings",
       "argument values",
-      "intra-file ordering of module- and function-scope bindings",
+      "intra-file ordering of module- and function-scope bindings (except a name published by `global` below the top level of its function — see the module docstring's named limits and #163)",
       "vendor SDK paths and line numbers"
     ],
     "frozen_key": [

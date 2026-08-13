@@ -916,6 +916,77 @@ def test_the_prepass_does_not_shadow_an_enclosing_binding(census_only, label, bo
         "%s: %s" % (label, diff.report())
 
 
+@pytest.mark.parametrize("scope,first,second", [
+    ("function",
+     "def m12_12_m2(v):\n"
+     "    def inner(c, x):\n"
+     "        return build_structured_update_xml(c, x)\n"
+     "    match v:\n"
+     "        case 1:\n"
+     "            from ...categories.integration_builder import "
+     "build_structured_update_xml\n"
+     "    return inner\n",
+     "def m12_12_m2(v):\n"
+     "    match v:\n"
+     "        case 1:\n"
+     "            from ...categories.integration_builder import "
+     "build_structured_update_xml\n"
+     "    def inner(c, x):\n"
+     "        return build_structured_update_xml(c, x)\n"
+     "    return inner\n"),
+    ("module",
+     "match 1:\n"
+     "    case 1:\n"
+     "        from ...categories.integration_builder import "
+     "build_structured_update_xml\n"
+     "def m12_12_mm(c, x):\n"
+     "    return build_structured_update_xml(c, x)\n",
+     "def m12_12_mm(c, x):\n"
+     "    return build_structured_update_xml(c, x)\n"
+     "match 1:\n"
+     "    case 1:\n"
+     "        from ...categories.integration_builder import "
+     "build_structured_update_xml\n"),
+])
+def test_a_match_case_binding_is_order_insensitive(scope, first, second):
+    """`match` cases bind their scope exactly as `if`/`try` bodies do.
+
+    Both namespace walkers omitted `ast.Match.cases`, which made the served
+    ordering claim FALSE at function scope: a `match`-case-local import reordered
+    against a nested `def` in the same function silently dropped a
+    `legacy_transitive_call`. The `if`-body spelling was stable throughout, which
+    is what made the omission a universe gap rather than a model choice.
+    """
+    def _tree(body):
+        sources = dict(inv.python_sources())
+        target = "src/boomi_mcp/categories/components/processes.py"
+        sources[target] = sources[target] + "\n\n" + body
+        return inv.build_inventory(sources=sources, include_served=False)
+
+    diff = inv.compare(_tree(second), _tree(first))
+    assert diff.empty(), "%s-scope `match` binding is order-sensitive: %s" % (
+        scope, diff.report())
+
+
+def test_the_served_limits_name_every_deferred_case(baseline):
+    """The limit text is the contract #160 reads, so a deferred hole must be
+    NAMED there — not left to a follow-up issue nobody reading the artifact can
+    find. An earlier attempt at this paragraph silently failed to apply and
+    shipped a claim with no accompanying limits.
+    """
+    module_doc = inv.__doc__ or ""
+    assert "Named, bounded scope-model limits" in module_doc
+    assert "#163" in module_doc, "the deferral has no follow-up pointer"
+    for topic in ("global", "CLASS body", "type_params"):
+        assert topic in module_doc, topic
+
+    # And the served claim itself carries the exception rather than overstating.
+    ordering = [e for e in baseline["scan_contract"]["excluded_from_equality"]
+                if "ordering" in e]
+    assert len(ordering) == 1, ordering
+    assert "global" in ordering[0] and "#163" in ordering[0], ordering[0]
+
+
 def test_the_whole_scan_contract_block_is_frozen(baseline):
     """`--check` is the drift gate #160 will run, so the block that states what
     the freeze COVERS must itself be covered.
