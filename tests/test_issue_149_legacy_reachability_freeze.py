@@ -977,14 +977,25 @@ def test_the_served_limits_name_every_deferred_case(baseline):
     module_doc = inv.__doc__ or ""
     assert "Named, bounded scope-model limits" in module_doc
     assert "#163" in module_doc, "the deferral has no follow-up pointer"
-    for topic in ("global", "CLASS body", "type_params"):
-        assert topic in module_doc, topic
+
+    # A DISTINCT marker per limit. Three generic substrings left the
+    # parameter-shadow bullet unchecked entirely, and one `global` token could
+    # not tell the two separate `global` limits apart — so removing either left
+    # the suite green and #160's named-limit contract could regress silently.
+    # Docstrings are excluded from `compare()`, so this test is their only guard.
+    for marker in ("[LIMIT-global-nested]", "[LIMIT-class-restore]",
+                   "[LIMIT-global-credit]", "[LIMIT-class-typeparams]",
+                   "[LIMIT-param-shadow]"):
+        assert marker in module_doc, "deferred limit %s is not named" % marker
 
     # And the served claim itself carries the exception rather than overstating.
     ordering = [e for e in baseline["scan_contract"]["excluded_from_equality"]
                 if "ordering" in e]
     assert len(ordering) == 1, ordering
-    assert "global" in ordering[0] and "#163" in ordering[0], ordering[0]
+    # The exception must name the scopes that are ACTUALLY broken. A `global`
+    # inside a function's own `match` case is handled since the case traversal
+    # landed, so claiming it as a blind spot under-states the instrument.
+    assert "NESTED" in ordering[0] and "#163" in ordering[0], ordering[0]
 
 
 def test_the_whole_scan_contract_block_is_frozen(baseline):

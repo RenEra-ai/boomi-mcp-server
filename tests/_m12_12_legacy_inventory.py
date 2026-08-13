@@ -75,20 +75,25 @@ That is a property of the SOURCE TEXT, and the universe is bounded accordingly:
   census harnesses before touching it; if the counters are still zero, re-affirm
   the limit rather than refine the model.
 
-  - A name published with ``global`` from BELOW the top level of its function
-    (a nested ``def``, or a ``match`` case) is restored away when the enclosing
-    scope exits — ``global`` binds the MODULE, not that function — so the edge
-    is lost with neither a row nor residue. Corpus: 11 ``global``/``nonlocal``
-    declarations, 10 nested, **none** import-bound.
-  - A CLASS body's imports are never scope-restored, so a class-body re-import
-    of a module-level name can erase a later real edge. Corpus: **zero**
-    class-body imports.
-  - ``global X; from Y import X`` is credited as if the initializer ran; if it
-    never does, the module name is still the legacy one and the row is dropped.
-  - ``visit_ClassDef`` does not walk PEP 695 ``type_params`` (``_scoped`` does),
-    so a legacy call in a class type-param bound is invisible. Corpus: **zero**.
-  - A function parameter shadowing a module-level aliased HTTP verb emits a
-    spurious ``http_client_call`` — fail-CLOSED, over-preserving.
+  - ``[LIMIT-global-nested]`` A name published with ``global`` from inside a
+    NESTED function or class body is restored away when the enclosing scope
+    exits — ``global`` binds the MODULE, not that function — so the edge is lost
+    with neither a row nor residue. A ``global`` in the function's own body,
+    including inside an ``if``/``try``/``match`` case at that level, IS handled.
+    Corpus: 11 ``global``/``nonlocal`` declarations, 10 nested, **none**
+    import-bound.
+  - ``[LIMIT-class-restore]`` A CLASS body's imports are never scope-restored,
+    so a class-body re-import of a module-level name can erase a later real
+    edge. Corpus: **zero** class-body imports.
+  - ``[LIMIT-global-credit]`` ``global X; from Y import X`` is credited as if
+    the initializer ran; if it never does, the module name is still the legacy
+    one and the row is dropped.
+  - ``[LIMIT-class-typeparams]`` ``visit_ClassDef`` does not walk PEP 695
+    ``type_params`` (``_scoped`` does), so a legacy call in a class type-param
+    bound is invisible. Corpus: **zero**.
+  - ``[LIMIT-param-shadow]`` A function parameter shadowing a module-level
+    aliased HTTP verb emits a spurious ``http_client_call`` — fail-CLOSED,
+    over-preserving. Corpus: **zero**.
 
 * Runtime behaviour is not modelled at all — this instrument reports where the
   legacy paths ARE, and #160 owns enforcement.
@@ -3398,8 +3403,9 @@ def build_inventory(sources: Optional[Dict[str, str]] = None,
                 # stopped using the prepass, and the code's own docstring said
                 # so one screen down.
                 "intra-file ordering of module- and function-scope bindings"
-                " (except a name published by `global` below the top level of its"
-                " function — see the module docstring's named limits and #163)",
+                " (except a name published by `global` from inside a NESTED"
+                " function or class body, which the enclosing scope's restore"
+                " erases — see the module docstring's named limits and #163)",
                 "vendor SDK paths and line numbers",
             ],
             "vocabulary": {k: list(v) for k, v in sorted(vocab.items())},
