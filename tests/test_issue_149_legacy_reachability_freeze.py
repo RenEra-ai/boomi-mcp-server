@@ -995,7 +995,12 @@ def test_the_served_limits_name_every_deferred_case(baseline):
     # The exception must name the scopes that are ACTUALLY broken. A `global`
     # inside a function's own `match` case is handled since the case traversal
     # landed, so claiming it as a blind spot under-states the instrument.
-    assert "NESTED" in ordering[0] and "#163" in ordering[0], ordering[0]
+    # The exception must name the scopes that ACTUALLY erase. It has now been
+    # wrong in both directions: "every scope" over-claimed the guarantee, then
+    # "nested function or class body" over-claimed the HOLE — a module-level
+    # class body is never restored, so its `global` survives.
+    assert "nested" in ordering[0] and "enclosed by one" in ordering[0], ordering[0]
+    assert "#163" in ordering[0], ordering[0]
 
 
 def test_the_whole_scan_contract_block_is_frozen(baseline):

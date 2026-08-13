@@ -76,10 +76,13 @@ That is a property of the SOURCE TEXT, and the universe is bounded accordingly:
   the limit rather than refine the model.
 
   - ``[LIMIT-global-nested]`` A name published with ``global`` from inside a
-    NESTED function or class body is restored away when the enclosing scope
-    exits — ``global`` binds the MODULE, not that function — so the edge is lost
-    with neither a row nor residue. A ``global`` in the function's own body,
-    including inside an ``if``/``try``/``match`` case at that level, IS handled.
+    NESTED function — or a class body ENCLOSED by a function — is restored away
+    when that function exits, because ``global`` binds the MODULE rather than the
+    function, so the edge is lost with neither a row nor residue. Two placements
+    that sound similar ARE handled: a ``global`` in the function's own body
+    (including inside an ``if``/``try``/``match`` case at that level), and a
+    ``global`` in a MODULE-LEVEL class body, since ``visit_ClassDef`` performs no
+    restore at all.
     Corpus: 11 ``global``/``nonlocal`` declarations, 10 nested, **none**
     import-bound.
   - ``[LIMIT-class-restore]`` A CLASS body's imports are never scope-restored,
@@ -3403,9 +3406,10 @@ def build_inventory(sources: Optional[Dict[str, str]] = None,
                 # stopped using the prepass, and the code's own docstring said
                 # so one screen down.
                 "intra-file ordering of module- and function-scope bindings"
-                " (except a name published by `global` from inside a NESTED"
-                " function or class body, which the enclosing scope's restore"
-                " erases — see the module docstring's named limits and #163)",
+                " (except a name published by `global` from inside a nested"
+                " function, or a class body enclosed by one, which that"
+                " function's restore erases — see the module docstring's named"
+                " limits and #163)",
                 "vendor SDK paths and line numbers",
             ],
             "vocabulary": {k: list(v) for k, v in sorted(vocab.items())},
