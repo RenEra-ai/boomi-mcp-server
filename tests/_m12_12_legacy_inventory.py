@@ -47,9 +47,14 @@ That is a property of the SOURCE TEXT, and the universe is bounded accordingly:
   limit of a static scan, not an oversight.
 * Non-Python assets are NOT read; their count is frozen by
   :func:`unscanned_assets` so their arrival is a diff.
-* **Statement order is excluded at EVERY scope.** Bindings are pre-indexed
-  before any body is scanned: ``visit_Module`` for the module namespace, and
-  ``_scoped`` for each function's own locals. Python fixes a scope's local
+* **Statement order is excluded at module and function scope — NOT in a class
+  body.** Bindings are pre-indexed before any body is scanned: ``visit_Module``
+  for the module namespace and ``_scoped`` for each function's own locals. A
+  class body is deliberately left statement-ordered because Python executes it
+  that way and it falls back to globals, so pre-indexing there would hide a real
+  call made earlier in the body under an enclosing binding. The residual class
+  sensitivity is fail-CLOSED (a reorder can only add a spurious row, never
+  remove a real one) and measures zero occurrences in the corpus. Python fixes a scope's local
   NAMES at compile time and only their values at run time, so binding
   flow-insensitively is the right analysis for reachability. Binding in
   traversal order was fail-OPEN in both halves, and not merely for a derived
@@ -944,15 +949,29 @@ class _Scanner(ast.NodeVisitor):
                     self.visit(argument.annotation)
         if getattr(node, "returns", None) is not None:
             self.visit(node.returns)
+        for type_param in getattr(node, "type_params", []) or []:
+            self.visit(type_param)
 
         self._symbols.append(name)
         consts: Dict[str, str] = {}
         origins: Dict[str, Tuple[str, str]] = {}
         self._local_consts.append(consts)
         self._local_origins.append(origins)
+        # Assignments land in the scope maps above, but imports route through
+        # `_bind_import*`, which write scanner-wide — so a function-local
+        # `from … import X as N` erased a LATER function's real module-level
+        # edge, with neither a row nor residue. Snapshot the RESOLUTION maps
+        # only: `_aliases` is deliberately left accumulating because
+        # `_ResidueScanner` is handed it and restoring it drops eight rows.
+        saved = (dict(self._qualified_origin), dict(self._module_paths),
+                 dict(self._modules), dict(self._import_origin),
+                 set(self._imported))
         self._index_bindings(_scope_body_nodes(node), consts, origins)
         for statement in node.body:
             self.visit(statement)
+        (self._qualified_origin, self._module_paths, self._modules,
+         self._import_origin, self._imported) = (
+            saved[0], saved[1], saved[2], saved[3], saved[4])
         self._local_origins.pop()
         self._local_consts.pop()
         self._symbols.pop()
@@ -3297,12 +3316,14 @@ def build_inventory(sources: Optional[Dict[str, str]] = None,
             "excluded_from_equality": [
                 "evidence_line", "column offsets", "source text", "formatting",
                 "comments and docstrings", "argument values",
-                # True at EVERY scope: module bindings are pre-indexed by
-                # `visit_Module`, function-local ones by `_scoped`, both before
-                # any body is scanned. Ordering was fail-OPEN in both halves —
-                # an alias assigned after a nested `def` erased the whole nested
-                # caller — so this claim is now earned rather than asserted.
-                "intra-file ordering (bindings are pre-indexed at every scope)",
+                # Module and FUNCTION scope only. A class body is executed in
+                # statement order by Python and is scanned that way, so its
+                # ordering is NOT excluded — fail-closed (a reorder can add a
+                # spurious row, never drop a real one), zero corpus exposure.
+                # Claiming "every scope" was false the moment `visit_ClassDef`
+                # stopped using the prepass, and the code's own docstring said
+                # so one screen down.
+                "intra-file ordering of module- and function-scope bindings",
                 "vendor SDK paths and line numbers",
             ],
             "vocabulary": {k: list(v) for k, v in sorted(vocab.items())},

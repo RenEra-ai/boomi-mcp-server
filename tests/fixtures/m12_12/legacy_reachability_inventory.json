@@ -6835,7 +6835,7 @@
       "formatting",
       "comments and docstrings",
       "argument values",
-      "intra-file ordering (bindings are pre-indexed at every scope)",
+      "intra-file ordering of module- and function-scope bindings",
       "vendor SDK paths and line numbers"
     ],
     "frozen_key": [

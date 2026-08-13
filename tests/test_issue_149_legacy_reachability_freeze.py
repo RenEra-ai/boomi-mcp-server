@@ -822,13 +822,10 @@ def test_a_binding_declared_below_its_use_is_still_resolved(census_only, label, 
      "    from ...categories.integration_builder import build_structured_update_xml\n"
      "    return inner\n",
      "legacy_transitive_call"),
-    ("registry import placed AFTER the nested def",
-     "def outer5():\n"
-     "    def render(c):\n"
-     "        return get_process_flow_builder(c).build(c)\n"
-     "    from ..builders import get_process_flow_builder\n"
-     "    return render\n",
-     "renderer_call"),
+    # NOTE: a `get_process_flow_builder` import is deliberately NOT a param here.
+    # That shape passes without the prepass — the name is watched, so the call
+    # emits `registry_lookup`/`renderer_call` by itself — so it would grade
+    # nothing. The plain-import param above does grade the binding kind.
     ("registry-bound builder assigned AFTER the nested def",
      "from ..builders import PROCESS_FLOW_BUILDERS as _M12_12_R2\n"
      "def outer4():\n"
@@ -919,14 +916,44 @@ def test_the_prepass_does_not_shadow_an_enclosing_binding(census_only, label, bo
         "%s: %s" % (label, diff.report())
 
 
-def test_the_scan_contract_claims_ordering_exclusion_at_every_scope(baseline):
-    """The served claim must match what the scanner actually does — an
-    unqualified 'intra-file ordering' was false while only module scope was
-    pre-indexed."""
+def test_the_scan_contract_scopes_its_ordering_claim_to_what_it_does(baseline):
+    """The served claim must match the scanner exactly.
+
+    It has been wrong twice: unqualified while only module scope was
+    pre-indexed, then "every scope" after `visit_ClassDef` deliberately stopped
+    using the prepass. A class body executes in statement order and IS scanned
+    that way, so the claim now names module and function scope only.
+    """
     excluded = baseline["scan_contract"]["excluded_from_equality"]
     ordering = [e for e in excluded if "ordering" in e]
-    assert ordering, excluded
-    assert "every scope" in ordering[0], ordering
+    assert len(ordering) == 1, ordering
+    assert "module- and function-scope" in ordering[0], ordering
+    assert "every scope" not in ordering[0], ordering
+
+
+def test_a_function_local_import_does_not_erase_a_later_module_level_edge(census_only):
+    """`_index_bindings` routes imports through `_bind_import*`, which write
+    scanner-wide — so a function-local `from … import X as N` clobbered the
+    module-level resolution of `N` and a LATER function's real legacy edge
+    vanished with neither a row nor residue, contradicting the instrument's
+    central "nothing vanishes" guarantee. The resolution maps are snapshotted
+    around each function scope (`_aliases` deliberately excepted: the residue
+    pass is handed the accumulated table).
+    """
+    sources = dict(inv.python_sources())
+    target = "src/boomi_mcp/categories/components/processes.py"
+    sources[target] = sources[target] + (
+        "\n\nfrom ...categories.integration_builder import build_structured_update_xml\n"
+        "def m12_12_shadower():\n"
+        "    from ...models.integration_models import IntegrationComponentSpec "
+        "as build_structured_update_xml\n"
+        "    return build_structured_update_xml\n"
+        "def m12_12_real(c, x):\n"
+        "    return build_structured_update_xml(c, x)\n")
+    diff = inv.compare(inv.build_inventory(sources=sources, include_served=False),
+                       census_only)
+    assert "legacy_transitive_call" in {r.split(" | ")[0] for r in diff.added}, \
+        diff.report()
 
 
 @pytest.mark.parametrize("form", [
