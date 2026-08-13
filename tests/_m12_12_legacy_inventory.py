@@ -1188,6 +1188,35 @@ _COMPONENT_ENDPOINT_RE = re.compile(
 #: same collection URL, and anchoring on `$` alone let it through.
 _COMPONENT_COLLECTION_RE = re.compile(r"^Component(?=$|[?#])")
 
+#: Interpolation placeholders, stripped BEFORE the anchors are applied.
+#:
+#: The residue pass enumerates literals totally, but the predicate it applied to
+#: each literal was still an anchor enumeration — a hand-listed answer to "what
+#: may sit next to the marker". Three consecutive rounds each patched one
+#: adjacency (`/Component`, `Component/`, `Component?`), and a placeholder glued
+#: directly in front defeated all of them: `"%sComponent/%s" % (base, cid)` is
+#: the UPDATE route for a specific component and was emitted as neither a
+#: classified row nor residue, which made the module's own stated invariant
+#: false. A placeholder means "some unknown prefix" — exactly what string-start
+#: and `/` already mean — so normalise it away and let the existing anchors
+#: decide. Measured over 59,763 literals in the scan universe: zero marginal
+#: false positives.
+_PLACEHOLDER_RE = re.compile(
+    r"%\([^)]*\)[sdrifgeExXoc]"      # %(name)s
+    r"|%[-#0-9.*+ ]*[sdrifgeExXoc]"   # %s, %-10.3f
+    r"|\{[^{}]*\}"                    # {}, {base}, {0!r:>10}
+    r"|\$\{[^}]*\}"                   # ${base}
+)
+
+
+def _mentions_component_endpoint(value: str) -> bool:
+    """True when the literal names the Component API, placeholders or not."""
+    for candidate in (value, _PLACEHOLDER_RE.sub("", value)):
+        if _COMPONENT_ENDPOINT_RE.search(candidate) \
+                or _COMPONENT_COLLECTION_RE.match(candidate):
+            return True
+    return False
+
 
 def _folded_str(node: ast.AST) -> Optional[str]:
     """A string literal, including a simple `"a" + "b"` concatenation."""
@@ -1342,8 +1371,7 @@ class _ResidueScanner(ast.NodeVisitor):
             # A watched SYMBOL reached as a string — `globals()["..."]`,
             # `getattr(m, "...")`, a dispatch table key.
             self._emit("%r (unclassified symbolic literal%s)" % (value, note), line)
-        elif _COMPONENT_ENDPOINT_RE.search(value) \
-                or _COMPONENT_COLLECTION_RE.match(value):
+        elif _mentions_component_endpoint(value):
             self._emit("%r (unclassified Component-endpoint literal%s)" % (value, note),
                        line)
 

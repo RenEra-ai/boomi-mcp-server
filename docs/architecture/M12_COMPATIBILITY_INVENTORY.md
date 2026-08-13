@@ -2515,6 +2515,9 @@ value either way.
 | The unscanned-asset universe is frozen and machine-independent | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_unscanned_asset_universe_is_frozen_and_machine_independent` |
 | **Guard the guard:** a root-module import resolves from a script | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_root_module_import_resolves_from_a_script` |
 | **Regression:** a C-quotable path is not silently dropped | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_c_quotable_path_is_not_silently_dropped` |
+| **Structural:** an interpolated prefix does not hide the endpoint | `tests/test_issue_149_legacy_reachability_freeze.py::test_an_interpolated_prefix_does_not_hide_the_component_endpoint` |
+| **Precision:** placeholder normalisation costs no precision | `tests/test_issue_149_legacy_reachability_freeze.py::test_placeholder_normalisation_costs_no_precision` |
+| The endpoint predicate has no marginal false positives (measured) | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_endpoint_predicate_has_no_marginal_false_positives` |
 
 **Darkness.** This slice changes nothing under `src/boomi_mcp/` or `server.py`:
 `git diff 9711a9c0cb6c88dda41ada94d88694915b659f36 -- src/boomi_mcp server.py` is empty. The only

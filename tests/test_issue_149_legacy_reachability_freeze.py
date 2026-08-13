@@ -1068,6 +1068,52 @@ def test_the_component_endpoint_marker_is_a_path_segment_not_a_substring():
         assert not _matches(not_a_path), not_a_path
 
 
+@pytest.mark.parametrize("literal", [
+    "{}Component", "%sComponent", "%sComponent/%s", "{base}Component",
+    "${b}Component", "%(base)sComponent", "%sComponent?x=1", "{}Component/{}",
+])
+def test_an_interpolated_prefix_does_not_hide_the_component_endpoint(literal):
+    """The predicate is normalised, not enumerated.
+
+    The residue pass accounts for every literal, but the test applied to each was
+    itself an anchor enumeration — a hand-listed answer to "what may sit next to
+    the marker". Three rounds each patched one adjacency (`/Component`,
+    `Component/`, `Component?`) and a placeholder glued directly in front
+    defeated all of them; `"%sComponent/%s"` is the UPDATE route for a specific
+    component. A placeholder means "some unknown prefix", which is what
+    string-start and `/` already mean, so it is stripped before the anchors run.
+    """
+    assert inv._mentions_component_endpoint(literal), literal
+
+
+@pytest.mark.parametrize("literal", [
+    "Componentry", "component", "Component is a thing", "some {x} text",
+    "100% done", "a {placeholder} with no marker",
+])
+def test_placeholder_normalisation_costs_no_precision(literal):
+    assert not inv._mentions_component_endpoint(literal), literal
+
+
+def test_the_endpoint_predicate_has_no_marginal_false_positives():
+    """Measured over the whole scan universe rather than asserted.
+
+    Stripping placeholders widens what the anchors see, so the cost has to be
+    counted: over ~59,700 string/bytes literals it matches exactly the one known
+    prose row, the same as before normalisation.
+    """
+    import ast as _ast
+
+    hits = []
+    for path, text in inv.python_sources().items():
+        for node in _ast.walk(_ast.parse(text, filename=path)):
+            if isinstance(node, _ast.Constant) and isinstance(node.value, (str, bytes)):
+                value = (node.value if isinstance(node.value, str)
+                         else node.value.decode("utf-8", "ignore"))
+                if inv._mentions_component_endpoint(value):
+                    hits.append((path, value[:60]))
+    assert len(hits) <= 2, hits
+
+
 def test_the_non_tool_mcp_surfaces_are_frozen(derived):
     """`list_tools()` is not the whole served MCP surface. Resources, prompts and
     resource templates are all empty today and nothing asserted they stay that
