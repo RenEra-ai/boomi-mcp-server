@@ -806,6 +806,61 @@ def test_a_binding_declared_below_its_use_is_still_resolved(census_only, label, 
     assert kinds & {"legacy_transitive_call", "http_client_call"}, (label, kinds)
 
 
+@pytest.mark.parametrize("label,body", [
+    ("alias assigned AFTER the nested def that uses it",
+     "from ...categories.integration_builder import build_structured_update_xml\n"
+     "def outer():\n"
+     "    def inner(c, x):\n"
+     "        return _m12_12_al(c, x)\n"
+     "    _m12_12_al = build_structured_update_xml\n"
+     "    return inner\n"),
+    ("http host assigned AFTER the nested def",
+     "import httpx\n"
+     "def outer3():\n"
+     "    def push(x):\n"
+     "        return httpx.post(_m12_12_h + '/Component', content=x)\n"
+     "    _m12_12_h = 'https://api.boomi.com'\n"
+     "    return push\n"),
+    ("registry-bound builder assigned AFTER the nested def",
+     "from ..builders import PROCESS_FLOW_BUILDERS as _M12_12_R2\n"
+     "def outer4():\n"
+     "    def render(c):\n"
+     "        return _m12_12_b.build(c)\n"
+     "    _m12_12_b = _M12_12_R2['sync_pipeline']\n"
+     "    return render\n"),
+])
+def test_a_function_local_binding_declared_below_its_use_is_resolved(
+        census_only, label, body):
+    """Scope order-insensitivity is claimed for EVERY scope, so it must hold in
+    function bodies too.
+
+    Binding local names in traversal order was fail-open, and not merely for a
+    derived sub-row: an alias assigned after a nested `def` made the ENTIRE
+    nested caller vanish — no census row, no residue. Python fixes a scope's
+    local NAMES at compile time, so binding them flow-insensitively is both
+    correct for reachability and conservative.
+    """
+    sources = dict(inv.python_sources())
+    target = "src/boomi_mcp/categories/components/processes.py"
+    sources[target] = sources[target] + "\n\n" + body
+    diff = inv.compare(inv.build_inventory(sources=sources, include_served=False),
+                       census_only)
+    assert not diff.empty(), "%s escaped the freeze entirely" % label
+    kinds = {r.split(" | ")[0] for r in diff.added}
+    assert kinds & {"legacy_transitive_call", "http_client_call", "renderer_call"}, \
+        (label, kinds)
+
+
+def test_the_scan_contract_claims_ordering_exclusion_at_every_scope(baseline):
+    """The served claim must match what the scanner actually does — an
+    unqualified 'intra-file ordering' was false while only module scope was
+    pre-indexed."""
+    excluded = baseline["scan_contract"]["excluded_from_equality"]
+    ordering = [e for e in excluded if "ordering" in e]
+    assert ordering, excluded
+    assert "every scope" in ordering[0], ordering
+
+
 @pytest.mark.parametrize("form", [
     "'%s/Component' % _M12_12_H",
     "'{}/Component'.format(_M12_12_H)",

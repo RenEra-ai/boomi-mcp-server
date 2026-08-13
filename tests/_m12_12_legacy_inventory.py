@@ -47,17 +47,15 @@ That is a property of the SOURCE TEXT, and the universe is bounded accordingly:
   limit of a static scan, not an oversight.
 * Non-Python assets are NOT read; their count is frozen by
   :func:`unscanned_assets` so their arrival is a diff.
-* **Statement order is excluded at MODULE scope only.** ``visit_Module``
-  pre-indexes every module-namespace binding, so a module-level import, alias,
-  constant or registry-bound builder declared BELOW its use resolves
-  identically — Python binds the whole module namespace before any of it runs.
-  A function body has no such property, so a FUNCTION-LOCAL binding read by an
-  earlier-declared nested ``def`` is still order-sensitive; closing that half
-  needs flow analysis, not a second prepass. The consequence is bounded: the
-  enclosing function keeps its own census row (the registry lookup, the HTTP
-  call and its endpoint residue all still fire), so what is lost is a derived
-  sub-row, never the presence of the legacy path — the inventory still names
-  the right file and symbol. Zero occurrences in the scanned corpus.
+* **Statement order is excluded at EVERY scope.** Bindings are pre-indexed
+  before any body is scanned: ``visit_Module`` for the module namespace, and
+  ``_scoped`` for each function's own locals. Python fixes a scope's local
+  NAMES at compile time and only their values at run time, so a conservative
+  reachability instrument is right to bind flow-insensitively — it
+  over-approximates, which is fail-closed. Binding in traversal order was
+  fail-OPEN in both halves, and not merely for a derived sub-row: an alias
+  assigned after a nested ``def`` made the ENTIRE nested caller vanish, with no
+  row and no residue.
 * Runtime behaviour is not modelled at all — this instrument reports where the
   legacy paths ARE, and #160 owns enforcement.
 
@@ -476,6 +474,26 @@ def _assign_parts(statement: ast.AST) -> Tuple[List[str], Optional[ast.AST]]:
     return ([], None)
 
 
+def _scope_body_nodes(node: ast.AST) -> List[ast.AST]:
+    """Statements binding THIS scope — control-flow bodies included, nested
+    ``def``/``class`` bodies excluded (those are their own scopes)."""
+    out: List[ast.AST] = []
+
+    def walk(body: Iterable[ast.AST]) -> None:
+        for statement in body:
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                      ast.ClassDef)):
+                continue
+            out.append(statement)
+            for attr in ("body", "orelse", "finalbody"):
+                walk(getattr(statement, attr, []) or [])
+            for handler in getattr(statement, "handlers", []):
+                walk(handler.body)
+
+    walk(getattr(node, "body", []) or [])
+    return out
+
+
 def _module_namespace_nodes(tree: ast.AST) -> List[ast.AST]:
     """Statements that bind the MODULE namespace.
 
@@ -891,9 +909,36 @@ class _Scanner(ast.NodeVisitor):
 
     # -- scopes --------------------------------------------------------
     def _scoped(self, node: ast.AST, name: str) -> None:
+        """Enter a scope, pre-indexing its own bindings FLOW-INSENSITIVELY.
+
+        Python fixes a scope's local NAMES at compile time and only their values
+        at run time, so for a conservative reachability instrument the right
+        analysis is flow-insensitive: over-approximating is fail-closed. Binding
+        in traversal order was fail-OPEN, and not merely for a derived sub-row —
+        `def outer(): def inner(c,x): return al(c,x); al = legacy_callee` made
+        the ENTIRE `inner` caller vanish, no row and no residue, because `al` was
+        recorded only after `inner`'s body had been scanned.
+        """
         self._symbols.append(name)
-        self._local_consts.append({})
-        self._local_origins.append({})
+        consts: Dict[str, str] = {}
+        origins: Dict[str, Tuple[str, str]] = {}
+        self._local_consts.append(consts)
+        self._local_origins.append(origins)
+        for statement in _scope_body_nodes(node):
+            targets, value = _assign_parts(statement)
+            if value is None:
+                continue
+            literal = self._resolved_str(value)
+            if literal is not None:
+                for tgt in targets:
+                    consts[tgt] = literal
+            if isinstance(value, (ast.Name, ast.Attribute)):
+                qualified = self._qualified_callee(value)
+                if qualified is not None:
+                    for tgt in targets:
+                        origins[tgt] = qualified
+            if self._binds_builder(value):
+                self._builder_vars.update(targets)
         self.generic_visit(node)
         self._local_origins.pop()
         self._local_consts.pop()
@@ -3213,19 +3258,12 @@ def build_inventory(sources: Optional[Dict[str, str]] = None,
             "excluded_from_equality": [
                 "evidence_line", "column offsets", "source text", "formatting",
                 "comments and docstrings", "argument values",
-                # SCOPED, because the unqualified claim is false. Module-scope
-                # ordering is genuinely excluded: `visit_Module` pre-indexes
-                # every module-namespace binding, so a binding declared below
-                # its use resolves identically. FUNCTION-LOCAL ordering is NOT
-                # excluded, and the module prepass does not transplant —
-                # Python binds a module namespace before any of it runs, and a
-                # function body has no such property, so closing that half
-                # needs flow analysis. Measured consequence: a local binding
-                # read by an earlier-declared nested def loses a derived
-                # sub-row, never the enclosing function's own row, so the
-                # inventory still names the right file and symbol. Zero
-                # occurrences in the scanned corpus.
-                "intra-file ordering of module-namespace bindings",
+                # True at EVERY scope: module bindings are pre-indexed by
+                # `visit_Module`, function-local ones by `_scoped`, both before
+                # any body is scanned. Ordering was fail-OPEN in both halves —
+                # an alias assigned after a nested `def` erased the whole nested
+                # caller — so this claim is now earned rather than asserted.
+                "intra-file ordering (bindings are pre-indexed at every scope)",
                 "vendor SDK paths and line numbers",
             ],
             "vocabulary": {k: list(v) for k, v in sorted(vocab.items())},

@@ -2530,6 +2530,8 @@ value either way.
 | **Mutation:** a rebound module binding keeps its final value | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_module_binding_rebound_after_its_use_keeps_the_final_value` |
 | **Mutation:** a registry-bound builder declared below its caller is reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_registry_bound_builder_declared_below_its_caller_is_reported` |
 | **Robustness:** an unresolvable format falls back, never aborts | `tests/test_issue_149_legacy_reachability_freeze.py::test_an_unresolvable_format_falls_back_instead_of_aborting` |
+| **Mutation:** a function-local binding declared below its use is resolved | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_function_local_binding_declared_below_its_use_is_resolved` |
+| The served ordering claim matches the scanner at every scope | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_scan_contract_claims_ordering_exclusion_at_every_scope` |
 
 **Darkness.** This slice changes nothing under `src/boomi_mcp/` or `server.py`:
 `git diff 9711a9c0cb6c88dda41ada94d88694915b659f36 -- src/boomi_mcp server.py` is empty. The only
