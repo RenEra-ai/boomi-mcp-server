@@ -3489,19 +3489,31 @@ def compare(current: Dict[str, Any], baseline: Dict[str, Any]) -> Diff:
         if cur_a[aid]["sha256"] != base_a[aid]["sha256"]:
             diff.artifact_changed.append(aid)
 
-    for field in ("python_source_count", "example_document_count",
-                  "unscanned_asset_count"):
-        c = (current.get("scan_contract") or {}).get(field)
-        b = (baseline.get("scan_contract") or {}).get(field)
-        if c != b:
-            diff.scalar_changes.append("scan_contract.%s: %s -> %s" % (field, b, c))
-    cv = (current.get("scan_contract") or {}).get("vocabulary") or {}
-    bv = (baseline.get("scan_contract") or {}).get("vocabulary") or {}
-    for family in sorted(set(cv) | set(bv)):
-        if cv.get(family) != bv.get(family):
+    # The WHOLE contract block, not an enumeration of its fields. Naming four
+    # fields left `excluded_from_equality`, `census_kinds`, `frozen_key` and
+    # `roots` unfrozen — so `--check` reported "no drift" while the artifact's
+    # own statement of what the freeze covers changed, including the very field
+    # a previous round spent an evaluation correcting. That is the same lesson
+    # already learned one section down ("a section the inventory declares frozen
+    # and the comparator does not read is not frozen"), applied there to
+    # SECTIONS and left as an enumeration here for FIELDS.
+    cur_contract = current.get("scan_contract") or {}
+    base_contract = baseline.get("scan_contract") or {}
+    for field in sorted(set(cur_contract) | set(base_contract)):
+        c = cur_contract.get(field)
+        b = base_contract.get(field)
+        if canonical_json(c) == canonical_json(b):
+            continue
+        if field == "vocabulary":
+            for family in sorted(set(c or {}) | set(b or {})):
+                if (c or {}).get(family) != (b or {}).get(family):
+                    diff.scalar_changes.append(
+                        "scan_contract.vocabulary.%s: %s -> %s"
+                        % (family, (b or {}).get(family), (c or {}).get(family)))
+        else:
             diff.scalar_changes.append(
-                "scan_contract.vocabulary.%s: %s -> %s"
-                % (family, bv.get(family), cv.get(family)))
+                "scan_contract.%s: %s -> %s"
+                % (field, canonical_json(b), canonical_json(c)))
 
     # Every remaining frozen section, compared by canonical value.
     #

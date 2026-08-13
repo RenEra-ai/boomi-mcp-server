@@ -837,7 +837,7 @@ def test_a_binding_declared_below_its_use_is_still_resolved(census_only, label, 
 ])
 def test_a_function_local_binding_declared_below_its_use_is_resolved(
         census_only, label, body, expect):
-    """Order-insensitivity is claimed for EVERY scope and EVERY binding kind.
+    """Order-insensitivity is claimed for module and function scope, every binding kind.
 
     Binding local names in traversal order was fail-open, and not for a derived
     sub-row: a binding placed after a nested `def` made the ENTIRE nested caller
@@ -914,6 +914,39 @@ def test_the_prepass_does_not_shadow_an_enclosing_binding(census_only, label, bo
                        census_only)
     assert "legacy_transitive_call" in {r.split(" | ")[0] for r in diff.added}, \
         "%s: %s" % (label, diff.report())
+
+
+def test_the_whole_scan_contract_block_is_frozen(baseline):
+    """`--check` is the drift gate #160 will run, so the block that states what
+    the freeze COVERS must itself be covered.
+
+    `compare()` enumerated four `scan_contract` fields, leaving
+    `excluded_from_equality`, `census_kinds`, `frozen_key` and `roots` unfrozen:
+    the gate reported "no drift" while the artifact's own contract changed —
+    including the exact field a previous round spent an evaluation correcting.
+    Perturb every field, including one that does not exist yet.
+    """
+    import copy as _copy
+
+    mutations = {
+        "excluded_from_equality":
+            lambda c: c["excluded_from_equality"].__setitem__(0, "anything"),
+        "census_kinds": lambda c: c["census_kinds"].append("bogus_kind"),
+        "roots": lambda c: c.__setitem__("roots", ["nowhere"]),
+        "frozen_key": lambda c: c.__setitem__("frozen_key", ["census"]),
+        "python_source_count": lambda c: c.__setitem__("python_source_count", 1),
+        "<a field added later>": lambda c: c.__setitem__("m12_12_probe", "x"),
+    }
+    for label, mutate in mutations.items():
+        mutated = _copy.deepcopy(baseline)
+        mutate(mutated["scan_contract"])
+        diff = inv.compare(mutated, baseline)
+        assert not diff.empty(), "scan_contract.%s is not frozen" % label
+        assert any("scan_contract" in line for line in diff.scalar_changes), \
+            (label, diff.report())
+
+    # Guard the guard: the unperturbed block must not report drift.
+    assert inv.compare(_copy.deepcopy(baseline), baseline).empty()
 
 
 def test_the_scan_contract_scopes_its_ordering_claim_to_what_it_does(baseline):
