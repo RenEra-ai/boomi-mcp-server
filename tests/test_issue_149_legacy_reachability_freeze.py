@@ -166,10 +166,14 @@ def test_no_owner_or_disposition_cell_is_left_unfilled(baseline):
         cells.append(("route %s assertion" % route["route_id"],
                       route["post_retraction_assertion"]))
     for surface in baseline["served_surface_retraction_matrix"]:
-        for field in ("surface_class", "producer", "legacy_guidance",
+        for field in ("surface_class", "legacy_guidance",
                       "post_retraction_assertion"):
             cells.append(("surface %s %s" % (surface["surface_id"], field),
                           surface[field]))
+        # `producers` is DERIVED from the collected artifacts, so it is a list,
+        # and the stale hand-written singular `producer` no longer exists.
+        cells.append(("surface %s producers" % surface["surface_id"],
+                      ", ".join(surface["producers"])))
 
     offenders = [label for label, value in cells
                  if str(value).strip().lower().rstrip(".") in _EMPTY_CELL_VALUES]
@@ -831,19 +835,22 @@ def test_the_retraction_matrix_producers_are_derived_not_hand_written(derived):
 
 def test_the_retraction_matrix_anchors_cover_every_producer_module(derived):
     """#160 executes from the matrix alone, so a row's anchors must reach every
-    module its producers actually live in — `processes.py` was missing."""
-    import re as _re
+    module its producers live in — `processes.py` and `server.py` were missing.
 
+    The modules are RECORDED per row, not parsed out of producer strings. A
+    regex over producer text skipped every format it did not anticipate
+    (`integration_builder plan preflight` has no dot, `IntegrationComponentSpec…`
+    is uppercase, `integration_authoring…` was simply absent from the
+    whitelist), so removing those anchors would still have passed — the
+    matrix-alone invariant was not actually enforced.
+    """
     for row in derived["served_surface_retraction_matrix"]:
+        assert row["source_modules"], row["surface_id"]
         anchored = " ".join(row["anchors"])
-        for producer in row["producers"]:
-            module = _re.match(r"([a-z_][a-z_0-9]*)\.", producer)
-            if not module:
-                continue
-            name = module.group(1)
-            if name in ("server", "authoring", "integration_builder", "meta_tools",
-                        "safe_edit_component", "processes"):
-                assert name in anchored, (row["surface_id"], producer, row["anchors"])
+        for module in row["source_modules"]:
+            assert (inv.repo_root() / module).is_file(), (row["surface_id"], module)
+            assert module in anchored, (
+                "%s: module %s has no anchor" % (row["surface_id"], module))
 
 
 def test_a_module_qualified_wrapper_is_reported(census_only):
@@ -1653,7 +1660,7 @@ def test_the_retraction_matrix_is_executable_from_the_matrix_alone(derived):
             path = anchor.split(":")[0].split(" ")[0]
             assert (inv.repo_root() / path).is_file(), (
                 "retraction-matrix anchor %r does not resolve at HEAD" % anchor)
-        assert row["producer"]
+        assert row["producers"], row["surface_id"]
         assert row["legacy_guidance"]
         assert row["post_retraction_assertion"]
 

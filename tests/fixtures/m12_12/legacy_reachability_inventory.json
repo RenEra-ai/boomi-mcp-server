@@ -30930,9 +30930,11 @@
       "legacy_guidance": "steers callers to \"manage_component for an explicit raw process XML escape hatch\" and advertises process_kind",
       "owning_issue": "#160",
       "post_retraction_assertion": "the served config description names no raw process XML escape hatch and no legacy process_kind.",
-      "producer": "IntegrationComponentSpec.model_json_schema()",
       "producers": [
         "IntegrationComponentSpec.model_json_schema()"
+      ],
+      "source_modules": [
+        "src/boomi_mcp/models/integration_models.py"
       ],
       "surface_class": "Pydantic schema / field descriptions",
       "surface_id": "SS-PYDANTIC"
@@ -30956,10 +30958,13 @@
       "legacy_guidance": "PROCESS_KIND_* hints enumerate sorted(PROCESS_FLOW_BUILDERS) and PROCESS_KIND_XML_CONFLICT actively steers raw process XML onto manage_component(type=\"component\", config.xml)",
       "owning_issue": "#160",
       "post_retraction_assertion": "no served builder envelope names a legacy process_kind value or routes raw process XML to another tool.",
-      "producer": "integration_builder plan preflight envelopes",
       "producers": [
         "integration_builder plan preflight",
         "processes.manage_process_action(action='create')"
+      ],
+      "source_modules": [
+        "src/boomi_mcp/categories/integration_builder.py",
+        "src/boomi_mcp/categories/components/processes.py"
       ],
       "surface_class": "Builder error texts and hints",
       "surface_id": "SS-BUILDER-DIAGNOSTICS"
@@ -30997,11 +31002,13 @@
       "legacy_guidance": "tool descriptions bless raw process XML as an escape hatch and advertise raw-XML connector create/update",
       "owning_issue": "#160",
       "post_retraction_assertion": "no registered tool description blesses raw process XML.",
-      "producer": "server.mcp.list_tools()",
       "producers": [
         "server.mcp.list_tools()",
         "server.mcp.list_tools() [all tools]",
         "server.mcp.list_{resources,prompts,resource_templates}()"
+      ],
+      "source_modules": [
+        "server.py"
       ],
       "surface_class": "Registered MCP tool descriptions and parameter schemas",
       "surface_id": "SS-MCP-DESCRIPTIONS"
@@ -31016,9 +31023,11 @@
       "legacy_guidance": "the raw-XML refusal steers callers to manage_component(action='update') with config.xml",
       "owning_issue": "#160",
       "post_retraction_assertion": "the refusal names no full-replacement escape hatch.",
-      "producer": "safe_edit_component._validate_patch_shape(...)",
       "producers": [
         "safe_edit_component._validate_patch_shape(...)"
+      ],
+      "source_modules": [
+        "src/boomi_mcp/categories/components/safe_edit_component.py"
       ],
       "surface_class": "Safe-edit guidance",
       "surface_id": "SS-SAFE-EDIT"
@@ -31107,11 +31116,14 @@
       "legacy_guidance": "served templates carry type=\"process\" raw XML, the raw_xml_escape_hatch text, and legacy process protocols",
       "owning_issue": "#160",
       "post_retraction_assertion": "no served template emits a process-typed raw XML skeleton or a raw-XML escape-hatch instruction, AND no template advertises a legacy process protocol (database_to_api_sync / wrapper_subprocess / sync_pipeline).",
-      "producer": "meta_tools.get_schema_template_action(...)",
       "producers": [
         "meta_tools.get_schema_template_action(...)",
         "meta_tools.get_schema_template_action(...) [all axes]",
         "server.get_schema_template.__doc__"
+      ],
+      "source_modules": [
+        "src/boomi_mcp/categories/meta_tools.py",
+        "server.py"
       ],
       "surface_class": "get_schema_template templates",
       "surface_id": "SS-SCHEMA-TEMPLATES"
@@ -31131,11 +31143,13 @@
       "legacy_guidance": "the raw invoker is type-unrestricted, so POST/PUT to /Component can mint or replace a process; classification splits its own copy of the endpoint while transport interpolates the raw string",
       "owning_issue": "#160",
       "post_retraction_assertion": "ONE canonical endpoint parser feeds classification, ID extraction AND transport; every update-shaped call runs the two-sided process check; `bulk` is matched before the <id> arm and never treated as a componentId.",
-      "producer": "meta_tools._raw_write_confirmation_guard / _classify_raw_api_request / _typed_alternatives_for_endpoint",
       "producers": [
         "meta_tools._classify_raw_api_request('POST', '/Component/abc')",
         "meta_tools._raw_write_confirmation_guard(...)",
         "meta_tools._typed_alternatives_for_endpoint('/Component/abc')"
+      ],
+      "source_modules": [
+        "src/boomi_mcp/categories/meta_tools.py"
       ],
       "surface_class": "Raw-API catalog and typed-alternative entries",
       "surface_id": "SS-RAW-API"
@@ -31154,9 +31168,11 @@
       "legacy_guidance": "catalog entries, workflow steps and hints reference legacy process protocols and the raw-XML route",
       "owning_issue": "#160",
       "post_retraction_assertion": "no catalog entry, workflow step or hint references a legacy process_kind or the raw process XML route.",
-      "producer": "meta_tools.list_capabilities_action()",
       "producers": [
         "meta_tools.list_capabilities_action()"
+      ],
+      "source_modules": [
+        "src/boomi_mcp/categories/meta_tools.py"
       ],
       "surface_class": "list_capabilities catalog entries, workflows and hints",
       "surface_id": "SS-CAPABILITY-CATALOG"
@@ -31176,9 +31192,12 @@
       "legacy_guidance": "every registered archetype whose emitted spec carries a legacy process_kind advertises it through the served descriptor",
       "owning_issue": "#159",
       "post_retraction_assertion": "no served archetype descriptor emits or documents a legacy process_kind.",
-      "producer": "authoring.contract.list_archetype_registry()",
       "producers": [
         "integration_authoring.list_integration_archetypes_action()"
+      ],
+      "source_modules": [
+        "src/boomi_mcp/authoring/contract.py",
+        "src/boomi_mcp/categories/integration_authoring.py"
       ],
       "surface_class": "Served archetype descriptors and parameter schemas",
       "surface_id": "SS-ARCHETYPE-CATALOG"

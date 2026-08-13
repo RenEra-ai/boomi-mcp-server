@@ -538,8 +538,12 @@ class _Scanner(ast.NodeVisitor):
         self._known: "frozenset[str]" = known_paths
         self._reexports = reexports or {}
         self._http_vars: Dict[str, str] = {}
+        #: Pre-indexed in `visit_Module`: traversal order otherwise decided whether
+        #: a composed URL folded, which made the re-pointing guard depend on
+        #: statement order even though the scan contract excludes it.
         self._module_consts: Dict[str, str] = {}
         self._local_consts: List[Dict[str, str]] = []
+        self._local_origins: List[Dict[str, Tuple[str, str]]] = []
         self._local_defs: Set[str] = set(local_defs)
         self.rows: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
         self._symbols: List[str] = []
@@ -755,6 +759,9 @@ class _Scanner(ast.NodeVisitor):
         attributes — is left unresolved rather than guessed at.
         """
         if isinstance(func, ast.Name):
+            for scope in reversed(self._local_origins):
+                if func.id in scope:
+                    return scope[func.id]
             if func.id in self._qualified_origin:
                 return self._qualified_origin[func.id]
             if func.id in self._local_defs:
@@ -806,7 +813,9 @@ class _Scanner(ast.NodeVisitor):
     def _scoped(self, node: ast.AST, name: str) -> None:
         self._symbols.append(name)
         self._local_consts.append({})
+        self._local_origins.append({})
         self.generic_visit(node)
+        self._local_origins.pop()
         self._local_consts.pop()
         self._symbols.pop()
 
@@ -822,6 +831,17 @@ class _Scanner(ast.NodeVisitor):
     # -- imports -------------------------------------------------------
     def _resolve_module(self, module: Optional[str], level: int) -> Optional[str]:
         return _resolve_module_path(module, level, self.path, self._known)
+
+    def visit_Module(self, node: ast.Module) -> None:  # noqa: N802
+        for statement in _module_namespace_nodes(node):
+            if not isinstance(statement, ast.Assign):
+                continue
+            value = statement.value
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                for tgt in statement.targets:
+                    if isinstance(tgt, ast.Name):
+                        self._module_consts.setdefault(tgt.id, value.value)
+        self.generic_visit(node)
 
     def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
         for alias in node.names:
@@ -897,9 +917,15 @@ class _Scanner(ast.NodeVisitor):
             # qualified identity across the rebind.
             qualified = self._qualified_callee(value)
             if qualified is not None:
+                # Scope-local, exactly like the constant map. A scanner-wide
+                # binding let a helper's `alias = safe` overwrite a module-level
+                # `alias = legacy_sink`, so a LATER function's `alias(...)`
+                # resolved to the safe callee and the real edge vanished.
+                scope = (self._local_origins[-1] if self._local_origins
+                         else self._qualified_origin)
                 for tgt in node.targets:
                     if isinstance(tgt, ast.Name):
-                        self._qualified_origin[tgt.id] = qualified
+                        scope[tgt.id] = qualified
             if base in self._builders:
                 bound = True
 
@@ -2884,6 +2910,7 @@ def ledger_rows(census_rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
 RETRACTION_MATRIX: Tuple[Dict[str, Any], ...] = (
     {
         "surface_id": "SS-PYDANTIC",
+        "source_modules": ("src/boomi_mcp/models/integration_models.py",),
         "surface_class": "Pydantic schema / field descriptions",
         "producer": "IntegrationComponentSpec.model_json_schema()",
         "anchors": ("src/boomi_mcp/models/integration_models.py:20-34 "
@@ -2896,6 +2923,8 @@ RETRACTION_MATRIX: Tuple[Dict[str, Any], ...] = (
     },
     {
         "surface_id": "SS-BUILDER-DIAGNOSTICS",
+        "source_modules": ("src/boomi_mcp/categories/integration_builder.py",
+                            "src/boomi_mcp/categories/components/processes.py"),
         "surface_class": "Builder error texts and hints",
         "producer": "integration_builder plan preflight envelopes",
         "anchors": ("src/boomi_mcp/categories/components/processes.py:224-241 "
@@ -2915,6 +2944,7 @@ RETRACTION_MATRIX: Tuple[Dict[str, Any], ...] = (
     },
     {
         "surface_id": "SS-MCP-DESCRIPTIONS",
+        "source_modules": ("server.py",),
         "surface_class": "Registered MCP tool descriptions and parameter schemas",
         "producer": "server.mcp.list_tools()",
         "anchors": ("server.py:1383-1385 (manage_process)",
@@ -2929,6 +2959,7 @@ RETRACTION_MATRIX: Tuple[Dict[str, Any], ...] = (
     },
     {
         "surface_id": "SS-SAFE-EDIT",
+        "source_modules": ("src/boomi_mcp/categories/components/safe_edit_component.py",),
         "surface_class": "Safe-edit guidance",
         "producer": "safe_edit_component._validate_patch_shape(...)",
         "anchors": ("src/boomi_mcp/categories/components/safe_edit_component.py:176-191",),
@@ -2939,6 +2970,7 @@ RETRACTION_MATRIX: Tuple[Dict[str, Any], ...] = (
     },
     {
         "surface_id": "SS-SCHEMA-TEMPLATES",
+        "source_modules": ("src/boomi_mcp/categories/meta_tools.py", "server.py"),
         "surface_class": "get_schema_template templates",
         "producer": "meta_tools.get_schema_template_action(...)",
         "anchors": ("src/boomi_mcp/categories/meta_tools.py:595-598 (raw_xml_escape_hatch)",
@@ -2960,6 +2992,7 @@ RETRACTION_MATRIX: Tuple[Dict[str, Any], ...] = (
     },
     {
         "surface_id": "SS-RAW-API",
+        "source_modules": ("src/boomi_mcp/categories/meta_tools.py",),
         "surface_class": "Raw-API catalog and typed-alternative entries",
         "producer": "meta_tools._raw_write_confirmation_guard / "
                     "_classify_raw_api_request / _typed_alternatives_for_endpoint",
@@ -2980,6 +3013,7 @@ RETRACTION_MATRIX: Tuple[Dict[str, Any], ...] = (
     },
     {
         "surface_id": "SS-CAPABILITY-CATALOG",
+        "source_modules": ("src/boomi_mcp/categories/meta_tools.py",),
         "surface_class": "list_capabilities catalog entries, workflows and hints",
         "producer": "meta_tools.list_capabilities_action()",
         "anchors": ("src/boomi_mcp/categories/meta_tools.py:10145 "
@@ -2992,6 +3026,8 @@ RETRACTION_MATRIX: Tuple[Dict[str, Any], ...] = (
     },
     {
         "surface_id": "SS-ARCHETYPE-CATALOG",
+        "source_modules": ("src/boomi_mcp/authoring/contract.py",
+                            "src/boomi_mcp/categories/integration_authoring.py"),
         "surface_class": "Served archetype descriptors and parameter schemas",
         "producer": "authoring.contract.list_archetype_registry()",
         "anchors": ("src/boomi_mcp/authoring/contract.py:335 "
@@ -3065,8 +3101,10 @@ def build_inventory(sources: Optional[Dict[str, str]] = None,
         "component_xml_write_routes": [dict(r, locations=list(r["locations"]))
                                        for r in WRITE_ROUTES],
         "route_reconciliation": reconciliation,
-        "served_surface_retraction_matrix": [dict(r, anchors=list(r["anchors"]))
-                                             for r in RETRACTION_MATRIX],
+        "served_surface_retraction_matrix": [
+            dict(r, anchors=list(r["anchors"]),
+                 source_modules=list(r["source_modules"]))
+            for r in RETRACTION_MATRIX],
         "sdk_evidence": sdk_evidence(),
     }
     if include_served:
@@ -3097,8 +3135,11 @@ def _resolve_matrix_producers(matrix: List[Dict[str, Any]],
     resolved = []
     for row in matrix:
         owned = by_class.get(row["surface_id"], [])
+        # `producer` was the hand-written, stale key this function exists to
+        # replace — carrying it alongside the derived `producers` left two
+        # disagreeing answers in one record for any consumer still reading it.
         resolved.append(dict(
-            row,
+            {k: v for k, v in row.items() if k != "producer"},
             producers=sorted({a["producer"] for a in owned}),
             artifact_ids=sorted(a["artifact_id"] for a in owned),
         ))
