@@ -1120,11 +1120,23 @@ def test_the_last_wins_limit_still_measures_zero_exposure():
             tree = ast.parse(text)
         except SyntaxError:  # pragma: no cover - the corpus parses
             continue
-        scopes = [n for n in ast.walk(tree)
-                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
-        for scope in scopes:
+        # EVERY namespace the prepass indexes, with the same inputs it uses —
+        # the module namespace and nested `global`/`nonlocal` publications
+        # included. Measuring only function-local `_scope_body_nodes()` left the
+        # module map (which `visit_Module` now feeds from nested publications)
+        # entirely unmeasured, so a module-level `A = legacy` beside an
+        # initializer's `global A; A = safe` certified as zero exposure.
+        scopes = [(tree,
+                   inv._module_namespace_nodes(tree)
+                   + inv._published_binding_nodes(tree, ast.Global))]
+        scopes += [(n,
+                    inv._scope_body_nodes(n)
+                    + inv._published_binding_nodes(n, ast.Nonlocal))
+                   for n in ast.walk(tree)
+                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        for scope, statements in scopes:
             bindings = {}
-            for statement in inv._scope_body_nodes(scope):
+            for statement in statements:
                 targets, value = inv._assign_parts(statement)
                 if value is None:
                     continue
@@ -1151,8 +1163,10 @@ def test_the_last_wins_limit_still_measures_zero_exposure():
                        for text in literals):
                     reasons.append("request-target")
                 if reasons:
-                    exposed.append("%s:%s:%s (%s)"
-                                   % (path, scope.name, name, ",".join(reasons)))
+                    exposed.append(
+                        "%s:%s:%s (%s)"
+                        % (path, getattr(scope, "name", "<module>"), name,
+                           ",".join(reasons)))
 
     assert multi > 0, "the harness found no multi-bindings at all — it is inert"
     assert not exposed, "[LIMIT-last-wins] now has live exposure: %s" % exposed

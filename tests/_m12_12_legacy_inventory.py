@@ -636,27 +636,89 @@ def _published_binding_nodes(tree: ast.AST, keyword: type) -> List[ast.AST]:
     That is precisely the ordering dependence the served contract excludes, and
     the promotion fix alone did not close it: promotion routes a binding to the
     right map, but the PREPASS is what makes position stop mattering.
+
+    `global` always names the module, so every such publication belongs to the
+    module prepass. `nonlocal` does NOT: it binds the nearest enclosing FUNCTION
+    that actually holds the name, so a publication must be delivered to that one
+    scope and no other. Broadcasting it to every ancestor let an inner
+    `nonlocal A` — resolving to an intervening `middle` — overwrite an OUTER
+    function's own later `A = legacy`, and re-pointing that outer binding then
+    moved nothing.
     """
     out: List[ast.AST] = []
 
-    def walk(node: ast.AST) -> None:
+    def _bindings_of(scope: ast.AST) -> List[ast.AST]:
+        names = {n for st in _scope_body_nodes(scope)
+                 if isinstance(st, keyword) for n in st.names}
+        if not names:
+            return []
+        found: List[ast.AST] = []
+        for statement in _scope_body_nodes(scope):
+            targets, value = _assign_parts(statement)
+            if value is not None and any(t in names for t in targets):
+                found.append(statement)
+            elif isinstance(statement, (ast.Import, ast.ImportFrom)) \
+                    and any((a.asname or a.name.split(".")[0]) in names
+                            for a in statement.names):
+                found.append(statement)
+        return found
+
+    def _owns(scope: ast.AST, name: str) -> bool:
+        """True when `scope` binds `name` as one of its own locals."""
+        arguments = getattr(scope, "args", None)
+        if isinstance(arguments, ast.arguments):
+            for argument in (list(arguments.posonlyargs) + list(arguments.args)
+                             + list(arguments.kwonlyargs)
+                             + [a for a in (arguments.vararg, arguments.kwarg) if a]):
+                if argument.arg == name:
+                    return True
+        for statement in _scope_body_nodes(scope):
+            targets, value = _assign_parts(statement)
+            if value is not None and name in targets:
+                return True
+            if isinstance(statement, (ast.Import, ast.ImportFrom)) \
+                    and any((a.asname or a.name.split(".")[0]) == name
+                            for a in statement.names):
+                return True
+        for child in ast.iter_child_nodes(scope):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                  ast.ClassDef)) and child.name == name:
+                return True
+        return False
+
+    def _declared(scope: ast.AST) -> Set[str]:
+        return {n for st in _scope_body_nodes(scope)
+                if isinstance(st, keyword) for n in st.names}
+
+    def walk(node: ast.AST, chain: List[ast.AST]) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
                                   ast.ClassDef)):
-                names = {n for st in _scope_body_nodes(child)
-                         if isinstance(st, keyword) for n in st.names}
+                names = _declared(child)
                 if names:
-                    for statement in _scope_body_nodes(child):
-                        targets, value = _assign_parts(statement)
-                        if value is not None and any(t in names for t in targets):
-                            out.append(statement)
-                        elif isinstance(statement, (ast.Import, ast.ImportFrom)) \
-                                and any((a.asname or a.name.split(".")[0]) in names
-                                        for a in statement.names):
-                            out.append(statement)
-            walk(child)
+                    if keyword is ast.Global:
+                        out.extend(_bindings_of(child))
+                    else:
+                        # Owner = innermost enclosing FUNCTION that holds the
+                        # name. Only that scope's prepass may see this binding.
+                        candidates = [tree] + chain
+                        for name in names:
+                            owner = next(
+                                (scope for scope in reversed(candidates)
+                                 if isinstance(scope, (ast.FunctionDef,
+                                                       ast.AsyncFunctionDef))
+                                 and _owns(scope, name)),
+                                tree)
+                            if owner is tree:
+                                out.extend(_bindings_of(child))
+                                break
+                nested = chain + [child] if not isinstance(child, ast.ClassDef) \
+                    else chain
+                walk(child, nested)
+            else:
+                walk(child, chain)
 
-    walk(tree)
+    walk(tree, [])
     return out
 
 
@@ -1431,19 +1493,18 @@ class _Scanner(ast.NodeVisitor):
             # nothing and added a real legacy caller with zero diff. The plan
             # names simple assignment aliases as a resolution form; carry the
             # qualified identity across the rebind.
-            qualified = self._qualified_callee(value)
-            if qualified is not None:
-                # Scope-local, exactly like the constant map. A scanner-wide
-                # binding let a helper's `alias = safe` overwrite a module-level
-                # `alias = legacy_sink`, so a LATER function's `alias(...)`
-                # resolved to the safe callee and the real edge vanished.
-                # Module scope is likewise owned by the prepass.
-                if self._local_origins:
-                    for tgt in node.targets:
-                        if isinstance(tgt, ast.Name):
-                            self._binding_maps(
-                                tgt.id, self._local_consts[-1],
-                                self._local_origins[-1])[1][tgt.id] = qualified
+            # NO traversal-time origin write. The prepass owns every name→value
+            # binding, at module AND function scope, and writing again on the way
+            # past re-introduced the exact ordering bug the prepass exists to
+            # remove — one scope down from where it had already been fixed:
+            #
+            #     def o(): A = safe; def u(): A(...); A = legacy
+            #
+            # The prepass correctly resolves `A` to `legacy` (last wins), then
+            # traversal reached `A = safe` FIRST, overwrote it, and scanned `u`
+            # under the safe callee — so no row appeared for ANY value of `A`,
+            # and re-pointing it moved nothing. A twice-bound name was simply
+            # invisible.
             if base in self._builders:
                 bound = True
 
@@ -1468,17 +1529,10 @@ class _Scanner(ast.NodeVisitor):
         # `KEY = "process_kind"` then `cfg[KEY] = ...`. Constant propagation for
         # plain string names only — without it, hoisting the selector into a
         # constant hid the producer from the census entirely.
-        if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            # MODULE scope is owned by the `visit_Module` prepass, which records
-            # the LAST binding as Python does. Letting traversal write here
-            # re-introduced the ordering bug the prepass exists to remove: it
-            # overwrote the final value with the first one on the way past.
-            if self._local_consts:
-                for tgt in node.targets:
-                    if isinstance(tgt, ast.Name):
-                        self._binding_maps(
-                            tgt.id, self._local_consts[-1],
-                            self._local_origins[-1])[0][tgt.id] = value.value
+        # Constants are bound by the prepass too, for the same reason and at both
+        # scopes: the fix was applied to MODULE scope one round earlier and left
+        # in place for function scope, where traversal kept overwriting the
+        # last binding with the first one on the way past.
 
         # `cfg["process_kind"] = ...` is a producer write.
         for tgt in node.targets:
@@ -2855,6 +2909,45 @@ def _served_tools() -> Dict[str, Any]:
     return {t.name: t for t in tools}
 
 
+def _fold_concat(node: ast.AST) -> str:
+    """Every string literal in an `+` chain, concatenated in SOURCE order.
+
+    Non-literal operands (a `.rstrip()` call on the existing docstring) fold to
+    the empty string, so what is left is exactly the appended text.
+    """
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _fold_concat(node.left) + _fold_concat(node.right)
+    return _const_str(node) or ""
+
+
+def hint_decorated_surfaces() -> Tuple[str, ...]:
+    """Functions that actually carry `@_kb_hint` / `@_gotcha_hint`.
+
+    The hints are now extracted from source in EITHER flag state, so stripping
+    them from every served description would erase the sentence wherever it
+    appeared — including from an ordinary tool that had adopted it
+    unconditionally, whose new served text would then normalise away to no
+    drift. Stripping is therefore restricted to the surfaces the hooks are
+    actually applied to.
+    """
+    import server as _server
+
+    try:
+        tree = ast.parse(inspect.getsource(_server))
+    except (OSError, TypeError, SyntaxError):  # pragma: no cover - defensive
+        return ()
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            if ast.unparse(decorator).lstrip("@").split("(")[0] in (
+                    "_kb_hint", "_gotcha_hint"):
+                out.append(node.name)
+                break
+    return tuple(sorted(set(out)))
+
+
 #: Docstring handed to the hint hooks to read back what they append.
 _HINT_PROBE_DOC = "m12_12 hint probe"
 
@@ -2901,12 +2994,14 @@ def optional_steering_hints() -> Tuple[str, ...]:
             if not any(isinstance(t, ast.Attribute) and t.attr == "__doc__"
                        for t in statement.targets):
                 continue
-            value = statement.value
-            while isinstance(value, ast.BinOp) and isinstance(value.op, ast.Add):
-                literal = _const_str(value.right)
-                if literal:
-                    suffixes.append(literal)
-                value = value.left
+            # ONE folded suffix, not a fragment per operand. Appending each
+            # literal separately meant `"use raw " + "XML"` was checked as two
+            # pieces — neither of which matches a legacy token — and then both
+            # were stripped, so the served guidance was neither rejected nor
+            # hashed. The whole appended expression is one hint.
+            folded = _fold_concat(statement.value)
+            if folded:
+                suffixes.append(folded)
     return tuple(suffixes)
 
 
@@ -3003,9 +3098,15 @@ def collect_served_artifacts() -> List[Dict[str, Any]]:
                 "an environment-gated steering hint now carries a legacy token "
                 "(%r) — stripping it would hide a served legacy path. Freeze the "
                 "hint explicitly instead of excluding it." % hint)
-    served_text = {name: _strip_optional_hints(tool.description or "")
+    # Only where a hook is actually applied — see `hint_decorated_surfaces`.
+    hinted = set(hint_decorated_surfaces())
+
+    def _normalise(name: str, value: Any) -> Any:
+        return _strip_optional_hints(value) if name in hinted else value
+
+    served_text = {name: _normalise(name, tool.description or "")
                    for name, tool in tools.items()}
-    served_params = {name: _strip_optional_hints(tool.parameters or {})
+    served_params = {name: _normalise(name, tool.parameters or {})
                      for name, tool in tools.items()}
     steering = sorted(
         name for name in tools
@@ -3049,7 +3150,7 @@ def collect_served_artifacts() -> List[Dict[str, Any]]:
         "SS-MCP-DESCRIPTIONS", "server.mcp.list_tools() [all tools]",
         "registered_surface_digest",
         {tool_name: _sha256(canonical_json(
-            _strip_optional_hints(_mcp_tool_surface(tool))))
+            _normalise(tool_name, _mcp_tool_surface(tool))))
          for tool_name, tool in sorted(tools.items())
          if not _is_flag_gated(tool_name)}))
 
