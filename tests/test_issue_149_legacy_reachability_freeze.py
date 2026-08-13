@@ -887,6 +887,38 @@ def test_a_function_local_http_host_resolves_regardless_of_placement(placement):
     assert any("[COMPONENT-API]" in r["form"] for r in rows), [r["form"] for r in rows]
 
 
+@pytest.mark.parametrize("label,body", [
+    ("a default value calls an alias the body later shadows",
+     "from ...categories.integration_builder import build_structured_update_xml as _m12_12_x\n"
+     "def f(a=_m12_12_x(None, None)):\n"
+     "    from ...models.integration_models import IntegrationComponentSpec as _m12_12_x\n"
+     "    return _m12_12_x\n"),
+    ("a class body calls an alias a later class import shadows",
+     "from ...categories.integration_builder import build_structured_update_xml as _m12_12_y\n"
+     "class M1212C:\n"
+     "    z = _m12_12_y(None, None)\n"
+     "    from ...models.integration_models import IntegrationComponentSpec as _m12_12_y\n"),
+])
+def test_the_prepass_does_not_shadow_an_enclosing_binding(census_only, label, body):
+    """The prepass must not be MORE eager than Python.
+
+    Two scopes do not follow function semantics. A `def` HEADER — defaults,
+    annotations, decorators — is evaluated at definition time in the ENCLOSING
+    scope, before the body's imports exist. A CLASS body executes in statement
+    order and falls back to globals. Installing a body- or class-local import
+    ahead of either let it shadow an enclosing legacy alias that the code
+    actually calls, so the fix for one fail-open manufactured a false negative
+    of its own.
+    """
+    sources = dict(inv.python_sources())
+    target = "src/boomi_mcp/categories/components/processes.py"
+    sources[target] = sources[target] + "\n\n" + body
+    diff = inv.compare(inv.build_inventory(sources=sources, include_served=False),
+                       census_only)
+    assert "legacy_transitive_call" in {r.split(" | ")[0] for r in diff.added}, \
+        "%s: %s" % (label, diff.report())
+
+
 def test_the_scan_contract_claims_ordering_exclusion_at_every_scope(baseline):
     """The served claim must match what the scanner actually does — an
     unqualified 'intra-file ordering' was false while only module scope was

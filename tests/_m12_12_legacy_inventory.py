@@ -916,23 +916,43 @@ class _Scanner(ast.NodeVisitor):
 
     # -- scopes --------------------------------------------------------
     def _scoped(self, node: ast.AST, name: str) -> None:
-        """Enter a scope, pre-indexing its own bindings FLOW-INSENSITIVELY.
+        """Enter a FUNCTION scope, pre-indexing its own bindings.
 
         Python fixes a scope's local NAMES at compile time and only their values
-        at run time, so for a conservative reachability instrument the right
-        analysis is flow-insensitive: over-approximating is fail-closed. Binding
-        in traversal order was fail-OPEN, and not merely for a derived sub-row —
-        `def outer(): def inner(c,x): return al(c,x); al = legacy_callee` made
-        the ENTIRE `inner` caller vanish, no row and no residue, because `al` was
-        recorded only after `inner`'s body had been scanned.
+        at run time, so binding flow-insensitively is the right analysis for
+        reachability. Binding in traversal order was fail-OPEN, and not for a
+        derived sub-row: a binding placed after a nested ``def`` made the ENTIRE
+        nested caller vanish.
+
+        The HEADER is deliberately scanned first, under the ENCLOSING scope.
+        Default values, annotations and decorators are evaluated at ``def`` time,
+        before the body's own imports exist, so installing a body-local import
+        first let it shadow an enclosing legacy alias that the default actually
+        calls — a false negative created by the prepass itself.
         """
+        for decorator in getattr(node, "decorator_list", []):
+            self.visit(decorator)
+        arguments = getattr(node, "args", None)
+        if isinstance(arguments, ast.arguments):
+            for default in list(arguments.defaults) + [
+                    d for d in arguments.kw_defaults if d is not None]:
+                self.visit(default)
+            for argument in (list(arguments.posonlyargs) + list(arguments.args)
+                             + list(arguments.kwonlyargs)
+                             + [a for a in (arguments.vararg, arguments.kwarg) if a]):
+                if argument.annotation is not None:
+                    self.visit(argument.annotation)
+        if getattr(node, "returns", None) is not None:
+            self.visit(node.returns)
+
         self._symbols.append(name)
         consts: Dict[str, str] = {}
         origins: Dict[str, Tuple[str, str]] = {}
         self._local_consts.append(consts)
         self._local_origins.append(origins)
         self._index_bindings(_scope_body_nodes(node), consts, origins)
-        self.generic_visit(node)
+        for statement in node.body:
+            self.visit(statement)
         self._local_origins.pop()
         self._local_consts.pop()
         self._symbols.pop()
@@ -944,7 +964,25 @@ class _Scanner(ast.NodeVisitor):
         self._scoped(node, node.name)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
-        self._scoped(node, node.name)
+        """A class body is NOT a function scope.
+
+        It executes in STATEMENT ORDER and falls back to globals, so the
+        flow-insensitive prepass is wrong here: pre-installing a class-local
+        import hid a real call made earlier in the same body under the enclosing
+        binding of that name. Class bodies therefore keep plain traversal order.
+        """
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for base in list(node.bases) + [k.value for k in node.keywords]:
+            self.visit(base)
+        self._symbols.append(node.name)
+        self._local_consts.append({})
+        self._local_origins.append({})
+        for statement in node.body:
+            self.visit(statement)
+        self._local_origins.pop()
+        self._local_consts.pop()
+        self._symbols.pop()
 
     # -- imports -------------------------------------------------------
     def _resolve_module(self, module: Optional[str], level: int) -> Optional[str]:

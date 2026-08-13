@@ -2533,6 +2533,7 @@ value either way.
 | **Mutation:** a function-local binding declared below its use is resolved | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_function_local_binding_declared_below_its_use_is_resolved` |
 | The served ordering claim matches the scanner at every scope | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_scan_contract_claims_ordering_exclusion_at_every_scope` |
 | **Mutation:** a function-local HTTP host resolves regardless of placement | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_function_local_http_host_resolves_regardless_of_placement` |
+| **Precision:** the prepass does not shadow an enclosing binding | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_prepass_does_not_shadow_an_enclosing_binding` |
 
 **Darkness.** This slice changes nothing under `src/boomi_mcp/` or `server.py`:
 `git diff 9711a9c0cb6c88dda41ada94d88694915b659f36 -- src/boomi_mcp server.py` is empty. The only
