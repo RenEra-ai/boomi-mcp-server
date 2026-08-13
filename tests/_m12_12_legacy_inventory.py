@@ -630,6 +630,27 @@ class _Scanner(ast.NodeVisitor):
             return node.attr == "PROCESS_FLOW_BUILDERS"
         return False
 
+    def _resolved_str(self, node: Optional[ast.AST]) -> Optional[str]:
+        """A string literal, a name bound to one, or a `+` composition of those."""
+        direct = self._as_str(node)
+        if direct is not None:
+            return direct
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left = self._resolved_str(node.left)
+            right = self._resolved_str(node.right)
+            if left is not None and right is not None:
+                return left + right
+        if isinstance(node, ast.JoinedStr):
+            parts = []
+            for value in node.values:
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    parts.append(value.value)
+                else:
+                    resolved = self._resolved_str(getattr(value, "value", None))
+                    parts.append(resolved if resolved is not None else "{}")
+            return "".join(parts)
+        return None
+
     def _as_str(self, node: Optional[ast.AST]) -> Optional[str]:
         """A string literal, or a plain name bound to one earlier in the module.
 
@@ -674,7 +695,12 @@ class _Scanner(ast.NodeVisitor):
         url = "<dynamic>"
         for candidate in args + [kw.value for kw in node.keywords
                                  if kw.arg in ("url", "endpoint")]:
-            literal = self._as_str(candidate)
+            # `_resolved_str` folds `BASE + "/Component"` through module-level
+            # string constants. Reducing a composed target to `<dynamic>` meant
+            # re-pointing `BASE` from an unrelated host to `api.boomi.com`
+            # produced an IDENTICAL census — an `external_transport` route could
+            # become a Component-API write with the freeze still green.
+            literal = self._resolved_str(candidate)
             if literal:
                 url = literal
                 break
@@ -863,6 +889,17 @@ class _Scanner(ast.NodeVisitor):
                 for tgt in node.targets:
                     if isinstance(tgt, ast.Name):
                         self._aliases[tgt.id] = base
+            # `alias = build_structured_update_xml` rebinds a LEGACY-BEARING
+            # function. Only `_watched` names were aliased, and a bearing
+            # function is not a watched sink name, so `alias(...)` resolved to
+            # nothing and added a real legacy caller with zero diff. The plan
+            # names simple assignment aliases as a resolution form; carry the
+            # qualified identity across the rebind.
+            qualified = self._qualified_callee(value)
+            if qualified is not None:
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name):
+                        self._qualified_origin[tgt.id] = qualified
             if base in self._builders:
                 bound = True
 
@@ -2396,6 +2433,11 @@ def _schema_template_surfaces(meta_tools: Any) -> Dict[str, Any]:
         # operation payload alone left edifact, hl7 and the rest outside the
         # digest entirely.
         overview_standards = _standard_axis(overview)
+        # Protocols can be advertised by the OVERVIEW alone — the
+        # trading-partner overview lists seven `communication_protocols` its
+        # `operation=create` payload does not repeat, so none of those templates
+        # entered the digest.
+        overview_protocols = _protocol_axis(overview)
 
         for component_type in component_types:
             surfaces["resource_type=%s|component_type=%s" % (resource_type, component_type)] = \
@@ -2413,7 +2455,7 @@ def _schema_template_surfaces(meta_tools: Any) -> Dict[str, Any]:
             # `available_protocols`. Following only `valid_protocols` walked
             # neither, so the templates the issue calls out as "advertising
             # legacy protocols" were never frozen.
-            for protocol in _protocol_axis(payload):
+            for protocol in (_protocol_axis(payload) or overview_protocols):
                 surfaces["%s|protocol=%s" % (key, protocol)] = \
                     meta_tools.get_schema_template_action(
                         resource_type=resource_type, operation=operation, protocol=protocol)
@@ -2477,7 +2519,7 @@ def assert_schema_surface_axes_non_vacuous(surfaces: Dict[str, Any]) -> None:
 #: carries the LEGACY protocol list; `available_protocols` carries the connector
 #: ones. Following only `valid_protocols` walked neither.
 _PROTOCOL_ECHO_KEYS = ("valid_protocols", "process_protocols", "available_protocols",
-                       "protocols")
+                       "communication_protocols", "protocols")
 
 #: `standard` is a SEPARATE selector from `protocol`. Folding these keys into the
 #: protocol list would have passed a standard as `protocol=`, which the action
@@ -2856,7 +2898,9 @@ RETRACTION_MATRIX: Tuple[Dict[str, Any], ...] = (
         "surface_id": "SS-BUILDER-DIAGNOSTICS",
         "surface_class": "Builder error texts and hints",
         "producer": "integration_builder plan preflight envelopes",
-        "anchors": ("src/boomi_mcp/categories/integration_builder.py:3148",
+        "anchors": ("src/boomi_mcp/categories/components/processes.py:224-241 "
+                    "(ACTION_UNSUPPORTED)",
+                    "src/boomi_mcp/categories/integration_builder.py:3148",
                     "src/boomi_mcp/categories/integration_builder.py:3162",
                     "src/boomi_mcp/categories/integration_builder.py:3544",
                     "src/boomi_mcp/categories/integration_builder.py:3610",
@@ -2903,12 +2947,16 @@ RETRACTION_MATRIX: Tuple[Dict[str, Any], ...] = (
                     "src/boomi_mcp/categories/meta_tools.py:4989 (force-clear hint)",
                     "src/boomi_mcp/categories/meta_tools.py:5180-5190 (_COMPONENT_CLONE)",
                     "src/boomi_mcp/categories/meta_tools.py:8867 (serves _COMPONENT_CREATE)",
-                    "src/boomi_mcp/categories/meta_tools.py:8880 (serves _COMPONENT_CLONE)"),
+                    "src/boomi_mcp/categories/meta_tools.py:8880 (serves _COMPONENT_CLONE)",
+                    "server.py:3178 (get_schema_template wrapper docstring)"),
         "legacy_guidance": "served templates carry type=\"process\" raw XML, the "
                            "raw_xml_escape_hatch text, and legacy process protocols",
         "owning_issue": "#160",
         "post_retraction_assertion": "no served template emits a process-typed raw XML "
-                                     "skeleton or a raw-XML escape-hatch instruction.",
+                                     "skeleton or a raw-XML escape-hatch instruction, AND no "
+                                     "template advertises a legacy process protocol "
+                                     "(database_to_api_sync / wrapper_subprocess / "
+                                     "sync_pipeline).",
     },
     {
         "surface_id": "SS-RAW-API",
@@ -3023,7 +3071,38 @@ def build_inventory(sources: Optional[Dict[str, str]] = None,
     }
     if include_served:
         document["served_artifacts"] = collect_served_artifacts()
+        document["served_surface_retraction_matrix"] = _resolve_matrix_producers(
+            document["served_surface_retraction_matrix"], document["served_artifacts"])
     return document
+
+
+def _resolve_matrix_producers(matrix: List[Dict[str, Any]],
+                              artifacts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Fill each matrix row's producers and artifact IDs from what was COLLECTED.
+
+    The `producer` cell used to be hand-written, and it went stale: the
+    SS-BUILDER-DIAGNOSTICS row named only the integration_builder preflight while
+    its artifacts also come from `processes.manage_process_action`. Worse, the
+    Markdown emitter derived the column at render time, so the rendered table
+    looked right while the authoritative JSON stayed wrong — #160 reading the
+    fixture got a different answer from #160 reading §11.6.
+
+    Deriving both here means the record cannot disagree with itself, and the
+    hand-maintained `anchors` are checked against the derived producers by
+    `test_the_retraction_matrix_anchors_cover_every_producer_module`.
+    """
+    by_class: Dict[str, List[Dict[str, Any]]] = {}
+    for artifact in artifacts:
+        by_class.setdefault(artifact["surface_class"], []).append(artifact)
+    resolved = []
+    for row in matrix:
+        owned = by_class.get(row["surface_id"], [])
+        resolved.append(dict(
+            row,
+            producers=sorted({a["producer"] for a in owned}),
+            artifact_ids=sorted(a["artifact_id"] for a in owned),
+        ))
+    return resolved
 
 
 def semantic_key(row: Dict[str, Any]) -> Tuple[str, str, str, str]:
@@ -3251,21 +3330,17 @@ def emit_matrix_table(document: Dict[str, Any]) -> str:
     actually contributes to the row, derived from the artifacts rather than
     hand-written, so it cannot drift from what was collected.
     """
-    artifacts_by_class: Dict[str, List[str]] = {}
-    producers_by_class: Dict[str, Set[str]] = {}
-    for artifact in document.get("served_artifacts", []):
-        artifacts_by_class.setdefault(artifact["surface_class"], []).append(
-            artifact["artifact_id"])
-        producers_by_class.setdefault(artifact["surface_class"], set()).add(
-            artifact["producer"])
+    # Renders the FROZEN fields. Re-deriving them here once masked a stale
+    # authoritative record: the rendered table was right while the JSON #160
+    # would quote was wrong.
     return _table(
         ("Surface ID", "Surface class", "Caller-visible producer(s)",
          "HEAD source anchor(s)", "Frozen artifact IDs", "Legacy guidance exposed",
          "Owning endgame step", "Required post-retraction assertion"),
         [(r["surface_id"], r["surface_class"],
-          "<br>".join(sorted(producers_by_class.get(r["surface_id"], set()))) or "—",
+          "<br>".join(r.get("producers") or []) or "—",
           "<br>".join(r["anchors"]),
-          "<br>".join(sorted(artifacts_by_class.get(r["surface_id"], []))) or "—",
+          "<br>".join(r.get("artifact_ids") or []) or "—",
           r["legacy_guidance"], r["owning_issue"], r["post_retraction_assertion"])
          for r in document["served_surface_retraction_matrix"]],
     )

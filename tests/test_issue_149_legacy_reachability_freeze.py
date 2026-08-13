@@ -760,6 +760,92 @@ def test_the_served_digests_cover_every_surface_not_just_token_matches(derived):
     assert all(len(v) == 64 for v in walked.values())
 
 
+def test_a_simple_assignment_alias_carries_transitive_identity(census_only):
+    """`alias = build_structured_update_xml; alias(...)` is a real legacy caller.
+
+    Only `_watched` SINK names were aliased on assignment, and a legacy-BEARING
+    function is not a watched sink name — so the rebind resolved to nothing and
+    the caller landed with zero diff. The architect plan lists simple assignment
+    aliases as a required resolution form.
+    """
+    diff = _added(census_only, "_m12_12_synthetic_assign_alias", (
+        "from .integration_builder import build_structured_update_xml\n"
+        "alias = build_structured_update_xml\n"
+        "def wrap(comp, xml):\n"
+        "    return alias(comp, xml)\n"
+    ))
+    assert "legacy_transitive_call" in {r.split(" | ")[0] for r in diff.added}, diff.report()
+
+
+def test_repointing_a_composed_http_target_breaks_the_freeze(census_only):
+    """`BASE + "/Component"` must fold through the module constant.
+
+    Reducing a composed target to `<dynamic>` meant swapping `BASE` from an
+    unrelated host to `api.boomi.com` produced an IDENTICAL census — an
+    `external_transport` route could become a Component-API write with the gate
+    still green. The endpoint literal alone is not enough: it is present in both.
+    """
+    def _tree(host):
+        sources = dict(inv.python_sources())
+        target = "src/boomi_mcp/__init__.py"
+        sources[target] = sources[target] + (
+            "\n\nimport httpx\n"
+            "_M12_12_BASE = '%s'\n"
+            "def go(x):\n"
+            "    return httpx.post(_M12_12_BASE + '/Component', content=x)\n" % host)
+        return inv.build_inventory(sources=sources, include_served=False)
+
+    diff = inv.compare(_tree("https://api.boomi.com"), _tree("https://example.test"))
+    assert not diff.empty(), "re-pointing a composed HTTP target did not move the census"
+    assert any("api.boomi.com/Component" in row for row in diff.added), diff.report()
+
+
+def test_the_trading_partner_protocol_templates_are_walked(derived):
+    """The trading-partner overview advertises seven `communication_protocols`
+    its `operation=create` payload never repeats, so none of those templates
+    entered the digest and the 'exhaustive walk' claim was foolable."""
+    walked = {a["selector"]: a for a in derived["served_artifacts"]}[
+        "walked_surface_digest"]["value"]
+    for protocol in ("http", "as2", "ftp", "sftp", "disk", "mllp", "oftp"):
+        key = "resource_type=trading_partner|operation=create|protocol=%s" % protocol
+        assert key in walked, "trading-partner protocol template %r not walked" % protocol
+
+
+def test_the_retraction_matrix_producers_are_derived_not_hand_written(derived):
+    """The authoritative record must not disagree with its own rendering.
+
+    `producer` was hand-written and went stale — the SS-BUILDER-DIAGNOSTICS row
+    named only the integration_builder preflight while its artifacts also come
+    from `processes.manage_process_action` — and the Markdown emitter re-derived
+    the column at render time, so §11.6 looked right while the JSON #160 quotes
+    was wrong.
+    """
+    for row in derived["served_surface_retraction_matrix"]:
+        owned = {a["producer"] for a in derived["served_artifacts"]
+                 if a["surface_class"] == row["surface_id"]}
+        assert set(row["producers"]) == owned, (row["surface_id"], row["producers"], owned)
+        ids = sorted(a["artifact_id"] for a in derived["served_artifacts"]
+                     if a["surface_class"] == row["surface_id"])
+        assert row["artifact_ids"] == ids, row["surface_id"]
+
+
+def test_the_retraction_matrix_anchors_cover_every_producer_module(derived):
+    """#160 executes from the matrix alone, so a row's anchors must reach every
+    module its producers actually live in — `processes.py` was missing."""
+    import re as _re
+
+    for row in derived["served_surface_retraction_matrix"]:
+        anchored = " ".join(row["anchors"])
+        for producer in row["producers"]:
+            module = _re.match(r"([a-z_][a-z_0-9]*)\.", producer)
+            if not module:
+                continue
+            name = module.group(1)
+            if name in ("server", "authoring", "integration_builder", "meta_tools",
+                        "safe_edit_component", "processes"):
+                assert name in anchored, (row["surface_id"], producer, row["anchors"])
+
+
 def test_a_module_qualified_wrapper_is_reported(census_only):
     """`import mod; mod.build_structured_update_xml(...)`.
 

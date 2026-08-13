@@ -30514,11 +30514,11 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:walked_surface_digest",
-      "canonical_length": 46805,
+      "canonical_length": 49515,
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "812983994ceeef2a2f4f79d002573347b38cf992034a13cb17e9c092f4d354b5",
+      "sha256": "5025e5d3f16dcd811102c9dfd205b3f9c1300486219222043ebc71a573ffd140",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "8327243ec482fa1641f49265c87694e33616f12db015b3f234dc73db9ed8057c",
@@ -30756,6 +30756,13 @@
         "resource_type=profile_inference": "ec75342eb2cd848126f5bce5da94dbe6ef24cc4c709e12b566237caa109693b2",
         "resource_type=trading_partner": "08ab759add35c4227cec548f6dc643f309580cd835ddb08e78f47b30dec652a2",
         "resource_type=trading_partner|operation=create": "308902cce4c4be21270e6d215b1001281156a01682fa8b3efcc506ccdcf68033",
+        "resource_type=trading_partner|operation=create|protocol=as2": "e7ea509492e86956cc29fa123c4b534e529410045c5997c935e07a6c53f79f59",
+        "resource_type=trading_partner|operation=create|protocol=disk": "5a78fc4a4d360d6e5b9ff4d037728fc8aa4ff9cbc99ff62e4f25e5f4ee369539",
+        "resource_type=trading_partner|operation=create|protocol=ftp": "e0295b5ee13808a3a37cbdc06d7802c90211a63cc342df6510f580db1d8ab331",
+        "resource_type=trading_partner|operation=create|protocol=http": "51e0c0f37bbc5b9850ee9b6f6ebdf1f5e30d4c6eeeed8cf2b6feabf45ac12d1d",
+        "resource_type=trading_partner|operation=create|protocol=mllp": "ffadde03bd917ffdf50a00c145274b8973bf26c01f9b27840d670620bede6441",
+        "resource_type=trading_partner|operation=create|protocol=oftp": "6b454df913e6f6177b4dd36317266a7f1c10ea2a09870e088338e941e8c003d5",
+        "resource_type=trading_partner|operation=create|protocol=sftp": "58a3c866ad57fe11ebdf717fa376251882e4b5d6a0631f510bad268b7e347940",
         "resource_type=trading_partner|operation=create|standard=custom": "2f8f387d90280e2da0c8d80d6fb2825c9991df10e4994149356f5fa2b85ca212",
         "resource_type=trading_partner|operation=create|standard=edifact": "ae5ea4170f66a718af84c49379c80f77cc7749854df8fbbef8a8f9bf4b0e5658",
         "resource_type=trading_partner|operation=create|standard=hl7": "d983d5199ff1b0644fe45eafc1030024b1207d437f2fc224d9aa583f496efb9b",
@@ -30764,6 +30771,13 @@
         "resource_type=trading_partner|operation=create|standard=tradacoms": "e6587b0264db77f85bdaea2c0265c31414cdf73b6f0a0a123a4656284a87d71f",
         "resource_type=trading_partner|operation=create|standard=x12": "308902cce4c4be21270e6d215b1001281156a01682fa8b3efcc506ccdcf68033",
         "resource_type=trading_partner|operation=list": "29e05cb348fc8093e179e79edd94e1573f034ea9821242e0fdfbc24a9f3feb93",
+        "resource_type=trading_partner|operation=list|protocol=as2": "e7ea509492e86956cc29fa123c4b534e529410045c5997c935e07a6c53f79f59",
+        "resource_type=trading_partner|operation=list|protocol=disk": "5a78fc4a4d360d6e5b9ff4d037728fc8aa4ff9cbc99ff62e4f25e5f4ee369539",
+        "resource_type=trading_partner|operation=list|protocol=ftp": "e0295b5ee13808a3a37cbdc06d7802c90211a63cc342df6510f580db1d8ab331",
+        "resource_type=trading_partner|operation=list|protocol=http": "51e0c0f37bbc5b9850ee9b6f6ebdf1f5e30d4c6eeeed8cf2b6feabf45ac12d1d",
+        "resource_type=trading_partner|operation=list|protocol=mllp": "ffadde03bd917ffdf50a00c145274b8973bf26c01f9b27840d670620bede6441",
+        "resource_type=trading_partner|operation=list|protocol=oftp": "6b454df913e6f6177b4dd36317266a7f1c10ea2a09870e088338e941e8c003d5",
+        "resource_type=trading_partner|operation=list|protocol=sftp": "58a3c866ad57fe11ebdf717fa376251882e4b5d6a0631f510bad268b7e347940",
         "resource_type=trading_partner|operation=list|standard=custom": "29e05cb348fc8093e179e79edd94e1573f034ea9821242e0fdfbc24a9f3feb93",
         "resource_type=trading_partner|operation=list|standard=edifact": "29e05cb348fc8093e179e79edd94e1573f034ea9821242e0fdfbc24a9f3feb93",
         "resource_type=trading_partner|operation=list|standard=hl7": "29e05cb348fc8093e179e79edd94e1573f034ea9821242e0fdfbc24a9f3feb93",
@@ -30772,6 +30786,13 @@
         "resource_type=trading_partner|operation=list|standard=tradacoms": "29e05cb348fc8093e179e79edd94e1573f034ea9821242e0fdfbc24a9f3feb93",
         "resource_type=trading_partner|operation=list|standard=x12": "29e05cb348fc8093e179e79edd94e1573f034ea9821242e0fdfbc24a9f3feb93",
         "resource_type=trading_partner|operation=update": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
+        "resource_type=trading_partner|operation=update|protocol=as2": "e7ea509492e86956cc29fa123c4b534e529410045c5997c935e07a6c53f79f59",
+        "resource_type=trading_partner|operation=update|protocol=disk": "5a78fc4a4d360d6e5b9ff4d037728fc8aa4ff9cbc99ff62e4f25e5f4ee369539",
+        "resource_type=trading_partner|operation=update|protocol=ftp": "e0295b5ee13808a3a37cbdc06d7802c90211a63cc342df6510f580db1d8ab331",
+        "resource_type=trading_partner|operation=update|protocol=http": "51e0c0f37bbc5b9850ee9b6f6ebdf1f5e30d4c6eeeed8cf2b6feabf45ac12d1d",
+        "resource_type=trading_partner|operation=update|protocol=mllp": "ffadde03bd917ffdf50a00c145274b8973bf26c01f9b27840d670620bede6441",
+        "resource_type=trading_partner|operation=update|protocol=oftp": "6b454df913e6f6177b4dd36317266a7f1c10ea2a09870e088338e941e8c003d5",
+        "resource_type=trading_partner|operation=update|protocol=sftp": "58a3c866ad57fe11ebdf717fa376251882e4b5d6a0631f510bad268b7e347940",
         "resource_type=trading_partner|operation=update|standard=custom": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=edifact": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=hl7": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
@@ -30903,15 +30924,22 @@
       "anchors": [
         "src/boomi_mcp/models/integration_models.py:20-34 (description string :22-33)"
       ],
+      "artifact_ids": [
+        "SS-PYDANTIC:properties.config.description"
+      ],
       "legacy_guidance": "steers callers to \"manage_component for an explicit raw process XML escape hatch\" and advertises process_kind",
       "owning_issue": "#160",
       "post_retraction_assertion": "the served config description names no raw process XML escape hatch and no legacy process_kind.",
       "producer": "IntegrationComponentSpec.model_json_schema()",
+      "producers": [
+        "IntegrationComponentSpec.model_json_schema()"
+      ],
       "surface_class": "Pydantic schema / field descriptions",
       "surface_id": "SS-PYDANTIC"
     },
     {
       "anchors": [
+        "src/boomi_mcp/categories/components/processes.py:224-241 (ACTION_UNSUPPORTED)",
         "src/boomi_mcp/categories/integration_builder.py:3148",
         "src/boomi_mcp/categories/integration_builder.py:3162",
         "src/boomi_mcp/categories/integration_builder.py:3544",
@@ -30919,10 +30947,20 @@
         "src/boomi_mcp/categories/integration_builder.py:5318",
         "src/boomi_mcp/categories/integration_builder.py:5403-5430"
       ],
+      "artifact_ids": [
+        "SS-BUILDER-DIAGNOSTICS:ACTION_UNSUPPORTED",
+        "SS-BUILDER-DIAGNOSTICS:PROCESS_KIND_REQUIRED",
+        "SS-BUILDER-DIAGNOSTICS:PROCESS_KIND_UNSUPPORTED",
+        "SS-BUILDER-DIAGNOSTICS:PROCESS_KIND_XML_CONFLICT"
+      ],
       "legacy_guidance": "PROCESS_KIND_* hints enumerate sorted(PROCESS_FLOW_BUILDERS) and PROCESS_KIND_XML_CONFLICT actively steers raw process XML onto manage_component(type=\"component\", config.xml)",
       "owning_issue": "#160",
       "post_retraction_assertion": "no served builder envelope names a legacy process_kind value or routes raw process XML to another tool.",
       "producer": "integration_builder plan preflight envelopes",
+      "producers": [
+        "integration_builder plan preflight",
+        "processes.manage_process_action(action='create')"
+      ],
       "surface_class": "Builder error texts and hints",
       "surface_id": "SS-BUILDER-DIAGNOSTICS"
     },
@@ -30934,10 +30972,37 @@
         "server.py:2098 (manage_connector raw create)",
         "server.py:2103 (manage_connector raw update)"
       ],
+      "artifact_ids": [
+        "SS-MCP-DESCRIPTIONS:get_schema_template.description",
+        "SS-MCP-DESCRIPTIONS:get_schema_template.parameters",
+        "SS-MCP-DESCRIPTIONS:index_profile_component.description",
+        "SS-MCP-DESCRIPTIONS:index_profile_component.parameters",
+        "SS-MCP-DESCRIPTIONS:infer_profile_fields.description",
+        "SS-MCP-DESCRIPTIONS:infer_profile_fields.parameters",
+        "SS-MCP-DESCRIPTIONS:invoke_boomi_api.description",
+        "SS-MCP-DESCRIPTIONS:invoke_boomi_api.parameters",
+        "SS-MCP-DESCRIPTIONS:manage_component.description",
+        "SS-MCP-DESCRIPTIONS:manage_component.parameters",
+        "SS-MCP-DESCRIPTIONS:manage_connector.description",
+        "SS-MCP-DESCRIPTIONS:manage_connector.parameters",
+        "SS-MCP-DESCRIPTIONS:manage_process.description",
+        "SS-MCP-DESCRIPTIONS:manage_process.parameters",
+        "SS-MCP-DESCRIPTIONS:non_tool_surface_digest",
+        "SS-MCP-DESCRIPTIONS:prepare_component_edit.description",
+        "SS-MCP-DESCRIPTIONS:prepare_component_edit.parameters",
+        "SS-MCP-DESCRIPTIONS:registered_surface_digest",
+        "SS-MCP-DESCRIPTIONS:review_transformation.description",
+        "SS-MCP-DESCRIPTIONS:review_transformation.parameters"
+      ],
       "legacy_guidance": "tool descriptions bless raw process XML as an escape hatch and advertise raw-XML connector create/update",
       "owning_issue": "#160",
       "post_retraction_assertion": "no registered tool description blesses raw process XML.",
       "producer": "server.mcp.list_tools()",
+      "producers": [
+        "server.mcp.list_tools()",
+        "server.mcp.list_tools() [all tools]",
+        "server.mcp.list_{resources,prompts,resource_templates}()"
+      ],
       "surface_class": "Registered MCP tool descriptions and parameter schemas",
       "surface_id": "SS-MCP-DESCRIPTIONS"
     },
@@ -30945,10 +31010,16 @@
       "anchors": [
         "src/boomi_mcp/categories/components/safe_edit_component.py:176-191"
       ],
+      "artifact_ids": [
+        "SS-SAFE-EDIT:COMPONENT_EDIT_RAW_XML_UNSUPPORTED"
+      ],
       "legacy_guidance": "the raw-XML refusal steers callers to manage_component(action='update') with config.xml",
       "owning_issue": "#160",
       "post_retraction_assertion": "the refusal names no full-replacement escape hatch.",
       "producer": "safe_edit_component._validate_patch_shape(...)",
+      "producers": [
+        "safe_edit_component._validate_patch_shape(...)"
+      ],
       "surface_class": "Safe-edit guidance",
       "surface_id": "SS-SAFE-EDIT"
     },
@@ -30959,12 +31030,89 @@
         "src/boomi_mcp/categories/meta_tools.py:4989 (force-clear hint)",
         "src/boomi_mcp/categories/meta_tools.py:5180-5190 (_COMPONENT_CLONE)",
         "src/boomi_mcp/categories/meta_tools.py:8867 (serves _COMPONENT_CREATE)",
-        "src/boomi_mcp/categories/meta_tools.py:8880 (serves _COMPONENT_CLONE)"
+        "src/boomi_mcp/categories/meta_tools.py:8880 (serves _COMPONENT_CLONE)",
+        "server.py:3178 (get_schema_template wrapper docstring)"
+      ],
+      "artifact_ids": [
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=clone",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=certificate",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=certificate.pgp",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=connector-action",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=connector-action|protocol=database.get",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=connector-action|protocol=rest.operation",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=connector-action|protocol=soap.operation",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=connector-settings",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=connector-settings|protocol=database.sqlserver",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=connector-settings|protocol=rest.client",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=connector-settings|protocol=soap.client",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=crossref",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=edistandard",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=flowservice",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=process",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=processproperty",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=processroute",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=profile.db",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=profile.db|protocol=database.read",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=profile.db|protocol=database.stored_procedure_read",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=profile.edi",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=profile.flatfile",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=profile.json",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=profile.xml",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=queue",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=script.mapping",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=script.processing",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=tpcommoptions",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=tpgroup",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=tporganization",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=tradingpartner",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=transform.function",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=transform.map",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=webservice",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=webservice.external",
+        "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=xslt",
+        "SS-SCHEMA-TEMPLATES:resource_type=integration|operation=plan",
+        "SS-SCHEMA-TEMPLATES:resource_type=process",
+        "SS-SCHEMA-TEMPLATES:resource_type=process|operation=create",
+        "SS-SCHEMA-TEMPLATES:resource_type=process|operation=create|protocol=database_to_api_sync",
+        "SS-SCHEMA-TEMPLATES:resource_type=process|operation=create|protocol=sync_pipeline",
+        "SS-SCHEMA-TEMPLATES:resource_type=process|operation=create|protocol=wrapper_subprocess",
+        "SS-SCHEMA-TEMPLATES:schema_name=AuthoringCompileResultV1",
+        "SS-SCHEMA-TEMPLATES:schema_name=AuthoringPlanResultV1",
+        "SS-SCHEMA-TEMPLATES:schema_name=AuthoringRequestV1",
+        "SS-SCHEMA-TEMPLATES:schema_name=IntegrationSpecV1",
+        "SS-SCHEMA-TEMPLATES:schema_name=archetype:api_to_api_sync",
+        "SS-SCHEMA-TEMPLATES:schema_name=archetype:api_to_database_sync",
+        "SS-SCHEMA-TEMPLATES:schema_name=archetype:database_to_api_sync",
+        "SS-SCHEMA-TEMPLATES:schema_name=archetype:http_listener_to_db",
+        "SS-SCHEMA-TEMPLATES:schema_name=archetype:http_listener_to_rest",
+        "SS-SCHEMA-TEMPLATES:schema_name=design_doctrine",
+        "SS-SCHEMA-TEMPLATES:schema_name=design_pattern:component_profile_reuse",
+        "SS-SCHEMA-TEMPLATES:schema_name=design_pattern:cross_cutting_framework_services",
+        "SS-SCHEMA-TEMPLATES:schema_name=design_pattern:inline_vs_branch_cache_invocation",
+        "SS-SCHEMA-TEMPLATES:schema_name=design_pattern:microservice_vs_monolith_decomposition",
+        "SS-SCHEMA-TEMPLATES:schema_name=design_pattern:migration_pattern_templating",
+        "SS-SCHEMA-TEMPLATES:schema_name=design_pattern:native_over_custom_scripting",
+        "SS-SCHEMA-TEMPLATES:schema_name=design_pattern:process_route_fanout",
+        "SS-SCHEMA-TEMPLATES:schema_name=design_pattern:unit_testing_via_swappable_data_source",
+        "SS-SCHEMA-TEMPLATES:schema_name=design_pattern:wrapper_subprocess_separation",
+        "SS-SCHEMA-TEMPLATES:schema_name=recipe_contributions",
+        "SS-SCHEMA-TEMPLATES:schema_name=script_dataprocess",
+        "SS-SCHEMA-TEMPLATES:schema_name=workflow:compose_multi_target_integration",
+        "SS-SCHEMA-TEMPLATES:schema_name=workflow:create_and_deploy_process",
+        "SS-SCHEMA-TEMPLATES:schema_name=workflow_sequences",
+        "SS-SCHEMA-TEMPLATES:walked_surface_digest",
+        "SS-SCHEMA-TEMPLATES:wrapper_docstring"
       ],
       "legacy_guidance": "served templates carry type=\"process\" raw XML, the raw_xml_escape_hatch text, and legacy process protocols",
       "owning_issue": "#160",
-      "post_retraction_assertion": "no served template emits a process-typed raw XML skeleton or a raw-XML escape-hatch instruction.",
+      "post_retraction_assertion": "no served template emits a process-typed raw XML skeleton or a raw-XML escape-hatch instruction, AND no template advertises a legacy process protocol (database_to_api_sync / wrapper_subprocess / sync_pipeline).",
       "producer": "meta_tools.get_schema_template_action(...)",
+      "producers": [
+        "meta_tools.get_schema_template_action(...)",
+        "meta_tools.get_schema_template_action(...) [all axes]",
+        "server.get_schema_template.__doc__"
+      ],
       "surface_class": "get_schema_template templates",
       "surface_id": "SS-SCHEMA-TEMPLATES"
     },
@@ -30975,10 +31123,20 @@
         "src/boomi_mcp/categories/meta_tools.py:5763 (invoke_api)",
         "src/boomi_mcp/categories/meta_tools.py:5811 (transport interpolation)"
       ],
+      "artifact_ids": [
+        "SS-RAW-API:RAW_WRITE_CONFIRMATION_REQUIRED",
+        "SS-RAW-API:component_typed_alternatives",
+        "SS-RAW-API:component_update_classification"
+      ],
       "legacy_guidance": "the raw invoker is type-unrestricted, so POST/PUT to /Component can mint or replace a process; classification splits its own copy of the endpoint while transport interpolates the raw string",
       "owning_issue": "#160",
       "post_retraction_assertion": "ONE canonical endpoint parser feeds classification, ID extraction AND transport; every update-shaped call runs the two-sided process check; `bulk` is matched before the <id> arm and never treated as a componentId.",
       "producer": "meta_tools._raw_write_confirmation_guard / _classify_raw_api_request / _typed_alternatives_for_endpoint",
+      "producers": [
+        "meta_tools._classify_raw_api_request('POST', '/Component/abc')",
+        "meta_tools._raw_write_confirmation_guard(...)",
+        "meta_tools._typed_alternatives_for_endpoint('/Component/abc')"
+      ],
       "surface_class": "Raw-API catalog and typed-alternative entries",
       "surface_id": "SS-RAW-API"
     },
@@ -30986,10 +31144,20 @@
       "anchors": [
         "src/boomi_mcp/categories/meta_tools.py:10145 (list_capabilities_action)"
       ],
+      "artifact_ids": [
+        "SS-CAPABILITY-CATALOG:authoring_contract",
+        "SS-CAPABILITY-CATALOG:design_doctrine",
+        "SS-CAPABILITY-CATALOG:operating_doctrine",
+        "SS-CAPABILITY-CATALOG:tools",
+        "SS-CAPABILITY-CATALOG:workflows"
+      ],
       "legacy_guidance": "catalog entries, workflow steps and hints reference legacy process protocols and the raw-XML route",
       "owning_issue": "#160",
       "post_retraction_assertion": "no catalog entry, workflow step or hint references a legacy process_kind or the raw process XML route.",
       "producer": "meta_tools.list_capabilities_action()",
+      "producers": [
+        "meta_tools.list_capabilities_action()"
+      ],
       "surface_class": "list_capabilities catalog entries, workflows and hints",
       "surface_id": "SS-CAPABILITY-CATALOG"
     },
@@ -30998,10 +31166,20 @@
         "src/boomi_mcp/authoring/contract.py:335 (list_archetype_registry)",
         "src/boomi_mcp/categories/integration_authoring.py:205 (list_integration_archetypes_action)"
       ],
+      "artifact_ids": [
+        "SS-ARCHETYPE-CATALOG:api_to_api_sync",
+        "SS-ARCHETYPE-CATALOG:api_to_database_sync",
+        "SS-ARCHETYPE-CATALOG:database_to_api_sync",
+        "SS-ARCHETYPE-CATALOG:http_listener_to_db",
+        "SS-ARCHETYPE-CATALOG:http_listener_to_rest"
+      ],
       "legacy_guidance": "every registered archetype whose emitted spec carries a legacy process_kind advertises it through the served descriptor",
       "owning_issue": "#159",
       "post_retraction_assertion": "no served archetype descriptor emits or documents a legacy process_kind.",
       "producer": "authoring.contract.list_archetype_registry()",
+      "producers": [
+        "integration_authoring.list_integration_archetypes_action()"
+      ],
       "surface_class": "Served archetype descriptors and parameter schemas",
       "surface_id": "SS-ARCHETYPE-CATALOG"
     }
