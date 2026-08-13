@@ -1108,25 +1108,36 @@ def test_the_endpoint_predicate_has_no_marginal_false_positives():
         return bool(inv._COMPONENT_ENDPOINT_RE.search(value)
                     or inv._COMPONENT_COLLECTION_RE.match(value))
 
+    # Identity is the OCCURRENCE — path, position and the complete literal.
+    # Truncating to 80 characters collapsed two distinct literals in one file
+    # (a long placeholder prefix, then `/Component` in one and `Component` in
+    # the other) into the same tuple, so the set comparison hid the extra
+    # `after` hit and this guard passed over a marginal match. Truncate only in
+    # the failure message.
     before, after = [], []
     for path, text in inv.python_sources().items():
         for node in _ast.walk(_ast.parse(text, filename=path)):
             if isinstance(node, _ast.Constant) and isinstance(node.value, (str, bytes)):
                 value = (node.value if isinstance(node.value, str)
                          else node.value.decode("utf-8", "ignore"))
+                occurrence = (path, getattr(node, "lineno", -1),
+                              getattr(node, "col_offset", -1), value)
                 if _raw_hit(value):
-                    before.append((path, value[:80]))
+                    before.append(occurrence)
                 if inv._mentions_component_endpoint(value):
-                    after.append((path, value[:80]))
+                    after.append(occurrence)
 
     # A slack bound (`<= 2`) would let ONE new false positive through while the
     # test still passed, and this is the precision guard the documented
     # re-baselining flow leans on. Compare the sets instead: normalisation may
     # only widen recall over literals the anchors already miss for a REASON
     # (a placeholder), never manufacture a new prose match.
-    assert set(after) == set(before), (
+    marginal = set(after) - set(before)
+    assert not marginal, (
         "placeholder normalisation introduced %d marginal match(es): %s"
-        % (len(set(after) - set(before)), sorted(set(after) - set(before))[:5]))
+        % (len(marginal),
+           [(p, line, value[:80]) for p, line, _col, value in sorted(marginal)[:5]]))
+    assert len(after) == len(before), (len(before), len(after))
 
 
 def test_the_non_tool_mcp_surfaces_are_frozen(derived):
