@@ -931,6 +931,47 @@ def test_the_scan_contract_scopes_its_ordering_claim_to_what_it_does(baseline):
     assert "every scope" not in ordering[0], ordering
 
 
+@pytest.mark.parametrize("label,body,expect", [
+    ("an import published with `global`",
+     "def m12_12_init():\n"
+     "    global _m12_12_gpost\n"
+     "    from httpx import post as _m12_12_gpost\n"
+     "def m12_12_push(u, x):\n"
+     "    return _m12_12_gpost(u, content=x)\n",
+     "http_client_call"),
+    ("a legacy alias published with `global`",
+     "def m12_12_init2():\n"
+     "    global _m12_12_gb\n"
+     "    from ...categories.integration_builder import "
+     "build_structured_update_xml as _m12_12_gb\n"
+     "def m12_12_call(c, x):\n"
+     "    return _m12_12_gb(c, x)\n",
+     "legacy_transitive_call"),
+    ("an aliased direct HTTP import with a dynamic URL",
+     "from httpx import post as _m12_12_p9\n"
+     "def m12_12_p(u, x):\n"
+     "    return _m12_12_p9(u, content=x)\n",
+     "http_client_call"),
+])
+def test_a_name_published_outward_survives_scope_restore(census_only, label, body,
+                                                         expect):
+    """`global`/`nonlocal` bind an ENCLOSING namespace.
+
+    Snapshotting a function's resolution maps to stop a local import clobbering
+    module state erased these too, so `def init(): global post; from httpx
+    import post` followed by a later `post(url, …)` emitted neither a row nor
+    residue — and with a dynamic URL there is no literal to fall back on. The
+    aliased case is parametrised alongside because the verb test matched the
+    LOCAL name: `_p(url, …)` is still `httpx.post`.
+    """
+    sources = dict(inv.python_sources())
+    target = "src/boomi_mcp/categories/components/processes.py"
+    sources[target] = sources[target] + "\n\n" + body
+    diff = inv.compare(inv.build_inventory(sources=sources, include_served=False),
+                       census_only)
+    assert expect in {r.split(" | ")[0] for r in diff.added}, (label, diff.report())
+
+
 def test_a_function_local_import_does_not_erase_a_later_module_level_edge(census_only):
     """`_index_bindings` routes imports through `_bind_import*`, which write
     scanner-wide — so a function-local `from … import X as N` clobbered the

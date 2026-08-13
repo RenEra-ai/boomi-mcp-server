@@ -807,6 +807,20 @@ class _Scanner(ast.NodeVisitor):
         targets_component = "/component" in url.lower()
         return "%s %s%s" % (method, url, " [COMPONENT-API]" if targets_component else "")
 
+    def _http_verb(self, func: ast.AST, base: str) -> bool:
+        """True when the callee is an HTTP write verb, alias or not.
+
+        `from httpx import post as _p; _p(url, …)` spells the verb `_p`, so a
+        bare name test missed it — including the `global`-published form, where
+        the endpoint is dynamic and there is no literal to fall back on as
+        residue. The import origin already records the original name.
+        """
+        if base in _HTTP_WRITE_VERBS:
+            return True
+        if isinstance(func, ast.Name):
+            return self._import_origin.get(func.id, "") in _HTTP_WRITE_VERBS
+        return False
+
     def _is_http_client(self, func: ast.AST) -> bool:
         """True when a call's receiver traces back to an HTTP client module.
 
@@ -963,15 +977,24 @@ class _Scanner(ast.NodeVisitor):
         # edge, with neither a row nor residue. Snapshot the RESOLUTION maps
         # only: `_aliases` is deliberately left accumulating because
         # `_ResidueScanner` is handed it and restoring it drops eight rows.
+        body_nodes = _scope_body_nodes(node)
+        # `global`/`nonlocal` names are bound in an ENCLOSING namespace, so the
+        # restore must not treat them as local: `def init(): global post; from
+        # httpx import post` genuinely publishes `post` outward, and erasing it
+        # made a later `post(url, …)` emit neither a row nor residue.
+        declared = {
+            name
+            for statement in body_nodes
+            if isinstance(statement, (ast.Global, ast.Nonlocal))
+            for name in statement.names
+        }
         saved = (dict(self._qualified_origin), dict(self._module_paths),
                  dict(self._modules), dict(self._import_origin),
                  set(self._imported))
-        self._index_bindings(_scope_body_nodes(node), consts, origins)
+        self._index_bindings(body_nodes, consts, origins)
         for statement in node.body:
             self.visit(statement)
-        (self._qualified_origin, self._module_paths, self._modules,
-         self._import_origin, self._imported) = (
-            saved[0], saved[1], saved[2], saved[3], saved[4])
+        self._restore_scope(saved, declared)
         self._local_origins.pop()
         self._local_consts.pop()
         self._symbols.pop()
@@ -1025,6 +1048,26 @@ class _Scanner(ast.NodeVisitor):
         self._index_bindings(_module_namespace_nodes(node),
                              self._module_consts, self._qualified_origin)
         self.generic_visit(node)
+
+    def _restore_scope(self, saved: Tuple[Any, ...],
+                       declared: "Set[str]") -> None:
+        """Undo a function's local bindings, keeping the ones it published."""
+        for current, previous in (
+                (self._qualified_origin, saved[0]), (self._module_paths, saved[1]),
+                (self._modules, saved[2]), (self._import_origin, saved[3])):
+            for key in list(current):
+                if key in declared:
+                    continue
+                if key in previous:
+                    current[key] = previous[key]
+                else:
+                    del current[key]
+            for key, value in previous.items():
+                current.setdefault(key, value)
+        for name in list(self._imported):
+            if name not in saved[4] and name not in declared:
+                self._imported.discard(name)
+        self._imported.update(saved[4])
 
     def _index_bindings(self, statements: List[ast.AST],
                         consts: Dict[str, str],
@@ -1269,7 +1312,7 @@ class _Scanner(ast.NodeVisitor):
             self._emit("component_xml_write", "%s(...)" % _tail(dotted, 2), node.lineno)
         elif base in self._invokers:
             self._emit("raw_api_invoker", "%s(...)" % base, node.lineno)
-        elif base in _HTTP_WRITE_VERBS and self._is_http_client(node.func):
+        elif self._http_verb(node.func, base) and self._is_http_client(node.func):
             # The TARGET is part of the frozen identity. Keying on the verb
             # alone let an existing `external_transport` route be re-pointed at
             # `/Component` with no census row, no count change and no

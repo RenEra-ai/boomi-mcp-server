@@ -2535,6 +2535,7 @@ value either way.
 | **Precision:** the prepass does not shadow an enclosing binding | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_prepass_does_not_shadow_an_enclosing_binding` |
 | The served ordering claim is scoped to what the scanner does | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_scan_contract_scopes_its_ordering_claim_to_what_it_does` |
 | **Mutation:** a local import does not erase a later module-level edge | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_function_local_import_does_not_erase_a_later_module_level_edge` |
+| **Mutation:** a name published with `global`/`nonlocal` survives scope restore | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_name_published_outward_survives_scope_restore` |
 
 **Darkness.** This slice changes nothing under `src/boomi_mcp/` or `server.py`:
 `git diff 9711a9c0cb6c88dda41ada94d88694915b659f36 -- src/boomi_mcp server.py` is empty. The only
