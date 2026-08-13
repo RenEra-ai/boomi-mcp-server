@@ -806,39 +806,48 @@ def test_a_binding_declared_below_its_use_is_still_resolved(census_only, label, 
     assert kinds & {"legacy_transitive_call", "http_client_call"}, (label, kinds)
 
 
-@pytest.mark.parametrize("label,body", [
+@pytest.mark.parametrize("label,body,expect", [
     ("alias assigned AFTER the nested def that uses it",
      "from ...categories.integration_builder import build_structured_update_xml\n"
      "def outer():\n"
      "    def inner(c, x):\n"
      "        return _m12_12_al(c, x)\n"
      "    _m12_12_al = build_structured_update_xml\n"
-     "    return inner\n"),
-    ("http host assigned AFTER the nested def",
-     "import httpx\n"
-     "def outer3():\n"
-     "    def push(x):\n"
-     "        return httpx.post(_m12_12_h + '/Component', content=x)\n"
-     "    _m12_12_h = 'https://api.boomi.com'\n"
-     "    return push\n"),
+     "    return inner\n",
+     "legacy_transitive_call"),
+    ("import placed AFTER the nested def that uses it",
+     "def outer2():\n"
+     "    def inner(c, x):\n"
+     "        return build_structured_update_xml(c, x)\n"
+     "    from ...categories.integration_builder import build_structured_update_xml\n"
+     "    return inner\n",
+     "legacy_transitive_call"),
+    ("registry import placed AFTER the nested def",
+     "def outer5():\n"
+     "    def render(c):\n"
+     "        return get_process_flow_builder(c).build(c)\n"
+     "    from ..builders import get_process_flow_builder\n"
+     "    return render\n",
+     "renderer_call"),
     ("registry-bound builder assigned AFTER the nested def",
      "from ..builders import PROCESS_FLOW_BUILDERS as _M12_12_R2\n"
      "def outer4():\n"
      "    def render(c):\n"
      "        return _m12_12_b.build(c)\n"
      "    _m12_12_b = _M12_12_R2['sync_pipeline']\n"
-     "    return render\n"),
+     "    return render\n",
+     "renderer_call"),
 ])
 def test_a_function_local_binding_declared_below_its_use_is_resolved(
-        census_only, label, body):
-    """Scope order-insensitivity is claimed for EVERY scope, so it must hold in
-    function bodies too.
+        census_only, label, body, expect):
+    """Order-insensitivity is claimed for EVERY scope and EVERY binding kind.
 
-    Binding local names in traversal order was fail-open, and not merely for a
-    derived sub-row: an alias assigned after a nested `def` made the ENTIRE
-    nested caller vanish — no census row, no residue. Python fixes a scope's
-    local NAMES at compile time, so binding them flow-insensitively is both
-    correct for reachability and conservative.
+    Binding local names in traversal order was fail-open, and not for a derived
+    sub-row: a binding placed after a nested `def` made the ENTIRE nested caller
+    vanish — no census row, no residue. `import` is parametrised here because
+    the first version of this test omitted exactly that kind while the module-
+    scope test covered it, and the omission is what let the module fix ship with
+    its function-scope mirror incomplete.
     """
     sources = dict(inv.python_sources())
     target = "src/boomi_mcp/categories/components/processes.py"
@@ -846,9 +855,36 @@ def test_a_function_local_binding_declared_below_its_use_is_resolved(
     diff = inv.compare(inv.build_inventory(sources=sources, include_served=False),
                        census_only)
     assert not diff.empty(), "%s escaped the freeze entirely" % label
-    kinds = {r.split(" | ")[0] for r in diff.added}
-    assert kinds & {"legacy_transitive_call", "http_client_call", "renderer_call"}, \
-        (label, kinds)
+    assert expect in {r.split(" | ")[0] for r in diff.added}, (label, diff.report())
+
+
+@pytest.mark.parametrize("placement", ["above", "below"])
+def test_a_function_local_http_host_resolves_regardless_of_placement(placement):
+    """Graded on the ROW CONTENT, not the row kind.
+
+    An earlier version asserted only that some `http_client_call` appeared — but
+    the pre-fix scanner already emitted one, merely degraded to
+    `POST <dynamic>`. A kind-set assertion cannot grade a fix whose whole effect
+    is a FIELD of the row, and it passed with the fix reverted.
+    """
+    binding = "    _m12_12_h = 'https://api.boomi.com'\n"
+    body = ("import httpx\n"
+            "def outer3():\n"
+            + (binding if placement == "above" else "")
+            + "    def push(x):\n"
+              "        return httpx.post(_m12_12_h + '/Component', content=x)\n"
+            + ("" if placement == "above" else binding)
+            + "    return push\n")
+    sources = dict(inv.python_sources())
+    target = "src/boomi_mcp/categories/components/processes.py"
+    sources[target] = sources[target] + "\n\n" + body
+    document = inv.build_inventory(sources=sources, include_served=False)
+    rows = [r for r in document["census"]
+            if r["census"] == "http_client_call" and r["symbol"].startswith("outer3")]
+    assert rows, "no http_client_call row for the nested call"
+    assert any("https://api.boomi.com/Component" in r["form"] for r in rows), \
+        "the host did not resolve (%s): %s" % (placement, [r["form"] for r in rows])
+    assert any("[COMPONENT-API]" in r["form"] for r in rows), [r["form"] for r in rows]
 
 
 def test_the_scan_contract_claims_ordering_exclusion_at_every_scope(baseline):

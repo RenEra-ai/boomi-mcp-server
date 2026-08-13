@@ -50,12 +50,19 @@ That is a property of the SOURCE TEXT, and the universe is bounded accordingly:
 * **Statement order is excluded at EVERY scope.** Bindings are pre-indexed
   before any body is scanned: ``visit_Module`` for the module namespace, and
   ``_scoped`` for each function's own locals. Python fixes a scope's local
-  NAMES at compile time and only their values at run time, so a conservative
-  reachability instrument is right to bind flow-insensitively — it
-  over-approximates, which is fail-closed. Binding in traversal order was
-  fail-OPEN in both halves, and not merely for a derived sub-row: an alias
-  assigned after a nested ``def`` made the ENTIRE nested caller vanish, with no
-  row and no residue.
+  NAMES at compile time and only their values at run time, so binding
+  flow-insensitively is the right analysis for reachability. Binding in
+  traversal order was fail-OPEN in both halves, and not merely for a derived
+  sub-row: an alias assigned after a nested ``def`` made the ENTIRE nested
+  caller vanish, with no row and no residue.
+
+  Flow-insensitive in POSITION, not in VALUE: the constant and origin maps are
+  single-valued and last-wins, so a name bound in two branches keeps only the
+  textually last binding. That is not fail-closed — a legacy value bound
+  textually first is lost — and it is a stated limit rather than a claim of
+  safety. Measured at zero occurrences in the scanned corpus (of 58
+  function-local multi-bindings, none is called in scope and none binds a
+  watched symbol or URL).
 * Runtime behaviour is not modelled at all — this instrument reports where the
   legacy paths ARE, and #160 owns enforcement.
 
@@ -924,21 +931,7 @@ class _Scanner(ast.NodeVisitor):
         origins: Dict[str, Tuple[str, str]] = {}
         self._local_consts.append(consts)
         self._local_origins.append(origins)
-        for statement in _scope_body_nodes(node):
-            targets, value = _assign_parts(statement)
-            if value is None:
-                continue
-            literal = self._resolved_str(value)
-            if literal is not None:
-                for tgt in targets:
-                    consts[tgt] = literal
-            if isinstance(value, (ast.Name, ast.Attribute)):
-                qualified = self._qualified_callee(value)
-                if qualified is not None:
-                    for tgt in targets:
-                        origins[tgt] = qualified
-            if self._binds_builder(value):
-                self._builder_vars.update(targets)
+        self._index_bindings(_scope_body_nodes(node), consts, origins)
         self.generic_visit(node)
         self._local_origins.pop()
         self._local_consts.pop()
@@ -972,36 +965,44 @@ class _Scanner(ast.NodeVisitor):
         local defs the round before), so it is fixed for ALL binding kinds here
         rather than one more per round.
         """
-        namespace = _module_namespace_nodes(node)
-        for statement in namespace:
+        self._index_bindings(_module_namespace_nodes(node),
+                             self._module_consts, self._qualified_origin)
+        self.generic_visit(node)
+
+    def _index_bindings(self, statements: List[ast.AST],
+                        consts: Dict[str, str],
+                        origins: Dict[str, Tuple[str, str]]) -> None:
+        """Bind every name a scope introduces, before any body is scanned.
+
+        ONE helper for both scopes on purpose. Module and function prepasses
+        were written separately and immediately diverged: the module one ran
+        three loops (imports, constants, origins/builders) and the function one
+        ran only the last two, so a function-local `import` stayed
+        traversal-ordered and a closure defined above it lost its legacy edge
+        entirely — the same signature that had just been fixed at module scope,
+        one spelling over. A binding kind can no longer be handled at one scope
+        and not the other.
+        """
+        for statement in statements:
             if isinstance(statement, ast.Import):
                 self._bind_import(statement)
             elif isinstance(statement, ast.ImportFrom):
                 self._bind_import_from(statement)
-        for statement in namespace:
+        for statement in statements:
             targets, value = _assign_parts(statement)
             if value is None:
                 continue
-            # LAST binding wins, as Python does — `setdefault` gave the first.
             literal = self._resolved_str(value)
             if literal is not None:
                 for tgt in targets:
-                    self._module_consts[tgt] = literal
-        for statement in namespace:
-            targets, value = _assign_parts(statement)
-            if value is None:
-                continue
+                    consts[tgt] = literal
             if isinstance(value, (ast.Name, ast.Attribute)):
                 qualified = self._qualified_callee(value)
                 if qualified is not None:
                     for tgt in targets:
-                        self._qualified_origin[tgt] = qualified
-            # A registry-bound builder declared BELOW its caller entered
-            # `_builder_vars` only after that caller had been visited, so the
-            # renderer call produced neither a row nor residue.
+                        origins[tgt] = qualified
             if self._binds_builder(value):
                 self._builder_vars.update(targets)
-        self.generic_visit(node)
 
     def _bind_import(self, node: ast.Import) -> None:
         for alias in node.names:
