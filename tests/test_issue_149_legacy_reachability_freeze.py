@@ -1071,6 +1071,7 @@ def test_the_component_endpoint_marker_is_a_path_segment_not_a_substring():
 @pytest.mark.parametrize("literal", [
     "{}Component", "%sComponent", "%sComponent/%s", "{base}Component",
     "${b}Component", "%(base)sComponent", "%sComponent?x=1", "{}Component/{}",
+    "%(base)1sComponent/%(id)s", "%(n)-10.3fComponent",
 ])
 def test_an_interpolated_prefix_does_not_hide_the_component_endpoint(literal):
     """The predicate is normalised, not enumerated.
@@ -1103,15 +1104,29 @@ def test_the_endpoint_predicate_has_no_marginal_false_positives():
     """
     import ast as _ast
 
-    hits = []
+    def _raw_hit(value):
+        return bool(inv._COMPONENT_ENDPOINT_RE.search(value)
+                    or inv._COMPONENT_COLLECTION_RE.match(value))
+
+    before, after = [], []
     for path, text in inv.python_sources().items():
         for node in _ast.walk(_ast.parse(text, filename=path)):
             if isinstance(node, _ast.Constant) and isinstance(node.value, (str, bytes)):
                 value = (node.value if isinstance(node.value, str)
                          else node.value.decode("utf-8", "ignore"))
+                if _raw_hit(value):
+                    before.append((path, value[:80]))
                 if inv._mentions_component_endpoint(value):
-                    hits.append((path, value[:60]))
-    assert len(hits) <= 2, hits
+                    after.append((path, value[:80]))
+
+    # A slack bound (`<= 2`) would let ONE new false positive through while the
+    # test still passed, and this is the precision guard the documented
+    # re-baselining flow leans on. Compare the sets instead: normalisation may
+    # only widen recall over literals the anchors already miss for a REASON
+    # (a placeholder), never manufacture a new prose match.
+    assert set(after) == set(before), (
+        "placeholder normalisation introduced %d marginal match(es): %s"
+        % (len(set(after) - set(before)), sorted(set(after) - set(before))[:5]))
 
 
 def test_the_non_tool_mcp_surfaces_are_frozen(derived):

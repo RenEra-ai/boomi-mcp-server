@@ -1202,7 +1202,7 @@ _COMPONENT_COLLECTION_RE = re.compile(r"^Component(?=$|[?#])")
 #: decide. Measured over 59,763 literals in the scan universe: zero marginal
 #: false positives.
 _PLACEHOLDER_RE = re.compile(
-    r"%\([^)]*\)[sdrifgeExXoc]"      # %(name)s
+    r"%\([^)]*\)[-#0-9.*+ ]*[sdrifgeExXoc]"   # %(name)s, %(name)1s, %(n)-10.3f
     r"|%[-#0-9.*+ ]*[sdrifgeExXoc]"   # %s, %-10.3f
     r"|\{[^{}]*\}"                    # {}, {base}, {0!r:>10}
     r"|\$\{[^}]*\}"                   # ${base}
