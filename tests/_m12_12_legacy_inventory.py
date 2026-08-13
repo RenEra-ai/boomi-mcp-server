@@ -454,6 +454,17 @@ def _resolve_module_path(module: Optional[str], level: int, from_path: str,
     return None
 
 
+def _assign_parts(statement: ast.AST) -> Tuple[List[str], Optional[ast.AST]]:
+    """`(bound names, value)` for `x = …` and `x: T = …`, else `([], None)`."""
+    if isinstance(statement, ast.Assign):
+        return ([t.id for t in statement.targets if isinstance(t, ast.Name)],
+                statement.value)
+    if isinstance(statement, ast.AnnAssign) and statement.value is not None \
+            and isinstance(statement.target, ast.Name):
+        return ([statement.target.id], statement.value)
+    return ([], None)
+
+
 def _module_namespace_nodes(tree: ast.AST) -> List[ast.AST]:
     """Statements that bind the MODULE namespace.
 
@@ -644,6 +655,33 @@ class _Scanner(ast.NodeVisitor):
             right = self._resolved_str(node.right)
             if left is not None and right is not None:
                 return left + right
+        # `"%s/Component" % BASE` — the `+` spelling was folded while four others
+        # stayed `<dynamic>`, so a re-point through them moved no census row.
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+            template = self._resolved_str(node.left)
+            if template is not None:
+                operands = (node.right.elts if isinstance(node.right, ast.Tuple)
+                            else [node.right])
+                values = [self._resolved_str(o) for o in operands]
+                if all(v is not None for v in values):
+                    try:
+                        return template % tuple(values)
+                    except (TypeError, ValueError, KeyError):  # pragma: no cover
+                        return None
+        # `"{}/Component".format(BASE)`
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                and node.func.attr == "format":
+            template = self._resolved_str(node.func.value)
+            if template is not None:
+                args = [self._resolved_str(a) for a in node.args]
+                kwargs = {kw.arg: self._resolved_str(kw.value)
+                          for kw in node.keywords if kw.arg}
+                if all(a is not None for a in args) \
+                        and all(v is not None for v in kwargs.values()):
+                    try:
+                        return template.format(*args, **kwargs)
+                    except (IndexError, KeyError, ValueError):  # pragma: no cover
+                        return None
         if isinstance(node, ast.JoinedStr):
             parts = []
             for value in node.values:
@@ -833,36 +871,59 @@ class _Scanner(ast.NodeVisitor):
         return _resolve_module_path(module, level, self.path, self._known)
 
     def visit_Module(self, node: ast.Module) -> None:  # noqa: N802
-        for statement in _module_namespace_nodes(node):
-            if not isinstance(statement, ast.Assign):
+        """Pre-index EVERY module-namespace binding before visiting any body.
+
+        The scan contract states that intra-file ordering is excluded from
+        equality — and for bindings resolved out of traversal state it was
+        false. A module-level import or alias declared BELOW the function that
+        uses it simply did not exist yet when the call was visited, so swapping
+        two adjacent statements silently removed a real `legacy_transitive_call`
+        row: no census row, no residue, no scalar. Python binds the whole module
+        namespace before any of it runs, so the scanner must too.
+
+        Third instance of this class (constants were pre-indexed one round ago,
+        local defs the round before), so it is fixed for ALL binding kinds here
+        rather than one more per round.
+        """
+        namespace = _module_namespace_nodes(node)
+        for statement in namespace:
+            if isinstance(statement, ast.Import):
+                self._bind_import(statement)
+            elif isinstance(statement, ast.ImportFrom):
+                self._bind_import_from(statement)
+        for statement in namespace:
+            targets, value = _assign_parts(statement)
+            if value is None:
                 continue
-            value = statement.value
-            if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                for tgt in statement.targets:
-                    if isinstance(tgt, ast.Name):
-                        self._module_consts.setdefault(tgt.id, value.value)
+            # LAST binding wins, as Python does — `setdefault` gave the first.
+            literal = self._resolved_str(value)
+            if literal is not None:
+                for tgt in targets:
+                    self._module_consts[tgt] = literal
+        for statement in namespace:
+            targets, value = _assign_parts(statement)
+            if value is None or not isinstance(value, (ast.Name, ast.Attribute)):
+                continue
+            qualified = self._qualified_callee(value)
+            if qualified is not None:
+                for tgt in targets:
+                    self._qualified_origin[tgt] = qualified
         self.generic_visit(node)
 
-    def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
+    def _bind_import(self, node: ast.Import) -> None:
         for alias in node.names:
             local = alias.asname or alias.name.split(".")[0]
             self._modules[local] = alias.name
             resolved = self._resolve_module(alias.name, 0)
             if resolved:
                 self._module_paths[local] = resolved
-        self.generic_visit(node)
 
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
+    def _bind_import_from(self, node: ast.ImportFrom) -> None:
         package = self._resolve_module(node.module, node.level or 0)
         for alias in node.names:
             local = alias.asname or alias.name
             self._imported.add(local)
-            # The ORIGINAL name, so `import x as y` still resolves against the
-            # bearing set — an aliased wrapper is exactly the escape this
-            # closure exists to catch.
             self._import_origin[local] = alias.name
-            # `from . import integration_builder as ib` binds a MODULE, so a
-            # later `ib.build_structured_update_xml(...)` must resolve too.
             submodule = self._resolve_module(
                 "%s.%s" % (node.module, alias.name) if node.module else alias.name,
                 node.level or 0)
@@ -870,17 +931,23 @@ class _Scanner(ast.NodeVisitor):
                 self._module_paths[local] = submodule
             elif package:
                 self._qualified_origin[local] = (package, alias.name)
-            # Non-repo modules matter too: `from urllib import request` binds a
-            # MODULE whose dotted origin is what identifies it as an HTTP client.
             if node.module and not node.level:
                 self._modules.setdefault(local, "%s.%s" % (node.module, alias.name))
             if alias.name in self._watched:
                 self._aliases[local] = alias.name
             if alias.name in self._builders:
                 self._builder_vars.add(local)
+
+    def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
+        self._bind_import(node)
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
+        self._bind_import_from(node)
+        for alias in node.names:
             if alias.name in self._emitters:
                 self._emit("legacy_emitter", "import %s" % alias.name, node.lineno)
-            self._consume(node)
+        self._consume(node)
         self.generic_visit(node)
 
     # -- assignments ---------------------------------------------------
@@ -2481,11 +2548,13 @@ def _schema_template_surfaces(meta_tools: Any) -> Dict[str, Any]:
             # `available_protocols`. Following only `valid_protocols` walked
             # neither, so the templates the issue calls out as "advertising
             # legacy protocols" were never frozen.
-            for protocol in (_protocol_axis(payload) or overview_protocols):
+            # UNION, not `or`: a payload advertising its own protocols used to
+            # suppress the overview's entirely. Non-lossy today, latent otherwise.
+            for protocol in _merged_axis(_protocol_axis(payload), overview_protocols):
                 surfaces["%s|protocol=%s" % (key, protocol)] = \
                     meta_tools.get_schema_template_action(
                         resource_type=resource_type, operation=operation, protocol=protocol)
-            for standard in (_standard_axis(payload) or overview_standards):
+            for standard in _merged_axis(_standard_axis(payload), overview_standards):
                 surfaces["%s|standard=%s" % (key, standard)] = \
                     meta_tools.get_schema_template_action(
                         resource_type=resource_type, operation=operation, standard=standard)
@@ -2551,6 +2620,15 @@ _PROTOCOL_ECHO_KEYS = ("valid_protocols", "process_protocols", "available_protoc
 #: protocol list would have passed a standard as `protocol=`, which the action
 #: does not accept — a dormant miswalk rather than coverage.
 _STANDARD_ECHO_KEYS = ("valid_standards", "available_standards", "standards")
+
+
+def _merged_axis(primary: List[str], fallback: List[str]) -> List[str]:
+    """Order-preserving union of two axis listings."""
+    out = list(primary)
+    for value in fallback:
+        if value not in out:
+            out.append(value)
+    return out
 
 
 def _protocol_axis(payload: Any) -> List[str]:

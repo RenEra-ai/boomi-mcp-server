@@ -764,6 +764,77 @@ def test_the_served_digests_cover_every_surface_not_just_token_matches(derived):
     assert all(len(v) == 64 for v in walked.values())
 
 
+@pytest.mark.parametrize("label,body", [
+    ("alias bound BELOW its use",
+     "from ...categories.integration_builder import build_structured_update_xml\n"
+     "def bridge(c, x):\n"
+     "    return _m12_12_impl(c, x)\n"
+     "_m12_12_impl = build_structured_update_xml\n"),
+    ("import BELOW its use",
+     "def bridge2(c, x):\n"
+     "    return build_structured_update_xml(c, x)\n"
+     "from ...categories.integration_builder import build_structured_update_xml\n"),
+    ("http client imported BELOW its use",
+     "def push(x):\n"
+     "    return _m12_12_hx.post(_m12_12_B + '/Component', content=x)\n"
+     "import httpx as _m12_12_hx\n"
+     "_m12_12_B = 'https://api.boomi.com'\n"),
+    ("annotated constant BELOW its use",
+     "import httpx\n"
+     "def push2(x):\n"
+     "    return httpx.post(_m12_12_B2 + '/Component', content=x)\n"
+     "_m12_12_B2: str = 'https://api.boomi.com'\n"),
+])
+def test_a_binding_declared_below_its_use_is_still_resolved(census_only, label, body):
+    """`scan_contract.excluded_from_equality` SERVES the claim that intra-file
+    ordering does not matter. For bindings resolved out of traversal state it was
+    false: a module-level import or alias declared BELOW the function using it
+    did not exist yet when the call was visited, so swapping two adjacent
+    statements silently removed a real legacy edge — no row, no residue, no
+    scalar. Python binds the whole module namespace before any of it runs.
+
+    A fixture field that overstates its own coverage is the one defect class that
+    propagates: #160 executes from that fixture.
+    """
+    sources = dict(inv.python_sources())
+    target = "src/boomi_mcp/categories/components/processes.py"
+    sources[target] = sources[target] + "\n\n" + body
+    diff = inv.compare(inv.build_inventory(sources=sources, include_served=False),
+                       census_only)
+    assert not diff.empty(), "%s escaped the freeze entirely" % label
+    kinds = {r.split(" | ")[0] for r in diff.added}
+    assert kinds & {"legacy_transitive_call", "http_client_call"}, (label, kinds)
+
+
+@pytest.mark.parametrize("form", [
+    "'%s/Component' % _M12_12_H",
+    "'{}/Component'.format(_M12_12_H)",
+    "_M12_12_H + '/Component'",
+    "f'{_M12_12_H}/Component'",
+])
+def test_repointing_any_composed_http_spelling_breaks_the_freeze(form):
+    """`+` was folded while `%`, `.format()` and the rest stayed `<dynamic>`, so a
+    re-point through them moved no census row."""
+    def _tree(host):
+        sources = dict(inv.python_sources())
+        target = "src/boomi_mcp/categories/components/processes.py"
+        sources[target] = sources[target] + (
+            "\n\nimport httpx\n_M12_12_H = '%s'\n"
+            "def go(x):\n    return httpx.post(%s, content=x)\n" % (host, form))
+        return inv.build_inventory(sources=sources, include_served=False)
+
+    diff = inv.compare(_tree("https://api.boomi.com"), _tree("https://example.test"))
+    assert not diff.empty(), "re-point via %s did not move the census" % form
+
+
+def test_the_axis_walk_unions_payload_and_overview_listings():
+    """An `or` let a payload advertising its own protocols suppress the
+    overview's entirely."""
+    assert inv._merged_axis(["a"], ["b"]) == ["a", "b"]
+    assert inv._merged_axis([], ["b"]) == ["b"]
+    assert inv._merged_axis(["a"], ["a"]) == ["a"]
+
+
 def test_a_simple_assignment_alias_carries_transitive_identity(census_only):
     """`alias = build_structured_update_xml; alias(...)` is a real legacy caller.
 

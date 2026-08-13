@@ -2523,6 +2523,9 @@ value either way.
 | The trading-partner protocol templates are walked | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_trading_partner_protocol_templates_are_walked` |
 | Matrix producers/artifact IDs are derived, not hand-written | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_retraction_matrix_producers_are_derived_not_hand_written` |
 | Matrix anchors cover every producer module | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_retraction_matrix_anchors_cover_every_producer_module` |
+| **Mutation:** a binding declared below its use is still resolved | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_binding_declared_below_its_use_is_still_resolved` |
+| **Mutation:** re-pointing any composed HTTP spelling breaks the freeze | `tests/test_issue_149_legacy_reachability_freeze.py::test_repointing_any_composed_http_spelling_breaks_the_freeze` |
+| The axis walk unions payload and overview listings | `tests/test_issue_149_legacy_reachability_freeze.py::test_the_axis_walk_unions_payload_and_overview_listings` |
 
 **Darkness.** This slice changes nothing under `src/boomi_mcp/` or `server.py`:
 `git diff 9711a9c0cb6c88dda41ada94d88694915b659f36 -- src/boomi_mcp server.py` is empty. The only
