@@ -47,6 +47,17 @@ That is a property of the SOURCE TEXT, and the universe is bounded accordingly:
   limit of a static scan, not an oversight.
 * Non-Python assets are NOT read; their count is frozen by
   :func:`unscanned_assets` so their arrival is a diff.
+* **Statement order is excluded at MODULE scope only.** ``visit_Module``
+  pre-indexes every module-namespace binding, so a module-level import, alias,
+  constant or registry-bound builder declared BELOW its use resolves
+  identically — Python binds the whole module namespace before any of it runs.
+  A function body has no such property, so a FUNCTION-LOCAL binding read by an
+  earlier-declared nested ``def`` is still order-sensitive; closing that half
+  needs flow analysis, not a second prepass. The consequence is bounded: the
+  enclosing function keeps its own census row (the registry lookup, the HTTP
+  call and its endpoint residue all still fire), so what is lost is a derived
+  sub-row, never the presence of the legacy path — the inventory still names
+  the right file and symbol. Zero occurrences in the scanned corpus.
 * Runtime behaviour is not modelled at all — this instrument reports where the
   legacy paths ARE, and #160 owns enforcement.
 
@@ -3201,7 +3212,20 @@ def build_inventory(sources: Optional[Dict[str, str]] = None,
             "frozen_key": ["census", "path", "symbol", "form"],
             "excluded_from_equality": [
                 "evidence_line", "column offsets", "source text", "formatting",
-                "comments and docstrings", "argument values", "intra-file ordering",
+                "comments and docstrings", "argument values",
+                # SCOPED, because the unqualified claim is false. Module-scope
+                # ordering is genuinely excluded: `visit_Module` pre-indexes
+                # every module-namespace binding, so a binding declared below
+                # its use resolves identically. FUNCTION-LOCAL ordering is NOT
+                # excluded, and the module prepass does not transplant —
+                # Python binds a module namespace before any of it runs, and a
+                # function body has no such property, so closing that half
+                # needs flow analysis. Measured consequence: a local binding
+                # read by an earlier-declared nested def loses a derived
+                # sub-row, never the enclosing function's own row, so the
+                # inventory still names the right file and symbol. Zero
+                # occurrences in the scanned corpus.
+                "intra-file ordering of module-namespace bindings",
                 "vendor SDK paths and line numbers",
             ],
             "vocabulary": {k: list(v) for k, v in sorted(vocab.items())},
