@@ -97,4 +97,11 @@ jobs:
       # The single gate. No `continue-on-error`, no `|| true`, no conditional
       # skip: any non-zero exit fails the job.
       - name: Wave gate (manifests, collection floor, required nodes, full suite)
+        # GITHUB_SHA is the commit Actions checked out — for a pull_request that
+        # is the merge commit it built. The gate binds the tree under test to it,
+        # because `pull_request.merge_commit_sha` in the payload is NULLABLE
+        # (GitHub computes mergeability asynchronously). Passed explicitly so the
+        # binding does not depend on ambient environment.
+        env:
+          GITHUB_SHA: ${{ github.sha }}
         run: python scripts/wave_gate.py ci --github-event "$GITHUB_EVENT_PATH"

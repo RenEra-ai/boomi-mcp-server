@@ -420,13 +420,21 @@ def check_checkout_matches_event(repo, context):
     # check when the event carries none reopens exactly what this closes: a
     # commit with parents {head, target} and an arbitrary tree satisfies the
     # shape while containing none of the PR's changes.
+    # `GITHUB_SHA` FIRST. For a `pull_request` event Actions sets it to the merge
+    # commit it checked out, and it is always present — whereas
+    # `pull_request.merge_commit_sha` is NULLABLE (GitHub computes mergeability
+    # asynchronously and sends null until it settles), so requiring the payload
+    # field would reject legitimate PR runs before a single test executed.
     merge_sha = context.get("merge_sha")
+    env_sha = os.environ.get("GITHUB_SHA", "")
+    if not merge_sha and _SHA_RE.match(env_sha):
+        merge_sha = env_sha
     if not merge_sha:
         raise _contract(
             "CHECKOUT_EVENT_MISMATCH",
-            "the checkout at {0} is not the PR head {1}, and the event carries no "
-            "merge_commit_sha to identify the merge it built; the tree under test "
-            "cannot be tied to the event".format(
+            "the checkout at {0} is not the PR head {1}, and neither GITHUB_SHA "
+            "nor merge_commit_sha identifies the merge that was built; the tree "
+            "under test cannot be tied to the event".format(
                 head[:12], (event_head or "?")[:12]
             ),
         )

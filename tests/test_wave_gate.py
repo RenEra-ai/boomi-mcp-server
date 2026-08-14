@@ -1622,13 +1622,14 @@ def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
 # §6 architect-review findings
 # ===========================================================================
 
-def test_the_checkout_must_be_the_tree_the_event_describes(tmp_path):
+def test_the_checkout_must_be_the_tree_the_event_describes(tmp_path, monkeypatch):
     """§6 finding 1. Baseline from one place, evidence from another.
 
     Without this the event can describe a PR carrying an illegal rewrite while
     the gate validates some other, valid checkout. GitHub's own actions keep the
     two in step, which is exactly why it must be asserted rather than assumed.
     """
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
     repo, base = _seeded(tmp_path)
     head = _commit(repo, "the real head")
     other = _commit(repo, "a different commit that is checked out")
@@ -1918,10 +1919,11 @@ def test_a_file_that_cannot_be_hashed_fails_closed(tmp_path, monkeypatch):
     assert "cannot fingerprint" in excinfo.value.message
 
 
-def test_a_pr_checkout_must_be_the_merge_commit_the_event_names(tmp_path):
+def test_a_pr_checkout_must_be_the_merge_commit_the_event_names(tmp_path, monkeypatch):
     """[Standard] Parentage proves shape, not content: a commit with exactly
     {head, target} as parents but the TARGET's tree — omitting every change the
     PR makes — satisfied the old check."""
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
     repo, base = _seeded(tmp_path)
     _run_git(repo, "checkout", "-q", "-b", "feature")
     head = _commit(repo, "feature work")
@@ -1986,7 +1988,38 @@ def test_a_renderer_raising_unittest_SkipTest_is_a_failure():
         corpus.CASE_REGISTRY.update(original)
 
 
-def test_a_pr_checkout_without_an_authoritative_merge_sha_is_refused(tmp_path):
+def test_a_null_merge_commit_sha_falls_back_to_GITHUB_SHA(tmp_path, monkeypatch):
+    """`pull_request.merge_commit_sha` is NULLABLE.
+
+    GitHub computes mergeability asynchronously and sends null until it settles,
+    while `actions/checkout` still checks out `refs/pull/N/merge` — so requiring
+    the payload field would reject legitimate PR runs before a test executed.
+    Actions always sets `GITHUB_SHA` to the merge commit it built.
+    """
+    repo, base = _seeded(tmp_path)
+    _run_git(repo, "checkout", "-q", "-b", "feature")
+    head = _commit(repo, "feature work")
+    _run_git(repo, "checkout", "-q", "main")
+    target = _commit(repo, "target")
+    _run_git(repo, "-c", "user.email=g@e.invalid", "-c", "user.name=g",
+             "merge", "-q", "--no-edit", head)
+    merge = _git_out(repo, "rev-parse", "HEAD")
+
+    ctx = {"kind": "pull_request", "target": target, "event_head": head,
+           "merge_sha": None}
+    monkeypatch.setenv("GITHUB_SHA", merge)
+    gate.check_checkout_matches_event(str(repo), ctx)      # accepted
+
+    # ...but a GITHUB_SHA that is not this checkout is still refused.
+    monkeypatch.setenv("GITHUB_SHA", "9" * 40)
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_checkout_matches_event(str(repo), ctx)
+    assert excinfo.value.code == "CHECKOUT_EVENT_MISMATCH"
+
+
+def test_a_pr_checkout_without_an_authoritative_merge_sha_is_refused(
+    tmp_path, monkeypatch
+):
     """Parentage is not evidence, so its absence is not a licence.
 
     Falling back to a parent-only check when the event carries no
@@ -1994,6 +2027,11 @@ def test_a_pr_checkout_without_an_authoritative_merge_sha_is_refused(tmp_path):
     parents {head, target} and an arbitrary tree satisfies the shape while
     containing none of the PR's changes.
     """
+    # Explicitly ABSENT, not merely unset here: this suite runs inside Actions,
+    # where GITHUB_SHA is always populated, and a test that depends on the
+    # ambient environment passes locally and fails on the runner.
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
+
     repo, base = _seeded(tmp_path)
     _run_git(repo, "checkout", "-q", "-b", "feature")
     head = _commit(repo, "feature work")
@@ -2009,7 +2047,7 @@ def test_a_pr_checkout_without_an_authoritative_merge_sha_is_refused(tmp_path):
              "merge_sha": None},
         )
     assert excinfo.value.code == "CHECKOUT_EVENT_MISMATCH"
-    assert "no merge_commit_sha" in excinfo.value.message
+    assert "neither GITHUB_SHA" in excinfo.value.message
 
 
 # ===========================================================================
