@@ -1595,6 +1595,9 @@ def test_every_diagnostic_code_the_gate_can_raise_is_documented():
     source = (_ROOT / "scripts" / "wave_gate.py").read_text(encoding="utf-8")
     raised = set(_re.findall(r'_(?:contract|invalid)\(\s*\n?\s*"([A-Z_]+)"', source))
     assert len(raised) >= 20, sorted(raised)
+    # Codes the gate emits without raising (the last-resort diagnostic fallback)
+    # are part of the same stderr contract and must be documented too.
+    raised |= set(gate.EMIT_ONLY_CODES)
 
     doc = (_ROOT / "docs" / "architecture" / "ENDGAME_VERIFICATION_GATE.md").read_text(
         encoding="utf-8"
@@ -2030,7 +2033,7 @@ def test_the_phase_boundary_never_inspects_a_hostile_exception():
     assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
 
 
-def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero():
+def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 
     Four rounds each found a different special method by which a hostile
@@ -2058,6 +2061,11 @@ def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero():
         assert gate.main(["manifests", "--base", "HEAD"]) == 1
     finally:
         gate.execute = original
+
+    # The stderr contract holds even here: the first token is a documented code,
+    # because a failure nobody can classify is a failure nobody acts on.
+    err = capsys.readouterr().err
+    assert err.split()[0] == "GATE_DIAGNOSTIC_UNRENDERABLE", err
 
 
 def test_the_exit_status_is_recomputed_not_trusted():

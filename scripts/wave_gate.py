@@ -138,6 +138,12 @@ _SCHEMAS = {
 
 SCHEMA_VERSION = 1
 
+#: Codes the gate EMITS without raising them as failures. The stderr contract is
+#: "first token is a documented code", and the last-resort diagnostic fallback
+#: must honour it too — a failure nobody can classify is a failure nobody acts
+#: on. Declared here so the code/doc agreement test can account for it.
+EMIT_ONLY_CODES = ("GATE_DIAGNOSTIC_UNRENDERABLE",)
+
 
 # --------------------------------------------------------------------------
 # Failure plumbing
@@ -2084,7 +2090,11 @@ def main(argv=None):
         try:
             _emit("{0} {1}".format(failure.code, failure.message))
         except BaseException:  # noqa: BLE001
-            _emit("gate failure (diagnostic could not be rendered)")
+            _emit(
+                "GATE_DIAGNOSTIC_UNRENDERABLE the gate failed and its own "
+                "diagnostic could not be rendered; the exit status is "
+                "authoritative"
+            )
         return status
 
 

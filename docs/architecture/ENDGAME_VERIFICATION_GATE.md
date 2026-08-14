@@ -77,7 +77,12 @@ Every failure prints a stable diagnostic code as the first stderr token:
 `PYTEST_PASSED_BELOW_FLOOR` · `GOLDEN_FILE_MISSING` · `GOLDEN_FILE_UNDECLARED` ·
 `GOLDEN_RENDER_FAILED` · `GOLDEN_OUTPUT_SET_MISMATCH` · `GOLDEN_NONDETERMINISTIC` ·
 `GOLDEN_MISMATCH` · `PLAN_FINGERPRINT_PENDING` · `PLAN_FINGERPRINT_MISMATCH` ·
-`WORKTREE_DIRTY`
+`WORKTREE_DIRTY` · `GATE_DIAGNOSTIC_UNRENDERABLE`
+
+The last of those is emitted, never raised: if the gate fails and its own
+diagnostic cannot be rendered, the fallback line still leads with a documented
+code so log and test consumers can classify it. The exit status is decided before
+any message is built, so it is authoritative regardless.
 
 ## 3. Manifest format
 
