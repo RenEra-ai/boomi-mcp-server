@@ -344,8 +344,30 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3.11 -m pytest tests \
   --ignore=tests/kb --collect-only -q -p no:cacheprovider
 ```
 
-Sort the node ids lexicographically, number them from `pytest-000001`, and set
-`minimum_active` / `minimum_collected` to the active row count.
+> **Regeneration is APPEND-ONLY, and this is the step that gets it wrong.**
+> Nobody hand-edits a 9,000-row ledger; they regenerate it. A regeneration that
+> sorts every collected node id and renumbers from `pytest-000001` **repoints
+> every row whose alphabetical position shifted** — measured here: adding 7
+> tests moved **321** existing ids onto different tests, which the gate refuses
+> as `MANIFEST_TRANSITION_ILLEGAL`.
+>
+> Correct procedure: read the previous manifest, keep every existing row's `id`,
+> `node_id`, `state` **and position** verbatim, then append only the genuinely
+> new node ids at the end with the next sequential ids — regardless of where
+> they sort. Raise `minimum_active` by exactly the number appended. Sorting
+> applies **once**, at the bootstrap, to fix the initial order.
+>
+> A node that no longer collects is **not** a regeneration outcome: it is an
+> explicit `active → tombstone` edit by the owning slice, in the change that
+> deletes the test. A generator that silently drops it must fail instead.
+>
+> Verify before committing, with the transition arm and not just the bootstrap
+> arm — the bootstrap arm skips transition checking entirely and will not catch
+> this:
+>
+> ```bash
+> python scripts/wave_gate.py manifests --base <the previous commit>
+> ```
 
 **Appending** a test or golden: add rows at the END with the next ids and state
 `active`, and raise `minimum_active` by exactly the number appended.

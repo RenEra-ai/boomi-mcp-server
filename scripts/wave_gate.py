@@ -697,26 +697,12 @@ def check_bootstrap(repo, baseline, manifests, *, require_flag, flag_given,
     too would make the bootstrap unreachable in CI, so the run that lands the
     manifests could never go green.
     """
-    # Ask the target branch first, when there is one. A PR branched before the
-    # manifests landed keeps a merge base that predates them FOREVER, so the
-    # merge base alone will always say "absent" and always look like a fresh
-    # introduction — even long after the ledger exists on `dev`. The question
-    # that actually decides bootstrap is "do these already exist on the branch
-    # we are merging into?", and only the target tip can answer it.
-    if target is not None and target != baseline:
-        landed = sorted(
-            spec["path"] for spec in _SCHEMAS.values()
-            if _blob_at(repo, target, spec["path"]) is not None
-        )
-        if landed:
-            raise _contract(
-                "BOOTSTRAP_NOT_ALLOWED",
-                "{0} already exist(s) on the target branch ({1}); a stale merge "
-                "base does not make this an introduction. Rebase so the baseline "
-                "carries the manifests and the change is validated as a "
-                "transition.".format(", ".join(landed), target[:12]),
-            )
-
+    # FIRST decide whether a bootstrap is even being claimed. Everything below
+    # this point applies only to a change that presents itself as the
+    # introduction; running any of it against an ordinary transition would
+    # refuse perfectly normal work. (An earlier revision ran the target probe
+    # ahead of this and rejected EVERY post-landing PR whose target had moved
+    # on — the manifests are present at the target for all of them.)
     present = {
         name: _blob_at(repo, baseline, _SCHEMAS[name]["path"]) is not None
         for name in _SCHEMAS
@@ -730,6 +716,29 @@ def check_bootstrap(repo, baseline, manifests, *, require_flag, flag_given,
             "manifests {0} are absent at baseline {1} while the others exist: a "
             "manifest cannot be introduced on its own".format(missing, baseline),
         )
+
+    # A bootstrap IS being claimed. Now ask the target branch, when there is
+    # one: a PR branched before the manifests landed keeps a merge base that
+    # predates them forever, so the merge base alone will always say "absent"
+    # and always look like a fresh introduction — even long after the ledger
+    # exists on `dev`, and even though GitHub checks out `refs/pull/N/merge`,
+    # whose tree HAS them. Only the target tip answers the question that
+    # decides it: do these already exist on the branch we are merging into?
+    if target is not None and target != baseline:
+        landed = sorted(
+            spec["path"] for spec in _SCHEMAS.values()
+            if _blob_at(repo, target, spec["path"]) is not None
+        )
+        if landed:
+            raise _contract(
+                "BOOTSTRAP_NOT_ALLOWED",
+                "{0} already exist(s) on the target branch ({1}) though not at "
+                "the merge base; a stale merge base does not make this an "
+                "introduction. Rebase so the baseline carries the manifests and "
+                "the change is validated as a transition.".format(
+                    ", ".join(landed), target[:12]
+                ),
+            )
 
     for name, spec in _SCHEMAS.items():
         if _path_touched_in_ancestry(repo, baseline, spec["path"]):

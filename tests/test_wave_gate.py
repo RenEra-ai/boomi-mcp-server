@@ -402,6 +402,36 @@ def test_introducing_only_one_manifest_is_refused(tmp_path):
     _expect(_manifests(repo, base, "--bootstrap"), 2, "MANIFEST_MISSING")
 
 
+def test_an_ordinary_pull_request_whose_target_moved_on_is_NOT_a_bootstrap(tmp_path):
+    """Codex Stage-2 r2 [P1]. The target probe must not fire on normal work.
+
+    An earlier revision ran it BEFORE deciding whether a bootstrap was being
+    claimed at all, so any PR whose target had advanced — every PR, once the
+    ledger has landed — was refused with BOOTSTRAP_NOT_ALLOWED even though its
+    merge base already carried the manifests and it was an ordinary transition.
+    """
+    repo, base = _seeded(tmp_path)          # merge base HAS the manifests
+    _run_git(repo, "checkout", "-q", "-b", "feature")
+    head = _commit(repo, "feature work")
+    _run_git(repo, "checkout", "-q", "main")
+    target = _commit(repo, "target advances independently")
+    _run_git(repo, "checkout", "-q", "feature")
+
+    event = tmp_path / "pr.json"
+    event.write_text(json.dumps(
+        {"pull_request": {"head": {"sha": head}, "base": {"sha": target}}}
+    ), encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "wave_gate.py"),
+         "--repo", str(repo), "manifests", "--github-event", str(event),
+         "--event-name", "pull_request"],
+        capture_output=True, text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "BOOTSTRAP" not in proc.stderr
+
+
 def test_a_half_bootstrap_is_refused(tmp_path):
     """Both manifests exist NOW, but only one existed at the baseline.
 
@@ -767,6 +797,36 @@ def test_reordering_or_inserting_before_the_end_is_refused():
     swapped = [dict(_node_row(2), id="pytest-000001"),
                dict(_node_row(1), id="pytest-000002")]
     _transition_fails(base, swapped)
+
+
+def test_a_resorted_regeneration_is_refused():
+    """Codex Stage-2 r2 [P1]. The way this ledger actually gets broken.
+
+    Nobody hand-edits a 9,000-row manifest; they regenerate it. A regeneration
+    that sorts every collected node id and renumbers from 1 REPOINTS every row
+    whose alphabetical position shifted — measured on this repo, adding 7 tests
+    moved 321 existing ids onto different tests. It must be refused, and the
+    documented procedure must preserve existing rows and append instead.
+    """
+    base = [
+        _node_row(1, node_id="tests/a.py::alpha"),
+        _node_row(2, node_id="tests/a.py::gamma"),
+    ]
+    # "beta" sorts between them, so a re-sorted regeneration shifts gamma.
+    resorted = [
+        _node_row(1, node_id="tests/a.py::alpha"),
+        _node_row(2, node_id="tests/a.py::beta"),
+        _node_row(3, node_id="tests/a.py::gamma"),
+    ]
+    _transition_fails(base, resorted,
+                      base_header=_node_header(2, 2), head_header=_node_header(3, 3))
+
+    # The append-only form of the same change is legal: existing ids keep their
+    # node, the newcomer goes at the end regardless of alphabetical order.
+    appended = base + [_node_row(3, node_id="tests/a.py::beta")]
+    assert _transition(base, appended,
+                       base_header=_node_header(2, 2),
+                       head_header=_node_header(3, 3)) == (1, 0)
 
 
 def test_repointing_an_existing_id_is_refused():
