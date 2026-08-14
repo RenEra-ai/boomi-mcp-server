@@ -2040,12 +2040,7 @@ def make_scratch_dir(repo):
         # replacement. Whatever we end up holding is what gets judged.
         fd = os.open(resolved, os.O_RDONLY | _O_DIRECTORY)
         _refuse_scratch_inside_repo(fd, repo)
-        # `..` relative to the scratch descriptor is the REAL parent, whatever the
-        # name says. Held from the start so that the final `rmdir` — the last
-        # destructive operation that still went through a mutable pathname — is
-        # anchored too. After this point no destructive operation resolves a name.
-        parent_fd = os.open("..", os.O_RDONLY | _O_DIRECTORY, dir_fd=fd)
-        return _ScratchDir(resolved, fd, parent_fd, repo)
+        return _ScratchDir(resolved, fd, repo)
     except BaseException:
         shutil.rmtree(candidate, ignore_errors=True)
         raise
@@ -2075,12 +2070,11 @@ class _ScratchDir(object):
     all.
     """
 
-    __slots__ = ("_path", "fd", "_parent_fd", "_repo")
+    __slots__ = ("_path", "fd", "_repo")
 
-    def __init__(self, path, fd, parent_fd, repo):
+    def __init__(self, path, fd, repo):
         self._path = path
         self.fd = fd
-        self._parent_fd = parent_fd
         self._repo = repo
 
     def _binding_holds(self):
@@ -2139,9 +2133,10 @@ class _ScratchDir(object):
         deleted at all, because the directory is already inside the repo when we
         look.
 
-        The final `rmdir` is itself descriptor-relative, against the real parent
-        captured at creation, so NO destructive operation in this class resolves a
-        pathname. A failing `rmdir` is a signal, not noise: it means the directory
+        The final `rmdir` is itself descriptor-relative, against the parent
+        derived from the held descriptor AT DISPOSAL TIME — `..` from the
+        directory we hold is its parent now, so there is no cached handle to go
+        stale. NO destructive operation in this class resolves a pathname. A failing `rmdir` is a signal, not noise: it means the directory
         is no longer where it was, or is no longer empty. Swallowing it and returning True would
         leave an empty directory in the worktree that git does not track, so the
         closing fingerprint would match and the gate would pass — exactly the
@@ -2149,36 +2144,40 @@ class _ScratchDir(object):
         """
         if not self._binding_holds():
             self._close()
-            self._close_parent()
             return False
         try:
             _unlink_tree_at(self.fd)
         except OSError:
             self._close()
-            self._close_parent()
             return False
         if not self._binding_holds():
             self._close()
-            self._close_parent()
+            return False
+        # The parent is derived HERE, from the descriptor we hold, not cached at
+        # construction. A cached handle goes stale the moment anything renames the
+        # original parent — `..` from the held directory is its parent NOW, so
+        # there is no window in which the two can disagree and no stale state to
+        # reason about.
+        try:
+            parent_fd = os.open("..", os.O_RDONLY | _O_DIRECTORY, dir_fd=self.fd)
+        except OSError:
+            self._close()
             return False
         self._close()
         try:
-            os.rmdir(os.path.basename(self._path), dir_fd=self._parent_fd)
+            os.rmdir(os.path.basename(self._path), dir_fd=parent_fd)
         except OSError:
             return False
         finally:
-            self._close_parent()
+            try:
+                os.close(parent_fd)
+            except OSError:
+                pass
         return True
 
     def _close(self):
         try:
             os.close(self.fd)
-        except OSError:
-            pass
-
-    def _close_parent(self):
-        try:
-            os.close(self._parent_fd)
         except OSError:
             pass
 

@@ -2343,6 +2343,43 @@ def test_a_failing_rmdir_is_a_broken_binding_not_a_shrug(tmp_path, monkeypatch):
     assert seen, "the forced failure never fired — the test would be vacuous"
 
 
+def test_disposal_uses_the_scratchs_current_parent_not_a_cached_one(tmp_path, monkeypatch):
+    """A parent handle captured at construction goes stale; `..` never does.
+
+    The scenario: a sibling renames the original parent away, recreates its old
+    pathname, and moves the held scratch back under the recreation. Identity and
+    containment both still hold — the path names our directory and it is still
+    outside the repo — but a parent descriptor captured at construction now names
+    the RENAMED-AWAY directory. With a decoy of the same basename sitting there,
+    `rmdir` would remove the decoy, leave the real scratch behind, and report
+    success.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+
+    scratch = gate.make_scratch_dir(str(repo))
+    basename = os.path.basename(os.fspath(scratch))
+    with scratch.open_for_write("collected.txt") as handle:
+        handle.write("x\n")
+
+    # Rename the parent away, recreate its pathname, move the scratch back under
+    # it, and leave a same-named decoy in the renamed-away directory.
+    moved_parent = tmp_path / "outside-renamed"
+    outside.rename(moved_parent)
+    outside.mkdir()
+    os.rename(str(moved_parent / basename), str(outside / basename))
+    (moved_parent / basename).mkdir()          # the decoy
+
+    assert scratch.dispose() is True
+    # The REAL scratch is gone...
+    assert not (outside / basename).exists()
+    # ...and the unrelated decoy was left alone.
+    assert (moved_parent / basename).is_dir()
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 
