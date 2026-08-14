@@ -167,6 +167,22 @@ def _invalid(code, message):
 # git helpers
 # --------------------------------------------------------------------------
 
+def _c_locale_env():
+    """Environment for any git call whose STDERR the gate INTERPRETS.
+
+    `_refuse_unreadable` matches English phrases like `could not open` and
+    `Permission denied`; under a non-English `LC_MESSAGES` git and libc localise
+    both, the command still exits 0 with the subtree omitted, and the match would
+    silently miss it. Any place that reads git's prose must pin the language it
+    is reading.
+    """
+    env = dict(os.environ)
+    env["LC_ALL"] = "C"
+    env["LANG"] = "C"
+    env["LC_MESSAGES"] = "C"
+    return env
+
+
 def _git(repo, *args, check=True):
     proc = subprocess.run(
         ["git", *args], cwd=str(repo), capture_output=True, text=True,
@@ -233,13 +249,10 @@ def _refuse_ambiguous(repo, rev, code):
     # warning off, and `LC_ALL=C` because a localized git need not produce the
     # English phrase. Both make the probe independent of how the machine happens
     # to be configured rather than trusting a default.
-    env = dict(os.environ)
-    env["LC_ALL"] = "C"
-    env["LANG"] = "C"
     proc = subprocess.run(
         ["git", "-c", "core.warnAmbiguousRefs=true", "rev-parse", "--verify",
          "{0}^{{commit}}".format(rev)],
-        cwd=str(repo), capture_output=True, text=True, env=env,
+        cwd=str(repo), capture_output=True, text=True, env=_c_locale_env(),
     )
     if "is ambiguous" in proc.stderr:
         raise _contract(
@@ -287,7 +300,7 @@ def _status(repo):
     raw_status = subprocess.run(
         ["git", "-c", "core.quotePath=false", "status", "--porcelain",
          "--untracked-files=all", "-z"],
-        cwd=str(repo), capture_output=True,
+        cwd=str(repo), capture_output=True, env=_c_locale_env(),
     )
     _refuse_unreadable(raw_status, "git status")
     status = raw_status.stdout
@@ -347,7 +360,7 @@ def _patch_digest(repo, *extra):
     """SHA-256 of the full binary patch — content-exact, disclosure-free."""
     proc = subprocess.run(
         ["git", "diff", "--binary", "--full-index", *extra],
-        cwd=str(repo), capture_output=True,
+        cwd=str(repo), capture_output=True, env=_c_locale_env(),
     )
     _refuse_unreadable(proc, "git diff")
     return hashlib.sha256(proc.stdout).hexdigest()

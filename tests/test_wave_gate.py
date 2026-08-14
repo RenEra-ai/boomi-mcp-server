@@ -2022,6 +2022,37 @@ def test_benign_git_diagnostics_do_not_disable_the_gate(stderr):
     gate._refuse_unreadable(_Proc(stderr=stderr), "git status")
 
 
+def test_git_stderr_is_read_under_a_pinned_locale(tmp_path, monkeypatch):
+    """[P1] The access-failure match is English; the locale must be pinned.
+
+    Under a non-English `LC_MESSAGES`, git and libc localise both
+    `could not open directory` and `Permission denied` while still exiting 0 with
+    the subtree omitted — so the match would miss it and the fingerprint would
+    compare equal across a real mutation.
+    """
+    assert gate._c_locale_env()["LC_ALL"] == "C"
+    assert gate._c_locale_env()["LC_MESSAGES"] == "C"
+
+    # And the env really reaches the subprocesses whose stderr is interpreted.
+    seen = []
+    real_run = gate.subprocess.run
+
+    def _spy(argv, **kwargs):
+        if argv[:1] == ["git"] and any(
+            a in ("status", "diff", "rev-parse") for a in argv
+        ):
+            seen.append((argv, (kwargs.get("env") or {}).get("LC_ALL")))
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(gate.subprocess, "run", _spy)
+    repo, _base = _seeded(tmp_path)
+    gate._status(str(repo))
+    interpreted = [(argv, loc) for argv, loc in seen
+                   if "status" in argv or "diff" in argv]
+    assert interpreted, "no interpreted git call observed"
+    assert all(loc == "C" for _argv, loc in interpreted), interpreted
+
+
 def test_a_nonzero_git_exit_still_refuses():
     with pytest.raises(gate.GateFailure):
         gate._refuse_unreadable(_Proc(stderr=b"boom", returncode=128), "git diff")
