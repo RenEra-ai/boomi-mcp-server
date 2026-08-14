@@ -1969,25 +1969,28 @@ def execute(args):
     except GateFailure as exc:
         failure = exc
     finally:
-        scratch_path = tmpdir.release()
-        if scratch_path is not None:
-            shutil.rmtree(scratch_path, ignore_errors=True)
+        disposed = tmpdir.dispose()
 
-    # A broken binding is a GATE FAILURE, not a cleanup nuisance. It means the
-    # name the gate wrote through stopped denoting the directory that passed the
-    # containment check, so the run's writes cannot be placed and the closing
-    # fingerprint cannot speak for them. Reported like any other hygiene failure:
-    # it never displaces an earlier, more specific failure.
-    if scratch_path is None:
-        retargeted = _contract(
+    # A broken binding is a GATE FAILURE, not a cleanup nuisance — and it is
+    # recorded as PENDING rather than raised here, because the closing
+    # fingerprint below is exactly the evidence this path needs. Raising
+    # immediately would skip it on the one route where a repository mutation is
+    # most plausible, which is also what makes `dispose()` refuse to delete:
+    # whatever the gate wrote through the changed name STAYS on disk, so the
+    # fingerprint can see it and report `WORKTREE_DIRTY`. Deleting it here would
+    # destroy the only evidence that anything happened.
+    if not disposed and failure is None:
+        failure = _contract(
             "SCRATCH_RETARGETED",
             "the scratch directory was replaced while the gate was running; the "
             "gate's own writes cannot be accounted for, and nothing was removed "
             "through the changed name.",
         )
-        if failure is None:
-            raise retargeted
-        _emit("{0} {1}".format(retargeted.code, retargeted.message))
+    elif not disposed:
+        _emit(
+            "SCRATCH_RETARGETED the scratch directory was replaced while the gate "
+            "was running; nothing was removed through the changed name."
+        )
 
     # UNCONDITIONAL, including after a failure — a failing test is exactly when
     # the tree is most likely to have been disturbed, and skipping the check on
@@ -2000,6 +2003,7 @@ def execute(args):
         if failure is None:
             raise
         _emit("{0} {1}".format(hygiene.code, hygiene.message))
+
 
     if failure is not None:
         raise failure
@@ -2029,14 +2033,21 @@ def make_scratch_dir(repo):
     candidate = tempfile.mkdtemp(prefix="wave-gate-")
     try:
         resolved = os.path.realpath(candidate)
-        _refuse_scratch_inside_repo(resolved, repo)
-        return _ScratchDir(resolved, os.open(resolved, os.O_RDONLY | _O_DIRECTORY))
+        # Open FIRST, validate the OPENED OBJECT second. Validating the path and
+        # then opening it leaves a window in which the parent is retargeted
+        # between the two, so the descriptor lands on the replacement — and every
+        # later stat/fstat comparison then agrees, because both sides name the
+        # replacement. Whatever we end up holding is what gets judged.
+        fd = os.open(resolved, os.O_RDONLY | _O_DIRECTORY)
+        _refuse_scratch_inside_repo(fd, repo)
+        return _ScratchDir(resolved, fd)
     except BaseException:
         shutil.rmtree(candidate, ignore_errors=True)
         raise
 
 
 _O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
 class _ScratchDir(object):
@@ -2096,42 +2107,79 @@ class _ScratchDir(object):
             return os.fdopen(handle, "w")
         return open(os.path.join(self, name), "w")
 
-    def release(self):
-        """Close the descriptor and return the path IF it still denotes it.
+    def dispose(self):
+        """Remove the scratch through the DESCRIPTOR, or remove nothing at all.
 
-        Returns None when the binding broke, so the caller removes nothing: a
-        blind `rmtree` through a retargeted name would delete a directory inside
-        the repository, turning a hygiene failure into data loss.
+        Returns True when the directory was disposed of cleanly, False when the
+        binding broke — and False means nothing was deleted, deliberately. Two
+        reasons, both load-bearing:
+
+        * Deleting through a retargeted name would delete a directory INSIDE the
+          repository, turning a hygiene failure into data loss.
+        * Whatever the gate wrote must STAY on disk, because the closing
+          worktree fingerprint is the evidence that something happened. A
+          cleanup that tidied it away would erase the only trace and leave the
+          gate green over a tree it had written into.
+
+        Contents are unlinked relative to the held descriptor, never by
+        pathname, so a parent swapped mid-cleanup cannot redirect the deletion.
+        Only the final `rmdir` of the (now empty) directory goes by name, and
+        only while the binding still holds: an empty directory carries no data
+        and git does not track one.
         """
         try:
             path = self.__fspath__()
         except GateFailure:
             path = None
-        finally:
+        if path is not None:
             try:
-                os.close(self.fd)
+                _unlink_tree_at(self.fd)
             except OSError:
-                pass
-        return path
+                path = None
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
+        if path is None:
+            return False
+        try:
+            os.rmdir(path)
+        except OSError:
+            pass
+        return True
 
 
-def _refuse_scratch_inside_repo(candidate, repo):
-    """Ask the FILESYSTEM whether the scratch is inside the repo, not the spelling.
+def _unlink_tree_at(dirfd):
+    """Recursively empty a directory using ONLY descriptor-relative operations."""
+    for entry in os.scandir(dirfd):
+        if entry.is_dir(follow_symlinks=False):
+            child = os.open(
+                entry.name, os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW, dir_fd=dirfd
+            )
+            try:
+                _unlink_tree_at(child)
+            finally:
+                os.close(child)
+            os.rmdir(entry.name, dir_fd=dirfd)
+        else:
+            os.unlink(entry.name, dir_fd=dirfd)
 
-    `candidate` must already be resolved — the caller checks and uses the same path.
 
-    A lexical `realpath().startswith(root + os.sep)` test is fail-open on any
-    case-insensitive filesystem — default macOS included — because `realpath()`
-    preserves the spelling it was given: with `TMPDIR=/users/.../repo` against a
-    repo reported as `/Users/.../repo`, the prefix comparison says "outside"
-    while the directory is physically INSIDE the worktree. Measured on this
-    machine: `lexical check would refuse: False`, `PHYSICALLY inside the repo:
-    True` — precisely the case this function exists to reject.
+def _refuse_scratch_inside_repo(fd, repo):
+    """Decide containment for the OPENED DIRECTORY, walking real parents.
 
-    So containment is decided by `(st_dev, st_ino)` identity, which is the
-    filesystem's own answer and is immune to spelling, case-folding, symlinks and
-    any other path variance. A `.` we cannot stat is not proof of safety, so it
-    fails closed rather than assuming the scratch is elsewhere.
+    Two things this deliberately does not do. It does not compare path strings:
+    on a case-insensitive filesystem `realpath()` preserves the spelling it was
+    given, so `TMPDIR=/users/…/repo` against `/Users/…/repo` passes a lexical
+    prefix test while landing physically inside the worktree (measured:
+    `lexical check would refuse: False`, `PHYSICALLY inside the repo: True`).
+    And it does not walk `os.path.dirname()`: that walks the NAME, which a
+    concurrent same-user process can retarget. `..` opened relative to a
+    directory descriptor is the real parent in the real tree, so this climbs the
+    filesystem itself.
+
+    A directory that cannot be stat'd is not evidence of safety, so it fails
+    closed as `SCRATCH_CONTAINMENT_UNPROVEN`.
     """
     try:
         root = os.stat(repo)
@@ -2141,28 +2189,44 @@ def _refuse_scratch_inside_repo(candidate, repo):
             "cannot stat the repository root {0} ({1}), so the scratch directory "
             "cannot be proven to be outside it.".format(repo, exc),
         )
-    current = candidate
-    while True:
+    current = os.dup(fd)
+    try:
+        while True:
+            try:
+                here = os.fstat(current)
+            except OSError as exc:
+                raise _contract(
+                    "SCRATCH_CONTAINMENT_UNPROVEN",
+                    "cannot stat a parent of the scratch directory ({0}) while "
+                    "checking that it lies outside the repository.".format(exc),
+                )
+            if (here.st_dev, here.st_ino) == (root.st_dev, root.st_ino):
+                raise _contract(
+                    "SCRATCH_INSIDE_REPO",
+                    "the scratch directory resolves inside the repository {0}; "
+                    "the gate must not write into the tree it is validating. "
+                    "Point TMPDIR somewhere outside the repository and "
+                    "re-run.".format(repo),
+                )
+            try:
+                parent = os.open("..", os.O_RDONLY | _O_DIRECTORY, dir_fd=current)
+            except OSError as exc:
+                raise _contract(
+                    "SCRATCH_CONTAINMENT_UNPROVEN",
+                    "cannot open the parent of the scratch directory ({0}) while "
+                    "checking that it lies outside the repository.".format(exc),
+                )
+            above = os.fstat(parent)
+            if (above.st_dev, above.st_ino) == (here.st_dev, here.st_ino):
+                os.close(parent)          # `..` of the root is the root: done.
+                return
+            os.close(current)
+            current = parent
+    finally:
         try:
-            here = os.stat(current)
-        except OSError as exc:
-            raise _contract(
-                "SCRATCH_CONTAINMENT_UNPROVEN",
-                "cannot stat {0} ({1}) while checking that the scratch directory "
-                "lies outside the repository.".format(current, exc),
-            )
-        if (here.st_dev, here.st_ino) == (root.st_dev, root.st_ino):
-            raise _contract(
-                "SCRATCH_INSIDE_REPO",
-                "temporary directories resolve inside the repository ({0} is "
-                "within {1}); the gate must not write into the tree it is "
-                "validating. Point TMPDIR somewhere outside the repository and "
-                "re-run.".format(candidate, repo),
-            )
-        parent = os.path.dirname(current)
-        if parent == current:
-            return
-        current = parent
+            os.close(current)
+        except OSError:
+            pass
 
 
 def check_worktree_unchanged(before, after):

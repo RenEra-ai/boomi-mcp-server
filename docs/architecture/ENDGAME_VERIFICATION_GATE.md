@@ -218,9 +218,28 @@ directory that passed the check, and `_ScratchDir.__fspath__` re-proves the bind
 time the value becomes a string. That single chokepoint covers every existing
 `os.path.join(...)`/`shutil.rmtree(...)` call without hardening them one by one; the
 gate's own writes additionally go through the descriptor, which cannot be redirected.
-A broken binding is `SCRATCH_RETARGETED` — a gate failure, not a cleanup nuisance — and
-cleanup then removes NOTHING through the changed name, because deleting through it would
-delete a directory inside the repository.
+The descriptor is acquired BEFORE containment is judged, and it is the opened object that
+gets judged — validating a path and then opening it leaves a window in which the parent is
+retargeted between the two, after which every later comparison agrees because both sides
+name the replacement. Containment itself is decided by climbing `..` through descriptors,
+which walks the real tree rather than the name.
+
+**Containment is not stable, and the gate does not pretend otherwise.** A same-user
+process can move the verified directory itself into the worktree; no amount of descriptor
+anchoring prevents that. What the gate guarantees instead is that it never HIDES the
+consequence, and three properties combine to make that true:
+
+1. A broken binding is `SCRATCH_RETARGETED`, a gate failure.
+2. `dispose()` then removes **nothing** — contents are unlinked relative to the held
+   descriptor, never by name, and a broken binding deletes nothing at all. Deleting
+   through a swapped name would delete inside the repository, and would erase the only
+   trace that anything happened.
+3. Retargeting is recorded as a PENDING failure so the closing worktree fingerprint still
+   runs. Raising immediately would skip it on precisely the path where a repository
+   mutation is most plausible, costing the gate its `WORKTREE_DIRTY` evidence.
+
+So the write survives, the fingerprint sees it, and the gate goes red. That — not stable
+containment — is the property that holds.
 
 **What the fingerprint does NOT defend against, stated plainly.** It is a hygiene check
 against the gate's own writes and against a misconfigured or subverted scratch path. It

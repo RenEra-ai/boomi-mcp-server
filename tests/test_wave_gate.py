@@ -2224,8 +2224,9 @@ def test_a_scratch_retargeted_mid_run_is_refused_not_followed(tmp_path, monkeypa
     assert not (repo / basename / "collected.txt").exists()
 
     # Cleanup removes NOTHING through the changed name — deleting through it
-    # would remove a directory inside the repository.
-    assert scratch.release() is None
+    # would remove a directory inside the repository, and the write must survive
+    # for the closing fingerprint to see it.
+    assert scratch.dispose() is False
     assert (repo / basename).exists()
 
 
@@ -2238,9 +2239,48 @@ def test_a_scratch_whose_binding_holds_is_released_normally(tmp_path, monkeypatc
     scratch = gate.make_scratch_dir(str(repo))
     with scratch.open_for_write("collected.txt") as handle:
         handle.write("x\n")
-    released = scratch.release()
-    assert released is not None and os.path.isdir(released)
-    shutil.rmtree(released, ignore_errors=True)
+    resolved = os.fspath(scratch)
+    assert scratch.dispose() is True
+    assert not os.path.exists(resolved)
+
+
+def test_a_retarget_only_failure_still_reaches_the_closing_fingerprint(tmp_path, monkeypatch):
+    """Retargeting must not short-circuit the check labelled UNCONDITIONAL.
+
+    Raising `SCRATCH_RETARGETED` immediately would skip `check_worktree_unchanged`
+    on the ONE path where a repository mutation is most plausible — the gate
+    would report the retargeting and lose the `WORKTREE_DIRTY` evidence that says
+    what it actually cost. Retargeting is therefore recorded as a pending failure
+    and the closing fingerprint runs first.
+
+    This is also why `dispose()` deletes nothing on a broken binding: the write
+    has to survive for the fingerprint to have something to see.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+
+    scratch = gate.make_scratch_dir(str(repo))
+    basename = os.path.basename(os.fspath(scratch))
+    before = gate._status(str(repo))
+
+    # A sibling retargets the parent at the repository, and the gate's write
+    # lands in the worktree.
+    outside.rename(tmp_path / "outside-moved")
+    os.symlink(str(repo), str(outside), target_is_directory=True)
+    (repo / basename).mkdir()
+    (repo / basename / "leftover.txt").write_text("the gate wrote here\n")
+
+    # Disposal refuses, and crucially leaves the evidence in place...
+    assert scratch.dispose() is False
+    assert (repo / basename / "leftover.txt").exists()
+
+    # ...so the closing fingerprint can still see the tree is dirty.
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_worktree_unchanged(before, gate._status(str(repo)))
+    assert excinfo.value.code == "WORKTREE_DIRTY"
 
 
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):

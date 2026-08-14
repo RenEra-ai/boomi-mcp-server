@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9738,"minimum_collected":9738,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9739,"minimum_collected":9739,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -9752,3 +9752,4 @@
 {"kind":"test","id":"pytest-009751","node_id":"tests/test_wave_gate.py::test_the_scratch_path_returned_is_the_path_that_was_verified","state":"active"}
 {"kind":"test","id":"pytest-009752","node_id":"tests/test_wave_gate.py::test_a_scratch_retargeted_mid_run_is_refused_not_followed","state":"active"}
 {"kind":"test","id":"pytest-009753","node_id":"tests/test_wave_gate.py::test_a_scratch_whose_binding_holds_is_released_normally","state":"active"}
+{"kind":"test","id":"pytest-009754","node_id":"tests/test_wave_gate.py::test_a_retarget_only_failure_still_reaches_the_closing_fingerprint","state":"active"}
