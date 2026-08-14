@@ -1941,10 +1941,7 @@ def execute(args):
         )
         return 0
 
-    # Scratch space lives OUTSIDE the repository — see check_worktree_unchanged.
-    # Removed on every exit, including a failing one, so a red run does not leave
-    # a trail of directories behind on a CI runner or a developer's machine.
-    tmpdir = tempfile.mkdtemp(prefix="wave-gate-")
+    tmpdir = make_scratch_dir(repo)
     failure = None
     try:
         collected = collect_nodes(repo, tmpdir)
@@ -1986,6 +1983,34 @@ def execute(args):
     if failure is not None:
         raise failure
     return 0
+
+
+def make_scratch_dir(repo):
+    """Scratch space, PROVEN to be outside the repository.
+
+    `tempfile.mkdtemp()` honours `TMPDIR`, so with `TMPDIR` pointing at the
+    worktree the gate's scratch is created INSIDE the repository and removed
+    again before the closing fingerprint — leaving the before/after comparison
+    identical while the gate really did write into the tree. Reproduced:
+    `inside_repo=True`, `fingerprint_equal_after_cleanup=True`.
+
+    "Writes only outside the repository" is the structural invariant that the
+    best-effort worktree fingerprint leans on, so it has to be ENFORCED rather
+    than asserted in a comment. Removed on every exit, including a failing one,
+    so a red run leaves no trail.
+    """
+    candidate = tempfile.mkdtemp(prefix="wave-gate-")
+    root = os.path.realpath(repo)
+    resolved = os.path.realpath(candidate)
+    if resolved == root or resolved.startswith(root + os.sep):
+        shutil.rmtree(candidate, ignore_errors=True)
+        raise _contract(
+            "SCRATCH_INSIDE_REPO",
+            "temporary directories resolve inside the repository ({0}); the gate "
+            "must not write into the tree it is validating. Point TMPDIR "
+            "somewhere outside {1} and re-run.".format(resolved, root),
+        )
+    return candidate
 
 
 def check_worktree_unchanged(before, after):

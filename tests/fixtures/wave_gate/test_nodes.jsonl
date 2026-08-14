@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9732,"minimum_collected":9732,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9733,"minimum_collected":9733,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -9746,3 +9746,4 @@
 {"kind":"test","id":"pytest-009745","node_id":"tests/test_wave_gate.py::test_the_phase_boundary_preserves_real_gate_diagnostics","state":"active"}
 {"kind":"test","id":"pytest-009746","node_id":"tests/test_wave_gate.py::test_the_exit_status_is_recomputed_not_trusted","state":"active"}
 {"kind":"test","id":"pytest-009747","node_id":"tests/test_wave_gate.py::test_a_failure_whose_diagnostic_explodes_still_exits_nonzero","state":"active"}
+{"kind":"test","id":"pytest-009748","node_id":"tests/test_wave_gate.py::test_scratch_inside_the_repository_is_refused","state":"active"}

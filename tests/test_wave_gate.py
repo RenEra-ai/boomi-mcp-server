@@ -18,6 +18,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import tempfile
 import sys
 from pathlib import Path
 
@@ -2031,6 +2032,44 @@ def test_the_phase_boundary_never_inspects_a_hostile_exception():
         gate.run_fingerprint_phase(True, _Provider())
     assert excinfo.value.status == 1
     assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+
+
+def test_scratch_inside_the_repository_is_refused(tmp_path, monkeypatch):
+    """The structural invariant is ENFORCED, not asserted.
+
+    `tempfile.mkdtemp()` honours `TMPDIR`, so with it pointing at the worktree
+    the gate's scratch is created INSIDE the repository and removed again before
+    the closing fingerprint — the before/after comparison stays identical while
+    the gate really did write into the tree. Reproduced: `inside_repo=True`,
+    `fingerprint_equal_after_cleanup=True`. Since the best-effort fingerprint
+    leans on this invariant, it has to hold.
+    """
+    repo, _base = _seeded(tmp_path)
+    # `tempfile.gettempdir()` MEMOIZES its answer, so setting the variable in this
+    # warm process is inert on its own. A real gate run is a cold process that
+    # resolves TMPDIR on first use, so clearing the cache is what reproduces the
+    # production path rather than a lucky no-op.
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(repo))
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.make_scratch_dir(str(repo))
+    assert excinfo.value.code == "SCRATCH_INSIDE_REPO"
+    assert excinfo.value.status == 2
+    # ...and nothing was left behind inside the tree.
+    assert not list(repo.glob("wave-gate-*"))
+
+    # A scratch root outside the repository is accepted and really is outside.
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+    created = gate.make_scratch_dir(str(repo))
+    try:
+        assert not os.path.realpath(created).startswith(
+            os.path.realpath(str(repo)) + os.sep
+        )
+    finally:
+        os.rmdir(created)
 
 
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):

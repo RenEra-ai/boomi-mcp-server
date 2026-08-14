@@ -68,7 +68,8 @@ Every failure prints a stable diagnostic code as the first stderr token:
 
 `BASELINE_EVENT_INVALID` · `BASELINE_ZERO_SHA` · `BASELINE_UNAVAILABLE` ·
 `BASELINE_MERGE_BASE_MISSING` · `BASELINE_MERGE_BASE_AMBIGUOUS` ·
-`BOOTSTRAP_NOT_ALLOWED` · `MANIFEST_MISSING` · `MANIFEST_FORMAT_INVALID` ·
+`BOOTSTRAP_NOT_ALLOWED` · `SCRATCH_INSIDE_REPO` · `MANIFEST_MISSING` ·
+`MANIFEST_FORMAT_INVALID` ·
 `MANIFEST_TRANSITION_ILLEGAL` · `MANIFEST_FLOOR_INVALID` ·
 `PYTEST_COLLECTION_FAILED` · `PYTEST_COLLECTION_EMPTY` ·
 `PYTEST_COLLECTION_DUPLICATE` · `PYTEST_COLLECTION_FLOOR` · `PYTEST_NODE_MISSING` ·
@@ -195,7 +196,10 @@ read from the **worktree**, so CI validates the checked-out merge result and a
 local run validates uncommitted work.
 
 **Worktree hygiene is a cross-check, not the guarantee.** The gate's read-only
-property is STRUCTURAL: it writes only under `tempfile.mkdtemp()`, runs children
+property is STRUCTURAL and ENFORCED, not merely asserted: the scratch directory's
+resolved path is checked to be outside the worktree before use (`TMPDIR` can
+otherwise place it inside, and cleanup would then hide the write from the
+fingerprint entirely — `SCRATCH_INSIDE_REPO`). It writes only there, runs children
 with `PYTHONDONTWRITEBYTECODE=1` and `-p no:cacheprovider`, and never invokes a
 mutating git command. The before/after fingerprint (HEAD + porcelain status +
 digests of the full binary patches + a SHA-256 per untracked file) is a runtime
