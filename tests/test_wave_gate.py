@@ -41,6 +41,26 @@ _ZERO = "0" * 40
 _FAKE_BASE = "1" * 40
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_github_sha(monkeypatch):
+    """Scrub `GITHUB_SHA` for every test in this module.
+
+    This suite RUNS inside the workflow it is testing, and that workflow exports
+    `GITHUB_SHA` to the wave-gate step, which passes it into pytest. Every test
+    here that drives `check_checkout_matches_event` against a SYNTHETIC repo
+    would otherwise read the outer checkout's sha and compare it against a
+    temp-repo commit — green locally, red on the runner, for a reason that has
+    nothing to do with the behaviour under test. (Reproduced: two tests failed
+    under `GITHUB_SHA=1111...`.)
+
+    An autouse fixture rather than a `delenv` in each test: remembering to scrub
+    it per test is the same enumeration that has already been got wrong twice.
+    Tests that WANT the variable set it explicitly with `monkeypatch.setenv`,
+    which still wins because it runs after this fixture.
+    """
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures: synthetic manifests and throwaway repositories
 # ---------------------------------------------------------------------------
@@ -1629,7 +1649,6 @@ def test_the_checkout_must_be_the_tree_the_event_describes(tmp_path, monkeypatch
     the gate validates some other, valid checkout. GitHub's own actions keep the
     two in step, which is exactly why it must be asserted rather than assumed.
     """
-    monkeypatch.delenv("GITHUB_SHA", raising=False)
     repo, base = _seeded(tmp_path)
     head = _commit(repo, "the real head")
     other = _commit(repo, "a different commit that is checked out")
@@ -1923,7 +1942,6 @@ def test_a_pr_checkout_must_be_the_merge_commit_the_event_names(tmp_path, monkey
     """[Standard] Parentage proves shape, not content: a commit with exactly
     {head, target} as parents but the TARGET's tree — omitting every change the
     PR makes — satisfied the old check."""
-    monkeypatch.delenv("GITHUB_SHA", raising=False)
     repo, base = _seeded(tmp_path)
     _run_git(repo, "checkout", "-q", "-b", "feature")
     head = _commit(repo, "feature work")
@@ -2037,11 +2055,6 @@ def test_a_pr_checkout_without_an_authoritative_merge_sha_is_refused(
     parents {head, target} and an arbitrary tree satisfies the shape while
     containing none of the PR's changes.
     """
-    # Explicitly ABSENT, not merely unset here: this suite runs inside Actions,
-    # where GITHUB_SHA is always populated, and a test that depends on the
-    # ambient environment passes locally and fails on the runner.
-    monkeypatch.delenv("GITHUB_SHA", raising=False)
-
     repo, base = _seeded(tmp_path)
     _run_git(repo, "checkout", "-q", "-b", "feature")
     head = _commit(repo, "feature work")
