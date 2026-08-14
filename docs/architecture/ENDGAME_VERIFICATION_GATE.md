@@ -205,7 +205,30 @@ st_ino)` identity, NOT path spelling: on a case-insensitive filesystem
 `realpath()` keeps the spelling it was given, so `TMPDIR=/users/…/repo` against
 `/Users/…/repo` passes a lexical prefix test while landing physically inside the
 worktree. An ancestor that cannot be stat'd is not evidence of safety either, so
-that fails closed as `SCRATCH_CONTAINMENT_UNPROVEN`. It writes only there, runs children
+that fails closed as `SCRATCH_CONTAINMENT_UNPROVEN`. The path the gate then uses is the
+resolved one that was checked, never the spelling `mkdtemp()` returned — verifying one
+name and writing through another leaves the used path unproven.
+
+**What the fingerprint does NOT defend against, stated plainly.** It is a hygiene check
+against the gate's own accidental writes and against a misconfigured `TMPDIR`. It is
+NOT a defence against hostile test code, and cannot be: the gate's entire job is to
+EXECUTE this repository's test suite, so any code in `tests/` already has arbitrary
+execution inside the gate's own process tree. Measured, with no symlink, no `TMPDIR`
+and no scratch directory involved at all:
+
+```
+wrote_inside_repo_during_run   : True
+fingerprint_equal_after_cleanup: True
+check_worktree_unchanged       : PASSED (blind)
+modify_then_restore blind      : True
+```
+
+A before/after snapshot is structurally blind to any write that is undone before the
+closing snapshot. Hardening one route to that outcome — descriptor-relative I/O against
+a repointed symlink, say — closes a single path out of unboundedly many while leaving
+the capability untouched, which is the enumeration-instead-of-invariant mistake this
+project has a standing rule against. The honest boundary is: test code is trusted
+because it is executed; the gate defends the tree against ITSELF. It writes only there, runs children
 with `PYTHONDONTWRITEBYTECODE=1` and `-p no:cacheprovider`, and never invokes a
 mutating git command. The before/after fingerprint (HEAD + porcelain status +
 digests of the full binary patches + a SHA-256 per untracked file) is a runtime

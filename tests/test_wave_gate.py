@@ -17,6 +17,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import sys
@@ -2139,6 +2140,44 @@ def test_scratch_containment_that_cannot_be_proven_fails_closed(tmp_path, monkey
         gate.make_scratch_dir(str(repo))
     assert excinfo.value.code == "SCRATCH_CONTAINMENT_UNPROVEN"
     assert excinfo.value.status == 2
+
+
+def test_the_scratch_path_returned_is_the_path_that_was_verified(tmp_path, monkeypatch):
+    """Check one path and write through another and only one of them was proven.
+
+    With `TMPDIR` a symlink, `mkdtemp()` returns a name whose parent can later be
+    repointed. Returning the RESOLVED path means the directory the gate writes
+    into is the same object the containment check cleared — so repointing the
+    symlink afterwards cannot redirect the gate's writes into the worktree.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "real_outside"
+    outside.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(outside, target_is_directory=True)
+
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(link))
+    scratch = gate.make_scratch_dir(str(repo))
+    try:
+        # The returned path carries no symlink component to retarget.
+        assert scratch == os.path.realpath(scratch)
+        assert not scratch.startswith(str(link) + os.sep)
+
+        # Repoint the symlink at the repository, exactly as the finding describes,
+        # and recreate the basename there.
+        basename = os.path.basename(scratch)
+        link.unlink()
+        link.symlink_to(repo, target_is_directory=True)
+        (repo / basename).mkdir()
+
+        # A write through the RETURNED path still lands outside the repository.
+        with open(os.path.join(scratch, "collected.txt"), "w") as handle:
+            handle.write("x\n")
+        assert (outside / basename / "collected.txt").exists()
+        assert not (repo / basename / "collected.txt").exists()
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):

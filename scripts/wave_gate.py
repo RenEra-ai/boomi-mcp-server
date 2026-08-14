@@ -1998,18 +1998,27 @@ def make_scratch_dir(repo):
     best-effort worktree fingerprint leans on, so it has to be ENFORCED rather
     than asserted in a comment. Removed on every exit, including a failing one,
     so a red run leaves no trail.
+
+    The path RETURNED is the resolved one that was checked, not the spelling
+    `mkdtemp()` happened to produce. Verifying one name and then writing through
+    another is its own defect: with `TMPDIR` a symlink, the checked path and the
+    used path are different objects, and only the checked one was ever proven to
+    be outside the tree.
     """
     candidate = tempfile.mkdtemp(prefix="wave-gate-")
     try:
-        _refuse_scratch_inside_repo(candidate, repo)
+        resolved = os.path.realpath(candidate)
+        _refuse_scratch_inside_repo(resolved, repo)
     except BaseException:
         shutil.rmtree(candidate, ignore_errors=True)
         raise
-    return candidate
+    return resolved
 
 
 def _refuse_scratch_inside_repo(candidate, repo):
     """Ask the FILESYSTEM whether the scratch is inside the repo, not the spelling.
+
+    `candidate` must already be resolved — the caller checks and uses the same path.
 
     A lexical `realpath().startswith(root + os.sep)` test is fail-open on any
     case-insensitive filesystem — default macOS included — because `realpath()`
@@ -2032,7 +2041,7 @@ def _refuse_scratch_inside_repo(candidate, repo):
             "cannot stat the repository root {0} ({1}), so the scratch directory "
             "cannot be proven to be outside it.".format(repo, exc),
         )
-    current = os.path.realpath(candidate)
+    current = candidate
     while True:
         try:
             here = os.stat(current)
@@ -2048,7 +2057,7 @@ def _refuse_scratch_inside_repo(candidate, repo):
                 "temporary directories resolve inside the repository ({0} is "
                 "within {1}); the gate must not write into the tree it is "
                 "validating. Point TMPDIR somewhere outside the repository and "
-                "re-run.".format(os.path.realpath(candidate), repo),
+                "re-run.".format(candidate, repo),
             )
         parent = os.path.dirname(current)
         if parent == current:
