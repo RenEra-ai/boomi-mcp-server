@@ -2380,6 +2380,41 @@ def test_disposal_uses_the_scratchs_current_parent_not_a_cached_one(tmp_path, mo
     assert (moved_parent / basename).is_dir()
 
 
+def test_disposal_removes_the_entry_that_is_the_scratch_not_its_old_name(
+    tmp_path, monkeypatch
+):
+    """A remembered basename is just another stale name.
+
+    The scratch is moved to `Q/new-name`, its original path becomes a symlink to
+    it, and an unrelated empty `Q/<original-name>` sits beside it. Both identity
+    checks pass — `os.stat` follows the symlink — and `..` correctly yields `Q`,
+    but the remembered basename denotes the unrelated directory there. Removing
+    by remembered name deletes a directory the gate does not own, leaves the real
+    scratch behind, and reports success.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+
+    scratch = gate.make_scratch_dir(str(repo))
+    original = os.fspath(scratch)
+    basename = os.path.basename(original)
+
+    elsewhere = tmp_path / "Q"
+    elsewhere.mkdir()
+    os.rename(original, str(elsewhere / "new-name"))
+    os.symlink(str(elsewhere / "new-name"), original, target_is_directory=True)
+    unrelated = elsewhere / basename
+    unrelated.mkdir()
+
+    assert scratch._binding_holds(), "identity holds through the symlink"
+    assert scratch.dispose() is True
+    assert not (elsewhere / "new-name").exists(), "the real scratch must be gone"
+    assert unrelated.is_dir(), "the unrelated directory must survive"
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

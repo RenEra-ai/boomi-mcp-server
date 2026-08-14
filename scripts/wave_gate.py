@@ -2134,7 +2134,13 @@ class _ScratchDir(object):
         look.
 
         The final `rmdir` is itself descriptor-relative, against the parent
-        derived from the held descriptor AT DISPOSAL TIME — `..` from the
+        derived from the held descriptor AT DISPOSAL TIME, and the entry it
+        removes is the one that IS this directory — looked up by inode in the
+        live parent rather than taken from the stored path. A remembered
+        basename is just another stale name: move the scratch to a new name,
+        leave a symlink at the old path and an empty directory of the old name
+        beside it, and identity checks pass (`os.stat` follows the symlink) while
+        the remembered name denotes something else entirely — `..` from the
         directory we hold is its parent now, so there is no cached handle to go
         stale. NO destructive operation in this class resolves a pathname. A failing `rmdir` is a signal, not noise: it means the directory
         is no longer where it was, or is no longer empty. Swallowing it and returning True would
@@ -2163,16 +2169,20 @@ class _ScratchDir(object):
         except OSError:
             self._close()
             return False
-        self._close()
         try:
-            os.rmdir(os.path.basename(self._path), dir_fd=parent_fd)
+            name = _entry_naming(parent_fd, os.fstat(self.fd))
+        except OSError:
+            name = None
+        self._close()
+        if name is None:
+            _close_quietly(parent_fd)
+            return False
+        try:
+            os.rmdir(name, dir_fd=parent_fd)
         except OSError:
             return False
         finally:
-            try:
-                os.close(parent_fd)
-            except OSError:
-                pass
+            _close_quietly(parent_fd)
         return True
 
     def _close(self):
@@ -2180,6 +2190,31 @@ class _ScratchDir(object):
             os.close(self.fd)
         except OSError:
             pass
+
+
+def _close_quietly(fd):
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+def _entry_naming(parent_fd, held):
+    """The name in `parent_fd` that denotes `held`, or None.
+
+    Compared without following symlinks — a symlink pointing AT the directory is
+    not the directory, and removing it would leave the real one behind while
+    reporting success. Re-proved immediately before use by the caller's `rmdir`,
+    which can only ever remove an empty directory.
+    """
+    for entry in os.scandir(parent_fd):
+        try:
+            st = entry.stat(follow_symlinks=False)
+        except OSError:
+            continue
+        if (st.st_dev, st.st_ino) == (held.st_dev, held.st_ino):
+            return entry.name
+    return None
 
 
 def _unlink_tree_at(dirfd):
