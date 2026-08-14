@@ -255,8 +255,10 @@ def test_a_push_uses_before_verbatim_and_never_a_merge_base(tmp_path):
     payload.write_text(json.dumps({"before": base, "after": head}), encoding="utf-8")
     resolved = gate.resolve_baseline(str(repo), event_path=str(payload),
                                      event_name="push")
-    assert resolved == base
-    assert resolved != head
+    assert resolved["sha"] == base
+    assert resolved["sha"] != head
+    # `before` doubles as the target: it IS the branch tip the push builds on.
+    assert resolved["kind"] == "push" and resolved["target"] == base
 
 
 def test_a_pull_request_without_head_or_base_is_refused(tmp_path):
@@ -281,8 +283,12 @@ def test_a_pull_request_uses_the_unique_merge_base(tmp_path):
     payload.write_text(json.dumps(
         {"pull_request": {"head": {"sha": head}, "base": {"sha": target}}}
     ), encoding="utf-8")
-    assert gate.resolve_baseline(str(repo), event_path=str(payload),
-                                 event_name="pull_request") == base
+    resolved = gate.resolve_baseline(str(repo), event_path=str(payload),
+                                     event_name="pull_request")
+    assert resolved["sha"] == base
+    # The merge base is the transition baseline; the TARGET tip is carried
+    # separately because only it can decide bootstrap eligibility.
+    assert resolved["kind"] == "pull_request" and resolved["target"] == target
 
 
 def test_a_pull_request_with_no_merge_base_is_refused(tmp_path):
@@ -429,6 +435,117 @@ def test_manifests_declaring_different_bootstrap_bases_are_refused(tmp_path):
     _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(_FAKE_BASE))
     _commit(repo, "introduce manifests")
     _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
+
+
+def test_a_push_cannot_bootstrap_once_the_manifests_have_landed(tmp_path):
+    """Codex Stage-2 [P1], the push half.
+
+    The ancestry probe looks only BACKWARDS: once the manifests land, a baseline
+    that predates them still finds both paths absent there, forever. What closes
+    it is that a push's baseline IS the branch tip it builds on — so after the
+    landing every later push sees them present and cannot reach the bootstrap
+    branch at all, whatever a stale `bootstrap_base` header still says.
+    """
+    repo, base = _bootstrap_repo(tmp_path)
+    landed = _commit(repo, "the landing commit is now the branch tip")
+
+    # A later push: `before` is the tip, which HAS the manifests.
+    event = tmp_path / "push.json"
+    event.write_text(json.dumps({"before": landed}), encoding="utf-8")
+    # Rewrite an immutable field and try to launder it through.
+    raw = (repo / gate.GOLDENS_MANIFEST).read_text(encoding="utf-8").splitlines()
+    raw[1] = raw[1].replace('"owner":"repository"', '"owner":"#999"')
+    _write(repo, gate.GOLDENS_MANIFEST, "\n".join(raw) + "\n")
+
+    proc = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "wave_gate.py"),
+         "--repo", str(repo), "manifests", "--github-event", str(event),
+         "--event-name", "push"],
+        capture_output=True, text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert proc.returncode == 2, proc.stderr
+    assert "MANIFEST_TRANSITION_ILLEGAL" in proc.stderr
+
+
+def test_multi_commit_development_of_the_introduction_stays_bootstrappable(tmp_path):
+    """The rule that is deliberately absent, pinned so it is not reintroduced.
+
+    A commit-count rule ("at most one commit may touch a manifest") looks like it
+    confines bootstrap to the introduction, but it refuses ordinary multi-commit
+    work on the very change that introduces the ledger — the slice could not
+    validate itself after its second commit. Whether the ledger has LANDED is the
+    discriminator, not how many commits touched it.
+    """
+    repo, base = _bootstrap_repo(tmp_path)
+    # A second commit on the same unlanded change, editing the ledger again.
+    _write(repo, "tests/fixtures/golden_xml/g3.xml", "<x/>\n")
+    rows = [_golden_row(1), _golden_row(2), _golden_row(3)]
+    _write(repo, gate.GOLDENS_MANIFEST, _serialize(_golden_header(3, base), rows))
+    _commit(repo, "second commit of the same introduction")
+
+    status, stderr = _manifests(repo, base, "--bootstrap")
+    assert status == 0, stderr
+    assert "BOOTSTRAP" in stderr
+
+
+def test_a_pull_request_with_a_stale_merge_base_cannot_bootstrap(tmp_path):
+    """Codex Stage-2 [P1], the CI half — and the case the commit-count rule alone
+    does NOT catch.
+
+    A branch cut before the manifests landed keeps a merge base that predates
+    them forever. `merge-base..HEAD` then still contains exactly ONE commit
+    introducing them (the one merged in from the target), so a count-based rule
+    reads it as a pristine introduction and skips every transition check. Only
+    the TARGET tip can answer the question that matters.
+    """
+    repo = _new_repo(tmp_path)
+    for name in ("g1.xml", "g2.xml"):
+        _write(repo, "tests/fixtures/golden_xml/{0}".format(name), "<x/>\n")
+    fork_point = _commit(repo, "before the manifests existed")
+
+    # The branch that was cut early, and never touched the manifests itself.
+    _run_git(repo, "checkout", "-q", "-b", "old-feature")
+    feature_only = _commit(repo, "unrelated feature work")
+
+    # Meanwhile the manifests land on the target branch...
+    _run_git(repo, "checkout", "-q", "main")
+    _write(repo, gate.NODES_MANIFEST, _default_nodes(fork_point))
+    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(fork_point))
+    target = _commit(repo, "manifests land on the target branch")
+
+    # GitHub checks out `refs/pull/N/merge` — the MERGE of head into base — while
+    # the event still reports the un-merged branch tip as `head.sha`. That is what
+    # keeps the merge base stale: it stays `fork_point`, not `target`.
+    _run_git(repo, "checkout", "-q", "old-feature")
+    _run_git(
+        repo, "-c", "user.email=gate@example.invalid", "-c", "user.name=gate",
+        "merge", "-q", "--no-edit", target,
+    )
+    # ...but the PR's head ref itself is still the un-merged commit.
+    _run_git(repo, "branch", "-f", "pr-head", feature_only)
+
+    merge_base = subprocess.run(
+        ["git", "merge-base", feature_only, target], cwd=str(repo),
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert merge_base == fork_point, "the merge base must still predate the manifests"
+    assert (repo / gate.NODES_MANIFEST).exists(), "the checkout has the manifests"
+
+    event = tmp_path / "pr.json"
+    event.write_text(json.dumps(
+        {"pull_request": {"head": {"sha": feature_only}, "base": {"sha": target}}}
+    ), encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "wave_gate.py"),
+         "--repo", str(repo), "manifests", "--github-event", str(event),
+         "--event-name", "pull_request"],
+        capture_output=True, text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert proc.returncode == 2, proc.stderr
+    assert "BOOTSTRAP_NOT_ALLOWED" in proc.stderr
+    assert "target branch" in proc.stderr
 
 
 def test_bootstrap_cannot_be_reused_after_a_deletion(tmp_path):
@@ -797,6 +914,24 @@ def test_tombstoned_nodes_are_not_required():
     gate.check_collection(manifest, {"tests/a.py::t1"})
 
 
+def test_a_tombstoned_node_that_still_collects_is_refused():
+    """Codex Stage-2 [P1]. The mirror of the golden rule, which was missing.
+
+    `check_golden_tree` already refuses a tombstoned row whose file survives.
+    Without the same rule for nodes, a retirement can be split across two
+    changes: tombstone a test that is still there (legally lowering both floors),
+    then delete it later with no manifest edit at all, because the floor
+    reduction was prepaid and a tombstoned node is not required. Both runs pass.
+    """
+    rows = [_node_row(1, node_id="tests/a.py::t1"),
+            _node_row(2, node_id="tests/a.py::retired", state="tombstone")]
+    manifest = gate.parse_manifest(_serialize(_node_header(1, 1), rows), "pytest-nodes")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_collection(manifest, {"tests/a.py::t1", "tests/a.py::retired"})
+    assert excinfo.value.code == "PYTEST_NODE_TOMBSTONED_BUT_PRESENT"
+    assert excinfo.value.status == 1
+
+
 _GOOD_COLLECTION = "tests/a.py::t1\ntests/a.py::t2\n\n2 tests collected in 0.10s\n"
 
 
@@ -994,6 +1129,24 @@ def test_a_tombstoned_golden_whose_file_is_gone_passes(tmp_path):
     gate.check_golden_tree(str(repo), _goldens_manifest(rows))
 
 
+def test_a_directory_in_the_golden_corpus_is_refused(tmp_path):
+    """Codex Stage-2 [P2]. A skipped directory made set equality vacuous.
+
+    Manifest rows must name a file directly under GOLDEN_DIR, so a nested XML
+    can never be declared — and skipping the directory left it out of `on_disk`
+    too, so the equality check passed while the nested golden was rendered by
+    nothing.
+    """
+    repo, _base = _seeded(tmp_path)
+    nested = repo / "tests/fixtures/golden_xml/nested"
+    nested.mkdir()
+    (nested / "new.xml").write_text("<x/>\n", encoding="utf-8")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_golden_tree(str(repo), _goldens_manifest([_golden_row(1), _golden_row(2)]))
+    assert excinfo.value.code == "GOLDEN_FILE_UNDECLARED"
+    assert "directory" in excinfo.value.message
+
+
 def test_a_symlinked_golden_is_refused(tmp_path):
     repo, _base = _seeded(tmp_path)
     link = repo / "tests/fixtures/golden_xml/g3.xml"
@@ -1064,11 +1217,12 @@ def test_a_render_pass_that_does_not_cover_the_manifest_fails(tmp_path, monkeypa
 
 class _StubProvider:
     def __init__(self, relocatable=True, discriminating=True, cases=("c1",),
-                 mutations=("semantic",)):
+                 mutations=("semantic",), mutation_relocatable=True):
         self._relocatable = relocatable
         self._discriminating = discriminating
         self._cases = list(cases)
         self._mutations = list(mutations)
+        self._mutation_relocatable = mutation_relocatable
 
     def cases(self):
         return self._cases
@@ -1077,8 +1231,11 @@ class _StubProvider:
         return self._mutations
 
     def fingerprint(self, case, *, account, environment, mutation=None):
-        if mutation is not None and self._discriminating:
-            return "{0}:{1}".format(case, mutation)
+        if mutation is not None:
+            body = "{0}:{1}".format(case, mutation) if self._discriminating else case
+            if not self._mutation_relocatable:
+                body = "{0}:{1}:{2}".format(body, account, environment)
+            return body
         if self._relocatable:
             return case
         return "{0}:{1}:{2}".format(case, account, environment)
@@ -1114,6 +1271,25 @@ def test_a_provider_whose_fingerprint_ignores_semantics_fails():
     with pytest.raises(gate.GateFailure) as excinfo:
         gate.run_plan_fingerprint_checks(True, _StubProvider(discriminating=False))
     assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+
+
+def test_a_provider_whose_MUTATED_plans_are_not_relocatable_fails():
+    """Codex Stage-2 [P2]. Relocatability is a property of every plan.
+
+    Checking mutations under one identity only accepts a provider that is
+    identity-independent for the base case and account-dependent the moment
+    anything changes — not a relocatable fingerprint, just one that looks
+    relocatable in the single place it was measured.
+    """
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(
+            True, _StubProvider(mutation_relocatable=False)
+        )
+    assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+    assert "relocatable" in excinfo.value.message
+    # The same provider passes every check the unmutated path makes, which is
+    # what made this reachable.
+    assert gate.run_plan_fingerprint_checks(True, _StubProvider()) .startswith("checked")
 
 
 @pytest.mark.parametrize(
@@ -1196,6 +1372,36 @@ def test_every_diagnostic_code_the_gate_can_raise_is_documented():
 
     assert raised - documented == set(), sorted(raised - documented)
     assert documented - raised == set(), sorted(documented - raised)
+
+
+def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
+    """The workflow is part of the contract, so pin the parts that fail open.
+
+    * It must call `wave_gate.py ci` — not `pytest` directly, which can go green
+      on a partial collection.
+    * Nothing may soften a failure.
+    * Pushes must NOT share a concurrency group (Codex Stage-2 [P2]): GitHub
+      cancels a previously PENDING run when a new one enters the group whatever
+      `cancel-in-progress` says, so three rapid pushes to `dev` would leave the
+      middle commit with no verdict — on the branch whose protection is this
+      check.
+    """
+    raw = (_ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+    # Comments legitimately NAME the softeners in order to say they are absent,
+    # so scan the directives only.
+    workflow = "\n".join(
+        line for line in raw.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "scripts/wave_gate.py ci --github-event" in workflow
+    assert "python-version: \"3.11\"" in workflow
+    assert "requirements-dev.txt" in workflow
+    assert "fetch-depth: 0" in workflow          # PR merge-base needs full history
+    for softener in ("continue-on-error", "|| true", "if: always()"):
+        assert softener not in workflow, softener
+    # Push runs are keyed per commit, PR runs per ref.
+    assert "github.event_name == 'push'" in workflow
+    assert "github.sha" in workflow
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
 
 
 def test_the_committed_manifests_parse_and_agree_with_the_tree():

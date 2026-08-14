@@ -25,10 +25,19 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # Superseded PR runs are cancelled; pushes to `dev` are not, because a
-  # cancelled run on the branch under protection would leave a commit with no
-  # verdict at all.
+  # Pushes get a group PER COMMIT, so they never queue against each other.
+  #
+  # `cancel-in-progress: false` is not enough on its own: GitHub cancels any
+  # previously PENDING run in a group when a new run enters it, whatever that
+  # flag says. With a shared per-ref group, three rapid pushes to `dev` leave
+  # the middle commit cancelled with no verdict — on the branch whose protection
+  # depends on this very check. A per-SHA group removes the queue entirely.
+  #
+  # PRs keep a shared per-ref group and DO cancel superseded runs: there the
+  # only verdict that matters is the head commit's.
+  group: >-
+    ${{ github.workflow }}-${{ github.event_name == 'push'
+        && github.sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

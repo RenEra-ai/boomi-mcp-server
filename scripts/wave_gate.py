@@ -221,6 +221,7 @@ def _path_touched_in_ancestry(repo, sha, path):
     return bool(proc.stdout.strip())
 
 
+
 def _status(repo):
     return _git(repo, "status", "--porcelain", "--untracked-files=normal").stdout
 
@@ -571,7 +572,11 @@ def resolve_baseline(repo, *, event_path=None, event_name=None, base=None):
             raise _contract(
                 "BASELINE_EVENT_INVALID", "--base and --github-event are mutually exclusive"
             )
-        return _resolve_commit(repo, base, "BASELINE_UNAVAILABLE")
+        return {
+            "sha": _resolve_commit(repo, base, "BASELINE_UNAVAILABLE"),
+            "kind": "local",
+            "target": None,
+        }
 
     if event_path is None:
         raise _contract(
@@ -613,7 +618,11 @@ def _baseline_from_push(repo, event):
             "push 'before' is the all-zero sha (branch creation / force-push): there "
             "is no baseline to validate the manifest transition against",
         )
-    return _resolve_commit(repo, before, "BASELINE_UNAVAILABLE")
+    # `before` IS the branch tip the push builds on, so it doubles as the
+    # target: if the manifests exist there, bootstrap is already impossible via
+    # the ordinary all-present check.
+    resolved = _resolve_commit(repo, before, "BASELINE_UNAVAILABLE")
+    return {"sha": resolved, "kind": "push", "target": resolved}
 
 
 def _baseline_from_pull_request(repo, event):
@@ -653,14 +662,21 @@ def _baseline_from_pull_request(repo, event):
                 len(bases), head, target, bases
             ),
         )
-    return bases[0]
+    # The merge base is the right baseline for TRANSITIONS, but the wrong thing
+    # to decide bootstrap on: a branch cut before the manifests landed keeps a
+    # merge base that predates them forever, so it would look like a fresh
+    # introduction even after they exist on the target branch. Carry the target
+    # tip so `check_bootstrap` can ask the question that actually matters —
+    # "do these already exist on the branch we are merging into?"
+    return {"sha": bases[0], "kind": "pull_request", "target": target}
 
 
 # --------------------------------------------------------------------------
 # Bootstrap — the single, scoped exception
 # --------------------------------------------------------------------------
 
-def check_bootstrap(repo, baseline, manifests, *, require_flag, flag_given):
+def check_bootstrap(repo, baseline, manifests, *, require_flag, flag_given,
+                    target=None):
     """Decide whether this change is the one legal manifest bootstrap.
 
     Returns True if bootstrap applies.  Raises if the change LOOKS like a
@@ -681,6 +697,26 @@ def check_bootstrap(repo, baseline, manifests, *, require_flag, flag_given):
     too would make the bootstrap unreachable in CI, so the run that lands the
     manifests could never go green.
     """
+    # Ask the target branch first, when there is one. A PR branched before the
+    # manifests landed keeps a merge base that predates them FOREVER, so the
+    # merge base alone will always say "absent" and always look like a fresh
+    # introduction — even long after the ledger exists on `dev`. The question
+    # that actually decides bootstrap is "do these already exist on the branch
+    # we are merging into?", and only the target tip can answer it.
+    if target is not None and target != baseline:
+        landed = sorted(
+            spec["path"] for spec in _SCHEMAS.values()
+            if _blob_at(repo, target, spec["path"]) is not None
+        )
+        if landed:
+            raise _contract(
+                "BOOTSTRAP_NOT_ALLOWED",
+                "{0} already exist(s) on the target branch ({1}); a stale merge "
+                "base does not make this an introduction. Rebase so the baseline "
+                "carries the manifests and the change is validated as a "
+                "transition.".format(", ".join(landed), target[:12]),
+            )
+
     present = {
         name: _blob_at(repo, baseline, _SCHEMAS[name]["path"]) is not None
         for name in _SCHEMAS
@@ -704,6 +740,15 @@ def check_bootstrap(repo, baseline, manifests, *, require_flag, flag_given):
                     spec["path"], baseline
                 ),
             )
+
+    # NOTE on a rule that is deliberately NOT here: "at most one commit in
+    # baseline..HEAD may touch a manifest". It looks like it would confine
+    # bootstrap to the introduction, but it refuses ordinary multi-commit
+    # development of the very change that introduces the ledger — the slice
+    # would be unable to validate itself after its second commit. The correct
+    # discriminator is not how many commits touched the file, it is whether the
+    # ledger has LANDED anywhere that matters, which the baseline-ancestry probe
+    # above and the target probe at the top of this function answer between them.
 
     declared = {m.header["bootstrap_base"] for m in manifests.values()}
     if len(declared) != 1:
@@ -752,8 +797,25 @@ def check_golden_tree(repo, goldens):
                 "GOLDEN_FILE_UNDECLARED",
                 "{0}/{1} is a symlink; goldens must be regular files".format(GOLDEN_DIR, entry),
             )
+        if os.path.isdir(full):
+            # Refused, not skipped. Manifest rows must name a file DIRECTLY under
+            # GOLDEN_DIR, so anything inside a subdirectory can never be declared
+            # — and skipping the directory would leave it out of `on_disk` too,
+            # making the "set equality" claim below vacuously true while the
+            # nested golden is never rendered by anything.
+            raise _invalid(
+                "GOLDEN_FILE_UNDECLARED",
+                "{0}/{1} is a directory; the golden corpus is flat, and nothing "
+                "inside a subdirectory can be declared in the manifest or "
+                "rendered by the gate".format(GOLDEN_DIR, entry),
+            )
         if not os.path.isfile(full):
-            continue
+            raise _invalid(
+                "GOLDEN_FILE_UNDECLARED",
+                "{0}/{1} is neither a regular file nor a directory".format(
+                    GOLDEN_DIR, entry
+                ),
+            )
         if not entry.endswith(".xml"):
             raise _invalid(
                 "GOLDEN_FILE_UNDECLARED",
@@ -916,6 +978,23 @@ def check_collection(nodes_manifest, collected):
             "{0} required node id(s) are not in the collection; removing a "
             "required test needs an explicit manifest tombstone in the same "
             "change. First 20: {1}".format(len(missing), missing[:20]),
+        )
+
+    # The mirror of the golden rule (`check_golden_tree` already refuses a
+    # tombstoned row whose file survives). Without it the two halves of a
+    # retirement can be split across changes: tombstone a test that is still
+    # there — legally lowering both floors — and the deletion later needs no
+    # manifest edit at all, because the floor reduction was already prepaid and
+    # a tombstoned node is not required. A tombstone must mean the test is gone
+    # NOW, not that someone intends to remove it.
+    retired = [row["node_id"] for row in nodes_manifest.tombstoned]
+    surviving = sorted(n for n in retired if n in collected)
+    if surviving:
+        raise _invalid(
+            "PYTEST_NODE_TOMBSTONED_BUT_PRESENT",
+            "{0} tombstoned node id(s) are still collected; a tombstone records a "
+            "retirement that has happened, so the test must be removed in the same "
+            "change. First 20: {1}".format(len(surviving), surviving[:20]),
         )
 
 
@@ -1175,6 +1254,19 @@ def run_plan_fingerprint_checks(require, provider=None):
             )
         for mutation in mutations:
             mutated = provider.fingerprint(case, mutation=mutation, **_RELOCATION_A)
+            # Relocatability is a property of EVERY plan, not just the unmutated
+            # one. Checking mutations under a single identity would accept a
+            # provider that is identity-independent for the base case and
+            # account-dependent as soon as anything changes — which is not a
+            # relocatable fingerprint, it is one that happens to look relocatable
+            # in the one place it was measured.
+            relocated = provider.fingerprint(case, mutation=mutation, **_RELOCATION_B)
+            if mutated != relocated:
+                raise _invalid(
+                    "PLAN_FINGERPRINT_MISMATCH",
+                    "case {0!r} under mutation {1!r}: fingerprint is not "
+                    "relocatable ({2} != {3})".format(case, mutation, mutated, relocated),
+                )
             if mutated == first:
                 raise _invalid(
                     "PLAN_FINGERPRINT_MISMATCH",
@@ -1212,11 +1304,12 @@ def _load_current(repo):
     return manifests
 
 
-def run_manifest_phase(repo, baseline, *, is_local, bootstrap_flag):
+def run_manifest_phase(repo, baseline, *, is_local, bootstrap_flag, target=None):
     """Baseline + format + transition + current-tree self-consistency."""
     current = _load_current(repo)
     bootstrapping = check_bootstrap(
-        repo, baseline, current, require_flag=is_local, flag_given=bootstrap_flag
+        repo, baseline, current, require_flag=is_local,
+        flag_given=bootstrap_flag, target=target,
     )
     if not bootstrapping:
         for name, spec in _SCHEMAS.items():
@@ -1242,18 +1335,20 @@ def execute(args):
     status_before = _status(repo)
 
     explicit_base = getattr(args, "base", None)
-    baseline = resolve_baseline(
+    context = resolve_baseline(
         repo,
         event_path=getattr(args, "github_event", None),
         event_name=getattr(args, "event_name", None),
         base=explicit_base,
     )
-    _emit("wave_gate: baseline {0}".format(baseline))
+    baseline = context["sha"]
+    _emit("wave_gate: baseline {0} ({1})".format(baseline, context["kind"]))
 
     current, bootstrapping = run_manifest_phase(
         repo, baseline,
         is_local=explicit_base is not None,
         bootstrap_flag=getattr(args, "bootstrap", False),
+        target=context["target"],
     )
     if bootstrapping:
         _emit("wave_gate: BOOTSTRAP — manifests are introduced by this change")
@@ -1273,6 +1368,7 @@ def execute(args):
     # Removed on every exit, including a failing one, so a red run does not leave
     # a trail of directories behind on a CI runner or a developer's machine.
     tmpdir = tempfile.mkdtemp(prefix="wave-gate-")
+    failure = None
     try:
         collected = collect_nodes(repo, tmpdir)
         check_collection(current["pytest-nodes"], collected)
@@ -1293,10 +1389,25 @@ def execute(args):
             )
             status = run_plan_fingerprint_checks(args.require_plan_fingerprint)
             _emit("wave_gate: plan fingerprint {0}".format(status))
+    except GateFailure as exc:
+        failure = exc
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
-    check_worktree_unchanged(status_before, _status(repo))
+    # UNCONDITIONAL, including after a failure — a failing test is exactly when
+    # the tree is most likely to have been disturbed, and skipping the check on
+    # that path would make the read-only guarantee true only when nothing went
+    # wrong. The original failure still wins: hygiene is reported alongside it,
+    # never in place of it.
+    try:
+        check_worktree_unchanged(status_before, _status(repo))
+    except GateFailure as hygiene:
+        if failure is None:
+            raise
+        _emit("{0} {1}".format(hygiene.code, hygiene.message))
+
+    if failure is not None:
+        raise failure
     return 0
 
 

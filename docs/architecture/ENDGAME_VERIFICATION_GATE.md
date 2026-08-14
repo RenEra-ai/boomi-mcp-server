@@ -64,7 +64,8 @@ Every failure prints a stable diagnostic code as the first stderr token:
 `MANIFEST_TRANSITION_ILLEGAL` · `MANIFEST_FLOOR_INVALID` ·
 `PYTEST_COLLECTION_FAILED` · `PYTEST_COLLECTION_EMPTY` ·
 `PYTEST_COLLECTION_DUPLICATE` · `PYTEST_COLLECTION_FLOOR` · `PYTEST_NODE_MISSING` ·
-`PYTEST_FAILED` · `PYTEST_SUMMARY_UNPARSEABLE` · `PYTEST_SKIPPED_EXCEEDS_CAP` ·
+`PYTEST_NODE_TOMBSTONED_BUT_PRESENT` · `PYTEST_FAILED` ·
+`PYTEST_SUMMARY_UNPARSEABLE` · `PYTEST_SKIPPED_EXCEEDS_CAP` ·
 `PYTEST_PASSED_BELOW_FLOOR` · `GOLDEN_FILE_MISSING` · `GOLDEN_FILE_UNDECLARED` ·
 `GOLDEN_RENDER_FAILED` · `GOLDEN_OUTPUT_SET_MISMATCH` · `GOLDEN_NONDETERMINISTIC` ·
 `GOLDEN_MISMATCH` · `PLAN_FINGERPRINT_PENDING` · `PLAN_FINGERPRINT_MISMATCH` ·
@@ -190,6 +191,14 @@ same index must carry the same `id` and identical payload fields. Then:
   reorder, any renumbering, any payload mutation, an appended row born
   `tombstone`
 
+**A tombstone records a retirement that has already happened, not an intention.**
+A tombstoned golden's file must be absent, and a tombstoned node id must not be
+collected (`PYTEST_NODE_TOMBSTONED_BUT_PRESENT`). Without the second half the two
+parts of a retirement could be split across changes: tombstone a test that is
+still there — legally lowering both floors — and the deletion later needs no
+manifest edit at all, because the floor reduction was prepaid and a tombstoned
+node is not required.
+
 New rows are permitted only **after** every baseline row, with the next
 sequential ids and state `active`.
 
@@ -216,9 +225,34 @@ condition must hold.
 * Neither manifest exists at the validated baseline (a half-introduction is
   refused).
 * `git log <baseline> -- <path>` is empty for both — neither path was ever
-  touched anywhere in the baseline's ancestry. **This is what makes bootstrap
-  one-time:** a later delete-and-recreate has the paths in its ancestry, so it
-  can never be laundered into a fresh start.
+  touched anywhere in the baseline's ancestry. A later delete-and-recreate has
+  the paths in its ancestry, so it cannot be laundered into a fresh start.
+* **Neither manifest exists on the TARGET**, when the run context has one. The
+  ancestry probe alone looks only BACKWARDS, and that is not enough: once the
+  manifests have landed, a baseline predating them still finds both paths absent
+  there — forever — so bootstrap would be granted again and every transition
+  check skipped, letting a rewritten ledger pass. (Measured before the fix:
+  mutating an immutable `owner` on an existing row exited 0 that way.)
+  For a **push** the baseline IS the branch tip, so the ordinary all-present
+  check already covers it. For a **PR** it does not: a branch cut before the
+  landing keeps a merge base that predates it forever, and GitHub checks out
+  `refs/pull/N/merge` — a tree that HAS the manifests — while `head.sha` stays
+  un-merged. The gate therefore carries the PR's `base.sha` alongside the merge
+  base and refuses bootstrap when the manifests already exist there.
+
+> A rule deliberately **not** used: "at most one commit in `<baseline>..HEAD` may
+> touch a manifest". It appears to confine bootstrap to the introduction, but it
+> refuses ordinary multi-commit development of the very change that introduces
+> the ledger — the slice could not validate itself after its second commit. The
+> discriminator is whether the ledger has LANDED, not how many commits touched
+> it. Pinned by
+> `test_multi_commit_development_of_the_introduction_stays_bootstrappable`.
+>
+> **Residual, stated rather than papered over:** a LOCAL `wave --base <sha
+> predating the landing> --bootstrap` on a hand-edited ledger is still accepted.
+> That is an operator explicitly invoking the one-time exception against a stale
+> baseline they typed themselves, and local runs are advisory — CI is the gate,
+> and no CI context can reach that state once the ledger has landed.
 * Both current manifests parse and are self-consistent.
 * Both headers declare the same `bootstrap_base`, equal to the validated
   baseline.
