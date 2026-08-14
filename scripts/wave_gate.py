@@ -202,7 +202,33 @@ def _resolve_commit(repo, rev, code="BASELINE_UNAVAILABLE"):
     sha = proc.stdout.strip()
     if proc.returncode != 0 or not _SHA_RE.match(sha):
         raise _contract(code, "cannot resolve commit {0!r} in {1}".format(rev, repo))
+    _refuse_ambiguous(repo, rev, code)
     return sha
+
+
+def _refuse_ambiguous(repo, rev, code):
+    """A name that resolves two ways is a refusal, not a coin flip.
+
+    ``git rev-parse --verify`` silently applies ref precedence, so a branch and a
+    tag with the same name resolve to whichever wins — and the gate would then
+    validate against a range the operator did not mean. Only names are at risk;
+    a 40-hex sha cannot be ambiguous.
+    """
+    if _SHA_RE.match(str(rev)):
+        return
+    proc = subprocess.run(
+        ["git", "for-each-ref", "--format=%(refname)",
+         "refs/heads/{0}".format(rev), "refs/tags/{0}".format(rev),
+         "refs/remotes/{0}".format(rev)],
+        cwd=str(repo), capture_output=True, text=True,
+    )
+    matches = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    if len(matches) > 1:
+        raise _contract(
+            code,
+            "{0!r} is ambiguous — it names {1}. Pass the 40-character sha you "
+            "mean.".format(rev, ", ".join(matches)),
+        )
 
 
 def _blob_at(repo, sha, path):
@@ -223,7 +249,66 @@ def _path_touched_in_ancestry(repo, sha, path):
 
 
 def _status(repo):
-    return _git(repo, "status", "--porcelain", "--untracked-files=normal").stdout
+    """A change fingerprint for the worktree.
+
+    ``git status --porcelain`` alone records only path + status LETTER, so
+    editing a file that was already modified leaves it byte-identical. Pairing it
+    with ``git diff --numstat`` (line counts per tracked path) and HEAD makes an
+    in-place edit, a commit, and a checkout all visible. It is still not a full
+    content hash — a same-size, same-line-count edit to an already-dirty file
+    would slip through — but it closes the cases a gate realistically causes.
+    """
+    return "\n".join([
+        _git(repo, "rev-parse", "HEAD").stdout.strip(),
+        _git(repo, "status", "--porcelain", "--untracked-files=normal").stdout,
+        _git(repo, "diff", "--numstat").stdout,
+        _git(repo, "diff", "--numstat", "--cached").stdout,
+    ])
+
+
+def check_checkout_matches_event(repo, context):
+    """The tree under test must be the tree the event describes.
+
+    Without this the gate reads its baseline from one place and its evidence from
+    another: a PR carrying an illegal manifest rewrite can be described by the
+    event while the checkout being validated is some other, valid state. GitHub's
+    own actions keep them in step, so this never fires in a healthy run — which
+    is exactly why it has to be asserted rather than assumed.
+
+    A ``pull_request`` run legitimately checks out ``refs/pull/N/merge``, a merge
+    commit whose parents are the head and the base, so both that merge and a bare
+    head checkout are accepted.
+    """
+    head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    if context["kind"] == "push":
+        expected = context.get("after")
+        if expected and head != expected:
+            raise _contract(
+                "CHECKOUT_EVENT_MISMATCH",
+                "the checkout is at {0} but the push event describes {1}".format(
+                    head[:12], expected[:12]
+                ),
+            )
+        return
+    if context["kind"] != "pull_request":
+        return
+
+    event_head = context.get("event_head")
+    target = context.get("target")
+    if head == event_head:
+        return
+    parents = _git(repo, "rev-list", "--parents", "-n", "1", head).stdout.split()[1:]
+    if event_head in parents and target in parents:
+        return
+    raise _contract(
+        "CHECKOUT_EVENT_MISMATCH",
+        "the checkout at {0} is neither the PR head {1} nor a merge of it with "
+        "the target {2} (parents: {3}); the gate would be validating a different "
+        "tree than the event describes".format(
+            head[:12], (event_head or "?")[:12], (target or "?")[:12],
+            [p[:12] for p in parents],
+        ),
+    )
 
 
 # --------------------------------------------------------------------------
@@ -342,10 +427,16 @@ def parse_manifest(raw, name):
     _check_uniqueness(rows, spec, bad)
 
     active = [r for r in rows if r["state"] == "active"]
-    if len(active) < header_obj["minimum_active"]:
+    if len(active) != header_obj["minimum_active"]:
+        # EQUALITY, not ">=". The transition arithmetic already keeps the two in
+        # step, but bootstrap skips that arithmetic entirely — so a ">=" check
+        # would let the introducing change commit a floor BELOW its own row count
+        # and weaken the ledger permanently, with every later transition faithfully
+        # preserving the weakened number.
         raise _contract(
             "MANIFEST_FLOOR_INVALID",
-            "{0}: {1} active rows is below the committed floor {2}".format(
+            "{0}: {1} active rows but minimum_active is {2}; the floor must equal "
+            "the active row count".format(
                 spec["path"], len(active), header_obj["minimum_active"]
             ),
         )
@@ -576,6 +667,8 @@ def resolve_baseline(repo, *, event_path=None, event_name=None, base=None):
             "sha": _resolve_commit(repo, base, "BASELINE_UNAVAILABLE"),
             "kind": "local",
             "target": None,
+            "event_head": None,
+            "after": None,
         }
 
     if event_path is None:
@@ -622,7 +715,11 @@ def _baseline_from_push(repo, event):
     # target: if the manifests exist there, bootstrap is already impossible via
     # the ordinary all-present check.
     resolved = _resolve_commit(repo, before, "BASELINE_UNAVAILABLE")
-    return {"sha": resolved, "kind": "push", "target": resolved}
+    after = event.get("after")
+    return {
+        "sha": resolved, "kind": "push", "target": resolved,
+        "after": after if isinstance(after, str) and _SHA_RE.match(after) else None,
+    }
 
 
 def _baseline_from_pull_request(repo, event):
@@ -668,7 +765,10 @@ def _baseline_from_pull_request(repo, event):
     # introduction even after they exist on the target branch. Carry the target
     # tip so `check_bootstrap` can ask the question that actually matters —
     # "do these already exist on the branch we are merging into?"
-    return {"sha": bases[0], "kind": "pull_request", "target": target}
+    return {
+        "sha": bases[0], "kind": "pull_request", "target": target,
+        "event_head": head,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -766,6 +866,19 @@ def check_bootstrap(repo, baseline, manifests, *, require_flag, flag_given,
             "manifests declare different bootstrap_base values: {0}".format(sorted(declared)),
         )
     declared_base = declared.pop()
+    if target is not None and target != declared_base:
+        # The architect contract: a PR bootstrap requires the TARGET to be the
+        # declared base. Checking only the merge base lets a PR go green while
+        # `dev` advances past `bootstrap_base` — and the resulting push, whose
+        # `before` is that advanced tip, then fails. Green PR, red merge.
+        raise _contract(
+            "BOOTSTRAP_NOT_ALLOWED",
+            "the target is {0} but the manifests declare bootstrap_base {1}; the "
+            "branch they are introduced onto has moved, so this can no longer be "
+            "the bootstrap. Rebase and regenerate the headers.".format(
+                target[:12], declared_base[:12]
+            ),
+        )
     if declared_base != baseline:
         raise _contract(
             "BOOTSTRAP_NOT_ALLOWED",
@@ -773,14 +886,59 @@ def check_bootstrap(repo, baseline, manifests, *, require_flag, flag_given,
                 declared_base, baseline
             ),
         )
-    if require_flag and not flag_given:
-        raise _contract(
-            "BOOTSTRAP_NOT_ALLOWED",
-            "a local run must pass --bootstrap to exercise the one-time bootstrap "
-            "exception (CI does not need it: the event's own baseline must equal "
-            "the declared bootstrap_base, which it does here)",
-        )
+    if require_flag:
+        if not flag_given:
+            raise _contract(
+                "BOOTSTRAP_NOT_ALLOWED",
+                "a local run must pass --bootstrap to exercise the one-time bootstrap "
+                "exception (CI does not need it: the event's own baseline must equal "
+                "the declared bootstrap_base, which it does here)",
+            )
+        _refuse_stale_local_bootstrap(repo, baseline)
     return True
+
+
+def _refuse_stale_local_bootstrap(repo, baseline):
+    """Local bootstrap is for introducing the ledger, not for re-blessing it.
+
+    A local baseline is whatever the operator typed, so after the ledger lands
+    they could keep passing the pre-landing sha with ``--bootstrap`` forever and
+    skip every transition check — and local ``wave`` is required wave evidence,
+    not merely advisory, so that matters.
+
+    The discriminator is HAS IT LANDED, and it has to be, because the two
+    tempting alternatives both refuse ordinary work: a commit-count rule and a
+    "ledger unchanged since its introducing commit" rule each reject
+    multi-commit development of the very change that introduces the ledger.
+    What separates the two situations is reachability — a landed introduction is
+    contained in some branch OTHER than the one being worked on (``dev``, or a
+    remote-tracking ref); an unlanded one is contained only in the current
+    branch.
+    """
+    current = _git(repo, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    for spec in _SCHEMAS.values():
+        adds = _git(
+            repo, "log", "--diff-filter=A", "--format=%H",
+            "{0}..HEAD".format(baseline), "--", spec["path"],
+        ).stdout.split()
+        if not adds:
+            continue
+        introduction = adds[-1]
+        refs = _git(
+            repo, "for-each-ref", "--contains", introduction,
+            "--format=%(refname:short)", "refs/heads", "refs/remotes",
+        ).stdout.split()
+        landed_on = [ref for ref in refs if ref != current]
+        if landed_on:
+            raise _contract(
+                "BOOTSTRAP_NOT_ALLOWED",
+                "{0} was introduced by {1}, which has already landed on {2}; the "
+                "bootstrap exception is spent. Validate against a baseline that "
+                "carries the manifests: --base <a commit that has them>, without "
+                "--bootstrap.".format(
+                    spec["path"], introduction[:12], ", ".join(sorted(landed_on)[:4])
+                ),
+            )
 
 
 # --------------------------------------------------------------------------
@@ -1220,6 +1378,11 @@ PLAN_FINGERPRINT_PROVIDER = None
 _RELOCATION_A = {"account": "wave-gate-account-a", "environment": "wave-gate-env-a"}
 _RELOCATION_B = {"account": "wave-gate-account-b", "environment": "wave-gate-env-b"}
 
+#: The mutation classes the plan enumerates. A provider must declare all four:
+#: proving a fingerprint reacts to a "semantic" change says nothing about
+#: whether it reacts to an envelope, policy, or revision change.
+REQUIRED_MUTATION_KINDS = ("semantic", "envelope", "policy", "revision")
+
 
 def run_plan_fingerprint_checks(require, provider=None):
     """The #153 seam.  Returns a short status string.
@@ -1239,14 +1402,26 @@ def run_plan_fingerprint_checks(require, provider=None):
             )
         return "pending:#153"
 
-    cases = list(provider.cases())
+    cases = list(_provider_call(provider.cases))
     if not cases:
         raise _invalid(
             "PLAN_FINGERPRINT_MISMATCH", "the registered provider declares no cases"
         )
     for case in cases:
-        first = provider.fingerprint(case, **_RELOCATION_A)
-        second = provider.fingerprint(case, **_RELOCATION_B)
+        first, material_a = _fingerprint(provider, case, _RELOCATION_A)
+        second, material_b = _fingerprint(provider, case, _RELOCATION_B)
+
+        # Compare the canonical MATERIAL, not only the digest. A digest that
+        # matches proves nothing on its own — a provider returning a constant
+        # matches too. The property being asserted is that the canonical bytes
+        # carry no account or environment identity, which is checkable only by
+        # looking at the bytes.
+        if material_a != material_b:
+            raise _invalid(
+                "PLAN_FINGERPRINT_MISMATCH",
+                "case {0!r}: canonical material differs between identities, so the "
+                "plan is not relocatable even though the digests may agree".format(case),
+            )
         if first != second:
             raise _invalid(
                 "PLAN_FINGERPRINT_MISMATCH",
@@ -1254,36 +1429,99 @@ def run_plan_fingerprint_checks(require, provider=None):
                     case, first, second
                 ),
             )
-        mutations = list(provider.mutations(case))
-        if not mutations:
+
+        mutations = list(_provider_call(provider.mutations, case))
+        missing = [kind for kind in REQUIRED_MUTATION_KINDS if kind not in mutations]
+        if missing:
+            # The plan enumerates these four. A provider that declares only
+            # "semantic" would pass a discrimination check while saying nothing
+            # about envelope, policy or revision changes.
             raise _invalid(
                 "PLAN_FINGERPRINT_MISMATCH",
-                "case {0!r}: no semantic mutations declared; a fingerprint proven "
-                "only to be stable is indistinguishable from a constant".format(case),
+                "case {0!r}: mutation kinds {1} are not declared; the contract "
+                "requires all of {2}".format(
+                    case, missing, list(REQUIRED_MUTATION_KINDS)
+                ),
             )
         for mutation in mutations:
-            mutated = provider.fingerprint(case, mutation=mutation, **_RELOCATION_A)
+            mutated, mutated_material = _fingerprint(
+                provider, case, _RELOCATION_A, mutation
+            )
             # Relocatability is a property of EVERY plan, not just the unmutated
-            # one. Checking mutations under a single identity would accept a
-            # provider that is identity-independent for the base case and
-            # account-dependent as soon as anything changes — which is not a
-            # relocatable fingerprint, it is one that happens to look relocatable
-            # in the one place it was measured.
-            relocated = provider.fingerprint(case, mutation=mutation, **_RELOCATION_B)
-            if mutated != relocated:
+            # one: a provider could be identity-independent for the base case and
+            # account-dependent as soon as anything changes.
+            relocated, relocated_material = _fingerprint(
+                provider, case, _RELOCATION_B, mutation
+            )
+            if mutated != relocated or mutated_material != relocated_material:
                 raise _invalid(
                     "PLAN_FINGERPRINT_MISMATCH",
-                    "case {0!r} under mutation {1!r}: fingerprint is not "
-                    "relocatable ({2} != {3})".format(case, mutation, mutated, relocated),
+                    "case {0!r} under mutation {1!r}: not relocatable".format(
+                        case, mutation
+                    ),
+                )
+            if mutated_material == material_a:
+                raise _invalid(
+                    "PLAN_FINGERPRINT_MISMATCH",
+                    "case {0!r}: mutation {1!r} did not change the canonical "
+                    "material, so it is not the mutation it claims to be".format(
+                        case, mutation
+                    ),
                 )
             if mutated == first:
                 raise _invalid(
                     "PLAN_FINGERPRINT_MISMATCH",
-                    "case {0!r}: mutation {1!r} did not change the fingerprint".format(
-                        case, mutation
-                    ),
+                    "case {0!r}: mutation {1!r} changed the canonical material but "
+                    "not the fingerprint — a collision the gate must not accept"
+                    .format(case, mutation),
                 )
     return "checked:{0} case(s)".format(len(cases))
+
+
+def _provider_call(fn, *args):
+    """Call into the #153 provider, keeping failures on the diagnostic path.
+
+    A provider that raises must not surface as an unhandled traceback: the gate's
+    contract is that every refusal carries a stable code.
+    """
+    try:
+        return fn(*args)
+    except GateFailure:
+        raise
+    except Exception as exc:
+        raise _invalid(
+            "PLAN_FINGERPRINT_MISMATCH",
+            "the plan-fingerprint provider raised {0}: {1}".format(
+                type(exc).__name__, exc
+            ),
+        )
+
+
+def _fingerprint(provider, case, identity, mutation=None):
+    """Return ``(digest, material)`` from the provider, strictly typed."""
+    result = _provider_call(
+        lambda: provider.fingerprint(case, mutation=mutation, **identity)
+    )
+    if not (isinstance(result, tuple) and len(result) == 2):
+        raise _invalid(
+            "PLAN_FINGERPRINT_MISMATCH",
+            "case {0!r}: provider must return (digest, canonical_material), got "
+            "{1}".format(case, type(result).__name__),
+        )
+    digest, material = result
+    if not isinstance(digest, str) or not digest:
+        raise _invalid(
+            "PLAN_FINGERPRINT_MISMATCH",
+            "case {0!r}: digest must be a non-empty string".format(case),
+        )
+    if not isinstance(material, bytes) or not material:
+        raise _invalid(
+            "PLAN_FINGERPRINT_MISMATCH",
+            "case {0!r}: canonical material must be non-empty bytes — the gate "
+            "compares the bytes the digest was derived from, not just the "
+            "digest".format(case),
+        )
+    return digest, material
 
 
 # --------------------------------------------------------------------------
@@ -1329,7 +1567,20 @@ def run_manifest_phase(repo, baseline, *, is_local, bootstrap_flag, target=None)
                     "{0} is unreadable at baseline {1}".format(spec["path"], baseline),
                 )
             base = parse_manifest(raw, name)
-            validate_transition(base, current[name], name)
+            _appended, tombstoned = validate_transition(base, current[name], name)
+            if tombstoned:
+                # The plan's compensating control for the ownership git cannot
+                # enforce: surface WHO claimed each retirement so review can check
+                # the change really belongs to the issue the row names.
+                was = {row["id"]: row["state"] for row in base.rows}
+                for row in current[name].rows:
+                    if row["state"] == "tombstone" and was.get(row["id"]) == "active":
+                        _emit(
+                            "wave_gate: TOMBSTONE {0} {1} owner={2} disposition={3}".format(
+                                name, row["id"], row.get("owner", "repository"),
+                                row.get("disposition", "n/a"),
+                            )
+                        )
     check_golden_tree(repo, current["goldens"])
     return current, bootstrapping
 
@@ -1351,6 +1602,7 @@ def execute(args):
         base=explicit_base,
     )
     baseline = context["sha"]
+    check_checkout_matches_event(repo, context)
     _emit("wave_gate: baseline {0} ({1})".format(baseline, context["kind"]))
 
     current, bootstrapping = run_manifest_phase(
@@ -1457,7 +1709,9 @@ def build_parser():
         "wave", help="the per-wave gate: ci + every active golden, twice, plus the "
                      "#153 fingerprint seam",
     )
-    wave.add_argument("--base", required=True, metavar="COMMIT",
+    # Not `required=True`: argparse would exit 2 with no diagnostic code, and the
+    # coded, explained refusal from `resolve_baseline` is the contract.
+    wave.add_argument("--base", default=None, metavar="COMMIT",
                       help="the baseline commit (REQUIRED; never inferred)")
     wave.add_argument("--bootstrap", action="store_true",
                       help="permit the one-time manifest bootstrap exception")

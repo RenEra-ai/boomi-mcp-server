@@ -1275,30 +1275,51 @@ def test_a_render_pass_that_does_not_cover_the_manifest_fails(tmp_path, monkeypa
 # The #153 plan-fingerprint seam
 # ===========================================================================
 
+_ALL_KINDS = gate.REQUIRED_MUTATION_KINDS
+
+
 class _StubProvider:
+    """A provider honouring the #153 contract: (digest, canonical_material)."""
+
     def __init__(self, relocatable=True, discriminating=True, cases=("c1",),
-                 mutations=("semantic",), mutation_relocatable=True):
+                 mutations=_ALL_KINDS, mutation_relocatable=True,
+                 material_leaks_identity=False, colliding=False, raises=False,
+                 bad_shape=False):
         self._relocatable = relocatable
         self._discriminating = discriminating
         self._cases = list(cases)
         self._mutations = list(mutations)
         self._mutation_relocatable = mutation_relocatable
+        self._material_leaks_identity = material_leaks_identity
+        self._colliding = colliding
+        self._raises = raises
+        self._bad_shape = bad_shape
 
     def cases(self):
+        if self._raises:
+            raise RuntimeError("provider exploded")
         return self._cases
 
     def mutations(self, case):
         return self._mutations
 
     def fingerprint(self, case, *, account, environment, mutation=None):
+        if self._bad_shape:
+            return "just-a-digest"
+        body = case if mutation is None else "{0}:{1}".format(case, mutation)
+        material = body.encode()
+        if self._material_leaks_identity:
+            material = "{0}:{1}:{2}".format(body, account, environment).encode()
+
         if mutation is not None:
-            body = "{0}:{1}".format(case, mutation) if self._discriminating else case
+            digest = body if self._discriminating else case
+            if self._colliding:
+                digest = case          # material moved, digest did not
             if not self._mutation_relocatable:
-                body = "{0}:{1}:{2}".format(body, account, environment)
-            return body
-        if self._relocatable:
-            return case
-        return "{0}:{1}:{2}".format(case, account, environment)
+                digest = "{0}:{1}".format(digest, account)
+            return digest, material
+        digest = case if self._relocatable else "{0}:{1}".format(case, account)
+        return digest, material
 
 
 def test_the_pending_seam_is_informational_by_default():
@@ -1353,7 +1374,9 @@ def test_a_provider_whose_MUTATED_plans_are_not_relocatable_fails():
 
 
 @pytest.mark.parametrize(
-    "kwargs", [{"cases": ()}, {"mutations": ()}], ids=["no-cases", "no-mutations"]
+    "kwargs",
+    [{"cases": ()}, {"mutations": ()}, {"mutations": ("semantic",)}],
+    ids=["no-cases", "no-mutations", "only-semantic"],
 )
 def test_a_vacuous_provider_fails(kwargs):
     with pytest.raises(gate.GateFailure) as excinfo:
@@ -1462,6 +1485,226 @@ def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
     assert "github.event_name == 'push'" in workflow
     assert "github.sha" in workflow
     assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
+
+
+# ===========================================================================
+# §6 architect-review findings
+# ===========================================================================
+
+def test_the_checkout_must_be_the_tree_the_event_describes(tmp_path):
+    """§6 finding 1. Baseline from one place, evidence from another.
+
+    Without this the event can describe a PR carrying an illegal rewrite while
+    the gate validates some other, valid checkout. GitHub's own actions keep the
+    two in step, which is exactly why it must be asserted rather than assumed.
+    """
+    repo, base = _seeded(tmp_path)
+    head = _commit(repo, "the real head")
+    other = _commit(repo, "a different commit that is checked out")
+
+    # push arm: event says `after` is `head`, but HEAD is `other`.
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_checkout_matches_event(
+            str(repo), {"kind": "push", "target": base, "after": head}
+        )
+    assert excinfo.value.code == "CHECKOUT_EVENT_MISMATCH"
+    # ...and it passes when they agree.
+    gate.check_checkout_matches_event(
+        str(repo), {"kind": "push", "target": base, "after": other}
+    )
+
+    # PR arm: neither the head nor a merge of head+target.
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_checkout_matches_event(
+            str(repo),
+            {"kind": "pull_request", "target": base, "event_head": head},
+        )
+    assert excinfo.value.code == "CHECKOUT_EVENT_MISMATCH"
+
+
+def test_a_pr_merge_checkout_is_accepted(tmp_path):
+    """`refs/pull/N/merge` is the normal PR checkout and must not be refused."""
+    repo, base = _seeded(tmp_path)
+    _run_git(repo, "checkout", "-q", "-b", "feature")
+    head = _commit(repo, "feature")
+    _run_git(repo, "checkout", "-q", "main")
+    target = _commit(repo, "target moves")
+    _run_git(
+        repo, "-c", "user.email=gate@example.invalid", "-c", "user.name=gate",
+        "merge", "-q", "--no-edit", head,
+    )
+    gate.check_checkout_matches_event(
+        str(repo), {"kind": "pull_request", "target": target, "event_head": head}
+    )
+
+
+def test_an_ambiguous_local_baseline_is_refused(tmp_path):
+    """§6 finding 3. `git rev-parse` silently applies ref precedence."""
+    repo, base = _seeded(tmp_path)
+    other = _commit(repo, "a second commit")
+    _run_git(repo, "branch", "ambiguous", base)
+    _run_git(repo, "tag", "ambiguous", other)
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.resolve_baseline(str(repo), base="ambiguous")
+    assert excinfo.value.code == "BASELINE_UNAVAILABLE"
+    assert "ambiguous" in excinfo.value.message
+    # A 40-hex sha cannot be ambiguous and is unaffected.
+    assert gate.resolve_baseline(str(repo), base=base)["sha"] == base
+
+
+def test_a_local_bootstrap_is_refused_once_the_introduction_has_landed(tmp_path):
+    """§6 finding 2b. Local `wave` is required evidence, not advisory.
+
+    The discriminator is reachability, not commit count and not ledger content —
+    both of those also reject ordinary multi-commit development of the change
+    that introduces the ledger.
+    """
+    repo, base = _bootstrap_repo(tmp_path)
+    # Still only on the working branch: bootstrap is legitimate.
+    assert _manifests(repo, base, "--bootstrap")[0] == 0
+    # Now it lands on another branch.
+    _run_git(repo, "branch", "dev")
+    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
+
+
+def test_a_pr_bootstrap_must_be_anchored_to_the_target(tmp_path):
+    """§6 finding 2a. Otherwise the PR is green and the resulting push is red."""
+    repo = _new_repo(tmp_path)
+    for name in ("g1.xml", "g2.xml"):
+        _write(repo, "tests/fixtures/golden_xml/{0}".format(name), "<x/>\n")
+    declared = _commit(repo, "the declared bootstrap base")
+    _run_git(repo, "checkout", "-q", "-b", "feature")
+    _write(repo, gate.NODES_MANIFEST, _default_nodes(declared))
+    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(declared))
+    head = _commit(repo, "introduce the manifests")
+    _run_git(repo, "checkout", "-q", "main")
+    target = _commit(repo, "target advances past the declared base")
+    _run_git(repo, "checkout", "-q", "feature")
+
+    event = tmp_path / "pr.json"
+    event.write_text(json.dumps(
+        {"pull_request": {"head": {"sha": head}, "base": {"sha": target}}}
+    ), encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "wave_gate.py"),
+         "--repo", str(repo), "manifests", "--github-event", str(event),
+         "--event-name", "pull_request"],
+        capture_output=True, text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert proc.returncode == 2, proc.stderr
+    assert "BOOTSTRAP_NOT_ALLOWED" in proc.stderr
+
+
+def test_the_active_floor_must_EQUAL_the_row_count():
+    """§6 finding 6a. Bootstrap skips transition arithmetic, so a `>=` floor
+    would let the introducing change commit a permanently weakened number."""
+    rows = [_node_row(1), _node_row(2)]
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.parse_manifest(_serialize(_node_header(1, 1), rows), "pytest-nodes")
+    assert excinfo.value.code == "MANIFEST_FLOOR_INVALID"
+
+
+def test_a_renderer_that_skips_is_a_failure_not_a_skip():
+    """§6 finding 5. A skipped renderer would leave a golden unrendered while
+    the suite stays green inside the skip cap."""
+    import _wave_gate_golden_corpus as corpus
+
+    original = dict(corpus.CASE_REGISTRY)
+    try:
+        def _skipping():
+            pytest.skip("a producer helper opted out")
+
+        corpus.CASE_REGISTRY["probe:skipping"] = ("process-xml-v1", _skipping)
+        with pytest.raises(corpus.RendererMismatch) as excinfo:
+            corpus.render_golden_case("probe:skipping", "process-xml-v1")
+        assert "may not opt out" in str(excinfo.value)
+    finally:
+        corpus.CASE_REGISTRY.clear()
+        corpus.CASE_REGISTRY.update(original)
+
+
+def test_invalid_utf8_and_symlinked_manifests_are_refused(tmp_path):
+    """§6 finding 7. Named negatives that were missing from the matrix."""
+    _parse_fails(b'{"kind":"manifest"}\n\xff\xfe not utf-8\n')
+
+    repo, _base = _seeded(tmp_path)
+    target = repo / gate.NODES_MANIFEST
+    payload = target.read_bytes()
+    target.unlink()
+    (repo / "elsewhere.jsonl").write_bytes(payload)
+    target.symlink_to(repo / "elsewhere.jsonl")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate._load_current(str(repo))
+    assert excinfo.value.code == "MANIFEST_FORMAT_INVALID"
+    assert "symlink" in excinfo.value.message
+
+
+def test_multiple_merge_bases_are_refused(tmp_path):
+    """§6 finding 7. A criss-cross merge has no unique baseline."""
+    repo, base = _seeded(tmp_path)
+    _run_git(repo, "checkout", "-q", "-b", "a")
+    a1 = _commit(repo, "a1")
+    _run_git(repo, "checkout", "-q", "main")
+    b1 = _commit(repo, "b1")
+    _run_git(repo, "checkout", "-q", "-b", "cross-a", a1)
+    _run_git(repo, "-c", "user.email=g@e.invalid", "-c", "user.name=g",
+             "merge", "-q", "--no-edit", b1)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(repo),
+                          capture_output=True, text=True, check=True).stdout.strip()
+    _run_git(repo, "checkout", "-q", "-b", "cross-b", b1)
+    _run_git(repo, "-c", "user.email=g@e.invalid", "-c", "user.name=g",
+             "merge", "-q", "--no-edit", a1)
+    target = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(repo),
+                            capture_output=True, text=True, check=True).stdout.strip()
+
+    event = tmp_path / "pr.json"
+    event.write_text(json.dumps(
+        {"pull_request": {"head": {"sha": head}, "base": {"sha": target}}}
+    ), encoding="utf-8")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.resolve_baseline(str(repo), event_path=str(event),
+                              event_name="pull_request")
+    assert excinfo.value.code == "BASELINE_MERGE_BASE_AMBIGUOUS"
+
+
+def test_the_fingerprint_seam_demands_canonical_material():
+    """§6 finding 4. A digest alone is satisfied by a constant."""
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(True, _StubProvider(bad_shape=True))
+    assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+
+    # Material that carries the account is not relocatable, even if the digest is.
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(
+            True, _StubProvider(material_leaks_identity=True)
+        )
+    assert "material" in excinfo.value.message
+
+    # Material moved but the digest did not — a collision the gate must refuse.
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(True, _StubProvider(colliding=True))
+    assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+
+
+def test_a_provider_that_raises_stays_on_the_diagnostic_path():
+    """§6 finding 4. Every refusal carries a stable code, including this one."""
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(True, _StubProvider(raises=True))
+    assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+    assert "RuntimeError" in excinfo.value.message
+
+
+def test_the_worktree_fingerprint_notices_an_in_place_edit(tmp_path):
+    """§6 finding 8. Porcelain status alone is blind to editing a dirty file."""
+    repo, _base = _seeded(tmp_path)
+    tracked = repo / "README.md"
+    tracked.write_text("seed\nmodified once\n", encoding="utf-8")
+    before = gate._status(str(repo))
+    tracked.write_text("seed\nmodified once\nand again\n", encoding="utf-8")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_worktree_unchanged(before, gate._status(str(repo)))
+    assert excinfo.value.code == "WORKTREE_DIRTY"
 
 
 def test_the_committed_manifests_parse_and_agree_with_the_tree():

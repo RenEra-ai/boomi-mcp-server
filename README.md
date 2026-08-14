@@ -589,8 +589,9 @@ tree: it compares `git status --porcelain` before and after and fails with
 deleted tracked file; it does not diff file contents, so an edit to a path that
 was already modified, or to a gitignored path, would not show up there.
 
-The required status check is named **`Python 3.11 non-KB`**; the `dev` ruleset
-requires it. Full specification:
+The required status check is named **`Python 3.11 non-KB`**. Making the `dev`
+ruleset actually require it is a separate repository-settings step that a workflow
+cannot perform on its own, and it is **not yet configured**. Full specification:
 [`docs/architecture/ENDGAME_VERIFICATION_GATE.md`](docs/architecture/ENDGAME_VERIFICATION_GATE.md).
 
 ---

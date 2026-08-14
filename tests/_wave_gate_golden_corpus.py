@@ -556,7 +556,23 @@ def render_golden_case(input_case, renderer):
         )
     if renderer not in RENDERERS:  # pragma: no cover - closed by declared_renderer
         raise RendererMismatch("unknown renderer {0!r}".format(renderer))
-    emitted = factory()
+    try:
+        emitted = factory()
+    except BaseException as exc:  # noqa: BLE001 - Skipped derives from BaseException
+        # A renderer must RENDER. If a producer module's helper reaches
+        # `pytest.skip()`, the per-commit golden test would report "skipped" and
+        # the suite would stay green with that golden never rendered or
+        # graph-verified — within the skip cap, invisibly. Converting it into a
+        # hard failure keeps "every active golden ran" true in the ordinary suite
+        # and not only under the explicit `wave` command.
+        if type(exc).__name__ in ("Skipped", "OutcomeException", "Failed"):
+            raise RendererMismatch(
+                "case {0!r} raised {1} instead of rendering; a golden renderer may "
+                "not opt out — retire the row if the case is gone".format(
+                    input_case, type(exc).__name__
+                )
+            )
+        raise
     if isinstance(emitted, bytes):
         return emitted
     if not isinstance(emitted, str):

@@ -1,6 +1,14 @@
 # The endgame verification gate
 
-Issue #152 (M12.13). Status: shipped. Owner: repository.
+Issue #152 (M12.13). Owner: repository.
+
+> **Status: implemented and locally validated; rollout NOT yet evidenced.** At the
+> time of writing the branch is unpushed, so no GitHub Actions run exists, the
+> `dev` ruleset does not yet require `Python 3.11 non-KB` (`gh api .../rulesets`
+> returns `[]`), and the scratch-branch red/green evidence the issue asks for has
+> not been recorded. Those are rollout steps for the owner after this lands —
+> §10 — and until they are done this document describes what the code does, not
+> what the repository enforces.
 
 Two committed ledgers and one fail-closed command make the mechanical half of the
 M12 endgame verification regime automatic:
@@ -64,7 +72,7 @@ Every failure prints a stable diagnostic code as the first stderr token:
 `MANIFEST_TRANSITION_ILLEGAL` · `MANIFEST_FLOOR_INVALID` ·
 `PYTEST_COLLECTION_FAILED` · `PYTEST_COLLECTION_EMPTY` ·
 `PYTEST_COLLECTION_DUPLICATE` · `PYTEST_COLLECTION_FLOOR` · `PYTEST_NODE_MISSING` ·
-`PYTEST_NODE_TOMBSTONED_BUT_PRESENT` · `PYTEST_FAILED` ·
+`CHECKOUT_EVENT_MISMATCH` · `PYTEST_NODE_TOMBSTONED_BUT_PRESENT` · `PYTEST_FAILED` ·
 `PYTEST_SUMMARY_UNPARSEABLE` · `PYTEST_SKIPPED_EXCEEDS_CAP` ·
 `PYTEST_PASSED_BELOW_FLOOR` · `GOLDEN_FILE_MISSING` · `GOLDEN_FILE_UNDECLARED` ·
 `GOLDEN_RENDER_FAILED` · `GOLDEN_OUTPUT_SET_MISMATCH` · `GOLDEN_NONDETERMINISTIC` ·
@@ -248,15 +256,19 @@ condition must hold.
 > it. Pinned by
 > `test_multi_commit_development_of_the_introduction_stays_bootstrappable`.
 >
-> **Residual, stated rather than papered over:** a LOCAL `wave --base <sha
-> predating the landing> --bootstrap` on a hand-edited ledger is still accepted.
-> That is an operator explicitly invoking the one-time exception against a stale
-> baseline they typed themselves, and local runs are advisory — CI is the gate,
-> and no CI context can reach that state once the ledger has landed.
+> The local arm is closed too, by reachability — see the `--bootstrap` bullet
+> above. Once the introducing commit is contained in any branch other than the
+> one being worked on, the exception is spent.
 * Both current manifests parse and are self-consistent.
 * Both headers declare the same `bootstrap_base`, equal to the validated
   baseline.
-* A local run must additionally pass `--bootstrap`.
+* A local run must additionally pass `--bootstrap`, **and** the commit that
+  introduced the ledger must not yet have landed — i.e. it is contained in the
+  current branch and no other. Reachability is the discriminator on purpose: a
+  commit-count rule, and a "ledger unchanged since its introducing commit" rule,
+  each also reject ordinary multi-commit development of the very change that
+  introduces the ledger. Local `wave` is required wave evidence, not advisory, so
+  this path is closed rather than documented as a residual.
 
 `bootstrap_base` is `9080e3c2d0fcc82b01f781b2352d60995ba58ad8`.
 
@@ -316,16 +328,24 @@ proves the seam actually activates.
 
 ```python
 cases() -> list[str]
-mutations(case) -> list[str]
-fingerprint(case, *, account, environment, mutation=None) -> str
+mutations(case) -> list[str]          # must include semantic, envelope, policy, revision
+fingerprint(case, *, account, environment, mutation=None) -> (digest: str, canonical_material: bytes)
 ```
 
-The gate then asserts **both** halves: the same plan under two different
-account/environment identities yields the SAME fingerprint (relocatable), and
-every declared semantic mutation yields a DIFFERENT one (discriminating). A
-provider declaring no cases or no mutations is refused — checking only stability
-would be satisfied by a constant. Do not change the command names or the check
-order when activating it.
+`fingerprint` returns the digest **and the exact canonical bytes it was derived
+from**, because a digest alone proves nothing: a constant is perfectly stable.
+The gate asserts, per case:
+
+* the canonical MATERIAL is identical under two different account/environment
+  identities — the bytes must carry no tenant identity — and so is the digest;
+* all four mutation kinds are declared (proving reaction to a `semantic` change
+  says nothing about `envelope`, `policy` or `revision`);
+* every mutation changes the material, changes the digest, and is itself
+  relocatable under both identities.
+
+A provider that raises is reported as `PLAN_FINGERPRINT_MISMATCH`, not an
+unhandled traceback: every refusal carries a stable code. Do not change the
+command names or the check order when activating it.
 
 ## 9. Regenerating a manifest
 
@@ -373,6 +393,34 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3.11 -m pytest tests \
 `active`, and raise `minimum_active` by exactly the number appended.
 **Retiring** one: flip `state` to `tombstone` in place (never delete the row),
 delete the artifact, and lower `minimum_active` by exactly the number tombstoned.
+
+## 9a. The CI environment, and what the plan asked for that is deliberately absent
+
+The workflow sets exactly `PYTHONPATH=src` and `PYTHONDONTWRITEBYTECODE=1`. The
+design plan also listed four more; each was dropped on measurement, and the
+reasons are recorded here rather than left as a silent divergence:
+
+* **`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`** — `anyio` DOES register a `pytest11`
+  entry point in this environment, and two test modules drive async code through
+  `anyio.run`. Setting the flag would disable it, so the flag would change the
+  configuration that was validated rather than lock it in. The environment is
+  already minimal by construction: `requirements-dev.txt` installs the runtime
+  set plus pytest, nothing else.
+* **`BOOMI_LOCAL`, `BOOMI_DOCS_ENABLED`, `BOOMI_GOTCHAS_ENABLED`** — all three are
+  real variables, but the full suite is green on Python 3.11 with none of them
+  set (measured, repeatedly). Setting values that no validating run used would
+  ship an unvalidated configuration on the strength of a guess about what they do.
+
+If a future run shows any of them is actually load-bearing, set it **and**
+re-measure; do not restore them because the plan named them.
+
+Two diagnostic codes the plan named are also absent — `GOLDEN_INPUT_MISSING` and
+`GOLDEN_FLOOR`. Neither adds a check: a missing case input surfaces as
+`GOLDEN_RENDER_FAILED` (the render child fails), and the golden floor is enforced
+by `MANIFEST_FLOOR_INVALID` at parse time. Minting codes that alias existing ones
+would make the roster longer without making the gate stricter, and
+`test_every_diagnostic_code_the_gate_can_raise_is_documented` keeps the roster and
+the code in exact agreement in both directions.
 
 ## 10. Branch protection
 

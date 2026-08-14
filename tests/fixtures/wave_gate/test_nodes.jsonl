@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9681,"minimum_collected":9681,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9694,"minimum_collected":9694,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -9680,3 +9680,16 @@
 {"kind":"test","id":"pytest-009679","node_id":"tests/test_wave_gate.py::test_an_ordinary_pull_request_whose_target_moved_on_is_NOT_a_bootstrap","state":"active"}
 {"kind":"test","id":"pytest-009680","node_id":"tests/test_wave_gate.py::test_multi_commit_development_of_the_introduction_stays_bootstrappable","state":"active"}
 {"kind":"test","id":"pytest-009681","node_id":"tests/test_wave_gate.py::test_the_workflow_invokes_the_real_gate_and_isolates_push_runs","state":"active"}
+{"kind":"test","id":"pytest-009682","node_id":"tests/test_wave_gate.py::test_a_local_bootstrap_is_refused_once_the_introduction_has_landed","state":"active"}
+{"kind":"test","id":"pytest-009683","node_id":"tests/test_wave_gate.py::test_a_pr_bootstrap_must_be_anchored_to_the_target","state":"active"}
+{"kind":"test","id":"pytest-009684","node_id":"tests/test_wave_gate.py::test_a_pr_merge_checkout_is_accepted","state":"active"}
+{"kind":"test","id":"pytest-009685","node_id":"tests/test_wave_gate.py::test_a_provider_that_raises_stays_on_the_diagnostic_path","state":"active"}
+{"kind":"test","id":"pytest-009686","node_id":"tests/test_wave_gate.py::test_a_renderer_that_skips_is_a_failure_not_a_skip","state":"active"}
+{"kind":"test","id":"pytest-009687","node_id":"tests/test_wave_gate.py::test_a_vacuous_provider_fails[only-semantic]","state":"active"}
+{"kind":"test","id":"pytest-009688","node_id":"tests/test_wave_gate.py::test_an_ambiguous_local_baseline_is_refused","state":"active"}
+{"kind":"test","id":"pytest-009689","node_id":"tests/test_wave_gate.py::test_invalid_utf8_and_symlinked_manifests_are_refused","state":"active"}
+{"kind":"test","id":"pytest-009690","node_id":"tests/test_wave_gate.py::test_multiple_merge_bases_are_refused","state":"active"}
+{"kind":"test","id":"pytest-009691","node_id":"tests/test_wave_gate.py::test_the_active_floor_must_EQUAL_the_row_count","state":"active"}
+{"kind":"test","id":"pytest-009692","node_id":"tests/test_wave_gate.py::test_the_checkout_must_be_the_tree_the_event_describes","state":"active"}
+{"kind":"test","id":"pytest-009693","node_id":"tests/test_wave_gate.py::test_the_fingerprint_seam_demands_canonical_material","state":"active"}
+{"kind":"test","id":"pytest-009694","node_id":"tests/test_wave_gate.py::test_the_worktree_fingerprint_notices_an_in_place_edit","state":"active"}
