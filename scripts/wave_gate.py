@@ -353,24 +353,43 @@ def _patch_digest(repo, *extra):
     return hashlib.sha256(proc.stdout).hexdigest()
 
 
+#: Substrings by which git reports that it could not READ something and has
+#: therefore omitted it. Deliberately an enumeration, and deliberately narrow —
+#: see `_refuse_unreadable`.
+_ACCESS_FAILURE_SIGNALS = (
+    "permission denied",
+    "could not open",
+    "cannot open",
+    "unable to read",
+    "cannot read",
+    "operation not permitted",
+    "no such file or directory",
+)
+
+
 def _refuse_unreadable(proc, what):
-    """Any stderr from a fingerprinting command is a refusal.
+    """Refuse when git reports it could not read part of the tree.
 
     Exit code alone is not enough: with an unreadable DIRECTORY, `git status`
     and `git diff` both exit 0, WARN on stderr (`could not open directory …
     Permission denied`) and silently omit every file underneath — so a mutation
     in there produced an identical fingerprint and the per-file `open()` guard
-    was never even reached.
+    was never reached.
 
-    Deliberately not a list of recognised warning strings: an enumeration of
-    "which git messages matter" is the shape of defect this file has produced
-    repeatedly. On a clean checkout these commands emit nothing at all, so
-    anything on stderr means the snapshot is incomplete — and an incomplete
-    snapshot cannot support the read-only claim. A spurious refusal here is loud
-    and fixable; a silent gap is neither.
+    An earlier revision refused on ANY stderr, on the reasoning that these
+    commands emit nothing on a clean checkout so anything at all means an
+    incomplete snapshot. That was wrong, and the asymmetry is why: git also emits
+    genuinely benign process diagnostics in some environments (a sandboxed macOS
+    can produce `warning: confstr() failed … using /tmp instead` alongside
+    complete output and exit 0). Over-matching makes the REQUIRED gate refuse
+    every invocation in such an environment — the whole check becomes unusable —
+    while under-matching leaves only the narrow residual that existed before.
+    A gate that cannot run protects nothing, so the narrow match wins.
     """
     noise = proc.stderr.decode("utf-8", "replace").strip()
-    if proc.returncode != 0 or noise:
+    lowered = noise.lower()
+    unreadable = any(signal in lowered for signal in _ACCESS_FAILURE_SIGNALS)
+    if proc.returncode != 0 or unreadable:
         raise _invalid(
             "WORKTREE_DIRTY",
             "{0} could not account for the whole worktree (exit {1}): {2}".format(

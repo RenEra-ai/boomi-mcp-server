@@ -1974,7 +1974,16 @@ def test_a_provider_GateFailure_cannot_carry_its_own_exit_status():
     assert excinfo.value.status == 1
 
 
-def test_an_unreadable_directory_fails_closed(tmp_path):
+class _Proc:
+    """A stand-in for a completed git process."""
+
+    def __init__(self, stderr=b"", returncode=0, stdout=b""):
+        self.stderr = stderr
+        self.returncode = returncode
+        self.stdout = stdout
+
+
+def test_an_unreadable_directory_fails_closed():
     """[Critical] Exit code alone is not accountability.
 
     With an unreadable DIRECTORY, `git status` and `git diff` both exit 0, warn
@@ -1982,21 +1991,40 @@ def test_an_unreadable_directory_fails_closed(tmp_path):
     produced an identical fingerprint and the per-file `open()` guard was never
     reached. Verified against real git: `status_rc=0` with
     `could not open directory 'locked/': Permission denied`.
+
+    The warning is SIMULATED rather than produced with `chmod(000)`: as UID 0 —
+    which container CI routinely is — the mode bits do not deny root, git emits
+    nothing, and a permission-based test would go red on the runner for a reason
+    unrelated to the behaviour under test.
     """
-    repo, _base = _seeded(tmp_path)
-    locked = repo / "locked"
-    locked.mkdir()
-    (locked / "f.txt").write_bytes(b"one\n")
-    _commit(repo, "add the directory")
-    (locked / "f.txt").write_bytes(b"two\n")
-    os.chmod(locked, 0o000)
-    try:
-        with pytest.raises(gate.GateFailure) as excinfo:
-            gate._status(str(repo))
-        assert excinfo.value.code == "WORKTREE_DIRTY"
-        assert "could not account for the whole worktree" in excinfo.value.message
-    finally:
-        os.chmod(locked, 0o755)
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate._refuse_unreadable(
+            _Proc(stderr=b"warning: could not open directory 'locked/': "
+                         b"Permission denied\n"),
+            "git status",
+        )
+    assert excinfo.value.code == "WORKTREE_DIRTY"
+    assert "could not account for the whole worktree" in excinfo.value.message
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [b"", b"warning: confstr() failed: Operation timed out; using /tmp instead\n"],
+    ids=["silent", "benign-process-warning"],
+)
+def test_benign_git_diagnostics_do_not_disable_the_gate(stderr):
+    """Refusing on ANY stderr made the required gate refuse every invocation in
+    environments that emit harmless process warnings alongside complete output.
+
+    Over-matching disables the check entirely; under-matching leaves only the
+    narrow residual that existed before. A gate that cannot run protects nothing.
+    """
+    gate._refuse_unreadable(_Proc(stderr=stderr), "git status")
+
+
+def test_a_nonzero_git_exit_still_refuses():
+    with pytest.raises(gate.GateFailure):
+        gate._refuse_unreadable(_Proc(stderr=b"boom", returncode=128), "git diff")
 
 
 def test_a_born_tombstoned_row_is_still_reported(tmp_path):
