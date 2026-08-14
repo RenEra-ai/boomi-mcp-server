@@ -2040,7 +2040,7 @@ def make_scratch_dir(repo):
         # replacement. Whatever we end up holding is what gets judged.
         fd = os.open(resolved, os.O_RDONLY | _O_DIRECTORY)
         _refuse_scratch_inside_repo(fd, repo)
-        return _ScratchDir(resolved, fd)
+        return _ScratchDir(resolved, fd, repo)
     except BaseException:
         shutil.rmtree(candidate, ignore_errors=True)
         raise
@@ -2070,11 +2070,21 @@ class _ScratchDir(object):
     all.
     """
 
-    __slots__ = ("_path", "fd")
+    __slots__ = ("_path", "fd", "_repo")
 
-    def __init__(self, path, fd):
+    def __init__(self, path, fd, repo):
         self._path = path
         self.fd = fd
+        self._repo = repo
+
+    def _binding_holds(self):
+        """True when the name still denotes the held directory AND it is outside."""
+        try:
+            self.__fspath__()
+            _refuse_scratch_inside_repo(self.fd, self._repo)
+        except GateFailure:
+            return False
+        return True
 
     def __fspath__(self):
         try:
@@ -2108,45 +2118,51 @@ class _ScratchDir(object):
         return open(os.path.join(self, name), "w")
 
     def dispose(self):
-        """Remove the scratch through the DESCRIPTOR, or remove nothing at all.
+        """Remove the scratch, or remove nothing at all — and never lie about it.
 
-        Returns True when the directory was disposed of cleanly, False when the
-        binding broke — and False means nothing was deleted, deliberately. Two
-        reasons, both load-bearing:
+        Returns True only when the directory was disposed of cleanly. False means
+        the binding broke, and the caller turns that into a gate failure.
 
-        * Deleting through a retargeted name would delete a directory INSIDE the
-          repository, turning a hygiene failure into data loss.
-        * Whatever the gate wrote must STAY on disk, because the closing
-          worktree fingerprint is the evidence that something happened. A
-          cleanup that tidied it away would erase the only trace and leave the
-          gate green over a tree it had written into.
+        The destructive step is BRACKETED by identity+containment checks rather
+        than preceded by one. A single check before deleting is not enough: a
+        sibling can rename the held directory into the worktree after the check,
+        and fd-relative deletion then erases the generated files from their new
+        in-repo location. Checking again afterwards cannot un-delete them, but it
+        does ensure the gate goes RED instead of exiting 0 over it — and the
+        check BEFORE means that in the ordinary version of that race nothing is
+        deleted at all, because the directory is already inside the repo when we
+        look.
 
-        Contents are unlinked relative to the held descriptor, never by
-        pathname, so a parent swapped mid-cleanup cannot redirect the deletion.
-        Only the final `rmdir` of the (now empty) directory goes by name, and
-        only while the binding still holds: an empty directory carries no data
-        and git does not track one.
+        A failing `rmdir` is likewise a signal, not noise: it means the name
+        stopped denoting our directory. Swallowing it and returning True would
+        leave an empty directory in the worktree that git does not track, so the
+        closing fingerprint would match and the gate would pass — exactly the
+        outcome the retargeting rules exist to prevent.
         """
+        if not self._binding_holds():
+            self._close()
+            return False
         try:
-            path = self.__fspath__()
-        except GateFailure:
-            path = None
-        if path is not None:
-            try:
-                _unlink_tree_at(self.fd)
-            except OSError:
-                path = None
+            _unlink_tree_at(self.fd)
+        except OSError:
+            self._close()
+            return False
+        if not self._binding_holds():
+            self._close()
+            return False
+        path = self._path
+        self._close()
+        try:
+            os.rmdir(path)
+        except OSError:
+            return False
+        return True
+
+    def _close(self):
         try:
             os.close(self.fd)
         except OSError:
             pass
-        if path is None:
-            return False
-        try:
-            os.rmdir(path)
-        except OSError:
-            pass
-        return True
 
 
 def _unlink_tree_at(dirfd):

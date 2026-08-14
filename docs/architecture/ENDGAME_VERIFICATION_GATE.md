@@ -233,7 +233,13 @@ consequence, and three properties combine to make that true:
 2. `dispose()` then removes **nothing** — contents are unlinked relative to the held
    descriptor, never by name, and a broken binding deletes nothing at all. Deleting
    through a swapped name would delete inside the repository, and would erase the only
-   trace that anything happened.
+   trace that anything happened. The destructive step is BRACKETED by identity and
+   containment checks rather than merely preceded by one: a check before deleting means
+   a directory already moved into the worktree is never emptied, and the check after
+   means a move that lands mid-delete still turns the run red. A failing `rmdir` is
+   treated as a broken binding for the same reason — swallowing it would leave an empty
+   directory that git does not track, so the fingerprint would match and the gate would
+   pass over a retargeting it had already seen.
 3. Retargeting is recorded as a PENDING failure so the closing worktree fingerprint still
    runs. Raising immediately would skip it on precisely the path where a repository
    mutation is most plausible, costing the gate its `WORKTREE_DIRTY` evidence.
