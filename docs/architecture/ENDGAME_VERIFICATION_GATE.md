@@ -69,6 +69,7 @@ Every failure prints a stable diagnostic code as the first stderr token:
 `BASELINE_EVENT_INVALID` · `BASELINE_ZERO_SHA` · `BASELINE_UNAVAILABLE` ·
 `BASELINE_MERGE_BASE_MISSING` · `BASELINE_MERGE_BASE_AMBIGUOUS` ·
 `BOOTSTRAP_NOT_ALLOWED` · `SCRATCH_INSIDE_REPO` · `SCRATCH_CONTAINMENT_UNPROVEN` ·
+`SCRATCH_RETARGETED` ·
 `MANIFEST_MISSING` ·
 `MANIFEST_FORMAT_INVALID` ·
 `MANIFEST_TRANSITION_ILLEGAL` · `MANIFEST_FLOOR_INVALID` ·
@@ -209,12 +210,23 @@ that fails closed as `SCRATCH_CONTAINMENT_UNPROVEN`. The path the gate then uses
 resolved one that was checked, never the spelling `mkdtemp()` returned — verifying one
 name and writing through another leaves the used path unproven.
 
+**A name is not a directory.** Resolving the path once is not enough: a process running
+as the same user — no execution inside the gate's process tree required — can rename the
+verified parent and leave a symlink to the repository in its place, after which the same
+string denotes a directory INSIDE the tree. So the gate holds an open descriptor on the
+directory that passed the check, and `_ScratchDir.__fspath__` re-proves the binding every
+time the value becomes a string. That single chokepoint covers every existing
+`os.path.join(...)`/`shutil.rmtree(...)` call without hardening them one by one; the
+gate's own writes additionally go through the descriptor, which cannot be redirected.
+A broken binding is `SCRATCH_RETARGETED` — a gate failure, not a cleanup nuisance — and
+cleanup then removes NOTHING through the changed name, because deleting through it would
+delete a directory inside the repository.
+
 **What the fingerprint does NOT defend against, stated plainly.** It is a hygiene check
-against the gate's own accidental writes and against a misconfigured `TMPDIR`. It is
-NOT a defence against hostile test code, and cannot be: the gate's entire job is to
-EXECUTE this repository's test suite, so any code in `tests/` already has arbitrary
-execution inside the gate's own process tree. Measured, with no symlink, no `TMPDIR`
-and no scratch directory involved at all:
+against the gate's own writes and against a misconfigured or subverted scratch path. It
+is NOT a general defence against a same-user adversary, and cannot be: such an adversary
+can write into the worktree directly, without involving the gate at all. Measured, with
+no symlink, no `TMPDIR` and no scratch directory involved:
 
 ```
 wrote_inside_repo_during_run   : True
@@ -224,11 +236,11 @@ modify_then_restore blind      : True
 ```
 
 A before/after snapshot is structurally blind to any write that is undone before the
-closing snapshot. Hardening one route to that outcome — descriptor-relative I/O against
-a repointed symlink, say — closes a single path out of unboundedly many while leaving
-the capability untouched, which is the enumeration-instead-of-invariant mistake this
-project has a standing rule against. The honest boundary is: test code is trusted
-because it is executed; the gate defends the tree against ITSELF. It writes only there, runs children
+closing snapshot, and no amount of hardening inside the gate changes that. The honest
+boundary is therefore narrow and worth stating exactly: **the gate guarantees that IT
+does not write into the worktree, and refuses to run rather than write through a path it
+cannot vouch for.** It does not guarantee that nothing else did. Test code is trusted
+because it is executed — the gate exists to run it. It writes only there, runs children
 with `PYTHONDONTWRITEBYTECODE=1` and `-p no:cacheprovider`, and never invokes a
 mutating git command. The before/after fingerprint (HEAD + porcelain status +
 digests of the full binary patches + a SHA-256 per untracked file) is a runtime

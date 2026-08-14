@@ -2159,25 +2159,88 @@ def test_the_scratch_path_returned_is_the_path_that_was_verified(tmp_path, monke
     monkeypatch.setattr(tempfile, "tempdir", None)
     monkeypatch.setenv("TMPDIR", str(link))
     scratch = gate.make_scratch_dir(str(repo))
+    resolved = os.fspath(scratch)
     try:
         # The returned path carries no symlink component to retarget.
-        assert scratch == os.path.realpath(scratch)
-        assert not scratch.startswith(str(link) + os.sep)
+        assert resolved == os.path.realpath(resolved)
+        assert not resolved.startswith(str(link) + os.sep)
 
         # Repoint the symlink at the repository, exactly as the finding describes,
         # and recreate the basename there.
-        basename = os.path.basename(scratch)
+        basename = os.path.basename(resolved)
         link.unlink()
         link.symlink_to(repo, target_is_directory=True)
         (repo / basename).mkdir()
 
         # A write through the RETURNED path still lands outside the repository.
-        with open(os.path.join(scratch, "collected.txt"), "w") as handle:
+        with scratch.open_for_write("collected.txt") as handle:
             handle.write("x\n")
         assert (outside / basename / "collected.txt").exists()
         assert not (repo / basename / "collected.txt").exists()
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        shutil.rmtree(resolved, ignore_errors=True)
+
+
+def test_a_scratch_retargeted_mid_run_is_refused_not_followed(tmp_path, monkeypatch):
+    """The sibling-process scenario: rename the parent, symlink it at the repo.
+
+    This needs no execution inside the gate's process tree — any process running
+    as the same user can do it while the gate runs. Returning the resolved path
+    closes the original `TMPDIR`-symlink case but NOT this one, because a name is
+    not a directory. The gate holds a descriptor on the directory it verified, so
+    every conversion of the scratch back to a string re-proves the binding.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+
+    scratch = gate.make_scratch_dir(str(repo))
+    basename = os.path.basename(os.fspath(scratch))
+
+    # The sibling process acts: the verified parent is renamed away and replaced
+    # by a symlink to the repository, with the same basename recreated inside.
+    outside.rename(tmp_path / "outside-moved")
+    os.symlink(str(repo), str(outside), target_is_directory=True)
+    (repo / basename).mkdir()
+
+    # The name now resolves INSIDE the repository...
+    assert os.path.realpath(os.path.join(str(outside), basename)) == os.path.realpath(
+        str(repo / basename)
+    )
+    # ...so every use of the scratch refuses rather than following it.
+    with pytest.raises(gate.GateFailure) as excinfo:
+        os.fspath(scratch)
+    assert excinfo.value.code == "SCRATCH_RETARGETED"
+    with pytest.raises(gate.GateFailure):
+        os.path.join(scratch, "collected.txt")
+
+    # A write the gate performs itself goes through the descriptor and lands in
+    # the real directory, never in the repository.
+    with scratch.open_for_write("collected.txt") as handle:
+        handle.write("x\n")
+    assert (tmp_path / "outside-moved" / basename / "collected.txt").exists()
+    assert not (repo / basename / "collected.txt").exists()
+
+    # Cleanup removes NOTHING through the changed name — deleting through it
+    # would remove a directory inside the repository.
+    assert scratch.release() is None
+    assert (repo / basename).exists()
+
+
+def test_a_scratch_whose_binding_holds_is_released_normally(tmp_path, monkeypatch):
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+    scratch = gate.make_scratch_dir(str(repo))
+    with scratch.open_for_write("collected.txt") as handle:
+        handle.write("x\n")
+    released = scratch.release()
+    assert released is not None and os.path.isdir(released)
+    shutil.rmtree(released, ignore_errors=True)
 
 
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):

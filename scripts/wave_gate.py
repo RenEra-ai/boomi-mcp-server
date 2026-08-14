@@ -1296,7 +1296,7 @@ def collect_nodes(repo, tmpdir):
             "collection exited {0}:\n{1}".format(proc.returncode, tail),
         )
     unique = parse_collection_output(proc.stdout)
-    with open(os.path.join(tmpdir, "collected.txt"), "w") as handle:
+    with tmpdir.open_for_write("collected.txt") as handle:
         handle.write("\n".join(sorted(unique)) + "\n")
     return unique
 
@@ -1494,9 +1494,12 @@ def _render_pass(repo, goldens, tmpdir, hashseed):
         {"id": row["id"], "input_case": row["input_case"], "renderer": row["renderer"]}
         for row in goldens.active
     ]
-    request_path = os.path.join(tmpdir, "request-{0}.json".format(hashseed))
-    with open(request_path, "w") as handle:
+    request_name = "request-{0}.json".format(hashseed)
+    with tmpdir.open_for_write(request_name) as handle:
         json.dump(request, handle)
+    # Re-derived AFTER the write, so the path handed to the child is one the
+    # binding still holds for.
+    request_path = os.path.join(tmpdir, request_name)
 
     proc = subprocess.run(
         [sys.executable, os.path.join(repo, GOLDEN_CORPUS), "--render", request_path],
@@ -1966,7 +1969,25 @@ def execute(args):
     except GateFailure as exc:
         failure = exc
     finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+        scratch_path = tmpdir.release()
+        if scratch_path is not None:
+            shutil.rmtree(scratch_path, ignore_errors=True)
+
+    # A broken binding is a GATE FAILURE, not a cleanup nuisance. It means the
+    # name the gate wrote through stopped denoting the directory that passed the
+    # containment check, so the run's writes cannot be placed and the closing
+    # fingerprint cannot speak for them. Reported like any other hygiene failure:
+    # it never displaces an earlier, more specific failure.
+    if scratch_path is None:
+        retargeted = _contract(
+            "SCRATCH_RETARGETED",
+            "the scratch directory was replaced while the gate was running; the "
+            "gate's own writes cannot be accounted for, and nothing was removed "
+            "through the changed name.",
+        )
+        if failure is None:
+            raise retargeted
+        _emit("{0} {1}".format(retargeted.code, retargeted.message))
 
     # UNCONDITIONAL, including after a failure — a failing test is exactly when
     # the tree is most likely to have been disturbed, and skipping the check on
@@ -2009,10 +2030,89 @@ def make_scratch_dir(repo):
     try:
         resolved = os.path.realpath(candidate)
         _refuse_scratch_inside_repo(resolved, repo)
+        return _ScratchDir(resolved, os.open(resolved, os.O_RDONLY | _O_DIRECTORY))
     except BaseException:
         shutil.rmtree(candidate, ignore_errors=True)
         raise
-    return resolved
+
+
+_O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+
+
+class _ScratchDir(object):
+    """The verified scratch directory — an OBJECT, re-proved on every use.
+
+    A pathname is not a directory. `make_scratch_dir` proves that a path denotes
+    a directory outside the worktree, but the binding between name and object is
+    not stable: a concurrent process running as the same user can rename the
+    resolved parent and leave a symlink to the repository in its place, after
+    which the identical string denotes a directory INSIDE the tree. The write
+    then lands in the worktree and cleanup removes it again, leaving the closing
+    fingerprint unchanged — a green gate over a tree the gate itself wrote into.
+
+    Holding an open descriptor keeps hold of the object that was actually
+    verified. `__fspath__` is the single funnel through which this value becomes
+    a string, so every existing `os.path.join(...)` and `shutil.rmtree(...)` call
+    re-asserts the binding without any of them being rewritten — an invariant at
+    one chokepoint rather than a list of hardened call sites. Writes the gate
+    performs itself additionally go through `fd`, which cannot be redirected at
+    all.
+    """
+
+    __slots__ = ("_path", "fd")
+
+    def __init__(self, path, fd):
+        self._path = path
+        self.fd = fd
+
+    def __fspath__(self):
+        try:
+            named = os.stat(self._path)
+        except OSError as exc:
+            raise _contract(
+                "SCRATCH_RETARGETED",
+                "the scratch directory {0} is no longer reachable by name ({1}); "
+                "it was replaced while the gate was running.".format(self._path, exc),
+            )
+        held = os.fstat(self.fd)
+        if (named.st_dev, named.st_ino) != (held.st_dev, held.st_ino):
+            raise _contract(
+                "SCRATCH_RETARGETED",
+                "the scratch directory {0} now denotes a different directory than "
+                "the one that passed the containment check; it was replaced while "
+                "the gate was running.".format(self._path),
+            )
+        return self._path
+
+    def __str__(self):
+        return self.__fspath__()
+
+    def open_for_write(self, name):
+        """Create a file INSIDE the verified directory, immune to retargeting."""
+        if os.open in os.supports_dir_fd:
+            handle = os.open(
+                name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600, dir_fd=self.fd
+            )
+            return os.fdopen(handle, "w")
+        return open(os.path.join(self, name), "w")
+
+    def release(self):
+        """Close the descriptor and return the path IF it still denotes it.
+
+        Returns None when the binding broke, so the caller removes nothing: a
+        blind `rmtree` through a retargeted name would delete a directory inside
+        the repository, turning a hygiene failure into data loss.
+        """
+        try:
+            path = self.__fspath__()
+        except GateFailure:
+            path = None
+        finally:
+            try:
+                os.close(self.fd)
+            except OSError:
+                pass
+        return path
 
 
 def _refuse_scratch_inside_repo(candidate, repo):
