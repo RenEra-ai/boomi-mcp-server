@@ -935,8 +935,15 @@ def _refuse_stale_local_bootstrap(repo, baseline):
     remote-tracking ref); an unlanded one is contained only in the current
     branch.
     """
-    current = _git(repo, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-    if current == "HEAD":
+    # `symbolic-ref`, NOT `rev-parse --abbrev-ref`: the latter returns the
+    # shortest UNAMBIGUOUS name, so a branch that shares its name with a tag
+    # comes back as `heads/release` — and prefixing that yields the nonexistent
+    # `refs/heads/heads/release`, leaving the real branch in `landed_on` and
+    # refusing a perfectly valid unshared bootstrap. `symbolic-ref` returns the
+    # full ref, and it also answers the detached case by failing outright.
+    proc = _git(repo, "symbolic-ref", "-q", "HEAD", check=False)
+    own_ref = proc.stdout.strip()
+    if proc.returncode != 0 or not own_ref.startswith("refs/heads/"):
         # Detached: there is no "current branch" to exclude, so every containing
         # ref would look like an independent landing. Refuse rather than guess.
         raise _contract(
@@ -966,7 +973,6 @@ def _refuse_stale_local_bootstrap(repo, baseline):
         refs = _git(
             repo, "for-each-ref", "--contains", introduction, "--format=%(refname)",
         ).stdout.split()
-        own_ref = "refs/heads/{0}".format(current)
         # ANY other containing ref counts, remote-tracking mirrors included.
         #
         # An earlier revision exempted `*/<current>` as "just a mirror of my own

@@ -1795,6 +1795,30 @@ def test_ANY_other_ref_spends_the_local_bootstrap(tmp_path, ref):
     _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
 
 
+def test_a_same_named_tag_before_the_introduction_does_not_block_a_bootstrap(tmp_path):
+    """The branch name must be read as a full symbolic ref.
+
+    `git rev-parse --abbrev-ref HEAD` returns the shortest UNAMBIGUOUS name, so a
+    branch sharing its name with a tag comes back as `heads/<name>` — and
+    prefixing that builds the nonexistent `refs/heads/heads/<name>`, leaving the
+    real branch in `landed_on` and refusing a valid unshared bootstrap.
+    """
+    repo = _new_repo(tmp_path)
+    _run_git(repo, "branch", "-m", "release")
+    for name in ("g1.xml", "g2.xml"):
+        _write(repo, "tests/fixtures/golden_xml/{0}".format(name), "<x/>\n")
+    base = _commit(repo, "pre-manifest")
+    # A tag with the SAME name as the branch, pointing BEFORE the introduction.
+    _run_git(repo, "tag", "release", base)
+    _write(repo, gate.NODES_MANIFEST, _default_nodes(base))
+    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(base))
+    _commit(repo, "introduce manifests")
+
+    assert _git_out(repo, "rev-parse", "--abbrev-ref", "HEAD") == "heads/release"
+    status, stderr = _manifests(repo, base, "--bootstrap")
+    assert status == 0, stderr
+
+
 def test_a_tag_sharing_the_branch_name_does_not_exempt_itself(tmp_path):
     """Full refnames, not short ones: `%(refname:short)` renders `refs/heads/x`
     and `refs/tags/x` identically, so a same-named tag would slip through."""
