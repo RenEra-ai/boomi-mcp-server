@@ -558,6 +558,17 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3.11 -m pytest tests \
 > they sort. Raise `minimum_active` by exactly the number appended. Sorting
 > applies **once**, at the bootstrap, to fix the initial order.
 >
+> **Before the bootstrap has landed, the rules above do not yet bind.** Until the
+> manifests exist on `dev`, the whole file is the bootstrap being authored: it is
+> regenerated wholesale, sorted, all-active, numbered from `pytest-000001`, and
+> the branch's intermediate commits form no ledger at all — the landing push is
+> validated as `dev`'s tip → the branch tip, which takes the bootstrap path
+> because `dev` carries no manifests. Reviewers have twice read an intermediate
+> commit as a baseline and reported a legal bootstrap as an illegal transition;
+> the question to ask is always **what does `dev` actually contain**. The instant
+> the bootstrap lands, append-only binds forever and this paragraph stops
+> applying.
+>
 > A node that no longer collects is **not** a regeneration outcome: it is an
 > explicit `active → tombstone` edit by the owning slice, in the change that
 > deletes the test. A generator that silently drops it must fail instead.
