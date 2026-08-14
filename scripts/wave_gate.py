@@ -2053,7 +2053,10 @@ def exit_status_for(failure):
     holding 0, and `sys.exit()` reads the underlying value. Anything not provably
     the literal 2 becomes 1: a failure never exits green.
     """
-    status = getattr(failure, "status", 1)
+    try:
+        status = failure.status
+    except BaseException:  # noqa: BLE001 - a property could raise
+        return 1
     return 2 if (type(status) is int and status == 2) else 1
 
 
@@ -2063,10 +2066,26 @@ def main(argv=None):
     try:
         return execute(args)
     except GateFailure as failure:
-        # `str()` on the fields, so a hostile `__str__` cannot smuggle a
-        # non-string through the formatter; the status is recomputed, not read.
-        _emit("{0} {1}".format(str(failure.code), str(failure.message)))
-        return exit_status_for(failure)
+        # DECIDE FIRST, RENDER SECOND — and that ordering is the whole point.
+        #
+        # Four successive rounds each found a different dunder by which a
+        # hostile provider could reach the exit path through the DIAGNOSTIC:
+        # `__name__` via a metaclass, `__repr__` in a formatter, `__eq__` on an
+        # int subclass, `__hash__`/`__str__` on a str subclass. Patching them one
+        # at a time cannot terminate — there is always another special method.
+        #
+        # So the exit decision no longer depends on rendering at all. It is taken
+        # before any message is built, from a guarded attribute read, a `type()`
+        # check and a comparison against a literal — none of which can execute
+        # foreign code. Rendering then happens inside its own guard and can fail
+        # freely: the worst outcome is a less informative line, never a green
+        # exit.
+        status = exit_status_for(failure)
+        try:
+            _emit("{0} {1}".format(failure.code, failure.message))
+        except BaseException:  # noqa: BLE001
+            _emit("gate failure (diagnostic could not be rendered)")
+        return status
 
 
 if __name__ == "__main__":  # pragma: no cover

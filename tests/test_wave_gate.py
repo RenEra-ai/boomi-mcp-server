@@ -2030,6 +2030,36 @@ def test_the_phase_boundary_never_inspects_a_hostile_exception():
     assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
 
 
+def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero():
+    """The exit decision precedes rendering, so no dunder can reach it.
+
+    Four rounds each found a different special method by which a hostile
+    provider could influence the exit path through the DIAGNOSTIC — `__name__`
+    via a metaclass, `__repr__` in a formatter, `__eq__` on an int subclass,
+    `__hash__`/`__str__` on a str subclass. Patching them individually cannot
+    terminate; deciding before rendering does.
+    """
+    class _Explosive(str):
+        def __str__(self):
+            raise SystemExit(0)
+
+        def __format__(self, spec):
+            raise SystemExit(0)
+
+    failure = gate.GateFailure(_Explosive("X"), _Explosive("m"), 1)
+
+    original = gate.execute
+
+    def _boom(_args):
+        raise failure
+
+    try:
+        gate.execute = _boom
+        assert gate.main(["manifests", "--base", "HEAD"]) == 1
+    finally:
+        gate.execute = original
+
+
 def test_the_exit_status_is_recomputed_not_trusted():
     """A constructor invariant only holds at construction.
 
