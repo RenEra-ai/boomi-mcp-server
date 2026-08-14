@@ -266,9 +266,9 @@ condition must hold.
 > it. Pinned by
 > `test_multi_commit_development_of_the_introduction_stays_bootstrappable`.
 >
-> The local arm is closed too, by reachability — see the `--bootstrap` bullet
-> above. Once the introducing commit is contained in any branch other than the
-> one being worked on, the exception is spent.
+> The local arm is NOT closed by any heuristic — see the `--bootstrap` bullet
+> above for why eight formulations were tried and removed. It is an explicit
+> operator assertion, labelled as one at runtime; the CI arms hold the authority.
 * Both current manifests parse and are self-consistent.
 * Both headers declare the same `bootstrap_base`, equal to the validated
   baseline.
@@ -313,8 +313,8 @@ Local bootstrap deliberately does **not** require "an uncommitted introduction a
 `HEAD == bootstrap_base`, or a single introduction commit whose parent is
 `bootstrap_base`". A working branch carries several commits before the manifests
 land, so neither arm would hold and the gate would be unrunnable locally on the
-very change it bootstraps. The ancestry proof already forbids re-bootstrap; the
-immediate-introduction rule adds nothing and costs runnability.
+very change it bootstraps — the first of the eight failed formulations catalogued
+above.
 
 ## 7. The golden case registry
 
@@ -438,9 +438,10 @@ delete the artifact, and lower `minimum_active` by exactly the number tombstoned
 
 ## 9a. The CI environment, and what the plan asked for that is deliberately absent
 
-The workflow sets exactly `PYTHONPATH=src` and `PYTHONDONTWRITEBYTECODE=1`. The
-design plan also listed four more; each was dropped on measurement, and the
-reasons are recorded here rather than left as a silent divergence:
+The workflow sets `PYTHONPATH=src`, `PYTHONDONTWRITEBYTECODE=1` and
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`. The design plan listed three more, all
+`BOOMI_*`; they were dropped on measurement, and the reasons are recorded here
+rather than left as a silent divergence:
 
 * **`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`** — SET, after an earlier refutation of it
   turned out to be wrong. That refutation reasoned that `anyio` registers a

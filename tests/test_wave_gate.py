@@ -960,10 +960,26 @@ def test_reactivating_a_tombstone_is_refused():
     )
 
 
-def test_appending_an_already_tombstoned_row_is_refused():
-    _transition_fails(
+def test_appending_an_already_tombstoned_row_is_LEGAL():
+    """A push range that adds a test in one commit and retires it in a later one
+    is exactly this from the range's endpoints.
+
+    Refusing it made an ordinary multi-commit push illegal even though every
+    individual commit transition was legal — reproduced on this very branch,
+    where `manifests --base <4 commits back>` exited 2. Nothing is lost: a
+    tombstoned row must separately have no artifact, so it stays accounted for.
+    """
+    assert _transition(
         [_node_row(1)], [_node_row(1), _node_row(2, state="tombstone")],
         base_header=_node_header(1, 1), head_header=_node_header(1, 1),
+    ) == (0, 0)
+
+    # ...and the floor still has to track it: a born-tombstoned row adds nothing
+    # to the active count, so claiming it does is refused.
+    _transition_fails(
+        [_node_row(1)], [_node_row(1), _node_row(2, state="tombstone")],
+        base_header=_node_header(1, 1), head_header=_node_header(2, 1),
+        code="MANIFEST_FLOOR_INVALID",
     )
 
 
@@ -1844,6 +1860,82 @@ def test_the_worktree_fingerprint_is_content_not_line_counts(tmp_path):
     with pytest.raises(gate.GateFailure) as excinfo:
         gate.check_worktree_unchanged(before, gate._status(str(repo)))
     assert excinfo.value.code == "WORKTREE_DIRTY"
+
+
+def test_the_worktree_fingerprint_discloses_no_file_content(tmp_path):
+    """[Critical] The fingerprint is printed verbatim in a WORKTREE_DIRTY
+    diagnostic, so an uncommitted credential would go straight into the log.
+
+    Reproduced before the fix with `TOKEN=SUPER_SECRET_VALUE`. Digests compare
+    exactly as well and disclose nothing.
+    """
+    secret = "SUPER_SECRET_VALUE_" + "x" * 8
+    repo = _new_repo(tmp_path)
+    tracked = repo / "conf.env"
+    tracked.write_text("TOKEN=placeholder\n", encoding="utf-8")
+    _commit(repo, "seed")
+    tracked.write_text("TOKEN={0}\n".format(secret), encoding="utf-8")
+    (repo / "extra.env").write_text("OTHER={0}\n".format(secret), encoding="utf-8")
+
+    work = str(repo)
+    fingerprint = gate._status(work)
+    assert secret not in fingerprint, "the fingerprint leaks file content"
+    # ...and it still notices a change to those same files.
+    before = fingerprint
+    tracked.write_text("TOKEN=different\n", encoding="utf-8")
+    with pytest.raises(gate.GateFailure):
+        gate.check_worktree_unchanged(before, gate._status(work))
+
+
+def test_a_file_that_cannot_be_hashed_fails_closed(tmp_path):
+    """[Critical] A stable `<unreadable errno>` token made the CONTENT invisible:
+    chmod / write / chmod produced identical snapshots across a real mutation."""
+    repo, _base = _seeded(tmp_path)
+    blocked = repo / "locked.bin"
+    blocked.write_bytes(b"one\n")
+    os.chmod(blocked, 0o000)
+    try:
+        with pytest.raises(gate.GateFailure) as excinfo:
+            gate._status(str(repo))
+        assert excinfo.value.code == "WORKTREE_DIRTY"
+        assert "cannot fingerprint" in excinfo.value.message
+    finally:
+        os.chmod(blocked, 0o644)
+
+
+def test_a_pr_checkout_must_be_the_merge_commit_the_event_names(tmp_path):
+    """[Standard] Parentage proves shape, not content: a commit with exactly
+    {head, target} as parents but the TARGET's tree — omitting every change the
+    PR makes — satisfied the old check."""
+    repo, base = _seeded(tmp_path)
+    _run_git(repo, "checkout", "-q", "-b", "feature")
+    head = _commit(repo, "feature work")
+    _run_git(repo, "checkout", "-q", "main")
+    target = _commit(repo, "target")
+    _run_git(repo, "-c", "user.email=g@e.invalid", "-c", "user.name=g",
+             "merge", "-q", "--no-edit", "-s", "ours", head)   # target's tree
+    impostor = _git_out(repo, "rev-parse", "HEAD")
+
+    ctx = {"kind": "pull_request", "target": target, "event_head": head,
+           "merge_sha": "9" * 40}
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_checkout_matches_event(str(repo), ctx)
+    assert excinfo.value.code == "CHECKOUT_EVENT_MISMATCH"
+    # The commit GitHub actually names is accepted.
+    ctx["merge_sha"] = impostor
+    gate.check_checkout_matches_event(str(repo), ctx)
+
+
+def test_a_provider_GateFailure_cannot_carry_its_own_exit_status():
+    """[Standard] `GateFailure(..., 0)` from a provider propagated out and exited
+    the wave green."""
+    class _Sneaky(_StubProvider):
+        def cases(self):
+            raise gate.GateFailure("PLAN_FINGERPRINT_MISMATCH", "green please", 0)
+
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(True, _Sneaky())
+    assert excinfo.value.status == 1
 
 
 def test_a_provider_raising_SystemExit_cannot_exit_green():

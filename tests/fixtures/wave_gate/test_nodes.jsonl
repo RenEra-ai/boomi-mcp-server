@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9715,"minimum_collected":9715,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9719,"minimum_collected":9719,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -9425,7 +9425,7 @@
 {"kind":"test","id":"pytest-009424","node_id":"tests/test_wave_gate.py::test_an_unparseable_suite_summary_is_not_a_pass","state":"active"}
 {"kind":"test","id":"pytest-009425","node_id":"tests/test_wave_gate.py::test_an_unreadable_or_non_object_event_is_refused","state":"active"}
 {"kind":"test","id":"pytest-009426","node_id":"tests/test_wave_gate.py::test_appending_an_active_row_is_legal","state":"active"}
-{"kind":"test","id":"pytest-009427","node_id":"tests/test_wave_gate.py::test_appending_an_already_tombstoned_row_is_refused","state":"active"}
+{"kind":"test","id":"pytest-009427","node_id":"tests/test_wave_gate.py::test_appending_an_already_tombstoned_row_is_refused","state":"tombstone"}
 {"kind":"test","id":"pytest-009428","node_id":"tests/test_wave_gate.py::test_base_and_event_together_are_refused","state":"active"}
 {"kind":"test","id":"pytest-009429","node_id":"tests/test_wave_gate.py::test_bootstrap_cannot_be_reused_after_a_deletion","state":"active"}
 {"kind":"test","id":"pytest-009430","node_id":"tests/test_wave_gate.py::test_collection_below_the_floor_fails_even_when_every_required_node_is_present","state":"active"}
@@ -9726,3 +9726,8 @@
 {"kind":"test","id":"pytest-009725","node_id":"tests/test_wave_gate.py::test_the_worktree_fingerprint_reaches_inside_untracked_directories","state":"active"}
 {"kind":"test","id":"pytest-009726","node_id":"tests/test_wave_gate.py::test_a_local_bootstrap_is_an_explicit_operator_assertion","state":"active"}
 {"kind":"test","id":"pytest-009727","node_id":"tests/test_wave_gate.py::test_the_worktree_fingerprint_survives_an_awkward_untracked_filename","state":"active"}
+{"kind":"test","id":"pytest-009728","node_id":"tests/test_wave_gate.py::test_a_file_that_cannot_be_hashed_fails_closed","state":"active"}
+{"kind":"test","id":"pytest-009729","node_id":"tests/test_wave_gate.py::test_a_pr_checkout_must_be_the_merge_commit_the_event_names","state":"active"}
+{"kind":"test","id":"pytest-009730","node_id":"tests/test_wave_gate.py::test_a_provider_GateFailure_cannot_carry_its_own_exit_status","state":"active"}
+{"kind":"test","id":"pytest-009731","node_id":"tests/test_wave_gate.py::test_appending_an_already_tombstoned_row_is_LEGAL","state":"active"}
+{"kind":"test","id":"pytest-009732","node_id":"tests/test_wave_gate.py::test_the_worktree_fingerprint_discloses_no_file_content","state":"active"}

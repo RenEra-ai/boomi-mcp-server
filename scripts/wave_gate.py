@@ -301,11 +301,17 @@ def _status(repo):
         _git(repo, "rev-parse", "HEAD").stdout.strip(),
         # surrogateescape keeps undecodable bytes distinguishable and round-trippable
         status.decode("utf-8", "surrogateescape"),
-        # The full PATCH, not `--numstat`: line counts are identical for a
-        # same-length rewrite of an already-modified file, so numstat could not
-        # see the gate editing user bytes.
-        _git(repo, "diff").stdout,
-        _git(repo, "diff", "--cached").stdout,
+        # DIGESTS of the patches, never the patches themselves. The fingerprint
+        # is printed verbatim in a WORKTREE_DIRTY diagnostic, and an uncommitted
+        # `.env`-style edit would put a live credential straight into the log —
+        # reproduced with `TOKEN=SUPER_SECRET_VALUE`. A digest compares exactly as
+        # well and discloses nothing.
+        #
+        # `--binary --full-index`: the default diff ABBREVIATES binary blob ids,
+        # so two different binary contents sharing a 7-character prefix produced
+        # identical snapshots.
+        "diff:" + _patch_digest(repo),
+        "diff-cached:" + _patch_digest(repo, "--cached"),
     ]
     # Untracked files have no diff at all, so hash their contents directly —
     # otherwise rewriting an existing untracked file is invisible.
@@ -322,8 +328,8 @@ def _status(repo):
         target = os.path.join(os.fsencode(repo), rel_bytes)
         try:
             if os.path.islink(target):
-                parts.append("{0}:<symlink {1}>".format(
-                    rel, os.fsdecode(os.readlink(target))))
+                parts.append("{0}:symlink:{1}".format(
+                    rel, hashlib.sha256(os.readlink(target)).hexdigest()))
             elif os.path.isfile(target):
                 with open(target, "rb") as handle:
                     parts.append("{0}:{1}".format(
@@ -331,8 +337,32 @@ def _status(repo):
             else:
                 parts.append("{0}:<not-a-regular-file>".format(rel))
         except OSError as exc:
-            parts.append("{0}:<unreadable {1}>".format(rel, exc.errno))
+            # FAIL CLOSED. Recording a stable "<unreadable errno>" token made an
+            # unreadable file's CONTENT invisible: chmod / write / chmod produced
+            # identical snapshots either side of a real mutation. A file the gate
+            # cannot account for means the gate cannot make its claim.
+            raise _invalid(
+                "WORKTREE_DIRTY",
+                "cannot fingerprint {0} ({1}); the read-only guarantee cannot be "
+                "asserted over a file that cannot be read".format(rel, exc.strerror),
+            )
     return "\n".join(parts)
+
+
+def _patch_digest(repo, *extra):
+    """SHA-256 of the full binary patch — content-exact, disclosure-free."""
+    proc = subprocess.run(
+        ["git", "diff", "--binary", "--full-index", *extra],
+        cwd=str(repo), capture_output=True,
+    )
+    if proc.returncode != 0:
+        raise _invalid(
+            "WORKTREE_DIRTY",
+            "git diff failed while fingerprinting the worktree: {0}".format(
+                proc.stderr.decode("utf-8", "replace").strip()
+            ),
+        )
+    return hashlib.sha256(proc.stdout).hexdigest()
 
 
 def check_checkout_matches_event(repo, context):
@@ -380,6 +410,22 @@ def check_checkout_matches_event(repo, context):
     target = context.get("target")
     if head == event_head:
         return
+    # GitHub names the test-merge commit it built; when it is present, require
+    # HEAD to BE that commit. Parentage alone proves only the shape: a commit with
+    # exactly {head, target} as parents but the TARGET's tree — omitting every
+    # change the PR makes — satisfied it, so the gate would validate a tree the
+    # PR does not produce.
+    merge_sha = context.get("merge_sha")
+    if merge_sha:
+        if head == merge_sha:
+            return
+        raise _contract(
+            "CHECKOUT_EVENT_MISMATCH",
+            "the checkout at {0} is neither the PR head {1} nor the merge commit "
+            "{2} the event names".format(
+                head[:12], (event_head or "?")[:12], merge_sha[:12]
+            ),
+        )
     parents = _git(repo, "rev-list", "--parents", "-n", "1", head).stdout.split()[1:]
     # EXACTLY the two expected parents. Membership alone accepts an octopus
     # commit that merely happens to include the head and the target among
@@ -673,16 +719,18 @@ def validate_transition(base, current, name):
         if was["state"] == "active" and now["state"] == "tombstone":
             newly_tombstoned += 1
 
+    # An appended row MAY arrive tombstoned. A push range that adds a test in one
+    # commit and retires it in a later one is exactly that from the range's
+    # endpoints, and refusing it made an ordinary multi-commit push illegal even
+    # though every individual commit transition was legal. Nothing is lost: a
+    # tombstoned row is separately required to have no artifact — no golden file,
+    # and a node id that does not collect — so a born-tombstoned row is still
+    # fully accounted for.
     appended = current.rows[len(base.rows):]
-    for row in appended:
-        if row["state"] != "active":
-            raise bad(
-                "appended row {0} must start 'active'; a row cannot be born "
-                "tombstoned".format(row["id"])
-            )
+    appended_active = len([row for row in appended if row["state"] == "active"])
 
-    _check_floor_arithmetic(base, current, len(appended), newly_tombstoned, name)
-    return len(appended), newly_tombstoned
+    _check_floor_arithmetic(base, current, appended_active, newly_tombstoned, name)
+    return appended_active, newly_tombstoned
 
 
 def _check_floor_arithmetic(base, current, appended, newly_tombstoned, name):
@@ -856,9 +904,12 @@ def _baseline_from_pull_request(repo, event):
     # introduction even after they exist on the target branch. Carry the target
     # tip so `check_bootstrap` can ask the question that actually matters —
     # "do these already exist on the branch we are merging into?"
+    merge_sha = pull.get("merge_commit_sha")
     return {
         "sha": bases[0], "kind": "pull_request", "target": target,
         "event_head": head,
+        "merge_sha": merge_sha
+        if isinstance(merge_sha, str) and _SHA_RE.match(merge_sha or "") else None,
     }
 
 
@@ -1580,9 +1631,12 @@ def _provider_call(fn, *args):
     """
     try:
         return fn(*args)
-    except GateFailure:
-        raise
     except BaseException as exc:  # noqa: BLE001
+        # NOT `except GateFailure: raise`. A provider is third-party code from
+        # this function's point of view, and `GateFailure` carries its own exit
+        # status — `GateFailure(..., 0)` would have propagated straight out and
+        # exited the wave green. Everything a provider raises becomes a status-1
+        # PLAN_FINGERPRINT_MISMATCH.
         # BaseException, not Exception: a provider raising `SystemExit(0)` would
         # otherwise terminate the whole wave with status 0 and skip the final
         # hygiene check — a green run that validated nothing.
