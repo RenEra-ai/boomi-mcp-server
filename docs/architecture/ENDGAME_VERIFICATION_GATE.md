@@ -189,6 +189,18 @@ Baseline manifests are read with `git show <base>:<path>`; current manifests are
 read from the **worktree**, so CI validates the checked-out merge result and a
 local run validates uncommitted work.
 
+**Worktree hygiene is a cross-check, not the guarantee.** The gate's read-only
+property is STRUCTURAL: it writes only under `tempfile.mkdtemp()`, runs children
+with `PYTHONDONTWRITEBYTECODE=1` and `-p no:cacheprovider`, and never invokes a
+mutating git command. The before/after fingerprint (HEAD + porcelain status +
+digests of the full binary patches + a SHA-256 per untracked file) is a runtime
+cross-check of that structure and raises the cost of an undetected mutation — it
+does not reduce it to zero. Git reports `lstat()` failures as arbitrary errno
+text and its directory iterator can treat a `readdir()` error as end-of-directory
+with no diagnostic at all, so a subtree can be omitted with nothing to detect.
+Do not read `WORKTREE_DIRTY` passing as proof that nothing changed; read it as
+"nothing that this check can see changed".
+
 **The checkout is bound to the event.** In an event context the gate asserts that
 `HEAD` is the commit the event names — the push's `after`, or for a PR either the
 head or a `refs/pull/N/merge` commit whose parents are the head and the base —

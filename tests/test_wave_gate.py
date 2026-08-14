@@ -1962,15 +1962,57 @@ def test_a_pr_checkout_must_be_the_merge_commit_the_event_names(tmp_path, monkey
     gate.check_checkout_matches_event(str(repo), ctx)
 
 
-def test_a_provider_GateFailure_cannot_carry_its_own_exit_status():
-    """[Standard] `GateFailure(..., 0)` from a provider propagated out and exited
-    the wave green."""
+def test_a_GateFailure_can_never_carry_a_success_status():
+    """[P1] Guarding each raise site individually leaked.
+
+    Provider-controlled code could construct `GateFailure(..., 0)` — via a
+    `__len__` on a tuple subclass, say — and it reached `main()`, which returned
+    0. Reproduced end to end with `main_status=0`. The invariant now lives in the
+    constructor, so every present and future path is closed at once.
+    """
+    assert gate.GateFailure("X", "m", 0).status == 1
+    assert gate.GateFailure("X", "m", -1).status == 1
+    assert gate.GateFailure("X", "m", 99).status == 1
+    assert gate.GateFailure("X", "m", 1).status == 1
+    assert gate.GateFailure("X", "m", 2).status == 2
+
     class _Sneaky(_StubProvider):
         def cases(self):
             raise gate.GateFailure("PLAN_FINGERPRINT_MISMATCH", "green please", 0)
 
     with pytest.raises(gate.GateFailure) as excinfo:
         gate.run_plan_fingerprint_checks(True, _Sneaky())
+    assert excinfo.value.status == 1
+
+
+def test_a_provider_output_whose_dunders_run_code_cannot_exit_green():
+    """[P1] Provider outputs are exercised AFTER the guarded call.
+
+    A tuple subclass whose `__len__` raises reached the orchestration boundary.
+    Outputs are now validated as EXACT built-ins, so an override never runs.
+    """
+    class _Hostile(tuple):
+        def __len__(self):
+            raise gate.GateFailure("PLAN_FINGERPRINT_MISMATCH", "green", 0)
+
+    class _Provider(_StubProvider):
+        def fingerprint(self, case, *, account, environment, mutation=None):
+            return _Hostile(("sha256:" + "0" * 64, b"x"))
+
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(True, _Provider())
+    assert excinfo.value.status == 1
+
+    # A str subclass for the digest is likewise refused before it is compared.
+    class _SneakyStr(str):
+        pass
+
+    class _StrProvider(_StubProvider):
+        def fingerprint(self, case, *, account, environment, mutation=None):
+            return (_SneakyStr("sha256:" + "0" * 64), b"x")
+
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(True, _StrProvider())
     assert excinfo.value.status == 1
 
 

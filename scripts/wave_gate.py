@@ -150,7 +150,13 @@ class GateFailure(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
-        self.status = status
+        # A failure can NEVER carry a success status. Guarding each raise site
+        # individually was tried and leaked: provider-controlled code can
+        # construct `GateFailure(..., 0)` — via a `__len__` on a tuple subclass,
+        # say — and it reached `main()`, which returned 0. Reproduced end to end
+        # with `main_status=0`. Enforcing the invariant in the constructor closes
+        # every present and future path at once.
+        self.status = status if status in (1, 2) else 1
 
 
 def _contract(code, message):
@@ -398,6 +404,21 @@ def _refuse_unreadable(proc, what):
     every invocation in such an environment — the whole check becomes unusable —
     while under-matching leaves only the narrow residual that existed before.
     A gate that cannot run protects nothing, so the narrow match wins.
+
+    KNOWN INCOMPLETE, and it cannot be otherwise by this route. Git prints
+    `lstat()` failures as arbitrary errno text (a symlink loop yields
+    `<path>: Too many levels of symbolic links`, which no fixed phrase list
+    anticipates), and its directory iterator can treat a `readdir()` error as
+    end-of-directory with NO diagnostic at all — so there are omissions with
+    nothing on stderr to match. This function therefore raises the cost of an
+    undetected mutation; it does not reduce it to zero.
+
+    That is acceptable because the read-only guarantee does NOT rest on it. The
+    gate writes only under `tempfile.mkdtemp()`, runs its children with
+    `PYTHONDONTWRITEBYTECODE=1` and `-p no:cacheprovider`, and never invokes a
+    mutating git command — the property is structural. This check is a runtime
+    cross-check of that structure, and it is described as exactly that wherever
+    it is documented.
     """
     noise = proc.stderr.decode("utf-8", "replace").strip()
     lowered = noise.lower()
@@ -1736,14 +1757,21 @@ def _fingerprint(provider, case, identity, mutation=None):
     result = _provider_call(
         lambda: provider.fingerprint(case, mutation=mutation, **identity)
     )
-    if not (isinstance(result, tuple) and len(result) == 2):
+    # `type(...) is tuple`, not `isinstance`: a tuple SUBCLASS can override
+    # `__len__`/`__iter__` and run provider code during the check itself.
+    if type(result) is not tuple or len(result) != 2:
         raise _invalid(
             "PLAN_FINGERPRINT_MISMATCH",
             "case {0!r}: provider must return (digest, canonical_material), got "
             "{1}".format(case, type(result).__name__),
         )
     digest, material = result
-    if not isinstance(material, bytes) or not material:
+    if type(digest) is not str:
+        raise _invalid(
+            "PLAN_FINGERPRINT_MISMATCH",
+            "case {0!r}: digest must be an exact str".format(case),
+        )
+    if type(material) is not bytes or not material:
         raise _invalid(
             "PLAN_FINGERPRINT_MISMATCH",
             "case {0!r}: canonical material must be non-empty bytes — the gate "
@@ -1906,13 +1934,16 @@ def execute(args):
             try:
                 status = run_plan_fingerprint_checks(args.require_plan_fingerprint)
                 _emit("wave_gate: plan fingerprint {0}".format(status))
-            except GateFailure:
-                raise
             except BaseException as exc:  # noqa: BLE001
+                # A FRESH failure, and the exception object is never formatted:
+                # `{!r}` on a provider-controlled object runs its `__repr__`,
+                # which could raise `SystemExit(0)` out of the very handler meant
+                # to contain it. Only the type NAME is used, which cannot execute
+                # provider code.
                 raise _invalid(
                     "PLAN_FINGERPRINT_MISMATCH",
-                    "the plan-fingerprint phase raised {0}: {1!r}".format(
-                        type(exc).__name__, exc
+                    "the plan-fingerprint phase raised {0}".format(
+                        type(exc).__name__
                     ),
                 )
     except GateFailure as exc:

@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9726,"minimum_collected":9726,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9727,"minimum_collected":9727,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -9728,7 +9728,7 @@
 {"kind":"test","id":"pytest-009727","node_id":"tests/test_wave_gate.py::test_the_worktree_fingerprint_survives_an_awkward_untracked_filename","state":"active"}
 {"kind":"test","id":"pytest-009728","node_id":"tests/test_wave_gate.py::test_a_file_that_cannot_be_hashed_fails_closed","state":"active"}
 {"kind":"test","id":"pytest-009729","node_id":"tests/test_wave_gate.py::test_a_pr_checkout_must_be_the_merge_commit_the_event_names","state":"active"}
-{"kind":"test","id":"pytest-009730","node_id":"tests/test_wave_gate.py::test_a_provider_GateFailure_cannot_carry_its_own_exit_status","state":"active"}
+{"kind":"test","id":"pytest-009730","node_id":"tests/test_wave_gate.py::test_a_provider_GateFailure_cannot_carry_its_own_exit_status","state":"tombstone"}
 {"kind":"test","id":"pytest-009731","node_id":"tests/test_wave_gate.py::test_appending_an_already_tombstoned_row_is_LEGAL","state":"active"}
 {"kind":"test","id":"pytest-009732","node_id":"tests/test_wave_gate.py::test_the_worktree_fingerprint_discloses_no_file_content","state":"active"}
 {"kind":"test","id":"pytest-009733","node_id":"tests/test_wave_gate.py::test_a_pr_checkout_without_an_authoritative_merge_sha_is_refused","state":"active"}
@@ -9739,3 +9739,5 @@
 {"kind":"test","id":"pytest-009738","node_id":"tests/test_wave_gate.py::test_benign_git_diagnostics_do_not_disable_the_gate[benign-process-warning]","state":"active"}
 {"kind":"test","id":"pytest-009739","node_id":"tests/test_wave_gate.py::test_benign_git_diagnostics_do_not_disable_the_gate[silent]","state":"active"}
 {"kind":"test","id":"pytest-009740","node_id":"tests/test_wave_gate.py::test_git_stderr_is_read_under_a_pinned_locale","state":"active"}
+{"kind":"test","id":"pytest-009741","node_id":"tests/test_wave_gate.py::test_a_GateFailure_can_never_carry_a_success_status","state":"active"}
+{"kind":"test","id":"pytest-009742","node_id":"tests/test_wave_gate.py::test_a_provider_output_whose_dunders_run_code_cannot_exit_green","state":"active"}

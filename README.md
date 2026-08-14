@@ -582,12 +582,14 @@ reordered, renumbered or repointed; the only legal state change is
 change that deletes it. Adding a test or golden means appending a row and raising
 the floor by exactly one.
 
-CI carries no Boomi credentials and performs no network mutation. The gate writes
-its scratch data outside the repository and checks that it did not disturb the
-tree: it compares `git status --porcelain` before and after and fails with
-`WORKTREE_DIRTY` if the *set of changed paths* differs. That catches a new or
-deleted tracked file; it does not diff file contents, so an edit to a path that
-was already modified, or to a gitignored path, would not show up there.
+CI carries no Boomi credentials and performs no network mutation. The gate is
+read-only by construction — it writes only under a system temp directory and
+never runs a mutating git command — and it cross-checks that at runtime by
+fingerprinting the worktree before and after (HEAD, porcelain status, digests of
+the full binary patches, and a hash per untracked file), failing with
+`WORKTREE_DIRTY` on a difference. The cross-check is best-effort, not a proof:
+git can omit an unreadable subtree while exiting 0, sometimes without any
+diagnostic, so treat a pass as "nothing this check can see changed".
 
 The required status check is named **`Python 3.11 non-KB`**. Making the `dev`
 ruleset actually require it is a separate repository-settings step that a workflow
