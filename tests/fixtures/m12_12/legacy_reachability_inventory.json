@@ -6846,7 +6846,7 @@
       "symbol",
       "form"
     ],
-    "python_source_count": 205,
+    "python_source_count": 206,
     "roots": [
       "*.py (repo root)",
       "src/boomi_mcp",

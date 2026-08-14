@@ -515,6 +515,86 @@ Visit http://localhost:8080 to access the web UI.
 
 ---
 
+## Verification and CI
+
+### Running the suite
+
+```bash
+python -m pip install -r requirements-dev.txt
+
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python -m pytest tests \
+  --ignore=tests/kb -q -p no:cacheprovider
+```
+
+`PYTHONPATH=src` is **mandatory** — without it collection dies with
+`ModuleNotFoundError: boomi_mcp`. `tests/kb/` is excluded on purpose: it needs
+the `requirements-kb.txt` extras (chromadb, sentence-transformers), which are
+deliberately not part of the normal environment.
+
+**Python versions.** CI runs **3.11**, the interpreter production runs
+(`Dockerfile`, `python:3.11-slim`). Local development typically uses a 3.12
+`.venv`. That skew is intentional: the 3.11 job is what catches a defect that
+only appears on the deployment interpreter, and it found several on its first
+run. If you develop on 3.12, expect CI to be the stricter of the two.
+
+### The gate
+
+Every push to `dev` and every PR targeting `dev` runs
+`.github/workflows/tests.yml`, whose only step is:
+
+```bash
+python scripts/wave_gate.py ci --github-event "$GITHUB_EVENT_PATH"
+```
+
+The gate refuses to believe a green pytest run on its own. It also checks a
+committed manifest of required node ids, a committed collection floor, and the
+append-only evolution of both manifests against the run's baseline — so a
+partial collection or a quietly deleted test cannot pass as success.
+
+Per **wave** (a group of related slices), run the fuller gate locally:
+
+```bash
+PYTHONPATH=src python scripts/wave_gate.py wave --base <commit>
+```
+
+which adds every active golden rendered twice in isolated processes (byte-for-byte
+determinism, then equality with the committed golden) and the #153
+plan-fingerprint seam — currently reported as `PLAN_FINGERPRINT_PENDING #153` and
+made fatal by `--require-plan-fingerprint`.
+
+`--base` is **required** and never inferred. Exit codes: `0` pass, `1` a
+validation failed, `2` a contract failure (usage, baseline, manifest). Every
+failure prints a stable diagnostic code first on stderr.
+
+`python scripts/wave_gate.py manifests --base <commit>` is a fast manifest-only
+pre-check. It is **not a gate** and says so when it runs.
+
+### Manifests
+
+| File | Contents |
+|---|---|
+| `tests/fixtures/wave_gate/test_nodes.jsonl` | required pytest node ids, active/collection floors |
+| `tests/fixtures/wave_gate/goldens.jsonl` | every golden: input case, renderer, owner, disposition, state |
+
+Both are **append-only ledgers with immutable rows**. Rows are never deleted,
+reordered, renumbered or repointed; the only legal state change is
+`active → tombstone`, made by the slice that retires the artifact, in the same
+change that deletes it. Adding a test or golden means appending a row and raising
+the floor by exactly one.
+
+CI carries no Boomi credentials and performs no network mutation. The gate writes
+its scratch data outside the repository and checks that it did not disturb the
+tree: it compares `git status --porcelain` before and after and fails with
+`WORKTREE_DIRTY` if the *set of changed paths* differs. That catches a new or
+deleted tracked file; it does not diff file contents, so an edit to a path that
+was already modified, or to a gitignored path, would not show up there.
+
+The required status check is named **`Python 3.11 non-KB`**; the `dev` ruleset
+requires it. Full specification:
+[`docs/architecture/ENDGAME_VERIFICATION_GATE.md`](docs/architecture/ENDGAME_VERIFICATION_GATE.md).
+
+---
+
 ## Project Structure
 
 ```
@@ -535,12 +615,17 @@ boomi-mcp-server/
 ├── templates/                 # Jinja2 web UI templates (credentials, login, ...)
 ├── static/                    # Web UI static assets
 ├── tests/                     # Unit + integration tests (incl. tests/kb)
+│   └── fixtures/wave_gate/    # Append-only test-node + golden manifests
 ├── docs/                      # Specs, plans, runbooks
 ├── agents/                    # Subagent configs (boomi-qa-tester, ...)
 ├── examples/                  # Usage examples
 ├── scripts/                   # Operational scripts
+│   └── wave_gate.py           # The fail-closed CI / per-wave verification gate
+├── .github/workflows/
+│   └── tests.yml              # Required check: Python 3.11 non-KB suite on dev
 ├── local_atom/                # Helpers for the local-atom dev profile
 ├── requirements.txt           # Core dependencies (FastMCP, ...)
+├── requirements-dev.txt       # Non-KB test environment (what CI installs)
 ├── requirements-cloud.txt     # Cloud provider SDKs
 ├── requirements-kb.txt        # KB dependencies (chromadb, sentence-transformers)
 ├── Dockerfile                 # Multi-stage Docker build (KB pin via ARG)

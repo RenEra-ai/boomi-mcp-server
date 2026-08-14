@@ -1,0 +1,27 @@
+# Test environment for the non-KB suite.
+#
+# This file is the complete, authoritative dependency set for running
+#     PYTHONPATH=src python -m pytest tests --ignore=tests/kb
+# It is what CI installs (.github/workflows/tests.yml) and what
+# scripts/wave_gate.py expects to be present.
+#
+# Deliberately NOT included:
+#   - requirements-kb.txt  — the KB suite (tests/kb/) needs chromadb and friends;
+#     the split is intentional (see requirements-kb.txt) and tests/kb/ does not
+#     run in CI.
+#   - requirements-cloud.txt — deployment-only.
+#
+# pytest is pinned because the gate parses its collection output: the node-ID
+# grammar and the "N tests collected" summary line are part of the contract in
+# scripts/wave_gate.py. An unpinned pytest can change either without notice.
+-r requirements.txt
+pytest==9.0.2
+
+# Declared explicitly even though pydantic pulls it in transitively: the tests
+# import it DIRECTLY (`typing_extensions.is_typeddict`, `typing_extensions.TypedDict`),
+# and on Python < 3.12 — the version CI and production run — the whole
+# TypedDict-handling half of tests/test_recipe_security.py and
+# tests/test_recipe_registry.py depends on it. A dependency a file imports by name
+# belongs in that file's requirements, not in whatever another package happens to
+# drag along today.
+typing_extensions>=4.0.0

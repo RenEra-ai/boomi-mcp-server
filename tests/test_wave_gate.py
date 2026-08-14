@@ -1,0 +1,1211 @@
+"""The wave gate's negative matrix: every fail-closed path, proven to trip.
+
+A gate is only worth its runtime if it goes RED for the things it claims to
+catch. Everything here is a NEGATIVE: a manifest, a baseline, an event payload
+or a collection that must be refused, with the exact diagnostic code and exit
+status it must be refused with. The positive path is covered by the gate's own
+green run at HEAD and by ``test_wave_gate_goldens.py``.
+
+Each case builds a throwaway git repository under ``tmp_path`` and drives the
+real script. Nothing here touches the real worktree — which is also the property
+``check_worktree_unchanged`` enforces at runtime.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _load_gate():
+    spec = importlib.util.spec_from_file_location(
+        "_wave_gate_under_test", _ROOT / "scripts" / "wave_gate.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+gate = _load_gate()
+
+_ZERO = "0" * 40
+_FAKE_BASE = "1" * 40
+
+
+# ---------------------------------------------------------------------------
+# Fixtures: synthetic manifests and throwaway repositories
+# ---------------------------------------------------------------------------
+
+def _node_header(active=2, collected=2, base=_FAKE_BASE, skipped=30):
+    return {
+        "kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes",
+        "minimum_active": active, "minimum_collected": collected,
+        "maximum_skipped": skipped, "bootstrap_base": base,
+    }
+
+
+def _golden_header(active=2, base=_FAKE_BASE):
+    return {
+        "kind": "manifest", "schema_version": 1, "manifest": "goldens",
+        "minimum_active": active, "bootstrap_base": base,
+    }
+
+
+def _node_row(index, node_id=None, state="active"):
+    return {
+        "kind": "test", "id": "pytest-{0:06d}".format(index),
+        "node_id": node_id or "tests/test_x.py::test_{0}".format(index),
+        "state": state,
+    }
+
+
+def _golden_row(index, name=None, disposition="survivor", owner="repository",
+                state="active", input_case=None, renderer="process-component-v1"):
+    name = name or "g{0}.xml".format(index)
+    return {
+        "kind": "golden", "id": "golden-{0:06d}".format(index),
+        "input_case": input_case or "case:{0}".format(index),
+        "renderer": renderer,
+        "expected_file": "tests/fixtures/golden_xml/{0}".format(name),
+        "owner": owner, "disposition": disposition, "state": state,
+    }
+
+
+def _serialize(header, rows):
+    lines = [json.dumps(header, separators=(",", ":"))]
+    lines += [json.dumps(row, separators=(",", ":")) for row in rows]
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _default_nodes(base=_FAKE_BASE):
+    return _serialize(_node_header(2, 2, base), [_node_row(1), _node_row(2)])
+
+
+def _default_goldens(base=_FAKE_BASE):
+    return _serialize(_golden_header(2, base), [_golden_row(1), _golden_row(2)])
+
+
+def _run_git(repo, *args):
+    subprocess.run(
+        ["git", *args], cwd=str(repo), check=True,
+        capture_output=True, text=True,
+    )
+
+
+def _commit(repo, message):
+    _run_git(repo, "add", "-A")
+    _run_git(
+        repo, "-c", "user.email=gate@example.invalid", "-c", "user.name=gate",
+        "commit", "-q", "--allow-empty", "-m", message,
+    )
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(repo),
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
+def _write(repo, rel, payload):
+    target = repo / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(payload, bytes):
+        target.write_bytes(payload)
+    else:
+        target.write_text(payload, encoding="utf-8")
+
+
+def _new_repo(tmp_path, name="repo"):
+    repo = tmp_path / name
+    repo.mkdir()
+    _run_git(repo, "init", "-q", "-b", "main")
+    (repo / "tests" / "fixtures" / "golden_xml").mkdir(parents=True)
+    (repo / "tests" / "fixtures" / "wave_gate").mkdir(parents=True)
+    _write(repo, "README.md", "seed\n")
+    return repo
+
+
+def _seeded(tmp_path, nodes=None, goldens=None, goldens_files=("g1.xml", "g2.xml")):
+    """A repo whose BASE commit already carries both manifests.
+
+    This is the ordinary (non-bootstrap) state: the base has manifests, so every
+    transition rule applies. Returns ``(repo, base_sha)``.
+    """
+    repo = _new_repo(tmp_path)
+    base_seed = _commit(repo, "seed")
+    for name in goldens_files:
+        _write(repo, "tests/fixtures/golden_xml/{0}".format(name), "<x/>\n")
+    _write(repo, gate.NODES_MANIFEST, nodes or _default_nodes(base_seed))
+    _write(repo, gate.GOLDENS_MANIFEST, goldens or _default_goldens(base_seed))
+    base = _commit(repo, "manifests")
+    return repo, base
+
+
+def _gate(repo, *args):
+    """Run the real CLI; return ``(exit_status, stderr)``."""
+    proc = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "wave_gate.py"),
+         "--repo", str(repo), *args],
+        capture_output=True, text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    return proc.returncode, proc.stderr
+
+
+def _manifests(repo, base, *extra):
+    return _gate(repo, "manifests", "--base", base, *extra)
+
+
+def _expect(result, status, code):
+    got_status, stderr = result
+    assert got_status == status, (got_status, stderr)
+    assert code in stderr, stderr
+
+
+# ===========================================================================
+# Baseline resolution
+# ===========================================================================
+
+def test_no_baseline_at_all_is_refused():
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.resolve_baseline(str(_ROOT))
+    assert excinfo.value.code == "BASELINE_EVENT_INVALID"
+    assert excinfo.value.status == 2
+
+
+def test_base_and_event_together_are_refused(tmp_path):
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.resolve_baseline(str(_ROOT), event_path=str(tmp_path / "e.json"),
+                              base="HEAD")
+    assert excinfo.value.code == "BASELINE_EVENT_INVALID"
+
+
+def test_the_wave_subcommand_requires_an_explicit_base(tmp_path):
+    """No inferred HEAD^, no branch, no remote: exit 2, never a guessed range."""
+    repo, _base = _seeded(tmp_path)
+    status, _stderr = _gate(repo, "wave")
+    assert status == 2
+
+
+@pytest.mark.parametrize("event_name", ["", "schedule", "workflow_dispatch"])
+def test_an_unknown_event_name_is_refused(tmp_path, event_name):
+    payload = tmp_path / "event.json"
+    payload.write_text("{}", encoding="utf-8")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.resolve_baseline(str(_ROOT), event_path=str(payload),
+                              event_name=event_name)
+    assert excinfo.value.code == "BASELINE_EVENT_INVALID"
+
+
+def test_an_unreadable_or_non_object_event_is_refused(tmp_path):
+    missing = tmp_path / "nope.json"
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.resolve_baseline(str(_ROOT), event_path=str(missing), event_name="push")
+    assert excinfo.value.code == "BASELINE_EVENT_INVALID"
+
+    listy = tmp_path / "list.json"
+    listy.write_text("[]", encoding="utf-8")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.resolve_baseline(str(_ROOT), event_path=str(listy), event_name="push")
+    assert excinfo.value.code == "BASELINE_EVENT_INVALID"
+
+
+@pytest.mark.parametrize(
+    "before,code",
+    [
+        (None, "BASELINE_EVENT_INVALID"),
+        ("", "BASELINE_EVENT_INVALID"),
+        ("not-a-sha", "BASELINE_EVENT_INVALID"),
+        ("ABCDEF" + "0" * 34, "BASELINE_EVENT_INVALID"),   # uppercase is not our form
+        (_ZERO, "BASELINE_ZERO_SHA"),
+    ],
+    ids=["missing", "empty", "non-hex", "uppercase", "all-zero"],
+)
+def test_a_push_without_a_usable_before_is_refused(tmp_path, before, code):
+    payload = tmp_path / "event.json"
+    payload.write_text(json.dumps({} if before is None else {"before": before}),
+                       encoding="utf-8")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.resolve_baseline(str(_ROOT), event_path=str(payload), event_name="push")
+    assert excinfo.value.code == code
+    assert excinfo.value.status == 2
+
+
+def test_a_push_before_that_does_not_resolve_is_refused(tmp_path):
+    payload = tmp_path / "event.json"
+    payload.write_text(json.dumps({"before": "a" * 40}), encoding="utf-8")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.resolve_baseline(str(_ROOT), event_path=str(payload), event_name="push")
+    assert excinfo.value.code == "BASELINE_UNAVAILABLE"
+
+
+def test_a_push_uses_before_verbatim_and_never_a_merge_base(tmp_path):
+    """The bug this rule exists for: on a push to ``dev`` a merge-base of HEAD
+    against ``dev`` is HEAD itself, so the gate would compare the new tip with
+    ITSELF and validate nothing."""
+    repo, base = _seeded(tmp_path)
+    head = _commit(repo, "later")
+    payload = tmp_path / "event.json"
+    payload.write_text(json.dumps({"before": base, "after": head}), encoding="utf-8")
+    resolved = gate.resolve_baseline(str(repo), event_path=str(payload),
+                                     event_name="push")
+    assert resolved == base
+    assert resolved != head
+
+
+def test_a_pull_request_without_head_or_base_is_refused(tmp_path):
+    for payload_obj in ({"pull_request": {}},
+                        {"pull_request": {"head": {"sha": _FAKE_BASE}}},
+                        {"nothing": True}):
+        payload = tmp_path / "event.json"
+        payload.write_text(json.dumps(payload_obj), encoding="utf-8")
+        with pytest.raises(gate.GateFailure) as excinfo:
+            gate.resolve_baseline(str(_ROOT), event_path=str(payload),
+                                  event_name="pull_request")
+        assert excinfo.value.code == "BASELINE_EVENT_INVALID"
+
+
+def test_a_pull_request_uses_the_unique_merge_base(tmp_path):
+    repo, base = _seeded(tmp_path)
+    _run_git(repo, "checkout", "-q", "-b", "feature")
+    head = _commit(repo, "feature work")
+    _run_git(repo, "checkout", "-q", "main")
+    target = _commit(repo, "main moves on")
+    payload = tmp_path / "event.json"
+    payload.write_text(json.dumps(
+        {"pull_request": {"head": {"sha": head}, "base": {"sha": target}}}
+    ), encoding="utf-8")
+    assert gate.resolve_baseline(str(repo), event_path=str(payload),
+                                 event_name="pull_request") == base
+
+
+def test_a_pull_request_with_no_merge_base_is_refused(tmp_path):
+    """Unrelated histories — the shape a shallow checkout also produces."""
+    repo, _base = _seeded(tmp_path)
+    head = _commit(repo, "head")
+    _run_git(repo, "checkout", "-q", "--orphan", "island")
+    _run_git(repo, "rm", "-rq", "--cached", ".")
+    _write(repo, "island.txt", "x\n")
+    orphan = _commit(repo, "orphan")
+    payload = tmp_path / "event.json"
+    payload.write_text(json.dumps(
+        {"pull_request": {"head": {"sha": orphan}, "base": {"sha": head}}}
+    ), encoding="utf-8")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.resolve_baseline(str(repo), event_path=str(payload),
+                              event_name="pull_request")
+    assert excinfo.value.code == "BASELINE_MERGE_BASE_MISSING"
+
+
+# ===========================================================================
+# Bootstrap — the single, scoped exception
+# ===========================================================================
+
+def _bootstrap_repo(tmp_path, node_base=None, golden_base=None, both=True):
+    repo = _new_repo(tmp_path)
+    base = _commit(repo, "pre-manifest")
+    for name in ("g1.xml", "g2.xml"):
+        _write(repo, "tests/fixtures/golden_xml/{0}".format(name), "<x/>\n")
+    _write(repo, gate.NODES_MANIFEST, _default_nodes(node_base or base))
+    if both:
+        _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(golden_base or base))
+    _commit(repo, "introduce manifests")
+    return repo, base
+
+
+def test_the_one_legal_bootstrap_is_accepted(tmp_path):
+    repo, base = _bootstrap_repo(tmp_path)
+    status, stderr = _manifests(repo, base, "--bootstrap")
+    assert status == 0, stderr
+    assert "BOOTSTRAP" in stderr
+
+
+def test_a_LOCAL_bootstrap_without_the_flag_is_refused(tmp_path):
+    """Locally the baseline is whatever the operator typed, so the exception
+    needs them to say they meant it."""
+    repo, base = _bootstrap_repo(tmp_path)
+    _expect(_manifests(repo, base), 2, "BOOTSTRAP_NOT_ALLOWED")
+
+
+def test_a_CI_bootstrap_needs_no_flag(tmp_path):
+    """...but in CI there is no flag and nobody to pass one.
+
+    The event payload is the evidence, and it is stronger than a flag: the
+    push's ``before`` must itself equal the ``bootstrap_base`` both headers
+    declare. Requiring the flag here too made the bootstrap UNREACHABLE in CI —
+    the run that lands the manifests could never go green, which is the one run
+    the exception exists for.
+    """
+    repo, base = _bootstrap_repo(tmp_path)
+    event = tmp_path / "push.json"
+    event.write_text(json.dumps({"before": base}), encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "wave_gate.py"),
+         "--repo", str(repo), "manifests", "--github-event", str(event),
+         "--event-name", "push"],
+        capture_output=True, text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "BOOTSTRAP" in proc.stderr
+
+
+def test_a_CI_bootstrap_whose_event_baseline_is_not_the_declared_base_is_refused(tmp_path):
+    """The CI arm is not a free pass: with no flag to give, the event baseline
+    matching the declared ``bootstrap_base`` is the ONLY thing authorising it.
+
+    Built so the manifests really are absent at the event's baseline — otherwise
+    the run is not a bootstrap at all, it is an ordinary no-change transition,
+    and it would pass for a reason that proves nothing.
+    """
+    repo = _new_repo(tmp_path)
+    earlier = _commit(repo, "two commits before the manifests")
+    declared = _commit(repo, "one commit before the manifests")
+    for name in ("g1.xml", "g2.xml"):
+        _write(repo, "tests/fixtures/golden_xml/{0}".format(name), "<x/>\n")
+    _write(repo, gate.NODES_MANIFEST, _default_nodes(declared))
+    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(declared))
+    _commit(repo, "introduce manifests")
+
+    event = tmp_path / "push.json"
+    event.write_text(json.dumps({"before": earlier}), encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "wave_gate.py"),
+         "--repo", str(repo), "manifests", "--github-event", str(event),
+         "--event-name", "push"],
+        capture_output=True, text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert proc.returncode == 2, proc.stderr
+    assert "BOOTSTRAP_NOT_ALLOWED" in proc.stderr
+
+
+def test_introducing_only_one_manifest_is_refused(tmp_path):
+    """A half-introduced pair fails on the tree, before bootstrap is considered.
+
+    The two manifests are one ledger: the gate reads both or refuses, so there
+    is no state in which only the goldens are governed.
+    """
+    repo, base = _bootstrap_repo(tmp_path, both=False)
+    _expect(_manifests(repo, base, "--bootstrap"), 2, "MANIFEST_MISSING")
+
+
+def test_a_half_bootstrap_is_refused(tmp_path):
+    """Both manifests exist NOW, but only one existed at the baseline.
+
+    This is the case ``check_bootstrap`` owns: the goldens ledger is already
+    under the transition rules while the node ledger claims to be brand new, so
+    "bootstrap" would exempt a manifest that has a history.
+    """
+    repo = _new_repo(tmp_path)
+    _write(repo, "tests/fixtures/golden_xml/g1.xml", "<x/>\n")
+    _write(repo, "tests/fixtures/golden_xml/g2.xml", "<x/>\n")
+    seed = _commit(repo, "seed")
+    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(seed))
+    base = _commit(repo, "goldens only")
+    _write(repo, gate.NODES_MANIFEST, _default_nodes(base))
+    _commit(repo, "add the node manifest later")
+    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
+
+
+def test_a_bootstrap_base_that_is_not_the_validated_baseline_is_refused(tmp_path):
+    repo, base = _bootstrap_repo(tmp_path, node_base=_FAKE_BASE,
+                                 golden_base=_FAKE_BASE)
+    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
+
+
+def test_manifests_declaring_different_bootstrap_bases_are_refused(tmp_path):
+    repo = _new_repo(tmp_path)
+    base = _commit(repo, "pre-manifest")
+    for name in ("g1.xml", "g2.xml"):
+        _write(repo, "tests/fixtures/golden_xml/{0}".format(name), "<x/>\n")
+    _write(repo, gate.NODES_MANIFEST, _default_nodes(base))
+    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(_FAKE_BASE))
+    _commit(repo, "introduce manifests")
+    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
+
+
+def test_bootstrap_cannot_be_reused_after_a_deletion(tmp_path):
+    """The ancestry proof is what makes bootstrap one-time.
+
+    Delete both manifests, then re-add them: the paths ARE in the baseline's
+    ancestry, so this is not a bootstrap and the transition rules apply — which
+    is precisely what stops a deletion being laundered into a fresh start.
+    """
+    repo, _base = _seeded(tmp_path)
+    _run_git(repo, "rm", "-q", gate.NODES_MANIFEST, gate.GOLDENS_MANIFEST)
+    deleted = _commit(repo, "delete manifests")
+    _write(repo, gate.NODES_MANIFEST, _default_nodes(deleted))
+    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(deleted))
+    _commit(repo, "re-add manifests")
+    _expect(_manifests(repo, deleted, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
+
+
+# ===========================================================================
+# Strict format
+# ===========================================================================
+
+def _parse_fails(raw, name="pytest-nodes", code="MANIFEST_FORMAT_INVALID"):
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.parse_manifest(raw, name)
+    assert excinfo.value.code == code, excinfo.value.message
+    assert excinfo.value.status == 2
+    return excinfo.value
+
+
+def test_a_well_formed_manifest_parses():
+    parsed = gate.parse_manifest(_default_nodes(), "pytest-nodes")
+    assert len(parsed.rows) == 2
+    assert len(parsed.active) == 2
+    assert parsed.tombstoned == []
+
+
+@pytest.mark.parametrize(
+    "mutate,label",
+    [
+        (lambda raw: b"\xef\xbb\xbf" + raw, "bom"),
+        (lambda raw: raw.replace(b"\n", b"\r\n"), "crlf"),
+        (lambda raw: raw + b"\n", "blank-line"),
+        (lambda raw: raw.rstrip(b"\n"), "no-final-newline"),
+        (lambda raw: b"", "empty"),
+        (lambda raw: raw.replace(b'{"kind":"test"', b'  {"kind":"test"', 1), "indented"),
+        (lambda raw: raw + b"not json\n", "invalid-json"),
+        (lambda raw: raw + b"[1,2]\n", "not-an-object"),
+        (lambda raw: raw.replace(b'"state":"active"', b'"state":"active","state":"x"', 1), "duplicate-key"),
+        (lambda raw: raw.replace(b'"kind":"test"', b'"kind":"nope"', 1), "wrong-row-kind"),
+        (lambda raw: raw.replace(b'"state":"active"', b'"state":"retired"', 1), "bad-state"),
+        (lambda raw: raw.replace(b'"schema_version":1', b'"schema_version":2', 1), "schema-version"),
+        (lambda raw: raw.replace(b'"manifest":"pytest-nodes"', b'"manifest":"goldens"', 1), "wrong-manifest"),
+        (lambda raw: raw.replace(b'"bootstrap_base":"' + _FAKE_BASE.encode(), b'"bootstrap_base":"short', 1), "bad-bootstrap-sha"),
+        (lambda raw: raw.replace(b'"minimum_active":2', b'"minimum_active":"2"', 1), "floor-not-int"),
+        (lambda raw: raw.replace(b'"minimum_active":2', b'"minimum_active":-1', 1), "floor-negative"),
+        (lambda raw: raw.replace(b'"id":"pytest-000001"', b'"id":"pytest-1"', 1), "bad-id-form"),
+        (lambda raw: raw.replace(b'"id":"pytest-000002"', b'"id":"pytest-000009"', 1), "non-contiguous-id"),
+        (lambda raw: raw.replace(b'"node_id":"tests/test_x.py::test_2"', b'"node_id":"tests/test_x.py::test_1"', 1), "duplicate-node-id"),
+        (lambda raw: raw.replace(b'"node_id":"tests/test_x.py::test_1"', b'"node_id":"tests/kb/test_k.py::test_1"', 1), "kb-node"),
+        (lambda raw: raw.replace(b'"node_id":"tests/test_x.py::test_1"', b'"node_id":"not a node"', 1), "malformed-node"),
+    ],
+)
+def test_a_malformed_node_manifest_is_refused(mutate, label):
+    _parse_fails(mutate(_default_nodes()))
+
+
+def test_a_floor_above_the_active_row_count_is_refused():
+    raw = _serialize(_node_header(active=99), [_node_row(1)])
+    _parse_fails(raw, code="MANIFEST_FLOOR_INVALID")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("renderer", "no-such-renderer"),
+        ("disposition", "maybe"),
+        ("owner", "some-team"),
+        ("owner", "#0"),
+        ("input_case", ""),
+    ],
+    ids=["renderer", "disposition", "owner-freetext", "owner-zero", "empty-case"],
+)
+def test_a_golden_row_with_a_bad_enum_or_owner_is_refused(field, value):
+    row = _golden_row(1)
+    row[field] = value
+    _parse_fails(_serialize(_golden_header(1), [row]), "goldens")
+
+
+@pytest.mark.parametrize(
+    "expected_file",
+    [
+        "/etc/passwd",
+        "tests/fixtures/golden_xml/../../../etc/passwd",
+        "tests/fixtures/other/g.xml",
+        "tests/fixtures/golden_xml/nested/g.xml",
+        "tests/fixtures/golden_xml/g.txt",
+        "tests\\fixtures\\golden_xml\\g.xml",
+        " tests/fixtures/golden_xml/g.xml",
+    ],
+    ids=["absolute", "traversal", "wrong-dir", "nested", "wrong-suffix",
+         "backslash", "whitespace"],
+)
+def test_a_golden_row_with_an_unsafe_expected_file_is_refused(expected_file):
+    row = _golden_row(1)
+    row["expected_file"] = expected_file
+    _parse_fails(_serialize(_golden_header(1), [row]), "goldens")
+
+
+def test_field_ORDER_is_part_of_the_format():
+    row = _node_row(1)
+    reordered = {"id": row["id"], "kind": row["kind"], "node_id": row["node_id"],
+                 "state": row["state"]}
+    failure = _parse_fails(_serialize(_node_header(1), [reordered]))
+    assert "ORDER" in failure.message
+
+
+def test_an_unknown_or_missing_field_is_refused():
+    row = _node_row(1)
+    row["extra"] = 1
+    _parse_fails(_serialize(_node_header(1), [row]))
+    row = _node_row(1)
+    del row["state"]
+    _parse_fails(_serialize(_node_header(1), [row]))
+
+
+def test_repeated_renderer_owner_and_disposition_are_LEGAL():
+    """Immutable is not the same as unique.
+
+    Two goldens routinely share a renderer, an owner and a disposition; only
+    ``input_case`` and ``expected_file`` identify a row's subject. Conflating the
+    two sets made the real 60-row manifest unparseable.
+    """
+    rows = [_golden_row(1), _golden_row(2)]
+    parsed = gate.parse_manifest(_serialize(_golden_header(2), rows), "goldens")
+    assert len({r["renderer"] for r in parsed.rows}) == 1
+
+
+def test_a_duplicate_expected_file_or_input_case_is_refused():
+    rows = [_golden_row(1), _golden_row(2, name="g1.xml")]
+    _parse_fails(_serialize(_golden_header(2), rows), "goldens")
+    rows = [_golden_row(1), _golden_row(2, input_case="case:1")]
+    _parse_fails(_serialize(_golden_header(2), rows), "goldens")
+
+
+# ===========================================================================
+# Transitions
+# ===========================================================================
+
+def _transition(base_rows, head_rows, name="pytest-nodes",
+                base_header=None, head_header=None):
+    header = _node_header if name == "pytest-nodes" else _golden_header
+    base = gate.parse_manifest(
+        _serialize(base_header or header(len([r for r in base_rows if r["state"] == "active"])), base_rows),
+        name,
+    )
+    head = gate.parse_manifest(
+        _serialize(head_header or header(len([r for r in head_rows if r["state"] == "active"])), head_rows),
+        name,
+    )
+    return gate.validate_transition(base, head, name)
+
+
+def _transition_fails(base_rows, head_rows, name="pytest-nodes",
+                      code="MANIFEST_TRANSITION_ILLEGAL", **kwargs):
+    with pytest.raises(gate.GateFailure) as excinfo:
+        _transition(base_rows, head_rows, name, **kwargs)
+    assert excinfo.value.code == code, excinfo.value.message
+    assert excinfo.value.status == 2
+
+
+def test_appending_an_active_row_is_legal():
+    appended, tombstoned = _transition(
+        [_node_row(1)], [_node_row(1), _node_row(2)]
+    )
+    assert (appended, tombstoned) == (1, 0)
+
+
+def test_an_unchanged_manifest_is_legal():
+    assert _transition([_node_row(1)], [_node_row(1)]) == (0, 0)
+
+
+def test_deleting_a_row_is_refused():
+    _transition_fails([_node_row(1), _node_row(2)], [_node_row(1)])
+
+
+@pytest.mark.parametrize(
+    "disposition", ["survivor", "transitional_oracle", "deletion_only"]
+)
+def test_deleting_a_golden_row_is_refused_for_every_disposition(disposition):
+    """The headline case: deleting a golden AND its row in one change.
+
+    Self-consistent against the tree, and therefore invisible to any check that
+    only looks at HEAD. It is refused whatever the row's disposition says, and
+    by whichever of the two independent rules sees it first — which one depends
+    only on WHERE the row sat:
+
+    * deleting the LAST row leaves a parseable file, so the base-to-head row
+      comparison is what catches it;
+    * deleting any EARLIER row also breaks the positional id sequence, so the
+      format check refuses the file before a transition is even computed.
+
+    Both are exit 2 and both are fail-closed; asserting one universal code here
+    would be asserting something untrue about the implementation.
+    """
+    base = [_golden_row(1, disposition=disposition), _golden_row(2)]
+
+    # Delete the last row -> illegal transition.
+    _transition_fails(base, [_golden_row(1, disposition=disposition)], "goldens")
+
+    # Delete the first row -> the surviving row's id no longer matches its
+    # position, so the file itself is refused.
+    _transition_fails(base, [_golden_row(2)], "goldens",
+                      code="MANIFEST_FORMAT_INVALID")
+
+
+def test_reordering_or_inserting_before_the_end_is_refused():
+    base = [_node_row(1), _node_row(2)]
+    swapped = [dict(_node_row(2), id="pytest-000001"),
+               dict(_node_row(1), id="pytest-000002")]
+    _transition_fails(base, swapped)
+
+
+def test_repointing_an_existing_id_is_refused():
+    base = [_node_row(1)]
+    _transition_fails(base, [_node_row(1, node_id="tests/test_y.py::test_other")])
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("input_case", "case:changed"),
+        ("renderer", "process-xml-v1"),
+        ("expected_file", "tests/fixtures/golden_xml/renamed.xml"),
+        ("owner", "#999"),
+        ("disposition", "deletion_only"),
+    ],
+)
+def test_mutating_any_immutable_golden_field_is_refused(field, value):
+    base = [_golden_row(1)]
+    head = dict(_golden_row(1))
+    head[field] = value
+    _transition_fails(base, [head], "goldens")
+
+
+def test_tombstoning_an_active_row_is_legal_and_counted():
+    appended, tombstoned = _transition(
+        [_node_row(1), _node_row(2)],
+        [_node_row(1), _node_row(2, state="tombstone")],
+        base_header=_node_header(2, 2),
+        head_header=_node_header(1, 1),
+    )
+    assert (appended, tombstoned) == (0, 1)
+
+
+def test_reactivating_a_tombstone_is_refused():
+    _transition_fails(
+        [_node_row(1, state="tombstone")], [_node_row(1)],
+        base_header=_node_header(0, 0), head_header=_node_header(1, 1),
+    )
+
+
+def test_appending_an_already_tombstoned_row_is_refused():
+    _transition_fails(
+        [_node_row(1)], [_node_row(1), _node_row(2, state="tombstone")],
+        base_header=_node_header(1, 1), head_header=_node_header(1, 1),
+    )
+
+
+def test_an_immutable_header_field_cannot_move():
+    _transition_fails(
+        [_node_row(1)], [_node_row(1)],
+        base_header=_node_header(1, 1, base=_FAKE_BASE),
+        head_header=_node_header(1, 1, base="2" * 40),
+    )
+
+
+# ===========================================================================
+# Floor arithmetic
+# ===========================================================================
+
+def test_the_active_floor_must_track_appends_and_tombstones_exactly():
+    # An append that does not raise the floor.
+    _transition_fails(
+        [_node_row(1)], [_node_row(1), _node_row(2)],
+        base_header=_node_header(1, 1), head_header=_node_header(1, 1),
+        code="MANIFEST_FLOOR_INVALID",
+    )
+    # A floor inflated beyond the append.
+    _transition_fails(
+        [_node_row(1)], [_node_row(1), _node_row(2)],
+        base_header=_node_header(1, 1), head_header=_node_header(5, 1),
+        code="MANIFEST_FLOOR_INVALID",
+    )
+    # A floor silently lowered with no tombstone at all.
+    _transition_fails(
+        [_node_row(1), _node_row(2)], [_node_row(1), _node_row(2)],
+        base_header=_node_header(2, 2), head_header=_node_header(1, 2),
+        code="MANIFEST_FLOOR_INVALID",
+    )
+
+
+def test_the_collection_floor_may_rise_freely_but_only_fall_by_a_tombstone():
+    # Raising it is always fine — a slice may pin growth deliberately.
+    assert _transition(
+        [_node_row(1)], [_node_row(1)],
+        base_header=_node_header(1, 10), head_header=_node_header(1, 4000),
+    ) == (0, 0)
+    # Dropping it without a tombstone is not.
+    _transition_fails(
+        [_node_row(1)], [_node_row(1)],
+        base_header=_node_header(1, 10), head_header=_node_header(1, 9),
+        code="MANIFEST_FLOOR_INVALID",
+    )
+    # Dropping it by exactly the tombstoned count is.
+    assert _transition(
+        [_node_row(1), _node_row(2)],
+        [_node_row(1), _node_row(2, state="tombstone")],
+        base_header=_node_header(2, 10), head_header=_node_header(1, 9),
+    ) == (0, 1)
+
+
+# ===========================================================================
+# Collection
+# ===========================================================================
+
+def _nodes_manifest(active_ids, floor_collected, cap=30):
+    rows = [_node_row(i, node_id=n) for i, n in enumerate(active_ids, start=1)]
+    return gate.parse_manifest(
+        _serialize(_node_header(len(rows), floor_collected, skipped=cap), rows),
+        "pytest-nodes",
+    )
+
+
+def test_extra_collected_tests_are_allowed():
+    manifest = _nodes_manifest(["tests/a.py::t1"], 1)
+    gate.check_collection(manifest, {"tests/a.py::t1", "tests/a.py::t2"})
+
+
+def test_collection_below_the_floor_fails_even_when_every_required_node_is_present():
+    """The floor trips ON ITS OWN.
+
+    Required-node coverage and the floor are separate assertions on purpose: a
+    collection can contain every manifested node and still be a fraction of the
+    suite, which is exactly what a partial import produces.
+    """
+    manifest = _nodes_manifest(["tests/a.py::t1"], 5000)
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_collection(manifest, {"tests/a.py::t1"})
+    assert excinfo.value.code == "PYTEST_COLLECTION_FLOOR"
+    assert excinfo.value.status == 1
+
+
+def test_a_missing_required_node_fails_even_above_the_floor():
+    manifest = _nodes_manifest(["tests/a.py::t1", "tests/a.py::t2"], 1)
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_collection(manifest, {"tests/a.py::t1", "tests/z.py::other"})
+    assert excinfo.value.code == "PYTEST_NODE_MISSING"
+    assert excinfo.value.status == 1
+
+
+def test_tombstoned_nodes_are_not_required():
+    rows = [_node_row(1, node_id="tests/a.py::t1"),
+            _node_row(2, node_id="tests/a.py::gone", state="tombstone")]
+    manifest = gate.parse_manifest(_serialize(_node_header(1, 1), rows), "pytest-nodes")
+    gate.check_collection(manifest, {"tests/a.py::t1"})
+
+
+_GOOD_COLLECTION = "tests/a.py::t1\ntests/a.py::t2\n\n2 tests collected in 0.10s\n"
+
+
+def test_a_healthy_collection_parses():
+    assert gate.parse_collection_output(_GOOD_COLLECTION) == {
+        "tests/a.py::t1", "tests/a.py::t2"
+    }
+
+
+@pytest.mark.parametrize(
+    "stdout,code",
+    [
+        ("tests/a.py::t1\n", "PYTEST_COLLECTION_FAILED"),
+        ("2 tests collected in 0.1s\n", "PYTEST_COLLECTION_EMPTY"),
+        ("tests/a.py::t1\n1 tests collected\n2 tests collected\n", "PYTEST_COLLECTION_FAILED"),
+        ("tests/a.py::t1\ntests/a.py::t1\n2 tests collected\n", "PYTEST_COLLECTION_DUPLICATE"),
+        ("tests/a.py::t1\n9999 tests collected\n", "PYTEST_COLLECTION_FAILED"),
+    ],
+    ids=["no-summary", "no-nodes", "two-summaries", "duplicate-node", "does-not-reconcile"],
+)
+def test_unreconcilable_collection_output_is_refused(stdout, code):
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.parse_collection_output(stdout)
+    assert excinfo.value.code == code
+    assert excinfo.value.status == 1
+
+
+# ---------------------------------------------------------------------------
+# Execution accounting — a collected test is not an executed test
+# ---------------------------------------------------------------------------
+
+class _FakeSuite:
+    """Stands in for the pytest child so these run in milliseconds."""
+
+    def __init__(self, text, status=0):
+        self.text = text
+        self.status = status
+
+    def install(self, monkeypatch):
+        class _Proc:
+            def __init__(self, text, status):
+                self.stdout = iter(text.splitlines(keepends=True))
+                self._status = status
+
+            def wait(self):
+                return self._status
+
+        monkeypatch.setattr(
+            gate.subprocess, "Popen",
+            lambda *a, **k: _Proc(self.text, self.status),
+        )
+
+
+def _summary(passed, skipped=0, failed=0):
+    parts = ["{0} passed".format(passed)]
+    if failed:
+        parts.append("{0} failed".format(failed))
+    if skipped:
+        parts.append("{0} skipped".format(skipped))
+    return "dots\n" + ", ".join(parts) + " in 12.00s\n"
+
+
+def _run_suite(monkeypatch, text, status=0, cap=30, collected=100):
+    _FakeSuite(text, status).install(monkeypatch)
+    manifest = _nodes_manifest(["tests/a.py::t1"], 1, cap=cap)
+    return gate.run_suite("/nonexistent", manifest, set(range(collected)))
+
+
+def test_a_healthy_suite_run_is_accounted(monkeypatch):
+    result = _run_suite(monkeypatch, _summary(98, skipped=2))
+    assert (result["passed"], result["skipped"], result["failed"]) == (98, 2, 0)
+
+
+def test_mass_skipping_is_refused_even_though_pytest_exits_zero(monkeypatch):
+    """The finding this check exists for.
+
+    pytest collects a skipped test, counts it, and exits 0 — so one module-level
+    ``pytestmark = pytest.mark.skip`` neutralises every test in that module with
+    collection, the floor, the required-node check and the exit code all green.
+    """
+    with pytest.raises(gate.GateFailure) as excinfo:
+        _run_suite(monkeypatch, _summary(0, skipped=100), cap=30)
+    assert excinfo.value.code == "PYTEST_SKIPPED_EXCEEDS_CAP"
+    assert excinfo.value.status == 1
+
+
+def test_environment_conditional_skips_below_the_cap_are_tolerated(monkeypatch):
+    """The cap is not zero on purpose: `gcloud` is on PATH here and not on a
+    runner, and this suite has 22 runtime ``pytest.skip()`` sites."""
+    result = _run_suite(monkeypatch, _summary(80, skipped=20), cap=30)
+    assert result["skipped"] == 20
+
+
+def test_a_pass_count_below_the_derived_floor_is_refused(monkeypatch):
+    """Deselection, a collection-time filter, or an aborted run can leave the
+    skip count small AND the pass count far short."""
+    with pytest.raises(gate.GateFailure) as excinfo:
+        _run_suite(monkeypatch, _summary(10, skipped=1), cap=30, collected=100)
+    assert excinfo.value.code == "PYTEST_PASSED_BELOW_FLOOR"
+
+
+def test_a_zero_exit_that_still_reports_failures_is_refused(monkeypatch):
+    with pytest.raises(gate.GateFailure) as excinfo:
+        _run_suite(monkeypatch, _summary(90, failed=3), status=0)
+    assert excinfo.value.code == "PYTEST_FAILED"
+
+
+def test_a_nonzero_exit_is_refused(monkeypatch):
+    with pytest.raises(gate.GateFailure) as excinfo:
+        _run_suite(monkeypatch, _summary(100), status=1)
+    assert excinfo.value.code == "PYTEST_FAILED"
+
+
+def test_an_unparseable_suite_summary_is_not_a_pass(monkeypatch):
+    """No accountable result is not the same as a good result."""
+    with pytest.raises(gate.GateFailure) as excinfo:
+        _run_suite(monkeypatch, "....\nsomething went sideways\n")
+    assert excinfo.value.code == "PYTEST_SUMMARY_UNPARSEABLE"
+
+
+def test_the_skip_cap_may_be_lowered_but_not_raised():
+    """Raising the cap is the exact move that launders a mass-skip past the gate."""
+    assert _transition(
+        [_node_row(1)], [_node_row(1)],
+        base_header=_node_header(1, 1, skipped=30),
+        head_header=_node_header(1, 1, skipped=5),
+    ) == (0, 0)
+    _transition_fails(
+        [_node_row(1)], [_node_row(1)],
+        base_header=_node_header(1, 1, skipped=30),
+        head_header=_node_header(1, 1, skipped=31),
+        code="MANIFEST_FLOOR_INVALID",
+    )
+
+
+def test_a_pytest_warning_line_is_not_counted_as_a_test():
+    """pytest's warning summary also emits lines beginning ``tests/``.
+
+    A loose ``startswith('tests/')`` filter counted them, which inflates the
+    collected total — the one direction a floor cannot catch.
+    """
+    stdout = (
+        "tests/a.py::t1\n"
+        "tests/test_recipe_security.py:642: UserWarning: something\n"
+        "1 test collected in 0.01s\n"
+    )
+    assert gate.parse_collection_output(stdout) == {"tests/a.py::t1"}
+
+
+# ===========================================================================
+# Golden tree self-consistency
+# ===========================================================================
+
+def _goldens_manifest(rows, active=None):
+    if active is None:
+        active = len([r for r in rows if r["state"] == "active"])
+    return gate.parse_manifest(_serialize(_golden_header(active), rows), "goldens")
+
+
+def test_a_consistent_golden_tree_passes(tmp_path):
+    repo, _base = _seeded(tmp_path)
+    gate.check_golden_tree(str(repo), _goldens_manifest([_golden_row(1), _golden_row(2)]))
+
+
+def test_a_declared_golden_that_is_missing_fails(tmp_path):
+    repo, _base = _seeded(tmp_path)
+    (repo / "tests/fixtures/golden_xml/g2.xml").unlink()
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_golden_tree(str(repo), _goldens_manifest([_golden_row(1), _golden_row(2)]))
+    assert excinfo.value.code == "GOLDEN_FILE_MISSING"
+    assert excinfo.value.status == 1
+
+
+def test_an_undeclared_golden_file_fails(tmp_path):
+    """A golden with no row would never be executed by the gate."""
+    repo, _base = _seeded(tmp_path)
+    _write(repo, "tests/fixtures/golden_xml/g3.xml", "<x/>\n")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_golden_tree(str(repo), _goldens_manifest([_golden_row(1), _golden_row(2)]))
+    assert excinfo.value.code == "GOLDEN_FILE_UNDECLARED"
+
+
+def test_a_tombstoned_golden_whose_file_survives_fails(tmp_path):
+    repo, _base = _seeded(tmp_path)
+    rows = [_golden_row(1), _golden_row(2, state="tombstone")]
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_golden_tree(str(repo), _goldens_manifest(rows))
+    assert excinfo.value.code == "GOLDEN_FILE_UNDECLARED"
+
+
+def test_a_tombstoned_golden_whose_file_is_gone_passes(tmp_path):
+    repo, _base = _seeded(tmp_path)
+    (repo / "tests/fixtures/golden_xml/g2.xml").unlink()
+    rows = [_golden_row(1), _golden_row(2, state="tombstone")]
+    gate.check_golden_tree(str(repo), _goldens_manifest(rows))
+
+
+def test_a_symlinked_golden_is_refused(tmp_path):
+    repo, _base = _seeded(tmp_path)
+    link = repo / "tests/fixtures/golden_xml/g3.xml"
+    link.symlink_to(repo / "tests/fixtures/golden_xml/g1.xml")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_golden_tree(str(repo), _goldens_manifest([_golden_row(1), _golden_row(2)]))
+    assert excinfo.value.code == "GOLDEN_FILE_UNDECLARED"
+
+
+# ===========================================================================
+# Golden rendering: determinism and byte equality
+# ===========================================================================
+
+def _fake_renders(monkeypatch, first, second):
+    passes = iter([first, second])
+
+    def fake(repo, goldens, tmpdir, hashseed):
+        return next(passes)
+
+    monkeypatch.setattr(gate, "_render_pass", fake)
+
+
+def test_two_disagreeing_renders_are_nondeterministic(tmp_path, monkeypatch):
+    repo, _base = _seeded(tmp_path)
+    manifest = _goldens_manifest([_golden_row(1)])
+    _fake_renders(monkeypatch, {"golden-000001": b"a"}, {"golden-000001": b"b"})
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_goldens(str(repo), manifest, str(tmp_path))
+    assert excinfo.value.code == "GOLDEN_NONDETERMINISTIC"
+    assert excinfo.value.status == 1
+
+
+def test_stable_but_wrong_bytes_are_a_mismatch(tmp_path, monkeypatch):
+    """Determinism is not correctness: both passes agreeing proves only that the
+    renderer is stable, which a hard-coded constant also is."""
+    repo, _base = _seeded(tmp_path)
+    manifest = _goldens_manifest([_golden_row(1)])
+    _fake_renders(monkeypatch, {"golden-000001": b"wrong"}, {"golden-000001": b"wrong"})
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_goldens(str(repo), manifest, str(tmp_path))
+    assert excinfo.value.code == "GOLDEN_MISMATCH"
+
+
+def test_matching_deterministic_bytes_pass(tmp_path, monkeypatch):
+    repo, _base = _seeded(tmp_path)
+    manifest = _goldens_manifest([_golden_row(1)])
+    _fake_renders(monkeypatch, {"golden-000001": b"<x/>\n"}, {"golden-000001": b"<x/>\n"})
+    assert gate.check_goldens(str(repo), manifest, str(tmp_path)) == 1
+
+
+@pytest.mark.parametrize(
+    "first",
+    [{}, {"golden-000001": b"<x/>\n", "golden-000009": b"extra"}],
+    ids=["missing", "extra"],
+)
+def test_a_render_pass_that_does_not_cover_the_manifest_fails(tmp_path, monkeypatch, first):
+    repo, _base = _seeded(tmp_path)
+    manifest = _goldens_manifest([_golden_row(1)])
+    _fake_renders(monkeypatch, first, {"golden-000001": b"<x/>\n"})
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_goldens(str(repo), manifest, str(tmp_path))
+    assert excinfo.value.code == "GOLDEN_OUTPUT_SET_MISMATCH"
+
+
+# ===========================================================================
+# The #153 plan-fingerprint seam
+# ===========================================================================
+
+class _StubProvider:
+    def __init__(self, relocatable=True, discriminating=True, cases=("c1",),
+                 mutations=("semantic",)):
+        self._relocatable = relocatable
+        self._discriminating = discriminating
+        self._cases = list(cases)
+        self._mutations = list(mutations)
+
+    def cases(self):
+        return self._cases
+
+    def mutations(self, case):
+        return self._mutations
+
+    def fingerprint(self, case, *, account, environment, mutation=None):
+        if mutation is not None and self._discriminating:
+            return "{0}:{1}".format(case, mutation)
+        if self._relocatable:
+            return case
+        return "{0}:{1}:{2}".format(case, account, environment)
+
+
+def test_the_pending_seam_is_informational_by_default():
+    assert gate.run_plan_fingerprint_checks(False) == "pending:#153"
+
+
+def test_the_pending_seam_fails_when_required():
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(True)
+    assert excinfo.value.code == "PLAN_FINGERPRINT_PENDING"
+    assert excinfo.value.status == 1
+
+
+def test_a_healthy_provider_passes():
+    assert "checked" in gate.run_plan_fingerprint_checks(True, _StubProvider())
+
+
+def test_a_provider_whose_fingerprint_moves_on_relocation_fails():
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(True, _StubProvider(relocatable=False))
+    assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+
+
+def test_a_provider_whose_fingerprint_ignores_semantics_fails():
+    """Relocation-stability alone is satisfied by a constant.
+
+    Both halves are asserted, so a fingerprint that never changes cannot pass by
+    being trivially relocatable.
+    """
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(True, _StubProvider(discriminating=False))
+    assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "kwargs", [{"cases": ()}, {"mutations": ()}], ids=["no-cases", "no-mutations"]
+)
+def test_a_vacuous_provider_fails(kwargs):
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(True, _StubProvider(**kwargs))
+    assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+
+
+# ===========================================================================
+# Hygiene and the exit contract
+# ===========================================================================
+
+def test_a_gate_that_changes_the_worktree_is_a_failure():
+    gate.check_worktree_unchanged("", "")
+    gate.check_worktree_unchanged(" M a\n", " M a\n")  # dirty in, dirty out: fine
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_worktree_unchanged("", "?? droppings\n")
+    assert excinfo.value.code == "WORKTREE_DIRTY"
+    assert excinfo.value.status == 1
+
+
+def test_manifests_announces_that_it_is_not_a_gate(tmp_path):
+    repo, base = _seeded(tmp_path)
+    status, stderr = _manifests(repo, base)
+    assert status == 0, stderr
+    assert "NOT A GATE" in stderr
+
+
+def test_the_ci_subcommand_refuses_a_bare_base(tmp_path):
+    """``ci`` derives its baseline from the event, never from an argument."""
+    repo, base = _seeded(tmp_path)
+    status, _stderr = _gate(repo, "ci", "--base", base)
+    assert status == 2
+
+
+def test_there_is_no_mutation_or_skip_surface():
+    """The gate must not be able to update a manifest or skip a check.
+
+    An ``--update`` that regenerates the ledger would end the append-only
+    contract on its first use, and a ``--skip`` makes every failure optional.
+    """
+    parser = gate.build_parser()
+    text = parser.format_help()
+    for banned in ("--update", "--skip", "--force", "--no-", "--minimum"):
+        assert banned not in text, banned
+    source = (_ROOT / "scripts" / "wave_gate.py").read_text(encoding="utf-8")
+    assert 'add_argument("--update' not in source
+    assert 'add_argument("--skip' not in source
+
+
+def test_every_diagnostic_code_the_gate_can_raise_is_documented():
+    """Codes are the contract CI logs and this matrix key on, so they are also
+    the thing a reader looks up. A code that exists only in the source is one
+    nobody can act on; a code documented but never raised is a promise the gate
+    does not keep. Assert the two sets agree EXACTLY, in both directions.
+    """
+    import re as _re
+
+    assert gate._contract("X", "m").status == 2
+    assert gate._invalid("X", "m").status == 1
+
+    source = (_ROOT / "scripts" / "wave_gate.py").read_text(encoding="utf-8")
+    raised = set(_re.findall(r'_(?:contract|invalid)\(\s*\n?\s*"([A-Z_]+)"', source))
+    assert len(raised) >= 20, sorted(raised)
+
+    doc = (_ROOT / "docs" / "architecture" / "ENDGAME_VERIFICATION_GATE.md").read_text(
+        encoding="utf-8"
+    )
+    # Scan ONLY the code roster, not the whole document: elsewhere the doc
+    # legitimately back-ticks identifiers that are not diagnostics
+    # (PLAN_FINGERPRINT_PROVIDER, PYTHONHASHSEED, SYNC_CASES, ...), and a
+    # prefix filter cannot tell those apart from the codes they resemble.
+    marker = "Every failure prints a stable diagnostic code as the first stderr token:"
+    assert marker in doc, "the code roster's heading moved; re-anchor this test"
+    roster = doc.split(marker, 1)[1].split("\n## ", 1)[0]
+    documented = set(_re.findall(r"`([A-Z][A-Z_]{4,})`", roster))
+
+    assert raised - documented == set(), sorted(raised - documented)
+    assert documented - raised == set(), sorted(documented - raised)
+
+
+def test_the_committed_manifests_parse_and_agree_with_the_tree():
+    """The real manifests, through the real parser, at the real HEAD."""
+    nodes = gate.parse_manifest(
+        (_ROOT / gate.NODES_MANIFEST).read_bytes(), "pytest-nodes"
+    )
+    goldens = gate.parse_manifest(
+        (_ROOT / gate.GOLDENS_MANIFEST).read_bytes(), "goldens"
+    )
+    assert nodes.header["bootstrap_base"] == goldens.header["bootstrap_base"]
+    assert len(goldens.active) >= goldens.header["minimum_active"]
+    gate.check_golden_tree(str(_ROOT), goldens)

@@ -4505,12 +4505,24 @@ def test_non_schema_keys_covers_every_declared_free_form_position():
     """
     import typing
 
+    import typing_extensions
+
     from pydantic_core import core_schema as cs
 
+    # ``typing_extensions.is_typeddict``, NOT ``typing.is_typeddict``: the latter
+    # is False for a ``typing_extensions.TypedDict`` — the exact trap
+    # ``test_recipe_security.py::test_both_typed_dict_spellings_are_judged``
+    # exists to pin. On Python < 3.12 pydantic_core declares EVERY one of these
+    # with the ``typing_extensions`` spelling (pydantic refuses the ``typing``
+    # one there), so ``typing.is_typeddict`` finds ZERO of them and this tripwire
+    # fired on the production interpreter while passing on 3.12. The
+    # ``typing_extensions`` predicate recognises both spellings on both
+    # interpreters (measured: 72 either way), so it is strictly stronger, not a
+    # version workaround.
     typed_dicts = {
         name: obj
         for name in dir(cs)
-        if typing.is_typeddict(obj := getattr(cs, name))
+        if typing_extensions.is_typeddict(obj := getattr(cs, name))
     }
     assert len(typed_dicts) > 40, "core_schema TypedDicts not introspectable"
 
@@ -4525,7 +4537,14 @@ def test_non_schema_keys_covers_every_declared_free_form_position():
             return True  # unknown -> assume schema-bearing, i.e. keep walking
         if ann is cs.CoreSchema:
             return True
-        if typing.is_typeddict(ann):
+        # Same predicate as above, and for the same reason: with
+        # ``typing.is_typeddict`` here the recursion stops at the first NESTED
+        # ``typing_extensions.TypedDict`` on Python < 3.12, so a key whose value
+        # type transitively bears a ``CoreSchema`` (``fields``, whose values are
+        # ``ModelField`` TypedDicts) lands in ``never`` and is reported as an
+        # uncovered free-form position. The product agrees — ``recipes/engine.py``
+        # imports the same ``typing_extensions`` predicate at :75.
+        if typing_extensions.is_typeddict(ann):
             return any(bears_schema(v, depth + 1) for v in annotations_of(ann).values())
         text = str(ann)
         if "CoreSchema" in text and "CoreSchemaType" not in text:

@@ -392,10 +392,21 @@ SECOND golden dir it deliberately does not cover: `tests/fixtures/process_ir/emi
 ledger. Statements elsewhere in this document about "31 golden_xml + 3 emitter_parity fixtures" count
 both; this section counts only the first. Each fixture below is
 labeled by the **measured comparison mode of its comparing test**. Since #138 (M12.3) the
-process-emitter goldens are UNIFORMLY byte-locked: all **34** committed `golden_xml/*.xml` fixtures
-are raw-byte, **0 are canonicalized** (the 8 formerly-canonicalized fixtures in §3.2 were converted
+process-emitter goldens are UNIFORMLY byte-locked: every committed `golden_xml/*.xml` fixture is
+raw-byte and **0 are canonicalized** (the 8 formerly-canonicalized fixtures in §3.2 were converted
 to raw `==` and 5 new byte anchors were added — §3.2/§3.4 and the §138 note; #139C then added the
 3 sync_pipeline anchors in §3.4, taking 31 → 34). The M8 JSON examples remain structural round-trips.
+
+> **Count authority moved (#152, M12.13).** The live inventory of this directory is
+> `tests/fixtures/wave_gate/goldens.jsonl` — **60 active entries at the #152 bootstrap**, each
+> carrying its input case, renderer, owner, disposition and state. That manifest is machine-checked
+> against the directory on every CI run (`scripts/wave_gate.py`: an active row with no file, or a
+> file with no active row, fails the gate), so it cannot drift the way a hand-maintained count does.
+>
+> The enumerations below and every "**34** fixtures" figure elsewhere in this document are
+> **historical tranche snapshots**, correct at the tranche they record, and are deliberately left as
+> written rather than re-tallied — the manifest, not this prose, is what a reader should trust for
+> the current corpus. Do not hand-maintain a second full list here.
 
 ### 3.1 Raw-byte equality (`emitted == golden.read_text()`)
 

@@ -20,6 +20,21 @@ import pickle
 import sys
 from pathlib import Path
 
+#: The ``TypedDict`` spelling pydantic will build a model from on THIS
+#: interpreter.
+#:
+#: On Python < 3.12 — which is what production runs (``Dockerfile:5``,
+#: ``python:3.11-slim``) — pydantic raises ``PydanticUserError`` /
+#: ``typed-dict-version`` for a field annotated with a ``typing.TypedDict`` and
+#: refuses to create the model at all. The tests that use this alias need *a*
+#: TypedDict field to exercise the engine's judging; the spelling is incidental
+#: to what they assert. ``test_both_typed_dict_spellings_are_judged`` is the one
+#: test that owns the spelling question, and it names both explicitly.
+if sys.version_info >= (3, 12):
+    from typing import TypedDict as PydanticCompatibleTypedDict
+else:  # pragma: no cover - exercised on the 3.11 CI interpreter, not on 3.12
+    from typing_extensions import TypedDict as PydanticCompatibleTypedDict
+
 import pytest
 from pydantic import ConfigDict, ValidationError, field_serializer, field_validator, model_validator
 
@@ -2353,9 +2368,11 @@ def test_a_typed_dict_field_does_not_fail_every_invocation():
     Second instance of the class after ``typing.Any``, which is why the guard is
     general rather than a ``TypedDict`` special case (issue #145, Codex review).
     """
-    from typing import TypedDict as TypedDictType, Union as UnionType
+    from typing import Union as UnionType
 
     from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    TypedDictType = PydanticCompatibleTypedDict
 
     class Bounded(TypedDictType):
         a: str
@@ -2654,9 +2671,9 @@ def test_a_typed_dict_field_is_judged_by_its_per_key_hints():
     mapping branch found no parametrised arm because ``get_origin`` is None — so
     nothing looked at it at all, for a field type that registers fine.
     """
-    from typing import TypedDict as TypedDictType
-
     from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    TypedDictType = PydanticCompatibleTypedDict
 
     # DECLARED-KEYS-ONLY, so the adapter above cannot reject it on an extra key —
     # otherwise the test passes without the per-key hints ever being consulted.
@@ -2847,7 +2864,25 @@ def test_an_unrecognised_annotation_form_is_unwrapped_not_waved_through(spelling
     )
 
 
-@pytest.mark.parametrize("module", ["typing", "typing_extensions"])
+@pytest.mark.parametrize(
+    "module",
+    [
+        pytest.param(
+            "typing",
+            marks=pytest.mark.skipif(
+                sys.version_info < (3, 12),
+                reason=(
+                    "pydantic refuses a typing.TypedDict field on Python < 3.12 "
+                    "(PydanticUserError typed-dict-version) and will not create the "
+                    "model, so this spelling cannot reach the engine at all on the "
+                    "production interpreter — there is no judging behaviour to assert. "
+                    "The typing_extensions arm below covers < 3.12."
+                ),
+            ),
+        ),
+        "typing_extensions",
+    ],
+)
 def test_both_typed_dict_spellings_are_judged(module):
     """``typing.is_typeddict`` is False for a ``typing_extensions.TypedDict``.
 
@@ -2964,11 +2999,13 @@ def test_an_uncheckable_union_arm_does_not_cancel_a_failed_one():
     uncheckable option now abstains for itself only, judged by the adapter, which
     can still say a ``str`` is not a ``TypedDict`` (issue #145, Codex review).
     """
-    from typing import TypedDict as TypedDictType, Union as UnionType
+    from typing import Union as UnionType
 
     from pydantic import SecretStr
 
     from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    TypedDictType = PydanticCompatibleTypedDict
 
     class Shaped(TypedDictType):
         a: str
@@ -3036,11 +3073,13 @@ def test_every_typed_dict_arm_is_tried_not_only_the_first():
     Its keys were absent from those hints, so it was walked unannotated and
     accepted after adapter conversion (issue #145, Codex review).
     """
-    from typing import TypedDict as TypedDictType, Union as UnionType
+    from typing import Union as UnionType
 
     from pydantic import SecretStr
 
     from boomi_mcp.recipes.engine import _assert_declared_shape
+
+    TypedDictType = PydanticCompatibleTypedDict
 
     class MetadataTD(TypedDictType):
         meta: str

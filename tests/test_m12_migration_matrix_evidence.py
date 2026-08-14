@@ -21,6 +21,7 @@ nonexistent test fails here rather than at some later audit.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -45,6 +46,49 @@ def _cited_ids() -> list:
     return sorted(set(_CITATION.findall(_INVENTORY.read_text())))
 
 
+def _collect_argv() -> list:
+    """The child collection's argv.
+
+    ``--ignore`` the KB subtree: the split is deliberate (``requirements-kb.txt``
+    — KB deps are "Deliberately NOT in requirements.txt"), the suite this repo
+    runs and gates on is the non-KB one, and collecting ``tests/kb/`` here made
+    this guard depend on optional ML dependencies it does not need.
+
+    ``-p no:cacheprovider`` so the child writes no ``.pytest_cache``: the wave
+    gate (``scripts/wave_gate.py``) asserts the tree is unchanged after a run,
+    and a nested collection leaving droppings would fight that.
+    """
+    return [
+        sys.executable,
+        "-m",
+        "pytest",
+        "--collect-only",
+        "-q",
+        "-p",
+        "no:randomly",
+        "-p",
+        "no:cacheprovider",
+        "--ignore",
+        str(_ROOT / "tests" / "kb"),
+        str(_ROOT / "tests"),
+    ]
+
+
+def _collect_env() -> dict:
+    """The child collection's environment.
+
+    INHERITS the parent environment rather than replacing it. The previous form
+    hard-coded ``PATH=/usr/bin:/bin:/usr/sbin:/sbin``, which is a macOS-developer
+    assumption: it is not the PATH on a GitHub runner, and a replaced environment
+    also drops everything else the interpreter may need. Only the two variables
+    this collection actually depends on are overlaid.
+    """
+    env = dict(os.environ)
+    env["PYTHONPATH"] = "src"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
 def _collected_ids() -> set:
     """Every collectible node id, plus each id's file::class and file::function.
 
@@ -53,20 +97,11 @@ def _collected_ids() -> set:
     error, a skipped module), which is not evidence of anything.
     """
     result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "--collect-only",
-            "-q",
-            "-p",
-            "no:randomly",
-            str(_ROOT / "tests"),
-        ],
+        _collect_argv(),
         capture_output=True,
         text=True,
         cwd=str(_ROOT),
-        env={"PYTHONPATH": "src", "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+        env=_collect_env(),
     )
     ids = set()
     for line in result.stdout.splitlines():
@@ -80,6 +115,33 @@ def _collected_ids() -> set:
             ids.add("{0}::{1}".format(parts[0], part.split("[")[0]))
         ids.add(line.split("[")[0])
     return ids
+
+
+def test_nested_collection_excludes_kb_and_inherits_the_environment():
+    """Pin the child invocation, not just its result (issue #152).
+
+    The three properties below were each wrong at one point and none of them
+    fails loudly: a KB-including collection needs optional ML dependencies this
+    guard has no use for; a replaced ``PATH`` is a developer-machine assumption
+    that does not hold on a CI runner; and a child that writes bytecode or a
+    pytest cache dirties a tree the wave gate asserts is unchanged. Asserting the
+    generated argv/env means a later refactor cannot quietly reintroduce any of
+    them.
+    """
+    argv = _collect_argv()
+    kb = str(_ROOT / "tests" / "kb")
+    assert "--ignore" in argv, argv
+    assert argv[argv.index("--ignore") + 1] == kb, argv
+    assert argv[-1] == str(_ROOT / "tests"), argv
+    # `-p no:X` pairs, so check the pair rather than the bare token.
+    pairs = {argv[i + 1] for i, tok in enumerate(argv) if tok == "-p"}
+    assert "no:cacheprovider" in pairs, argv
+
+    env = _collect_env()
+    assert env["PYTHONPATH"] == "src"
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+    # Inherited, not replaced: PATH must match this process, whatever it is here.
+    assert env.get("PATH") == os.environ.get("PATH")
 
 
 def test_the_matrix_actually_cites_evidence():

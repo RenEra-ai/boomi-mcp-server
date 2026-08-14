@@ -1,0 +1,83 @@
+# The required status check for `dev`.
+#
+# Runs the full non-KB suite on Python 3.11 — the interpreter production runs
+# (`Dockerfile:5`, `python:3.11-slim`). Local development uses a 3.12 `.venv`;
+# that skew is deliberate and this job is what stops it hiding a defect that
+# only appears on the deployment interpreter. (It found seven on its first run.)
+#
+# Everything this job asserts lives in `scripts/wave_gate.py`, invoked once. The
+# job deliberately does NOT run `pytest` itself: a workflow that shells out to
+# pytest directly can go green on a partial collection, which is the exact
+# failure mode this whole slice exists to make impossible. The gate asserts a
+# committed floor and a committed set of required node ids before it believes
+# any result.
+#
+# See `docs/architecture/ENDGAME_VERIFICATION_GATE.md`.
+name: Python tests
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Superseded PR runs are cancelled; pushes to `dev` are not, because a
+  # cancelled run on the branch under protection would leave a commit with no
+  # verdict at all.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  non-kb-python311:
+    # This display name is the STABLE required-check name configured in the
+    # `dev` ruleset. Renaming it silently drops branch protection.
+    name: Python 3.11 non-KB
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    env:
+      PYTHONPATH: src
+      PYTHONDONTWRITEBYTECODE: "1"
+
+    steps:
+      # fetch-depth: 0 is REQUIRED, not tidiness: the gate resolves a PR's
+      # baseline with `git merge-base`, and a shallow checkout has no merge base
+      # — which the gate reports as BASELINE_MERGE_BASE_MISSING rather than
+      # guessing.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      # ASSERT the version, do not print it. A `python --version` step that
+      # reports 3.12 is a log line nobody reads; this is a failure.
+      - name: Assert the interpreter is 3.11
+        run: |
+          python - <<'PY'
+          import sys
+          assert sys.version_info[:2] == (3, 11), sys.version
+          print("interpreter ok:", sys.version)
+          PY
+
+      # requirements-dev.txt is the complete non-KB test environment. It does
+      # NOT install requirements-kb.txt: the KB split is deliberate and
+      # tests/kb/ does not run here.
+      - name: Install the non-KB test environment
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      # The single gate. No `continue-on-error`, no `|| true`, no conditional
+      # skip: any non-zero exit fails the job.
+      - name: Wave gate (manifests, collection floor, required nodes, full suite)
+        run: python scripts/wave_gate.py ci --github-event "$GITHUB_EVENT_PATH"
