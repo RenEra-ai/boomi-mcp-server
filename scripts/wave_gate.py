@@ -956,14 +956,23 @@ def _refuse_stale_local_bootstrap(repo, baseline):
             repo, "for-each-ref", "--contains", introduction,
             "--format=%(refname:short)", "refs/heads", "refs/remotes",
         ).stdout.split()
-        # A MIRROR of the working branch is the working branch. Once the branch
-        # is pushed, `origin/<branch>` also contains the introduction, and a bare
-        # name comparison would read that as "landed" — making the local wave
-        # gate unusable after the first push even though nothing reached `dev`.
-        landed_on = [
-            ref for ref in refs
-            if ref != current and not ref.endswith("/" + current)
-        ]
+        # ANY other containing ref counts, remote-tracking mirrors included.
+        #
+        # An earlier revision exempted `*/<current>` as "just a mirror of my own
+        # branch". That reopened the hole on the branch that matters most: this
+        # repo lands by fast-forward push to `dev`, so working ON `dev` leaves
+        # the containing refs `dev` and `origin/dev` — and the exemption
+        # discarded both, making the bootstrap re-claimable forever on the
+        # integration branch itself.
+        #
+        # "Has it been shared anywhere?" is decidable; "is that ref an
+        # integration branch or a backup of mine?" is not. So the strict form
+        # wins. The cost is only that the BOOTSTRAP arm stops being available
+        # once the introduction is pushed — the wave gate itself stays fully
+        # usable via `--base <a commit that carries the manifests>`, which
+        # validates the transition as well as the suite and goldens, and is the
+        # more appropriate check by then anyway.
+        landed_on = [ref for ref in refs if ref != current]
         if landed_on:
             raise _contract(
                 "BOOTSTRAP_NOT_ALLOWED",

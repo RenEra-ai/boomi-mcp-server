@@ -1752,22 +1752,30 @@ def test_the_worktree_fingerprint_notices_an_in_place_edit(tmp_path):
 # Repo review of the §6 fix delta
 # ===========================================================================
 
-def test_a_pushed_mirror_of_the_working_branch_is_not_a_landing(tmp_path):
-    """[P1] `origin/<branch>` is the working branch, not an integration ref.
+def test_pushing_the_introduction_anywhere_spends_the_local_bootstrap(tmp_path):
+    """[P1] The mirror exemption reopened the hole on the integration branch.
 
-    Filtering only the exact current name made the local wave gate unusable the
-    moment the branch was pushed, even though nothing had reached `dev`.
+    An earlier revision exempted `*/<current>` as "just a mirror of my own
+    branch". This repo lands by fast-forward push to `dev`, so working ON `dev`
+    leaves the containing refs `dev` and `origin/dev` — and that exemption
+    discarded BOTH, making the bootstrap re-claimable forever on `dev` itself
+    and skipping every transition check.
+
+    "Has it been shared anywhere?" is decidable; "is that ref an integration
+    branch or a backup of mine?" is not. The strict form is the one that holds.
     """
     repo, base = _bootstrap_repo(tmp_path)
     current = _git_out(repo, "rev-parse", "--abbrev-ref", "HEAD")
-    # Simulate `git push` creating a remote-tracking mirror of THIS branch.
-    _run_git(repo, "update-ref", "refs/remotes/origin/{0}".format(current), "HEAD")
-    status, stderr = _manifests(repo, base, "--bootstrap")
-    assert status == 0, stderr
+    # Unshared: the introduction is still a legal local bootstrap.
+    assert _manifests(repo, base, "--bootstrap")[0] == 0
 
-    # A genuine other branch still counts as landed.
-    _run_git(repo, "branch", "dev")
+    # Pushed — even to a mirror of this very branch — spends it.
+    _run_git(repo, "update-ref", "refs/remotes/origin/{0}".format(current), "HEAD")
     _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
+
+    # ...and the wave gate stays usable: the transition arm needs no bootstrap.
+    status, stderr = _manifests(repo, _git_out(repo, "rev-parse", "HEAD"))
+    assert status == 0, stderr
 
 
 def test_a_detached_head_cannot_claim_a_local_bootstrap(tmp_path):

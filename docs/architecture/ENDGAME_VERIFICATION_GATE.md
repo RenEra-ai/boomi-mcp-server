@@ -273,8 +273,20 @@ condition must hold.
 * Both headers declare the same `bootstrap_base`, equal to the validated
   baseline.
 * A local run must additionally pass `--bootstrap`, **and** the commit that
-  introduced the ledger must not yet have landed — i.e. it is contained in the
-  current branch and no other. Reachability is the discriminator on purpose: a
+  introduced the ledger must not yet have been shared — i.e. it is contained in
+  the current branch and in NO other ref, remote-tracking mirrors included.
+  Exempting `*/<current>` as "just a mirror of my own branch" was tried and
+  removed: this repo lands by fast-forward push to `dev`, so working ON `dev`
+  leaves the containing refs `dev` and `origin/dev`, and the exemption discarded
+  both — making the bootstrap re-claimable forever on the integration branch.
+  "Has it been shared anywhere?" is decidable; "is that ref an integration branch
+  or a backup of mine?" is not.
+
+  The cost is only that the BOOTSTRAP arm stops being available once the
+  introduction is pushed. The wave gate itself stays fully usable — run
+  `wave --base <a commit that carries the manifests>`, which validates the
+  transition as well as the suite and the goldens, and is the more appropriate
+  check once the ledger is committed. Reachability is the discriminator on purpose: a
   commit-count rule, and a "ledger unchanged since its introducing commit" rule,
   each also reject ordinary multi-commit development of the very change that
   introduces the ledger. Local `wave` is required wave evidence, not advisory, so
