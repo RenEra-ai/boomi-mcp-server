@@ -2151,7 +2151,15 @@ class _ScratchDir(object):
         outcome the retargeting rules exist to prevent.
         """
         try:
-            return self._dispose()
+            try:
+                return self._dispose()
+            finally:
+                # INSIDE the guard. A `finally` placed outside `except` runs
+                # after the handler has completed, so anything it raises escapes
+                # anyway — measured: `ESCAPED the 'total' boundary: RuntimeError`.
+                # Closing a descriptor is exactly the kind of operation an
+                # instrumented environment or a signal can make throw.
+                self._close()
         except BaseException:
             # TOTAL BY CONSTRUCTION. `dispose()` runs in `execute()`'s `finally`,
             # so ANY exception escaping here replaces the pending GateFailure with
@@ -2162,8 +2170,6 @@ class _ScratchDir(object):
             # call by call: no path out of this method raises, and anything
             # unexpected reads as "not disposed", which is the fail-closed answer.
             return False
-        finally:
-            self._close()
 
     def _dispose(self):
         if not self._binding_holds():
@@ -2243,9 +2249,10 @@ def _probe_dotdot_at(fd):
     just passed containment, using a directory the gate creates and removes
     itself.
 
-    Returns True/False for the observed behaviour, or None when the probe could
-    not run, which `_removal_proved` treats as "cannot interpret" and fails
-    closed on.
+    Returns True when `..` still resolves after removal, or the SPECIFIC errno
+    this filesystem reports when it does not, or None when the probe could not
+    run — which `_removal_proved` treats as "cannot interpret" and fails closed
+    on.
     """
     try:
         os.mkdir(_DOTDOT_PROBE, dir_fd=fd)
@@ -2266,8 +2273,12 @@ def _probe_dotdot_at(fd):
     try:
         _close_quietly(os.open("..", os.O_RDONLY | _O_DIRECTORY, dir_fd=probe))
         return True
-    except OSError:
-        return False
+    except OSError as exc:
+        # The SPECIFIC errno this filesystem reports for an unlinked directory.
+        # Returning a bare False would later accept any `OSError` at all —
+        # `EACCES`, `EMFILE` — as the unlink signal, which is a different event
+        # entirely and would turn an unrelated failure into "cleanly disposed".
+        return exc.errno
     finally:
         _close_quietly(probe)
 
@@ -2290,16 +2301,22 @@ def _removal_proved(parent_fd, fd, held, dotdot_survives):
       removal, and the entry's name after removing something else;
     * `..` from the held descriptor still names that parent, so a directory
       moved elsewhere mid-race is caught. `dotdot_survives` records what this
-      filesystem actually does after a removal (see `_probe_dotdot_at`); an
-      unreadable `..` is NOT proof of unlinking and fails closed unless the
-      probe established that this platform reports removal exactly that way.
+      filesystem actually does after a removal (see `_probe_dotdot_at`) — either
+      True, or the exact errno it reports. An unreadable `..` is NOT proof of
+      unlinking: it counts only when the errno MATCHES the calibrated one, so an
+      `EACCES` or `EMFILE` from an unrelated cause cannot masquerade as the
+      unlink signal.
     """
     if _entry_naming(parent_fd, held) is not None:
         return False                      # still linked here: we removed something else
     try:
         up = os.open("..", os.O_RDONLY | _O_DIRECTORY, dir_fd=fd)
-    except OSError:
-        return dotdot_survives is False   # only proof where that IS the platform's signal
+    except OSError as exc:
+        # Proof ONLY when this is the exact error the calibration observed for an
+        # unlinked directory. Any other errno is an unrelated lookup failure —
+        # accepting it would report a clean disposal on the strength of a
+        # permission or descriptor-exhaustion error.
+        return isinstance(dotdot_survives, int) and exc.errno == dotdot_survives
     try:
         if dotdot_survives is not True:
             return False                  # `..` should not have opened here: unproven

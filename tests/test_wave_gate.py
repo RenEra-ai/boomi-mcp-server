@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import errno
 import os
 import shutil
 import subprocess
@@ -2455,32 +2456,47 @@ def test_disposal_reports_failure_when_the_removal_hit_the_wrong_directory(
 
 
 def test_an_unreadable_parent_probe_is_not_proof_of_removal(tmp_path, monkeypatch):
-    """`..` that cannot be read is not evidence that anything was unlinked."""
+    """`..` failing counts only when the errno MATCHES the calibrated one.
+
+    The first version of this test asserted `False` and passed — but passed at
+    the FIRST branch, because the still-linked scratch was found by
+    `_entry_naming` and the `..` code was never reached. Measured:
+    `entry_naming finds it first -> wave-gate-0bo5omvy`. So the listing is
+    stubbed out here, which is what forces the branch under test to run.
+    """
     repo, _base = _seeded(tmp_path)
     outside = tmp_path / "outside"
     outside.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", None)
     monkeypatch.setenv("TMPDIR", str(outside))
     scratch = gate.make_scratch_dir(str(repo))
-    # This platform was measured at creation; the probe must have produced a
-    # definite answer or the assertion below tests nothing.
-    assert scratch._dotdot is not None
+    assert scratch._dotdot is not None, "the platform probe must have an answer"
 
     held = os.fstat(scratch.fd)
     parent = os.open("..", os.O_RDONLY | gate._O_DIRECTORY, dir_fd=scratch.fd)
     real_open = os.open
+    reached = []
 
     def blind(path, *args, **kwargs):
         if path == ".." and kwargs.get("dir_fd") == scratch.fd:
-            raise OSError(13, "Permission denied")
+            reached.append(path)
+            raise OSError(errno.EACCES, "Permission denied")
         return real_open(path, *args, **kwargs)
 
     try:
+        # Not listed in the parent, so the '..' branch is the one that decides.
+        monkeypatch.setattr(gate, "_entry_naming", lambda *a, **k: None)
         monkeypatch.setattr(os, "open", blind)
-        # dotdot_survives=True on this platform, so an OSError is unproven.
+
+        # `..` survives removal here, so ANY error is unproven.
         assert gate._removal_proved(parent, scratch.fd, held, True) is False
-        # And where the probe could not run at all, it is also unproven.
+        # Probe could not run: unproven.
         assert gate._removal_proved(parent, scratch.fd, held, None) is False
+        # Calibrated to a DIFFERENT errno: an unrelated EACCES is not the signal.
+        assert gate._removal_proved(parent, scratch.fd, held, errno.ENOENT) is False
+        # Calibrated to exactly this errno: that IS the platform's unlink signal.
+        assert gate._removal_proved(parent, scratch.fd, held, errno.EACCES) is True
+        assert reached, "the '..' branch never ran — the test would be vacuous"
     finally:
         monkeypatch.undo()
         os.close(parent)
@@ -2507,6 +2523,41 @@ def test_dispose_never_raises_even_when_the_filesystem_does(tmp_path, monkeypatc
 
     monkeypatch.setattr(gate, "_entry_naming", explode)
     assert scratch.dispose() is False
+
+
+def test_dispose_is_total_even_when_closing_the_descriptor_throws(
+    tmp_path, monkeypatch
+):
+    """The guard must cover the close, not sit beside it.
+
+    A `finally` outside `except BaseException` runs after the handler completes,
+    so whatever it raises escapes anyway. Measured against the previous shape:
+    `ESCAPED the 'total' boundary: RuntimeError close blew up` — and an escape
+    here costs the gate its pending failure and its closing fingerprint.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+    scratch = gate.make_scratch_dir(str(repo))
+    resolved = os.fspath(scratch)
+
+    real_close = os.close
+    fired = []
+
+    def explode(fd):
+        if fd == scratch.fd:
+            fired.append(fd)
+            real_close(fd)
+            raise RuntimeError("close blew up")
+        return real_close(fd)
+
+    monkeypatch.setattr(os, "close", explode)
+    assert scratch.dispose() is False
+    assert fired, "the raising close never ran — the test would be vacuous"
+    monkeypatch.undo()
+    shutil.rmtree(resolved, ignore_errors=True)
 
 
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
