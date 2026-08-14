@@ -68,7 +68,8 @@ Every failure prints a stable diagnostic code as the first stderr token:
 
 `BASELINE_EVENT_INVALID` · `BASELINE_ZERO_SHA` · `BASELINE_UNAVAILABLE` ·
 `BASELINE_MERGE_BASE_MISSING` · `BASELINE_MERGE_BASE_AMBIGUOUS` ·
-`GATE_USAGE_INVALID` · `BOOTSTRAP_NOT_ALLOWED` · `SCRATCH_NOT_OURS` ·
+`GATE_USAGE_INVALID` · `GATE_UNEXPECTED_ERROR` · `BOOTSTRAP_NOT_ALLOWED` ·
+`SCRATCH_NOT_OURS` · `SCRATCH_FOREIGN_ENTRIES` ·
 `SCRATCH_INSIDE_REPO` ·
 `SCRATCH_CONTAINMENT_UNPROVEN` ·
 `SCRATCH_RETARGETED` ·
@@ -162,7 +163,8 @@ unique. `renderer`, `owner` and `disposition` are shared by many rows.
 its subject later. The gate runs and counts every `active` row *regardless of
 disposition*; `disposition` records who owns the row's eventual retirement.
 
-Current assignment: 58 `survivor`/`repository`, and two `transitional_oracle`
+Current assignment: 57 `survivor`/`repository`, one `deletion_only` owned by
+**#160** (`try_catch_dlq_error_subprocess.xml`), and two `transitional_oracle`
 owned by **#159** — `try_catch_dlq_document_cache_archetype.xml` and
 `try_catch_notify_dlq_document_cache_archetype.xml`. That pair is the only one
 the repo positively evidences as retiring with a named subject
@@ -170,8 +172,15 @@ the repo positively evidences as retiring with a named subject
 bytes are the two `*_archetype.xml` files, which retire with the archetype";
 `created-issue-recipes.md:125`).
 
-**No row is committed as `deletion_only`,** deliberately. `survivor` is the only
-value that can be corrected later without an illegal edit — a survivor that turns
+**`deletion_only` is committed only where the withdrawal is already settled.** The
+architect plan settles exactly one — `try_catch_dlq_error_subprocess.xml`, owned by
+#160 — and it must be stamped **before** the bootstrap lands, because the field is
+immutable and #160 could never correct it afterwards. An earlier revision of this
+section generalised a caution about a DIFFERENT golden into "no row is committed as
+`deletion_only`", which contradicted both the plan and the committed manifest.
+
+The caution itself stands, for goldens whose withdrawal is still open: `survivor` is the
+only value that can be corrected later without an illegal edit — a survivor that turns
 out to retire is simply tombstoned by its owning slice, which is a legal
 transition — whereas an immutable `deletion_only` stamped on a golden whose
 withdrawal is still an open decision can never be taken back. The nearest
@@ -252,7 +261,12 @@ anchoring prevents that. What the gate guarantees instead is that it never HIDES
 consequence, and three properties combine to make that true:
 
 1. A broken binding is `SCRATCH_RETARGETED`, a gate failure.
-2. `dispose()` removes nothing **through a broken binding** — contents are unlinked
+2. `dispose()` removes **only what the gate created** — an inventory recorded at
+   creation, deepest first — and refuses with `SCRATCH_FOREIGN_ENTRIES` if anything else
+   is present. A recursive sweep of whatever happens to be in the scratch destroys data
+   the gate never owned: reproduced by moving an unrelated subtree containing
+   `precious.txt` into a valid scratch, which the sweep deleted while reporting success.
+   It removes nothing **through a broken binding** — contents are unlinked
    relative to the held descriptor, never by name. Stated precisely, because the earlier
    wording overclaimed: `_unlink_tree_at()` runs BETWEEN the two binding checks, so a
    directory moved into the worktree after the first check can have its contents deleted
@@ -349,13 +363,16 @@ manifest edit at all, because the floor reduction was prepaid and a tombstoned
 node is not required.
 
 New rows are permitted only **after** every baseline row, with the next
-sequential ids. A new row may arrive `active` **or** `tombstone`: a push range
-that adds a test in one commit and retires it in a later one is exactly a
-born-tombstoned row when read from the range's endpoints, and refusing that made
-ordinary multi-commit pushes illegal even though every individual commit
-transition was legal. Nothing is lost — a tombstoned row must separately have no
-artifact (no golden file; a node id that does not collect), so it stays fully
-accounted for.
+sequential ids, and a new row must arrive **`active`**. Appending an already
+tombstoned row is `MANIFEST_TRANSITION_ILLEGAL`: a tombstone is a RETIREMENT
+RECORD, and there is nothing to retire for an identity that was never in the
+manifest — the row would permanently reserve an id for something that never
+collected, with floors unchanged.
+
+An earlier revision permitted born-tombstoned rows so that a push adding a test in
+one commit and removing it in a later one stayed legal. That solved a problem which
+does not exist: from the range's endpoints such a test simply never existed, so it
+needs **no row at all**.
 
 Floor arithmetic:
 
@@ -602,13 +619,14 @@ rather than left as a silent divergence:
   does not use. Measured with the flag set: all 9,712 nodes still collect and
   both modules pass 50/50. The flag costs nothing and stops a plugin arriving
   through a transitive dependency from changing what this job runs.
-* **`BOOMI_LOCAL`, `BOOMI_DOCS_ENABLED`, `BOOMI_GOTCHAS_ENABLED`** — all three are
-  real variables, but the full suite is green on Python 3.11 with none of them
-  set (measured, repeatedly). Setting values that no validating run used would
-  ship an unvalidated configuration on the strength of a guess about what they do.
-
-If a future run shows any of them is actually load-bearing, set it **and**
-re-measure; do not restore them because the plan named them.
+* **`BOOMI_LOCAL`, `BOOMI_DOCS_ENABLED`, `BOOMI_GOTCHAS_ENABLED`** — SET, as the plan
+  specified. An earlier revision dropped them on the grounds that the suite was green
+  without them, which was true but proved the wrong thing: with `BOOMI_LOCAL` unset a
+  direct `import server` selects production initialization and fails for a missing
+  `GCP_PROJECT_ID`, and the suite survived only because some test module's import side
+  effect happened to set local mode first. That makes the required check
+  ORDER-DEPENDENT — green for a reason nobody chose and nothing pins. They are set,
+  and the run that validates this tree sets them.
 
 Two diagnostic codes the plan named are also absent — `GOLDEN_INPUT_MISSING` and
 `GOLDEN_FLOOR`. Neither adds a check: a missing case input surfaces as

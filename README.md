@@ -559,7 +559,7 @@ PYTHONPATH=src python scripts/wave_gate.py wave --base <commit>
 
 which adds every active golden rendered twice in isolated processes (byte-for-byte
 determinism, then equality with the committed golden) and the #153
-plan-fingerprint seam — currently reported as `PLAN_FINGERPRINT_PENDING #153` and
+plan-fingerprint seam — currently reported as `PLAN_FINGERPRINT_PENDING issue=#153` and
 made fatal by `--require-plan-fingerprint`.
 
 `--base` is **required** and never inferred. Exit codes: `0` pass, `1` a

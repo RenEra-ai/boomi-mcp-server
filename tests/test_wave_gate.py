@@ -2744,6 +2744,73 @@ def test_a_symlinked_golden_ancestor_keeps_the_validation_status(tmp_path):
     assert excinfo.value.status == 2
 
 
+def test_disposal_deletes_only_what_the_gate_created(tmp_path, monkeypatch):
+    """A recursive sweep destroys whatever a sibling moved in.
+
+    Reproduced against the sweep: an unrelated subtree containing `precious.txt`
+    moved into a VALID scratch was deleted while `dispose()` returned True and
+    the worktree fingerprint stayed unchanged. The scratch is a directory another
+    process can write to, so cleanup removes an inventory of what the gate
+    created and refuses anything else.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+
+    scratch = gate.make_scratch_dir(str(repo))
+    resolved = os.fspath(scratch)
+    with scratch.open_for_write("collected.txt") as handle:
+        handle.write("ours\n")
+
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "precious.txt").write_text("real data\n")
+    os.rename(str(victim), os.path.join(resolved, "victim"))
+
+    assert scratch.dispose() is False
+    assert scratch.refusal_code == "SCRATCH_FOREIGN_ENTRIES"
+    # Theirs survives...
+    assert (pathlib.Path(resolved) / "victim" / "precious.txt").read_text() == "real data\n"
+    # ...and ours was still removed.
+    assert not (pathlib.Path(resolved) / "collected.txt").exists()
+    shutil.rmtree(resolved, ignore_errors=True)
+
+
+def test_an_unexpected_systemexit_cannot_make_the_gate_green(tmp_path, monkeypatch):
+    """`main()` catches only `GateFailure`, so re-raising handed the process the
+    exception's own exit semantics — and `SystemExit(0)` exits GREEN.
+
+    Unexpected exceptions are normalized to a coded status-1 failure instead.
+    """
+    repo, base = _seeded(tmp_path)
+    fired = []
+
+    def explode(*args, **kwargs):
+        fired.append(True)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(gate, "collect_nodes", explode)
+    status = gate.main(["--repo", str(repo), "wave", "--base", base])
+    assert fired, "collect_nodes was never reached — the test would be vacuous"
+    assert status == 1, "a SystemExit(0) from inside the gate must not exit green"
+
+
+def test_a_forty_digit_integer_is_not_a_bootstrap_base(tmp_path):
+    """`str(value)` first would let a JSON integer match the sha pattern."""
+    header = _node_header(1, 1)
+    header["bootstrap_base"] = int("1" * 40)
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.parse_manifest(_serialize(header, [_node_row(1)]), "pytest-nodes")
+    assert "bootstrap_base" in excinfo.value.message
+
+    # The correct string form still parses, so the check is type-specific and
+    # not an accidental rejection of every base.
+    header["bootstrap_base"] = "1" * 40
+    gate.parse_manifest(_serialize(header, [_node_row(1)]), "pytest-nodes")
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

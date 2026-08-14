@@ -53,6 +53,7 @@ CI logs and the negative-test matrix can key on it rather than on prose.
 from __future__ import annotations
 
 import argparse
+import errno
 import base64
 import hashlib
 import json
@@ -143,7 +144,15 @@ SCHEMA_VERSION = 1
 #: "first token is a documented code", and the last-resort diagnostic fallback
 #: must honour it too — a failure nobody can classify is a failure nobody acts
 #: on. Declared here so the code/doc agreement test can account for it.
-EMIT_ONLY_CODES = ("GATE_DIAGNOSTIC_UNRENDERABLE",)
+# Codes the doc-coverage check cannot find by scanning for a literal at a
+# `_contract(...)`/`_invalid(...)` call site: either the gate emits them without
+# raising, or it raises them through a variable. They are part of the same stderr
+# contract, so they are declared here rather than left to a regex that would
+# quietly stop covering them.
+EMIT_ONLY_CODES = (
+    "GATE_DIAGNOSTIC_UNRENDERABLE",     # emitted when the diagnostic cannot render
+    "SCRATCH_FOREIGN_ENTRIES",          # raised via `_ScratchDir.refusal_code`
+)
 
 
 # --------------------------------------------------------------------------
@@ -637,8 +646,12 @@ def parse_manifest(raw, name):
         value = header_obj[floor_field]
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             raise bad("line 1: {0} must be a non-negative integer".format(floor_field))
-    if not _SHA_RE.match(str(header_obj["bootstrap_base"])):
-        raise bad("line 1: bootstrap_base must be a 40-char lowercase hex sha")
+    # `str(value)` first would let a JSON integer of 40 decimal digits match the
+    # sha pattern, and two identically malformed manifests would then agree with
+    # each other through transition validation.
+    if (type(header_obj["bootstrap_base"]) is not str
+            or not _SHA_RE.match(header_obj["bootstrap_base"])):
+        raise bad("line 1: bootstrap_base must be a 40-char lowercase hex sha string")
 
     rows = []
     for index, obj in enumerate(objects[1:], start=2):
@@ -1280,7 +1293,7 @@ def _pytest_env():
     return env
 
 
-def _render_env(repo, hashseed):
+def _render_env(repo, hashseed, tmpdir=None):
     """The golden-render child runs OUTSIDE pytest, so it must reproduce by hand
     the ``sys.path`` entries pytest would have inserted for it: the repo root
     (for the ``src.``-prefixed spelling one producer uses), ``tests/`` and
@@ -1296,6 +1309,10 @@ def _render_env(repo, hashseed):
     )
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONHASHSEED"] = str(hashseed)
+    if tmpdir is not None:
+        # Per-pass temporary space, so the two children cannot meet through it.
+        for key in ("TMPDIR", "TEMP", "TMP"):
+            env[key] = tmpdir
     return env
 
 
@@ -1518,8 +1535,7 @@ def _render_dir(tmpdir, index):
 
     Returns ``(path, fd)``. The descriptor is what writes go through: converting
     the pass directory to a plain string and calling `open()` on it would follow
-    a retargeted name and write outside the held scratch — the same-user race the
-    whole `_ScratchDir` design exists to defend against. The pathname is derived
+    a retargeted name and write outside the held scratch. The pathname is derived
     only to hand to the child process, which must resolve a name because it is a
     separate process.
     """
@@ -1527,8 +1543,7 @@ def _render_dir(tmpdir, index):
     held = getattr(tmpdir, "fd", None)
     try:
         if held is not None:
-            os.mkdir(name, 0o700, dir_fd=held)
-            fd = os.open(name, os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW, dir_fd=held)
+            fd = tmpdir.mkdir_owned(name)
         else:
             os.mkdir(os.path.join(tmpdir, name), 0o700)
             fd = None
@@ -1561,6 +1576,7 @@ def _render_pass(repo, goldens, tmpdir, hashseed):
                         dir_fd=pass_fd),
                 "w",
             )
+            tmpdir.own("render-{0}/{1}".format(hashseed, request_name))
         else:
             handle = open(os.path.join(pass_dir, request_name), "w")
         with handle:
@@ -1572,8 +1588,15 @@ def _render_pass(repo, goldens, tmpdir, hashseed):
 
     proc = subprocess.run(
         [sys.executable, os.path.join(repo, GOLDEN_CORPUS), "--render", request_path],
-        cwd=str(repo), capture_output=True, text=True,
-        env=_render_env(repo, hashseed),
+        # The two passes must not share a runtime filesystem, not just a request
+        # file. Separate directories alone leave both children with the repo as
+        # cwd and the SAME inherited TMPDIR, so a renderer that caches through
+        # `tempfile.gettempdir()` serves pass 1's bytes to pass 2 and the
+        # determinism check agrees with itself. `cwd` is the pass directory too,
+        # so a relative write lands there; every path handed to the child is
+        # absolute, so nothing depends on it.
+        cwd=pass_dir, capture_output=True, text=True,
+        env=_render_env(repo, hashseed, pass_dir),
     )
     if proc.returncode != 0:
         tail = "\n".join((proc.stdout + proc.stderr).splitlines()[-40:])
@@ -2032,10 +2055,13 @@ def execute(args):
         )
         return 0
 
-    tmpdir = make_scratch_dir(repo)
     failure = None
     unexpected = None
+    tmpdir = None
     try:
+        # Inside the boundary: a scratch that cannot be created safely is a gate
+        # failure like any other, and still gets the closing fingerprint.
+        tmpdir = make_scratch_dir(repo)
         collected = collect_nodes(repo, tmpdir)
         check_collection(current["pytest-nodes"], collected)
         _emit("wave_gate: collection ok ({0} tests)".format(len(collected)))
@@ -2071,7 +2097,7 @@ def execute(args):
         # after the closing sequence, so nothing is swallowed.
         unexpected = exc
     finally:
-        disposed = tmpdir.dispose()
+        disposed = True if tmpdir is None else tmpdir.dispose()
 
     # A broken binding is a GATE FAILURE, not a cleanup nuisance — and it is
     # recorded as PENDING rather than raised here, because the closing
@@ -2083,15 +2109,15 @@ def execute(args):
     # destroy the only evidence that anything happened.
     if not disposed and failure is None:
         failure = _contract(
-            "SCRATCH_RETARGETED",
+            tmpdir.refusal_code,
             "the scratch directory was replaced while the gate was running; the "
             "gate's own writes cannot be accounted for, and nothing was removed "
             "through the changed name.",
         )
     elif not disposed:
         _emit(
-            "SCRATCH_RETARGETED the scratch directory was replaced while the gate "
-            "was running; nothing was removed through the changed name."
+            "{0} the scratch was not disposed of cleanly; nothing was removed "
+            "through it.".format(tmpdir.refusal_code)
         )
 
     # UNCONDITIONAL, including after a failure — a failing test is exactly when
@@ -2108,7 +2134,17 @@ def execute(args):
 
 
     if unexpected is not None:
-        raise unexpected
+        # NORMALIZED, not re-raised. `main()` catches only `GateFailure`, so
+        # re-raising handed the process the exception's own exit semantics — and
+        # `SystemExit(0)` from anywhere inside the gate then exits GREEN. The
+        # message deliberately inspects nothing about the object: reading even
+        # `type(exc).__name__` can run foreign code through a metaclass hook,
+        # which is the exact route four earlier rounds closed on the diagnostic
+        # path.
+        raise _invalid(
+            "GATE_UNEXPECTED_ERROR",
+            "the gate raised a non-gate exception; the run is not valid",
+        )
     if failure is not None:
         raise failure
     return 0
@@ -2195,13 +2231,22 @@ class _ScratchDir(object):
     all.
     """
 
-    __slots__ = ("_path", "fd", "_repo", "_dotdot")
+    __slots__ = ("_path", "fd", "_repo", "_dotdot", "_owned", "refusal_code")
 
     def __init__(self, path, fd, repo, dotdot):
         self._path = path
         self.fd = fd
         self._repo = repo
         self._dotdot = dotdot
+        # Every entry the gate creates, in creation order. Disposal removes THESE
+        # and nothing else. A recursive delete of whatever happens to be present
+        # destroys anything a concurrent process moved in — reproduced: an
+        # unrelated subtree containing `precious.txt` moved into a valid scratch
+        # was deleted while `dispose()` returned True. Owning what you delete is
+        # the invariant; enumerating the filenames in the cleanup code would just
+        # be the same list written twice.
+        self._owned = []
+        self.refusal_code = "SCRATCH_RETARGETED"
 
     def _binding_holds(self):
         """True when the name still denotes the held directory AND it is outside."""
@@ -2234,8 +2279,19 @@ class _ScratchDir(object):
     def __str__(self):
         return self.__fspath__()
 
+    def mkdir_owned(self, name):
+        """Create a subdirectory the gate owns, relative to the held descriptor."""
+        os.mkdir(name, 0o700, dir_fd=self.fd)
+        self._owned.append(name)
+        return os.open(name, os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW, dir_fd=self.fd)
+
+    def own(self, relpath):
+        """Record an entry the gate created below this scratch."""
+        self._owned.append(relpath)
+
     def open_for_write(self, name):
         """Create a file INSIDE the verified directory, immune to retargeting."""
+        self._owned.append(name)
         if os.open in os.supports_dir_fd:
             handle = os.open(
                 name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600, dir_fd=self.fd
@@ -2299,8 +2355,18 @@ class _ScratchDir(object):
         if not self._binding_holds():
             return False
         try:
-            _unlink_tree_at(self.fd)
+            _remove_owned(self.fd, self._owned)
         except OSError:
+            return False
+        # Anything still here was not created by the gate. Refuse rather than
+        # delete it, and say so with its own code — reporting it as retargeting
+        # would name the wrong cause.
+        try:
+            leftover = os.listdir(self.fd)
+        except OSError:
+            return False
+        if leftover:
+            self.refusal_code = "SCRATCH_FOREIGN_ENTRIES"
             return False
         if not self._binding_holds():
             return False
@@ -2449,22 +2515,6 @@ def _removal_proved(parent_fd, fd, held, dotdot_survives):
         return os.fstat(up).st_ino == os.fstat(parent_fd).st_ino
     finally:
         _close_quietly(up)
-
-
-def _unlink_tree_at(dirfd):
-    """Recursively empty a directory using ONLY descriptor-relative operations."""
-    for entry in os.scandir(dirfd):
-        if entry.is_dir(follow_symlinks=False):
-            child = os.open(
-                entry.name, os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW, dir_fd=dirfd
-            )
-            try:
-                _unlink_tree_at(child)
-            finally:
-                os.close(child)
-            os.rmdir(entry.name, dir_fd=dirfd)
-        else:
-            os.unlink(entry.name, dir_fd=dirfd)
 
 
 def _refuse_symlinked_ancestor(repo, relpath, code, what, make=None):
@@ -2627,6 +2677,30 @@ def _refuse_scratch_inside_repo(fd, repo):
             os.close(current)
         except OSError:
             pass
+
+
+def _remove_owned(dirfd, owned):
+    """Remove exactly the entries the gate created, deepest first.
+
+    Never a recursive sweep of whatever is present: the scratch is a directory a
+    same-user process can move things into, and deleting everything found there
+    destroys data the gate never owned.
+    """
+    for relpath in sorted(owned, key=lambda r: r.count("/"), reverse=True):
+        try:
+            os.unlink(relpath, dir_fd=dirfd)
+            continue
+        except IsADirectoryError:
+            pass
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            if exc.errno not in (errno.EPERM, errno.EISDIR):
+                raise
+        try:
+            os.rmdir(relpath, dir_fd=dirfd)
+        except FileNotFoundError:
+            continue
 
 
 def check_worktree_unchanged(before, after):
