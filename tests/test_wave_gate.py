@@ -2324,16 +2324,23 @@ def test_a_failing_rmdir_is_a_broken_binding_not_a_shrug(tmp_path, monkeypatch):
     monkeypatch.setattr(tempfile, "tempdir", None)
     monkeypatch.setenv("TMPDIR", str(outside))
     scratch = gate.make_scratch_dir(str(repo))
+    basename = os.path.basename(os.fspath(scratch))
 
     real_rmdir = os.rmdir
+    seen = []
 
     def refuse(path, *args, **kwargs):
-        if str(path) == os.fspath(scratch):
+        # The removal is descriptor-relative, so match the BASENAME plus a
+        # dir_fd — matching a full path here would silently never fire and the
+        # test would pass while exercising nothing.
+        if str(path) == basename and kwargs.get("dir_fd") is not None:
+            seen.append(path)
             raise OSError(39, "Directory not empty")
         return real_rmdir(path, *args, **kwargs)
 
     monkeypatch.setattr(os, "rmdir", refuse)
     assert scratch.dispose() is False
+    assert seen, "the forced failure never fired — the test would be vacuous"
 
 
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
