@@ -952,10 +952,21 @@ def _refuse_stale_local_bootstrap(repo, baseline):
         if not adds:
             continue
         introduction = adds[-1]
+        # NO namespace list. Enumerating `refs/heads refs/remotes` omitted
+        # `refs/tags`, so a published tag containing the introduction left
+        # `landed_on` empty and the exception stayed claimable — the contract
+        # says ANY other ref spends it, and an enumeration that has to be kept
+        # in step with that sentence is the same shape of defect this predicate
+        # has already produced twice. Asking git for every ref removes the
+        # enumeration instead of extending it.
+        #
+        # Full refnames, not short ones: `%(refname:short)` renders both
+        # `refs/heads/x` and `refs/tags/x` as `x`, so a tag sharing the branch's
+        # name would be exempted by the comparison below.
         refs = _git(
-            repo, "for-each-ref", "--contains", introduction,
-            "--format=%(refname:short)", "refs/heads", "refs/remotes",
+            repo, "for-each-ref", "--contains", introduction, "--format=%(refname)",
         ).stdout.split()
+        own_ref = "refs/heads/{0}".format(current)
         # ANY other containing ref counts, remote-tracking mirrors included.
         #
         # An earlier revision exempted `*/<current>` as "just a mirror of my own
@@ -972,7 +983,7 @@ def _refuse_stale_local_bootstrap(repo, baseline):
         # usable via `--base <a commit that carries the manifests>`, which
         # validates the transition as well as the suite and goldens, and is the
         # more appropriate check by then anyway.
-        landed_on = [ref for ref in refs if ref != current]
+        landed_on = [ref for ref in refs if ref != own_ref]
         if landed_on:
             raise _contract(
                 "BOOTSTRAP_NOT_ALLOWED",

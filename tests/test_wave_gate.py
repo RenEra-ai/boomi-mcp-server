@@ -1778,6 +1778,37 @@ def test_pushing_the_introduction_anywhere_spends_the_local_bootstrap(tmp_path):
     assert status == 0, stderr
 
 
+@pytest.mark.parametrize(
+    "ref", ["refs/tags/published", "refs/notes/commits", "refs/heads/dev"],
+    ids=["tag", "note", "branch"],
+)
+def test_ANY_other_ref_spends_the_local_bootstrap(tmp_path, ref):
+    """ANY ref, not an enumerated list of namespaces.
+
+    Querying `refs/heads refs/remotes` omitted `refs/tags`, so a published tag
+    containing the introduction left the exception claimable — the third leak
+    from this one predicate. The enumeration is gone: git is asked for every ref.
+    """
+    repo, base = _bootstrap_repo(tmp_path)
+    assert _manifests(repo, base, "--bootstrap")[0] == 0
+    _run_git(repo, "update-ref", ref, "HEAD")
+    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
+
+
+def test_a_tag_sharing_the_branch_name_does_not_exempt_itself(tmp_path):
+    """Full refnames, not short ones: `%(refname:short)` renders `refs/heads/x`
+    and `refs/tags/x` identically, so a same-named tag would slip through."""
+    repo, base = _bootstrap_repo(tmp_path)
+    current = _git_out(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    _run_git(repo, "update-ref", "refs/tags/{0}".format(current), "HEAD")
+    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
+
+
+    # ...and the wave gate stays usable: the transition arm needs no bootstrap.
+    status, stderr = _manifests(repo, _git_out(repo, "rev-parse", "HEAD"))
+    assert status == 0, stderr
+
+
 def test_a_detached_head_cannot_claim_a_local_bootstrap(tmp_path):
     """[P1] With no current branch every containing ref looks like a landing."""
     repo, base = _bootstrap_repo(tmp_path)
