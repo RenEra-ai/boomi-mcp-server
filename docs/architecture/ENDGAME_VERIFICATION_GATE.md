@@ -239,7 +239,14 @@ consequence, and three properties combine to make that true:
    means a move that lands mid-delete still turns the run red. A failing `rmdir` is
    treated as a broken binding for the same reason — swallowing it would leave an empty
    directory that git does not track, so the fingerprint would match and the gate would
-   pass over a retargeting it had already seen.
+   pass over a retargeting it had already seen. Removal targets the entry whose inode IS
+   the held directory (looked up in the live parent, `follow_symlinks=False`), never a
+   remembered name — and because POSIX offers no remove-by-descriptor, no guard placed
+   *before* `rmdir` can be atomic with it. The gate therefore proves the OUTCOME: after
+   the call the held directory must no longer be listed in that parent, and `..` from it
+   must still name that parent. Anything else is a removal that hit something other than
+   the scratch, and fails closed. Asserting the result is what ends this class; each
+   additional pre-check only ever revealed the next window.
 3. Retargeting is recorded as a PENDING failure so the closing worktree fingerprint still
    runs. Raising immediately would skip it on precisely the path where a repository
    mutation is most plausible, costing the gate its `WORKTREE_DIRTY` evidence.

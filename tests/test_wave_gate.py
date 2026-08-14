@@ -2415,6 +2415,45 @@ def test_disposal_removes_the_entry_that_is_the_scratch_not_its_old_name(
     assert unrelated.is_dir(), "the unrelated directory must survive"
 
 
+def test_disposal_reports_failure_when_the_removal_hit_the_wrong_directory(
+    tmp_path, monkeypatch
+):
+    """The race that no pre-check can close is caught AFTER the fact.
+
+    A sibling moves the emptied scratch aside and installs an unrelated empty
+    directory at the scanned name between the scan and the `rmdir`. POSIX has no
+    remove-by-descriptor, so no guard before the call can exclude this. The gate
+    instead proves the outcome — the held directory is still linked in the
+    parent, so the removal hit something else — and fails closed.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+
+    scratch = gate.make_scratch_dir(str(repo))
+    original = os.fspath(scratch)
+    basename = os.path.basename(original)
+
+    real_rmdir = os.rmdir
+    fired = []
+
+    def race(name, *args, **kwargs):
+        # Fires exactly once, in the window the finding describes.
+        if not fired and kwargs.get("dir_fd") is not None and name == basename:
+            fired.append(name)
+            os.rename(original, str(outside / "moved-aside"))
+            os.mkdir(original)                     # an unrelated empty directory
+        return real_rmdir(name, *args, **kwargs)
+
+    monkeypatch.setattr(os, "rmdir", race)
+    assert scratch.dispose() is False, "a removal that hit the wrong directory must fail closed"
+    assert fired, "the race never fired — the test would be vacuous"
+    # The real scratch survived, which is exactly why the run must go red.
+    assert (outside / "moved-aside").is_dir()
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

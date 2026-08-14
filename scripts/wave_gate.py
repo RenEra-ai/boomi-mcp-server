@@ -2170,20 +2170,24 @@ class _ScratchDir(object):
             self._close()
             return False
         try:
-            name = _entry_naming(parent_fd, os.fstat(self.fd))
+            held = os.fstat(self.fd)
+            name = _entry_naming(parent_fd, held)
         except OSError:
             name = None
-        self._close()
         if name is None:
+            self._close()
             _close_quietly(parent_fd)
             return False
         try:
             os.rmdir(name, dir_fd=parent_fd)
         except OSError:
-            return False
-        finally:
+            self._close()
             _close_quietly(parent_fd)
-        return True
+            return False
+        removed = _removal_proved(parent_fd, self.fd, held)
+        self._close()
+        _close_quietly(parent_fd)
+        return removed
 
     def _close(self):
         try:
@@ -2215,6 +2219,41 @@ def _entry_naming(parent_fd, held):
         if (st.st_dev, st.st_ino) == (held.st_dev, held.st_ino):
             return entry.name
     return None
+
+
+def _removal_proved(parent_fd, fd, held):
+    """After the fact, prove the directory we HELD is the one that went away.
+
+    No pre-check can be atomic with `rmdir` — POSIX has no remove-by-descriptor —
+    so every guard placed *before* the call leaves a window, and closing one
+    window has only ever revealed the next. This asserts the OUTCOME instead,
+    which is what ends the class: whatever interleaving occurred, the gate
+    afterwards either proves the held directory is gone from the parent it
+    removed from, or fails closed.
+
+    Both discriminators are measured, not assumed. macOS does NOT zero
+    `st_nlink` for an open descriptor on a removed directory (measured:
+    `nlink after it was removed : 2`), so a link-count test would silently
+    always agree; these two do distinguish the cases:
+
+    * the parent no longer lists our inode — measured `None` after a correct
+      removal, and the entry's name after removing something else;
+    * `..` from the held descriptor still names that same parent — so a
+      directory moved elsewhere before the `rmdir` is caught rather than
+      reported as disposed. A platform where `..` of a removed directory fails
+      is treated as "gone", which is the same conclusion.
+    """
+    if _entry_naming(parent_fd, held) is not None:
+        return False                      # still linked here: we removed something else
+    try:
+        up = os.open("..", os.O_RDONLY | _O_DIRECTORY, dir_fd=fd)
+    except OSError:
+        return True                       # not linked anywhere: gone
+    try:
+        moved = os.fstat(up).st_ino != os.fstat(parent_fd).st_ino
+    finally:
+        _close_quietly(up)
+    return not moved
 
 
 def _unlink_tree_at(dirfd):
