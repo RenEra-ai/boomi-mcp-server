@@ -434,12 +434,15 @@ The workflow sets exactly `PYTHONPATH=src` and `PYTHONDONTWRITEBYTECODE=1`. The
 design plan also listed four more; each was dropped on measurement, and the
 reasons are recorded here rather than left as a silent divergence:
 
-* **`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`** — `anyio` DOES register a `pytest11`
-  entry point in this environment, and two test modules drive async code through
-  `anyio.run`. Setting the flag would disable it, so the flag would change the
-  configuration that was validated rather than lock it in. The environment is
-  already minimal by construction: `requirements-dev.txt` installs the runtime
-  set plus pytest, nothing else.
+* **`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`** — SET, after an earlier refutation of it
+  turned out to be wrong. That refutation reasoned that `anyio` registers a
+  `pytest11` entry point and two modules drive async code through `anyio.run`,
+  so disabling autoload would change the validated configuration. It was an
+  inference, not a measurement, and the inference was false: `anyio.run()` is a
+  plain function, unrelated to the plugin's marker and fixtures, which this repo
+  does not use. Measured with the flag set: all 9,712 nodes still collect and
+  both modules pass 50/50. The flag costs nothing and stops a plugin arriving
+  through a transitive dependency from changing what this job runs.
 * **`BOOMI_LOCAL`, `BOOMI_DOCS_ENABLED`, `BOOMI_GOTCHAS_ENABLED`** — all three are
   real variables, but the full suite is green on Python 3.11 with none of them
   set (measured, repeatedly). Setting values that no validating run used would

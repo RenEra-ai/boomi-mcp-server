@@ -201,10 +201,14 @@ def test_base_and_event_together_are_refused(tmp_path):
 
 
 def test_the_wave_subcommand_requires_an_explicit_base(tmp_path):
-    """No inferred HEAD^, no branch, no remote: exit 2, never a guessed range."""
+    """No inferred HEAD^, no branch, no remote: exit 2, never a guessed range.
+
+    The CODE is asserted too, not just the status: argparse also exits 2, so a
+    regression to its uncoded failure would leave a status-only test green and
+    the promised diagnostic silently gone.
+    """
     repo, _base = _seeded(tmp_path)
-    status, _stderr = _gate(repo, "wave")
-    assert status == 2
+    _expect(_gate(repo, "wave"), 2, "BASELINE_EVENT_INVALID")
 
 
 @pytest.mark.parametrize("event_name", ["", "schedule", "workflow_dispatch"])
@@ -1579,18 +1583,37 @@ def test_a_pr_merge_checkout_is_accepted(tmp_path):
     )
 
 
-def test_an_ambiguous_local_baseline_is_refused(tmp_path):
-    """§6 finding 3. `git rev-parse` silently applies ref precedence."""
+@pytest.mark.parametrize(
+    "make_second,rev",
+    [
+        (lambda repo, sha: _run_git(repo, "tag", "ambiguous", sha), "ambiguous"),
+        # `refs/<name>` is outside heads/tags/remotes entirely — the namespace
+        # enumeration this replaced could not see it, and git silently resolved
+        # to it.
+        (lambda repo, sha: _run_git(repo, "update-ref", "refs/ambiguous", sha),
+         "ambiguous"),
+        # ...and ambiguity inside a revision EXPRESSION, which the enumeration
+        # could not have parsed at all.
+        (lambda repo, sha: _run_git(repo, "tag", "ambiguous", sha), "ambiguous~0"),
+    ],
+    ids=["branch-vs-tag", "branch-vs-bare-ref", "rev-expression"],
+)
+def test_an_ambiguous_local_baseline_is_refused(tmp_path, make_second, rev):
+    """§6 finding 3, re-fixed. Ask git rather than enumerate namespaces."""
     repo, base = _seeded(tmp_path)
     other = _commit(repo, "a second commit")
     _run_git(repo, "branch", "ambiguous", base)
-    _run_git(repo, "tag", "ambiguous", other)
+    make_second(repo, other)
     with pytest.raises(gate.GateFailure) as excinfo:
-        gate.resolve_baseline(str(repo), base="ambiguous")
+        gate.resolve_baseline(str(repo), base=rev)
     assert excinfo.value.code == "BASELINE_UNAVAILABLE"
     assert "ambiguous" in excinfo.value.message
-    # A 40-hex sha cannot be ambiguous and is unaffected.
+
+
+def test_an_unambiguous_local_baseline_is_accepted(tmp_path):
+    repo, base = _seeded(tmp_path)
     assert gate.resolve_baseline(str(repo), base=base)["sha"] == base
+    assert gate.resolve_baseline(str(repo), base="HEAD")["sha"] == base
 
 
 def test_a_local_bootstrap_is_refused_once_the_introduction_has_landed(tmp_path):
@@ -1748,6 +1771,80 @@ def test_the_worktree_fingerprint_notices_an_in_place_edit(tmp_path):
     assert excinfo.value.code == "WORKTREE_DIRTY"
 
 
+def test_the_worktree_fingerprint_is_content_not_line_counts(tmp_path):
+    """A SAME-LENGTH rewrite of an already-dirty file, and any rewrite of an
+    existing untracked file, both leave `--numstat` and porcelain identical."""
+    repo, _base = _seeded(tmp_path)
+
+    tracked = repo / "README.md"
+    tracked.write_text("seed\naaaa\n", encoding="utf-8")
+    before = gate._status(str(repo))
+    tracked.write_text("seed\nbbbb\n", encoding="utf-8")   # same line count
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_worktree_unchanged(before, gate._status(str(repo)))
+    assert excinfo.value.code == "WORKTREE_DIRTY"
+
+    untracked = repo / "scratch.txt"
+    untracked.write_text("one\n", encoding="utf-8")
+    before = gate._status(str(repo))
+    untracked.write_text("two\n", encoding="utf-8")          # same status letter
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_worktree_unchanged(before, gate._status(str(repo)))
+    assert excinfo.value.code == "WORKTREE_DIRTY"
+
+
+def test_a_provider_raising_SystemExit_cannot_exit_green():
+    """`SystemExit` derives from BaseException; catching only `Exception` let a
+    provider terminate the wave with status 0 and skip final hygiene."""
+    class _Exiting(_StubProvider):
+        def cases(self):
+            raise SystemExit(0)
+
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(True, _Exiting())
+    assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+    assert excinfo.value.status == 1
+
+
+def test_a_renderer_raising_unittest_SkipTest_is_a_failure():
+    """pytest honours `unittest.SkipTest` as a skip, so re-raising it left a
+    golden unrendered while the run stayed green under the cap."""
+    import unittest
+
+    import _wave_gate_golden_corpus as corpus
+
+    original = dict(corpus.CASE_REGISTRY)
+    try:
+        def _skipping():
+            raise unittest.SkipTest("opted out")
+
+        corpus.CASE_REGISTRY["probe:unittest-skip"] = ("process-xml-v1", _skipping)
+        with pytest.raises(corpus.RendererMismatch):
+            corpus.render_golden_case("probe:unittest-skip", "process-xml-v1")
+    finally:
+        corpus.CASE_REGISTRY.clear()
+        corpus.CASE_REGISTRY.update(original)
+
+
+def test_an_octopus_merge_is_not_a_pr_merge_checkout(tmp_path):
+    """Membership in the parent list is not the same as being the PR merge."""
+    repo, base = _seeded(tmp_path)
+    _run_git(repo, "checkout", "-q", "-b", "a")
+    head = _commit(repo, "a")
+    _run_git(repo, "checkout", "-q", "-b", "b", base)
+    third = _commit(repo, "b")
+    _run_git(repo, "checkout", "-q", "main")
+    target = _commit(repo, "target")
+    _run_git(repo, "-c", "user.email=g@e.invalid", "-c", "user.name=g",
+             "merge", "-q", "--no-edit", head, third)
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_checkout_matches_event(
+            str(repo),
+            {"kind": "pull_request", "target": target, "event_head": head},
+        )
+    assert excinfo.value.code == "CHECKOUT_EVENT_MISMATCH"
+
+
 # ===========================================================================
 # Repo review of the §6 fix delta
 # ===========================================================================
@@ -1817,6 +1914,34 @@ def test_a_same_named_tag_before_the_introduction_does_not_block_a_bootstrap(tmp
     assert _git_out(repo, "rev-parse", "--abbrev-ref", "HEAD") == "heads/release"
     status, stderr = _manifests(repo, base, "--bootstrap")
     assert status == 0, stderr
+
+
+def test_an_independently_recreated_ledger_elsewhere_spends_the_bootstrap(tmp_path):
+    """The landing test is about the PATH's history, not one commit's identity.
+
+    Matching on the introduction COMMIT assumed the landed copy would be that
+    same commit. A stale branch can independently recreate both manifests, and
+    because the SHAs differ the probe found nothing and handed back the
+    exception even though `dev` already carried a ledger.
+    """
+    repo = _new_repo(tmp_path)
+    for name in ("g1.xml", "g2.xml"):
+        _write(repo, "tests/fixtures/golden_xml/{0}".format(name), "<x/>\n")
+    base = _commit(repo, "pre-manifest")
+
+    # `dev` introduces the ledger in its own commits.
+    _run_git(repo, "checkout", "-q", "-b", "dev")
+    _write(repo, gate.NODES_MANIFEST, _default_nodes(base))
+    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(base))
+    _commit(repo, "dev introduces the manifests")
+
+    # A stale branch, cut before that, introduces its OWN copy — different SHAs.
+    _run_git(repo, "checkout", "-q", "-b", "stale", base)
+    _write(repo, gate.NODES_MANIFEST, _default_nodes(base))
+    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(base))
+    _commit(repo, "stale branch recreates the manifests independently")
+
+    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
 
 
 def test_a_tag_sharing_the_branch_name_does_not_exempt_itself(tmp_path):

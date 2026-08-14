@@ -571,7 +571,10 @@ def render_golden_case(input_case, renderer):
         # unrendered with CI none the wiser. Checked by name rather than by
         # importing pytest, because this module also runs in a plain child
         # process outside pytest.
-        _outcomes = {"Skipped", "Failed", "XFailed", "OutcomeException", "Exit"}
+        # `unittest.SkipTest` too: pytest honours it as a skip, so re-raising it
+        # left a golden unrendered while the run stayed green under the cap.
+        _outcomes = {"Skipped", "SkipTest", "Failed", "XFailed", "OutcomeException",
+                     "Exit"}
         if _outcomes.intersection(base.__name__ for base in type(exc).__mro__):
             raise RendererMismatch(
                 "case {0!r} raised {1} instead of rendering; a golden renderer may "

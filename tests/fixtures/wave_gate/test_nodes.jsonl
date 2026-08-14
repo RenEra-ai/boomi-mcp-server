@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9712,"minimum_collected":9712,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9720,"minimum_collected":9720,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -9686,7 +9686,7 @@
 {"kind":"test","id":"pytest-009685","node_id":"tests/test_wave_gate.py::test_a_provider_that_raises_stays_on_the_diagnostic_path","state":"active"}
 {"kind":"test","id":"pytest-009686","node_id":"tests/test_wave_gate.py::test_a_renderer_that_skips_is_a_failure_not_a_skip","state":"active"}
 {"kind":"test","id":"pytest-009687","node_id":"tests/test_wave_gate.py::test_a_vacuous_provider_fails[only-semantic]","state":"active"}
-{"kind":"test","id":"pytest-009688","node_id":"tests/test_wave_gate.py::test_an_ambiguous_local_baseline_is_refused","state":"active"}
+{"kind":"test","id":"pytest-009688","node_id":"tests/test_wave_gate.py::test_an_ambiguous_local_baseline_is_refused","state":"tombstone"}
 {"kind":"test","id":"pytest-009689","node_id":"tests/test_wave_gate.py::test_invalid_utf8_and_symlinked_manifests_are_refused","state":"active"}
 {"kind":"test","id":"pytest-009690","node_id":"tests/test_wave_gate.py::test_multiple_merge_bases_are_refused","state":"active"}
 {"kind":"test","id":"pytest-009691","node_id":"tests/test_wave_gate.py::test_the_active_floor_must_EQUAL_the_row_count","state":"active"}
@@ -9712,3 +9712,12 @@
 {"kind":"test","id":"pytest-009711","node_id":"tests/test_wave_gate.py::test_ANY_other_ref_spends_the_local_bootstrap[tag]","state":"active"}
 {"kind":"test","id":"pytest-009712","node_id":"tests/test_wave_gate.py::test_a_tag_sharing_the_branch_name_does_not_exempt_itself","state":"active"}
 {"kind":"test","id":"pytest-009713","node_id":"tests/test_wave_gate.py::test_a_same_named_tag_before_the_introduction_does_not_block_a_bootstrap","state":"active"}
+{"kind":"test","id":"pytest-009714","node_id":"tests/test_wave_gate.py::test_a_provider_raising_SystemExit_cannot_exit_green","state":"active"}
+{"kind":"test","id":"pytest-009715","node_id":"tests/test_wave_gate.py::test_a_renderer_raising_unittest_SkipTest_is_a_failure","state":"active"}
+{"kind":"test","id":"pytest-009716","node_id":"tests/test_wave_gate.py::test_an_ambiguous_local_baseline_is_refused[branch-vs-bare-ref]","state":"active"}
+{"kind":"test","id":"pytest-009717","node_id":"tests/test_wave_gate.py::test_an_ambiguous_local_baseline_is_refused[branch-vs-tag]","state":"active"}
+{"kind":"test","id":"pytest-009718","node_id":"tests/test_wave_gate.py::test_an_ambiguous_local_baseline_is_refused[rev-expression]","state":"active"}
+{"kind":"test","id":"pytest-009719","node_id":"tests/test_wave_gate.py::test_an_independently_recreated_ledger_elsewhere_spends_the_bootstrap","state":"active"}
+{"kind":"test","id":"pytest-009720","node_id":"tests/test_wave_gate.py::test_an_octopus_merge_is_not_a_pr_merge_checkout","state":"active"}
+{"kind":"test","id":"pytest-009721","node_id":"tests/test_wave_gate.py::test_an_unambiguous_local_baseline_is_accepted","state":"active"}
+{"kind":"test","id":"pytest-009722","node_id":"tests/test_wave_gate.py::test_the_worktree_fingerprint_is_content_not_line_counts","state":"active"}

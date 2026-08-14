@@ -210,25 +210,33 @@ def _resolve_commit(repo, rev, code="BASELINE_UNAVAILABLE"):
 def _refuse_ambiguous(repo, rev, code):
     """A name that resolves two ways is a refusal, not a coin flip.
 
-    ``git rev-parse --verify`` silently applies ref precedence, so a branch and a
-    tag with the same name resolve to whichever wins — and the gate would then
-    validate against a range the operator did not mean. Only names are at risk;
-    a 40-hex sha cannot be ambiguous.
+    ``git rev-parse --verify`` silently applies ref precedence, so an ambiguous
+    name resolves to whichever wins and the gate validates a range the operator
+    did not mean.
+
+    ASK GIT rather than enumerate namespaces. An earlier revision checked
+    ``refs/heads/<x>``, ``refs/tags/<x>`` and ``refs/remotes/<x>`` — measured on a
+    probe repo, that misses ``refs/<x>`` entirely (git resolved to it, the probe
+    saw only the branch, and the mismatch went unreported), and it cannot see
+    ambiguity inside a revision EXPRESSION like ``<x>~0`` at all. Git already
+    knows: it emits ``warning: refname '<x>' is ambiguous.`` on stderr, for
+    expressions too. Using its answer removes the enumeration that has now
+    drifted out of step with its own contract three times.
     """
     if _SHA_RE.match(str(rev)):
-        return
+        return  # a full sha cannot be ambiguous
+    # NO `--quiet` here: it suppresses the very warning being read (measured).
+    # The resolvability check elsewhere keeps its `--quiet`; this call exists
+    # solely to hear what git says on stderr.
     proc = subprocess.run(
-        ["git", "for-each-ref", "--format=%(refname)",
-         "refs/heads/{0}".format(rev), "refs/tags/{0}".format(rev),
-         "refs/remotes/{0}".format(rev)],
+        ["git", "rev-parse", "--verify", "{0}^{{commit}}".format(rev)],
         cwd=str(repo), capture_output=True, text=True,
     )
-    matches = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    if len(matches) > 1:
+    if "is ambiguous" in proc.stderr:
         raise _contract(
             code,
-            "{0!r} is ambiguous — it names {1}. Pass the 40-character sha you "
-            "mean.".format(rev, ", ".join(matches)),
+            "{0!r} is ambiguous — git reports: {1}. Pass the 40-character sha you "
+            "mean.".format(rev, proc.stderr.strip().splitlines()[0]),
         )
 
 
@@ -259,12 +267,32 @@ def _status(repo):
     content hash — a same-size, same-line-count edit to an already-dirty file
     would slip through — but it closes the cases a gate realistically causes.
     """
-    return "\n".join([
+    status = _git(repo, "status", "--porcelain", "--untracked-files=normal").stdout
+    parts = [
         _git(repo, "rev-parse", "HEAD").stdout.strip(),
-        _git(repo, "status", "--porcelain", "--untracked-files=normal").stdout,
-        _git(repo, "diff", "--numstat").stdout,
-        _git(repo, "diff", "--numstat", "--cached").stdout,
-    ])
+        status,
+        # The full PATCH, not `--numstat`: line counts are identical for a
+        # same-length rewrite of an already-modified file, so numstat could not
+        # see the gate editing user bytes.
+        _git(repo, "diff").stdout,
+        _git(repo, "diff", "--cached").stdout,
+    ]
+    # Untracked files have no diff at all, so hash their contents directly —
+    # otherwise rewriting an existing untracked file is invisible.
+    for line in status.splitlines():
+        if not line.startswith("?? "):
+            continue
+        target = os.path.join(repo, line[3:].strip().strip('"'))
+        try:
+            if os.path.isfile(target) and not os.path.islink(target):
+                with open(target, "rb") as handle:
+                    parts.append("{0}:{1}".format(
+                        line[3:], hashlib.sha256(handle.read()).hexdigest()))
+            else:
+                parts.append("{0}:<not-a-regular-file>".format(line[3:]))
+        except OSError as exc:
+            parts.append("{0}:<unreadable {1}>".format(line[3:], exc.errno))
+    return "\n".join(parts)
 
 
 def check_checkout_matches_event(repo, context):
@@ -313,7 +341,10 @@ def check_checkout_matches_event(repo, context):
     if head == event_head:
         return
     parents = _git(repo, "rev-list", "--parents", "-n", "1", head).stdout.split()[1:]
-    if event_head in parents and target in parents:
+    # EXACTLY the two expected parents. Membership alone accepts an octopus
+    # commit that merely happens to include the head and the target among
+    # several parents, which is not a `refs/pull/N/merge` commit.
+    if len(parents) == 2 and set(parents) == {event_head, target}:
         return
     raise _contract(
         "CHECKOUT_EVENT_MISMATCH",
@@ -952,6 +983,26 @@ def _refuse_stale_local_bootstrap(repo, baseline):
             "run the bootstrap from the branch that introduces the manifests",
         )
     for spec in _SCHEMAS.values():
+        # Ask about the PATH, not about one commit. Matching on the introduction
+        # COMMIT assumed the landed copy would be that same commit — but a stale
+        # branch can independently recreate both manifests, and because the SHAs
+        # differ the probe found nothing and handed back the exception even
+        # though `dev` already carried a ledger. "Has any history outside this
+        # branch ever touched this file?" is the question that survives a
+        # rewrite, a cherry-pick or a parallel introduction.
+        outside = _git(
+            repo, "rev-list", "--max-count=1", "--all", "--not", own_ref,
+            "--", spec["path"],
+        ).stdout.strip()
+        if outside:
+            raise _contract(
+                "BOOTSTRAP_NOT_ALLOWED",
+                "{0} already has history outside {1} (e.g. {2}); the bootstrap "
+                "exception is spent. Validate against a baseline that carries the "
+                "manifests: --base <a commit that has them>, without "
+                "--bootstrap.".format(spec["path"], own_ref, outside[:12]),
+            )
+
         adds = _git(
             repo, "log", "--diff-filter=A", "--format=%H",
             "{0}..HEAD".format(baseline), "--", spec["path"],
@@ -1463,7 +1514,7 @@ def run_plan_fingerprint_checks(require, provider=None):
             )
         return "pending:#153"
 
-    cases = _provider_strings(provider.cases, "cases()")
+    cases = _provider_strings(lambda: provider.cases(), "cases()")
     if not cases:
         raise _invalid(
             "PLAN_FINGERPRINT_MISMATCH", "the registered provider declares no cases"
@@ -1491,7 +1542,7 @@ def run_plan_fingerprint_checks(require, provider=None):
                 ),
             )
 
-        mutations = _provider_strings(provider.mutations, "mutations()", case)
+        mutations = _provider_strings(lambda: provider.mutations(case), "mutations()")
         missing = [kind for kind in REQUIRED_MUTATION_KINDS if kind not in mutations]
         if missing:
             # The plan enumerates these four. A provider that declares only
@@ -1569,7 +1620,10 @@ def _provider_call(fn, *args):
         return fn(*args)
     except GateFailure:
         raise
-    except Exception as exc:
+    except BaseException as exc:  # noqa: BLE001
+        # BaseException, not Exception: a provider raising `SystemExit(0)` would
+        # otherwise terminate the whole wave with status 0 and skip the final
+        # hygiene check — a green run that validated nothing.
         raise _invalid(
             "PLAN_FINGERPRINT_MISMATCH",
             "the plan-fingerprint provider raised {0}: {1}".format(
@@ -1578,7 +1632,7 @@ def _provider_call(fn, *args):
         )
 
 
-def _provider_strings(fn, what, *args):
+def _provider_strings(fn, what):
     """A provider list, MATERIALIZED and type-checked inside the guard.
 
     ``list(_provider_call(...))`` iterates AFTER the guard has returned, so a
@@ -1586,7 +1640,7 @@ def _provider_strings(fn, what, *args):
     quietly become a list of characters.
     """
     def _materialize():
-        value = fn(*args)
+        value = fn()
         if isinstance(value, (str, bytes)) or value is None:
             raise TypeError(
                 "{0} must be a list of strings, got {1}".format(

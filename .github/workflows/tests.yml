@@ -51,6 +51,14 @@ jobs:
     env:
       PYTHONPATH: src
       PYTHONDONTWRITEBYTECODE: "1"
+      # Only what requirements-dev.txt installs may register a pytest plugin.
+      # `anyio` ships a pytest11 entry point, but MEASURED: with autoload
+      # disabled all 9,712 nodes still collect and the two modules that drive
+      # async code (`anyio.run()`, a plain function — not the plugin's marker or
+      # fixtures) pass 50/50. So the flag costs nothing here and closes the door
+      # on a plugin arriving through a transitive dependency and changing what
+      # this job runs.
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
 
     steps:
       # fetch-depth: 0 is REQUIRED, not tidiness: the gate resolves a PR's
