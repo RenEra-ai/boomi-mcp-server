@@ -2030,6 +2030,37 @@ def test_the_phase_boundary_never_inspects_a_hostile_exception():
     assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
 
 
+def test_the_exit_status_is_recomputed_not_trusted():
+    """A constructor invariant only holds at construction.
+
+    `GateFailure` is mutable and subclassable, so `.status` can be reassigned
+    afterwards. Enforcing the rule where the value is CONSUMED closes that
+    regardless — and covers ordinary bugs, not only adversarial ones.
+    """
+    failure = gate.GateFailure("X", "m", 2)
+    failure.status = 0                       # mutated after construction
+    assert gate.exit_status_for(failure) == 1
+
+    class _Sub(gate.GateFailure):
+        def __init__(self):
+            self.code, self.message, self.status = "X", "m", 0
+
+    assert gate.exit_status_for(_Sub()) == 1
+
+    class _Liar(int):
+        def __eq__(self, other):
+            return True
+
+        def __hash__(self):
+            return 0
+
+    failure.status = _Liar(0)
+    assert gate.exit_status_for(failure) == 1
+
+    # A genuine contract failure still reports 2.
+    assert gate.exit_status_for(gate.GateFailure("X", "m", 2)) == 2
+
+
 def test_a_lying_int_subclass_cannot_become_a_success_status():
     """[P1] An int subclass whose `__eq__` reports 1 while its value is 0 passed
     an `in (1, 2)` test and was then read as 0 by `sys.exit()`."""

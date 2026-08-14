@@ -2039,14 +2039,34 @@ def build_parser():
     return parser
 
 
+def exit_status_for(failure):
+    """The process exit status for a failure — RECOMPUTED, never trusted.
+
+    The constructor already normalises `status`, but a constructor invariant only
+    holds at construction: `GateFailure` is mutable and subclassable, so an
+    attribute can be reassigned afterwards, or a subclass can supply its own.
+    Enforcing the rule where the value is CONSUMED closes that regardless of what
+    happened to the object in between — which is the right place for it, and also
+    covers ordinary bugs, not just adversarial ones.
+
+    `type(...) is int` because an int subclass can report equality with 2 while
+    holding 0, and `sys.exit()` reads the underlying value. Anything not provably
+    the literal 2 becomes 1: a failure never exits green.
+    """
+    status = getattr(failure, "status", 1)
+    return 2 if (type(status) is int and status == 2) else 1
+
+
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
         return execute(args)
     except GateFailure as failure:
-        _emit("{0} {1}".format(failure.code, failure.message))
-        return failure.status
+        # `str()` on the fields, so a hostile `__str__` cannot smuggle a
+        # non-string through the formatter; the status is recomputed, not read.
+        _emit("{0} {1}".format(str(failure.code), str(failure.message)))
+        return exit_status_for(failure)
 
 
 if __name__ == "__main__":  # pragma: no cover
