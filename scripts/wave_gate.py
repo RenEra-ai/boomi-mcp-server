@@ -228,9 +228,18 @@ def _refuse_ambiguous(repo, rev, code):
     # NO `--quiet` here: it suppresses the very warning being read (measured).
     # The resolvability check elsewhere keeps its `--quiet`; this call exists
     # solely to hear what git says on stderr.
+    #
+    # `-c core.warnAmbiguousRefs=true` because a repository may have turned the
+    # warning off, and `LC_ALL=C` because a localized git need not produce the
+    # English phrase. Both make the probe independent of how the machine happens
+    # to be configured rather than trusting a default.
+    env = dict(os.environ)
+    env["LC_ALL"] = "C"
+    env["LANG"] = "C"
     proc = subprocess.run(
-        ["git", "rev-parse", "--verify", "{0}^{{commit}}".format(rev)],
-        cwd=str(repo), capture_output=True, text=True,
+        ["git", "-c", "core.warnAmbiguousRefs=true", "rev-parse", "--verify",
+         "{0}^{{commit}}".format(rev)],
+        cwd=str(repo), capture_output=True, text=True, env=env,
     )
     if "is ambiguous" in proc.stderr:
         raise _contract(
@@ -267,7 +276,14 @@ def _status(repo):
     content hash — a same-size, same-line-count edit to an already-dirty file
     would slip through — but it closes the cases a gate realistically causes.
     """
-    status = _git(repo, "status", "--porcelain", "--untracked-files=normal").stdout
+    # `--untracked-files=all`, NUL-delimited: with `normal`, an untracked
+    # DIRECTORY collapses to a single `?? dir/` entry, so rewriting a file inside
+    # it during the suite left both snapshots identical. `-z` also removes the
+    # quoting/escaping that `--porcelain` applies to unusual names.
+    status = _git(
+        repo, "-c", "core.quotePath=false", "status", "--porcelain",
+        "--untracked-files=all", "-z",
+    ).stdout
     parts = [
         _git(repo, "rev-parse", "HEAD").stdout.strip(),
         status,
@@ -279,19 +295,22 @@ def _status(repo):
     ]
     # Untracked files have no diff at all, so hash their contents directly —
     # otherwise rewriting an existing untracked file is invisible.
-    for line in status.splitlines():
-        if not line.startswith("?? "):
+    for entry in status.split("\0"):
+        if not entry.startswith("?? "):
             continue
-        target = os.path.join(repo, line[3:].strip().strip('"'))
+        rel = entry[3:]
+        target = os.path.join(repo, rel)
         try:
-            if os.path.isfile(target) and not os.path.islink(target):
+            if os.path.islink(target):
+                parts.append("{0}:<symlink {1}>".format(rel, os.readlink(target)))
+            elif os.path.isfile(target):
                 with open(target, "rb") as handle:
                     parts.append("{0}:{1}".format(
-                        line[3:], hashlib.sha256(handle.read()).hexdigest()))
+                        rel, hashlib.sha256(handle.read()).hexdigest()))
             else:
-                parts.append("{0}:<not-a-regular-file>".format(line[3:]))
+                parts.append("{0}:<not-a-regular-file>".format(rel))
         except OSError as exc:
-            parts.append("{0}:<unreadable {1}>".format(line[3:], exc.errno))
+            parts.append("{0}:<unreadable {1}>".format(rel, exc.errno))
     return "\n".join(parts)
 
 
@@ -982,73 +1001,53 @@ def _refuse_stale_local_bootstrap(repo, baseline):
             "cannot judge whether the bootstrap has landed from a detached HEAD; "
             "run the bootstrap from the branch that introduces the manifests",
         )
+    # Every ref except our own branch. Full refnames: `%(refname:short)` renders
+    # `refs/heads/x` and `refs/tags/x` identically, so a same-named tag would
+    # exempt itself. No namespace list either — an enumeration kept drifting out
+    # of step with the sentence "ANY other ref spends it".
+    others = [
+        ref for ref in _git(
+            repo, "for-each-ref", "--format=%(refname)",
+        ).stdout.split()
+        if ref != own_ref
+    ]
+
     for spec in _SCHEMAS.values():
-        # Ask about the PATH, not about one commit. Matching on the introduction
-        # COMMIT assumed the landed copy would be that same commit — but a stale
-        # branch can independently recreate both manifests, and because the SHAs
-        # differ the probe found nothing and handed back the exception even
-        # though `dev` already carried a ledger. "Has any history outside this
-        # branch ever touched this file?" is the question that survives a
-        # rewrite, a cherry-pick or a parallel introduction.
-        outside = _git(
-            repo, "rev-list", "--max-count=1", "--all", "--not", own_ref,
-            "--", spec["path"],
+        # Ask about the PATH's HISTORY, one ref at a time, as POSITIVE roots.
+        #
+        # Two earlier formulations failed here. Matching the introduction COMMIT
+        # assumed the landed copy would be that same commit — a branch that
+        # independently recreates the ledger has different SHAs and slipped
+        # through. Subtracting our own ancestry (`--all --not <own_ref>`) then
+        # removed any commit we had merged in, so once two branches that both
+        # introduced the ledger were merged, the other branch's add-commit became
+        # reachable from us and vanished from the answer. Querying each ref
+        # directly is immune to both: it asks whether that ref's own history ever
+        # touched this file, which no merge, rewrite or cherry-pick can hide.
+        if not others:
+            continue
+        # All the roots in ONE call — `rev-list` takes many. The per-ref loop
+        # below runs only to name the culprit once the answer is already known,
+        # so a repository with thousands of refs costs one query, not thousands.
+        hit = _git(
+            repo, "rev-list", "--max-count=1", *others, "--", spec["path"],
         ).stdout.strip()
+        outside = ""
+        if hit:
+            outside = "another ref ({0})".format(hit[:12])
+            for ref in others:
+                if _git(
+                    repo, "rev-list", "--max-count=1", ref, "--", spec["path"],
+                ).stdout.strip():
+                    outside = "{0} ({1})".format(ref, hit[:12])
+                    break
         if outside:
             raise _contract(
                 "BOOTSTRAP_NOT_ALLOWED",
-                "{0} already has history outside {1} (e.g. {2}); the bootstrap "
-                "exception is spent. Validate against a baseline that carries the "
-                "manifests: --base <a commit that has them>, without "
-                "--bootstrap.".format(spec["path"], own_ref, outside[:12]),
-            )
-
-        adds = _git(
-            repo, "log", "--diff-filter=A", "--format=%H",
-            "{0}..HEAD".format(baseline), "--", spec["path"],
-        ).stdout.split()
-        if not adds:
-            continue
-        introduction = adds[-1]
-        # NO namespace list. Enumerating `refs/heads refs/remotes` omitted
-        # `refs/tags`, so a published tag containing the introduction left
-        # `landed_on` empty and the exception stayed claimable — the contract
-        # says ANY other ref spends it, and an enumeration that has to be kept
-        # in step with that sentence is the same shape of defect this predicate
-        # has already produced twice. Asking git for every ref removes the
-        # enumeration instead of extending it.
-        #
-        # Full refnames, not short ones: `%(refname:short)` renders both
-        # `refs/heads/x` and `refs/tags/x` as `x`, so a tag sharing the branch's
-        # name would be exempted by the comparison below.
-        refs = _git(
-            repo, "for-each-ref", "--contains", introduction, "--format=%(refname)",
-        ).stdout.split()
-        # ANY other containing ref counts, remote-tracking mirrors included.
-        #
-        # An earlier revision exempted `*/<current>` as "just a mirror of my own
-        # branch". That reopened the hole on the branch that matters most: this
-        # repo lands by fast-forward push to `dev`, so working ON `dev` leaves
-        # the containing refs `dev` and `origin/dev` — and the exemption
-        # discarded both, making the bootstrap re-claimable forever on the
-        # integration branch itself.
-        #
-        # "Has it been shared anywhere?" is decidable; "is that ref an
-        # integration branch or a backup of mine?" is not. So the strict form
-        # wins. The cost is only that the BOOTSTRAP arm stops being available
-        # once the introduction is pushed — the wave gate itself stays fully
-        # usable via `--base <a commit that carries the manifests>`, which
-        # validates the transition as well as the suite and goldens, and is the
-        # more appropriate check by then anyway.
-        landed_on = [ref for ref in refs if ref != own_ref]
-        if landed_on:
-            raise _contract(
-                "BOOTSTRAP_NOT_ALLOWED",
-                "{0} was introduced by {1}, which has already landed on {2}; the "
-                "bootstrap exception is spent. Validate against a baseline that "
-                "carries the manifests: --base <a commit that has them>, without "
-                "--bootstrap.".format(
-                    spec["path"], introduction[:12], ", ".join(sorted(landed_on)[:4])
+                "{0} already has history on {1}; the bootstrap exception is "
+                "spent. Validate against a baseline that carries the manifests: "
+                "--base <a commit that has them>, without --bootstrap.".format(
+                    spec["path"], outside
                 ),
             )
 

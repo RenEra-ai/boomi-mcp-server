@@ -1944,6 +1944,63 @@ def test_an_independently_recreated_ledger_elsewhere_spends_the_bootstrap(tmp_pa
     _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
 
 
+def test_a_merged_independent_introduction_still_spends_the_bootstrap(tmp_path):
+    """[P1-adjacent] The case that defeated the `--all --not <own_ref>` form.
+
+    Subtracting our own ancestry removes any commit we have merged in, so once
+    two branches that both introduced the ledger were merged, the other branch's
+    add-commit became reachable from us and vanished from the answer.
+    """
+    repo = _new_repo(tmp_path)
+    for name in ("g1.xml", "g2.xml"):
+        _write(repo, "tests/fixtures/golden_xml/{0}".format(name), "<x/>\n")
+    base = _commit(repo, "pre-manifest")
+
+    _run_git(repo, "checkout", "-q", "-b", "dev")
+    _write(repo, gate.NODES_MANIFEST, _default_nodes(base))
+    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(base))
+    _commit(repo, "dev introduces the manifests")
+
+    _run_git(repo, "checkout", "-q", "-b", "mine", base)
+    _write(repo, gate.NODES_MANIFEST, _default_nodes(base))
+    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(base))
+    _commit(repo, "mine introduces them independently")
+    # ...and then merges dev in, making dev's add-commit reachable from us.
+    _run_git(repo, "-c", "user.email=g@e.invalid", "-c", "user.name=g",
+             "merge", "-q", "--no-edit", "-X", "ours", "dev")
+
+    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
+
+
+def test_the_worktree_fingerprint_reaches_inside_untracked_directories(tmp_path):
+    """[P1] `--untracked-files=normal` collapses a directory to one `?? dir/`.
+
+    Rewriting a file inside it then left both snapshots identical, so the gate
+    could mutate user bytes and still pass hygiene.
+    """
+    repo, _base = _seeded(tmp_path)
+    nested = repo / "scratchdir"
+    nested.mkdir()
+    (nested / "note.txt").write_text("one\n", encoding="utf-8")
+    before = gate._status(str(repo))
+    (nested / "note.txt").write_text("two\n", encoding="utf-8")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_worktree_unchanged(before, gate._status(str(repo)))
+    assert excinfo.value.code == "WORKTREE_DIRTY"
+
+
+def test_ambiguity_detection_does_not_depend_on_repo_config_or_locale(tmp_path):
+    """[P2] `core.warnAmbiguousRefs=false` silenced the warning being parsed."""
+    repo, base = _seeded(tmp_path)
+    other = _commit(repo, "second")
+    _run_git(repo, "config", "core.warnAmbiguousRefs", "false")
+    _run_git(repo, "branch", "ambiguous", base)
+    _run_git(repo, "tag", "ambiguous", other)
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.resolve_baseline(str(repo), base="ambiguous")
+    assert excinfo.value.code == "BASELINE_UNAVAILABLE"
+
+
 def test_a_tag_sharing_the_branch_name_does_not_exempt_itself(tmp_path):
     """Full refnames, not short ones: `%(refname:short)` renders `refs/heads/x`
     and `refs/tags/x` identically, so a same-named tag would slip through."""
