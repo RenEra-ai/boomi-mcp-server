@@ -268,7 +268,8 @@ consequence, and three properties combine to make that true:
    `precious.txt` into a valid scratch, which the sweep deleted while reporting success.
    It removes nothing **through a broken binding** — contents are unlinked
    relative to the held descriptor, never by name. Stated precisely, because the earlier
-   wording overclaimed: `_unlink_tree_at()` runs BETWEEN the two binding checks, so a
+   wording overclaimed: the recorded-inventory removal runs BETWEEN the two binding
+   checks, so a
    directory moved into the worktree after the first check can have its contents deleted
    before the second check fails. The run still goes red — that is the guarantee — but
    "nothing is deleted" and "the write survives for the fingerprint" hold for a binding
@@ -603,11 +604,11 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3.11 -m pytest tests \
 **Retiring** one: flip `state` to `tombstone` in place (never delete the row),
 delete the artifact, and lower `minimum_active` by exactly the number tombstoned.
 
-## 9a. The CI environment, and what the plan asked for that is deliberately absent
+## 9a. The CI environment
 
-The workflow sets `PYTHONPATH=src`, `PYTHONDONTWRITEBYTECODE=1` and
-`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`. The design plan listed three more, all
-`BOOMI_*`; they were dropped on measurement, and the reasons are recorded here
+The workflow sets `PYTHONPATH=src`, `PYTHONDONTWRITEBYTECODE=1`,
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` and the three `BOOMI_*` variables the design plan
+specified. Both decisions reversed an earlier position, and the reasons are recorded here
 rather than left as a silent divergence:
 
 * **`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`** — SET, after an earlier refutation of it

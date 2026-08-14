@@ -1946,9 +1946,14 @@ def test_a_file_that_cannot_be_hashed_fails_closed(tmp_path, monkeypatch):
     blocked.write_bytes(b"one\n")
 
     real_open = open
+    refused = []
 
     def _refusing_open(path, *args, **kwargs):
         if os.fsdecode(path).endswith("locked.bin"):
+            # Non-vacuity witness: a CONDITIONAL patch stops firing silently when
+            # the code under test changes how it opens files, and the assertion
+            # below can still pass for an unrelated reason.
+            refused.append(path)
             raise PermissionError(13, "Permission denied")
         return real_open(path, *args, **kwargs)
 
@@ -1957,6 +1962,7 @@ def test_a_file_that_cannot_be_hashed_fails_closed(tmp_path, monkeypatch):
         gate._status(str(repo))
     assert excinfo.value.code == "WORKTREE_DIRTY"
     assert "cannot fingerprint" in excinfo.value.message
+    assert refused, "the forced read failure never fired — the test would be vacuous"
 
 
 def test_a_pr_checkout_must_be_the_merge_commit_the_event_names(tmp_path, monkeypatch):
@@ -2141,9 +2147,11 @@ def test_scratch_containment_that_cannot_be_proven_fails_closed(tmp_path, monkey
     monkeypatch.setenv("TMPDIR", str(outside))
 
     real_stat = os.stat
+    blinded = []
 
     def blind(path, *args, **kwargs):
         if str(path) == str(repo):
+            blinded.append(path)     # non-vacuity witness for a CONDITIONAL patch
             raise OSError(13, "Permission denied")
         return real_stat(path, *args, **kwargs)
 
@@ -2152,6 +2160,7 @@ def test_scratch_containment_that_cannot_be_proven_fails_closed(tmp_path, monkey
         gate.make_scratch_dir(str(repo))
     assert excinfo.value.code == "SCRATCH_CONTAINMENT_UNPROVEN"
     assert excinfo.value.status == 2
+    assert blinded, "the forced stat failure never fired — the test would be vacuous"
 
 
 def test_the_scratch_path_returned_is_the_path_that_was_verified(tmp_path, monkeypatch):
@@ -2705,11 +2714,14 @@ def test_a_usage_error_emits_the_coded_line_first(capsys):
     assert "usage:" not in err.splitlines()[0]
 
 
-def test_help_is_not_a_usage_failure(capsys):
-    """`--help` exits 0 through SystemExit and must stay that way."""
-    with pytest.raises(SystemExit) as excinfo:
-        gate.main(["--help"])
-    assert excinfo.value.code in (0, None)
+def test_help_is_not_a_usage_failure():
+    """`--help` is a success, and it no longer travels as `SystemExit(0)`.
+
+    The outermost boundary treats every escaping exception as a failure, so help
+    signals through `_HelpRequested` instead — otherwise it would be
+    indistinguishable from the exact fault that boundary exists to catch.
+    """
+    assert gate.main(["--help"]) == 0
 
 
 def test_a_symlinked_golden_ancestor_keeps_the_validation_status(tmp_path):
@@ -2914,6 +2926,125 @@ def test_content_moved_into_the_worktree_is_caught_by_the_fingerprint(tmp_path):
     # Empty: git tracks nothing, so the fingerprint cannot see it. Stated, not
     # hidden — this is exactly the bound recorded in #164.
     gate.check_worktree_unchanged(before, gate._status(str(repo)))
+
+
+def test_a_foreign_file_at_an_owned_name_is_never_taken_over(tmp_path, monkeypatch):
+    """`O_CREAT|O_TRUNC` does not create — it TAKES OVER.
+
+    A file a sibling already placed at the name was truncated, recorded as ours,
+    and deleted at disposal, with the worktree fingerprint none the wiser.
+    Reproduced: `open_for_write ACCEPTED and truncated the foreign file`,
+    `dispose -> True`. Creation must BE the proof of ownership.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+
+    scratch = gate.make_scratch_dir(str(repo))
+    resolved = os.fspath(scratch)
+    (pathlib.Path(resolved) / "collected.txt").write_text("someone else's data\n")
+
+    with pytest.raises(FileExistsError):
+        scratch.open_for_write("collected.txt")
+
+    # Untouched, and disposal refuses rather than deleting what it never owned.
+    assert (pathlib.Path(resolved) / "collected.txt").read_text() == "someone else's data\n"
+    assert scratch.dispose() is False
+    assert scratch.refusal_code == "SCRATCH_FOREIGN_ENTRIES"
+    assert (pathlib.Path(resolved) / "collected.txt").exists()
+    shutil.rmtree(resolved, ignore_errors=True)
+
+
+def test_the_closing_fingerprint_cannot_exit_green_on_an_unexpected_error(
+    tmp_path, monkeypatch
+):
+    """The LAST step was outside the normalization boundary.
+
+    `_status()` shells out to git and hashes files; an unexpected exception there
+    escaped `main()` with its own exit semantics, so a `SystemExit(0)` from the
+    very last step exited GREEN after everything else had passed.
+    """
+    repo, base = _seeded(tmp_path)
+    real_status = gate._status
+    calls = []
+
+    def explode(target):
+        calls.append(target)
+        if len(calls) > 1:            # the CLOSING call, not the opening one
+            raise SystemExit(0)
+        return real_status(target)
+
+    # The heavy phases are stubbed so the run reaches the CLOSING fingerprint,
+    # which is the step under test; each stub returns what its caller expects.
+    monkeypatch.setattr(gate, "collect_nodes", lambda repo_, tmp: {"tests/t.py::a"})
+    monkeypatch.setattr(gate, "check_collection", lambda manifest, collected: None)
+    monkeypatch.setattr(
+        gate, "run_suite", lambda repo_, manifest, collected: {"passed": 1, "skipped": 0}
+    )
+    monkeypatch.setattr(gate, "check_goldens", lambda repo_, goldens, tmp: 0)
+    monkeypatch.setattr(gate, "_status", explode)
+
+    status = gate.main(["--repo", str(repo), "wave", "--base", base])
+    assert len(calls) >= 2, "the closing fingerprint never ran — the test would be vacuous"
+    assert status != 0, "a SystemExit(0) from the closing fingerprint must not exit green"
+
+
+class _HostileStr(Exception):
+    """Its rendering tries to exit green — the classic route onto the exit path."""
+
+    def __str__(self):
+        raise SystemExit(0)
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [
+        pytest.param(SystemExit(0), id="SystemExit-0"),
+        pytest.param(KeyboardInterrupt(), id="KeyboardInterrupt"),
+        pytest.param(GeneratorExit(), id="GeneratorExit"),
+        pytest.param(RuntimeError("boom"), id="RuntimeError"),
+        pytest.param(_HostileStr(), id="hostile-__str__"),
+    ],
+)
+def test_no_exception_can_decide_the_gates_exit_status(tmp_path, monkeypatch, raised):
+    """THE invariant: the gate decides its exit status, never an exception.
+
+    Non-vacuity witness — `SystemExit(0)` raised from the OPENING fingerprint is a
+    concrete case the invariant excludes and which previously exited GREEN
+    (measured: `SystemExit ESCAPED main() with code: 0`).
+
+    Coverage claim over the authority's full case set: every exception crossing
+    `main()` falls into one of these partitions — an ordinary `Exception`, a
+    `BaseException` that is NOT an `Exception` (`SystemExit`, `KeyboardInterrupt`,
+    `GeneratorExit`), or one whose rendering itself misbehaves. All are covered
+    here, and the boundary reads nothing about the object, so no case can be
+    distinguished by the object's own code.
+
+    Five instances of this class were found one at a time, each a statement
+    further out, before a sibling sweep of all 51 `try` blocks located the last.
+    """
+    repo, base = _seeded(tmp_path)
+
+    def boom(target):
+        raise raised
+
+    monkeypatch.setattr(gate, "_status", boom)
+    status = gate.main(["--repo", str(repo), "manifests", "--base", base])
+    assert status == 1, "an exception must never decide the gate's exit status"
+
+
+def test_help_and_usage_survive_the_outermost_boundary(tmp_path, capsys):
+    """The boundary treats every escape as failure, so help needs its own signal.
+
+    `--help` must stay 0 and a usage error must stay 2; relying on `SystemExit(0)`
+    for help would make it indistinguishable from the very thing the boundary
+    exists to catch.
+    """
+    assert gate.main(["--help"]) == 0
+    assert gate.main(["ci", "--base", "HEAD"]) == 2
+    assert capsys.readouterr().err.split()[0] == "GATE_USAGE_INVALID"
 
 
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):

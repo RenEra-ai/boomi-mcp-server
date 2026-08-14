@@ -1572,13 +1572,15 @@ def _render_pass(repo, goldens, tmpdir, hashseed):
     try:
         if pass_fd is not None:
             handle = os.fdopen(
-                os.open(request_name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600,
+                os.open(request_name,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW, 0o600,
                         dir_fd=pass_fd),
                 "w",
             )
+            # Recorded only after the EXCLUSIVE create succeeded.
             tmpdir.own("render-{0}/{1}".format(hashseed, request_name))
         else:
-            handle = open(os.path.join(pass_dir, request_name), "w")
+            handle = open(os.path.join(pass_dir, request_name), "x")
         with handle:
             json.dump(request, handle)
     finally:
@@ -2056,7 +2058,7 @@ def execute(args):
         return 0
 
     failure = None
-    unexpected = None
+    unexpected = False
     tmpdir = None
     try:
         # Inside the boundary: a scratch that cannot be created safely is a gate
@@ -2087,7 +2089,7 @@ def execute(args):
         _emit(_fingerprint_line(status))
     except GateFailure as exc:
         failure = exc
-    except BaseException as exc:  # noqa: BLE001
+    except BaseException:  # noqa: BLE001
         # NOT just GateFailure. An ordinary RuntimeError/OSError out of
         # collection, scratch output or golden processing would otherwise
         # propagate past BOTH the retargeting bookkeeping and the closing
@@ -2095,7 +2097,7 @@ def execute(args):
         # exactly when the tree is most likely to have been disturbed, and
         # replacing the coded diagnostic with a traceback. It is re-raised
         # after the closing sequence, so nothing is swallowed.
-        unexpected = exc
+        unexpected = True
     finally:
         disposed = True if tmpdir is None else tmpdir.dispose()
 
@@ -2129,11 +2131,18 @@ def execute(args):
         check_worktree_unchanged(status_before, _status(repo))
     except GateFailure as hygiene:
         if failure is None:
-            raise
-        _emit("{0} {1}".format(hygiene.code, hygiene.message))
+            failure = hygiene
+        else:
+            _emit("{0} {1}".format(hygiene.code, hygiene.message))
+    except BaseException:  # noqa: BLE001
+        # The CLOSING call is inside the boundary as well. `_status()` shells out
+        # to git and hashes files; an unexpected exception there escaped `main()`
+        # with its own exit semantics, so a `SystemExit(0)` from the very last
+        # step exited GREEN after everything else had passed.
+        unexpected = True
 
 
-    if unexpected is not None:
+    if unexpected:
         # NORMALIZED, not re-raised. `main()` catches only `GateFailure`, so
         # re-raising handed the process the exception's own exit semantics — and
         # `SystemExit(0)` from anywhere inside the gate then exits GREEN. The
@@ -2280,7 +2289,11 @@ class _ScratchDir(object):
         return self.__fspath__()
 
     def mkdir_owned(self, name):
-        """Create a subdirectory the gate owns, relative to the held descriptor."""
+        """Create a subdirectory the gate owns, relative to the held descriptor.
+
+        `os.mkdir` already fails if the name exists, so creation IS the proof of
+        ownership — and the record is made only after it succeeds.
+        """
         os.mkdir(name, 0o700, dir_fd=self.fd)
         self._owned.append(name)
         return os.open(name, os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW, dir_fd=self.fd)
@@ -2290,14 +2303,30 @@ class _ScratchDir(object):
         self._owned.append(relpath)
 
     def open_for_write(self, name):
-        """Create a file INSIDE the verified directory, immune to retargeting."""
-        self._owned.append(name)
+        """Create a file the gate OWNS — exclusively, or not at all.
+
+        `O_CREAT|O_TRUNC` without `O_EXCL` does not create, it *takes over*: a file
+        a sibling already placed at this name is truncated, recorded as ours, and
+        then deleted at disposal. Reproduced: a foreign `collected.txt` was
+        overwritten, `dispose()` returned True and removed it, and the worktree
+        fingerprint never saw a thing.
+
+        `O_EXCL` makes creation the proof of ownership, and `O_NOFOLLOW` stops the
+        name resolving through a symlink somebody else planted. The record is made
+        only after the exclusive create succeeds.
+        """
         if os.open in os.supports_dir_fd:
             handle = os.open(
-                name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600, dir_fd=self.fd
+                name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW,
+                0o600,
+                dir_fd=self.fd,
             )
+            self._owned.append(name)
             return os.fdopen(handle, "w")
-        return open(os.path.join(self, name), "w")
+        stream = open(os.path.join(self, name), "x")
+        self._owned.append(name)
+        return stream
 
     def dispose(self):
         """Remove the scratch, or remove nothing at all — and never lie about it.
@@ -2840,6 +2869,15 @@ def exit_status_for(failure):
     return 2 if (type(status) is int and status == 2) else 1
 
 
+class _HelpRequested(Exception):
+    """`--help`/`--version` completed — a success, not a failure.
+
+    Distinguished from `SystemExit(0)` on purpose: the outermost boundary treats
+    every escaping exception as a failure, so help needs a signal of its own
+    rather than relying on an exit code the boundary is designed to distrust.
+    """
+
+
 class _UsageError(Exception):
     """argparse rejected the command line — raised INSTEAD of printing."""
 
@@ -2863,7 +2901,7 @@ class _GateArgumentParser(argparse.ArgumentParser):
     def exit(self, status=0, message=None):
         if status:
             raise _UsageError(message.strip() if message else "invalid arguments")
-        raise SystemExit(status)
+        raise _HelpRequested()
 
 
 def main(argv=None):
@@ -2874,6 +2912,8 @@ def main(argv=None):
         # EVERY failure carries one.
         try:
             args = build_parser().parse_args(argv)
+        except _HelpRequested:
+            return 0
         except _UsageError as exc:
             # argparse's own `error()` writes `usage: ...` to stderr BEFORE it
             # raises, so merely catching SystemExit still leaves the stable code
@@ -2909,6 +2949,26 @@ def main(argv=None):
                 "authoritative"
             )
         return status
+    except BaseException:  # noqa: BLE001
+        # THE invariant, at the only place that can enforce it: the gate decides
+        # its own exit status, and an exception NEVER decides it for the gate.
+        #
+        # Five instances of one defect class were found one at a time, each a
+        # statement further out — `dispose()` totality, its `close()`,
+        # `execute()`'s re-raise, the closing fingerprint, and finally the
+        # OPENING fingerprint and everything else before `execute()`'s inner try.
+        # Each fix was correct and none of them terminated the class, because
+        # each guarded a REGION while the class is about the process boundary.
+        # A sibling sweep of all 51 try blocks is what surfaced the fifth without
+        # a sixth review round.
+        #
+        # Nothing about the object is read — not its type, not its args, not its
+        # `__str__` — so no foreign code runs on this path.
+        _emit(
+            "GATE_UNEXPECTED_ERROR the gate raised a non-gate exception; the "
+            "run is not valid"
+        )
+        return 1
 
 
 if __name__ == "__main__":  # pragma: no cover
