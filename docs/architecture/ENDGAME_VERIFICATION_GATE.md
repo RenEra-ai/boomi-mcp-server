@@ -68,7 +68,8 @@ Every failure prints a stable diagnostic code as the first stderr token:
 
 `BASELINE_EVENT_INVALID` · `BASELINE_ZERO_SHA` · `BASELINE_UNAVAILABLE` ·
 `BASELINE_MERGE_BASE_MISSING` · `BASELINE_MERGE_BASE_AMBIGUOUS` ·
-`BOOTSTRAP_NOT_ALLOWED` · `SCRATCH_INSIDE_REPO` · `MANIFEST_MISSING` ·
+`BOOTSTRAP_NOT_ALLOWED` · `SCRATCH_INSIDE_REPO` · `SCRATCH_CONTAINMENT_UNPROVEN` ·
+`MANIFEST_MISSING` ·
 `MANIFEST_FORMAT_INVALID` ·
 `MANIFEST_TRANSITION_ILLEGAL` · `MANIFEST_FLOOR_INVALID` ·
 `PYTEST_COLLECTION_FAILED` · `PYTEST_COLLECTION_EMPTY` ·
@@ -199,7 +200,12 @@ local run validates uncommitted work.
 property is STRUCTURAL and ENFORCED, not merely asserted: the scratch directory's
 resolved path is checked to be outside the worktree before use (`TMPDIR` can
 otherwise place it inside, and cleanup would then hide the write from the
-fingerprint entirely — `SCRATCH_INSIDE_REPO`). It writes only there, runs children
+fingerprint entirely — `SCRATCH_INSIDE_REPO`). That check compares `(st_dev,
+st_ino)` identity, NOT path spelling: on a case-insensitive filesystem
+`realpath()` keeps the spelling it was given, so `TMPDIR=/users/…/repo` against
+`/Users/…/repo` passes a lexical prefix test while landing physically inside the
+worktree. An ancestor that cannot be stat'd is not evidence of safety either, so
+that fails closed as `SCRATCH_CONTAINMENT_UNPROVEN`. It writes only there, runs children
 with `PYTHONDONTWRITEBYTECODE=1` and `-p no:cacheprovider`, and never invokes a
 mutating git command. The before/after fingerprint (HEAD + porcelain status +
 digests of the full binary patches + a SHA-256 per untracked file) is a runtime

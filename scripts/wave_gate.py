@@ -2000,17 +2000,60 @@ def make_scratch_dir(repo):
     so a red run leaves no trail.
     """
     candidate = tempfile.mkdtemp(prefix="wave-gate-")
-    root = os.path.realpath(repo)
-    resolved = os.path.realpath(candidate)
-    if resolved == root or resolved.startswith(root + os.sep):
+    try:
+        _refuse_scratch_inside_repo(candidate, repo)
+    except BaseException:
         shutil.rmtree(candidate, ignore_errors=True)
-        raise _contract(
-            "SCRATCH_INSIDE_REPO",
-            "temporary directories resolve inside the repository ({0}); the gate "
-            "must not write into the tree it is validating. Point TMPDIR "
-            "somewhere outside {1} and re-run.".format(resolved, root),
-        )
+        raise
     return candidate
+
+
+def _refuse_scratch_inside_repo(candidate, repo):
+    """Ask the FILESYSTEM whether the scratch is inside the repo, not the spelling.
+
+    A lexical `realpath().startswith(root + os.sep)` test is fail-open on any
+    case-insensitive filesystem — default macOS included — because `realpath()`
+    preserves the spelling it was given: with `TMPDIR=/users/.../repo` against a
+    repo reported as `/Users/.../repo`, the prefix comparison says "outside"
+    while the directory is physically INSIDE the worktree. Measured on this
+    machine: `lexical check would refuse: False`, `PHYSICALLY inside the repo:
+    True` — precisely the case this function exists to reject.
+
+    So containment is decided by `(st_dev, st_ino)` identity, which is the
+    filesystem's own answer and is immune to spelling, case-folding, symlinks and
+    any other path variance. A `.` we cannot stat is not proof of safety, so it
+    fails closed rather than assuming the scratch is elsewhere.
+    """
+    try:
+        root = os.stat(repo)
+    except OSError as exc:
+        raise _contract(
+            "SCRATCH_CONTAINMENT_UNPROVEN",
+            "cannot stat the repository root {0} ({1}), so the scratch directory "
+            "cannot be proven to be outside it.".format(repo, exc),
+        )
+    current = os.path.realpath(candidate)
+    while True:
+        try:
+            here = os.stat(current)
+        except OSError as exc:
+            raise _contract(
+                "SCRATCH_CONTAINMENT_UNPROVEN",
+                "cannot stat {0} ({1}) while checking that the scratch directory "
+                "lies outside the repository.".format(current, exc),
+            )
+        if (here.st_dev, here.st_ino) == (root.st_dev, root.st_ino):
+            raise _contract(
+                "SCRATCH_INSIDE_REPO",
+                "temporary directories resolve inside the repository ({0} is "
+                "within {1}); the gate must not write into the tree it is "
+                "validating. Point TMPDIR somewhere outside the repository and "
+                "re-run.".format(os.path.realpath(candidate), repo),
+            )
+        parent = os.path.dirname(current)
+        if parent == current:
+            return
+        current = parent
 
 
 def check_worktree_unchanged(before, after):

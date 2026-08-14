@@ -2072,6 +2072,75 @@ def test_scratch_inside_the_repository_is_refused(tmp_path, monkeypatch):
         os.rmdir(created)
 
 
+def _case_insensitive(path):
+    """Probe the filesystem rather than guessing from `sys.platform`."""
+    probe = path / "CaseProbe"
+    probe.mkdir()
+    try:
+        twin = path / "caseprobe"
+        return twin.exists() and os.path.samefile(str(probe), str(twin))
+    except OSError:
+        return False
+    finally:
+        probe.rmdir()
+
+
+def test_scratch_containment_is_decided_by_inode_not_by_spelling(tmp_path, monkeypatch):
+    """A differently-SPELLED path to the same directory must still be refused.
+
+    `os.path.realpath()` preserves the spelling it is handed, so on a
+    case-insensitive filesystem `TMPDIR=/users/.../repo` against a repo reported
+    as `/Users/.../repo` defeats any lexical prefix comparison while landing the
+    scratch physically inside the worktree — cleanup then hides it from the
+    closing fingerprint. Measured before the fix: `lexical check would refuse:
+    False`, `PHYSICALLY inside the repo: True`.
+
+    The probe is a runtime measurement, not a `sys.platform` guess: this hazard
+    is a property of the filesystem, and a case-sensitive one cannot express it.
+    """
+    repo, _base = _seeded(tmp_path)
+    if not _case_insensitive(tmp_path):
+        pytest.skip(
+            "case-sensitive filesystem: a same-inode/different-spelling TMPDIR "
+            "cannot be constructed here without root (bind mount)"
+        )
+    spelled = str(repo).replace("/Users/", "/users/", 1)
+    if spelled == str(repo):
+        head, sep, tail = str(repo).rpartition(os.sep)
+        spelled = head + sep + (tail.upper() if tail.lower() == tail else tail.lower())
+    assert spelled != str(repo)
+    assert os.path.samefile(spelled, str(repo)), "the probe must name the same directory"
+
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", spelled)
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.make_scratch_dir(str(repo))
+    assert excinfo.value.code == "SCRATCH_INSIDE_REPO"
+    assert not list(repo.glob("wave-gate-*"))
+
+
+def test_scratch_containment_that_cannot_be_proven_fails_closed(tmp_path, monkeypatch):
+    """An unstattable ancestor is not evidence that the scratch is elsewhere."""
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+
+    real_stat = os.stat
+
+    def blind(path, *args, **kwargs):
+        if str(path) == str(repo):
+            raise OSError(13, "Permission denied")
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", blind)
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.make_scratch_dir(str(repo))
+    assert excinfo.value.code == "SCRATCH_CONTAINMENT_UNPROVEN"
+    assert excinfo.value.status == 2
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 
