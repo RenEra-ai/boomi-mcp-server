@@ -2811,6 +2811,59 @@ def test_a_forty_digit_integer_is_not_a_bootstrap_base(tmp_path):
     gate.parse_manifest(_serialize(header, [_node_row(1)]), "pytest-nodes")
 
 
+def test_cleanup_does_not_follow_a_replaced_owned_directory(tmp_path, monkeypatch):
+    """`unlink("render-1/request-1.json")` follows a replaced `render-1`.
+
+    A same-user process swapping an owned directory for a symlink would have the
+    gate delete the TARGET's file of that name and then report success. Every
+    component is opened `O_NOFOLLOW` from its parent's descriptor instead.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+
+    scratch = gate.make_scratch_dir(str(repo))
+    resolved = os.fspath(scratch)
+    os.close(scratch.mkdir_owned("render-1"))
+    scratch.own("render-1/request-1.json")
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "request-1.json").write_text("someone else's file\n")
+    os.rmdir(os.path.join(resolved, "render-1"))
+    os.symlink(str(elsewhere), os.path.join(resolved, "render-1"),
+               target_is_directory=True)
+
+    assert scratch.dispose() is False
+    assert scratch.refusal_code == "SCRATCH_FOREIGN_ENTRIES"
+    assert (elsewhere / "request-1.json").read_text() == "someone else's file\n"
+    shutil.rmtree(resolved, ignore_errors=True)
+
+
+def test_a_foreign_file_nested_in_an_owned_directory_is_classified(tmp_path, monkeypatch):
+    """Its parent's `rmdir` fails first, so it never reaches the top-level listing.
+
+    Without classifying it there, the code stayed `SCRATCH_RETARGETED` and a
+    machine consumer got the wrong contract token for a foreign entry.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+
+    scratch = gate.make_scratch_dir(str(repo))
+    resolved = os.fspath(scratch)
+    os.close(scratch.mkdir_owned("render-1"))
+    (pathlib.Path(resolved) / "render-1" / "intruder.txt").write_text("x\n")
+
+    assert scratch.dispose() is False
+    assert scratch.refusal_code == "SCRATCH_FOREIGN_ENTRIES"
+    shutil.rmtree(resolved, ignore_errors=True)
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

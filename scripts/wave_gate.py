@@ -2356,6 +2356,12 @@ class _ScratchDir(object):
             return False
         try:
             _remove_owned(self.fd, self._owned)
+        except _ForeignEntry:
+            # Classified here, not left as retargeting: a foreign entry NESTED in
+            # an owned directory never reaches the top-level listing below,
+            # because its parent's `rmdir` fails first.
+            self.refusal_code = "SCRATCH_FOREIGN_ENTRIES"
+            return False
         except OSError:
             return False
         # Anything still here was not created by the gate. Refuse rather than
@@ -2679,28 +2685,61 @@ def _refuse_scratch_inside_repo(fd, repo):
             pass
 
 
+class _ForeignEntry(Exception):
+    """Something the gate did not create is in the way of its own cleanup."""
+
+
 def _remove_owned(dirfd, owned):
     """Remove exactly the entries the gate created, deepest first.
 
-    Never a recursive sweep of whatever is present: the scratch is a directory a
-    same-user process can move things into, and deleting everything found there
-    destroys data the gate never owned.
+    Never a recursive sweep of whatever is present, and never through a
+    multi-component NAME: `unlink("render-1/request-1.json")` follows an
+    intermediate `render-1` that a sibling replaced with a symlink, and deletes
+    the target's file instead. Every component is opened with `O_NOFOLLOW` from
+    its parent's descriptor, so a replaced component is refused rather than
+    traversed.
     """
-    for relpath in sorted(owned, key=lambda r: r.count("/"), reverse=True):
+    for parts in sorted((r.split("/") for r in owned), key=len, reverse=True):
+        _remove_owned_entry(dirfd, parts)
+
+
+def _remove_owned_entry(dirfd, parts):
+    if len(parts) > 1:
         try:
-            os.unlink(relpath, dir_fd=dirfd)
-            continue
-        except IsADirectoryError:
-            pass
+            child = os.open(
+                parts[0], os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW, dir_fd=dirfd
+            )
         except FileNotFoundError:
-            continue
-        except OSError as exc:
-            if exc.errno not in (errno.EPERM, errno.EISDIR):
-                raise
+            return
+        except OSError:
+            # ELOOP/ENOTDIR: the component is no longer the directory we made.
+            raise _ForeignEntry(parts[0])
         try:
-            os.rmdir(relpath, dir_fd=dirfd)
-        except FileNotFoundError:
-            continue
+            _remove_owned_entry(child, parts[1:])
+        finally:
+            _close_quietly(child)
+        return
+
+    name = parts[0]
+    try:
+        os.unlink(name, dir_fd=dirfd)
+        return
+    except FileNotFoundError:
+        return
+    except IsADirectoryError:
+        pass
+    except OSError as exc:
+        if exc.errno not in (errno.EPERM, errno.EISDIR):
+            raise
+    try:
+        os.rmdir(name, dir_fd=dirfd)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        if exc.errno in (errno.ENOTEMPTY, errno.EEXIST):
+            # An owned directory holding something we did not create.
+            raise _ForeignEntry(name)
+        raise
 
 
 def check_worktree_unchanged(before, after):
