@@ -246,7 +246,15 @@ consequence, and three properties combine to make that true:
    the call the held directory must no longer be listed in that parent, and `..` from it
    must still name that parent. Anything else is a removal that hit something other than
    the scratch, and fails closed. Asserting the result is what ends this class; each
-   additional pre-check only ever revealed the next window.
+   additional pre-check only ever revealed the next window. `dispose()` is total by
+   construction — it returns a verdict and never raises, because it runs in a `finally`
+   where an escape would replace a pending failure with a traceback and skip the closing
+   fingerprint. How `..` behaves for a removed directory is filesystem-specific and is
+   MEASURED once per run inside the verified scratch (`_probe_dotdot_at`); an unreadable
+   `..` is not proof of unlinking. **Known residual, tracked in #164:** the two outcome
+   observations are separate syscalls, so a same-user process racing the gate can
+   interleave between them. It can cost at most an empty untracked directory, which git
+   does not track and which changes no tracked content and no gate assertion.
 3. Retargeting is recorded as a PENDING failure so the closing worktree fingerprint still
    runs. Raising immediately would skip it on precisely the path where a repository
    mutation is most plausible, costing the gate its `WORKTREE_DIRTY` evidence.

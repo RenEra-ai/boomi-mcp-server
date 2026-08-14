@@ -2454,6 +2454,61 @@ def test_disposal_reports_failure_when_the_removal_hit_the_wrong_directory(
     assert (outside / "moved-aside").is_dir()
 
 
+def test_an_unreadable_parent_probe_is_not_proof_of_removal(tmp_path, monkeypatch):
+    """`..` that cannot be read is not evidence that anything was unlinked."""
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+    scratch = gate.make_scratch_dir(str(repo))
+    # This platform was measured at creation; the probe must have produced a
+    # definite answer or the assertion below tests nothing.
+    assert scratch._dotdot is not None
+
+    held = os.fstat(scratch.fd)
+    parent = os.open("..", os.O_RDONLY | gate._O_DIRECTORY, dir_fd=scratch.fd)
+    real_open = os.open
+
+    def blind(path, *args, **kwargs):
+        if path == ".." and kwargs.get("dir_fd") == scratch.fd:
+            raise OSError(13, "Permission denied")
+        return real_open(path, *args, **kwargs)
+
+    try:
+        monkeypatch.setattr(os, "open", blind)
+        # dotdot_survives=True on this platform, so an OSError is unproven.
+        assert gate._removal_proved(parent, scratch.fd, held, True) is False
+        # And where the probe could not run at all, it is also unproven.
+        assert gate._removal_proved(parent, scratch.fd, held, None) is False
+    finally:
+        monkeypatch.undo()
+        os.close(parent)
+        scratch.dispose()
+
+
+def test_dispose_never_raises_even_when_the_filesystem_does(tmp_path, monkeypatch):
+    """`dispose()` runs in a `finally`; an escape there costs the gate its evidence.
+
+    An exception out of cleanup replaces the pending `GateFailure` with an uncoded
+    traceback AND skips the closing worktree fingerprint. The guarantee is placed
+    at the boundary: no path out of `dispose()` raises, and anything unexpected
+    reads as "not disposed".
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+    scratch = gate.make_scratch_dir(str(repo))
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("the filesystem is having a day")
+
+    monkeypatch.setattr(gate, "_entry_naming", explode)
+    assert scratch.dispose() is False
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

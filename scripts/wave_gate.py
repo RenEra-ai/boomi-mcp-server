@@ -2040,7 +2040,7 @@ def make_scratch_dir(repo):
         # replacement. Whatever we end up holding is what gets judged.
         fd = os.open(resolved, os.O_RDONLY | _O_DIRECTORY)
         _refuse_scratch_inside_repo(fd, repo)
-        return _ScratchDir(resolved, fd, repo)
+        return _ScratchDir(resolved, fd, repo, _probe_dotdot_at(fd))
     except BaseException:
         shutil.rmtree(candidate, ignore_errors=True)
         raise
@@ -2048,6 +2048,7 @@ def make_scratch_dir(repo):
 
 _O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_DOTDOT_PROBE = ".wave-gate-dotdot-probe"
 
 
 class _ScratchDir(object):
@@ -2070,12 +2071,13 @@ class _ScratchDir(object):
     all.
     """
 
-    __slots__ = ("_path", "fd", "_repo")
+    __slots__ = ("_path", "fd", "_repo", "_dotdot")
 
-    def __init__(self, path, fd, repo):
+    def __init__(self, path, fd, repo, dotdot):
         self._path = path
         self.fd = fd
         self._repo = repo
+        self._dotdot = dotdot
 
     def _binding_holds(self):
         """True when the name still denotes the held directory AND it is outside."""
@@ -2148,16 +2150,29 @@ class _ScratchDir(object):
         closing fingerprint would match and the gate would pass — exactly the
         outcome the retargeting rules exist to prevent.
         """
-        if not self._binding_holds():
+        try:
+            return self._dispose()
+        except BaseException:
+            # TOTAL BY CONSTRUCTION. `dispose()` runs in `execute()`'s `finally`,
+            # so ANY exception escaping here replaces the pending GateFailure with
+            # an uncoded traceback AND skips the closing worktree fingerprint —
+            # the gate loses both its diagnostic and its evidence. This is the
+            # third time an escape from the cleanup path has been found, so the
+            # guarantee is placed at the boundary once instead of being chased
+            # call by call: no path out of this method raises, and anything
+            # unexpected reads as "not disposed", which is the fail-closed answer.
+            return False
+        finally:
             self._close()
+
+    def _dispose(self):
+        if not self._binding_holds():
             return False
         try:
             _unlink_tree_at(self.fd)
         except OSError:
-            self._close()
             return False
         if not self._binding_holds():
-            self._close()
             return False
         # The parent is derived HERE, from the descriptor we hold, not cached at
         # construction. A cached handle goes stale the moment anything renames the
@@ -2167,27 +2182,22 @@ class _ScratchDir(object):
         try:
             parent_fd = os.open("..", os.O_RDONLY | _O_DIRECTORY, dir_fd=self.fd)
         except OSError:
-            self._close()
             return False
         try:
-            held = os.fstat(self.fd)
-            name = _entry_naming(parent_fd, held)
-        except OSError:
-            name = None
-        if name is None:
-            self._close()
+            try:
+                held = os.fstat(self.fd)
+                name = _entry_naming(parent_fd, held)
+            except OSError:
+                return False
+            if name is None:
+                return False
+            try:
+                os.rmdir(name, dir_fd=parent_fd)
+            except OSError:
+                return False
+            return _removal_proved(parent_fd, self.fd, held, self._dotdot)
+        finally:
             _close_quietly(parent_fd)
-            return False
-        try:
-            os.rmdir(name, dir_fd=parent_fd)
-        except OSError:
-            self._close()
-            _close_quietly(parent_fd)
-            return False
-        removed = _removal_proved(parent_fd, self.fd, held)
-        self._close()
-        _close_quietly(parent_fd)
-        return removed
 
     def _close(self):
         try:
@@ -2221,39 +2231,81 @@ def _entry_naming(parent_fd, held):
     return None
 
 
-def _removal_proved(parent_fd, fd, held):
+def _probe_dotdot_at(fd):
+    """Measure what `..` does for a REMOVED directory on THIS filesystem.
+
+    `_removal_proved` reads `..` as evidence, and how it behaves after a removal
+    is platform-specific: on macOS it still opens and names the old parent, while
+    a system that invalidates the lookup would report `OSError` for a perfectly
+    ordinary successful removal. Assuming either way is how a gate ends up
+    permanently red on the deployment platform, or permanently credulous on the
+    development one. So it is measured — inside the scratch directory that has
+    just passed containment, using a directory the gate creates and removes
+    itself.
+
+    Returns True/False for the observed behaviour, or None when the probe could
+    not run, which `_removal_proved` treats as "cannot interpret" and fails
+    closed on.
+    """
+    try:
+        os.mkdir(_DOTDOT_PROBE, dir_fd=fd)
+    except OSError:
+        return None
+    probe = None
+    try:
+        probe = os.open(_DOTDOT_PROBE, os.O_RDONLY | _O_DIRECTORY, dir_fd=fd)
+        os.rmdir(_DOTDOT_PROBE, dir_fd=fd)
+    except OSError:
+        try:
+            os.rmdir(_DOTDOT_PROBE, dir_fd=fd)
+        except OSError:
+            pass
+        if probe is not None:
+            _close_quietly(probe)
+        return None
+    try:
+        _close_quietly(os.open("..", os.O_RDONLY | _O_DIRECTORY, dir_fd=probe))
+        return True
+    except OSError:
+        return False
+    finally:
+        _close_quietly(probe)
+
+
+def _removal_proved(parent_fd, fd, held, dotdot_survives):
     """After the fact, prove the directory we HELD is the one that went away.
 
     No pre-check can be atomic with `rmdir` — POSIX has no remove-by-descriptor —
     so every guard placed *before* the call leaves a window, and closing one
-    window has only ever revealed the next. This asserts the OUTCOME instead,
-    which is what ends the class: whatever interleaving occurred, the gate
-    afterwards either proves the held directory is gone from the parent it
-    removed from, or fails closed.
+    window has only ever revealed the next. This asserts the OUTCOME instead:
+    whatever interleaving occurred, the gate either proves the held directory is
+    gone from the parent it removed from, or fails closed.
 
-    Both discriminators are measured, not assumed. macOS does NOT zero
+    Two observations, both measured rather than assumed. macOS does NOT zero
     `st_nlink` for an open descriptor on a removed directory (measured:
-    `nlink after it was removed : 2`), so a link-count test would silently
-    always agree; these two do distinguish the cases:
+    `nlink after it was removed : 2`), so a link-count test would silently agree
+    with every case. What does discriminate:
 
     * the parent no longer lists our inode — measured `None` after a correct
       removal, and the entry's name after removing something else;
-    * `..` from the held descriptor still names that same parent — so a
-      directory moved elsewhere before the `rmdir` is caught rather than
-      reported as disposed. A platform where `..` of a removed directory fails
-      is treated as "gone", which is the same conclusion.
+    * `..` from the held descriptor still names that parent, so a directory
+      moved elsewhere mid-race is caught. `dotdot_survives` records what this
+      filesystem actually does after a removal (see `_probe_dotdot_at`); an
+      unreadable `..` is NOT proof of unlinking and fails closed unless the
+      probe established that this platform reports removal exactly that way.
     """
     if _entry_naming(parent_fd, held) is not None:
         return False                      # still linked here: we removed something else
     try:
         up = os.open("..", os.O_RDONLY | _O_DIRECTORY, dir_fd=fd)
     except OSError:
-        return True                       # not linked anywhere: gone
+        return dotdot_survives is False   # only proof where that IS the platform's signal
     try:
-        moved = os.fstat(up).st_ino != os.fstat(parent_fd).st_ino
+        if dotdot_survives is not True:
+            return False                  # `..` should not have opened here: unproven
+        return os.fstat(up).st_ino == os.fstat(parent_fd).st_ino
     finally:
         _close_quietly(up)
-    return not moved
 
 
 def _unlink_tree_at(dirfd):
