@@ -850,7 +850,8 @@ def _transition(base_rows, head_rows, name="pytest-nodes",
         _serialize(head_header or header(len([r for r in head_rows if r["state"] == "active"])), head_rows),
         name,
     )
-    return gate.validate_transition(base, head, name)
+    appended, tombstoned, _born = gate.validate_transition(base, head, name)
+    return appended, tombstoned
 
 
 def _transition_fails(base_rows, head_rows, name="pytest-nodes",
@@ -1971,6 +1972,53 @@ def test_a_provider_GateFailure_cannot_carry_its_own_exit_status():
     with pytest.raises(gate.GateFailure) as excinfo:
         gate.run_plan_fingerprint_checks(True, _Sneaky())
     assert excinfo.value.status == 1
+
+
+def test_an_unreadable_directory_fails_closed(tmp_path):
+    """[Critical] Exit code alone is not accountability.
+
+    With an unreadable DIRECTORY, `git status` and `git diff` both exit 0, warn
+    on stderr, and silently omit every file underneath — so a mutation in there
+    produced an identical fingerprint and the per-file `open()` guard was never
+    reached. Verified against real git: `status_rc=0` with
+    `could not open directory 'locked/': Permission denied`.
+    """
+    repo, _base = _seeded(tmp_path)
+    locked = repo / "locked"
+    locked.mkdir()
+    (locked / "f.txt").write_bytes(b"one\n")
+    _commit(repo, "add the directory")
+    (locked / "f.txt").write_bytes(b"two\n")
+    os.chmod(locked, 0o000)
+    try:
+        with pytest.raises(gate.GateFailure) as excinfo:
+            gate._status(str(repo))
+        assert excinfo.value.code == "WORKTREE_DIRTY"
+        assert "could not account for the whole worktree" in excinfo.value.message
+    finally:
+        os.chmod(locked, 0o755)
+
+
+def test_a_born_tombstoned_row_is_still_reported(tmp_path):
+    """[Standard] It changes no floor, but it IS a retirement record.
+
+    Excluding born-tombstones from the audit made the documented compensating
+    control — "every tombstone transition is reported with its immutable owner
+    and disposition" — quietly skip them.
+    """
+    base_rows = [_golden_row(1)]
+    head_rows = [_golden_row(1), _golden_row(2, owner="#159",
+                                             disposition="transitional_oracle",
+                                             state="tombstone")]
+    appended, tombstoned, born = gate.validate_transition(
+        gate.parse_manifest(_serialize(_golden_header(1), base_rows), "goldens"),
+        gate.parse_manifest(_serialize(_golden_header(1), head_rows), "goldens"),
+        "goldens",
+    )
+    assert (appended, tombstoned) == (0, 0)
+    assert [row["id"] for row in born] == ["golden-000002"]
+    assert born[0]["owner"] == "#159"
+    assert born[0]["disposition"] == "transitional_oracle"
 
 
 def test_a_provider_raising_SystemExit_cannot_exit_green():

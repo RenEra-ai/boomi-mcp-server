@@ -289,13 +289,7 @@ def _status(repo):
          "--untracked-files=all", "-z"],
         cwd=str(repo), capture_output=True,
     )
-    if raw_status.returncode != 0:
-        raise _contract(
-            "BASELINE_UNAVAILABLE",
-            "git status failed in {0}: {1}".format(
-                repo, raw_status.stderr.decode("utf-8", "replace").strip()
-            ),
-        )
+    _refuse_unreadable(raw_status, "git status")
     status = raw_status.stdout
     parts = [
         _git(repo, "rev-parse", "HEAD").stdout.strip(),
@@ -355,14 +349,34 @@ def _patch_digest(repo, *extra):
         ["git", "diff", "--binary", "--full-index", *extra],
         cwd=str(repo), capture_output=True,
     )
-    if proc.returncode != 0:
+    _refuse_unreadable(proc, "git diff")
+    return hashlib.sha256(proc.stdout).hexdigest()
+
+
+def _refuse_unreadable(proc, what):
+    """Any stderr from a fingerprinting command is a refusal.
+
+    Exit code alone is not enough: with an unreadable DIRECTORY, `git status`
+    and `git diff` both exit 0, WARN on stderr (`could not open directory …
+    Permission denied`) and silently omit every file underneath — so a mutation
+    in there produced an identical fingerprint and the per-file `open()` guard
+    was never even reached.
+
+    Deliberately not a list of recognised warning strings: an enumeration of
+    "which git messages matter" is the shape of defect this file has produced
+    repeatedly. On a clean checkout these commands emit nothing at all, so
+    anything on stderr means the snapshot is incomplete — and an incomplete
+    snapshot cannot support the read-only claim. A spurious refusal here is loud
+    and fixable; a silent gap is neither.
+    """
+    noise = proc.stderr.decode("utf-8", "replace").strip()
+    if proc.returncode != 0 or noise:
         raise _invalid(
             "WORKTREE_DIRTY",
-            "git diff failed while fingerprinting the worktree: {0}".format(
-                proc.stderr.decode("utf-8", "replace").strip()
+            "{0} could not account for the whole worktree (exit {1}): {2}".format(
+                what, proc.returncode, noise or "<no detail>"
             ),
         )
-    return hashlib.sha256(proc.stdout).hexdigest()
 
 
 def check_checkout_matches_event(repo, context):
@@ -678,8 +692,9 @@ _LEGAL_STATE_TRANSITIONS = {
 def validate_transition(base, current, name):
     """Validate that ``current`` is a legal successor of ``base``.
 
-    Returns ``(appended_active, newly_tombstoned)`` so the caller can check the
-    floor arithmetic.  Every failure is ``MANIFEST_TRANSITION_ILLEGAL``.
+    Returns ``(appended_active, newly_tombstoned, born_tombstoned)`` so the
+    caller can check the floor arithmetic AND report every retirement.  Every
+    failure is ``MANIFEST_TRANSITION_ILLEGAL``.
     """
     spec = _SCHEMAS[name]
 
@@ -732,9 +747,15 @@ def validate_transition(base, current, name):
     # fully accounted for.
     appended = current.rows[len(base.rows):]
     appended_active = len([row for row in appended if row["state"] == "active"])
+    # Born-tombstoned appends stay OUT of `newly_tombstoned` (they were never
+    # active, so they change no floor) but they are still retirement records and
+    # must appear in the audit trail — otherwise the documented compensating
+    # control, "every tombstone transition is reported with its immutable owner
+    # and disposition", quietly skips them.
+    born_tombstoned = [row for row in appended if row["state"] == "tombstone"]
 
     _check_floor_arithmetic(base, current, appended_active, newly_tombstoned, name)
-    return appended_active, newly_tombstoned
+    return appended_active, newly_tombstoned, born_tombstoned
 
 
 def _check_floor_arithmetic(base, current, appended, newly_tombstoned, name):
@@ -1755,7 +1776,15 @@ def run_manifest_phase(repo, baseline, *, is_local, bootstrap_flag, target=None)
                     "{0} is unreadable at baseline {1}".format(spec["path"], baseline),
                 )
             base = parse_manifest(raw, name)
-            _appended, tombstoned = validate_transition(base, current[name], name)
+            _appended, tombstoned, born = validate_transition(base, current[name], name)
+            for row in born:
+                _emit(
+                    "wave_gate: TOMBSTONE {0} {1} owner={2} disposition={3} "
+                    "(appended already retired)".format(
+                        name, row["id"], row.get("owner", "repository"),
+                        row.get("disposition", "n/a"),
+                    )
+                )
             if tombstoned:
                 # The plan's compensating control for the ownership git cannot
                 # enforce: surface WHO claimed each retirement so review can check
@@ -1836,8 +1865,24 @@ def execute(args):
             _emit(
                 "wave_gate: {0} active goldens deterministic and byte-exact".format(rendered)
             )
-            status = run_plan_fingerprint_checks(args.require_plan_fingerprint)
-            _emit("wave_gate: plan fingerprint {0}".format(status))
+            # ONE boundary around the whole provider phase, not just the calls
+            # into it. The provider is repo-owned code, so this is not a defence
+            # against a hostile TCB — but its OUTPUTS are compared and formatted
+            # after the guarded call returns, and a `SystemExit` raised from, say,
+            # a `__str__` would otherwise leave the process with status 0. A
+            # gate that can exit green by accident is the one thing it must not do.
+            try:
+                status = run_plan_fingerprint_checks(args.require_plan_fingerprint)
+                _emit("wave_gate: plan fingerprint {0}".format(status))
+            except GateFailure:
+                raise
+            except BaseException as exc:  # noqa: BLE001
+                raise _invalid(
+                    "PLAN_FINGERPRINT_MISMATCH",
+                    "the plan-fingerprint phase raised {0}: {1!r}".format(
+                        type(exc).__name__, exc
+                    ),
+                )
     except GateFailure as exc:
         failure = exc
     finally:
