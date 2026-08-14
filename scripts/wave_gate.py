@@ -313,14 +313,17 @@ def _status(repo):
         if not chunk.startswith(b"?? "):
             continue
         rel_bytes = chunk[3:]
-        rel = rel_bytes.decode("utf-8", "surrogateescape")
-        # Join in BYTES via the filesystem encoding so an undecodable name still
-        # names the real file.
-        target = os.path.join(
-            os.fsencode(repo), rel_bytes).decode("utf-8", "surrogateescape")
+        # `rel` is for the FINGERPRINT TEXT only; every filesystem call below
+        # takes the BYTES. Decoding the joined path back to str would re-encode
+        # it through the filesystem encoding — which is not necessarily UTF-8 —
+        # and address a different file, or raise. os.path and open accept bytes
+        # paths directly, so the bytes never need to round-trip at all.
+        rel = os.fsdecode(rel_bytes)
+        target = os.path.join(os.fsencode(repo), rel_bytes)
         try:
             if os.path.islink(target):
-                parts.append("{0}:<symlink {1}>".format(rel, os.readlink(target)))
+                parts.append("{0}:<symlink {1}>".format(
+                    rel, os.fsdecode(os.readlink(target))))
             elif os.path.isfile(target):
                 with open(target, "rb") as handle:
                     parts.append("{0}:{1}".format(
