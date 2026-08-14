@@ -276,17 +276,31 @@ def _status(repo):
     content hash — a same-size, same-line-count edit to an already-dirty file
     would slip through — but it closes the cases a gate realistically causes.
     """
-    # `--untracked-files=all`, NUL-delimited: with `normal`, an untracked
-    # DIRECTORY collapses to a single `?? dir/` entry, so rewriting a file inside
-    # it during the suite left both snapshots identical. `-z` also removes the
-    # quoting/escaping that `--porcelain` applies to unusual names.
-    status = _git(
-        repo, "-c", "core.quotePath=false", "status", "--porcelain",
-        "--untracked-files=all", "-z",
-    ).stdout
+    # `--untracked-files=all`, NUL-delimited, captured as BYTES.
+    #
+    # `normal` collapses an untracked DIRECTORY to a single `?? dir/` entry, so
+    # rewriting a file inside it left both snapshots identical. And the `-z`
+    # stream must not go through text mode: universal-newline translation
+    # rewrites a `\r` inside a legal POSIX filename, and strict UTF-8 decoding
+    # raises on a filename that is merely bytes — either way the gate would look
+    # at the wrong path, or crash, on a file the user is entitled to have.
+    raw_status = subprocess.run(
+        ["git", "-c", "core.quotePath=false", "status", "--porcelain",
+         "--untracked-files=all", "-z"],
+        cwd=str(repo), capture_output=True,
+    )
+    if raw_status.returncode != 0:
+        raise _contract(
+            "BASELINE_UNAVAILABLE",
+            "git status failed in {0}: {1}".format(
+                repo, raw_status.stderr.decode("utf-8", "replace").strip()
+            ),
+        )
+    status = raw_status.stdout
     parts = [
         _git(repo, "rev-parse", "HEAD").stdout.strip(),
-        status,
+        # surrogateescape keeps undecodable bytes distinguishable and round-trippable
+        status.decode("utf-8", "surrogateescape"),
         # The full PATCH, not `--numstat`: line counts are identical for a
         # same-length rewrite of an already-modified file, so numstat could not
         # see the gate editing user bytes.
@@ -295,11 +309,15 @@ def _status(repo):
     ]
     # Untracked files have no diff at all, so hash their contents directly —
     # otherwise rewriting an existing untracked file is invisible.
-    for entry in status.split("\0"):
-        if not entry.startswith("?? "):
+    for chunk in status.split(b"\0"):
+        if not chunk.startswith(b"?? "):
             continue
-        rel = entry[3:]
-        target = os.path.join(repo, rel)
+        rel_bytes = chunk[3:]
+        rel = rel_bytes.decode("utf-8", "surrogateescape")
+        # Join in BYTES via the filesystem encoding so an undecodable name still
+        # names the real file.
+        target = os.path.join(
+            os.fsencode(repo), rel_bytes).decode("utf-8", "surrogateescape")
         try:
             if os.path.islink(target):
                 parts.append("{0}:<symlink {1}>".format(rel, os.readlink(target)))
@@ -964,92 +982,34 @@ def check_bootstrap(repo, baseline, manifests, *, require_flag, flag_given,
                 "exception (CI does not need it: the event's own baseline must equal "
                 "the declared bootstrap_base, which it does here)",
             )
-        _refuse_stale_local_bootstrap(repo, baseline)
-    return True
-
-
-def _refuse_stale_local_bootstrap(repo, baseline):
-    """Local bootstrap is for introducing the ledger, not for re-blessing it.
-
-    A local baseline is whatever the operator typed, so after the ledger lands
-    they could keep passing the pre-landing sha with ``--bootstrap`` forever and
-    skip every transition check — and local ``wave`` is required wave evidence,
-    not merely advisory, so that matters.
-
-    The discriminator is HAS IT LANDED, and it has to be, because the two
-    tempting alternatives both refuse ordinary work: a commit-count rule and a
-    "ledger unchanged since its introducing commit" rule each reject
-    multi-commit development of the very change that introduces the ledger.
-    What separates the two situations is reachability — a landed introduction is
-    contained in some branch OTHER than the one being worked on (``dev``, or a
-    remote-tracking ref); an unlanded one is contained only in the current
-    branch.
-    """
-    # `symbolic-ref`, NOT `rev-parse --abbrev-ref`: the latter returns the
-    # shortest UNAMBIGUOUS name, so a branch that shares its name with a tag
-    # comes back as `heads/release` — and prefixing that yields the nonexistent
-    # `refs/heads/heads/release`, leaving the real branch in `landed_on` and
-    # refusing a perfectly valid unshared bootstrap. `symbolic-ref` returns the
-    # full ref, and it also answers the detached case by failing outright.
-    proc = _git(repo, "symbolic-ref", "-q", "HEAD", check=False)
-    own_ref = proc.stdout.strip()
-    if proc.returncode != 0 or not own_ref.startswith("refs/heads/"):
-        # Detached: there is no "current branch" to exclude, so every containing
-        # ref would look like an independent landing. Refuse rather than guess.
-        raise _contract(
-            "BOOTSTRAP_NOT_ALLOWED",
-            "cannot judge whether the bootstrap has landed from a detached HEAD; "
-            "run the bootstrap from the branch that introduces the manifests",
-        )
-    # Every ref except our own branch. Full refnames: `%(refname:short)` renders
-    # `refs/heads/x` and `refs/tags/x` identically, so a same-named tag would
-    # exempt itself. No namespace list either — an enumeration kept drifting out
-    # of step with the sentence "ANY other ref spends it".
-    others = [
-        ref for ref in _git(
-            repo, "for-each-ref", "--format=%(refname)",
-        ).stdout.split()
-        if ref != own_ref
-    ]
-
-    for spec in _SCHEMAS.values():
-        # Ask about the PATH's HISTORY, one ref at a time, as POSITIVE roots.
+        # A LOCAL bootstrap is an operator assertion, and it is labelled as one.
         #
-        # Two earlier formulations failed here. Matching the introduction COMMIT
-        # assumed the landed copy would be that same commit — a branch that
-        # independently recreates the ledger has different SHAs and slipped
-        # through. Subtracting our own ancestry (`--all --not <own_ref>`) then
-        # removed any commit we had merged in, so once two branches that both
-        # introduced the ledger were merged, the other branch's add-commit became
-        # reachable from us and vanished from the answer. Querying each ref
-        # directly is immune to both: it asks whether that ref's own history ever
-        # touched this file, which no merge, rewrite or cherry-pick can hide.
-        if not others:
-            continue
-        # All the roots in ONE call — `rev-list` takes many. The per-ref loop
-        # below runs only to name the culprit once the answer is already known,
-        # so a repository with thousands of refs costs one query, not thousands.
-        hit = _git(
-            repo, "rev-list", "--max-count=1", *others, "--", spec["path"],
-        ).stdout.strip()
-        outside = ""
-        if hit:
-            outside = "another ref ({0})".format(hit[:12])
-            for ref in others:
-                if _git(
-                    repo, "rev-list", "--max-count=1", ref, "--", spec["path"],
-                ).stdout.strip():
-                    outside = "{0} ({1})".format(ref, hit[:12])
-                    break
-        if outside:
-            raise _contract(
-                "BOOTSTRAP_NOT_ALLOWED",
-                "{0} already has history on {1}; the bootstrap exception is "
-                "spent. Validate against a baseline that carries the manifests: "
-                "--base <a commit that has them>, without --bootstrap.".format(
-                    spec["path"], outside
-                ),
-            )
+        # There is deliberately no local check that the exception is still
+        # unspent. Eight successive formulations of "has this ledger landed?"
+        # were each defeated — ancestry-only; a commit-count rule; exempting
+        # `*/<branch>` mirrors; enumerating ref namespaces; `--abbrev-ref`
+        # ambiguity; matching the introducing COMMIT rather than the path;
+        # `--all --not <own_ref>` subtracting merged-in commits; and default
+        # history simplification pruning a `merge -s ours` addition. They did not
+        # fail through sloppiness: locally the OPERATOR chooses the baseline, so
+        # no rule can separate "legitimately introducing the ledger" from
+        # "asserting a stale baseline". The question is ill-posed here, and
+        # answering it wrongly in either direction is worse than not claiming to
+        # answer it — a false refusal blocks the introduction itself.
+        #
+        # The authority for bootstrap therefore lives where the baseline is
+        # supplied by the platform rather than chosen by the person being
+        # checked: the `ci` arms. Those are unaffected, and they are strict —
+        # `push` compares against the branch tip it builds on, `pull_request`
+        # additionally requires the target to carry no manifests.
+        _emit(
+            "wave_gate: WARNING — a local --bootstrap is an OPERATOR ASSERTION, not "
+            "a verified one. It skips manifest transition validation entirely. Only "
+            "the CI arms can judge whether the exception is still unspent; if the "
+            "ledger has landed, run `--base <a commit that carries the manifests>` "
+            "WITHOUT --bootstrap to validate the transition."
+        )
+    return True
 
 
 # --------------------------------------------------------------------------

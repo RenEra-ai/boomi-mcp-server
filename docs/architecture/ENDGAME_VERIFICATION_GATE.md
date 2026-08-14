@@ -272,25 +272,33 @@ condition must hold.
 * Both current manifests parse and are self-consistent.
 * Both headers declare the same `bootstrap_base`, equal to the validated
   baseline.
-* A local run must additionally pass `--bootstrap`, **and** the commit that
-  introduced the ledger must not yet have been shared — i.e. it is contained in
-  the current branch and in NO other ref, remote-tracking mirrors included.
-  Exempting `*/<current>` as "just a mirror of my own branch" was tried and
-  removed: this repo lands by fast-forward push to `dev`, so working ON `dev`
-  leaves the containing refs `dev` and `origin/dev`, and the exemption discarded
-  both — making the bootstrap re-claimable forever on the integration branch.
-  "Has it been shared anywhere?" is decidable; "is that ref an integration branch
-  or a backup of mine?" is not.
+* A local run must additionally pass `--bootstrap`. That flag is an OPERATOR
+  ASSERTION, not a verified condition, and the run says so on stderr.
 
-  The cost is only that the BOOTSTRAP arm stops being available once the
-  introduction is pushed. The wave gate itself stays fully usable — run
-  `wave --base <a commit that carries the manifests>`, which validates the
-  transition as well as the suite and the goldens, and is the more appropriate
-  check once the ledger is committed. Reachability is the discriminator on purpose: a
-  commit-count rule, and a "ledger unchanged since its introducing commit" rule,
-  each also reject ordinary multi-commit development of the very change that
-  introduces the ledger. Local `wave` is required wave evidence, not advisory, so
-  this path is closed rather than documented as a residual.
+  There is deliberately **no local check that the exception is still unspent**.
+  Eight successive formulations of "has this ledger landed?" were each defeated:
+  ancestry-only (re-claimable forever after landing); a commit-count rule
+  (rejected ordinary multi-commit development of the introduction itself);
+  exempting `*/<branch>` mirrors (reopened the hole on `dev`, which is exactly
+  where this repo lands); enumerating ref namespaces (missed `refs/tags`);
+  `git rev-parse --abbrev-ref` (returns `heads/<name>` for a branch that shares a
+  tag's name); matching the introducing COMMIT rather than the path (a branch that
+  recreates the ledger has different SHAs); `--all --not <own_ref>` (subtracts any
+  commit merged in, hiding the other branch's addition); and default history
+  simplification (prunes an addition that arrived via `merge -s ours`).
+
+  They did not fail through sloppiness. Locally the OPERATOR chooses the
+  baseline, so no rule can separate "legitimately introducing the ledger" from
+  "asserting a stale baseline" — and being wrong in the refusing direction blocks
+  the introduction the exception exists for. The question is ill-posed here.
+
+  The authority therefore lives where the baseline is supplied by the platform
+  rather than chosen by the person being checked — the `ci` arms, which are
+  strict: `push` compares against the branch tip it builds on, and
+  `pull_request` additionally requires the target to carry no manifests. A local
+  `wave --bootstrap` still runs the suite, the goldens and the determinism check;
+  only the manifest-transition portion is unvalidated, and in a genuine bootstrap
+  there is no transition to validate.
 
 `bootstrap_base` is `9080e3c2d0fcc82b01f781b2352d60995ba58ad8`.
 

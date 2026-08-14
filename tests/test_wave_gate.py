@@ -452,6 +452,74 @@ def test_an_ordinary_pull_request_whose_target_moved_on_is_NOT_a_bootstrap(tmp_p
     assert "BOOTSTRAP" not in proc.stderr
 
 
+def test_a_local_bootstrap_is_an_explicit_operator_assertion(tmp_path):
+    """The local arm asserts; it does not verify. And it says so.
+
+    There is deliberately NO local check that the exception is still unspent.
+    Eight successive formulations of "has this ledger landed?" were each defeated
+    — ancestry-only; a commit-count rule; exempting `*/<branch>` mirrors;
+    enumerating ref namespaces; `--abbrev-ref` ambiguity; matching the
+    introducing COMMIT rather than the path; `--all --not <own_ref>` subtracting
+    merged-in commits; and default history simplification pruning a
+    `merge -s ours` addition. They failed because locally the OPERATOR chooses
+    the baseline, so no rule separates "legitimately introducing" from "asserting
+    a stale baseline" — and a false refusal blocks the introduction itself.
+
+    So the flag is still required (the operator must mean it), the run is labelled
+    loudly, and the judgment lives in the `ci` arms, where the baseline comes from
+    the platform rather than from the person being checked.
+    """
+    repo, base = _bootstrap_repo(tmp_path)
+
+    # Still required: silence is not consent.
+    _expect(_manifests(repo, base), 2, "BOOTSTRAP_NOT_ALLOWED")
+
+    status, stderr = _manifests(repo, base, "--bootstrap")
+    assert status == 0, stderr
+    assert "OPERATOR ASSERTION" in stderr
+    assert "skips manifest transition validation" in stderr
+
+    # Sharing it changes nothing locally — that is the point being pinned, so a
+    # ninth landing heuristic is not reintroduced by accident.
+    _run_git(repo, "branch", "dev")
+    status, stderr = _manifests(repo, base, "--bootstrap")
+    assert status == 0, stderr
+    assert "OPERATOR ASSERTION" in stderr
+
+    # ...while the CI arm DOES judge it: `before` is the tip, which has the
+    # manifests, so no bootstrap is available and the transition rules apply.
+    event = tmp_path / "push.json"
+    event.write_text(json.dumps(
+        {"before": _head(repo), "after": _head(repo)}
+    ), encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "wave_gate.py"),
+         "--repo", str(repo), "manifests", "--github-event", str(event),
+         "--event-name", "push"],
+        capture_output=True, text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "BOOTSTRAP" not in proc.stderr
+
+
+def test_the_worktree_fingerprint_survives_an_awkward_untracked_filename(tmp_path):
+    """`-z` status must be read as BYTES.
+
+    Universal-newline translation rewrites a `\\r` inside a legal POSIX filename
+    and strict UTF-8 decoding raises on a name that is merely bytes — either way
+    the gate looks at the wrong path, or crashes, on a file the user may have.
+    """
+    repo, _base = _seeded(tmp_path)
+    awkward = repo / "we\rird\tname.txt"
+    awkward.write_bytes(b"one\n")
+    before = gate._status(str(repo))
+    awkward.write_bytes(b"two\n")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_worktree_unchanged(before, gate._status(str(repo)))
+    assert excinfo.value.code == "WORKTREE_DIRTY"
+
+
 def test_a_half_bootstrap_is_refused(tmp_path):
     """Both manifests exist NOW, but only one existed at the baseline.
 
@@ -1616,21 +1684,6 @@ def test_an_unambiguous_local_baseline_is_accepted(tmp_path):
     assert gate.resolve_baseline(str(repo), base="HEAD")["sha"] == base
 
 
-def test_a_local_bootstrap_is_refused_once_the_introduction_has_landed(tmp_path):
-    """§6 finding 2b. Local `wave` is required evidence, not advisory.
-
-    The discriminator is reachability, not commit count and not ledger content —
-    both of those also reject ordinary multi-commit development of the change
-    that introduces the ledger.
-    """
-    repo, base = _bootstrap_repo(tmp_path)
-    # Still only on the working branch: bootstrap is legitimate.
-    assert _manifests(repo, base, "--bootstrap")[0] == 0
-    # Now it lands on another branch.
-    _run_git(repo, "branch", "dev")
-    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
-
-
 def test_a_pr_bootstrap_must_be_anchored_to_the_target(tmp_path):
     """§6 finding 2a. Otherwise the PR is green and the resulting push is red."""
     repo = _new_repo(tmp_path)
@@ -1849,128 +1902,6 @@ def test_an_octopus_merge_is_not_a_pr_merge_checkout(tmp_path):
 # Repo review of the §6 fix delta
 # ===========================================================================
 
-def test_pushing_the_introduction_anywhere_spends_the_local_bootstrap(tmp_path):
-    """[P1] The mirror exemption reopened the hole on the integration branch.
-
-    An earlier revision exempted `*/<current>` as "just a mirror of my own
-    branch". This repo lands by fast-forward push to `dev`, so working ON `dev`
-    leaves the containing refs `dev` and `origin/dev` — and that exemption
-    discarded BOTH, making the bootstrap re-claimable forever on `dev` itself
-    and skipping every transition check.
-
-    "Has it been shared anywhere?" is decidable; "is that ref an integration
-    branch or a backup of mine?" is not. The strict form is the one that holds.
-    """
-    repo, base = _bootstrap_repo(tmp_path)
-    current = _git_out(repo, "rev-parse", "--abbrev-ref", "HEAD")
-    # Unshared: the introduction is still a legal local bootstrap.
-    assert _manifests(repo, base, "--bootstrap")[0] == 0
-
-    # Pushed — even to a mirror of this very branch — spends it.
-    _run_git(repo, "update-ref", "refs/remotes/origin/{0}".format(current), "HEAD")
-    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
-
-    # ...and the wave gate stays usable: the transition arm needs no bootstrap.
-    status, stderr = _manifests(repo, _git_out(repo, "rev-parse", "HEAD"))
-    assert status == 0, stderr
-
-
-@pytest.mark.parametrize(
-    "ref", ["refs/tags/published", "refs/notes/commits", "refs/heads/dev"],
-    ids=["tag", "note", "branch"],
-)
-def test_ANY_other_ref_spends_the_local_bootstrap(tmp_path, ref):
-    """ANY ref, not an enumerated list of namespaces.
-
-    Querying `refs/heads refs/remotes` omitted `refs/tags`, so a published tag
-    containing the introduction left the exception claimable — the third leak
-    from this one predicate. The enumeration is gone: git is asked for every ref.
-    """
-    repo, base = _bootstrap_repo(tmp_path)
-    assert _manifests(repo, base, "--bootstrap")[0] == 0
-    _run_git(repo, "update-ref", ref, "HEAD")
-    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
-
-
-def test_a_same_named_tag_before_the_introduction_does_not_block_a_bootstrap(tmp_path):
-    """The branch name must be read as a full symbolic ref.
-
-    `git rev-parse --abbrev-ref HEAD` returns the shortest UNAMBIGUOUS name, so a
-    branch sharing its name with a tag comes back as `heads/<name>` — and
-    prefixing that builds the nonexistent `refs/heads/heads/<name>`, leaving the
-    real branch in `landed_on` and refusing a valid unshared bootstrap.
-    """
-    repo = _new_repo(tmp_path)
-    _run_git(repo, "branch", "-m", "release")
-    for name in ("g1.xml", "g2.xml"):
-        _write(repo, "tests/fixtures/golden_xml/{0}".format(name), "<x/>\n")
-    base = _commit(repo, "pre-manifest")
-    # A tag with the SAME name as the branch, pointing BEFORE the introduction.
-    _run_git(repo, "tag", "release", base)
-    _write(repo, gate.NODES_MANIFEST, _default_nodes(base))
-    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(base))
-    _commit(repo, "introduce manifests")
-
-    assert _git_out(repo, "rev-parse", "--abbrev-ref", "HEAD") == "heads/release"
-    status, stderr = _manifests(repo, base, "--bootstrap")
-    assert status == 0, stderr
-
-
-def test_an_independently_recreated_ledger_elsewhere_spends_the_bootstrap(tmp_path):
-    """The landing test is about the PATH's history, not one commit's identity.
-
-    Matching on the introduction COMMIT assumed the landed copy would be that
-    same commit. A stale branch can independently recreate both manifests, and
-    because the SHAs differ the probe found nothing and handed back the
-    exception even though `dev` already carried a ledger.
-    """
-    repo = _new_repo(tmp_path)
-    for name in ("g1.xml", "g2.xml"):
-        _write(repo, "tests/fixtures/golden_xml/{0}".format(name), "<x/>\n")
-    base = _commit(repo, "pre-manifest")
-
-    # `dev` introduces the ledger in its own commits.
-    _run_git(repo, "checkout", "-q", "-b", "dev")
-    _write(repo, gate.NODES_MANIFEST, _default_nodes(base))
-    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(base))
-    _commit(repo, "dev introduces the manifests")
-
-    # A stale branch, cut before that, introduces its OWN copy — different SHAs.
-    _run_git(repo, "checkout", "-q", "-b", "stale", base)
-    _write(repo, gate.NODES_MANIFEST, _default_nodes(base))
-    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(base))
-    _commit(repo, "stale branch recreates the manifests independently")
-
-    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
-
-
-def test_a_merged_independent_introduction_still_spends_the_bootstrap(tmp_path):
-    """[P1-adjacent] The case that defeated the `--all --not <own_ref>` form.
-
-    Subtracting our own ancestry removes any commit we have merged in, so once
-    two branches that both introduced the ledger were merged, the other branch's
-    add-commit became reachable from us and vanished from the answer.
-    """
-    repo = _new_repo(tmp_path)
-    for name in ("g1.xml", "g2.xml"):
-        _write(repo, "tests/fixtures/golden_xml/{0}".format(name), "<x/>\n")
-    base = _commit(repo, "pre-manifest")
-
-    _run_git(repo, "checkout", "-q", "-b", "dev")
-    _write(repo, gate.NODES_MANIFEST, _default_nodes(base))
-    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(base))
-    _commit(repo, "dev introduces the manifests")
-
-    _run_git(repo, "checkout", "-q", "-b", "mine", base)
-    _write(repo, gate.NODES_MANIFEST, _default_nodes(base))
-    _write(repo, gate.GOLDENS_MANIFEST, _default_goldens(base))
-    _commit(repo, "mine introduces them independently")
-    # ...and then merges dev in, making dev's add-commit reachable from us.
-    _run_git(repo, "-c", "user.email=g@e.invalid", "-c", "user.name=g",
-             "merge", "-q", "--no-edit", "-X", "ours", "dev")
-
-    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
-
 
 def test_the_worktree_fingerprint_reaches_inside_untracked_directories(tmp_path):
     """[P1] `--untracked-files=normal` collapses a directory to one `?? dir/`.
@@ -1999,27 +1930,6 @@ def test_ambiguity_detection_does_not_depend_on_repo_config_or_locale(tmp_path):
     with pytest.raises(gate.GateFailure) as excinfo:
         gate.resolve_baseline(str(repo), base="ambiguous")
     assert excinfo.value.code == "BASELINE_UNAVAILABLE"
-
-
-def test_a_tag_sharing_the_branch_name_does_not_exempt_itself(tmp_path):
-    """Full refnames, not short ones: `%(refname:short)` renders `refs/heads/x`
-    and `refs/tags/x` identically, so a same-named tag would slip through."""
-    repo, base = _bootstrap_repo(tmp_path)
-    current = _git_out(repo, "rev-parse", "--abbrev-ref", "HEAD")
-    _run_git(repo, "update-ref", "refs/tags/{0}".format(current), "HEAD")
-    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
-
-
-    # ...and the wave gate stays usable: the transition arm needs no bootstrap.
-    status, stderr = _manifests(repo, _git_out(repo, "rev-parse", "HEAD"))
-    assert status == 0, stderr
-
-
-def test_a_detached_head_cannot_claim_a_local_bootstrap(tmp_path):
-    """[P1] With no current branch every containing ref looks like a landing."""
-    repo, base = _bootstrap_repo(tmp_path)
-    _run_git(repo, "checkout", "-q", "--detach", "HEAD")
-    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
 
 
 def test_an_event_run_requires_a_clean_tree(tmp_path):
