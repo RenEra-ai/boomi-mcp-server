@@ -189,6 +189,16 @@ Baseline manifests are read with `git show <base>:<path>`; current manifests are
 read from the **worktree**, so CI validates the checked-out merge result and a
 local run validates uncommitted work.
 
+**The checkout is bound to the event.** In an event context the gate asserts that
+`HEAD` is the commit the event names — the push's `after`, or for a PR either the
+head or a `refs/pull/N/merge` commit whose parents are the head and the base —
+and that the worktree is **clean**. Without both, the baseline comes from the
+event while the evidence comes from whatever happens to be checked out, so a PR
+carrying an illegal rewrite could be validated against a different, valid tree.
+`after` is validated as strictly as `before`: degrading a malformed value to
+"unknown" would make the binding silently skip itself. Local `--base` runs keep
+their dirty-tree support, because there the operator chose the baseline.
+
 ## 5. Legal and illegal transitions
 
 Rows are compared **by position**. For each baseline row the current row at the
@@ -329,7 +339,7 @@ proves the seam actually activates.
 ```python
 cases() -> list[str]
 mutations(case) -> list[str]          # must include semantic, envelope, policy, revision
-fingerprint(case, *, account, environment, mutation=None) -> (digest: str, canonical_material: bytes)
+fingerprint(case, *, account, environment, mutation=None) -> ("sha256:<hex>", canonical_material: bytes)
 ```
 
 `fingerprint` returns the digest **and the exact canonical bytes it was derived
@@ -341,7 +351,19 @@ The gate asserts, per case:
 * all four mutation kinds are declared (proving reaction to a `semantic` change
   says nothing about `envelope`, `policy` or `revision`);
 * every mutation changes the material, changes the digest, and is itself
-  relocatable under both identities.
+  relocatable under both identities;
+* the four kinds produce **distinct** plans from each other — otherwise a
+  provider can declare all four names, ignore which was requested, and return
+  one identical "changed" plan every time;
+* the digest is **recomputed**: it must equal `sha256:` + the SHA-256 of the
+  returned material. Accepting any non-empty string would let the digest and the
+  material drift apart, leaving "the exact canonical byte material used to derive
+  it" unverified.
+
+`cases()` and `mutations()` are materialised and type-checked INSIDE the guarded
+call, so a generator that raises mid-iteration — or a bare string, which would
+otherwise become a list of characters — is a coded refusal rather than a
+traceback.
 
 A provider that raises is reported as `PLAN_FINGERPRINT_MISMATCH`, not an
 unhandled traceback: every refusal carries a stable code. Do not change the

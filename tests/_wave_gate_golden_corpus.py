@@ -565,7 +565,14 @@ def render_golden_case(input_case, renderer):
         # graph-verified — within the skip cap, invisibly. Converting it into a
         # hard failure keeps "every active golden ran" true in the ordinary suite
         # and not only under the explicit `wave` command.
-        if type(exc).__name__ in ("Skipped", "OutcomeException", "Failed"):
+        # Match the whole MRO, not the exact class: `pytest.xfail()` raises
+        # `XFailed`, a SUBCLASS of `Failed`, which an exact-name comparison
+        # misses — and an xfailed golden test is green, so the golden would go
+        # unrendered with CI none the wiser. Checked by name rather than by
+        # importing pytest, because this module also runs in a plain child
+        # process outside pytest.
+        _outcomes = {"Skipped", "Failed", "XFailed", "OutcomeException", "Exit"}
+        if _outcomes.intersection(base.__name__ for base in type(exc).__mro__):
             raise RendererMismatch(
                 "case {0!r} raised {1} instead of rendering; a golden renderer may "
                 "not opt out — retire the row if the case is gone".format(

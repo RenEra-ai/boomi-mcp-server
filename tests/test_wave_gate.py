@@ -13,6 +13,7 @@ real script. Nothing here touches the real worktree — which is also the proper
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -106,6 +107,19 @@ def _commit(repo, message):
         repo, "-c", "user.email=gate@example.invalid", "-c", "user.name=gate",
         "commit", "-q", "--allow-empty", "-m", message,
     )
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(repo),
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
+def _git_out(repo, *args):
+    return subprocess.run(
+        ["git", *args], cwd=str(repo), capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
+def _head(repo):
     return subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=str(repo),
         capture_output=True, text=True, check=True,
@@ -350,7 +364,8 @@ def test_a_CI_bootstrap_needs_no_flag(tmp_path):
     """
     repo, base = _bootstrap_repo(tmp_path)
     event = tmp_path / "push.json"
-    event.write_text(json.dumps({"before": base}), encoding="utf-8")
+    event.write_text(json.dumps({"before": base, "after": _head(repo)}),
+                     encoding="utf-8")
     proc = subprocess.run(
         [sys.executable, str(_ROOT / "scripts" / "wave_gate.py"),
          "--repo", str(repo), "manifests", "--github-event", str(event),
@@ -380,7 +395,8 @@ def test_a_CI_bootstrap_whose_event_baseline_is_not_the_declared_base_is_refused
     _commit(repo, "introduce manifests")
 
     event = tmp_path / "push.json"
-    event.write_text(json.dumps({"before": earlier}), encoding="utf-8")
+    event.write_text(json.dumps({"before": earlier, "after": _head(repo)}),
+                     encoding="utf-8")
     proc = subprocess.run(
         [sys.executable, str(_ROOT / "scripts" / "wave_gate.py"),
          "--repo", str(repo), "manifests", "--github-event", str(event),
@@ -479,13 +495,17 @@ def test_a_push_cannot_bootstrap_once_the_manifests_have_landed(tmp_path):
     repo, base = _bootstrap_repo(tmp_path)
     landed = _commit(repo, "the landing commit is now the branch tip")
 
-    # A later push: `before` is the tip, which HAS the manifests.
-    event = tmp_path / "push.json"
-    event.write_text(json.dumps({"before": landed}), encoding="utf-8")
-    # Rewrite an immutable field and try to launder it through.
+    # Rewrite an immutable field and COMMIT it — an event-mode run requires a
+    # clean tree, and a real push carries committed content anyway.
     raw = (repo / gate.GOLDENS_MANIFEST).read_text(encoding="utf-8").splitlines()
     raw[1] = raw[1].replace('"owner":"repository"', '"owner":"#999"')
     _write(repo, gate.GOLDENS_MANIFEST, "\n".join(raw) + "\n")
+    _commit(repo, "rewrite the landed ledger")
+
+    # A later push: `before` is the tip, which HAS the manifests.
+    event = tmp_path / "push.json"
+    event.write_text(json.dumps({"before": landed, "after": _head(repo)}),
+                     encoding="utf-8")
 
     proc = subprocess.run(
         [sys.executable, str(_ROOT / "scripts" / "wave_gate.py"),
@@ -1284,7 +1304,7 @@ class _StubProvider:
     def __init__(self, relocatable=True, discriminating=True, cases=("c1",),
                  mutations=_ALL_KINDS, mutation_relocatable=True,
                  material_leaks_identity=False, colliding=False, raises=False,
-                 bad_shape=False):
+                 bad_shape=False, indistinct_kinds=False, bad_iterable=None):
         self._relocatable = relocatable
         self._discriminating = discriminating
         self._cases = list(cases)
@@ -1294,31 +1314,52 @@ class _StubProvider:
         self._colliding = colliding
         self._raises = raises
         self._bad_shape = bad_shape
+        self._indistinct_kinds = indistinct_kinds
+        self._bad_iterable = bad_iterable
 
     def cases(self):
         if self._raises:
             raise RuntimeError("provider exploded")
+        if self._bad_iterable == "string":
+            return "c1"
+        if self._bad_iterable == "none":
+            return None
+        if self._bad_iterable == "generator":
+            def _gen():
+                yield "c1"
+                raise RuntimeError("exploded mid-iteration")
+            return _gen()
         return self._cases
 
     def mutations(self, case):
         return self._mutations
 
+    @staticmethod
+    def _digest(material):
+        return "sha256:" + hashlib.sha256(material).hexdigest()
+
     def fingerprint(self, case, *, account, environment, mutation=None):
         if self._bad_shape:
             return "just-a-digest"
         body = case if mutation is None else "{0}:{1}".format(case, mutation)
+        if mutation is not None and not self._discriminating:
+            body = case
+        if mutation is not None and self._indistinct_kinds:
+            body = "{0}:changed".format(case)   # same plan for every kind
         material = body.encode()
         if self._material_leaks_identity:
             material = "{0}:{1}:{2}".format(body, account, environment).encode()
+        digest = self._digest(material)
 
         if mutation is not None:
-            digest = body if self._discriminating else case
             if self._colliding:
-                digest = case          # material moved, digest did not
+                digest = self._digest(case.encode())   # material moved, digest did not
             if not self._mutation_relocatable:
-                digest = "{0}:{1}".format(digest, account)
+                material = "{0}:{1}".format(body, account).encode()
+                digest = self._digest(material)
             return digest, material
-        digest = case if self._relocatable else "{0}:{1}".format(case, account)
+        if not self._relocatable:
+            digest = self._digest("{0}:{1}".format(case, account).encode())
         return digest, material
 
 
@@ -1705,6 +1746,116 @@ def test_the_worktree_fingerprint_notices_an_in_place_edit(tmp_path):
     with pytest.raises(gate.GateFailure) as excinfo:
         gate.check_worktree_unchanged(before, gate._status(str(repo)))
     assert excinfo.value.code == "WORKTREE_DIRTY"
+
+
+# ===========================================================================
+# Repo review of the §6 fix delta
+# ===========================================================================
+
+def test_a_pushed_mirror_of_the_working_branch_is_not_a_landing(tmp_path):
+    """[P1] `origin/<branch>` is the working branch, not an integration ref.
+
+    Filtering only the exact current name made the local wave gate unusable the
+    moment the branch was pushed, even though nothing had reached `dev`.
+    """
+    repo, base = _bootstrap_repo(tmp_path)
+    current = _git_out(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    # Simulate `git push` creating a remote-tracking mirror of THIS branch.
+    _run_git(repo, "update-ref", "refs/remotes/origin/{0}".format(current), "HEAD")
+    status, stderr = _manifests(repo, base, "--bootstrap")
+    assert status == 0, stderr
+
+    # A genuine other branch still counts as landed.
+    _run_git(repo, "branch", "dev")
+    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
+
+
+def test_a_detached_head_cannot_claim_a_local_bootstrap(tmp_path):
+    """[P1] With no current branch every containing ref looks like a landing."""
+    repo, base = _bootstrap_repo(tmp_path)
+    _run_git(repo, "checkout", "-q", "--detach", "HEAD")
+    _expect(_manifests(repo, base, "--bootstrap"), 2, "BOOTSTRAP_NOT_ALLOWED")
+
+
+def test_an_event_run_requires_a_clean_tree(tmp_path):
+    """[P1] Otherwise the gate validates bytes the event does not contain."""
+    repo, base = _seeded(tmp_path)
+    head = _commit(repo, "tip")
+    (repo / "README.md").write_text("edited on the runner\n", encoding="utf-8")
+    event = tmp_path / "push.json"
+    event.write_text(json.dumps({"before": base, "after": head}), encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "wave_gate.py"),
+         "--repo", str(repo), "manifests", "--github-event", str(event),
+         "--event-name", "push"],
+        capture_output=True, text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert proc.returncode == 2, proc.stderr
+    assert "CHECKOUT_EVENT_MISMATCH" in proc.stderr
+
+
+@pytest.mark.parametrize(
+    "after", [None, "", "not-a-sha", _ZERO], ids=["missing", "empty", "nonhex", "zero"]
+)
+def test_a_push_without_a_usable_after_is_refused(tmp_path, after):
+    """[P2] Degrading `after` to None made the binding skip its own comparison."""
+    repo, base = _seeded(tmp_path)
+    payload = {"before": base}
+    if after is not None:
+        payload["after"] = after
+    event = tmp_path / "push.json"
+    event.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.resolve_baseline(str(repo), event_path=str(event), event_name="push")
+    assert excinfo.value.code == "BASELINE_EVENT_INVALID"
+
+
+def test_a_renderer_that_xfails_is_also_a_failure():
+    """[P2] `XFailed` subclasses `Failed`; an exact-name match missed it, and an
+    xfailed golden test is GREEN."""
+    import _wave_gate_golden_corpus as corpus
+
+    original = dict(corpus.CASE_REGISTRY)
+    try:
+        def _xfailing():
+            pytest.xfail("a producer helper opted out")
+
+        corpus.CASE_REGISTRY["probe:xfail"] = ("process-xml-v1", _xfailing)
+        with pytest.raises(corpus.RendererMismatch):
+            corpus.render_golden_case("probe:xfail", "process-xml-v1")
+    finally:
+        corpus.CASE_REGISTRY.clear()
+        corpus.CASE_REGISTRY.update(original)
+
+
+@pytest.mark.parametrize("shape", ["string", "none", "generator"])
+def test_a_malformed_provider_iterable_stays_coded(shape):
+    """[P2] `list(...)` outside the guard let a mid-iteration raise escape."""
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(True, _StubProvider(bad_iterable=shape))
+    assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+
+
+def test_the_digest_must_be_the_digest_of_the_material():
+    """[P2] Otherwise the two tuple members can drift apart entirely."""
+    class _Drifting(_StubProvider):
+        def fingerprint(self, case, *, account, environment, mutation=None):
+            return "sha256:" + "0" * 64, b"unrelated bytes"
+
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(True, _Drifting())
+    assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+    assert "sha256" in excinfo.value.message
+
+
+def test_mutation_kinds_must_produce_distinct_plans():
+    """[P2] Declaring four names while ignoring which was asked for proves
+    nothing about envelope, policy or revision discrimination."""
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_plan_fingerprint_checks(True, _StubProvider(indistinct_kinds=True))
+    assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+    assert "distinguishing" in excinfo.value.message
 
 
 def test_the_committed_manifests_parse_and_agree_with_the_tree():

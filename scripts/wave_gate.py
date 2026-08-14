@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import re
@@ -279,6 +280,20 @@ def check_checkout_matches_event(repo, context):
     commit whose parents are the head and the base, so both that merge and a bare
     head checkout are accepted.
     """
+    if context["kind"] in ("push", "pull_request"):
+        # Comparing only the HEAD COMMIT would accept a runner whose worktree had
+        # been edited: `_status` snapshots that dirty state and then merely checks
+        # it does not change, so the gate would validate bytes that are not in the
+        # event's tree at all. CI checkouts are clean; local `--base` runs keep
+        # their dirty-tree support because the operator chose the baseline.
+        dirty = _git(repo, "status", "--porcelain", "--untracked-files=normal").stdout
+        if dirty.strip():
+            raise _contract(
+                "CHECKOUT_EVENT_MISMATCH",
+                "the worktree is not clean, so the tree under test is not the tree "
+                "the {0} event describes:\n{1}".format(context["kind"], dirty),
+            )
+
     head = _git(repo, "rev-parse", "HEAD").stdout.strip()
     if context["kind"] == "push":
         expected = context.get("after")
@@ -716,10 +731,15 @@ def _baseline_from_push(repo, event):
     # the ordinary all-present check.
     resolved = _resolve_commit(repo, before, "BASELINE_UNAVAILABLE")
     after = event.get("after")
-    return {
-        "sha": resolved, "kind": "push", "target": resolved,
-        "after": after if isinstance(after, str) and _SHA_RE.match(after) else None,
-    }
+    if not isinstance(after, str) or not _SHA_RE.match(after) or after == _ZERO_SHA:
+        # Silently degrading this to None made `check_checkout_matches_event` skip
+        # its comparison, so a synthetic event with a valid `before` could bless
+        # any checkout — defeating the binding entirely.
+        raise _contract(
+            "BASELINE_EVENT_INVALID",
+            "push event has no usable 'after' sha: {0!r}".format(after),
+        )
+    return {"sha": resolved, "kind": "push", "target": resolved, "after": after}
 
 
 def _baseline_from_pull_request(repo, event):
@@ -916,6 +936,14 @@ def _refuse_stale_local_bootstrap(repo, baseline):
     branch.
     """
     current = _git(repo, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if current == "HEAD":
+        # Detached: there is no "current branch" to exclude, so every containing
+        # ref would look like an independent landing. Refuse rather than guess.
+        raise _contract(
+            "BOOTSTRAP_NOT_ALLOWED",
+            "cannot judge whether the bootstrap has landed from a detached HEAD; "
+            "run the bootstrap from the branch that introduces the manifests",
+        )
     for spec in _SCHEMAS.values():
         adds = _git(
             repo, "log", "--diff-filter=A", "--format=%H",
@@ -928,7 +956,14 @@ def _refuse_stale_local_bootstrap(repo, baseline):
             repo, "for-each-ref", "--contains", introduction,
             "--format=%(refname:short)", "refs/heads", "refs/remotes",
         ).stdout.split()
-        landed_on = [ref for ref in refs if ref != current]
+        # A MIRROR of the working branch is the working branch. Once the branch
+        # is pushed, `origin/<branch>` also contains the introduction, and a bare
+        # name comparison would read that as "landed" — making the local wave
+        # gate unusable after the first push even though nothing reached `dev`.
+        landed_on = [
+            ref for ref in refs
+            if ref != current and not ref.endswith("/" + current)
+        ]
         if landed_on:
             raise _contract(
                 "BOOTSTRAP_NOT_ALLOWED",
@@ -1402,7 +1437,7 @@ def run_plan_fingerprint_checks(require, provider=None):
             )
         return "pending:#153"
 
-    cases = list(_provider_call(provider.cases))
+    cases = _provider_strings(provider.cases, "cases()")
     if not cases:
         raise _invalid(
             "PLAN_FINGERPRINT_MISMATCH", "the registered provider declares no cases"
@@ -1430,7 +1465,7 @@ def run_plan_fingerprint_checks(require, provider=None):
                 ),
             )
 
-        mutations = list(_provider_call(provider.mutations, case))
+        mutations = _provider_strings(provider.mutations, "mutations()", case)
         missing = [kind for kind in REQUIRED_MUTATION_KINDS if kind not in mutations]
         if missing:
             # The plan enumerates these four. A provider that declares only
@@ -1443,6 +1478,7 @@ def run_plan_fingerprint_checks(require, provider=None):
                     case, missing, list(REQUIRED_MUTATION_KINDS)
                 ),
             )
+        seen_mutations = {}
         for mutation in mutations:
             mutated, mutated_material = _fingerprint(
                 provider, case, _RELOCATION_A, mutation
@@ -1475,6 +1511,25 @@ def run_plan_fingerprint_checks(require, provider=None):
                     "not the fingerprint — a collision the gate must not accept"
                     .format(case, mutation),
                 )
+            seen_mutations[mutation] = mutated_material
+
+        # Each KIND must move the plan differently. Without this a provider can
+        # declare all four names, ignore which one was asked for, and return one
+        # identical "changed" plan every time — every result differs from the
+        # base, so the loop above passes while proving nothing about envelope,
+        # policy or revision discrimination.
+        collisions = {}
+        for kind, material in seen_mutations.items():
+            collisions.setdefault(material, []).append(kind)
+        indistinct = sorted(v for v in collisions.values() if len(v) > 1)
+        if indistinct:
+            raise _invalid(
+                "PLAN_FINGERPRINT_MISMATCH",
+                "case {0!r}: mutation kinds {1} produced identical canonical "
+                "material, so the provider is not distinguishing them".format(
+                    case, indistinct
+                ),
+            )
     return "checked:{0} case(s)".format(len(cases))
 
 
@@ -1497,6 +1552,32 @@ def _provider_call(fn, *args):
         )
 
 
+def _provider_strings(fn, what, *args):
+    """A provider list, MATERIALIZED and type-checked inside the guard.
+
+    ``list(_provider_call(...))`` iterates AFTER the guard has returned, so a
+    generator that raises mid-iteration escapes uncoded — and a bare string would
+    quietly become a list of characters.
+    """
+    def _materialize():
+        value = fn(*args)
+        if isinstance(value, (str, bytes)) or value is None:
+            raise TypeError(
+                "{0} must be a list of strings, got {1}".format(
+                    what, type(value).__name__
+                )
+            )
+        items = list(value)
+        for item in items:
+            if not isinstance(item, str) or not item:
+                raise TypeError(
+                    "{0} must contain non-empty strings, got {1!r}".format(what, item)
+                )
+        return items
+
+    return _provider_call(_materialize)
+
+
 def _fingerprint(provider, case, identity, mutation=None):
     """Return ``(digest, material)`` from the provider, strictly typed."""
     result = _provider_call(
@@ -1509,17 +1590,24 @@ def _fingerprint(provider, case, identity, mutation=None):
             "{1}".format(case, type(result).__name__),
         )
     digest, material = result
-    if not isinstance(digest, str) or not digest:
-        raise _invalid(
-            "PLAN_FINGERPRINT_MISMATCH",
-            "case {0!r}: digest must be a non-empty string".format(case),
-        )
     if not isinstance(material, bytes) or not material:
         raise _invalid(
             "PLAN_FINGERPRINT_MISMATCH",
             "case {0!r}: canonical material must be non-empty bytes — the gate "
             "compares the bytes the digest was derived from, not just the "
             "digest".format(case),
+        )
+    # RECOMPUTE it. Accepting any non-empty string lets the digest and the
+    # material drift apart entirely: a provider could return a stable digest and
+    # independently varying bytes and satisfy every other check, so "the exact
+    # canonical byte material used to derive it" would be unverified.
+    expected = "sha256:" + hashlib.sha256(material).hexdigest()
+    if digest != expected:
+        raise _invalid(
+            "PLAN_FINGERPRINT_MISMATCH",
+            "case {0!r}: digest {1!r} is not sha256 of the canonical material "
+            "(expected {2!r}); the fingerprint must be derived from the bytes the "
+            "provider returns".format(case, digest, expected),
         )
     return digest, material
 
