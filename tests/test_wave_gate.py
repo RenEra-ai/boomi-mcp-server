@@ -2691,6 +2691,59 @@ def test_a_rejected_scratch_is_discarded_through_the_descriptor(tmp_path, monkey
     assert (captured["moved"] / "keep.py").read_text() == "keep me\n"
 
 
+def test_a_usage_error_emits_the_coded_line_first(capsys):
+    """The stable code must be the FIRST token on stderr, not trail argparse.
+
+    `argparse.error()` writes its `usage:` block before raising, so merely
+    catching `SystemExit` leaves a machine consumer reading usage text first —
+    the documented first-token contract says otherwise.
+    """
+    status = gate.main(["ci", "--base", "HEAD"])
+    assert status == 2
+    err = capsys.readouterr().err
+    assert err.split()[0] == "GATE_USAGE_INVALID", err
+    assert "usage:" not in err.splitlines()[0]
+
+
+def test_help_is_not_a_usage_failure(capsys):
+    """`--help` exits 0 through SystemExit and must stay that way."""
+    with pytest.raises(SystemExit) as excinfo:
+        gate.main(["--help"])
+    assert excinfo.value.code in (0, None)
+
+
+def test_a_symlinked_golden_ancestor_keeps_the_validation_status(tmp_path):
+    """The caller picks the failure class; the helper must not force one.
+
+    Golden-tree diagnostics are executed-validation failures (status 1) while
+    manifest reading reports contract failures (status 2). The same code
+    arriving with the wrong status miscategorises it for machine consumers.
+    """
+    root = tmp_path / "repo"
+    (root / "real" / "golden_xml").mkdir(parents=True)
+    (root / "tests" / "fixtures").mkdir(parents=True)
+    os.symlink(str(root / "real" / "golden_xml"),
+               str(root / "tests" / "fixtures" / "golden_xml"),
+               target_is_directory=True)
+
+    # The golden tree's own class: an executed validation failed.
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate._refuse_symlinked_ancestor(
+            str(root), "tests/fixtures/golden_xml", "GOLDEN_FILE_UNDECLARED",
+            "goldens", make=gate._invalid,
+        )
+    assert excinfo.value.code == "GOLDEN_FILE_UNDECLARED"
+    assert excinfo.value.status == 1
+
+    # The manifest caller's class: a contract was violated.
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate._refuse_symlinked_ancestor(
+            str(root), "tests/fixtures/golden_xml", "MANIFEST_FORMAT_INVALID",
+            "manifests",
+        )
+    assert excinfo.value.status == 2
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

@@ -1197,7 +1197,9 @@ def check_golden_tree(repo, goldens):
     if not os.path.isdir(golden_dir):
         raise _invalid("GOLDEN_FILE_MISSING", "{0} does not exist".format(GOLDEN_DIR))
 
-    _refuse_symlinked_ancestor(repo, GOLDEN_DIR, "GOLDEN_FILE_UNDECLARED", "goldens")
+    _refuse_symlinked_ancestor(
+        repo, GOLDEN_DIR, "GOLDEN_FILE_UNDECLARED", "goldens", make=_invalid
+    )
 
     on_disk = set()
     for entry in sorted(os.listdir(golden_dir)):
@@ -1512,20 +1514,30 @@ def _parse_suite_summary(text):
 # --------------------------------------------------------------------------
 
 def _render_dir(tmpdir, index):
-    """A fresh per-pass directory, created relative to the held descriptor."""
+    """A fresh per-pass directory, created and OPENED relative to the scratch.
+
+    Returns ``(path, fd)``. The descriptor is what writes go through: converting
+    the pass directory to a plain string and calling `open()` on it would follow
+    a retargeted name and write outside the held scratch — the same-user race the
+    whole `_ScratchDir` design exists to defend against. The pathname is derived
+    only to hand to the child process, which must resolve a name because it is a
+    separate process.
+    """
     name = "render-{0}".format(index)
     held = getattr(tmpdir, "fd", None)
     try:
         if held is not None:
-            os.mkdir(name, 0o700, dir_fd=held)   # descriptor-relative in the gate
+            os.mkdir(name, 0o700, dir_fd=held)
+            fd = os.open(name, os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW, dir_fd=held)
         else:
             os.mkdir(os.path.join(tmpdir, name), 0o700)
+            fd = None
     except OSError as exc:
         raise _invalid(
             "GOLDEN_RENDER_FAILED",
             "cannot create the pass-{0} scratch directory ({1})".format(index, exc),
         )
-    return os.path.join(tmpdir, name)
+    return os.path.join(tmpdir, name), fd
 
 
 def _render_pass(repo, goldens, tmpdir, hashseed):
@@ -1540,9 +1552,23 @@ def _render_pass(repo, goldens, tmpdir, hashseed):
         {"id": row["id"], "input_case": row["input_case"], "renderer": row["renderer"]}
         for row in goldens.active
     ]
-    request_path = os.path.join(tmpdir, "request-{0}.json".format(hashseed))
-    with open(request_path, "w") as handle:
-        json.dump(request, handle)
+    pass_dir, pass_fd = _render_dir(tmpdir, hashseed)
+    request_name = "request-{0}.json".format(hashseed)
+    try:
+        if pass_fd is not None:
+            handle = os.fdopen(
+                os.open(request_name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600,
+                        dir_fd=pass_fd),
+                "w",
+            )
+        else:
+            handle = open(os.path.join(pass_dir, request_name), "w")
+        with handle:
+            json.dump(request, handle)
+    finally:
+        if pass_fd is not None:
+            _close_quietly(pass_fd)
+    request_path = os.path.join(pass_dir, request_name)
 
     proc = subprocess.run(
         [sys.executable, os.path.join(repo, GOLDEN_CORPUS), "--render", request_path],
@@ -1585,8 +1611,8 @@ def check_goldens(repo, goldens, tmpdir):
     # lets a renderer that caches beside its request file have pass 2 read what
     # pass 1 wrote — the two passes then agree because they shared state, which
     # is precisely the nondeterminism this check exists to expose.
-    first = _render_pass(repo, goldens, _render_dir(tmpdir, 1), 1)
-    second = _render_pass(repo, goldens, _render_dir(tmpdir, 2), 2)
+    first = _render_pass(repo, goldens, tmpdir, 1)
+    second = _render_pass(repo, goldens, tmpdir, 2)
 
     for label, results in (("pass 1", first), ("pass 2", second)):
         if set(results) != expected_ids:
@@ -2441,7 +2467,7 @@ def _unlink_tree_at(dirfd):
             os.unlink(entry.name, dir_fd=dirfd)
 
 
-def _refuse_symlinked_ancestor(repo, relpath, code, what):
+def _refuse_symlinked_ancestor(repo, relpath, code, what, make=None):
     """Refuse a declared path reached through a symlinked DIRECTORY.
 
     Checking only the final component is not enough: replacing `golden_xml`
@@ -2453,7 +2479,12 @@ def _refuse_symlinked_ancestor(repo, relpath, code, what):
     for part in relpath.split("/"):
         walked = os.path.join(walked, part)
         if os.path.islink(walked):
-            raise _contract(
+            # The FAILURE CLASS is the caller's, not this helper's. The golden
+            # tree reports its own diagnostics as executed-validation failures
+            # (status 1) while manifest reading reports contract failures
+            # (status 2); hard-coding one here would hand machine consumers the
+            # wrong category for the same code they already know.
+            raise (make or _contract)(
                 code,
                 "{0} is reached through a symlink at {1}; {2} must be at their "
                 "declared paths".format(relpath, os.path.relpath(walked, repo), what),
@@ -2614,14 +2645,14 @@ def check_worktree_unchanged(before, after):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(
+    parser = _GateArgumentParser(
         prog="wave_gate.py", description=__doc__.split("\n")[0],
     )
     parser.add_argument(
         "--repo", default=None,
         help="repository to check (default: the repo this script lives in)",
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(parser_class=_GateArgumentParser, dest="command", required=True)
 
     ci = subparsers.add_parser(
         "ci", help="the required CI check: manifests + collection + full non-KB suite",
@@ -2676,6 +2707,32 @@ def exit_status_for(failure):
     return 2 if (type(status) is int and status == 2) else 1
 
 
+class _UsageError(Exception):
+    """argparse rejected the command line — raised INSTEAD of printing."""
+
+    def __init__(self, detail):
+        Exception.__init__(self, detail)
+        self.detail = detail
+
+
+class _GateArgumentParser(argparse.ArgumentParser):
+    """A parser that never writes to stderr and never exits on its own.
+
+    `--help`/`--version` still exit 0 through `SystemExit`, which is correct and
+    is left alone; only the ERROR path is diverted, so the gate's coded
+    diagnostic is the first token on stderr rather than trailing argparse's
+    usage block.
+    """
+
+    def error(self, message):
+        raise _UsageError(message)
+
+    def exit(self, status=0, message=None):
+        if status:
+            raise _UsageError(message.strip() if message else "invalid arguments")
+        raise SystemExit(status)
+
+
 def main(argv=None):
     try:
         # INSIDE the boundary. argparse exits 2 with usage text and no code, so
@@ -2684,12 +2741,14 @@ def main(argv=None):
         # EVERY failure carries one.
         try:
             args = build_parser().parse_args(argv)
-        except SystemExit as exc:
-            if exc.code in (0, None):       # --help / --version: not a failure
-                raise
+        except _UsageError as exc:
+            # argparse's own `error()` writes `usage: ...` to stderr BEFORE it
+            # raises, so merely catching SystemExit still leaves the stable code
+            # as the second thing a machine consumer sees. The parser is
+            # overridden to raise instead of printing, so the coded line is first.
             raise _contract(
                 "GATE_USAGE_INVALID",
-                "the command line is not valid for this gate; see --help",
+                "{0}; see --help".format(exc.detail),
             )
         return execute(args)
     except GateFailure as failure:
