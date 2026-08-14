@@ -2049,6 +2049,12 @@ def make_scratch_dir(repo):
 _O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _DOTDOT_PROBE = ".wave-gate-dotdot-probe"
+# A TAG, not a bool. `bool` is a subclass of `int` in Python, so a `True`
+# calibration would satisfy an `isinstance(..., int)` errno comparison AND equal
+# `errno.EPERM` (1) — an unrelated EPERM would then read as the calibrated unlink
+# signal and prove a removal that never happened. The two outcomes are different
+# kinds of answer, so they get different types.
+_DOTDOT_SURVIVES = object()
 
 
 class _ScratchDir(object):
@@ -2249,7 +2255,7 @@ def _probe_dotdot_at(fd):
     just passed containment, using a directory the gate creates and removes
     itself.
 
-    Returns True when `..` still resolves after removal, or the SPECIFIC errno
+    Returns `_DOTDOT_SURVIVES` when `..` still resolves after removal, or the SPECIFIC errno
     this filesystem reports when it does not, or None when the probe could not
     run — which `_removal_proved` treats as "cannot interpret" and fails closed
     on.
@@ -2272,7 +2278,7 @@ def _probe_dotdot_at(fd):
         return None
     try:
         _close_quietly(os.open("..", os.O_RDONLY | _O_DIRECTORY, dir_fd=probe))
-        return True
+        return _DOTDOT_SURVIVES
     except OSError as exc:
         # The SPECIFIC errno this filesystem reports for an unlinked directory.
         # Returning a bare False would later accept any `OSError` at all —
@@ -2302,7 +2308,7 @@ def _removal_proved(parent_fd, fd, held, dotdot_survives):
     * `..` from the held descriptor still names that parent, so a directory
       moved elsewhere mid-race is caught. `dotdot_survives` records what this
       filesystem actually does after a removal (see `_probe_dotdot_at`) — either
-      True, or the exact errno it reports. An unreadable `..` is NOT proof of
+      the `_DOTDOT_SURVIVES` tag, or the exact errno it reports. An unreadable `..` is NOT proof of
       unlinking: it counts only when the errno MATCHES the calibrated one, so an
       `EACCES` or `EMFILE` from an unrelated cause cannot masquerade as the
       unlink signal.
@@ -2316,9 +2322,11 @@ def _removal_proved(parent_fd, fd, held, dotdot_survives):
         # unlinked directory. Any other errno is an unrelated lookup failure —
         # accepting it would report a clean disposal on the strength of a
         # permission or descriptor-exhaustion error.
-        return isinstance(dotdot_survives, int) and exc.errno == dotdot_survives
+        # `type(...) is int`, deliberately not `isinstance`: `isinstance(True,
+        # int)` is True, so a survives-calibration would match `errno.EPERM`.
+        return type(dotdot_survives) is int and exc.errno == dotdot_survives
     try:
-        if dotdot_survives is not True:
+        if dotdot_survives is not _DOTDOT_SURVIVES:
             return False                  # `..` should not have opened here: unproven
         return os.fstat(up).st_ino == os.fstat(parent_fd).st_ino
     finally:

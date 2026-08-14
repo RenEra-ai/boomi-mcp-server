@@ -2489,13 +2489,58 @@ def test_an_unreadable_parent_probe_is_not_proof_of_removal(tmp_path, monkeypatc
         monkeypatch.setattr(os, "open", blind)
 
         # `..` survives removal here, so ANY error is unproven.
-        assert gate._removal_proved(parent, scratch.fd, held, True) is False
+        assert (
+            gate._removal_proved(parent, scratch.fd, held, gate._DOTDOT_SURVIVES)
+            is False
+        )
         # Probe could not run: unproven.
         assert gate._removal_proved(parent, scratch.fd, held, None) is False
         # Calibrated to a DIFFERENT errno: an unrelated EACCES is not the signal.
         assert gate._removal_proved(parent, scratch.fd, held, errno.ENOENT) is False
         # Calibrated to exactly this errno: that IS the platform's unlink signal.
         assert gate._removal_proved(parent, scratch.fd, held, errno.EACCES) is True
+        assert reached, "the '..' branch never ran — the test would be vacuous"
+    finally:
+        monkeypatch.undo()
+        os.close(parent)
+        scratch.dispose()
+
+
+def test_a_survives_calibration_is_never_matched_as_an_errno(tmp_path, monkeypatch):
+    """`bool` is a subclass of `int`, and `True == errno.EPERM`.
+
+    Measured: `isinstance(True, int) -> True`, `True == errno.EPERM -> True`.
+    So a survives-calibration compared with `isinstance(..., int)` would accept
+    an unrelated EPERM from the parent lookup as the calibrated unlink signal and
+    report a removal that never happened. The calibration is a tag, not a bool.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+    scratch = gate.make_scratch_dir(str(repo))
+
+    held = os.fstat(scratch.fd)
+    parent = os.open("..", os.O_RDONLY | gate._O_DIRECTORY, dir_fd=scratch.fd)
+    real_open = os.open
+    reached = []
+
+    def eperm(path, *args, **kwargs):
+        if path == ".." and kwargs.get("dir_fd") == scratch.fd:
+            reached.append(path)
+            raise OSError(errno.EPERM, "Operation not permitted")
+        return real_open(path, *args, **kwargs)
+
+    try:
+        monkeypatch.setattr(gate, "_entry_naming", lambda *a, **k: None)
+        monkeypatch.setattr(os, "open", eperm)
+        assert (
+            gate._removal_proved(parent, scratch.fd, held, gate._DOTDOT_SURVIVES)
+            is False
+        ), "EPERM must not satisfy a survives-calibration"
+        # A literal True must not either, however it reaches the function.
+        assert gate._removal_proved(parent, scratch.fd, held, True) is False
         assert reached, "the '..' branch never ran — the test would be vacuous"
     finally:
         monkeypatch.undo()
