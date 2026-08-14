@@ -2864,6 +2864,58 @@ def test_a_foreign_file_nested_in_an_owned_directory_is_classified(tmp_path, mon
     shutil.rmtree(resolved, ignore_errors=True)
 
 
+def test_an_owned_child_must_still_be_named_by_its_parent(tmp_path, monkeypatch):
+    """The scratch root re-proves its binding; every owned child must too.
+
+    A sibling can rename an opened `render-*` between `os.open` and the recursive
+    deletion, after which deletion proceeds through a still-valid descriptor while
+    the ROOT's checks keep passing. This is the root's existing proof applied
+    uniformly, not a new mechanism.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+
+    scratch = gate.make_scratch_dir(str(repo))
+    child = scratch.mkdir_owned("render-9")
+    try:
+        # While bound, the proof accepts.
+        gate._refuse_unbound_child(scratch.fd, "render-9", child)
+        # Renamed away: the name no longer denotes the held directory.
+        os.rename(os.path.join(os.fspath(scratch), "render-9"),
+                  str(tmp_path / "stolen"))
+        with pytest.raises(gate._ForeignEntry):
+            gate._refuse_unbound_child(scratch.fd, "render-9", child)
+    finally:
+        os.close(child)
+        scratch.dispose()
+
+
+def test_content_moved_into_the_worktree_is_caught_by_the_fingerprint(tmp_path):
+    """The bound on every remaining scratch-disposal race, measured.
+
+    A NON-empty directory appearing in the worktree is `WORKTREE_DIRTY`; only an
+    EMPTY one is invisible, because git does not track empty directories. That is
+    why the residual tracked in #164 cannot smuggle content past the gate.
+    """
+    repo, _base = _seeded(tmp_path)
+    before = gate._status(str(repo))
+
+    (repo / "render-1").mkdir()
+    (repo / "render-1" / "request-1.json").write_text("{}")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_worktree_unchanged(before, gate._status(str(repo)))
+    assert excinfo.value.code == "WORKTREE_DIRTY"
+
+    shutil.rmtree(str(repo / "render-1"))
+    (repo / "render-1").mkdir()
+    # Empty: git tracks nothing, so the fingerprint cannot see it. Stated, not
+    # hidden — this is exactly the bound recorded in #164.
+    gate.check_worktree_unchanged(before, gate._status(str(repo)))
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

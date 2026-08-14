@@ -2703,6 +2703,17 @@ def _remove_owned(dirfd, owned):
         _remove_owned_entry(dirfd, parts)
 
 
+def _refuse_unbound_child(parent_fd, name, child_fd):
+    """`name` in `parent_fd` must still BE the directory `child_fd` holds."""
+    try:
+        named = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except OSError:
+        raise _ForeignEntry(name)
+    held = os.fstat(child_fd)
+    if (named.st_dev, named.st_ino) != (held.st_dev, held.st_ino):
+        raise _ForeignEntry(name)
+
+
 def _remove_owned_entry(dirfd, parts):
     if len(parts) > 1:
         try:
@@ -2715,7 +2726,16 @@ def _remove_owned_entry(dirfd, parts):
             # ELOOP/ENOTDIR: the component is no longer the directory we made.
             raise _ForeignEntry(parts[0])
         try:
+            # The SAME proof the scratch root already makes, applied uniformly to
+            # every directory the gate deletes through — not a new mechanism, a
+            # missing application of the existing one. A sibling can rename an
+            # opened `render-*` into the worktree between `os.open` and the
+            # recursion; deletion would then proceed through a descriptor that is
+            # still perfectly valid, leaving an empty in-repo directory git does
+            # not track while the root's own binding checks keep passing.
+            _refuse_unbound_child(dirfd, parts[0], child)
             _remove_owned_entry(child, parts[1:])
+            _refuse_unbound_child(dirfd, parts[0], child)
         finally:
             _close_quietly(child)
         return
