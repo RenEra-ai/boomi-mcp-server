@@ -2016,6 +2016,16 @@ def test_a_null_merge_commit_sha_falls_back_to_GITHUB_SHA(tmp_path, monkeypatch)
         gate.check_checkout_matches_event(str(repo), ctx)
     assert excinfo.value.code == "CHECKOUT_EVENT_MISMATCH"
 
+    # And GITHUB_SHA WINS when both are present and disagree: the payload's
+    # merge sha is computed asynchronously and can lag the workflow context, so
+    # trusting it first would accept a stale commit and reject the real one.
+    ctx_stale = dict(ctx, merge_sha=merge)
+    monkeypatch.setenv("GITHUB_SHA", "9" * 40)
+    with pytest.raises(gate.GateFailure):
+        gate.check_checkout_matches_event(str(repo), ctx_stale)
+    monkeypatch.setenv("GITHUB_SHA", merge)
+    gate.check_checkout_matches_event(str(repo), dict(ctx, merge_sha="9" * 40))
+
 
 def test_a_pr_checkout_without_an_authoritative_merge_sha_is_refused(
     tmp_path, monkeypatch

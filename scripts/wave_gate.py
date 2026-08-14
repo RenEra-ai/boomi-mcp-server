@@ -425,10 +425,8 @@ def check_checkout_matches_event(repo, context):
     # `pull_request.merge_commit_sha` is NULLABLE (GitHub computes mergeability
     # asynchronously and sends null until it settles), so requiring the payload
     # field would reject legitimate PR runs before a single test executed.
-    merge_sha = context.get("merge_sha")
     env_sha = os.environ.get("GITHUB_SHA", "")
-    if not merge_sha and _SHA_RE.match(env_sha):
-        merge_sha = env_sha
+    merge_sha = env_sha if _SHA_RE.match(env_sha) else context.get("merge_sha")
     if not merge_sha:
         raise _contract(
             "CHECKOUT_EVENT_MISMATCH",
