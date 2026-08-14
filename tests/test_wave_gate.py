@@ -18,6 +18,7 @@ import importlib.util
 import json
 import errno
 import os
+import pathlib
 import shutil
 import subprocess
 import tempfile
@@ -475,7 +476,7 @@ def test_an_ordinary_pull_request_whose_target_moved_on_is_NOT_a_bootstrap(tmp_p
     assert "BOOTSTRAP" not in proc.stderr
 
 
-def test_a_local_bootstrap_is_an_explicit_operator_assertion(tmp_path):
+def test_a_local_bootstrap_is_derived_and_the_flag_only_confirms_intent(tmp_path):
     """The local arm asserts; it does not verify. And it says so.
 
     There is deliberately NO local check that the exception is still unspent.
@@ -499,15 +500,22 @@ def test_a_local_bootstrap_is_an_explicit_operator_assertion(tmp_path):
 
     status, stderr = _manifests(repo, base, "--bootstrap")
     assert status == 0, stderr
-    assert "OPERATOR ASSERTION" in stderr
-    assert "skips manifest transition validation" in stderr
+    # The note must describe the gate ACCURATELY: eligibility is derived, and the
+    # flag only confirms intent. An earlier wording claimed the flag "skips
+    # manifest transition validation entirely", which misdescribed the gate's own
+    # behaviour — the derivation (manifests absent at the baseline, never touched
+    # in its ancestry) runs regardless of the flag. What a local run cannot check
+    # is the operator's BASELINE CHOICE.
+    assert "DERIVED" in stderr
+    assert "confirms you meant it" in stderr
+    assert "no transition to validate" in stderr
 
     # Sharing it changes nothing locally — that is the point being pinned, so a
     # ninth landing heuristic is not reintroduced by accident.
     _run_git(repo, "branch", "dev")
     status, stderr = _manifests(repo, base, "--bootstrap")
     assert status == 0, stderr
-    assert "OPERATOR ASSERTION" in stderr
+    assert "DERIVED" in stderr
 
     # ...while the CI arm DOES judge it: `before` is the tip, which has the
     # manifests, so no bootstrap is available and the transition rules apply.
@@ -986,22 +994,25 @@ def test_reactivating_a_tombstone_is_refused():
     )
 
 
-def test_appending_an_already_tombstoned_row_is_LEGAL():
-    """A push range that adds a test in one commit and retires it in a later one
-    is exactly this from the range's endpoints.
+def test_appending_an_already_tombstoned_row_is_refused():
+    """A tombstone is a RETIREMENT RECORD; there is nothing to retire.
 
-    Refusing it made an ordinary multi-commit push illegal even though every
-    individual commit transition was legal — reproduced on this very branch,
-    where `manifests --base <4 commits back>` exited 2. Nothing is lost: a
-    tombstoned row must separately have no artifact, so it stays accounted for.
+    Plan §"Append a tombstoned row → fail". An identity that was never in the
+    manifest cannot be introduced already retired — the row would permanently
+    reserve an id for something that never collected, with floors unchanged.
+
+    A push that adds a test in one commit and removes it in a later one needs no
+    row at all: from the range's endpoints that test simply never existed. An
+    earlier revision admitted such rows to make that push legal, which solved a
+    problem that does not exist.
     """
-    assert _transition(
+    _transition_fails(
         [_node_row(1)], [_node_row(1), _node_row(2, state="tombstone")],
         base_header=_node_header(1, 1), head_header=_node_header(1, 1),
-    ) == (0, 0)
-
-    # ...and the floor still has to track it: a born-tombstoned row adds nothing
-    # to the active count, so claiming it does is refused.
+        code="MANIFEST_TRANSITION_ILLEGAL",
+    )
+    # Claiming it as an active append is refused too — the floor check runs
+    # first and already rejects a floor that no active row supports.
     _transition_fails(
         [_node_row(1)], [_node_row(1), _node_row(2, state="tombstone")],
         base_header=_node_header(1, 1), head_header=_node_header(2, 1),
@@ -2605,6 +2616,81 @@ def test_dispose_is_total_even_when_closing_the_descriptor_throws(
     shutil.rmtree(resolved, ignore_errors=True)
 
 
+def test_a_directory_swapped_onto_the_candidate_name_is_refused(tmp_path, monkeypatch):
+    """Containment cannot tell somebody else's directory from ours.
+
+    `mkdtemp()` returns a NAME; a same-user process can replace the directory at
+    that name before `os.open()`. An attacker's directory OUTSIDE the repository
+    passes the containment check perfectly well, so without an identity+shape
+    check the gate adopts their files as scratch and `dispose()` recursively
+    deletes them. Reproduced against the unfixed code with a `precious.txt`
+    inside.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+
+    real_mkdtemp = tempfile.mkdtemp
+    swapped = []
+
+    def swapping(*args, **kwargs):
+        made = real_mkdtemp(*args, **kwargs)
+        os.rmdir(made)
+        os.makedirs(made)
+        (pathlib.Path(made) / "precious.txt").write_text("real data\n")
+        swapped.append(made)
+        return made
+
+    monkeypatch.setattr(tempfile, "mkdtemp", swapping)
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.make_scratch_dir(str(repo))
+    assert excinfo.value.code == "SCRATCH_NOT_OURS"
+    assert swapped, "the swap never happened — the test would be vacuous"
+    # Nothing of theirs was deleted.
+    assert (pathlib.Path(swapped[0]) / "precious.txt").exists()
+
+
+def test_a_rejected_scratch_is_discarded_through_the_descriptor(tmp_path, monkeypatch):
+    """The failure path must not `rmtree` the candidate PATHNAME.
+
+    On that path the gate has just decided the candidate is untrustworthy, and
+    the pathname is the thing it distrusts. Reproduced against the unfixed code:
+    moving a tracked directory onto the candidate name during the failing check
+    made cleanup delete the tracked subtree.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+
+    tracked = repo / "tracked_subtree"
+    tracked.mkdir()
+    (tracked / "keep.py").write_text("keep me\n")
+
+    captured = {}
+    real_refuse = gate._refuse_scratch_inside_repo
+
+    def hijack(fd, repo_path):
+        # Move the tracked subtree onto the candidate name, then fail.
+        entries = [p for p in os.listdir(str(outside)) if p.startswith("wave-gate-")]
+        assert entries, "no candidate to hijack — the test would be vacuous"
+        captured["moved"] = outside / entries[0]
+        os.rmdir(str(captured["moved"]))
+        os.rename(str(tracked), str(captured["moved"]))
+        raise gate._contract("SCRATCH_INSIDE_REPO", "forced for the test")
+
+    monkeypatch.setattr(gate, "_refuse_scratch_inside_repo", hijack)
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.make_scratch_dir(str(repo))
+    assert excinfo.value.code == "SCRATCH_INSIDE_REPO"
+    monkeypatch.setattr(gate, "_refuse_scratch_inside_repo", real_refuse)
+    # The tracked subtree survived the failure path.
+    assert (captured["moved"] / "keep.py").read_text() == "keep me\n"
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 
@@ -2800,28 +2886,6 @@ def test_git_stderr_is_read_under_a_pinned_locale(tmp_path, monkeypatch):
 def test_a_nonzero_git_exit_still_refuses():
     with pytest.raises(gate.GateFailure):
         gate._refuse_unreadable(_Proc(stderr=b"boom", returncode=128), "git diff")
-
-
-def test_a_born_tombstoned_row_is_still_reported(tmp_path):
-    """[Standard] It changes no floor, but it IS a retirement record.
-
-    Excluding born-tombstones from the audit made the documented compensating
-    control — "every tombstone transition is reported with its immutable owner
-    and disposition" — quietly skip them.
-    """
-    base_rows = [_golden_row(1)]
-    head_rows = [_golden_row(1), _golden_row(2, owner="#159",
-                                             disposition="transitional_oracle",
-                                             state="tombstone")]
-    appended, tombstoned, born = gate.validate_transition(
-        gate.parse_manifest(_serialize(_golden_header(1), base_rows), "goldens"),
-        gate.parse_manifest(_serialize(_golden_header(1), head_rows), "goldens"),
-        "goldens",
-    )
-    assert (appended, tombstoned) == (0, 0)
-    assert [row["id"] for row in born] == ["golden-000002"]
-    assert born[0]["owner"] == "#159"
-    assert born[0]["disposition"] == "transitional_oracle"
 
 
 def test_a_provider_raising_SystemExit_cannot_exit_green():

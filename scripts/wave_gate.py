@@ -59,6 +59,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -291,7 +292,13 @@ def _blob_at(repo, sha, path):
 
 
 def _path_touched_in_ancestry(repo, sha, path):
-    proc = _git(repo, "log", "--max-count=1", "--format=%H", sha, "--", path)
+    # `--full-history` is load-bearing, not tidiness. Path-limited `git log`
+    # SIMPLIFIES history by default, so an addition on a side branch that an
+    # `ours` merge discarded is pruned from the walk — the path then looks
+    # untouched in ancestry and the one-time bootstrap exception is granted for a
+    # manifest that already existed.
+    proc = _git(repo, "log", "--full-history", "--max-count=1", "--format=%H",
+                sha, "--", path)
     return bool(proc.stdout.strip())
 
 
@@ -618,8 +625,12 @@ def parse_manifest(raw, name):
         raise bad("line 1: kind must be 'manifest'")
     if header_obj["manifest"] != name:
         raise bad("line 1: manifest must be {0!r}".format(name))
-    if header_obj["schema_version"] != SCHEMA_VERSION:
-        raise bad("line 1: schema_version must be {0}".format(SCHEMA_VERSION))
+    # `type(...) is int`, not `==` alone: `True == 1` and `1.0 == 1` in Python,
+    # so a header carrying JSON `true` or `1.0` would be accepted as version 1 and
+    # land in an IMMUTABLE row.
+    if (type(header_obj["schema_version"]) is not int
+            or header_obj["schema_version"] != SCHEMA_VERSION):
+        raise bad("line 1: schema_version must be the integer {0}".format(SCHEMA_VERSION))
     for floor_field in ("minimum_active", "minimum_collected", "maximum_skipped"):
         if floor_field not in spec["header"]:
             continue
@@ -802,24 +813,32 @@ def validate_transition(base, current, name):
         if was["state"] == "active" and now["state"] == "tombstone":
             newly_tombstoned += 1
 
-    # An appended row MAY arrive tombstoned. A push range that adds a test in one
-    # commit and retires it in a later one is exactly that from the range's
-    # endpoints, and refusing it made an ordinary multi-commit push illegal even
-    # though every individual commit transition was legal. Nothing is lost: a
-    # tombstoned row is separately required to have no artifact — no golden file,
-    # and a node id that does not collect — so a born-tombstoned row is still
-    # fully accounted for.
+    # An appended row may NOT arrive tombstoned. A tombstone is a RETIREMENT
+    # RECORD, and there is nothing to retire for an identity that was never in
+    # the manifest: the row would permanently reserve an id for something that
+    # never collected and never existed here.
+    #
+    # The multi-commit push that adds a test in one commit and removes it in a
+    # later one needs no row at all — from the range's endpoints that test simply
+    # never existed. An earlier revision admitted born-tombstones to make such a
+    # push legal; that solved a problem that does not exist, and it opened a way
+    # to mint reserved identities with unchanged floors.
     appended = current.rows[len(base.rows):]
-    appended_active = len([row for row in appended if row["state"] == "active"])
-    # Born-tombstoned appends stay OUT of `newly_tombstoned` (they were never
-    # active, so they change no floor) but they are still retirement records and
-    # must appear in the audit trail — otherwise the documented compensating
-    # control, "every tombstone transition is reported with its immutable owner
-    # and disposition", quietly skips them.
     born_tombstoned = [row for row in appended if row["state"] == "tombstone"]
+    if born_tombstoned:
+        raise _contract(
+            "MANIFEST_TRANSITION_ILLEGAL",
+            "{0}: rows {1} are appended already tombstoned; a tombstone records "
+            "the retirement of a row that existed, so an identity that was never "
+            "active cannot be introduced retired. A row added and removed within "
+            "the same range needs no row at all.".format(
+                name, [row["id"] for row in born_tombstoned]
+            ),
+        )
+    appended_active = len(appended)
 
     _check_floor_arithmetic(base, current, appended_active, newly_tombstoned, name)
-    return appended_active, newly_tombstoned, born_tombstoned
+    return appended_active, newly_tombstoned, []
 
 
 def _check_floor_arithmetic(base, current, appended, newly_tombstoned, name):
@@ -1145,12 +1164,20 @@ def check_bootstrap(repo, baseline, manifests, *, require_flag, flag_given,
         # checked: the `ci` arms. Those are unaffected, and they are strict —
         # `push` compares against the branch tip it builds on, `pull_request`
         # additionally requires the target to carry no manifests.
+        # Accurate about what was and was not proven. The eligibility itself IS
+        # derived — both manifests absent at the baseline, neither path anywhere
+        # in its ancestry, and the declared `bootstrap_base` matching — so the
+        # flag confirms intent and never substitutes for the derivation. What a
+        # local run cannot check is the BASELINE CHOICE: `--base` is whatever the
+        # operator typed, and a baseline from before the manifests landed has no
+        # prior manifest to transition from, so no transition is validated.
         _emit(
-            "wave_gate: WARNING — a local --bootstrap is an OPERATOR ASSERTION, not "
-            "a verified one. It skips manifest transition validation entirely. Only "
-            "the CI arms can judge whether the exception is still unspent; if the "
-            "ledger has landed, run `--base <a commit that carries the manifests>` "
-            "WITHOUT --bootstrap to validate the transition."
+            "wave_gate: NOTE — bootstrap eligibility was DERIVED (manifests absent "
+            "at the baseline and never touched in its ancestry); --bootstrap only "
+            "confirms you meant it. The baseline itself is your choice, and a "
+            "pre-manifest baseline has no transition to validate. Once the ledger "
+            "has landed, run `--base <a commit that carries the manifests>` "
+            "WITHOUT --bootstrap to exercise the transition rules."
         )
     return True
 
@@ -1169,6 +1196,8 @@ def check_golden_tree(repo, goldens):
     golden_dir = os.path.join(repo, GOLDEN_DIR)
     if not os.path.isdir(golden_dir):
         raise _invalid("GOLDEN_FILE_MISSING", "{0} does not exist".format(GOLDEN_DIR))
+
+    _refuse_symlinked_ancestor(repo, GOLDEN_DIR, "GOLDEN_FILE_UNDECLARED", "goldens")
 
     on_disk = set()
     for entry in sorted(os.listdir(golden_dir)):
@@ -1482,6 +1511,23 @@ def _parse_suite_summary(text):
 # Golden rendering — the deterministic double compile
 # --------------------------------------------------------------------------
 
+def _render_dir(tmpdir, index):
+    """A fresh per-pass directory, created relative to the held descriptor."""
+    name = "render-{0}".format(index)
+    held = getattr(tmpdir, "fd", None)
+    try:
+        if held is not None:
+            os.mkdir(name, 0o700, dir_fd=held)   # descriptor-relative in the gate
+        else:
+            os.mkdir(os.path.join(tmpdir, name), 0o700)
+    except OSError as exc:
+        raise _invalid(
+            "GOLDEN_RENDER_FAILED",
+            "cannot create the pass-{0} scratch directory ({1})".format(index, exc),
+        )
+    return os.path.join(tmpdir, name)
+
+
 def _render_pass(repo, goldens, tmpdir, hashseed):
     """Render every ACTIVE golden once, in a fresh child process.
 
@@ -1494,12 +1540,9 @@ def _render_pass(repo, goldens, tmpdir, hashseed):
         {"id": row["id"], "input_case": row["input_case"], "renderer": row["renderer"]}
         for row in goldens.active
     ]
-    request_name = "request-{0}.json".format(hashseed)
-    with tmpdir.open_for_write(request_name) as handle:
+    request_path = os.path.join(tmpdir, "request-{0}.json".format(hashseed))
+    with open(request_path, "w") as handle:
         json.dump(request, handle)
-    # Re-derived AFTER the write, so the path handed to the child is one the
-    # binding still holds for.
-    request_path = os.path.join(tmpdir, request_name)
 
     proc = subprocess.run(
         [sys.executable, os.path.join(repo, GOLDEN_CORPUS), "--render", request_path],
@@ -1538,8 +1581,12 @@ def _render_pass(repo, goldens, tmpdir, hashseed):
 
 def check_goldens(repo, goldens, tmpdir):
     expected_ids = {row["id"] for row in goldens.active}
-    first = _render_pass(repo, goldens, tmpdir, 1)
-    second = _render_pass(repo, goldens, tmpdir, 2)
+    # SEPARATE directories, not just separate processes. Sharing one directory
+    # lets a renderer that caches beside its request file have pass 2 read what
+    # pass 1 wrote — the two passes then agree because they shared state, which
+    # is precisely the nondeterminism this check exists to expose.
+    first = _render_pass(repo, goldens, _render_dir(tmpdir, 1), 1)
+    second = _render_pass(repo, goldens, _render_dir(tmpdir, 2), 2)
 
     for label, results in (("pass 1", first), ("pass 2", second)):
         if set(results) != expected_ids:
@@ -1715,6 +1762,18 @@ def run_plan_fingerprint_checks(require, provider=None):
     return "checked:{0} case(s)".format(len(cases))
 
 
+def _fingerprint_line(status):
+    """The #153 seam's contract line.
+
+    `PLAN_FINGERPRINT_PENDING issue=#153` is what #153 activates against, so it
+    is emitted verbatim rather than as human prose — a lowercase sentence would
+    make the seam unaddressable by the contract the plan names.
+    """
+    if status.startswith("pending"):
+        return "PLAN_FINGERPRINT_PENDING issue=#153"
+    return "wave_gate: plan fingerprint {0}".format(status)
+
+
 def run_fingerprint_phase(require, provider=None):
     """One fail-closed boundary around the whole provider phase.
 
@@ -1858,6 +1917,9 @@ def _load_current(repo):
             raise _contract(
                 "MANIFEST_FORMAT_INVALID", "{0} is a symlink".format(spec["path"])
             )
+        _refuse_symlinked_ancestor(
+            repo, spec["path"], "MANIFEST_FORMAT_INVALID", "manifests"
+        )
         manifests[name] = parse_manifest(raw, name)
     return manifests
 
@@ -1946,6 +2008,7 @@ def execute(args):
 
     tmpdir = make_scratch_dir(repo)
     failure = None
+    unexpected = None
     try:
         collected = collect_nodes(repo, tmpdir)
         check_collection(current["pytest-nodes"], collected)
@@ -1964,10 +2027,23 @@ def execute(args):
             _emit(
                 "wave_gate: {0} active goldens deterministic and byte-exact".format(rendered)
             )
-            status = run_fingerprint_phase(args.require_plan_fingerprint)
-            _emit("wave_gate: plan fingerprint {0}".format(status))
+
+        # BOTH `ci` and `wave` run the #153 seam and emit its contract line —
+        # a machine-readable token, not prose, because #153 activates against
+        # this exact string.
+        status = run_fingerprint_phase(getattr(args, "require_plan_fingerprint", False))
+        _emit(_fingerprint_line(status))
     except GateFailure as exc:
         failure = exc
+    except BaseException as exc:  # noqa: BLE001
+        # NOT just GateFailure. An ordinary RuntimeError/OSError out of
+        # collection, scratch output or golden processing would otherwise
+        # propagate past BOTH the retargeting bookkeeping and the closing
+        # worktree fingerprint — making "the fingerprint always runs" false
+        # exactly when the tree is most likely to have been disturbed, and
+        # replacing the coded diagnostic with a traceback. It is re-raised
+        # after the closing sequence, so nothing is swallowed.
+        unexpected = exc
     finally:
         disposed = tmpdir.dispose()
 
@@ -2005,6 +2081,8 @@ def execute(args):
         _emit("{0} {1}".format(hygiene.code, hygiene.message))
 
 
+    if unexpected is not None:
+        raise unexpected
     if failure is not None:
         raise failure
     return 0
@@ -2031,19 +2109,33 @@ def make_scratch_dir(repo):
     be outside the tree.
     """
     candidate = tempfile.mkdtemp(prefix="wave-gate-")
+    # The identity of what we JUST CREATED, captured before anything else touches
+    # the name. Containment answers "is this directory outside the repo"; it does
+    # NOT answer "is this the directory I made". Without that second question, an
+    # unrelated directory swapped onto the candidate name is accepted, written
+    # into, and then recursively deleted by `dispose()` — destroying real files
+    # that were never ours.
+    created = os.stat(candidate)
+    resolved = os.path.realpath(candidate)
+    # Open FIRST, validate the OPENED OBJECT second. Validating a path and then
+    # opening it leaves a window in which the parent is retargeted between the
+    # two, so the descriptor lands on the replacement — and every later stat/fstat
+    # comparison then agrees, because both sides name the replacement. Whatever we
+    # end up holding is what gets judged.
+    fd = os.open(resolved, os.O_RDONLY | _O_DIRECTORY)
     try:
-        resolved = os.path.realpath(candidate)
-        # Open FIRST, validate the OPENED OBJECT second. Validating the path and
-        # then opening it leaves a window in which the parent is retargeted
-        # between the two, so the descriptor lands on the replacement — and every
-        # later stat/fstat comparison then agrees, because both sides name the
-        # replacement. Whatever we end up holding is what gets judged.
-        fd = os.open(resolved, os.O_RDONLY | _O_DIRECTORY)
+        _refuse_scratch_created_here(fd, created)
         _refuse_scratch_inside_repo(fd, repo)
-        return _ScratchDir(resolved, fd, repo, _probe_dotdot_at(fd))
+        scratch = _ScratchDir(resolved, fd, repo, _probe_dotdot_at(fd))
     except BaseException:
-        shutil.rmtree(candidate, ignore_errors=True)
+        # NEVER `shutil.rmtree(candidate)` here. On this path the gate has just
+        # decided the candidate is not usable, and the pathname is exactly what it
+        # distrusts — a sibling that moves a tracked directory onto that name turns
+        # cleanup into deletion of the worktree. Discard through the descriptor,
+        # which can only name the directory actually opened, and never leak it.
+        _discard_scratch_at(fd)
         raise
+    return scratch
 
 
 _O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
@@ -2349,6 +2441,99 @@ def _unlink_tree_at(dirfd):
             os.unlink(entry.name, dir_fd=dirfd)
 
 
+def _refuse_symlinked_ancestor(repo, relpath, code, what):
+    """Refuse a declared path reached through a symlinked DIRECTORY.
+
+    Checking only the final component is not enough: replacing `golden_xml`
+    itself (or a manifest's directory) with a symlink to a tree of perfectly
+    ordinary regular files passes a leaf-only check, and the gate then validates
+    files that are not at their declared Git paths at all.
+    """
+    walked = repo
+    for part in relpath.split("/"):
+        walked = os.path.join(walked, part)
+        if os.path.islink(walked):
+            raise _contract(
+                code,
+                "{0} is reached through a symlink at {1}; {2} must be at their "
+                "declared paths".format(relpath, os.path.relpath(walked, repo), what),
+            )
+
+
+def _refuse_scratch_created_here(fd, created):
+    """Refuse anything that is not the directory `mkdtemp()` just created.
+
+    `mkdtemp()` returns a NAME. Between its return and the `os.open()` that
+    follows, a process running as the same user can replace the directory at that
+    name with one of its own — and containment cannot tell the difference,
+    because an attacker's directory outside the repository passes that check
+    perfectly well. The gate would then treat somebody else's files as its
+    scratch space and `dispose()` would recursively delete them.
+
+    Two independent refusals, because either alone is weak:
+
+    * identity — the opened inode must be the one observed immediately after
+      creation;
+    * shape — `mkdtemp()` creates an EMPTY directory with mode 0700 owned by us,
+      so anything holding entries, or with looser permissions, is not it. This is
+      what stops the swapped-directory-full-of-real-files case even if the
+      identity observation itself were raced.
+    """
+    try:
+        here = os.fstat(fd)
+    except OSError as exc:
+        raise _contract(
+            "SCRATCH_NOT_OURS",
+            "cannot stat the opened scratch directory ({0}).".format(exc),
+        )
+    if (here.st_dev, here.st_ino) != (created.st_dev, created.st_ino):
+        raise _contract(
+            "SCRATCH_NOT_OURS",
+            "the scratch directory was replaced between creation and use; the "
+            "gate refuses to write into, or delete, a directory it did not make.",
+        )
+    if stat.S_IMODE(here.st_mode) != 0o700 or here.st_uid != os.geteuid():
+        raise _contract(
+            "SCRATCH_NOT_OURS",
+            "the scratch directory does not have the mode and ownership "
+            "`mkdtemp()` creates (mode={0:o}, uid={1}).".format(
+                stat.S_IMODE(here.st_mode), here.st_uid
+            ),
+        )
+    try:
+        entries = os.listdir(fd)
+    except OSError as exc:
+        raise _contract(
+            "SCRATCH_NOT_OURS",
+            "cannot read the opened scratch directory ({0}).".format(exc),
+        )
+    if entries:
+        raise _contract(
+            "SCRATCH_NOT_OURS",
+            "the scratch directory is not empty ({0} entries); `mkdtemp()` "
+            "creates an empty one, so this is somebody else's "
+            "directory.".format(len(entries)),
+        )
+
+
+def _discard_scratch_at(fd):
+    """Remove a freshly created, still-empty scratch THROUGH its descriptor."""
+    try:
+        parent = os.open("..", os.O_RDONLY | _O_DIRECTORY, dir_fd=fd)
+    except OSError:
+        _close_quietly(fd)
+        return
+    try:
+        name = _entry_naming(parent, os.fstat(fd))
+        if name is not None:
+            os.rmdir(name, dir_fd=parent)
+    except OSError:
+        pass
+    finally:
+        _close_quietly(parent)
+        _close_quietly(fd)
+
+
 def _refuse_scratch_inside_repo(fd, repo):
     """Decide containment for the OPENED DIRECTORY, walking real parents.
 
@@ -2492,9 +2677,20 @@ def exit_status_for(failure):
 
 
 def main(argv=None):
-    parser = build_parser()
-    args = parser.parse_args(argv)
     try:
+        # INSIDE the boundary. argparse exits 2 with usage text and no code, so
+        # parsing outside it left a class of invocations — `ci --base ...` — that
+        # failed without a stable diagnostic, contradicting the contract that
+        # EVERY failure carries one.
+        try:
+            args = build_parser().parse_args(argv)
+        except SystemExit as exc:
+            if exc.code in (0, None):       # --help / --version: not a failure
+                raise
+            raise _contract(
+                "GATE_USAGE_INVALID",
+                "the command line is not valid for this gate; see --help",
+            )
         return execute(args)
     except GateFailure as failure:
         # DECIDE FIRST, RENDER SECOND — and that ordering is the whole point.

@@ -68,7 +68,9 @@ Every failure prints a stable diagnostic code as the first stderr token:
 
 `BASELINE_EVENT_INVALID` · `BASELINE_ZERO_SHA` · `BASELINE_UNAVAILABLE` ·
 `BASELINE_MERGE_BASE_MISSING` · `BASELINE_MERGE_BASE_AMBIGUOUS` ·
-`BOOTSTRAP_NOT_ALLOWED` · `SCRATCH_INSIDE_REPO` · `SCRATCH_CONTAINMENT_UNPROVEN` ·
+`GATE_USAGE_INVALID` · `BOOTSTRAP_NOT_ALLOWED` · `SCRATCH_NOT_OURS` ·
+`SCRATCH_INSIDE_REPO` ·
+`SCRATCH_CONTAINMENT_UNPROVEN` ·
 `SCRATCH_RETARGETED` ·
 `MANIFEST_MISSING` ·
 `MANIFEST_FORMAT_INVALID` ·
@@ -197,6 +199,15 @@ Baseline manifests are read with `git show <base>:<path>`; current manifests are
 read from the **worktree**, so CI validates the checked-out merge result and a
 local run validates uncommitted work.
 
+**Golden-corpus authority direction — tracked in #165.** `tests/_wave_gate_golden_corpus.py`
+obtains its cases by importing the thirteen golden-producing test modules, rather than
+those tests consuming the registry. There is exactly ONE case definition either way, so
+the "two independent definitions" risk does not apply; the measured import cost is ~0.39 s,
+not the ~4.9 s that motivated the original instruction against it. The real cost is
+directional: removing an owning test makes its golden unrenderable, and that is exactly
+the removal `transitional_oracle` (#159) and `deletion_only` (#160) are designed to
+survive. It fails loudly rather than silently, and #165 carries the inversion.
+
 **Worktree hygiene is a cross-check, not the guarantee.** The gate's read-only
 property is STRUCTURAL and ENFORCED, not merely asserted: the scratch directory's
 resolved path is checked to be outside the worktree before use (`TMPDIR` can
@@ -209,6 +220,17 @@ worktree. An ancestor that cannot be stat'd is not evidence of safety either, so
 that fails closed as `SCRATCH_CONTAINMENT_UNPROVEN`. The path the gate then uses is the
 resolved one that was checked, never the spelling `mkdtemp()` returned — verifying one
 name and writing through another leaves the used path unproven.
+
+**The scratch must be the directory the gate created.** `mkdtemp()` returns a name, and
+between its return and the `os.open()` that follows, a same-user process can replace the
+directory at that name. Containment cannot tell the difference — an attacker's directory
+outside the repository passes it perfectly well — so the gate would adopt somebody else's
+files as scratch space and `dispose()` would recursively delete them. `SCRATCH_NOT_OURS`
+refuses anything that is not what `mkdtemp()` makes: the inode observed immediately after
+creation, mode 0700, owned by us, and **empty**. The emptiness check is what defeats the
+swapped-directory-full-of-real-files case even if the identity observation were itself
+raced. The failure path discards through the DESCRIPTOR — never `rmtree` on the candidate
+pathname, which is precisely the name the gate has just decided it distrusts.
 
 **A name is not a directory.** Resolving the path once is not enough: a process running
 as the same user — no execution inside the gate's process tree required — can rename the
@@ -230,8 +252,13 @@ anchoring prevents that. What the gate guarantees instead is that it never HIDES
 consequence, and three properties combine to make that true:
 
 1. A broken binding is `SCRATCH_RETARGETED`, a gate failure.
-2. `dispose()` then removes **nothing** — contents are unlinked relative to the held
-   descriptor, never by name, and a broken binding deletes nothing at all. Deleting
+2. `dispose()` removes nothing **through a broken binding** — contents are unlinked
+   relative to the held descriptor, never by name. Stated precisely, because the earlier
+   wording overclaimed: `_unlink_tree_at()` runs BETWEEN the two binding checks, so a
+   directory moved into the worktree after the first check can have its contents deleted
+   before the second check fails. The run still goes red — that is the guarantee — but
+   "nothing is deleted" and "the write survives for the fingerprint" hold for a binding
+   that is already broken when disposal begins, not for one broken mid-disposal. Deleting
    through a swapped name would delete inside the repository, and would erase the only
    trace that anything happened. The destructive step is BRACKETED by identity and
    containment checks rather than merely preceded by one: a check before deleting means
@@ -259,8 +286,11 @@ consequence, and three properties combine to make that true:
    runs. Raising immediately would skip it on precisely the path where a repository
    mutation is most plausible, costing the gate its `WORKTREE_DIRTY` evidence.
 
-So the write survives, the fingerprint sees it, and the gate goes red. That — not stable
-containment — is the property that holds.
+So the gate goes red. Where the binding was already broken when disposal began, the write
+also survives for the fingerprint to see; where it breaks mid-disposal, the contents may
+already be gone and the red comes from the failed second check instead. Going red — not
+stable containment, and not guaranteed evidence retention in every interleaving — is the
+property that holds.
 
 **What the fingerprint does NOT defend against, stated plainly.** It is a hygiene check
 against the gate's own writes and against a misconfigured or subverted scratch path. It

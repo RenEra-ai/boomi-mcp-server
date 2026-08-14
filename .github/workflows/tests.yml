@@ -59,6 +59,14 @@ jobs:
       # on a plugin arriving through a transitive dependency and changing what
       # this job runs.
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      # The credential-free configuration the plan specifies. Without
+      # BOOMI_LOCAL a direct `import server` selects production initialization
+      # and fails for a missing GCP_PROJECT_ID; the suite currently survives
+      # only because some test module's import side effect happens to set local
+      # mode first, which makes the required check ORDER-DEPENDENT.
+      BOOMI_LOCAL: "true"
+      BOOMI_DOCS_ENABLED: "false"
+      BOOMI_GOTCHAS_ENABLED: "false"
 
     steps:
       # fetch-depth: 0 is REQUIRED, not tidiness: the gate resolves a PR's
