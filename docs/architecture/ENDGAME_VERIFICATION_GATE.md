@@ -206,8 +206,7 @@ same index must carry the same `id` and identical payload fields. Then:
 
 * legal: `active → active`, `active → tombstone`, `tombstone → tombstone`
 * illegal: `tombstone → active`, any deletion, any insertion before the end, any
-  reorder, any renumbering, any payload mutation, an appended row born
-  `tombstone`
+  reorder, any renumbering, any payload mutation
 
 **A tombstone records a retirement that has already happened, not an intention.**
 A tombstoned golden's file must be absent, and a tombstoned node id must not be
@@ -218,11 +217,19 @@ manifest edit at all, because the floor reduction was prepaid and a tombstoned
 node is not required.
 
 New rows are permitted only **after** every baseline row, with the next
-sequential ids and state `active`.
+sequential ids. A new row may arrive `active` **or** `tombstone`: a push range
+that adds a test in one commit and retires it in a later one is exactly a
+born-tombstoned row when read from the range's endpoints, and refusing that made
+ordinary multi-commit pushes illegal even though every individual commit
+transition was legal. Nothing is lost — a tombstoned row must separately have no
+artifact (no golden file; a node id that does not collect), so it stays fully
+accounted for.
 
 Floor arithmetic:
 
-* `minimum_active` (both manifests) — exactly `old + appended − newly_tombstoned`.
+* `minimum_active` (both manifests) — exactly
+  `old + appended_ACTIVE − newly_tombstoned`. Only appends that arrive `active`
+  count; a born-tombstoned row adds nothing to the active total.
 * `minimum_collected` (node manifest) — may be raised freely; may drop by at most
   the number of rows tombstoned in the same change.
 

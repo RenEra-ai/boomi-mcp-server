@@ -655,9 +655,11 @@ def test_a_pull_request_with_a_stale_merge_base_cannot_bootstrap(tmp_path):
     assert (repo / gate.NODES_MANIFEST).exists(), "the checkout has the manifests"
 
     event = tmp_path / "pr.json"
-    event.write_text(json.dumps(
-        {"pull_request": {"head": {"sha": feature_only}, "base": {"sha": target}}}
-    ), encoding="utf-8")
+    event.write_text(json.dumps({"pull_request": {
+        "head": {"sha": feature_only}, "base": {"sha": target},
+        # GitHub names the test-merge it built; the checkout IS that commit.
+        "merge_commit_sha": _head(repo),
+    }}), encoding="utf-8")
     proc = subprocess.run(
         [sys.executable, str(_ROOT / "scripts" / "wave_gate.py"),
          "--repo", str(repo), "manifests", "--github-event", str(event),
@@ -1663,7 +1665,9 @@ def test_a_pr_merge_checkout_is_accepted(tmp_path):
         "merge", "-q", "--no-edit", head,
     )
     gate.check_checkout_matches_event(
-        str(repo), {"kind": "pull_request", "target": target, "event_head": head}
+        str(repo),
+        {"kind": "pull_request", "target": target, "event_head": head,
+         "merge_sha": _git_out(repo, "rev-parse", "HEAD")},
     )
 
 
@@ -1887,20 +1891,31 @@ def test_the_worktree_fingerprint_discloses_no_file_content(tmp_path):
         gate.check_worktree_unchanged(before, gate._status(work))
 
 
-def test_a_file_that_cannot_be_hashed_fails_closed(tmp_path):
+def test_a_file_that_cannot_be_hashed_fails_closed(tmp_path, monkeypatch):
     """[Critical] A stable `<unreadable errno>` token made the CONTENT invisible:
-    chmod / write / chmod produced identical snapshots across a real mutation."""
+    chmod / write / chmod produced identical snapshots across a real mutation.
+
+    The read failure is SIMULATED rather than produced with `chmod(000)`: as UID
+    0 — which container-based CI routinely is — the mode bits do not deny root,
+    so a permission-based test would pass locally and go red on a runner for a
+    reason that has nothing to do with the behaviour under test.
+    """
     repo, _base = _seeded(tmp_path)
     blocked = repo / "locked.bin"
     blocked.write_bytes(b"one\n")
-    os.chmod(blocked, 0o000)
-    try:
-        with pytest.raises(gate.GateFailure) as excinfo:
-            gate._status(str(repo))
-        assert excinfo.value.code == "WORKTREE_DIRTY"
-        assert "cannot fingerprint" in excinfo.value.message
-    finally:
-        os.chmod(blocked, 0o644)
+
+    real_open = open
+
+    def _refusing_open(path, *args, **kwargs):
+        if os.fsdecode(path).endswith("locked.bin"):
+            raise PermissionError(13, "Permission denied")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", _refusing_open)
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate._status(str(repo))
+    assert excinfo.value.code == "WORKTREE_DIRTY"
+    assert "cannot fingerprint" in excinfo.value.message
 
 
 def test_a_pr_checkout_must_be_the_merge_commit_the_event_names(tmp_path):
@@ -1971,23 +1986,30 @@ def test_a_renderer_raising_unittest_SkipTest_is_a_failure():
         corpus.CASE_REGISTRY.update(original)
 
 
-def test_an_octopus_merge_is_not_a_pr_merge_checkout(tmp_path):
-    """Membership in the parent list is not the same as being the PR merge."""
+def test_a_pr_checkout_without_an_authoritative_merge_sha_is_refused(tmp_path):
+    """Parentage is not evidence, so its absence is not a licence.
+
+    Falling back to a parent-only check when the event carries no
+    `merge_commit_sha` reopens the hole it was added to close: a commit with
+    parents {head, target} and an arbitrary tree satisfies the shape while
+    containing none of the PR's changes.
+    """
     repo, base = _seeded(tmp_path)
-    _run_git(repo, "checkout", "-q", "-b", "a")
-    head = _commit(repo, "a")
-    _run_git(repo, "checkout", "-q", "-b", "b", base)
-    third = _commit(repo, "b")
+    _run_git(repo, "checkout", "-q", "-b", "feature")
+    head = _commit(repo, "feature work")
     _run_git(repo, "checkout", "-q", "main")
     target = _commit(repo, "target")
     _run_git(repo, "-c", "user.email=g@e.invalid", "-c", "user.name=g",
-             "merge", "-q", "--no-edit", head, third)
+             "merge", "-q", "--no-edit", "-s", "ours", head)
+
     with pytest.raises(gate.GateFailure) as excinfo:
         gate.check_checkout_matches_event(
             str(repo),
-            {"kind": "pull_request", "target": target, "event_head": head},
+            {"kind": "pull_request", "target": target, "event_head": head,
+             "merge_sha": None},
         )
     assert excinfo.value.code == "CHECKOUT_EVENT_MISMATCH"
+    assert "no merge_commit_sha" in excinfo.value.message
 
 
 # ===========================================================================

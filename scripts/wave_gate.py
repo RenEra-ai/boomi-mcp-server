@@ -415,30 +415,28 @@ def check_checkout_matches_event(repo, context):
     # exactly {head, target} as parents but the TARGET's tree — omitting every
     # change the PR makes — satisfied it, so the gate would validate a tree the
     # PR does not produce.
+    # HEAD is not the PR head, so this must be the merge checkout — and only an
+    # AUTHORITATIVE merge sha can establish that. Falling back to a parentage
+    # check when the event carries none reopens exactly what this closes: a
+    # commit with parents {head, target} and an arbitrary tree satisfies the
+    # shape while containing none of the PR's changes.
     merge_sha = context.get("merge_sha")
-    if merge_sha:
-        if head == merge_sha:
-            return
+    if not merge_sha:
         raise _contract(
             "CHECKOUT_EVENT_MISMATCH",
-            "the checkout at {0} is neither the PR head {1} nor the merge commit "
-            "{2} the event names".format(
-                head[:12], (event_head or "?")[:12], merge_sha[:12]
+            "the checkout at {0} is not the PR head {1}, and the event carries no "
+            "merge_commit_sha to identify the merge it built; the tree under test "
+            "cannot be tied to the event".format(
+                head[:12], (event_head or "?")[:12]
             ),
         )
-    parents = _git(repo, "rev-list", "--parents", "-n", "1", head).stdout.split()[1:]
-    # EXACTLY the two expected parents. Membership alone accepts an octopus
-    # commit that merely happens to include the head and the target among
-    # several parents, which is not a `refs/pull/N/merge` commit.
-    if len(parents) == 2 and set(parents) == {event_head, target}:
+    if head == merge_sha:
         return
     raise _contract(
         "CHECKOUT_EVENT_MISMATCH",
-        "the checkout at {0} is neither the PR head {1} nor a merge of it with "
-        "the target {2} (parents: {3}); the gate would be validating a different "
-        "tree than the event describes".format(
-            head[:12], (event_head or "?")[:12], (target or "?")[:12],
-            [p[:12] for p in parents],
+        "the checkout at {0} is neither the PR head {1} nor the merge commit {2} "
+        "the event names".format(
+            head[:12], (event_head or "?")[:12], merge_sha[:12]
         ),
     )
 

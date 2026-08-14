@@ -9718,7 +9718,7 @@
 {"kind":"test","id":"pytest-009717","node_id":"tests/test_wave_gate.py::test_an_ambiguous_local_baseline_is_refused[branch-vs-tag]","state":"active"}
 {"kind":"test","id":"pytest-009718","node_id":"tests/test_wave_gate.py::test_an_ambiguous_local_baseline_is_refused[rev-expression]","state":"active"}
 {"kind":"test","id":"pytest-009719","node_id":"tests/test_wave_gate.py::test_an_independently_recreated_ledger_elsewhere_spends_the_bootstrap","state":"tombstone"}
-{"kind":"test","id":"pytest-009720","node_id":"tests/test_wave_gate.py::test_an_octopus_merge_is_not_a_pr_merge_checkout","state":"active"}
+{"kind":"test","id":"pytest-009720","node_id":"tests/test_wave_gate.py::test_an_octopus_merge_is_not_a_pr_merge_checkout","state":"tombstone"}
 {"kind":"test","id":"pytest-009721","node_id":"tests/test_wave_gate.py::test_an_unambiguous_local_baseline_is_accepted","state":"active"}
 {"kind":"test","id":"pytest-009722","node_id":"tests/test_wave_gate.py::test_the_worktree_fingerprint_is_content_not_line_counts","state":"active"}
 {"kind":"test","id":"pytest-009723","node_id":"tests/test_wave_gate.py::test_a_merged_independent_introduction_still_spends_the_bootstrap","state":"tombstone"}
@@ -9731,3 +9731,4 @@
 {"kind":"test","id":"pytest-009730","node_id":"tests/test_wave_gate.py::test_a_provider_GateFailure_cannot_carry_its_own_exit_status","state":"active"}
 {"kind":"test","id":"pytest-009731","node_id":"tests/test_wave_gate.py::test_appending_an_already_tombstoned_row_is_LEGAL","state":"active"}
 {"kind":"test","id":"pytest-009732","node_id":"tests/test_wave_gate.py::test_the_worktree_fingerprint_discloses_no_file_content","state":"active"}
+{"kind":"test","id":"pytest-009733","node_id":"tests/test_wave_gate.py::test_a_pr_checkout_without_an_authoritative_merge_sha_is_refused","state":"active"}
