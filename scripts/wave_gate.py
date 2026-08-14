@@ -156,7 +156,12 @@ class GateFailure(Exception):
         # say — and it reached `main()`, which returned 0. Reproduced end to end
         # with `main_status=0`. Enforcing the invariant in the constructor closes
         # every present and future path at once.
-        self.status = status if status in (1, 2) else 1
+        # `type(status) is int`, and then a LITERAL is stored. An int subclass
+        # whose `__eq__` reports equality with 1 while its underlying value is 0
+        # passes an `in (1, 2)` test and is then read as 0 by `sys.exit()` — the
+        # failure would terminate successfully. Copying to a literal makes the
+        # stored value independent of whatever was passed in.
+        self.status = 2 if (type(status) is int and status == 2) else 1
 
 
 def _contract(code, message):
@@ -1701,6 +1706,34 @@ def run_plan_fingerprint_checks(require, provider=None):
     return "checked:{0} case(s)".format(len(cases))
 
 
+def run_fingerprint_phase(require, provider=None):
+    """One fail-closed boundary around the whole provider phase.
+
+    The provider's OUTPUTS are compared and formatted after the guarded calls
+    return, so the boundary has to wrap the phase, not just the calls into it.
+
+    A real ``GateFailure`` passes through UNCHANGED — that is what keeps the
+    stable diagnostic contract (``PLAN_FINGERPRINT_PENDING`` must stay
+    ``PLAN_FINGERPRINT_PENDING``, and a real mismatch must keep its detail), and
+    it is safe because ``GateFailure`` now guarantees its own status is 1 or 2.
+
+    Anything else becomes a fixed-message status-1 failure. The message does NOT
+    inspect the caught object or its class: even ``type(exc).__name__`` can run
+    provider code through a metaclass hook, and a hook that raised
+    ``SystemExit(0)`` would escape the very handler meant to contain it.
+    """
+    try:
+        return run_plan_fingerprint_checks(require, provider)
+    except GateFailure:
+        raise
+    except BaseException:  # noqa: BLE001
+        raise _invalid(
+            "PLAN_FINGERPRINT_MISMATCH",
+            "the plan-fingerprint phase raised a non-gate exception; the "
+            "provider is not usable",
+        )
+
+
 def _provider_call(fn, *args):
     """Call into the #153 provider, keeping failures on the diagnostic path.
 
@@ -1925,27 +1958,8 @@ def execute(args):
             _emit(
                 "wave_gate: {0} active goldens deterministic and byte-exact".format(rendered)
             )
-            # ONE boundary around the whole provider phase, not just the calls
-            # into it. The provider is repo-owned code, so this is not a defence
-            # against a hostile TCB — but its OUTPUTS are compared and formatted
-            # after the guarded call returns, and a `SystemExit` raised from, say,
-            # a `__str__` would otherwise leave the process with status 0. A
-            # gate that can exit green by accident is the one thing it must not do.
-            try:
-                status = run_plan_fingerprint_checks(args.require_plan_fingerprint)
-                _emit("wave_gate: plan fingerprint {0}".format(status))
-            except BaseException as exc:  # noqa: BLE001
-                # A FRESH failure, and the exception object is never formatted:
-                # `{!r}` on a provider-controlled object runs its `__repr__`,
-                # which could raise `SystemExit(0)` out of the very handler meant
-                # to contain it. Only the type NAME is used, which cannot execute
-                # provider code.
-                raise _invalid(
-                    "PLAN_FINGERPRINT_MISMATCH",
-                    "the plan-fingerprint phase raised {0}".format(
-                        type(exc).__name__
-                    ),
-                )
+            status = run_fingerprint_phase(args.require_plan_fingerprint)
+            _emit("wave_gate: plan fingerprint {0}".format(status))
     except GateFailure as exc:
         failure = exc
     finally:

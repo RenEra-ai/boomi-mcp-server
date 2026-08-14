@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9727,"minimum_collected":9727,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9730,"minimum_collected":9730,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -9741,3 +9741,6 @@
 {"kind":"test","id":"pytest-009740","node_id":"tests/test_wave_gate.py::test_git_stderr_is_read_under_a_pinned_locale","state":"active"}
 {"kind":"test","id":"pytest-009741","node_id":"tests/test_wave_gate.py::test_a_GateFailure_can_never_carry_a_success_status","state":"active"}
 {"kind":"test","id":"pytest-009742","node_id":"tests/test_wave_gate.py::test_a_provider_output_whose_dunders_run_code_cannot_exit_green","state":"active"}
+{"kind":"test","id":"pytest-009743","node_id":"tests/test_wave_gate.py::test_a_lying_int_subclass_cannot_become_a_success_status","state":"active"}
+{"kind":"test","id":"pytest-009744","node_id":"tests/test_wave_gate.py::test_the_phase_boundary_never_inspects_a_hostile_exception","state":"active"}
+{"kind":"test","id":"pytest-009745","node_id":"tests/test_wave_gate.py::test_the_phase_boundary_preserves_real_gate_diagnostics","state":"active"}

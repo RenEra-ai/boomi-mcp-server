@@ -1470,7 +1470,10 @@ class _StubProvider:
                 digest = self._digest(material)
             return digest, material
         if not self._relocatable:
-            digest = self._digest("{0}:{1}".format(case, account).encode())
+            # A genuinely non-relocatable fingerprint carries the identity in its
+            # CANONICAL BYTES; the digest still derives from them.
+            material = "{0}:{1}".format(case, account).encode()
+            digest = self._digest(material)
         return digest, material
 
 
@@ -1983,6 +1986,64 @@ def test_a_GateFailure_can_never_carry_a_success_status():
     with pytest.raises(gate.GateFailure) as excinfo:
         gate.run_plan_fingerprint_checks(True, _Sneaky())
     assert excinfo.value.status == 1
+
+
+def test_the_phase_boundary_preserves_real_gate_diagnostics():
+    """[P2] Removing the `GateFailure` re-raise replaced legitimate diagnostics.
+
+    `wave --require-plan-fingerprint` with no provider must still say
+    `PLAN_FINGERPRINT_PENDING`, and a real mismatch must keep its detail —
+    otherwise the CLI's stable diagnostic contract is broken by the very handler
+    added to harden it. Safe to re-raise now because `GateFailure` guarantees its
+    own status is 1 or 2.
+    """
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_fingerprint_phase(True)
+    assert excinfo.value.code == "PLAN_FINGERPRINT_PENDING"
+
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_fingerprint_phase(True, _StubProvider(relocatable=False))
+    assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+    assert "not relocatable" in excinfo.value.message
+
+    assert gate.run_fingerprint_phase(False) == "pending:#153"
+
+
+def test_the_phase_boundary_never_inspects_a_hostile_exception():
+    """[P1] `type(exc).__name__` can run provider code via a metaclass hook, and
+    a hook raising `SystemExit(0)` would escape the last-resort handler."""
+    class _Meta(type):
+        @property
+        def __name__(cls):
+            raise SystemExit(0)
+
+    class _Hostile(Exception, metaclass=_Meta):
+        pass
+
+    class _Provider(_StubProvider):
+        def cases(self):
+            raise _Hostile()
+
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_fingerprint_phase(True, _Provider())
+    assert excinfo.value.status == 1
+    assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+
+
+def test_a_lying_int_subclass_cannot_become_a_success_status():
+    """[P1] An int subclass whose `__eq__` reports 1 while its value is 0 passed
+    an `in (1, 2)` test and was then read as 0 by `sys.exit()`."""
+    class _Liar(int):
+        def __eq__(self, other):
+            return other in (1, 2)
+
+        def __hash__(self):
+            return 0
+
+    failure = gate.GateFailure("X", "m", _Liar(0))
+    assert type(failure.status) is int
+    assert failure.status == 1
+    assert int(failure.status) == 1        # what sys.exit() actually reads
 
 
 def test_a_provider_output_whose_dunders_run_code_cannot_exit_green():
