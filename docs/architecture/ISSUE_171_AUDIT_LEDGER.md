@@ -160,7 +160,49 @@ empty context each exit 2. A scratch push with `origin/dev` unresolvable exits 2
 criterion 2's actual claim, measured rather than asserted.
 
 **Suite** — full non-KB suite on the 3.12 local interpreter. First execution surfaced one
-finding (row S1-1), fixed structurally; re-run recorded in the final-tree table.
+finding (row S1-1), fixed structurally; re-run green at `9771 passed, 17 skipped`.
+
+**The new selector, end to end on the committed tree** *(measured here — exit status
+captured directly, not inferred from a later line)*:
+
+```
+$ PYTHONPATH=src python scripts/wave_gate.py ci --base 6792d065…
+wave_gate: baseline 6792d0658b6da7964e35b3c493c8320dee2c1c6a (local)
+wave_gate: TOMBSTONE pytest-nodes pytest-009550 owner=repository disposition=n/a
+wave_gate: manifests ok (9788 required nodes, 60 active goldens)
+wave_gate: collection ok (9788 tests)
+wave_gate: non-KB suite green (9771 passed, 17 skipped, cap 30)
+PLAN_FINGERPRINT_PENDING issue=#153
+```
+
+The process exit status was **0**, captured directly from the invocation rather than
+inferred from the last line printed. (An earlier capture piped the run through `tail`,
+which discards the status and truncated the header; that measurement was re-taken rather
+than reasoned around.)
+
+This is criterion 1 and criterion 6 discharged locally on the exact code path the
+`scratch/**` runner executes: baseline kind `local`, the checkout binding satisfied, the
+manifest transition legal, collection at the floor, and the suite green. The
+plan-fingerprint line is the #153 seam reporting pending, which is not fatal without
+`--require-plan-fingerprint`.
+
+## Stage-2 repo Codex review (evaluation 1)
+
+Round 1 — run directory `cdx-review.oDMlDK`, archived at
+`docs/architecture/evidence/issue-171/commit-reviews/cdx-review.oDMlDK/`, collected via
+the collector (never read from `wait`), teardown `confirmed stopped`.
+
+```
+STATUS: completed
+SCOPE: branch diff against 6792d0658b6da7964e35b3c493c8320dee2c1c6a (6792d06)
+       head=55fd417de75ecdca4e12f6fc499cb1bb4ac6971c dirty=false
+```
+
+Verbatim result: "No actionable correctness issues were found in the baseline selection,
+checkout binding, ancestry validation, workflow routing, or associated test updates."
+
+Zero findings, so no correction and no new finding rows. Not a checkpoint (evaluation 1
+of 3).
 
 ## Checkpoints (written IN FLIGHT at every third evaluation of each loop)
 
