@@ -1,0 +1,80 @@
+You are reviewing an IMPLEMENTATION against the ARCHITECT DESIGN PLAN that follows below.
+
+Repository: `boomi-mcp-server` at /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: `codex/issue-171`
+Baseline: `6792d0658b6da7964e35b3c493c8320dee2c1c6a`
+Current HEAD: `e541a3d8936ad415d31d3ed52227195b2534dad0`
+
+Review the delta `git diff 6792d0658b6da7964e35b3c493c8320dee2c1c6a..HEAD`.
+
+## Changed files
+
+```
+.github/workflows/tests.yml
+README.md
+docs/architecture/ENDGAME_VERIFICATION_GATE.md
+docs/architecture/ISSUE_152_AUDIT_LEDGER.md
+docs/architecture/ISSUE_171_AUDIT_LEDGER.md            (new)
+docs/architecture/evidence/issue-171/**                (new archive)
+scripts/wave_gate.py
+tests/fixtures/wave_gate/test_nodes.jsonl
+tests/test_wave_gate.py
+```
+
+## What to judge
+
+Your job is **implementation-versus-plan fidelity**, plus correctness of what was
+actually written. Specifically:
+
+1. **Does the implementation realize the plan?** Where it deviates, is the deviation
+   justified and recorded, or is it a silent drop of a load-bearing constraint? The
+   implementer recorded seven deliberate deviations in
+   `.codex/plans/issue-171.claude.md`; the ones that matter most to check are:
+   - the `GITHUB_SHA` binding was applied to ALL `ci` contexts, not only the `local`
+     arm as the plan scoped it (claimed as the Structural-fix rule's sibling sweep);
+   - `_LEDGER_NON_DIAGNOSTIC_TOKENS` and the ledger-stem derivation were changed in
+     `tests/test_wave_gate.py` — a scanner the plan did not anticipate touching;
+   - the required-status ruleset experiment and the `[skip ci]` hole were deliberately
+     NOT executed, and are recorded as undecided-pending-measurement with follow-ups.
+
+2. **Is the new invariant actually an invariant?** `check_checkout_matches_event()`
+   gained a `ci_mode` parameter, `_bind_head_to_platform_sha()` and
+   `_refuse_baseline_off_this_history()`. Look hard for fail-open paths: a context that
+   reaches the end without being bound; an environment shape that skips a check; a
+   `ci_mode=False` caller that should have been `True`; the ordering of the dirty-tree
+   check relative to the binding.
+
+3. **The workflow's single gate step.** It must fail closed on any unrecognized
+   event/ref, must be ONE step with no step-level `if:`, and must not select a baseline
+   from `github.event.before` or a merge-base. Check the `case` patterns for holes —
+   in particular whether `push:refs/heads/scratch/*` matches what the `branches:`
+   filter matches, and whether anything reaches the `exec` with an unset variable
+   under `set -u`.
+
+4. **The manifest transaction.** `pytest-009550` tombstoned, `pytest-009789` appended,
+   header floors unchanged at 9788/9788/30. Verify the arithmetic against §5 of
+   `docs/architecture/ENDGAME_VERIFICATION_GATE.md` and confirm the tombstoned node id
+   is genuinely no longer collected.
+
+5. **Test quality.** `test_ci_requires_exactly_one_baseline_selector` replaces
+   `test_the_ci_subcommand_refuses_a_bare_base`. Does it actually witness the excluded
+   cases, or does it assert something weaker than it claims? Are the extensions to
+   `test_the_checkout_must_be_the_tree_the_event_describes` and
+   `test_an_event_run_requires_a_clean_tree` real witnesses? Is any assertion vacuous —
+   passing whether or not the behaviour holds?
+
+6. **Served contract text.** This repo treats CLI help, diagnostic messages, the spec's
+   command synopsis and baseline table, and the manifests as machine-facing contract —
+   blocking if wrong. Check the docs actually match the code now, and flag any place
+   the prose asserts GitHub platform behaviour without a provenance marker (this repo
+   has been burned ten times by hand-modelled platform claims).
+
+7. **Anything the plan and the implementation BOTH got wrong.** Two documents agreeing
+   is not evidence.
+
+Be concrete: name the file and line, state the failure scenario, and say what the fix
+is. Do not report style preferences. If you find nothing actionable, say so plainly
+rather than manufacturing findings.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or
+`VERDICT: ISSUES FOUND`.

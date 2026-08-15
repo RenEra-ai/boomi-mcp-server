@@ -243,7 +243,9 @@ replaced, and it can never invoke the bootstrap exception.
 `github.event.before`: on the push that CREATES a scratch branch that field is
 the all-zero sha, and on later incremental pushes it is the previous scratch
 tip — so the gate would validate only the newest increment rather than the whole
-candidate. Not a merge base either: a branch that has diverged from `dev` still
+candidate. *(Provenance: documented GitHub behaviour, not measured here. The gate
+refuses an all-zero baseline outright, which is measured — see the negative
+matrix — so this rationale explains the choice without the choice resting on it.)* Not a merge base either: a branch that has diverged from `dev` still
 has one, so it would preflight green and then fail to fast-forward. The exact
 `origin/dev` commit plus an ancestry proof is the pair that models this
 repository's actual integration rule.
@@ -392,8 +394,15 @@ and that the worktree is **clean**. Without both, the baseline comes from the
 event while the evidence comes from whatever happens to be checked out, so a PR
 carrying an illegal rewrite could be validated against a different, valid tree.
 `after` is validated as strictly as `before`: degrading a malformed value to
-"unknown" would make the binding silently skip itself. Local `--base` runs keep
-their dirty-tree support, because there the operator chose the baseline.
+"unknown" would make the binding silently skip itself.
+
+Since #171 the binding is wider than "an event context": **every `ci` run** is bound
+to the platform's `GITHUB_SHA` when one is available, and a `ci` run additionally
+requires a clean worktree whatever its baseline kind — including `--base`. What keeps
+their dirty-tree support is `wave --base` and `manifests --base` SPECIFICALLY, because
+there the operator chose the baseline and the uncommitted work is the subject. An
+earlier revision of this sentence said "local `--base` runs" without that
+qualification, which stopped being true when `ci` gained the selector.
 
 ## 5. Legal and illegal transitions
 
@@ -717,6 +726,10 @@ origin/dev   .github/workflows             -> tests.yml
 for a workflow present on the **default branch**, and `dev` reaches `main` only
 at milestone end. A `push:` trigger resolves the workflow from the *pushed ref*
 instead, which is why `scratch/**` works today with the file only on `dev`.
+*(Provenance: the default-branch condition for `workflow_dispatch` and the
+pushed-ref resolution for `push` are documented GitHub behaviour; the branch
+inventory above is measured here. #152's landing run is the local evidence that a
+push loads the workflow from the tree that arrives with it.)*
 
 Repository **rulesets** and **classic branch protection** are distinct mechanisms;
 an earlier revision of this section inferred "no protection" from the rulesets
@@ -768,10 +781,14 @@ seen.
    meant to check. *(Provenance: the tree-loading half is measured — the landing
    run demonstrates it; the consequences for a removing push follow from it and are
    not separately measured here.)*
-4. **~~The gate cannot be run on a branch by any convention-compliant means.~~
-   CLOSED by #171.** A push to `scratch/**` now runs the same gate on the
-   candidate itself, baselined on the exact fetched `origin/dev` and required to
-   descend from it — no pull request involved. The `pull_request` trigger has been
+4. **The gate could not be run on a branch by any convention-compliant means —
+   addressed by #171's configuration; see its ledger for the run evidence.** A push
+   to `scratch/**` now triggers the same gate on the candidate itself, baselined on
+   the exact fetched `origin/dev` and required to descend from it — no pull request
+   involved. *(Provenance: the trigger and the gate's local behaviour are measured
+   here; whether a real Actions run has been observed RED and GREEN on that route is
+   recorded in [`ISSUE_171_AUDIT_LEDGER.md`](ISSUE_171_AUDIT_LEDGER.md), which is the
+   single place that claim lives.)* The `pull_request` trigger has been
    REMOVED (criterion 7a): it validated the synthetic **merge** tree rather than
    the branch tip, so even setting the no-PR convention aside it never told you
    that the commit you were about to fast-forward was green, and keeping a
@@ -785,18 +802,22 @@ seen.
 
 **On making it a required status check.** A required check is evaluated against the
 commit being pushed, so it needs a way for a commit to acquire a passing check
-*before* it reaches `dev`. Opening a pull request does run this gate — that is how
-the five seeded-defect runs were produced — but **it validates the synthetic MERGE
-tree, not the branch head**: for a `pull_request` event `GITHUB_SHA` is the merge
-commit Actions built, which is exactly why the gate binds to it explicitly
-(`tests.yml`, the `Wave gate` step). So a PR run does not, by itself, establish
-that the head SHA carries a passing check usable by a later fast-forward push.
+*before* it reaches `dev`. **Historically** — while the `pull_request` trigger still
+existed, which is how #152's five seeded-defect runs were produced — opening a PR did
+run this gate, but **it validated the synthetic MERGE tree, not the branch head**: for
+a `pull_request` event `GITHUB_SHA` is the merge commit Actions built, which is why
+the gate binds to it explicitly. So a PR run did not, by itself, establish that the
+head SHA carried a passing check usable by a later fast-forward push — one of the two
+reasons #171 removed that trigger. That route no longer exists here; the
+`scratch/**` preflight replaces it.
 
 This paragraph has now been wrong in both directions — first calling a preflight
 impossible, then calling it available-but-disallowed — and both errors were the
 same mechanism: asserting platform behaviour instead of measuring it. #171
-supplies the missing half of the first clause: **a convention-compliant preflight
-path now exists and has been demonstrated**, RED and GREEN, on `scratch/**`.
+CONFIGURES the missing half of the first clause — a convention-compliant preflight
+route on `scratch/**`. Whether it has been **demonstrated** RED and GREEN is
+recorded in [`ISSUE_171_AUDIT_LEDGER.md`](ISSUE_171_AUDIT_LEDGER.md) and nowhere
+else: this document does not assert a run it cannot cite.
 
 What #171 deliberately did **not** do is answer whether that makes a ruleset
 viable. Doing so requires attaching an enforcing rule to a live branch with

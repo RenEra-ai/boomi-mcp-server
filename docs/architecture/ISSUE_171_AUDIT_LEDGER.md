@@ -61,8 +61,12 @@ with the original retained.
 
 | Class | Mechanism | Runtime authority | Instances (derived from rows) | Resolution |
 | --- | --- | --- | --- | --- |
-| **DC-A** | the tree under test is not bound to the identity the run's authority describes | git ancestry graph + Actions' `GITHUB_SHA` | seeded as **instance 2 on arrival** (instance 1 = #152's push/PR checkout-binding findings, same mechanism under the *event payload* authority) | **Structural fix applied in the first batch**, not an instance patch — see below |
+| **DC-A** | the tree under test is not bound to the identity the run's authority describes | git ancestry graph + Actions' `GITHUB_SHA` | seeded as **instance 2 on arrival** (instance 1 = #152's push/PR checkout-binding findings, same mechanism under the *event payload* authority); **instance 3 = A6-6**, the widened binding's own missing witness | **Structural fix applied in the first batch**, not an instance patch — see below. A6-6 did not break the invariant; it broke the PROOF of the invariant, and is fixed by completing the witness set rather than by re-narrowing the code |
 | **DC-B** | a hand-listed allowlist shadowing a set that is derivable from the filesystem | the audit-ledger filenames present under `docs/architecture`, as globbed by the scanner itself | 1 (S1-1) | structural: the derived set is computed once and consumed by BOTH scans in the scanner; the hand-list keeps only FIXED document names, which do not grow per slice |
+| **DC-7** | served prose drifting from the evidence or code it describes | the measured runs, and the implemented CLI | 2 (A6-1, A6-3) | second instance reached at the §6 gate. Structural response: run claims are now single-sourced — §10, README and #152's note all DEFER to this ledger rather than restating a run, so there is one place a demonstration claim can live and one place to correct |
+| **DC-10** | hand-modelled GitHub platform behaviour in served text | GitHub's actual semantics | 1 (A6-4) | instance-level: provenance markers added. Carried forward from #152, where this class reached ten instances; the marker convention IS that structural fix, and this slice applies it |
+| **DC-12** | a residual claimed as owned by a follow-up | that issue's existence and acceptance criteria | 2 (INH-TC1-2 inherited, A6-2) | #172 filed with number, criteria, reason class and placement before the deferral text was written |
+| **DC-13** | an assertion whose scope is wider than the property it claims | the boundary of the thing under assertion (here, the workflow step) | 1 (A6-5) | structural: assert inside the isolated step AND assert absence outside it, so both halves of "exactly one step does this" are bound |
 
 **DC-A structural fix, applied in batch 1** (mandatory on second instance):
 
@@ -84,9 +88,15 @@ with the original retained.
   dirty tree under `ci --base`; a malformed / wrong / absent `GITHUB_SHA` inside Actions;
   a supplied-but-wrong `GITHUB_SHA` outside Actions; a baseline off this history. Plus
   the two scoping witnesses that the same dirty tree and the same non-ancestor baseline
-  are ACCEPTED when the subcommand is not `ci`.
-- *Coverage claim:* the authority's case set is the nine cells above; all nine are
-  asserted, six by the pre-existing push/PR matrix and three by this slice's additions.
+  are ACCEPTED when the subcommand is not `ci`. Plus — added at the §6 gate, finding
+  A6-6 — push and PR contexts under `ci_mode=True`, constructed so the arm itself
+  already agrees with the checkout and only the platform binding can refuse.
+- *Coverage claim, CORRECTED at the §6 gate:* the authority's case set is the nine cells
+  above. An earlier revision of this row claimed all nine were asserted. **That was
+  false, and was falsified by measurement, not by reading:** with the platform binding
+  moved back under the `local` arm the suite stayed green at 243/243, so the three
+  `ci` cells for push and pull_request were unwitnessed. After A6-6's fix the same
+  mutant fails. The claim now holds because the mutant that would break it dies.
 
 Second-instance check is run against this table at row-write time.
 
@@ -97,10 +107,28 @@ Second-instance check is run against this table at row-write time.
 | INH-TC1-2 | inherited from `ISSUE_152_AUDIT_LEDGER.md` row TC1-2 (not a gate of this slice) | "Capture a green run after reverting the PR seeds" — every seeded run was `pull_request`; the only green run is `push`/BOOTSTRAP, a different baseline path | P2 | capability reachability | DC-12 (a residual claimed as owned by a follow-up; authority = that issue's acceptance criteria) | Standard — anchor: source label P2, and no critical blocking class | inherited at `6792d065` | *(open — discharged by criterion 7(a) landing plus archived scratch GREEN evidence; see the criteria matrix)* |
 | S1-1 | Stage-1 QA, full non-KB suite run (no run dir — a local suite execution, not a collected gate) | `test_diagnostic_codes_named_in_the_audit_ledger_exist` failed: "the audit ledger names diagnostic codes the gate cannot emit: ['ISSUE_171_AUDIT_LEDGER']" | *(none — surfaced by the suite, not labelled by a reviewer)* | machine-served schemas/contracts (the scanner is the served checker for every ledger) | **DC-B** instance 1 | Standard — anchor: no source P0/P1/Critical/High label, and no critical blocking class | uncommitted delta at Stage 1 | `fixed` — structurally. The scanner's own comment already required stems to be allowed "by derivation … never by hand-listing", but only its all-ledgers loop did so; the #152-specific scan read a hand-listed copy. The derived set is now computed once and consumed by both. **Sibling sweep:** both 152-specific assertions (unknown-code and bare-token) plus both all-ledgers assertions — four sites, all now reading the one authority. **Non-vacuity witnesses** *(measured here)*: an invented code inside a backtick span in the new ledger is still rejected; a bare real code in its prose is still rejected; the clean ledger passes. |
 
+| A6-1 | §6 architect review, run dir `cdx-gate-review.ZxeOl1`, attestation `attestation.json` (verdict ISSUES FOUND) | "Rollout evidence is claimed before it exists." §10 says scratch RED/GREEN was demonstrated and #152's note marks TC1-2 discharged, but both runs are still pending and the archive holds no Actions logs | *(none)* | machine-served schemas/contracts (served spec + README prose) | **DC-7** (served prose drifting from the evidence; authority = the measured runs) instance 1 | Standard — anchor: no source P0/P1/Critical/High label; served text, not a critical class | `55fd417`..`e541a3d` | `fixed` — every demonstration claim reverted to its true present state. §10 now names the ledger as the single place a run claim may live; gap 4 says "addressed by configuration, see the ledger for run evidence"; #152's note explicitly declines to declare TC1-2 discharged. The claims will be restated only from measured runs. |
+| A6-2 | §6 architect review, `cdx-gate-review.ZxeOl1` | "The unrun ruleset and `[skip ci]` work is not validly deferred" — no issue numbers, acceptance criteria, placement or lineage | *(none)* | *(audit-record integrity — NOT a blocking class)* | **DC-12** (a residual claimed as owned by a follow-up; authority = that issue's existence and criteria) instance 1 | Standard — anchor: no source critical label | `e541a3d` | `fixed` — **#172 filed** with per-item acceptance criteria, reason class `blocked-by-mechanism`, milestone M12 and slot "after #171, before M12 close" recorded in its body at filing time. The Deferrals section now cites the number. The finding was exactly right: the prior text claimed "filed follow-ups" that did not exist. |
+| A6-3 | §6 architect review, `cdx-gate-review.ZxeOl1` | "The served specification contradicts the implemented CLI" — §4 says local `--base` keeps dirty-tree support though `ci --base` now requires clean; §10 says opening a PR runs the gate though the trigger is removed | *(none)* | machine-served schemas/contracts | **DC-7** instance 2 | Standard — anchor: no source critical label; served contract text | `e541a3d` | `fixed` — §4 now scopes dirty-tree support to `wave`/`manifests --base` specifically and states the binding covers every `ci` run; the PR paragraph is rewritten in the past tense as history, naming trigger removal as its consequence. |
+| A6-4 | §6 architect review, `cdx-gate-review.ZxeOl1` | "Platform claims lack the promised provenance discipline, and one is overbroad" — `before` behaviour, workflow discovery, synthetic PR tree; and README says every matching push runs the workflow, contradicting its own skip caveat | *(none)* | machine-served schemas/contracts | **DC-10** (hand-modelled GitHub platform behaviour in served text; authority = GitHub's actual semantics) instance 1 | Standard — anchor: no source critical label; in a blocking class | `e541a3d` | `fixed` — provenance markers added to the `before`-behaviour and workflow-discovery claims and to README's PR-tree claim; README's opening sentence now reads "that **starts** the workflow", with the qualifier's reason stated inline. |
+| A6-5 | §6 architect review, `cdx-gate-review.ZxeOl1` | "The single-step workflow test is structurally vacuous" — it searches the entire YAML, so the scratch arm could move into a second step while every assertion still passed | *(none)* | capability reachability (the test is the only thing binding the workflow's shape) | **DC-13** (an assertion whose scope is wider than the property it claims; authority = the step boundary) instance 1 | Standard — anchor: no source critical label | `e541a3d` | `fixed` — the named step is now isolated by indentation-aware slicing and every arm asserted INSIDE it, plus `wave_gate.py` asserted absent from the remainder. **Non-vacuity witness** *(measured here)*: moving the scratch arm into a second unnamed step now fails the test. Implemented by slicing rather than the reviewer's suggested YAML parse — see the refutation note below. |
+| A6-6 | §6 architect review, `cdx-gate-review.ZxeOl1` | "The deliberate all-`ci` platform binding lacks push/PR witnesses" — `GITHUB_SHA` is tested only for `kind="local"`, so moving the binding back under the local arm would leave the suite green | *(none)* | capability reachability | **DC-A** instance 3 — the structural fix's own coverage claim was unwitnessed | Standard — anchor: no source critical label. *(Recorded as the most consequential of the six: it falsified this ledger's own coverage claim.)* | `e541a3d` | `fixed` — push and PR witnesses added with `ci_mode=True`, each constructed so the ARM ITSELF is already satisfied (`after` IS the checkout; `event_head` IS the checkout) so only the binding can refuse — a wrong-sha assertion alone would not discriminate, because both arms raise the same code unaided. **Non-vacuity witness** *(measured here)*: before the fix the narrowing mutant left 243/243 green; after it, the mutant dies. |
+
 Dispositions: `fixed` · `finding-refuted` · `severity-refuted` · `not-validated` ·
 `deferred` (issue, reason class, placement). A refutation names the disputed claim and
 the concrete evidence. An original label is never edited — a revision is a new dated line
 with the original retained.
+
+**Partial refutation of A6-5's suggested remedy (the finding itself stands, and is
+fixed).** The review proposed "Parse the workflow or isolate the named step"; the parse
+half is not available here. PyYAML is declared in neither `requirements.txt` nor
+`requirements-dev.txt`, and that file states it is the complete, authoritative set CI
+installs. A module-level `import yaml` in the gate's own test module would therefore be a
+COLLECTION ERROR on the runner — the precise failure this gate exists to prevent — while
+passing locally, because the developer virtualenv happens to carry PyYAML transitively.
+The isolate-the-step half of the remedy was taken instead, which closes the same vacuity
+with no new dependency. *(Measured here: `pip show pyyaml` reports no declaring package,
+and neither requirements file names it.)*
 
 **INH-TC1-2 lineage, carried forward unchanged:** first deferral, reason class
 `out-of-scope-by-design`, NOT `window-exhausted`. Its single-use `window-exhausted`
@@ -204,6 +232,32 @@ checkout binding, ancestry validation, workflow routing, or associated test upda
 Zero findings, so no correction and no new finding rows. Not a checkpoint (evaluation 1
 of 3).
 
+## §6 architect implementation review (evaluation 1)
+
+Round 1 — run directory `cdx-gate-review.ZxeOl1`, gate `review`, collected via
+`gate-attest collect` with `ok:true`, `stopped:true`, and the design plan's bytes
+verified present in the prompt (the collector checks this, so "reviewed against the
+plan" is a checkable claim rather than an assertion).
+
+Verdict: **ISSUES FOUND** — six findings, all reconciled above as rows A6-1 … A6-6, all
+`fixed`, none refuted outright. One suggested REMEDY was partially refuted on evidence
+(A6-5's YAML parse) while its finding was accepted and fixed another way.
+
+The review explicitly confirmed what it did NOT find, which is worth recording because it
+bounds the fixes: the Python invariant itself, the workflow routing, and the manifest
+transaction were each checked and found correct — including that a shell `case` glob
+matches nested `scratch/a/b/c` the way the `branches:` filter does, and that the
+`9788 + 1 − 1 = 9788` arithmetic and unchanged floors are right.
+
+Two of the six are worth singling out as the ones a human should care about:
+
+- **A6-6 falsified this ledger's own coverage claim.** The structural fix's invariant was
+  correct, but its proof was not; the mutation test is what settled it. A review that only
+  read the code would have agreed with the ledger.
+- **A6-2 caught a deferral citing an issue that did not exist.** The completion policy
+  requires the follow-up to be filed BEFORE the deferral is recorded, precisely so this
+  cannot happen; it happened anyway, and the gate caught it.
+
 ## Checkpoints (written IN FLIGHT at every third evaluation of each loop)
 
 | Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |
@@ -218,18 +272,29 @@ NAMED finite next correction.
 Pointer-only — reason class, placement and lineage live on the finding row and in the
 filed issue.
 
-Two dispositions this slice records as **out of its own scope and carried by filed
-follow-ups**, both reason class `blocked-by-mechanism`:
+Two items are deferred out of this slice, both to **already-filed issue #172**
+(*"required-status viability and the `[skip ci]` hole are undecided pending a measured
+ruleset experiment"*), both reason class **`blocked-by-mechanism`**, both **first
+deferral — NOT `window-exhausted`**, placement **M12 milestone, after #171 lands and
+before M12 close** (recorded in #172's body at filing time, which is also where the
+per-item acceptance criteria are enumerated):
 
-1. **The required-status-check measurement.** Deciding whether a ruleset requiring
-   `Python 3.11 non-KB` is viable requires attaching an enforcing rule to a live branch
-   with repository-admin authority. The issue asks for the question to be decided
-   *against measurement, not predicted*; predicting it is the exact error §10 has already
-   made twice. The experiment is specified in spec §10 steps 1–6 and left unrun. This is
-   NOT one of acceptance criteria 1–7.
-2. **The `[skip ci]` hole.** A skipped workflow cannot repair its own absence, so the
-   only mechanism that closes it is the same repository rule as (1). Recorded as an
-   explicitly tracked residual in §10 gap 1, not as an oversight.
+1. **The required-status-check measurement** — #172 item 1. Deciding whether a ruleset
+   requiring `Python 3.11 non-KB` is viable requires attaching an enforcing rule to a
+   live branch with repository-admin authority: the blocking mechanism. The issue asks
+   for the question to be decided *against measurement, not predicted*, and predicting
+   it is the exact error §10 has already made twice. The experiment is specified in
+   §10 and reproduced as #172's acceptance criteria. This is NOT one of #171's
+   acceptance criteria 1–7.
+2. **The `[skip ci]` hole** — #172 item 2. A skipped workflow cannot repair its own
+   absence, so the only mechanism that closes it is the same repository rule as (1);
+   #172 item 1's negative control IS this hole's test, which is why the two are filed
+   together rather than separately. Recorded as an explicitly tracked residual in §10
+   gap 1, not as an oversight.
+
+Both deferrals were recorded at the §6 architect-review reconciliation, and #172 existed
+before this text was written — a deferral may not cite an unfiled issue. The checkpoint
+row governing them is in the Checkpoints table below.
 
 ## Evidence index
 

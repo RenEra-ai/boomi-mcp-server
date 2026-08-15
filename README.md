@@ -539,8 +539,10 @@ run. If you develop on 3.12, expect CI to be the stricter of the two.
 
 ### The gate
 
-Every push to `dev` — and every push to a `scratch/**` branch — runs
-`.github/workflows/tests.yml`, whose only step selects one of two routes:
+Every push to `dev` — and every push to a `scratch/**` branch — that **starts** the
+workflow runs `.github/workflows/tests.yml`, whose only step selects one of two
+routes. (The qualifier is load-bearing: a head commit carrying `[skip ci]` starts no
+run at all, as the enforcement note below and spec §10 gap 1 both record.)
 
 ```bash
 # push to dev — DETECTION on the pushed tip; the event supplies the baseline
@@ -552,7 +554,9 @@ python scripts/wave_gate.py ci --base "$(git rev-parse refs/remotes/origin/dev^{
 
 So you can run the real gate on a branch before pushing to `dev`, without
 opening a pull request. There is deliberately **no `pull_request` trigger**: a PR
-run validates the synthetic merge tree rather than the commit that would land.
+run validated the synthetic merge tree rather than the commit that would land
+*(documented GitHub behaviour, and the reason #171 removed the trigger — not
+measured here)*.
 
 The gate refuses to believe a green pytest run on its own. It also checks a
 committed manifest of required node ids, a committed collection floor, and the

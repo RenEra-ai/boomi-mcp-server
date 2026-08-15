@@ -860,19 +860,22 @@ lineage first deferral and NOT `window-exhausted`. This note records only WHERE 
 deferred residual was discharged, which the row could not know when it was written.
 
 TC1-2 deferred the observation that no non-`push` baseline path had ever been observed
-reaching green. #171 owns it via its criterion 7 and discharges it two ways at once:
+reaching green. #171 owns it via its criterion 7 and addresses it two ways:
 
 - **criterion 7(a)** — the `pull_request` trigger has been REMOVED from
   `.github/workflows/tests.yml`. The never-observed-green merge-base arm is eliminated by
   design rather than carried, which is the disposition the owner selected on the issue.
   `_baseline_from_pull_request()` and its unit coverage are retained, so the resolver
-  stays tested while the untested CI arm is gone.
+  stays tested while the untested CI arm is gone. **This half has landed.**
 - **criterion 5** — a GREEN run on the scratch-push (`local` baseline) route, which is
   the non-`push:[dev]` path #171 introduces.
 
-Both, plus the seeded RED rerun that criterion 4 required with no pull request opened,
-are recorded in [`ISSUE_171_AUDIT_LEDGER.md`](ISSUE_171_AUDIT_LEDGER.md) and archived
-under `docs/architecture/evidence/issue-171/`.
+**This note deliberately does not declare TC1-2 discharged.** The row's disposition is
+whatever [`ISSUE_171_AUDIT_LEDGER.md`](ISSUE_171_AUDIT_LEDGER.md) records for
+`INH-TC1-2`, and that ledger — not this note — is where the criterion 4 and 5 run
+evidence lives, archived under `docs/architecture/evidence/issue-171/`. An earlier
+revision of this note asserted the discharge before the runs existed, which is the same
+claimed-before-measured error TC1-2's own row was created to correct.
 
 One thing this note does NOT claim: that #171 made a required status check viable. That
 question is recorded there as undecided pending a measured experiment, because deciding

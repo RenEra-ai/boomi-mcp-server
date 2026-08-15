@@ -2066,18 +2066,42 @@ def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
                    "cancel-in-progress", "github.event.before", "merge-base"):
         assert absent not in workflow, absent
 
-    # ONE step carrying BOTH arms — not two strings loose in the file.
-    assert workflow.count("- name: Wave gate") == 1
-    assert workflow.count("scripts/wave_gate.py") == 2
-    assert 'ci \\\n                --github-event "$GITHUB_EVENT_PATH"' in workflow
-    assert 'ci --base "$base"' in workflow
-    assert "push:refs/heads/dev)" in workflow
-    assert "push:refs/heads/scratch/*)" in workflow
-    assert "refs/remotes/origin/dev^{commit}" in workflow
+    # ONE step carrying BOTH arms. Asserting the strings against the whole file
+    # would be VACUOUS: the scratch arm could sit in a second, unnamed step while
+    # the named one rejected scratch, and every count below would still hold. So
+    # isolate the named step and assert INSIDE it — then assert the gate is
+    # invoked nowhere else. (Sliced textually rather than parsed: PyYAML is not in
+    # `requirements-dev.txt`, which is the authoritative CI environment, so a
+    # module-level `import yaml` here would be a collection error on the runner —
+    # the one failure this whole gate exists to prevent.)
+    lines = workflow.splitlines()
+    heads = [i for i, ln in enumerate(lines) if ln.strip().startswith("- name: Wave gate")]
+    assert len(heads) == 1, heads
+    top = heads[0]
+    indent = len(lines[top]) - len(lines[top].lstrip())
+    tail = len(lines)
+    for j in range(top + 1, len(lines)):
+        ln = lines[j]
+        if ln.strip() and (len(ln) - len(ln.lstrip())) <= indent and ln.lstrip().startswith("- "):
+            tail = j
+            break
+    step = "\n".join(lines[top:tail])
+    outside = "\n".join(lines[:top] + lines[tail:])
+
+    # Both routes, both refusals, inside the ONE step.
+    assert step.count("scripts/wave_gate.py") == 2
+    assert 'ci \\\n                --github-event "$GITHUB_EVENT_PATH"' in step
+    assert 'ci --base "$base"' in step
+    assert "push:refs/heads/dev)" in step
+    assert "push:refs/heads/scratch/*)" in step
+    assert "refs/remotes/origin/dev^{commit}" in step
     # The two fail-closed arms: an unresolvable baseline, and any other context.
-    assert "BASELINE_UNAVAILABLE cannot resolve refs/remotes/origin/dev" in workflow
-    assert "BASELINE_EVENT_INVALID unsupported event/ref" in workflow
-    assert workflow.count("exit 2") == 2
+    assert "BASELINE_UNAVAILABLE cannot resolve refs/remotes/origin/dev" in step
+    assert "BASELINE_EVENT_INVALID unsupported event/ref" in step
+    assert step.count("exit 2") == 2
+    # ...and NOTHING outside it invokes the gate, so the step really is the whole
+    # story rather than merely one telling of it.
+    assert "wave_gate.py" not in outside, outside
 
     assert "python-version: \"3.11\"" in workflow
     assert "requirements-dev.txt" in workflow
@@ -2153,6 +2177,39 @@ def test_the_checkout_must_be_the_tree_the_event_describes(tmp_path, monkeypatch
         gate.check_checkout_matches_event(str(repo), ctx_local, ci_mode=True)
     assert excinfo.value.code == "CHECKOUT_EVENT_MISMATCH"
     monkeypatch.delenv("GITHUB_SHA")
+
+    # ---- the platform binding applies to EVERY `ci` context, not just `local`.
+    # These witnesses are built so the ARM ITSELF is already satisfied — the push's
+    # `after` IS the checkout, the PR's `event_head` IS the checkout — so the only
+    # thing that can refuse is the binding. Asserting a wrong-sha refusal without
+    # that care proves nothing: the push and PR arms raise the same code on their
+    # own, so such a test passes whether or not the binding runs at all.
+    # (MEASURED: with these four cases removed, moving `_bind_head_to_platform_sha`
+    # back under the `local` arm leaves the suite green.)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    for kind, ctx_ok in (
+        ("push", {"kind": "push", "target": base, "after": other}),
+        ("pull_request",
+         {"kind": "pull_request", "target": base, "event_head": other}),
+    ):
+        # The arm agrees with the checkout, and so does the platform: accepted.
+        monkeypatch.setenv("GITHUB_SHA", other)
+        gate.check_checkout_matches_event(str(repo), ctx_ok, ci_mode=True)
+        # The arm still agrees — only the PLATFORM disagrees. Without the binding
+        # every one of these returns cleanly.
+        for bad_sha in ("9" * 40, "not-a-sha"):
+            monkeypatch.setenv("GITHUB_SHA", bad_sha)
+            with pytest.raises(gate.GateFailure) as excinfo:
+                gate.check_checkout_matches_event(str(repo), ctx_ok, ci_mode=True)
+            assert excinfo.value.code == "CHECKOUT_EVENT_MISMATCH", (kind, bad_sha)
+        monkeypatch.delenv("GITHUB_SHA")
+        with pytest.raises(gate.GateFailure) as excinfo:
+            gate.check_checkout_matches_event(str(repo), ctx_ok, ci_mode=True)
+        assert excinfo.value.code == "CHECKOUT_EVENT_MISMATCH", kind
+        # ...and the same context under `ci_mode=False` is still accepted, which is
+        # what makes these four cases a witness for the WIDENING specifically.
+        gate.check_checkout_matches_event(str(repo), ctx_ok, ci_mode=False)
+    monkeypatch.delenv("GITHUB_ACTIONS")
 
     # A baseline off this history is not an integration delta.
     _run_git(repo, "checkout", "-q", "-b", "side")

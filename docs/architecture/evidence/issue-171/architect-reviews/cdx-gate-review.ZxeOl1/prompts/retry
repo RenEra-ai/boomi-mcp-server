@@ -1,0 +1,19 @@
+Approvals are unavailable in this read-only review session — no tool will be approved, no command will be run, and no file will be written. Do not request approval, do not ask a clarifying question, and do not wait for a response: there is nobody to answer.
+
+Emit your FULL review findings as plain text NOW, in this message, using whatever you have already read. If some detail could not be verified because a command was not approved, state the limitation inline and continue — an explicitly-flagged limitation is acceptable; an absent review is not.
+
+Review the delta `git diff 6792d0658b6da7964e35b3c493c8320dee2c1c6a..HEAD` in the repository at /Users/gleb/Documents/Projects/Renera/boomi-mcp-server (branch `codex/issue-171`, HEAD `e541a3d8936ad415d31d3ed52227195b2534dad0`) against the architect design plan reproduced in the original prompt.
+
+Cover, at minimum:
+
+1. Implementation-versus-plan fidelity, including the seven recorded deviations — above all the `GITHUB_SHA` binding being widened from the `local` arm to ALL `ci` contexts, the unplanned changes to the ledger scanner in `tests/test_wave_gate.py`, and the deliberate non-execution of the required-status ruleset experiment.
+2. Whether the new `ci_mode` invariant in `check_checkout_matches_event()` (with `_bind_head_to_platform_sha()` and `_refuse_baseline_off_this_history()`) has any fail-open path.
+3. Whether the workflow's single `case`-based gate step fails closed on every unrecognized event/ref, with no step-level `if:` and no `github.event.before` or merge-base baseline selection.
+4. The manifest transaction: `pytest-009550` tombstoned, `pytest-009789` appended, floors unchanged at 9788/9788/30 — verified against §5 of the spec.
+5. Test quality: whether the replacement and extended tests are real witnesses or vacuous assertions.
+6. Served contract text: whether docs match code, and whether any prose asserts GitHub platform behaviour without a provenance marker.
+7. Anything the plan and the implementation both got wrong.
+
+For each finding: file, line, concrete failure scenario, and the fix. No style preferences. If nothing is actionable, say so plainly.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.
