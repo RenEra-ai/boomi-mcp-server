@@ -3301,6 +3301,83 @@ def test_a_summary_evicted_from_the_tail_is_still_counted(tmp_path, monkeypatch,
     assert excinfo.value.code == "PYTEST_SUMMARY_AMBIGUOUS"
 
 
+def test_two_outcomes_on_one_physical_line_are_refused():
+    """Counting LINES is not counting outcomes.
+
+    `100 passed, 0 skipped in 0.01s 100 skipped in 0.01s` is a single line, so
+    the one-summary rule saw one candidate; the first clause of each kind then
+    won, reporting 100 passed and 0 skipped for a fully skipped run. The grammar
+    is now anchored with exactly one duration clause.
+    """
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate._parse_suite_summary(
+            "==== 100 passed, 0 skipped in 0.01s 100 skipped in 0.01s ===="
+        )
+    assert excinfo.value.code == "PYTEST_SUMMARY_UNPARSEABLE"
+
+    # A repeated clause inside a well-formed line is ambiguous, not first-wins.
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate._parse_suite_summary("==== 1 passed, 2 passed in 0.01s ====")
+    assert excinfo.value.code == "PYTEST_SUMMARY_AMBIGUOUS"
+
+    # The real thing still parses — a stricter grammar must not reject it.
+    assert gate._parse_suite_summary(
+        "==== 9757 passed, 18 skipped, 20 warnings in 776.50s (0:12:56) ===="
+    ) == {"passed": 9757, "failed": 0, "skipped": 18, "errors": 0}
+
+
+def test_an_outcome_the_gate_cannot_account_for_is_refused():
+    """An outcome vocabulary open by omission let `deselected` through.
+
+    A hook can retain a required node at COLLECTION and deselect it at
+    EXECUTION; `deselected` was parsed as nothing, so the missing pass hid inside
+    the skip-cap headroom and a required test avoided execution while the gate
+    went green.
+    """
+    for line in (
+        "== 229 passed, 1 deselected in 1.0s ==",
+        "== 10 passed, 1 xpassed in 1.0s ==",
+        "== 10 passed, 1 xfailed in 1.0s ==",
+    ):
+        with pytest.raises(gate.GateFailure) as excinfo:
+            gate._parse_suite_summary(line)
+        assert excinfo.value.code == "PYTEST_OUTCOME_UNACCOUNTED", line
+
+    # `failed`/`error` remain parseable so the SPECIFIC diagnostic still wins.
+    assert gate._parse_suite_summary("== 10 passed, 2 failed in 1.0s ==")["failed"] == 2
+
+
+def test_every_collected_test_must_be_accounted_for(tmp_path, monkeypatch):
+    """The accounting identity: passed + skipped == collected.
+
+    Without it a collected-but-never-executed test simply vanishes from the
+    arithmetic. Driven through `run_suite`, because that is where collection and
+    outcome meet.
+    """
+    lines = ["==== 229 passed, 1 skipped in 1.00s ===="]
+
+    class _FakeProc:
+        stdout = iter("%s\n" % line for line in lines)
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(gate.subprocess, "Popen", lambda *a, **k: _FakeProc())
+    manifest = gate.parse_manifest(_default_nodes(), "pytest-nodes")
+
+    # 230 accounted, 230 collected -> fine.
+    collected = {"tests/test_x.py::t%d" % i for i in range(230)}
+    gate.run_suite(str(tmp_path), manifest, collected)
+
+    # 231 collected, still only 230 accounted -> the missing one is refused.
+    lines[:] = ["==== 229 passed, 1 skipped in 1.00s ===="]
+    _FakeProc.stdout = iter("%s\n" % line for line in lines)
+    collected.add("tests/test_x.py::vanished")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_suite(str(tmp_path), manifest, collected)
+    assert excinfo.value.code == "PYTEST_OUTCOME_UNACCOUNTED"
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

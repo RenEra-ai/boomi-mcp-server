@@ -1507,7 +1507,42 @@ def run_suite(repo, nodes_manifest, collected):
             "{0} tests passed, below the floor of {1} ({2} collected - {3} "
             "permitted skips)".format(summary["passed"], floor, len(collected), cap),
         )
+    # ACCOUNTING IDENTITY: every collected test is either a pass or a permitted
+    # skip. Without it a collected-but-never-executed test simply vanishes from
+    # the arithmetic — a hook can retain a required node at COLLECTION and
+    # deselect it at EXECUTION, and the missing pass hides inside the skip-cap
+    # headroom. Reproduced: `229 passed, 1 deselected`, exit 0, 230 collected,
+    # gate green while a required test never ran.
+    accounted = summary["passed"] + summary["skipped"]
+    if accounted != len(collected):
+        raise _invalid(
+            "PYTEST_OUTCOME_UNACCOUNTED",
+            "{0} tests collected but {1} accounted for ({2} passed + {3} "
+            "skipped); every collected test must run and pass or be a "
+            "permitted skip".format(
+                len(collected), accounted, summary["passed"], summary["skipped"]
+            ),
+        )
     return summary
+
+
+# A pytest summary is a comma-separated list of `<n> <outcome>` clauses, then
+# exactly ONE duration. Anchored and single-duration on purpose: a substring
+# search let one physical line carry two outcomes —
+# `100 passed, 0 skipped in 0.01s 100 skipped in 0.01s` — and the first clause of
+# each kind won, reporting 100 passed and 0 skipped for a fully skipped run.
+_SUMMARY_LINE_RE = re.compile(
+    r"\A\d+ [a-z]+(?:, *\d+ [a-z]+)* in \d+(?:\.\d+)?s(?: \(\d+:\d\d:\d\d\))?\Z"
+)
+_SUMMARY_CLAUSE_RE = re.compile(r"(\d+) ([a-z]+)")
+
+# Outcomes the gate will accept in a green run. `warnings` is not a test outcome
+# and is excluded from the accounting identity; everything else — `failed`,
+# `error(s)`, `deselected`, `xpassed`, `xfailed` — means tests did not simply run
+# and pass, so it is refused rather than ignored. An outcome vocabulary that is
+# open by omission is how `deselected` slipped through unaccounted.
+_TEST_OUTCOMES = ("passed", "skipped", "failed", "error", "errors")
+_NON_TEST_CLAUSES = ("warning", "warnings")
 
 
 def _is_summary_line(stripped):
@@ -1532,13 +1567,40 @@ def _summary_from_candidates(summaries):
             "the suite produced no parseable outcome summary; its result cannot "
             "be accounted for, so it is not a pass",
         )
-    for stripped in summaries:
-        for key, pattern in (
-            ("passed", r"(\d+) passed"), ("failed", r"(\d+) failed"),
-            ("skipped", r"(\d+) skipped"), ("errors", r"(\d+) error"),
-        ):
-            match = re.search(pattern, stripped)
-            counts[key] = int(match.group(1)) if match else 0
+    stripped = summaries[0]
+    if not _SUMMARY_LINE_RE.match(stripped):
+        raise _invalid(
+            "PYTEST_SUMMARY_UNPARSEABLE",
+            "the outcome summary does not match the expected grammar (one list "
+            "of `<n> <outcome>` clauses and exactly one duration): {0!r}".format(
+                stripped
+            ),
+        )
+    seen = {}
+    for value, outcome in _SUMMARY_CLAUSE_RE.findall(stripped):
+        if outcome in seen:
+            raise _invalid(
+                "PYTEST_SUMMARY_AMBIGUOUS",
+                "the outcome summary repeats the {0!r} clause: {1!r}".format(
+                    outcome, stripped
+                ),
+            )
+        seen[outcome] = int(value)
+    unexpected = sorted(
+        o for o in seen
+        if o not in _TEST_OUTCOMES and o not in _NON_TEST_CLAUSES
+    )
+    if unexpected:
+        raise _invalid(
+            "PYTEST_OUTCOME_UNACCOUNTED",
+            "the suite reported outcomes the gate does not accept as a pass "
+            "({0}); every test must run and pass or be a permitted skip: "
+            "{1!r}".format(", ".join(unexpected), stripped),
+        )
+    counts["passed"] = seen.get("passed", 0)
+    counts["skipped"] = seen.get("skipped", 0)
+    counts["failed"] = seen.get("failed", 0)
+    counts["errors"] = seen.get("errors", seen.get("error", 0))
     return counts
 
 
@@ -2992,6 +3054,7 @@ DIAGNOSTIC_CODES = frozenset({
     "PYTEST_FAILED",
     "PYTEST_NODE_MISSING",
     "PYTEST_NODE_TOMBSTONED_BUT_PRESENT",
+    "PYTEST_OUTCOME_UNACCOUNTED",
     "PYTEST_PASSED_BELOW_FLOOR",
     "PYTEST_SKIPPED_EXCEEDS_CAP",
     "PYTEST_SUMMARY_AMBIGUOUS",
