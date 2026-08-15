@@ -1829,19 +1829,27 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
     # satisfied by ONE visible occurrence: the ledger repeats codes (PYTEST_FAILED
     # six times at this writing), so a region going invisible while another
     # occurrence stays visible — and a typo inside the hidden region — would both
-    # pass it. Every occurrence must sit inside a region some scan parses: a fence
-    # body, or an inline span located on the fence-blanked text (same-length
-    # whitespace, so source positions survive) exactly as inline_codes() excises.
-    def _scanned_spans(text):
-        spans = [m.span() for m in _re.finditer(r"```.*?```", text, _re.S)]
+    # pass it. "Covered" means a region a scan actually PARSES: a fence BODY (the
+    # same capture fenced_codes() reads — the opener/info line is NOT parsed, so
+    # it is not covered), or an inline span located on the fence-blanked text
+    # (same-length whitespace, so source positions survive) exactly as
+    # inline_codes() excises.
+    def _covered_spans(text):
+        spans = [m.span(1) for m in _re.finditer(r"```.*?\n(.*?)```", text, _re.S)]
         blanked = _re.sub(
             r"```.*?```", lambda m: " " * len(m.group(0)), text, flags=_re.S
         )
         spans += [m.span() for m in _re.finditer(r"(`+)(.+?)\1", blanked, _re.S)]
         return spans
 
+    def _uncovered_text(text):
+        chars = list(text)
+        for a, b in _covered_spans(text):
+            chars[a:b] = " " * (b - a)
+        return "".join(chars)
+
     def _hidden_occurrences(text, codes):
-        spans = _scanned_spans(text)
+        spans = _covered_spans(text)
         return [
             (code, m.start())
             for code in sorted(codes)
@@ -1850,18 +1858,46 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
         ]
 
     assert _hidden_occurrences(ledger, present) == [], (
-        "these (code, offset) occurrences are outside every scanned region, so a "
+        "these (code, offset) occurrences are outside every parsed region, so a "
         "typo there would go unreported"
     )
 
-    # Non-vacuity witness: one occurrence in a span AND one in bare prose. The
-    # distinct-code sets see the first and go green; the occurrence check must
-    # report exactly the second.
+    # A typo in a hidden region is not in `present`, so the exact-code walk above
+    # cannot search for it. Judge every candidate token in the UNCOVERED text
+    # instead: no diagnostic-like token — exact, near-miss, or merely shaped like
+    # a code — may sit outside the parsed regions at all.
+    bare = _judge(
+        _re.findall(r"\b({0})\b".format(_CANDIDATE), _uncovered_text(ledger))
+    )
+    assert bare == set(), (
+        "diagnostic-like tokens sit outside every parsed region, where the scans "
+        "cannot judge them: {0}".format(sorted(bare))
+    )
+
+    # Non-vacuity witnesses, one per false-negative path this closed:
+    # 1. a DUPLICATED code, one occurrence in a span and one bare — the
+    #    distinct-code sets see the first and stay green; the occurrence walk
+    #    must report exactly the second;
     witness = "`PYTEST_FAILED` in a span, then bare PYTEST_FAILED in prose."
     assert named_codes(witness) & gate.DIAGNOSTIC_CODES == {"PYTEST_FAILED"}
     assert _hidden_occurrences(witness, {"PYTEST_FAILED"}) == [
         ("PYTEST_FAILED", witness.rindex("PYTEST_FAILED"))
     ]
+    # 2. a MALFORMED bare token: not a member of `present`, invisible to
+    #    named_codes(), so only the uncovered-candidate judge can report it;
+    assert "PYTEST_FAILD" not in gate.DIAGNOSTIC_CODES
+    assert named_codes("bare PYTEST_FAILD in prose") == set()
+    assert _judge(
+        _re.findall(
+            r"\b({0})\b".format(_CANDIDATE),
+            _uncovered_text("bare PYTEST_FAILD in prose"),
+        )
+    ) == {"PYTEST_FAILD"}
+    # 3. a code on a fence OPENER line, which fenced_codes() never parses: the
+    #    fence-body span must not cover it.
+    opener = "```PYTEST_FAILED\nbody text\n```"
+    assert fenced_codes(opener) == set()
+    assert _hidden_occurrences(opener, {"PYTEST_FAILED"}) == [("PYTEST_FAILED", 3)]
 
 
 def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
