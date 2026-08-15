@@ -3414,6 +3414,28 @@ def test_the_render_envelope_must_verify_itself():
         assert excinfo.value.code == "GOLDEN_RENDER_FAILED", name
 
 
+def test_error_spellings_are_canonicalized_before_duplicate_detection():
+    """`1 error` and `0 errors` are ONE outcome, not two.
+
+    Keying the duplicate check on the literal word let a summary carry both
+    spellings: `1 passed, 1 error, 0 errors` passed as two distinct outcomes and
+    the plural-first lookup read the ZERO, so a reported error vanished and the
+    run was accepted. Reproduced: `{'passed': 1, 'errors': 0}`.
+    """
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate._parse_suite_summary("== 1 passed, 1 error, 0 errors in 1.0s ==")
+    assert excinfo.value.code == "PYTEST_SUMMARY_AMBIGUOUS"
+
+    # Both spellings, alone, are recorded — canonicalization must not lose either.
+    assert gate._parse_suite_summary("== 1 passed, 1 error in 1.0s ==")["errors"] == 1
+    assert gate._parse_suite_summary("== 1 passed, 2 errors in 1.0s ==")["errors"] == 2
+
+    # And the real line is unaffected.
+    assert gate._parse_suite_summary(
+        "9761 passed, 18 skipped, 20 warnings in 776.00s (0:12:55)"
+    ) == {"passed": 9761, "failed": 0, "skipped": 18, "errors": 0}
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

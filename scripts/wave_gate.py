@@ -1542,8 +1542,23 @@ _SUMMARY_CLAUSE_RE = re.compile(r"(\d+) ([a-z]+)")
 # `error(s)`, `deselected`, `xpassed`, `xfailed` — means tests did not simply run
 # and pass, so it is refused rather than ignored. An outcome vocabulary that is
 # open by omission is how `deselected` slipped through unaccounted.
-_TEST_OUTCOMES = ("passed", "skipped", "failed", "error", "errors")
-_NON_TEST_CLAUSES = ("warning", "warnings")
+# Spellings are CANONICALIZED before anything else looks at them. pytest writes
+# `1 error` and `2 errors`, and treating those as distinct keys let a summary
+# carry both: `1 passed, 1 error, 0 errors` passed the duplicate check as two
+# different outcomes, and a plural-first lookup then read the ZERO — the
+# reported error vanished and the run was accepted. Canonical keys are the only
+# thing downstream logic ever sees.
+_OUTCOME_ALIASES = {
+    "passed": "passed",
+    "skipped": "skipped",
+    "failed": "failed",
+    "error": "errors",
+    "errors": "errors",
+    "warning": "warnings",
+    "warnings": "warnings",
+}
+_TEST_OUTCOMES = ("passed", "skipped", "failed", "errors")
+_NON_TEST_CLAUSES = ("warnings",)
 
 
 def _is_summary_line(stripped):
@@ -1579,14 +1594,14 @@ def _summary_from_candidates(summaries):
         )
     seen = {}
     for value, outcome in _SUMMARY_CLAUSE_RE.findall(stripped):
-        if outcome in seen:
+        canonical = _OUTCOME_ALIASES.get(outcome, outcome)
+        if canonical in seen:
             raise _invalid(
                 "PYTEST_SUMMARY_AMBIGUOUS",
-                "the outcome summary repeats the {0!r} clause: {1!r}".format(
-                    outcome, stripped
-                ),
+                "the outcome summary repeats the {0!r} outcome (as {1!r}): "
+                "{2!r}".format(canonical, outcome, stripped),
             )
-        seen[outcome] = int(value)
+        seen[canonical] = int(value)
     unexpected = sorted(
         o for o in seen
         if o not in _TEST_OUTCOMES and o not in _NON_TEST_CLAUSES
@@ -1601,7 +1616,7 @@ def _summary_from_candidates(summaries):
     counts["passed"] = seen.get("passed", 0)
     counts["skipped"] = seen.get("skipped", 0)
     counts["failed"] = seen.get("failed", 0)
-    counts["errors"] = seen.get("errors", seen.get("error", 0))
+    counts["errors"] = seen.get("errors", 0)
     return counts
 
 
