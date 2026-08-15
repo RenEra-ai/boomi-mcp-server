@@ -4320,3 +4320,167 @@ def test_the_committed_manifests_parse_and_agree_with_the_tree():
     assert nodes.header["bootstrap_base"] == goldens.header["bootstrap_base"]
     assert len(goldens.active) >= goldens.header["minimum_active"]
     gate.check_golden_tree(str(_ROOT), goldens)
+
+
+def test_audit_ledger_attestations_have_durable_matching_evidence():
+    """Every attested review round has durable evidence a machine can re-verify.
+
+    #152's terminal loop wrote six attestations that the collector never earned —
+    free prose, indistinguishable from a real one by reading — and they survived
+    six rounds because nothing checked the checker. This is the in-tree half of
+    the fix: every run row in every evidence archive must be backed by the
+    collector's own artifacts, hash-verified, with the sidecar rules applied PER
+    COLLECTOR TYPE (commit-review sidecars must never be assumed for gate runs —
+    the two schemas share nothing). The operator-side hook is the live-claim
+    guard; this test keeps the durable record honest after the fact.
+    """
+    indexes = sorted(_ROOT.glob("docs/architecture/evidence/*/index.jsonl"))
+    assert indexes, "no evidence archives found — this check would be vacuous"
+
+    # The exact, reasoned allowlist of rows that are legitimately not `completed`.
+    # No wildcard and no generic "legacy" skip: a new non-completed row must be
+    # added here with its reason, or it fails.
+    expected_not_completed = {
+        # failed run, replaced by cdx-review.Kkf8n6 over the same scope
+        "commit-reviews/cdx-review.kXfU2v": "failed",
+        # refused start — never an evaluation; carries only start.json+refusal.json
+        "architect-reviews/cdx-gate-review.TnpZpj": "refused",
+    }
+
+    def _sha256(path):
+        digest = hashlib.sha256()
+        digest.update(path.read_bytes())
+        return digest.hexdigest()
+
+    # The verifier must have teeth: a flipped hex digit is a detected mismatch.
+    probe = _ROOT / "docs/architecture/evidence/issue-152/index.jsonl"
+    good = _sha256(probe)
+    flipped = ("0" if good[0] != "0" else "1") + good[1:]
+    assert good != flipped and _sha256(probe) != flipped
+
+    import re as _re
+
+    _hex40 = _re.compile(r"^[0-9a-f]{40}$")
+    _shaish = _re.compile(r"^[0-9a-f]{7,40}$")
+    _ancestor_cache = {}
+
+    def _is_ancestor(sha):
+        if sha not in _ancestor_cache:
+            _ancestor_cache[sha] = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", sha, "HEAD"],
+                cwd=_ROOT, capture_output=True,
+            ).returncode == 0
+        return _ancestor_cache[sha]
+
+    def _assert_commit(value, where):
+        # A value is a COMMIT ASSERTION when it is hex-shaped; the collector also
+        # writes the literal `auto` for auto-scope rounds, which asserts nothing.
+        if value is None or value == "auto":
+            return
+        assert _shaish.match(value), "{0}: not a commit or 'auto': {1!r}".format(
+            where, value
+        )
+        assert _hex40.match(value), (
+            "{0}: abbreviated sha {1!r}; the archive records full 40-character "
+            "commits only".format(where, value)
+        )
+        assert _is_ancestor(value), "{0}: {1} is not an ancestor of HEAD".format(
+            where, value
+        )
+
+    total_152_rows = 0
+    seen_dirs = set()
+    for index in indexes:
+        base = index.parent
+        rows = [json.loads(line) for line in index.read_text().splitlines() if line]
+        header, runs = rows[0], rows[1:]
+        assert header["schema_version"] == 1, header
+        _assert_commit(header["source_tip"], str(index))
+
+        # The owning ledger must point at this archive — an archive nothing
+        # references is not part of any audit record.
+        ledger_path = base.parent.parent / "ISSUE_{0}_AUDIT_LEDGER.md".format(
+            header["issue"]
+        )
+        assert ledger_path.is_file(), ledger_path
+        assert "evidence/issue-{0}".format(header["issue"]) in ledger_path.read_text()
+
+        # SHA256SUMS covers exactly the on-disk archive (minus itself), and every
+        # hash re-verifies. Full verification, not a sample: the archive exists
+        # to be checked.
+        sums_path = base / "SHA256SUMS"
+        sums = {}
+        for line in sums_path.read_text().splitlines():
+            digest, rel = line.split("  ", 1)
+            sums[rel] = digest
+        on_disk = {
+            str(p.relative_to(base))
+            for p in base.rglob("*")
+            if p.is_file() and p.name != "SHA256SUMS"
+        }
+        assert set(sums) == on_disk, sorted(set(sums) ^ on_disk)
+        for rel, digest in sums.items():
+            assert _sha256(base / rel) == digest, "hash mismatch: {0}".format(rel)
+
+        for row in runs:
+            where = "{0}:{1}".format(index, row.get("durable_dir"))
+            durable = row["durable_dir"]
+            assert durable not in seen_dirs, "duplicate run dir: " + durable
+            seen_dirs.add(durable)
+            run_dir = base / durable
+            assert run_dir.is_dir(), where
+            for rel, digest in row["files"].items():
+                assert sums.get(rel) == digest, (
+                    "row/manifest hash disagreement for {0}".format(rel)
+                )
+            _assert_commit(row.get("baseline"), where)
+            _assert_commit(row.get("reviewed_sha"), where)
+
+            if row["collector"] == "commit-review-collect":
+                if row["status"] == "completed":
+                    start_head = (run_dir / "start-head").read_text().strip()
+                    reviewed = (run_dir / "last-reviewed-sha").read_text().strip()
+                    assert _hex40.match(start_head), where
+                    assert start_head == reviewed, (
+                        where + ": a completed round reviews exactly its start-head"
+                    )
+                    assert _is_ancestor(start_head), where
+                    teardown = (run_dir / "teardown").read_text().strip()
+                    assert teardown == "confirmed stopped", where
+                else:
+                    assert expected_not_completed.get(durable) == row["status"], (
+                        where + ": non-completed row absent from the reasoned "
+                        "allowlist"
+                    )
+                    assert (run_dir / "phase").is_file(), where
+            elif row["collector"] == "gate-attest":
+                if row["status"] == "completed":
+                    att = json.loads((run_dir / "attestation.json").read_text())
+                    assert att["teardown"] == "confirmed", where
+                    assert att["turn"]["status"] == "completed", where
+                    assert att.get("parsedVerdict"), where
+                    assert _sha256(run_dir / "review.md") == att["artifact"]["sha256"], (
+                        where + ": review.md does not match its attestation"
+                    )
+                    prompt_hashes = {
+                        _sha256(p) for p in (run_dir / "prompts").iterdir()
+                    }
+                    assert att["prompt"]["actualSha256"] in prompt_hashes, (
+                        where + ": attested prompt hash not among archived prompts"
+                    )
+                else:
+                    assert expected_not_completed.get(durable) == row["status"], (
+                        where + ": non-completed row absent from the reasoned "
+                        "allowlist"
+                    )
+                    assert (run_dir / "refusal.json").is_file(), where
+            else:
+                raise AssertionError(where + ": unknown collector " + row["collector"])
+
+        if header["issue"] == 152:
+            total_152_rows = len(runs)
+
+    # Non-vacuous #152 coverage: the slice's 87 archived rounds plus the three
+    # adjustment rounds. A floor, not equality — later record-only corrections
+    # may append rounds, and fewer than this means the archive lost rows.
+    assert total_152_rows >= 90, total_152_rows
