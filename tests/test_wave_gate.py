@@ -3436,6 +3436,61 @@ def test_error_spellings_are_canonicalized_before_duplicate_detection():
     ) == {"passed": 9761, "failed": 0, "skipped": 18, "errors": 0}
 
 
+def test_execution_is_reconciled_by_identity_not_by_count():
+    """`passed + skipped == collected` is necessary but NOT sufficient.
+
+    A `pytest_collection_modifyitems` hook that replaces node B with a second
+    copy of node A keeps the count identity exactly true while B — which fails —
+    never executes. junit's `(classname, name)` records are compared as a
+    MULTISET against the same projection of the collected node ids, so a missing
+    node and a doubled one are both caught.
+    """
+    assert gate._junit_projection("tests/test_x.py::test_foo") == (
+        "tests.test_x", "test_foo"
+    )
+    assert gate._junit_projection("tests/patterns/test_x.py::TestC::test_bar[p1]") == (
+        "tests.patterns.test_x.TestC", "test_bar[p1]"
+    )
+    # A REAL node id from this suite whose parameter contains `::` — an IPv6
+    # literal. A naive `split("::")` shreds it, and the hand-written ids above
+    # never showed it; the 9,782-test run did, with
+    # `PYTEST_EXECUTION_UNRECONCILED` on the first honest execution.
+    assert gate._junit_projection(
+        "tests/test_loopback_redirect_patch.py::test_loopback_port_flexibility"
+        "[http://[::1]:9999/callback-http://[::1]/callback-True]"
+    ) == (
+        "tests.test_loopback_redirect_patch",
+        "test_loopback_port_flexibility"
+        "[http://[::1]:9999/callback-http://[::1]/callback-True]",
+    )
+
+    collected = {"tests/t.py::test_a", "tests/t.py::test_b"}
+    expected = sorted(gate._junit_projection(n) for n in collected)
+    # A executed twice, B never — the count identity would still hold.
+    executed = sorted([("tests.t", "test_a"), ("tests.t", "test_a")])
+    assert len(executed) == len(expected), "the count identity is satisfied"
+    assert executed != expected, "identity reconciliation must still refuse it"
+
+
+def test_untrusted_json_rejects_duplicate_members():
+    """`json.loads` keeps the LAST value for a repeated key.
+
+    So an event can carry two conflicting `before`/`after` pairs, and a render
+    envelope two conflicting `sha256` members, with the checks downstream seeing
+    only one of them — the document is ambiguous and the gate silently picks a
+    side.
+    """
+    for text in (
+        '{"before":"a","before":"b"}',
+        '{"id":"g","id":"h","len":1,"sha256":"x","b64":"y"}',
+    ):
+        with pytest.raises(ValueError):
+            gate._strict_json_loads(text)
+
+    # Well-formed JSON is unaffected.
+    assert gate._strict_json_loads('{"a":1,"b":2}') == {"a": 1, "b": 2}
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

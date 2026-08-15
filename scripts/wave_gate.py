@@ -65,6 +65,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from xml.etree import ElementTree
 from pathlib import PurePosixPath
 
 # --------------------------------------------------------------------------
@@ -941,7 +942,9 @@ def resolve_baseline(repo, *, event_path=None, event_name=None, base=None):
         )
     try:
         with open(event_path, "rb") as handle:
-            event = json.loads(handle.read().decode("utf-8"))
+            # Duplicate members make the event AMBIGUOUS about its own baseline;
+            # `json.loads` would silently keep the last `before`/`after` pair.
+            event = _strict_json_loads(handle.read().decode("utf-8"))
     except (OSError, ValueError) as exc:
         raise _contract(
             "BASELINE_EVENT_INVALID", "cannot read event payload {0}: {1}".format(event_path, exc)
@@ -1428,7 +1431,50 @@ def check_collection(nodes_manifest, collected):
         )
 
 
-def run_suite(repo, nodes_manifest, collected):
+def _junit_projection(node_id):
+    """Project a pytest node id onto junit's `(classname, name)` pair.
+
+    junit reports `classname="tests.test_x.TestClass" name="test_y[param]"`, so a
+    node id is projected the same way and the two multisets are compared. This
+    reconciles IDENTITY, which a count cannot: a hook that runs one node twice
+    and another never keeps `passed + skipped == len(collected)` exactly true
+    while a required test never executes.
+    """
+    # The PARAMETER section is split off first. Node id separators are `::`, but
+    # a parameter can contain them too — this suite has
+    # `test_loopback_port_flexibility[http://[::1]:9999/callback-...]`, whose
+    # IPv6 literal shredded a naive `split("::")`. Caught by a real 9,782-test
+    # run, not by the hand-written node ids in the unit test.
+    head, bracket, params = node_id.partition("[")
+    suffix = bracket + params
+    parts = head.split("::")
+    module = parts[0]
+    if module.endswith(".py"):
+        module = module[:-3]
+    module = module.replace("/", ".")
+    if len(parts) == 1:
+        return (module, suffix)
+    classname = ".".join([module] + parts[1:-1])
+    return (classname, parts[-1] + suffix)
+
+
+def _executed_projections(report_path):
+    """Every `(classname, name)` junit recorded, as a sorted list (duplicates kept)."""
+    try:
+        tree = ElementTree.parse(report_path)
+    except (ElementTree.ParseError, OSError) as exc:
+        raise _invalid(
+            "PYTEST_EXECUTION_UNRECONCILED",
+            "cannot read the junit execution report ({0}); what actually ran "
+            "cannot be established".format(exc),
+        )
+    return sorted(
+        (case.get("classname") or "", case.get("name") or "")
+        for case in tree.iter("testcase")
+    )
+
+
+def run_suite(repo, nodes_manifest, collected, tmpdir=None):
     """Run the suite and account for what actually EXECUTED.
 
     The exit code alone is not evidence. A required node id proves a test still
@@ -1450,7 +1496,14 @@ def run_suite(repo, nodes_manifest, collected):
     (measured 18 here, ~19 expected on a bare runner) and far below any
     mass-skip.
     """
+    report_path = None
+    if tmpdir is not None:
+        # Owned scratch: the execution record is the gate's own artifact.
+        tmpdir.own("junit.xml")
+        report_path = os.path.join(tmpdir, "junit.xml")
     argv = _pytest_argv("-q", "-rs")
+    if report_path is not None:
+        argv = argv + ["--junit-xml", report_path]
     proc = subprocess.Popen(
         argv, cwd=str(repo), env=_pytest_env(),
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
@@ -1508,6 +1561,27 @@ def run_suite(repo, nodes_manifest, collected):
             "{0} tests passed, below the floor of {1} ({2} collected - {3} "
             "permitted skips)".format(summary["passed"], floor, len(collected), cap),
         )
+    # IDENTITY, not just arithmetic. The count identity below is necessary but
+    # NOT sufficient: a `pytest_collection_modifyitems` hook that replaces node B
+    # with a second copy of node A keeps `passed + skipped == len(collected)`
+    # exactly true while B — which fails — never executes. So the multiset of
+    # what junit says RAN must equal the multiset projected from what was
+    # COLLECTED; that catches a missing node and a doubled one alike.
+    if report_path is not None:
+        executed = _executed_projections(report_path)
+        expected = sorted(_junit_projection(n) for n in collected)
+        if executed != expected:
+            missing = sorted(set(expected) - set(executed))
+            extra = sorted(set(executed) - set(expected))
+            raise _invalid(
+                "PYTEST_EXECUTION_UNRECONCILED",
+                "the tests that RAN do not match the tests that were COLLECTED "
+                "({0} executed records vs {1} collected). Missing: {2}. "
+                "Unexpected: {3}.".format(
+                    len(executed), len(expected), missing[:10], extra[:10]
+                ),
+            )
+
     # ACCOUNTING IDENTITY: every collected test is either a pass or a permitted
     # skip. Without it a collected-but-never-executed test simply vanishes from
     # the arithmetic — a hook can retain a required node at COLLECTION and
@@ -1559,6 +1633,11 @@ _OUTCOME_ALIASES = {
 }
 _TEST_OUTCOMES = ("passed", "skipped", "failed", "errors")
 _NON_TEST_CLAUSES = ("warnings",)
+
+
+def _strict_json_loads(text):
+    """`json.loads` that rejects duplicate members. Raises ValueError."""
+    return json.loads(text, object_pairs_hook=_no_duplicate_keys)
 
 
 def _is_summary_line(stripped):
@@ -1733,7 +1812,7 @@ def _render_pass(repo, goldens, tmpdir, hashseed):
         if not line:
             continue
         try:
-            envelope = json.loads(line)
+            envelope = _strict_json_loads(line)
         except ValueError:
             raise _invalid(
                 "GOLDEN_RENDER_FAILED",
@@ -2274,7 +2353,7 @@ def execute(args):
         check_collection(current["pytest-nodes"], collected)
         _emit("wave_gate: collection ok ({0} tests)".format(len(collected)))
 
-        summary = run_suite(repo, current["pytest-nodes"], collected)
+        summary = run_suite(repo, current["pytest-nodes"], collected, tmpdir)
         _emit(
             "wave_gate: non-KB suite green ({0} passed, {1} skipped, cap {2})".format(
                 summary["passed"], summary["skipped"],
@@ -3144,6 +3223,7 @@ DIAGNOSTIC_CODES = frozenset({
     "PYTEST_COLLECTION_EMPTY",
     "PYTEST_COLLECTION_FAILED",
     "PYTEST_COLLECTION_FLOOR",
+    "PYTEST_EXECUTION_UNRECONCILED",
     "PYTEST_FAILED",
     "PYTEST_NODE_MISSING",
     "PYTEST_NODE_TOMBSTONED_BUT_PRESENT",
