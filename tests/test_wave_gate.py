@@ -3246,6 +3246,27 @@ def test_provider_strings_reject_str_subclasses():
     ) == ["semantic", "envelope"]
 
 
+def test_a_second_outcome_summary_is_refused(capsys):
+    """Anything printed AFTER pytest's summary must not become the outcome.
+
+    Reproduced against the previous parser: a genuine
+    `9740 passed, 33 skipped ... in 700.00s` followed by an `atexit` line reading
+    `9773 passed in 0.01s` parsed as 9773 passed and ZERO skipped — clearing the
+    floor and hiding skips above the cap in one step. Two summaries are not a tie
+    to break by position; they mean the stream is not something an outcome can be
+    read from.
+    """
+    real = "==== 9740 passed, 33 skipped, 20 warnings in 700.00s (0:11:40) ===="
+    assert gate._parse_suite_summary(real) == {
+        "passed": 9740, "failed": 0, "skipped": 33, "errors": 0
+    }
+
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate._parse_suite_summary(real + "\nchatter\n==== 9773 passed in 0.01s ====")
+    assert excinfo.value.code == "PYTEST_SUMMARY_AMBIGUOUS"
+    assert excinfo.value.status == 1
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

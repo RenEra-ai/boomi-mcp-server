@@ -1501,16 +1501,36 @@ def run_suite(repo, nodes_manifest, collected):
 
 
 def _parse_suite_summary(text):
-    """Read pytest's outcome counts out of its final summary line."""
+    """Read pytest's outcome counts out of its final summary line.
+
+    EXACTLY ONE summary must appear in the stream. An earlier revision let each
+    matching line overwrite the last, so anything printed after pytest's real
+    summary — an `atexit` handler, a plugin's parting line, a wrapper echo — was
+    taken as the outcome. Reproduced: a genuine
+    `9740 passed, 33 skipped ... in 700.00s` followed by `9773 passed in 0.01s`
+    parsed as 9773 passed and ZERO skipped, which clears the floor and hides
+    skips above the cap in one step.
+
+    Two summaries are not a tie to be broken by position; they mean the stream is
+    not the one thing the gate can read an outcome from, so it fails closed.
+    """
     counts = {"passed": 0, "failed": 0, "skipped": 0, "errors": 0}
-    seen = False
+    summaries = []
     for line in text.splitlines():
         stripped = line.strip().strip("=").strip()
         if not re.search(r"\b\d+ (passed|failed|skipped|error)", stripped):
             continue
         if " in " not in stripped:
             continue
-        seen = True
+        summaries.append(stripped)
+    if len(summaries) > 1:
+        raise _invalid(
+            "PYTEST_SUMMARY_AMBIGUOUS",
+            "pytest produced {0} outcome summaries; the gate cannot tell which "
+            "is the run's result: {1!r}".format(len(summaries), summaries[:3]),
+        )
+    seen = bool(summaries)
+    for stripped in summaries:
         for key, pattern in (
             ("passed", r"(\d+) passed"), ("failed", r"(\d+) failed"),
             ("skipped", r"(\d+) skipped"), ("errors", r"(\d+) error"),
@@ -2954,6 +2974,7 @@ DIAGNOSTIC_CODES = frozenset({
     "PYTEST_NODE_TOMBSTONED_BUT_PRESENT",
     "PYTEST_PASSED_BELOW_FLOOR",
     "PYTEST_SKIPPED_EXCEEDS_CAP",
+    "PYTEST_SUMMARY_AMBIGUOUS",
     "PYTEST_SUMMARY_UNPARSEABLE",
     "SCRATCH_CONTAINMENT_UNPROVEN",
     "SCRATCH_FOREIGN_ENTRIES",

@@ -137,21 +137,47 @@ ledger already committed, and re-decide both deferrals against it.
 | Issue | Reason class | Placement (roadmap owner's slotting) | Lineage |
 | --- | --- | --- | --- |
 | **#164** | `blocked-by-mechanism` — POSIX offers no remove-by-descriptor and no atomic multi-namespace observation | after #160 lands, before M12 close | first deferral; NOT `window-exhausted` |
-| **#165** | `out-of-scope-by-design` — cited to `.codex/plans/issue-152.claude.md` | after #152 lands, before #159 starts | first deferral; NOT `window-exhausted` |
+| **#165** | `window-exhausted` (counted debt) — the original `out-of-scope-by-design` ground was VOIDED by an in-slice measurement (0.39 s, not the estimated 4.9 s) | after #152 lands, before #159 starts | **consumes** the single permitted `window-exhausted` deferral; the next appearance must be fixed, refuted, or escalated |
 
 Both cite THIS checkpoint row, which exists in-tree at the moment of the citation.
 
-*A review round asserted that #165's body had been "re-decided as the single permitted
-`window-exhausted` deferral". That text does not exist in the issue; its body reads
-`out-of-scope-by-design` … `Lineage: first deferral. Not window-exhausted.` Recorded as
-`finding-refuted` on the issue body itself as evidence.*
+**Correction — that refutation was wrong, and the finding was right.** An earlier
+revision of this ledger recorded the claim "#165 was re-decided as the single permitted
+`window-exhausted` deferral" as `finding-refuted`, on the strength of reading the FIRST
+TWELVE LINES of the issue body. The body's line 68 carries a
+"Re-decision 2026-08-14 (falsified-justification rule)" section disposing it exactly that
+way. Absence was asserted from a partial read — the same failure this slice has flagged
+repeatedly in other contexts, committed here in the audit record itself.
 
-## Owed after landing (NOT satisfied by this slice)
+**#165's correct classification is `window-exhausted`, not `out-of-scope-by-design`.** The
+original ground was a ~4.9 s registry import cost; measured in-slice at ~0.39 s, which the
+2026-08-14 amendment makes a VOID justification requiring re-decision with the measurement
+in the record. The honest remaining reason is this slice's review window, which is
+`window-exhausted` (counted debt). It consumes the finding's single permitted
+`window-exhausted` deferral: its next appearance must be fixed, refuted, or escalated.
 
-The architect plan's Definition of Done includes branch protection requiring the
-`Python 3.11 non-KB` check on `dev`. Measured: `gh api repos/.../rulesets` returns `[]` —
-**no ruleset exists**, so `README.md:594` stating the requirement is not yet configured is
-ACCURATE, not stale. The check must run at least once before GitHub will accept it as a
-required status check, so the order is: land → the workflow runs → configure the ruleset.
-That final step is a repository-settings change and is called out explicitly in the
-slice's final report rather than silently claimed as done.
+## Owed after landing (NOT satisfied by this slice) — #152 CANNOT close until these are done
+
+The architect plan §6 makes rollout evidence part of this slice's acceptance, and none of
+it can be produced before the workflow exists on `dev`. Listing it in full, because an
+earlier revision of this section named only the ruleset and thereby understated what is
+owed:
+
+1. **Land**, and record the real `Python 3.11 non-KB` Actions run for the push.
+2. **Seeded-defect proofs**, each pushed on a scratch branch with its RED Actions URL
+   recorded in #152, then reverted and proven green:
+   1. mutate one golden byte → `GOLDEN_MISMATCH`;
+   2. an import failure that terminates collection → `PYTEST_COLLECTION_FAILED`;
+   3. remove a required test while still exceeding the floor → `PYTEST_NODE_MISSING`;
+   4. raise the floor above actual collection → `PYTEST_COLLECTION_FLOOR`;
+   5. delete a golden and its manifest row together → `MANIFEST_TRANSITION_ILLEGAL`.
+   Item 6 of the plan (row-and-file deletion per disposition) is explicitly LOCAL, and the
+   committed parametrized test is its permanent proof.
+3. **Revert every seeded defect** and record green CI and wave-gate results.
+4. **Configure the `dev` ruleset** to require `Python 3.11 non-KB`. Measured:
+   `gh api repos/.../rulesets` returns `[]` — no ruleset exists, so `README.md:594` is
+   ACCURATE rather than stale. GitHub will not accept a required status check that has
+   never run, so this necessarily follows step 1.
+
+Until 1–4 are complete and their URLs are recorded in #152, the slice is INCOMPLETE and
+the issue stays open.
