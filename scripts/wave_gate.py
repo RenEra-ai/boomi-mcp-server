@@ -1458,10 +1458,33 @@ def _junit_projection(node_id):
     return (classname, parts[-1] + suffix)
 
 
-def _executed_projections(report_path):
-    """Every `(classname, name)` junit recorded, as a sorted list (duplicates kept)."""
+def _refuse_unowned_report(tmpdir, report_fd):
+    """The report READ must be the file that was CREATED."""
     try:
-        tree = ElementTree.parse(report_path)
+        named = os.stat("junit.xml", dir_fd=tmpdir.fd, follow_symlinks=False)
+        held = os.fstat(report_fd)
+    except OSError as exc:
+        raise _invalid(
+            "PYTEST_EXECUTION_UNRECONCILED",
+            "cannot verify the junit execution report ({0})".format(exc),
+        )
+    if (named.st_dev, named.st_ino) != (held.st_dev, held.st_ino):
+        raise _invalid(
+            "PYTEST_EXECUTION_UNRECONCILED",
+            "the junit execution report was replaced during the run; the "
+            "evidence of what actually ran cannot be trusted",
+        )
+
+
+def _executed_projections(report_fd):
+    """Every `(classname, name)` junit recorded, as a sorted list (duplicates kept).
+
+    Read through the HELD DESCRIPTOR, never the pathname, so the parse cannot be
+    redirected after the ownership proof.
+    """
+    try:
+        os.lseek(report_fd, 0, os.SEEK_SET)
+        tree = ElementTree.parse(os.fdopen(os.dup(report_fd), "rb"))
     except (ElementTree.ParseError, OSError) as exc:
         raise _invalid(
             "PYTEST_EXECUTION_UNRECONCILED",
@@ -1497,9 +1520,19 @@ def run_suite(repo, nodes_manifest, collected, tmpdir=None):
     mass-skip.
     """
     report_path = None
+    report_fd = None
     if tmpdir is not None:
-        # Owned scratch: the execution record is the gate's own artifact.
-        tmpdir.own("junit.xml")
+        # The child opens this by NAME, so the gate cannot hand it a descriptor —
+        # but it can still own the artifact. `open_for_write` creates it
+        # EXCLUSIVELY (`O_EXCL|O_NOFOLLOW`), which defeats a pre-planted symlink,
+        # and a descriptor is held so the file that is READ can be proven to be
+        # the file that was CREATED. Claiming the name alone would let a sibling
+        # replace the report between the run and the parse, forging the very
+        # execution evidence this check exists to establish.
+        tmpdir.open_for_write("junit.xml").close()
+        report_fd = os.open(
+            "junit.xml", os.O_RDONLY | _O_NOFOLLOW, dir_fd=tmpdir.fd
+        )
         report_path = os.path.join(tmpdir, "junit.xml")
     argv = _pytest_argv("-q", "-rs")
     if report_path is not None:
@@ -1568,8 +1601,27 @@ def run_suite(repo, nodes_manifest, collected, tmpdir=None):
     # what junit says RAN must equal the multiset projected from what was
     # COLLECTED; that catches a missing node and a doubled one alike.
     if report_path is not None:
-        executed = _executed_projections(report_path)
+        _refuse_unowned_report(tmpdir, report_fd)
+        executed = _executed_projections(report_fd)
         expected = sorted(_junit_projection(n) for n in collected)
+        # The projection must be INJECTIVE over what was collected, or "identity"
+        # is not what is being compared: `tests/a.py::B::test_x` and
+        # `tests/a/B.py::test_x` both project to `('tests.a.B', 'test_x')`, so
+        # omitting one and running the other twice leaves the multisets equal.
+        # Measured on this suite: 0 collisions among 9,782 active node ids — so
+        # this is a fail-closed assertion, not a restriction on anything real.
+        if len(set(expected)) != len(expected):
+            seen, collided = set(), set()
+            for node_id in sorted(collected):
+                key = _junit_projection(node_id)
+                if key in seen:
+                    collided.add(key)
+                seen.add(key)
+            raise _invalid(
+                "PYTEST_EXECUTION_UNRECONCILED",
+                "distinct node ids share a junit identity {0}; execution cannot "
+                "be reconciled by identity while they do".format(sorted(collided)[:5]),
+            )
         if executed != expected:
             missing = sorted(set(expected) - set(executed))
             extra = sorted(set(executed) - set(expected))

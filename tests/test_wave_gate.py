@@ -3491,6 +3491,57 @@ def test_untrusted_json_rejects_duplicate_members():
     assert gate._strict_json_loads('{"a":1,"b":2}') == {"a": 1, "b": 2}
 
 
+def test_the_junit_report_must_be_the_file_the_gate_created(tmp_path, monkeypatch):
+    """The child opens the report by NAME, so ownership needs a proof.
+
+    Claiming the name alone let a sibling replace the report between the run and
+    the parse — forging the very execution evidence the check exists to
+    establish — and a pre-planted symlink would have been opened with `w` by
+    pytest, truncating an arbitrary file.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+    scratch = gate.make_scratch_dir(str(repo))
+    try:
+        scratch.open_for_write("junit.xml").close()
+        fd = os.open("junit.xml", os.O_RDONLY | gate._O_NOFOLLOW, dir_fd=scratch.fd)
+        try:
+            # Unmolested: the held descriptor is the named file.
+            gate._refuse_unowned_report(scratch, fd)
+
+            # Replaced during the run: same name, different inode.
+            os.unlink("junit.xml", dir_fd=scratch.fd)
+            scratch.open_for_write("junit.xml").close()
+            with pytest.raises(gate.GateFailure) as excinfo:
+                gate._refuse_unowned_report(scratch, fd)
+            assert excinfo.value.code == "PYTEST_EXECUTION_UNRECONCILED"
+        finally:
+            os.close(fd)
+    finally:
+        shutil.rmtree(os.fspath(scratch), ignore_errors=True)
+
+
+def test_a_non_injective_junit_projection_is_refused():
+    """If two node ids share one junit identity, this is not identity at all.
+
+    `tests/a.py::B::test_x` and `tests/a/B.py::test_x` both project to
+    `('tests.a.B', 'test_x')`, so omitting one and running the other twice leaves
+    the multisets equal. Measured on this suite: 0 collisions among 9,782 active
+    node ids, so the assertion constrains nothing real.
+    """
+    assert gate._junit_projection("tests/a.py::B::test_x") == gate._junit_projection(
+        "tests/a/B.py::test_x"
+    )
+    collided = {"tests/a.py::B::test_x", "tests/a/B.py::test_x"}
+    projections = [gate._junit_projection(n) for n in collided]
+    assert len(set(projections)) != len(projections), (
+        "the collision must be detectable by the injectivity check"
+    )
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 
