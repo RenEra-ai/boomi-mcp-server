@@ -2904,7 +2904,54 @@ class _GateArgumentParser(argparse.ArgumentParser):
         raise _HelpRequested()
 
 
-_CODE_ONLY_RE = re.compile(r"\A[A-Z][A-Z_]{4,}\Z")
+# The gate's OWN codes, and the single authority for them. Pinned bidirectionally
+# by `test_every_diagnostic_code_the_gate_can_raise_is_documented`: this set must
+# equal the codes actually raised in this file, and must equal the roster in
+# `ENDGAME_VERIFICATION_GATE.md`. A shape-only `[A-Z_]+` test is NOT a substitute
+# — a provider-created or post-construction-mutated `GateFailure` can carry any
+# matching token, and emitting it would put an undocumented code in the position
+# the machine contract reserves for a documented one.
+DIAGNOSTIC_CODES = frozenset({
+    "BASELINE_EVENT_INVALID",
+    "BASELINE_MERGE_BASE_AMBIGUOUS",
+    "BASELINE_MERGE_BASE_MISSING",
+    "BASELINE_UNAVAILABLE",
+    "BASELINE_ZERO_SHA",
+    "BOOTSTRAP_NOT_ALLOWED",
+    "CHECKOUT_EVENT_MISMATCH",
+    "GATE_DIAGNOSTIC_UNRENDERABLE",
+    "GATE_UNEXPECTED_ERROR",
+    "GATE_USAGE_INVALID",
+    "GOLDEN_FILE_MISSING",
+    "GOLDEN_FILE_UNDECLARED",
+    "GOLDEN_MISMATCH",
+    "GOLDEN_NONDETERMINISTIC",
+    "GOLDEN_OUTPUT_SET_MISMATCH",
+    "GOLDEN_RENDER_FAILED",
+    "MANIFEST_FLOOR_INVALID",
+    "MANIFEST_FORMAT_INVALID",
+    "MANIFEST_MISSING",
+    "MANIFEST_TRANSITION_ILLEGAL",
+    "PLAN_FINGERPRINT_MISMATCH",
+    "PLAN_FINGERPRINT_PENDING",
+    "PYTEST_COLLECTION_DUPLICATE",
+    "PYTEST_COLLECTION_EMPTY",
+    "PYTEST_COLLECTION_FAILED",
+    "PYTEST_COLLECTION_FLOOR",
+    "PYTEST_FAILED",
+    "PYTEST_NODE_MISSING",
+    "PYTEST_NODE_TOMBSTONED_BUT_PRESENT",
+    "PYTEST_PASSED_BELOW_FLOOR",
+    "PYTEST_SKIPPED_EXCEEDS_CAP",
+    "PYTEST_SUMMARY_UNPARSEABLE",
+    "SCRATCH_CONTAINMENT_UNPROVEN",
+    "SCRATCH_FOREIGN_ENTRIES",
+    "SCRATCH_INSIDE_REPO",
+    "SCRATCH_NOT_OURS",
+    "SCRATCH_RETARGETED",
+    "WORKTREE_DIRTY",
+})
+
 
 _UNRENDERABLE = (
     "GATE_DIAGNOSTIC_UNRENDERABLE the gate failed and its own diagnostic could "
@@ -2922,6 +2969,12 @@ def _report(text, fallback=None):
       handler, where a raise escapes the enclosing `try` entirely, so a sink that
       can throw hands the process an exit status chosen by the failure of
       REPORTING.
+    A `fallback` is only used when it is one of the gate's OWN documented codes
+    (`DIAGNOSTIC_CODES`): a provider-created or post-construction-mutated
+    `GateFailure` can carry any token that merely LOOKS like a code, and emitting
+    that would put an undocumented value where the machine contract requires a
+    documented one.
+
     * It must still print a stable code as the first stderr token. Swallowing
       every failure satisfies the first obligation and silently abandons the
       second: a stderr configured as strict ASCII rejects the em-dash in, for
@@ -2933,6 +2986,12 @@ def _report(text, fallback=None):
     construction), then a fixed ASCII line. Only if every rung fails does it give
     up — and even then it returns rather than raising.
     """
+    # The membership check lives HERE, at the sink, not at a call site: this is
+    # the one place every last-resort diagnostic passes through, so enforcing it
+    # here holds for callers that do not exist yet. Checking it at one caller
+    # would be an enumeration of the callers.
+    if fallback is not None and fallback not in DIAGNOSTIC_CODES:
+        fallback = None
     for candidate in (text, fallback, _UNRENDERABLE):
         if candidate is None:
             continue
@@ -2990,8 +3049,6 @@ def main(argv=None):
         # construction, so it survives a sink the full message cannot reach.
         try:
             code_only = str(failure.code)
-            if not _CODE_ONLY_RE.match(code_only):
-                code_only = None
         except BaseException:  # noqa: BLE001
             code_only = None
         _report(rendered, code_only)

@@ -1613,6 +1613,14 @@ def test_every_diagnostic_code_the_gate_can_raise_is_documented():
     # are part of the same stderr contract and must be documented too.
     raised |= set(gate.EMIT_ONLY_CODES)
 
+    # BIDIRECTIONAL PIN. `DIAGNOSTIC_CODES` is what the fallback reporter trusts,
+    # so it must equal what the gate can actually raise — a shape-only check let
+    # a provider-supplied `UNDECLARED_CODE` reach stderr in the position the
+    # machine contract reserves for a documented code.
+    assert gate.DIAGNOSTIC_CODES == raised, sorted(
+        gate.DIAGNOSTIC_CODES.symmetric_difference(raised)
+    )
+
     doc = (_ROOT / "docs" / "architecture" / "ENDGAME_VERIFICATION_GATE.md").read_text(
         encoding="utf-8"
     )
@@ -3094,10 +3102,11 @@ def test_reporting_still_prints_a_code_when_the_sink_rejects_the_message(monkeyp
 
     monkeypatch.setattr(gate, "_emit", ascii_only)
 
-    # A) the full text is unprintable; the ASCII code survives.
-    gate._report("BASELINE_AMBIGUOUS 'x' is ambiguous \u2014 git reports: y",
-                 "BASELINE_AMBIGUOUS")
-    assert printed == ["BASELINE_AMBIGUOUS"]
+    # A) the full text is unprintable; the ASCII code survives. The code must be
+    #    one the gate actually owns — an invented token is refused by the sink.
+    gate._report("BASELINE_UNAVAILABLE 'x' is ambiguous \u2014 git reports: y",
+                 "BASELINE_UNAVAILABLE")
+    assert printed == ["BASELINE_UNAVAILABLE"]
 
     # B) no fallback offered: the fixed ASCII line is the last rung.
     printed.clear()
@@ -3108,6 +3117,32 @@ def test_reporting_still_prints_a_code_when_the_sink_rejects_the_message(monkeyp
     #    decide the exit status.
     monkeypatch.setattr(gate, "_emit", lambda t: (_ for _ in ()).throw(SystemExit(0)))
     gate._report("x", "Y")
+
+
+def test_the_fallback_never_emits_an_undocumented_code(monkeypatch):
+    """A shape-only `[A-Z_]+` test is not membership in the gate's code set.
+
+    A provider-created or post-construction-mutated `GateFailure` can carry any
+    matching token — `UNDECLARED_CODE` — and emitting it puts an undocumented
+    code in the position the machine contract reserves for a documented one.
+    """
+    printed = []
+
+    def ascii_only(text):
+        text.encode("ascii")
+        printed.append(text)
+
+    monkeypatch.setattr(gate, "_emit", ascii_only)
+
+    # An undocumented token that PASSES a shape check is refused as a fallback,
+    # and the generic ASCII line is used instead.
+    gate._report("UNDECLARED_CODE something \u2014 bad", "UNDECLARED_CODE")
+    assert printed and printed[0].startswith("GATE_DIAGNOSTIC_UNRENDERABLE")
+
+    # A real gate code is still reused, because it IS documented.
+    printed.clear()
+    gate._report("WORKTREE_DIRTY something \u2014 bad", "WORKTREE_DIRTY")
+    assert printed == ["WORKTREE_DIRTY"]
 
 
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
