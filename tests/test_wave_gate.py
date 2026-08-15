@@ -3047,6 +3047,36 @@ def test_help_and_usage_survive_the_outermost_boundary(tmp_path, capsys):
     assert capsys.readouterr().err.split()[0] == "GATE_USAGE_INVALID"
 
 
+def test_a_throwing_diagnostic_sink_cannot_decide_the_exit_status(tmp_path, monkeypatch):
+    """Reporting runs INSIDE a handler, where a raise escapes the enclosing try.
+
+    The last-resort diagnostic — including the `GATE_DIAGNOSTIC_UNRENDERABLE`
+    fallback — used an unguarded `_emit`, so a sink that raises `SystemExit(0)`
+    exited GREEN from the very handler that exists to prevent it. Sibling sweep:
+    every `_emit` inside an `except` suite now goes through `_report`, which
+    cannot throw.
+
+    Both paths are covered: an unexpected error, and an ordinary `GateFailure`
+    whose status was already decided before rendering.
+    """
+    repo, _base = _seeded(tmp_path)
+
+    def hostile_sink(text):
+        raise SystemExit(0)
+
+    monkeypatch.setattr(gate, "_emit", hostile_sink)
+
+    # A) unexpected error inside the gate
+    monkeypatch.setattr(gate, "_status", lambda target: (_ for _ in ()).throw(RuntimeError("x")))
+    assert gate.main(["--repo", str(repo), "manifests", "--base", "HEAD"]) == 1
+
+    # B) an ordinary GateFailure — status decided before rendering, and reporting
+    #    cannot take it back
+    monkeypatch.undo()
+    monkeypatch.setattr(gate, "_emit", hostile_sink)
+    assert gate.main(["--repo", str(repo), "manifests", "--base", "no-such-ref"]) == 2
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

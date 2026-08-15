@@ -28,7 +28,7 @@ post-reconciliation across all roster gates; `finding-refuted` rows never count.
 | # | Defect class | Instances | Resolution |
 | --- | --- | --- | --- |
 | DC-1 | (compare path **strings**, filesystem identity) | 2 | **structural** — `(st_dev, st_ino)` identity, ancestry walked by `..` through descriptors. Sibling sweep: no path-string comparison remains in any security decision (only `os.path.dirname` locating the repo root from `__file__`). |
-| DC-2 | (exception escaping a boundary, **process exit status**) | 5 | **structural** — outermost `except BaseException` in `main()`; see below. |
+| DC-2 | (exception escaping a boundary, **process exit status**) | 6 | **structural** — outermost `except BaseException` in `main()`; see below. |
 | DC-3 | (destructive op resolving a **mutable name**, filesystem object identity) | 7 | **structural** — descriptor-anchored removal + post-hoc outcome proof. Irreducible residual → **#164**. |
 | DC-4 | (ownership **asserted** rather than established, exclusive creation) | 2 | **structural** — `O_EXCL`/`O_NOFOLLOW`; record appended only after the exclusive create. Sibling sweep: every create site is exclusive (`O_EXCL`, `open(...,"x")`, `os.mkdir`). |
 | DC-5 | (bool/int conflation in a discriminator, Python type semantics) | 2 | **structural** — `type(x) is int`. Sibling sweep: line 647 already excludes `bool`; all other coercions are `isinstance(..., str)`, and `bool` is not a `str` subclass. |
@@ -52,6 +52,15 @@ status, and an exception never decides it for the gate.**
   hold evidence reviewed; the outermost handler subsumes the rest.
 * **Non-vacuity witness** — `SystemExit(0)` from the opening fingerprint, a concrete case
   the invariant excludes and which previously exited green.
+A **sixth** instance was then found in the new handler itself: reporting runs INSIDE an
+`except` suite, where a raise escapes the enclosing `try`, so an `_emit` that throws
+exited green from the very handler meant to prevent it — and the older
+`GATE_DIAGNOSTIC_UNRENDERABLE` fallback had the same shape. Every `_emit` inside an
+`except` suite now goes through `_report`, which cannot throw. Rendering (which can run
+foreign `__str__`/`__format__`) stays separately guarded, and the exit status is decided
+before either. Measured after: throwing sink + unexpected error → 1; throwing sink +
+ordinary `GateFailure` → 2.
+
 * **Coverage claim** — the authority's full case set is every exception that can cross
   `main()`: ordinary `Exception`; `BaseException` that is not `Exception`
   (`SystemExit`, `KeyboardInterrupt`, `GeneratorExit`); and one whose rendering itself

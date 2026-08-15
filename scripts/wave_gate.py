@@ -2133,7 +2133,7 @@ def execute(args):
         if failure is None:
             failure = hygiene
         else:
-            _emit("{0} {1}".format(hygiene.code, hygiene.message))
+            _report("{0} {1}".format(hygiene.code, hygiene.message))
     except BaseException:  # noqa: BLE001
         # The CLOSING call is inside the boundary as well. `_status()` shells out
         # to git and hashes files; an unexpected exception there escaped `main()`
@@ -2904,6 +2904,23 @@ class _GateArgumentParser(argparse.ArgumentParser):
         raise _HelpRequested()
 
 
+def _report(text):
+    """Emit a last-resort diagnostic that can NEVER decide the exit status.
+
+    Every last-resort report runs INSIDE an exception handler, where a raise
+    escapes the enclosing `try` entirely — so a sink that can throw hands the
+    process an exit status chosen by the failure of REPORTING. That is the same
+    class as the five exit-status escapes already closed, appearing in the
+    handlers themselves; the `GATE_DIAGNOSTIC_UNRENDERABLE` fallback had it too.
+    Sibling sweep: every `_emit` call inside an `except` suite now goes through
+    here.
+    """
+    try:
+        _emit(text)
+    except BaseException:  # noqa: BLE001
+        pass
+
+
 def main(argv=None):
     try:
         # INSIDE the boundary. argparse exits 2 with usage text and no code, so
@@ -2940,14 +2957,18 @@ def main(argv=None):
         # freely: the worst outcome is a less informative line, never a green
         # exit.
         status = exit_status_for(failure)
+        # RENDERING can run foreign code (`__str__`/`__format__`), so it is
+        # guarded; REPORTING can fail too, so it goes through a sink that cannot
+        # throw. Neither may reach the exit status, which is already decided.
         try:
-            _emit("{0} {1}".format(failure.code, failure.message))
+            rendered = "{0} {1}".format(failure.code, failure.message)
         except BaseException:  # noqa: BLE001
-            _emit(
+            rendered = (
                 "GATE_DIAGNOSTIC_UNRENDERABLE the gate failed and its own "
                 "diagnostic could not be rendered; the exit status is "
                 "authoritative"
             )
+        _report(rendered)
         return status
     except BaseException:  # noqa: BLE001
         # THE invariant, at the only place that can enforce it: the gate decides
@@ -2964,7 +2985,7 @@ def main(argv=None):
         #
         # Nothing about the object is read — not its type, not its args, not its
         # `__str__` — so no foreign code runs on this path.
-        _emit(
+        _report(
             "GATE_UNEXPECTED_ERROR the gate raised a non-gate exception; the "
             "run is not valid"
         )
