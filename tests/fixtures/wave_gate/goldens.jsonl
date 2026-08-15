@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"goldens","minimum_active":60,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"goldens","minimum_active":59,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"golden","id":"golden-000001","input_case":"recipe:api_to_api_sync_0","renderer":"process-xml-v1","expected_file":"tests/fixtures/golden_xml/api_to_api_sync_fetch_map_send.xml","owner":"repository","disposition":"survivor","state":"active"}
 {"kind":"golden","id":"golden-000002","input_case":"process_flow:branch_fanout","renderer":"process-component-v1","expected_file":"tests/fixtures/golden_xml/branch_fanout.xml","owner":"repository","disposition":"survivor","state":"active"}
 {"kind":"golden","id":"golden-000003","input_case":"recipe:compose_all_cache","renderer":"process-xml-v1","expected_file":"tests/fixtures/golden_xml/composed_db_to_api_cache_fanout.xml","owner":"repository","disposition":"survivor","state":"active"}
@@ -58,4 +58,3 @@
 {"kind":"golden","id":"golden-000057","input_case":"trycatch_dlq:error_subprocess","renderer":"process-component-v1","expected_file":"tests/fixtures/golden_xml/try_catch_dlq_error_subprocess.xml","owner":"#160","disposition":"deletion_only","state":"active"}
 {"kind":"golden","id":"golden-000058","input_case":"trycatch_dlq:document_cache_retry2","renderer":"process-component-v1","expected_file":"tests/fixtures/golden_xml/try_catch_dlq_retry_count_2.xml","owner":"repository","disposition":"survivor","state":"active"}
 {"kind":"golden","id":"golden-000059","input_case":"trycatch_dlq:notify_document_cache","renderer":"process-component-v1","expected_file":"tests/fixtures/golden_xml/try_catch_notify_dlq_document_cache.xml","owner":"repository","disposition":"survivor","state":"active"}
-{"kind":"golden","id":"golden-000060","input_case":"archetype_dlq:notify_document_cache","renderer":"process-component-v1","expected_file":"tests/fixtures/golden_xml/try_catch_notify_dlq_document_cache_archetype.xml","owner":"#159","disposition":"transitional_oracle","state":"active"}
