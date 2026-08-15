@@ -2,13 +2,17 @@
 
 Issue #152 (M12.13). Owner: repository.
 
-> **Status: implemented and locally validated; rollout NOT yet evidenced.** At the
-> time of writing the branch is unpushed, so no GitHub Actions run exists, the
-> `dev` ruleset does not yet require `Python 3.11 non-KB` (`gh api .../rulesets`
-> returns `[]`), and the scratch-branch red/green evidence the issue asks for has
-> not been recorded. Those are rollout steps for the owner after this lands —
-> §10 — and until they are done this document describes what the code does, not
-> what the repository enforces.
+> **Status: implemented, landed on `dev`, and evidenced in CI.** The gate runs on
+> pushes to `dev` that start it (§10 gap 1: a `[skip ci]` head commit starts none);
+> the landing run passed on Python 3.11.15 with the full non-KB suite. Its ability
+> to FAIL was proven by seeded defects on scratch branches — four produced the
+> diagnostic the plan expected and one produced a different, correct one; see the
+> rollout evidence in [`ISSUE_152_AUDIT_LEDGER.md`](ISSUE_152_AUDIT_LEDGER.md).
+>
+> There is deliberately **no `dev` ruleset** requiring the check: this repo
+> integrates by fast-forward push, and a required status check would reject such
+> a push outright. §10 explains the mechanism and states the resulting bound
+> honestly — this gate DETECTS a bad tip, it does not PREVENT one.
 
 Two committed ledgers and one fail-closed command make the mechanical half of the
 M12 endgame verification regime automatic:
@@ -389,8 +393,11 @@ base→head comparison runs *before* the tree checks, which is what catches it.
 
 The gate cannot prove from git alone that a change is "the owning slice". It
 reports every tombstone transition with the row's immutable `owner` and
-`disposition`; branch protection and review enforce that the transition belongs
-to the named issue.
+`disposition` — and there it stops. This repository has no branch protection and
+no pull-request review (§10), so **nothing mechanical enforces that a transition
+belongs to the issue its row names**; the gate makes the transition loud and
+attributable, and the owner enforces it at push time. Stated plainly because the
+alternative is a documented guarantee no mechanism provides.
 
 ## 6. The bootstrap exception
 
@@ -637,13 +644,95 @@ would make the roster longer without making the gate stricter, and
 `test_every_diagnostic_code_the_gate_can_raise_is_documented` keeps the roster and
 the code in exact agreement in both directions.
 
-## 10. Branch protection
+## 10. What enforces the check, and what does not
 
-The workflow cannot enforce itself. Configure the `dev` ruleset to require the
-status check named **`Python 3.11 non-KB`** and to require branches to be up to
-date before merging. That check name is the stable contract #153 and #154 cite as
-their "full non-KB Python 3.11 suite in CI" gate item; renaming the job silently
-drops protection.
+This repository integrates by fast-forward **push** to `dev`; it does not use pull
+requests, and `dev` reaches `main` only at milestone end.
+
+**Measured configuration**, on both surfaces that can enforce a check — they are
+configured separately and a rulesets query alone does not settle the question:
+
+```
+gh api repos/.../rulesets                  -> []                      (no ruleset)
+gh api repos/.../branches/dev/protection   -> 404 Branch not protected (no classic rule)
+gh api repos/.../branches/main/protection  -> 404 Branch not protected
+default branch                             -> main
+origin/main  .github/workflows             -> absent entirely
+origin/dev   .github/workflows             -> tests.yml
+```
+
+Repository **rulesets** and **classic branch protection** are distinct mechanisms;
+an earlier revision of this section inferred "no protection" from the rulesets
+query alone, which does not follow. Both are now measured. §10 states nothing
+about GitHub's behaviour that was not either measured here or is not load-bearing
+for a claim.
+
+**What the gate therefore delivers: detection on a pushed tip, not prevention.**
+Every push to `dev` that triggers the workflow runs the full gate on the pushed
+commit, and a failure is visible on it.
+
+The gaps below are the ones currently known. They are **not claimed to be an
+exhaustive bound** — gaps 1 and 3 were each found by review *after* an earlier
+revision of this section asserted the then-current list was complete, and a claim of
+completeness about a platform this document cannot test is exactly the kind of
+assertion §10 exists to avoid. What unites them is worth stating plainly: **with no
+required check and no ruleset, nothing outside the pushed tree gets a vote**, so
+anything that stops the workflow from starting also stops the failure from being
+seen.
+
+1. **A push can suppress its own run.** GitHub honours skip directives
+   (`[skip ci]`, `[ci skip]`, and siblings) in a pushed head commit's message and
+   does not start the workflow. *(Provenance: GitHub-documented behaviour, raised in
+   review — NOT measured in this repository. It is recorded as a gap rather than as
+   a guarantee in either direction.)* With no required check and no ruleset, such a
+   commit would land on `dev` with no run at all — not a red one. Nothing here
+   currently closes that hole.
+2. **A bad tip is detected after it has landed,** because the run starts only once
+   the push is accepted. Reverting is the remedy; refusal is not available.
+3. **A push can disable the gate itself.** For a `push` event GitHub loads the
+   workflow from the **pushed tree** — which is why the landing run executed the
+   `tests.yml` that arrived with it. So a push that removes the workflow from
+   discovery starts no run, and that tip lands silently. Precisely: deleting the
+   file, moving it out of `.github/workflows/`, giving it an extension other than
+   `.yml`/`.yaml`, or changing its trigger so `dev` no longer matches. A rename to
+   another valid path *within* `.github/workflows/` does **not** disable it —
+   discovery is by directory, not by filename, so `tests.yml` is not a magic name.
+   This is gap 1's mechanism at tree level rather than commit-message level, and it
+   is the sharper of the two: the gate's own definition sits inside the thing it is
+   meant to check. *(Provenance: the tree-loading half is measured — the landing
+   run demonstrates it; the consequences for a removing push follow from it and are
+   not separately measured here.)*
+4. **The gate cannot be run on a branch by any convention-compliant means.** It is
+   reachable there today only by opening a pull request — which is how the five
+   seeded-defect runs were produced, and which violates this repository's no-PR
+   convention. So the missing capability is a **non-PR trigger**, not the ability
+   to run at all; an earlier revision claimed the gate simply could not run on a
+   scratch branch, which those five runs contradict. Note also what a PR run does
+   and does not check: it validates the synthetic **merge** tree, not the branch
+   tip, so even setting the convention aside it does not tell you that the commit
+   you are about to fast-forward is green. That is #171's scope.
+
+**On making it a required status check.** A required check is evaluated against the
+commit being pushed, so it needs a way for a commit to acquire a passing check
+*before* it reaches `dev`. Opening a pull request does run this gate — that is how
+the five seeded-defect runs were produced — but **it validates the synthetic MERGE
+tree, not the branch head**: for a `pull_request` event `GITHUB_SHA` is the merge
+commit Actions built, which is exactly why the gate binds to it explicitly
+(`tests.yml`, the `Wave gate` step). So a PR run does not, by itself, establish
+that the head SHA carries a passing check usable by a later fast-forward push.
+
+This paragraph has now been wrong in both directions — first calling a preflight
+impossible, then calling it available-but-disallowed — and both errors were the
+same mechanism: asserting platform behaviour instead of measuring it. So the
+accurate statement is the narrow one: **no preflight path has been demonstrated
+here**, whether a PR run's check can be reused for a direct push is untested, and
+whether #171's trigger changes that is untested too. Anyone enabling a ruleset
+should verify the association first, against a real run. That belongs to #171,
+decided against measurement, not to this document.
+
+The job name **`Python 3.11 non-KB`** remains the stable contract that #153 and
+#154 cite as their "full non-KB Python 3.11 suite in CI" gate item. Renaming it
+breaks those citations even though no ruleset depends on it.
 
 ## 11. Interaction with the #149 reachability freeze
 

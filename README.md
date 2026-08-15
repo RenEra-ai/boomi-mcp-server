@@ -591,9 +591,21 @@ the full binary patches, and a hash per untracked file), failing with
 git can omit an unreadable subtree while exiting 0, sometimes without any
 diagnostic, so treat a pass as "nothing this check can see changed".
 
-The required status check is named **`Python 3.11 non-KB`**. Making the `dev`
-ruleset actually require it is a separate repository-settings step that a workflow
-cannot perform on its own, and it is **not yet configured**. Full specification:
+The check is named **`Python 3.11 non-KB`**, and on `dev` it runs on each push that
+starts it — note that a head commit carrying `[skip ci]` starts no run at all.
+It is **not** a GitHub *required status check*. This repository integrates by
+pushing to `dev` directly, never by pull request, and with today's triggers a
+ruleset would reject such a push outright — the commit carries no passing check
+yet, and the check cannot run until the push lands. So what the gate provides is
+**detection on the pushed tip, not prevention**. Because nothing outside the pushed
+tree gets a vote, anything that stops the workflow from starting also stops the
+failure from being seen: a head commit carrying `[skip ci]`, or a push that removes
+the workflow from discovery or drops `dev` from its filter, lands with no run at
+all. Nor can the gate be run on a branch by any convention-compliant means — only
+by opening a pull request, which this repository does not do
+([#171](https://github.com/RenEra-ai/boomi-mcp-server/issues/171)). Spec §10
+enumerates the known gaps — and says plainly that the list is not claimed
+exhaustive. Full specification:
 [`docs/architecture/ENDGAME_VERIFICATION_GATE.md`](docs/architecture/ENDGAME_VERIFICATION_GATE.md).
 
 ---
@@ -625,7 +637,7 @@ boomi-mcp-server/
 ├── scripts/                   # Operational scripts
 │   └── wave_gate.py           # The fail-closed CI / per-wave verification gate
 ├── .github/workflows/
-│   └── tests.yml              # Required check: Python 3.11 non-KB suite on dev
+│   └── tests.yml              # Verification gate: 3.11 non-KB suite on dev push
 ├── local_atom/                # Helpers for the local-atom dev profile
 ├── requirements.txt           # Core dependencies (FastMCP, ...)
 ├── requirements-dev.txt       # Non-KB test environment (what CI installs)

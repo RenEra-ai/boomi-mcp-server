@@ -1637,6 +1637,195 @@ def test_every_diagnostic_code_the_gate_can_raise_is_documented():
     assert documented - raised == set(), sorted(documented - raised)
 
 
+#: Uppercase tokens the audit ledger legitimately uses that are NOT diagnostic codes —
+#: env vars, open(2) flags, a checkpoint outcome, prose placeholders, and words that
+#: appear in quoted gate output (`BOOTSTRAP` is a log line, not a failure code). Kept
+#: explicit and asserted disjoint from `DIAGNOSTIC_CODES` below, so this list can never
+#: be used to silence a code that really exists.
+_LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
+    "BLIND",
+    "BOOTSTRAP",
+    "CONTINUE",
+    "DIAGNOSTIC_CODES",
+    "EMPTY",
+    # Document filenames — the ledger cites both, and tokenizing inside compound
+    # inline spans now sees the stem of `ISSUE_152_AUDIT_LEDGER.md`.
+    "ENDGAME_VERIFICATION_GATE",
+    "ISSUE_152_AUDIT_LEDGER",
+    "GITHUB_SHA",
+    "O_EXCL",
+    "O_NOFOLLOW",
+    "PYTHONHASHSEED",
+    # Collector trailer keywords, not diagnostics: the ledger quotes `STATUS:` and
+    # `SCOPE:` when recording a review round's attestation.
+    "SCOPE",
+    "STATUS",
+    "UPPER_SNAKE",
+})
+
+
+def test_diagnostic_codes_named_in_the_audit_ledger_exist():
+    """The ledger must not name a diagnostic the gate cannot emit.
+
+    #152's ledger claimed a seeded golden mutation would produce `GOLDEN_MISMATCH`.
+    It cannot: `run_suite()` precedes the wave-only `check_goldens()`, so the suite's
+    own golden test fails first and the gate reports `PYTEST_FAILED`. The claim read
+    as authoritative for three review rounds because nothing checked it.
+
+    This pins the part that CAN be mechanised — that every code named is a real
+    member of `DIAGNOSTIC_CODES`. It deliberately does NOT claim to verify that a
+    named code is the RIGHT code for the scenario described; only running the
+    scenario establishes that, which is why the ledger quotes measured output.
+    """
+    import re as _re
+
+    ledger = (
+        _ROOT / "docs" / "architecture" / "ISSUE_152_AUDIT_LEDGER.md"
+    ).read_text(encoding="utf-8")
+
+    # Candidates are extracted CASE-TOLERANTLY and judged afterwards. An earlier
+    # revision matched `[A-Z][A-Z0-9_]{4,}`, which cannot see a malformed spelling
+    # at all: `PYTEST_NODE_MISSINg` produced no token, so it vanished instead of
+    # failing — the precise defect the test exists to catch. A token is a candidate
+    # if it carries an underscore and at least four capitals; MEASURED: all 41
+    # members of `DIAGNOSTIC_CODES` contain an underscore, so nothing real is lost,
+    # while ordinary snake_case (`st_dev`, `minimum_active`) has no capitals and
+    # CamelCase (`GateFailure`) has no underscore.
+    _CANDIDATE = r"[A-Za-z][A-Za-z0-9_]{4,}"
+
+    # A typo can also DELETE the underscore (`PYTEST_FAILED` -> `PYTESTFAILED`), which
+    # the shape rule below would discard before ever checking membership. So a token
+    # is also judged when it collides with a real code after normalisation — that
+    # collision is precisely what makes it a near-miss rather than an unrelated word.
+    _normal = {c.replace("_", "").upper(): c for c in gate.DIAGNOSTIC_CODES}
+
+    def _judge(tokens):
+        out = set()
+        for tok in tokens:
+            # NEAR-MISS FIRST, before any shape filter. A typo can also drop the
+            # CASE (`golden_mismatch`), which has no capitals at all — an earlier
+            # revision applied the >=4-capitals threshold first and so discarded
+            # exactly the malformed spellings this exists to report.
+            near_miss = (
+                tok.replace("_", "").upper() in _normal
+                and tok not in gate.DIAGNOSTIC_CODES
+            )
+            if near_miss:
+                out.add(tok)
+                continue
+            # Otherwise a token must LOOK like a diagnostic to be judged at all,
+            # or ordinary prose would flood this.
+            if "_" in tok and sum(c.isupper() for c in tok) >= 4:
+                out.add(tok)
+        return out - _LEDGER_NON_DIAGNOSTIC_TOKENS
+
+    # The two forms are scanned SEPARATELY, not merged, so each can be asserted on
+    # its own. Merging them made the fenced-coverage assertion vacuous: the codes it
+    # named also appear in inline spans, so it passed even when the fence scan found
+    # nothing at all.
+    def inline_codes(text):
+        # Fenced blocks are EXCISED first. A ``` fence is three backticks, and an
+        # inline-span pattern reads them as ordinary delimiters — which pairs every
+        # following backtick out of phase and silently drops whole regions. Measured
+        # on this ledger: `GOLDEN_NONDETERMINISTIC` was present in the file and
+        # invisible to the scan. Fences are covered by `fenced_codes()` anyway.
+        text = _re.sub(r"```.*?```", "", text, flags=_re.S)
+        # Then tokenize INSIDE each span rather than requiring the whole span to be
+        # one candidate: the ledger writes compound spans like
+        # `code: MANIFEST_FLOOR_INVALID, status: 2`. Newline-tolerant and bounded,
+        # because a Markdown span may wrap across a source line.
+        # Match a RUN of backticks and require the same run to close it. Markdown
+        # allows ``a `literal` `` spans, and the ledger uses one; a single-backtick
+        # pattern pairs those delimiters out of phase and drops what follows.
+        toks = []
+        for _delim, span in _re.findall(r"(`+)(.+?)\1", text, _re.S):
+            toks += _re.findall(r"\b({0})\b".format(_CANDIDATE), span)
+        return _judge(toks)
+
+    def fenced_codes(text):
+        # Inside a fence the tokens are bare — this is where the ledger quotes real
+        # gate output, and an inline-only scan left it entirely unchecked.
+        toks = []
+        for block in _re.findall(r"```.*?\n(.*?)```", text, _re.S):
+            toks += _re.findall(r"\b({0})\b".format(_CANDIDATE), block)
+        return _judge(toks)
+
+    def named_codes(text):
+        return inline_codes(text) | fenced_codes(text)
+
+    # The allowlist may never hide a real code.
+    assert _LEDGER_NON_DIAGNOSTIC_TOKENS & gate.DIAGNOSTIC_CODES == set(), sorted(
+        _LEDGER_NON_DIAGNOSTIC_TOKENS & gate.DIAGNOSTIC_CODES
+    )
+
+    unknown = named_codes(ledger) - gate.DIAGNOSTIC_CODES
+    assert unknown == set(), (
+        "the audit ledger names diagnostic codes the gate cannot emit: "
+        "{0}".format(sorted(unknown))
+    )
+
+    # NON-VACUITY, three ways. First: the scan must actually be finding codes in the
+    # real file — an allowlist that swallowed everything, or a regex that matched
+    # nothing, would pass the assertion above while checking nothing at all.
+    found = named_codes(ledger) & gate.DIAGNOSTIC_CODES
+    assert len(found) >= 5, sorted(found)
+    assert "PYTEST_FAILED" in found, sorted(found)
+
+    # Second: a code that does not exist must be REJECTED. Constructed here rather
+    # than written into the ledger, so the ledger holds no fictional code even as
+    # an illustration.
+    fictional = "PYTEST_NODE_MISSSING"          # note the deliberate typo
+    assert fictional not in gate.DIAGNOSTIC_CODES
+    assert named_codes("a row naming `{0}`".format(fictional)) - gate.DIAGNOSTIC_CODES \
+        == {fictional}
+
+    # Third, and the case an inline-only scan silently missed: the same typo inside
+    # a FENCED block, where the ledger quotes real gate output and the tokens carry
+    # no backticks. This is the arm that regressed, so it gets its own witness.
+    fenced = "```\nseed 3  {0} 1 required node id(s)\n```".format(fictional)
+    assert named_codes(fenced) - gate.DIAGNOSTIC_CODES == {fictional}
+
+    # Fourth: a MALFORMED spelling — a real code with a lowercase slip. The earlier
+    # uppercase-only pattern could not represent this at all, so the bad token
+    # disappeared and the test passed. Both forms must now surface it.
+    malformed = "PYTEST_NODE_MISSINg"
+    assert malformed not in gate.DIAGNOSTIC_CODES
+    assert malformed.upper() in gate.DIAGNOSTIC_CODES, "the witness must be a near-miss"
+    assert named_codes("`{0}`".format(malformed)) - gate.DIAGNOSTIC_CODES == {malformed}
+    assert named_codes("```\n{0} x\n```".format(malformed)) - gate.DIAGNOSTIC_CODES \
+        == {malformed}
+
+    # ...and the fenced scan must reach the ledger's REAL quoted output, not just
+    # synthetic text. Asserted against fence-derived tokens ALONE — an earlier
+    # revision checked the merged set, so it stayed green even if the fence scan
+    # returned nothing, because the codes it named also appear in inline spans.
+    real_fenced = fenced_codes(ledger) & gate.DIAGNOSTIC_CODES
+    assert len(real_fenced) >= 5, (
+        "the fenced scan found {0} diagnostic code(s) in the ledger's quoted output; "
+        "the 'Observed diagnostics' block should supply several".format(
+            sorted(real_fenced)
+        )
+    )
+
+    # The inline arm needs the same treatment, and for the same reason: it was
+    # silently dropping regions because fence backticks put its span pairing out of
+    # phase. Assert it against inline-derived tokens ALONE.
+    real_inline = inline_codes(ledger) & gate.DIAGNOSTIC_CODES
+    assert len(real_inline) >= 5, sorted(real_inline)
+
+    # STRONGEST of the coverage checks, and the one that would have caught the
+    # out-of-phase bug directly: no code written anywhere in the ledger may be
+    # invisible to the scan. Substring presence is a coarse oracle, but it is
+    # derived from the file rather than from the parser under test — which is the
+    # whole point.
+    present = {c for c in gate.DIAGNOSTIC_CODES if c in ledger}
+    invisible = present - (real_inline | real_fenced)
+    assert invisible == set(), (
+        "these codes appear in the ledger but the scan cannot see them, so a typo "
+        "in them would go unreported: {0}".format(sorted(invisible))
+    )
+
+
 def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
     """The workflow is part of the contract, so pin the parts that fail open.
 
@@ -3091,7 +3280,7 @@ def test_reporting_still_prints_a_code_when_the_sink_rejects_the_message(monkeyp
     An earlier revision of `_report` met the first half by swallowing every
     failure — which silently abandoned the second. A stderr configured as strict
     ASCII rejects the em-dash in `_refuse_ambiguous`'s message
-    (`wave_gate.py:287`), and the gate then exited with EMPTY stderr and no
+    (`wave_gate.py:290`), and the gate then exited with EMPTY stderr and no
     machine-readable code at all.
     """
     printed = []

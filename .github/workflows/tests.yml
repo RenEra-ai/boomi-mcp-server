@@ -1,4 +1,12 @@
-# The required status check for `dev`.
+# The verification gate for `dev`.
+#
+# It is NOT wired as a GitHub "required status check": this repo integrates by
+# fast-forward push to `dev`, never by pull request, and with only the two
+# triggers below a ruleset would reject such a push outright — the commit has no
+# passing check yet, and the check cannot run until the push lands. So this run is
+# DETECTION on the pushed tip, not prevention — and note that a head commit
+# carrying `[skip ci]` starts no run at all. #171 tracks running the gate on a
+# scratch branch before pushing. See §10 of the spec for the full bound.
 #
 # Runs the full non-KB suite on Python 3.11 — the interpreter production runs
 # (`Dockerfile:5`, `python:3.11-slim`). Local development uses a 3.12 `.venv`;
@@ -29,9 +37,14 @@ concurrency:
   #
   # `cancel-in-progress: false` is not enough on its own: GitHub cancels any
   # previously PENDING run in a group when a new run enters it, whatever that
-  # flag says. With a shared per-ref group, three rapid pushes to `dev` leave
-  # the middle commit cancelled with no verdict — on the branch whose protection
-  # depends on this very check. A per-SHA group removes the queue entirely.
+  # flag says. (Provenance: documented platform behaviour, not measured here —
+  # but the design does not DEPEND on it being true. A per-SHA group has no
+  # queue to cancel either way, so this rationale explains the choice without
+  # the choice resting on it.) With a shared per-ref group, three rapid pushes
+  # to `dev` leave
+  # the middle commit cancelled with no verdict — and since a push is the only
+  # way work reaches `dev` here, a missing verdict is a commit nothing checked.
+  # A per-SHA group removes the queue entirely.
   #
   # PRs keep a shared per-ref group and DO cancel superseded runs: there the
   # only verdict that matters is the head commit's.
@@ -42,8 +55,9 @@ concurrency:
 
 jobs:
   non-kb-python311:
-    # This display name is the STABLE required-check name configured in the
-    # `dev` ruleset. Renaming it silently drops branch protection.
+    # This display name is the STABLE check name that #153 and #154 cite as
+    # their "full non-KB Python 3.11 suite in CI" gate item. No ruleset depends
+    # on it (see the header), but renaming it breaks those citations.
     name: Python 3.11 non-KB
     runs-on: ubuntu-24.04
     timeout-minutes: 60

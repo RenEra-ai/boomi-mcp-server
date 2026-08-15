@@ -13,8 +13,10 @@ open, assert-a-floor fails closed.
 
 WHAT IT CHECKS
 --------------
-``ci``   — the required status check for every push to ``dev`` and every PR
-           targeting ``dev``.  Baseline + manifest transition, then collection
+``ci``   — the verification gate wired to pushes to ``dev`` (and to PRs targeting
+           it, though this repo does not use PRs).  It runs only when GitHub
+           starts the workflow: a ``[skip ci]`` head commit starts no run at all.
+           See spec §10.  Baseline + manifest transition, then collection
            (floor, required nodes, reconciliation), then the full non-KB suite.
 ``wave`` — everything ``ci`` does, plus the per-wave obligations: every ACTIVE
            golden-manifest entry rendered TWICE in isolated child processes and
@@ -3372,7 +3374,7 @@ def _report(text, fallback=None):
     * It must still print a stable code as the first stderr token. Swallowing
       every failure satisfies the first obligation and silently abandons the
       second: a stderr configured as strict ASCII rejects the em-dash in, for
-      example, `_refuse_ambiguous`'s message (`wave_gate.py:287`), and the gate
+      example, `_refuse_ambiguous`'s message (`wave_gate.py:290`), and the gate
       then exits with an EMPTY stderr and no machine-readable code at all.
 
     So this is a LADDER, each rung independently guarded: the full text, then a
