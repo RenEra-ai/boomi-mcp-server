@@ -2036,6 +2036,86 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
         )
 
 
+def _split_out_gate_step(workflow):
+    """Split a workflow into (the named Wave-gate step, everything else).
+
+    The step ends at the first NONBLANK DEDENT — any line indented at or below the
+    step's own `- name:` line — not merely at the next sibling `- ` item. A later
+    job whose `steps:` sequence is indented more deeply than this one dedents at
+    its own job key, a line that never starts with `- `, so a `- `-only terminator
+    runs straight through it and swallows that job into the slice. That is not
+    hypothetical: `test_the_step_slice_ends_at_a_dedented_second_job` constructs
+    the exact workflow it swallowed.
+    """
+    lines = workflow.splitlines()
+    heads = [i for i, ln in enumerate(lines) if ln.strip().startswith("- name: Wave gate")]
+    assert len(heads) == 1, heads
+    top = heads[0]
+    indent = len(lines[top]) - len(lines[top].lstrip())
+    tail = len(lines)
+    for j in range(top + 1, len(lines)):
+        ln = lines[j]
+        if ln.strip() and (len(ln) - len(ln.lstrip())) <= indent:
+            tail = j
+            break
+    return "\n".join(lines[top:tail]), "\n".join(lines[:top] + lines[tail:])
+
+
+def test_the_step_slice_ends_at_a_dedented_second_job():
+    """The slice boundary's NON-VACUITY witness, committed rather than performed.
+
+    The real workflow has ONE job whose Wave-gate step is last, so the old
+    `- `-only terminator and the correct dedent terminator both run to end-of-file
+    and agree — reverting the fix leaves the real-file assertions green. The
+    property therefore needs a case where they DISAGREE, and this is it: a second
+    job whose `steps:` sequence is indented more deeply than the first job's.
+
+    Under the old predicate the second job's gate invocation landed INSIDE `step`
+    and `outside` came back empty, so a workflow whose two routes no longer share
+    one step passed. Here it must land outside.
+    """
+    smuggled = (
+        "jobs:\n"
+        "  non-kb-python311:\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v7\n"
+        "      - name: Wave gate (manifests, collection floor, required nodes, full suite)\n"
+        "        run: |\n"
+        "          case \"${GITHUB_EVENT_NAME-}:${GITHUB_REF-}\" in\n"
+        "            push:refs/heads/dev)\n"
+        "              exec python scripts/wave_gate.py ci --github-event \"$GITHUB_EVENT_PATH\"\n"
+        "              ;;\n"
+        "          esac\n"
+        "  smuggled-second-job:\n"
+        "        runs-on: ubuntu-24.04\n"
+        "        steps:\n"
+        "          - name: Scratch arm hidden in a deeper job\n"
+        "            run: |\n"
+        "              exec python scripts/wave_gate.py ci --base \"$base\"\n"
+    )
+    step, outside = _split_out_gate_step(smuggled)
+
+    # The smuggled invocation is NOT part of the named step...
+    assert "--base" not in step, step
+    assert step.count("scripts/wave_gate.py") == 1, step
+    # ...and it IS visible outside it, which is what the real test's
+    # `"wave_gate.py" not in outside` assertion then rejects.
+    assert "scripts/wave_gate.py ci --base" in outside, outside
+
+    # And the ordinary single-job shape still slices to end-of-file.
+    plain = (
+        "jobs:\n"
+        "  only:\n"
+        "    steps:\n"
+        "      - name: Wave gate (manifests, collection floor, required nodes, full suite)\n"
+        "        run: |\n"
+        "          exec python scripts/wave_gate.py ci --github-event \"$GITHUB_EVENT_PATH\"\n"
+    )
+    step, outside = _split_out_gate_step(plain)
+    assert "scripts/wave_gate.py" in step
+    assert "wave_gate.py" not in outside
+
+
 def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
     """The workflow is part of the contract, so pin the parts that fail open.
 
@@ -2067,32 +2147,16 @@ def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
         assert absent not in workflow, absent
 
     # ONE step carrying BOTH arms. Asserting the strings against the whole file
-    # would be VACUOUS: the scratch arm could sit in a second, unnamed step while
-    # the named one rejected scratch, and every count below would still hold. So
-    # isolate the named step and assert INSIDE it — then assert the gate is
-    # invoked nowhere else. (Sliced textually rather than parsed: PyYAML is not in
-    # `requirements-dev.txt`, which is the authoritative CI environment, so a
-    # module-level `import yaml` here would be a collection error on the runner —
-    # the one failure this whole gate exists to prevent.)
-    lines = workflow.splitlines()
-    heads = [i for i, ln in enumerate(lines) if ln.strip().startswith("- name: Wave gate")]
-    assert len(heads) == 1, heads
-    top = heads[0]
-    indent = len(lines[top]) - len(lines[top].lstrip())
-    # Terminate on ANY structural dedent, not only on a sibling `- ` item. A later
-    # job whose `steps:` sequence is indented MORE deeply than this one dedents at
-    # its own `jobs:` key — a line that never starts with `- ` — so a `- `-only
-    # break would run straight through it and swallow that job into the slice.
-    # (MEASURED: with the `- ` condition, a valid two-job workflow carrying the
-    # scratch arm in the second job passed this test.)
-    tail = len(lines)
-    for j in range(top + 1, len(lines)):
-        ln = lines[j]
-        if ln.strip() and (len(ln) - len(ln.lstrip())) <= indent:
-            tail = j
-            break
-    step = "\n".join(lines[top:tail])
-    outside = "\n".join(lines[:top] + lines[tail:])
+    # would be VACUOUS: the scratch arm could sit in a second step while the named
+    # one rejected scratch, and every count below would still hold. So isolate the
+    # named step and assert INSIDE it — then assert the gate is invoked nowhere
+    # else. (Sliced textually rather than parsed. PyYAML IS importable here — the
+    # pinned `fastmcp` declares it unconditionally — so this is a preference, not
+    # a necessity: the slice asserts the block boundary directly instead of
+    # reconstructing it from parsed structure. An earlier revision of this comment
+    # claimed PyYAML was absent and that importing it would break CI collection;
+    # that was false and is withdrawn.)
+    step, outside = _split_out_gate_step(workflow)
 
     # Both routes, both refusals, inside the ONE step.
     assert step.count("scripts/wave_gate.py") == 2
