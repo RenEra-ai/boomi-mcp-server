@@ -24,8 +24,9 @@ itself.
   **Historical**: its rollout tail is stale; `ISSUE_152_AUDIT_LEDGER.md` from its "Rollout
   evidence (post-landing)" section onward is the final closure authority. It is preserved as
   the only durable home of the pre-terminal per-finding narrative.
-- `plans/issue-152.md`, `plans/issue-152.claude.md` — the attested architect input plan and
-  the implementation plan, hash-pinned by the gate attestations (`inputPlan.sha256`).
+- `plans/issue-152.md` — the architect input plan, gate-attested: all 16 completed
+  attestations carry its hash as `inputPlan.sha256`. `plans/issue-152.claude.md` — the
+  implementation plan, covered by `SHA256SUMS` only; no gate attestation binds it.
 - `architect-reviews/cdx-gate-review.<suffix>/` — 17 gate-attest run dirs: `start.json`,
   `attestation.json`, `review.md`, plus `prompts/` (the attested external prompt directory's
   `brief`/`prompt`/`retry` files). `TnpZpj` is a refused start (only `start.json` +

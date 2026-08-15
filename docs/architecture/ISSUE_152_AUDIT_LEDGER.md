@@ -824,7 +824,9 @@ evidence discovered later.
 **Durable evidence archive.** All session-lifetime run directories cited anywhere in
 this ledger are archived byte-verified at `docs/architecture/evidence/issue-152/`
 (17 architect-gate directories including the `TnpZpj` refusal, 70 commit-review
-directories, the raw working report, and the two attested plan files; `SHA256SUMS` +
+directories, the raw working report, and the two plan files — the architect plan
+gate-attested by all 16 attestations' input-plan hash, the implementation plan
+checksum-covered only, no attestation binds it; `SHA256SUMS` +
 `index.jsonl` are the integrity contract). The archive records, rather than repairs,
 the known limitations: commit-review `review.json` carries no verdict, dirty reviews
 have no worktree fingerprint, and the §6 evaluation 12–16 scope SHAs are reconstructed.

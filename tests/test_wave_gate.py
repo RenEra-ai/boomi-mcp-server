@@ -1825,6 +1825,44 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
         "in them would go unreported: {0}".format(sorted(invisible))
     )
 
+    # ...and PER OCCURRENCE, not per distinct code. The set check above is
+    # satisfied by ONE visible occurrence: the ledger repeats codes (PYTEST_FAILED
+    # six times at this writing), so a region going invisible while another
+    # occurrence stays visible — and a typo inside the hidden region — would both
+    # pass it. Every occurrence must sit inside a region some scan parses: a fence
+    # body, or an inline span located on the fence-blanked text (same-length
+    # whitespace, so source positions survive) exactly as inline_codes() excises.
+    def _scanned_spans(text):
+        spans = [m.span() for m in _re.finditer(r"```.*?```", text, _re.S)]
+        blanked = _re.sub(
+            r"```.*?```", lambda m: " " * len(m.group(0)), text, flags=_re.S
+        )
+        spans += [m.span() for m in _re.finditer(r"(`+)(.+?)\1", blanked, _re.S)]
+        return spans
+
+    def _hidden_occurrences(text, codes):
+        spans = _scanned_spans(text)
+        return [
+            (code, m.start())
+            for code in sorted(codes)
+            for m in _re.finditer(r"\b" + _re.escape(code) + r"\b", text)
+            if not any(a <= m.start() and m.end() <= b for a, b in spans)
+        ]
+
+    assert _hidden_occurrences(ledger, present) == [], (
+        "these (code, offset) occurrences are outside every scanned region, so a "
+        "typo there would go unreported"
+    )
+
+    # Non-vacuity witness: one occurrence in a span AND one in bare prose. The
+    # distinct-code sets see the first and go green; the occurrence check must
+    # report exactly the second.
+    witness = "`PYTEST_FAILED` in a span, then bare PYTEST_FAILED in prose."
+    assert named_codes(witness) & gate.DIAGNOSTIC_CODES == {"PYTEST_FAILED"}
+    assert _hidden_occurrences(witness, {"PYTEST_FAILED"}) == [
+        ("PYTEST_FAILED", witness.rindex("PYTEST_FAILED"))
+    ]
+
 
 def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
     """The workflow is part of the contract, so pin the parts that fail open.
