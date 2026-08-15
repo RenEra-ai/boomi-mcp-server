@@ -740,8 +740,10 @@ for a claim.
 **What the gate therefore delivers: detection on a pushed tip, plus an optional
 preflight — not prevention.** Every push to `dev` that triggers the workflow runs
 the full gate on the pushed commit, and a failure is visible on it. Since #171,
-every push to `scratch/**` runs the same gate on the candidate *before* it is
-fast-forwarded, so a bad tip can be found without landing it. Neither is
+every push to `scratch/**` **that starts a run** does the same on the candidate
+*before* it is fast-forwarded, so a bad tip can be found without landing it. The
+qualifier is not pedantry: gap 1 applies to the preflight exactly as it applies to
+`dev`, so a scratch push carrying a skip directive is preflighted by nothing. Neither is
 compulsory: with no required check and no ruleset, nothing forces a candidate
 through the preflight, and nothing outside the pushed tree gets a vote.
 

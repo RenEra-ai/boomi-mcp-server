@@ -24,10 +24,12 @@ depend on one.
 
 ## Limitations, stated rather than implied
 
-**GitHub Actions evidence is hash-covered but deliberately NOT indexed.** Run metadata,
-raw logs, the quoted gate stderr, and the empty pull-request queries live under
-`actions/` and `no-pr/` and are covered by `SHA256SUMS`, but they get no `index.jsonl`
-row. The verifier accepts only the `commit-review-collect` and `gate-attest` collector
+**GitHub Actions evidence is NOT PRESENT YET, and when it is, it will be hash-covered
+but deliberately NOT indexed.** Criteria 4 and 5 have not been executed, so no `actions/`
+or `no-pr/` directory exists in this archive — do not read this paragraph as a claim that
+they do. When those runs happen, their metadata, raw logs, quoted gate stderr, and the
+empty pull-request queries will live under `actions/` and `no-pr/` and be covered by
+`SHA256SUMS`, but will get no `index.jsonl` row. The verifier accepts only the `commit-review-collect` and `gate-attest` collector
 schemas; a row shaped like a collector row with no collector behind it is exactly the
 fabrication this archive exists to make impossible. The ledger and this README are where
 Actions evidence is accounted for.

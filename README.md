@@ -618,8 +618,9 @@ Because nothing outside the pushed tree gets a vote, anything that stops the
 workflow from starting also stops the failure from being seen: a head commit
 carrying `[skip ci]`, or a push that removes the workflow from discovery or drops
 `dev` from its filter, lands with no run at all. Those remain explicitly tracked
-residuals. What is no longer true is that the gate cannot be run on a branch: a
-push to `scratch/**` runs it on the candidate itself, with no pull request
+residuals — and they apply to the preflight too, not only to `dev`. What is no
+longer true is that the gate cannot be run on a branch: a push to `scratch/**` that
+starts a run exercises it on the candidate itself, with no pull request
 ([#171](https://github.com/RenEra-ai/boomi-mcp-server/issues/171)) — but nothing
 compels a candidate through that preflight. Whether the preflight makes a
 required-check ruleset viable is **undecided pending a measured experiment**,

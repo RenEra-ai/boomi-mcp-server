@@ -20,7 +20,9 @@
 # expression was PR-only and is now dead, and a per-SHA group would make the
 # SAME candidate SHA collide between its `scratch/**` preflight and the later
 # `dev` push — exactly the sequence this workflow now creates. Every pushed ref
-# gets its own verdict; the cost is more parallel runner minutes.
+# that STARTS a run gets its own verdict — a head commit carrying `[skip ci]` starts
+# none, so it gets no verdict at all (see the residual note above); the cost is more
+# parallel runner minutes.
 #
 # Required-status disposition: still DETECTION, not prevention. Enabling
 # `Python 3.11 non-KB` as a required check on `dev` needs a measured

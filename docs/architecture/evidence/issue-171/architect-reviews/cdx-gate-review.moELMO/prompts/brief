@@ -1,0 +1,48 @@
+This is a DELTA-SCOPED REPLAY of the architect implementation-review gate, required by the repository's downstream-loop contract: after a correction, the originating gate re-runs scoped to the correction delta. Five generic support reviews have run since the original architect gate; none of them was this gate.
+
+Repository: `boomi-mcp-server` at /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: `codex/issue-171`
+Original architect gate ran at: `e541a3d8936ad415d31d3ed52227195b2534dad0`
+Current HEAD: `0029826733d0672d6ca10ac0b08c5f0f572f303d`
+
+**Review the CORRECTION DELTA only:** `git diff e541a3d8936ad415d31d3ed52227195b2534dad0..HEAD`
+
+Do NOT re-review the implementation that the original gate already cleared. Your question is narrower and specific:
+
+## What to judge
+
+**1. Did the corrections faithfully address the original architect gate's six findings, without breaking what it had approved?**
+
+The original gate (verdict ISSUES FOUND) raised six findings, all recorded in `docs/architecture/ISSUE_171_AUDIT_LEDGER.md` as rows A6-1…A6-6:
+
+- A6-1 rollout evidence claimed before it existed (served docs asserting scratch RED/GREEN runs that had not happened)
+- A6-2 deferrals citing follow-up issues that had not been filed
+- A6-3 served spec contradicting the implemented CLI (dirty-tree scoping; PR trigger removed but prose said PRs run the gate)
+- A6-4 platform claims lacking provenance markers; a README claim overbroad against its own `[skip ci]` caveat
+- A6-5 the workflow regression test structurally vacuous (scanned the whole YAML rather than the isolated step)
+- A6-6 the widened all-`ci` `GITHUB_SHA` binding had no push/PR witnesses, so narrowing it back left the suite green
+
+Verify each is genuinely fixed in the current tree — not merely described as fixed. In particular:
+- `tests/test_wave_gate.py`: does `_split_out_gate_step()` plus `test_the_step_slice_ends_at_a_dedented_second_job` actually make the A6-5/R2-1/R3-2 property durable? Would reverting the slice predicate fail a COMMITTED test?
+- `tests/test_wave_gate.py`: do the push/PR `ci_mode=True` witnesses added for A6-6 actually discriminate — i.e. is each constructed so the arm itself is already satisfied and only the platform binding can refuse?
+- Does `scripts/wave_gate.py` still implement what the design plan specified, unchanged by five rounds of correction?
+
+**2. Is the implementation still faithful to the ARCHITECT DESIGN PLAN reproduced verbatim below?**
+
+The corrections touched code, tests, the workflow, served docs, the audit ledger and the evidence archive. Check that none of them drifted from the plan's intent, and that the plan's load-bearing constraints still hold. Where the implementation deviates from the plan, the deviations are recorded in `.codex/plans/issue-171.claude.md`; judge whether each is justified or whether a constraint was silently dropped across the correction rounds.
+
+**3. Is anything now WORSE than at the original gate?**
+
+Five correction rounds is a lot of churn on a gate that guards CI itself. Look specifically for:
+- a regression introduced by a correction rather than by the original implementation;
+- a test weakened while being "fixed";
+- served documentation that has drifted again during the corrections;
+- the manifest transaction (`tests/fixtures/wave_gate/test_nodes.jsonl`) — it has changed twice now (one tombstone + two appends, floors 9788→9789). Verify the arithmetic against §5 of `docs/architecture/ENDGAME_VERIFICATION_GATE.md` afresh.
+
+**4. What remains genuinely owed before this slice can close?**
+
+Acceptance criteria 4 and 5 (a RED and a GREEN Actions run on a `scratch/**` branch, no pull request) have NOT yet been executed — they are the next step. Criteria 1, 2, 3, 6 and 7 are claimed complete. Judge whether that claim holds on the current tree.
+
+Be concrete: file, line, failure scenario, fix. Do not report style preferences, and do not re-litigate the audit ledger's bookkeeping unless a defect there would mislead a reader about whether a gate ran. If nothing is actionable, say so plainly.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.
