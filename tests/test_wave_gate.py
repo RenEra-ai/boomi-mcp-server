@@ -3378,6 +3378,42 @@ def test_every_collected_test_must_be_accounted_for(tmp_path, monkeypatch):
     assert excinfo.value.code == "PYTEST_OUTCOME_UNACCOUNTED"
 
 
+def test_the_render_envelope_must_verify_itself():
+    """The child declares `len` and `sha256`; reading only `b64` ignored both.
+
+    Reproduced: `{"len": 0, "sha256": "not-the-payload", "b64": "PHgvPgo=!!!"}`
+    decoded to `b"<x/>\\n"` and was accepted, because `b64decode` without
+    `validate=True` silently drops non-alphabet characters. Two such envelopes
+    could then agree with each other AND with the expected bytes while violating
+    the child protocol outright.
+    """
+    import base64 as _b64
+    import hashlib as _hashlib
+
+    payload = b"<x/>\n"
+    good = {
+        "id": "golden-000001",
+        "len": len(payload),
+        "sha256": _hashlib.sha256(payload).hexdigest(),
+        "b64": _b64.b64encode(payload).decode("ascii"),
+    }
+    # The honest envelope still decodes — the check must not reject the protocol
+    # the child actually speaks.
+    assert gate._envelope_payload(good, "golden-000001") == payload
+
+    for name, envelope in (
+        ("non-canonical base64", dict(good, b64="PHgvPgo=!!!", len=0,
+                                      sha256="not-the-payload")),
+        ("unknown field", dict(good, extra=1)),
+        ("declared length wrong", dict(good, len=99)),
+        ("declared digest wrong", dict(good, sha256="0" * 64)),
+    ):
+        with pytest.raises(gate.GateFailure) as excinfo:
+            gate._envelope_id(envelope, "{}")
+            gate._envelope_payload(envelope, "golden-000001")
+        assert excinfo.value.code == "GOLDEN_RENDER_FAILED", name
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

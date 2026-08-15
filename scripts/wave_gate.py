@@ -55,6 +55,7 @@ from __future__ import annotations
 import argparse
 import errno
 import base64
+import binascii
 import hashlib
 import json
 import os
@@ -1723,13 +1724,90 @@ def _render_pass(repo, goldens, tmpdir, hashseed):
                 "GOLDEN_RENDER_FAILED",
                 "unparseable render envelope: {0!r}".format(line[:200]),
             )
-        rid = envelope["id"]
+        rid = _envelope_id(envelope, line)
         if rid in results:
             raise _invalid(
                 "GOLDEN_OUTPUT_SET_MISMATCH", "duplicate render result for {0}".format(rid)
             )
-        results[rid] = base64.b64decode(envelope["b64"])
+        results[rid] = _envelope_payload(envelope, rid)
     return results
+
+
+_SHA256_HEX_RE = re.compile(r"\A[0-9a-f]{64}\Z")
+_ENVELOPE_KEYS = frozenset({"id", "len", "sha256", "b64"})
+
+
+def _envelope_id(envelope, line):
+    if not isinstance(envelope, dict):
+        raise _invalid(
+            "GOLDEN_RENDER_FAILED",
+            "render envelope is not an object: {0!r}".format(line[:200]),
+        )
+    if set(envelope) != _ENVELOPE_KEYS:
+        raise _invalid(
+            "GOLDEN_RENDER_FAILED",
+            "render envelope keys must be exactly {0}, got {1}".format(
+                sorted(_ENVELOPE_KEYS), sorted(map(str, envelope))
+            ),
+        )
+    rid = envelope["id"]
+    if type(rid) is not str or not rid:
+        raise _invalid(
+            "GOLDEN_RENDER_FAILED", "render envelope id must be a non-empty string"
+        )
+    return rid
+
+
+def _envelope_payload(envelope, rid):
+    """Decode the payload and CHECK IT AGAINST the envelope's own declarations.
+
+    The child publishes `len` and `sha256` beside `b64`; reading only `b64`
+    ignored the self-description entirely, and `b64decode` without
+    `validate=True` silently drops non-alphabet characters. So
+    `{"len": 0, "sha256": "not-the-payload", "b64": "PHgvPgo=!!!"}` decoded to
+    `b"<x/>\n"` and was accepted — two such envelopes could then agree with each
+    other and with the expected bytes while violating the protocol outright.
+
+    The declarations are the authority the child itself provides; checking the
+    payload against them is what makes the envelope self-verifying.
+    """
+    declared_len, digest, blob = envelope["len"], envelope["sha256"], envelope["b64"]
+    if type(declared_len) is not int or declared_len < 0:
+        raise _invalid(
+            "GOLDEN_RENDER_FAILED",
+            "{0}: envelope len must be a non-negative integer".format(rid),
+        )
+    if type(digest) is not str or not _SHA256_HEX_RE.match(digest):
+        raise _invalid(
+            "GOLDEN_RENDER_FAILED",
+            "{0}: envelope sha256 must be 64 lowercase hex characters".format(rid),
+        )
+    if type(blob) is not str:
+        raise _invalid(
+            "GOLDEN_RENDER_FAILED", "{0}: envelope b64 must be a string".format(rid)
+        )
+    try:
+        payload = base64.b64decode(blob, validate=True)
+    except (binascii.Error, ValueError):
+        raise _invalid(
+            "GOLDEN_RENDER_FAILED",
+            "{0}: envelope b64 is not canonical base64".format(rid),
+        )
+    if len(payload) != declared_len:
+        raise _invalid(
+            "GOLDEN_RENDER_FAILED",
+            "{0}: envelope declares {1} bytes but carries {2}".format(
+                rid, declared_len, len(payload)
+            ),
+        )
+    actual = hashlib.sha256(payload).hexdigest()
+    if actual != digest:
+        raise _invalid(
+            "GOLDEN_RENDER_FAILED",
+            "{0}: envelope declares sha256 {1} but the payload hashes to "
+            "{2}".format(rid, digest, actual),
+        )
+    return payload
 
 
 def check_goldens(repo, goldens, tmpdir):
