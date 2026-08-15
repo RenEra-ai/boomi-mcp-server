@@ -10,8 +10,8 @@ Issue #152 (M12.13). Owner: repository.
 > rollout evidence in [`ISSUE_152_AUDIT_LEDGER.md`](ISSUE_152_AUDIT_LEDGER.md).
 >
 > **Since #171 there are TWO routes, one gate.** A push to `dev` is DETECTION on
-> the pushed tip. A push to `scratch/**` is a PREFLIGHT on a candidate before it
-> is fast-forwarded, baselined on the exact fetched `origin/dev` commit and
+> the pushed tip. A push to `scratch/**` that STARTS a run is a PREFLIGHT on a
+> candidate before it is fast-forwarded, baselined on the exact fetched `origin/dev` commit and
 > required to descend from it. There is deliberately **no `pull_request`
 > trigger** — a PR run validates the synthetic merge tree rather than the commit
 > that would land, and this repo does not use pull requests
@@ -785,8 +785,8 @@ seen.
    not separately measured here.)*
 4. **The gate could not be run on a branch by any convention-compliant means —
    addressed by #171's configuration; see its ledger for the run evidence.** A push
-   to `scratch/**` now triggers the same gate on the candidate itself, baselined on
-   the exact fetched `origin/dev` and required to descend from it — no pull request
+   to `scratch/**` that starts a run now triggers the same gate on the candidate
+   itself, baselined on the exact fetched `origin/dev` and required to descend from it — no pull request
    involved. *(Provenance: the trigger and the gate's local behaviour are measured
    here; whether a real Actions run has been observed RED and GREEN on that route is
    recorded in [`ISSUE_171_AUDIT_LEDGER.md`](ISSUE_171_AUDIT_LEDGER.md), which is the

@@ -872,6 +872,23 @@ reaching green. #171 owns it via its criterion 7 and addresses it two ways:
 - **criterion 5** — a GREEN run on the scratch-push (`local` baseline) route, which is
   the non-`push:[dev]` path #171 introduces.
 
+### Resolution (appended 2026-08-15, after #171's acceptance runs)
+
+Both halves now hold, and TC1-2 is recorded as **`fixed`** on #171's ledger:
+
+- **criterion 7(a)** — the `pull_request` trigger is removed from `.github/workflows/tests.yml`.
+- **criterion 5** — GitHub Actions run
+  [31911864696](https://github.com/RenEra-ai/boomi-mcp-server/actions/runs/31911864696),
+  a `push` to `refs/heads/scratch/171-green`, conclusion **success**, emitting
+  `wave_gate: baseline 6792d065… (local)` and
+  `wave_gate: non-KB suite green (9770 passed, 19 skipped, cap 30)`. No pull request was
+  opened. Raw log and metadata are archived under
+  `docs/architecture/evidence/issue-171/actions/green-initial/`.
+
+TC1-2's original observation — that no non-`push` baseline path had ever been observed
+reaching green — no longer holds. The paragraph below is retained as the record of this
+note's state BEFORE those runs existed; it is history, not the current disposition.
+
 **This note deliberately does not declare TC1-2 discharged.** The row's disposition is
 whatever [`ISSUE_171_AUDIT_LEDGER.md`](ISSUE_171_AUDIT_LEDGER.md) records for
 `INH-TC1-2`, and that ledger — not this note — is where the criterion 4 and 5 run

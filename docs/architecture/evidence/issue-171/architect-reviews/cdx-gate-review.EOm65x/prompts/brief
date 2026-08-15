@@ -1,0 +1,41 @@
+This is the SECOND delta-scoped replay of the architect implementation-review gate for issue #171. The first replay (`cdx-gate-review.moELMO`) returned ISSUES FOUND with three findings; they have been fixed and the acceptance evidence has since been captured.
+
+Repository: `boomi-mcp-server` at /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: `codex/issue-171`
+Previous replay reviewed up to: `0029826733d0672d6ca10ac0b08c5f0f572f303d`
+Current HEAD: `7abf5d4523caed785e6255cb6d876eaad474b1dd`
+
+**Review the delta since the previous replay:** `git diff 0029826733d0672d6ca10ac0b08c5f0f572f303d..HEAD`
+
+## What changed in this delta
+
+1. **The previous replay's three findings, fixed** (ledger rows AR-1…AR-3):
+   - AR-1: the ledger pre-claimed the replay and CP-3/D-1b/D-2b. Those claims are removed; R5-1 is reopened as `not-validated` and states that no valid checkpoint currently authorizes the deferrals.
+   - AR-2: the evidence README and ledger claimed Actions artifacts were archived when no `actions/`/`no-pr/` existed. Both now say NOT PRESENT YET in the future tense.
+   - AR-3: `tests.yml`, the spec and README carried an unqualified "every pushed ref gets a verdict" claim contradicted by `[skip ci]`. All three qualified.
+
+2. **Acceptance criteria 4 and 5 were then EXECUTED against real GitHub Actions**, and their evidence archived:
+   - GREEN: run 31911864696, `push` to `refs/heads/scratch/171-green`, head `15e922a8f5c5a1999137899bd64a1abc23269248`, conclusion success. Emitted `wave_gate: baseline 6792d065… (local)`, `collection ok (9789 tests)`, `non-KB suite green (9770 passed, 19 skipped, cap 30)`.
+   - RED: run 31913525688, `push` to `refs/heads/scratch/171-seed4-collection-floor`, head `b20fce181e1d314899a251b55c3dc08156baeef9`, conclusion failure, exit 1, `PYTEST_COLLECTION_FLOOR collected 9789 tests, below the committed floor of 99999`.
+   - Neither branch has a pull request (`gh pr list --state all --head <branch>` returned `[]` for both; captures archived under `docs/architecture/evidence/issue-171/no-pr/`).
+   - The seed commit is not an ancestor of the candidate.
+
+3. **The composite wave gate was run** on `c5c66b6`: exit 0, `non-KB suite green (9772 passed, 17 skipped, cap 30)`, `60 active goldens deterministic and byte-exact`.
+
+4. **`INH-TC1-2` was discharged** — the residual inherited from #152.
+
+## What to judge
+
+1. **Are the AR-1…AR-3 fixes real and complete?** In particular, is there any remaining claim in the tree that asserts something not yet true, and did the AR-3 qualification sweep every surface repeating the claim?
+
+2. **Does the archived evidence actually support the claims made about it?** Check `docs/architecture/evidence/issue-171/actions/` and `no-pr/` against what the ledger says. Verify `SHA256SUMS` covers everything. Verify the ledger's quoted run output matches the archived files rather than being re-keyed.
+
+3. **Is the criteria 1–7 completion claim now sound on this tree?** Criterion 7(a) removed the `pull_request` trigger; criterion 4 and 5 now have runs; criterion 6 was claimed both locally and in CI. Judge whether each is genuinely discharged by evidence in the tree, and whether `INH-TC1-2`'s discharge is justified.
+
+4. **What still legitimately blocks closure?** Known and deliberately outstanding: a checkpoint (CP-3) authorizing the two deferrals to #172 has NOT been recorded yet, and the deferral revision rows citing it do not exist yet — the plan is to record CP-3 in its own commit once this replay is clean, then the deferral rows in a following commit, so the cited checkpoint genuinely pre-exists its citation. Also outstanding: a final GREEN run on the final candidate SHA, and the final-tree validation table. Say whether that sequencing is sufficient, and whether anything ELSE blocks.
+
+5. **Anything now worse than at the previous replay** — a regression, a weakened test, or a fresh claim outrunning its evidence.
+
+Do not re-review `scripts/wave_gate.py` or `.github/workflows/tests.yml` behaviour that earlier gates already cleared unless this delta changed it. Be concrete: file, line, failure scenario, fix. If nothing is actionable, say so plainly.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.

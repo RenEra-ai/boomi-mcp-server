@@ -1,0 +1,16 @@
+Approvals are unavailable in this read-only review session — no tool will be approved, no command will be run, and no file will be written. Do not request approval, do not ask a clarifying question, and do not wait for a response: there is nobody to answer.
+
+Emit your FULL review findings as plain text NOW, in this message, using whatever you have already read. If some detail could not be verified because a command was not approved, state the limitation inline and continue — an explicitly-flagged limitation is acceptable; an absent review is not.
+
+This is a DELTA-SCOPED REPLAY of the architect implementation-review gate on the repository at /Users/gleb/Documents/Projects/Renera/boomi-mcp-server (branch `codex/issue-171`, HEAD `7abf5d4523caed785e6255cb6d876eaad474b1dd`). Review only the correction delta `git diff 0029826733d0672d6ca10ac0b08c5f0f572f303d..HEAD`, against the architect design plan reproduced in the original prompt.
+
+Cover, at minimum:
+
+1. Whether the original gate's six findings (ledger rows A6-1…A6-6) are genuinely fixed in the current tree rather than merely described as fixed — especially whether the workflow step-slice property and the push/PR `GITHUB_SHA` witnesses are durable, discriminating, COMMITTED tests.
+2. Whether the implementation is still faithful to the architect design plan after five correction rounds, and whether any recorded deviation silently drops a load-bearing constraint.
+3. Whether anything is now WORSE than at the original gate — a regression introduced by a correction, a test weakened while being fixed, served docs drifted again, or the twice-changed manifest transaction (one tombstone + two appends, floors 9788→9789) failing §5's arithmetic.
+4. Whether the claim that acceptance criteria 1, 2, 3, 6 and 7 are complete holds on the current tree. Criteria 4 and 5 have now been executed (GREEN run 31911864696, RED run 31913525688, no pull request on either) and their evidence archived; judge whether the archive supports the claims. A checkpoint authorizing the two #172 deferrals is deliberately not yet recorded.
+
+For each finding: file, line, concrete failure scenario, and the fix. No style preferences. If nothing is actionable, say so plainly.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.
