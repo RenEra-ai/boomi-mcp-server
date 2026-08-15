@@ -469,6 +469,33 @@ $ gh pr list --state all --head scratch/171-seed4-collection-floor -> []
 
 Both captures are archived under `docs/architecture/evidence/issue-171/no-pr/`.
 
+## Composite wave gate (roster item 5) — MEASURED
+
+One composite evaluation, run on the committed candidate `c5c66b6`, exit status **0**
+captured directly:
+
+```
+$ PYTHONPATH=src python scripts/wave_gate.py wave --base 6792d065…
+wave_gate: baseline 6792d0658b6da7964e35b3c493c8320dee2c1c6a (local)
+wave_gate: TOMBSTONE pytest-nodes pytest-009550 owner=repository disposition=n/a
+wave_gate: manifests ok (9789 required nodes, 60 active goldens)
+wave_gate: collection ok (9789 tests)
+wave_gate: non-KB suite green (9772 passed, 17 skipped, cap 30)
+wave_gate: 60 active goldens deterministic and byte-exact
+PLAN_FINGERPRINT_PENDING issue=#153
+```
+
+This is the whole wave set as ONE evaluation, not five: full non-KB suite, every active
+golden rendered twice under different hash seeds and compared pass-to-pass then to its
+committed bytes, the manifest transaction, and the #153 fingerprint seam. The
+plan-fingerprint line reports pending, which is the #153 seam's expected state and is not
+fatal without `--require-plan-fingerprint`.
+
+The golden line is the part `ci` never runs — it is the reason a wave gate exists
+separately — and it passes byte-exact across all 60 active goldens, confirming this slice
+disturbed none of them. That is consistent with the darkness proof, and is the independent
+check of it.
+
 ## Checkpoints (written IN FLIGHT at every third evaluation of each loop)
 
 | Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |
