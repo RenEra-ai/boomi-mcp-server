@@ -1,0 +1,82 @@
+You are reviewing the implementation of GitHub issue #152 ("M12.13 — Endgame
+verification gate automation and Python 3.11 CI") against the architect design plan
+inlined verbatim at the end of this prompt. Read-only review. This is ROUND 8.
+
+## Your round-7 finding, and how it was answered
+
+You reported one P1:
+
+> [P1] The containment decision is vulnerable to path retargeting —
+> scripts/wave_gate.py:2008. `_refuse_scratch_inside_repo()` validates the resolved
+> directory once, but `make_scratch_dir()` returns the original, potentially
+> symlink-bearing path. During pytest collection, imported test code can retarget a
+> user-owned `TMPDIR` symlink from an outside directory to the repository and create the
+> same scratch basename. The parent then writes `collected.txt` through that path at line
+> 1299; cleanup at line 1969 removes the in-repository directory before the closing
+> fingerprint. I reproduced `later_write_inside_repo=True` followed by
+> `repo_equal_after_cleanup=True`. Thus the gate can still return 0 after writing inside
+> the validated tree. Later I/O and cleanup must be anchored to the verified directory
+> object—such as descriptor-relative, no-follow operations—not the mutable pathname.
+
+I split it and answered the two halves differently. **Contest either answer if you think
+it is wrong — that is a large part of what this round is for.**
+
+**ACCEPTED AND FIXED — verifying one path and returning another.** That was a genuine
+defect independent of any attacker. `make_scratch_dir()` now resolves once and returns
+the RESOLVED path, so the directory the gate writes into is the same object the
+containment check cleared. New regression
+`test_the_scratch_path_returned_is_the_path_that_was_verified` builds your scenario —
+symlinked `TMPDIR`, repointed at the repository after the check, scratch basename
+recreated inside the repo — and asserts the write still lands outside.
+
+**REFUTED — the demand for descriptor-relative, no-follow I/O.** Two grounds:
+
+1. *The attacker is inside the trust boundary.* The capability required is arbitrary code
+   execution during pytest collection. The gate's entire purpose is to EXECUTE this
+   repository's test suite, so code in `tests/` has arbitrary execution inside the gate's
+   own process tree by construction.
+2. *The symlink is not load-bearing for the stated impact.* I measured `_status()` and
+   `check_worktree_unchanged()` directly, with no symlink, no `TMPDIR` and no scratch
+   directory involved:
+
+   ```
+   wrote_inside_repo_during_run   : True
+   fingerprint_equal_after_cleanup: True
+   check_worktree_unchanged       : PASSED (blind)
+   modify_then_restore blind      : True
+   ```
+
+   A before/after snapshot is structurally blind to any write undone before the closing
+   snapshot. `repo_equal_after_cleanup=True` is therefore reachable by writing a file and
+   deleting it; the retargeting adds no capability. Hardening that one route would close
+   a single path out of unboundedly many while leaving the capability untouched.
+
+The plan's requirement (line 97) is that the gate "write temporary output outside the
+repository" — a constraint on where the GATE writes, now enforced with the used path
+being the proven one. `docs/architecture/ENDGAME_VERIFICATION_GATE.md` now states this
+boundary explicitly, with the measurement above.
+
+## Files changed since round 7 (`4784406..1779e5b`)
+
+- scripts/wave_gate.py
+- tests/test_wave_gate.py
+- tests/fixtures/wave_gate/test_nodes.jsonl
+- docs/architecture/ENDGAME_VERIFICATION_GATE.md
+
+## What to judge
+
+1. Is the accepted half genuinely fixed — is the path the gate uses now always the path
+   that was verified?
+2. **Is my refutation of the other half wrong?** Specifically: is there a route to a
+   green gate that does NOT require arbitrary code execution inside the gate's own
+   process tree? If there is, that defeats the trust-boundary argument and I want it.
+   If you agree the capability is in-boundary, say so plainly.
+3. Is the documented trust boundary an accurate description of what the gate actually
+   does, or does the code claim more than the docs now admit (or less)?
+4. Any remaining route in this delta by which the gate passes when it should fail.
+
+Report only actionable findings, each with a file:line and a concrete failure scenario.
+If you cannot reproduce a suspicion, say so rather than reporting it as a finding.
+
+END your reply with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

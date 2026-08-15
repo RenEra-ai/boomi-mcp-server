@@ -83,14 +83,19 @@ ordinary `GateFailure` → 2.
   `test_no_exception_can_decide_the_gates_exit_status`, and the boundary reads nothing
   about the object, so no case can distinguish itself by its own code.
 
-## Deferrals (reason class and placement recorded at filing)
+## Deferrals
 
-| Issue | Findings | Reason class | Placement | Lineage |
-| --- | --- | --- | --- | --- |
-| **#164** | DC-3 residual: `_removal_proved`'s two observations, and owned-child bindings during deletion — both sites enumerated in the issue body | `blocked-by-mechanism` — POSIX offers no remove-by-descriptor and no atomic multi-namespace observation, so the class cannot be closed by another check | **after #160 lands, before M12 close** — the roadmap owner's slotting, recorded in the issue title. An earlier revision of this row inferred "independent of the chain" from the measured bound; where the two differ the owner's slotting governs, and it is recorded here rather than argued with | first deferral |
-| **#165** | Golden-corpus authority direction: the registry imports the thirteen producer test modules instead of those tests consuming it | `out-of-scope-by-design` — recorded in `.codex/plans/issue-152.claude.md` ("build the registry, DEFER the thirteen-module refactor, file a follow-up issue") | **after #152 lands, before #159 starts** — the roadmap owner's slotting, recorded in the issue title, and consistent with the technical reason: #159's `transitional_oracle` and #160's `deletion_only` exist to keep goldens running after the owning tests are removed, which is exactly the removal this direction breaks | first deferral |
+The canonical deferral records — reason class, placement, lineage — live in exactly one
+place each. An earlier revision of this section held a hand-copied two-row table (plus
+the sentence "Neither is `window-exhausted`; neither is debt minted to end a loop") that
+went stale against the closing re-decision — the DC-11 mechanism occurring in the ledger
+itself — and omitted the #171 deferral entirely. Corrected 2026-08-15 by the TC10-5
+delete-the-copy fix: pointers only.
 
-Neither is `window-exhausted`; neither is debt minted to end a loop.
+- **#164** — the "Deferrals, re-decided" table in the closing checkpoint below.
+- **#165** — the same re-decided table; it SUPERSEDES the filing-time
+  `out-of-scope-by-design` classification recorded in `.codex/plans/issue-152.claude.md`.
+- **#171** — finding row TC1-2.
 
 **Bound on the #164 residual, measured and pinned by
 `test_content_moved_into_the_worktree_is_caught_by_the_fingerprint`:**
@@ -121,13 +126,59 @@ Content cannot be smuggled past the gate; only an empty untracked directory is i
 | Terminal correction loop | **evaluation 3 — CHECKPOINT** (`/tmp/cdx-review.iPi4gC`) | `b2b608b` + uncommitted batch | `CONTINUE` | Four validated findings, all deriving **Critical** from their P1 source labels — so `DEFER-*` is unavailable (critical is never deferred) and `CLOSE-CLEAN` is false. `ESCALATE-OPEN` is not warranted: each finding has a concrete corrective action, and validation is available and running. Trend across evaluations 1→2→3: unresolved 3 → 6 → 4; **zero findings in executable gate code in any round** (the delta since `b2b608b` is docstrings plus one new test); recurring classes DC-10, DC-11, DC-12 each moved from instance-patch to a structural fix with a sibling sweep, and DC-7's Critical instance took a structural fix rather than a second deviation. Named finite next correction: the four TC3 rows above, then evaluation 4 over the correction delta. Recorded honestly: the first two TC3 edits were applied before this row was written, so the decision was recorded mid-correction rather than strictly before it. |
 | Terminal correction loop | **roster addition** (recorded before its first correction was validated; evaluations 1–2 are NOT checkpoints — those fall on 3, 6, 9) | `b2b608b` + uncommitted batch | `CONTINUE` | Loop added as roster item 5. Cause: owner input during rollout ("no PRs in this repo") falsified enforcement claims the landed documents asserted, so a batched non-blocking correction became necessary. Inherits the Stage-2 loop's cumulative history; does not start a fresh slice. An earlier revision recorded a `CONTINUE` for *evaluation 1* while that evaluation's own review was still owed — withdrawn: the policy places the checkpoint decision after the owed validation, and evaluation 1 was never a checkpoint in the first place. |
 
+**Post-close correction (2026-08-15) — the evaluation-13 closing row above is retained
+as written and is superseded on three points.** (1) Its "#165 (`out-of-scope-by-design`)"
+and "No deferral is `window-exhausted`" restate a classification the "Deferrals,
+re-decided" table below had already voided the previous evening: #165's governing class
+is `window-exhausted` (counted debt), the single permitted such deferral CONSUMED — the
+DC-8 mechanism (a correction silently un-done by a later row) occurring in the closing
+decision itself. (2) Its "all thirteen review rounds collector-attested" is true of the
+terminal loop but the row's "every required gate is current on the final tree" was not:
+the three TC13 fixes and this ledger's closing rows were committed as `adfd8b5` AFTER
+evaluation 13 was collected at `b2b608b`, so the final delta had no review coverage at
+close (see "Post-close record" below for its disposition). (3) The §6 architect count it
+inherits ("11 evaluations") was wrong — see the next subsection.
+
+### §6 architect review — evaluations 12–16 (recorded post-close, 2026-08-15)
+
+Five further collector-attested §6 rounds ran between evaluation 11's corrections and the
+landing; they were collected but never recorded here — the closing checkpoint's "11
+evaluations, rounds 9–11 attested" undercounted its own gate. Recorded now from the
+attested run directories (archived under `evidence/issue-152/architect-reviews/`). The
+Base and Reviewed-head SHAs are **reconstructed** from prompt bases, adjacent
+commit-review sidecars, and timestamps — they are not collector-attested architect
+fields; verdicts and review hashes are from `attestation.json`.
+
+| Eval | Run | Base | Reviewed head | Collected UTC | Verdict | Review SHA-256 |
+| ---: | --- | --- | --- | --- | --- | --- |
+| 12 | `7tLUAe` | `706ec9d` | `8c61d59` | 2026-08-15T02:21:00Z | Issues found | `090d12d37b9b812e0ec7159ef2759d3f7f3ffdadd335a090661852c2b05abc06` |
+| 13 | `4i4Aaw` | `d90a315` | `139c862` | 2026-08-15T03:20:20Z | Issues found | `380173b3d2f4f4550340b1b30140817d19129e21a7a8249e8961f658000cce7f` |
+| 14 | `kD3sjA` | `139c862` | `de4d0ed` | 2026-08-15T04:37:28Z | Issues found | `22c7d7b766fd4cfa134e18372f413dac911191c3520c5555dd2ab9b41cca62c9` |
+| 15 | `ad8BR0` | `a4270df` | `27eda5e` | 2026-08-15T06:23:38Z | Issues found | `cac8d7fcfdeac68fac1dff038ba3f26fe5180e22e1e08873c63d81ac4afe0089` |
+| 16 | `bFYEn9` | `27eda5e` | `b2b608b` | 2026-08-15T06:51:43Z | No issues | `7671f8828bfa47db4274397b9cb601de8ab4154da6336dcfcf62fa2ec7a088ae` |
+
+The §6 loop therefore ran **16 completed evaluations**, ending clean over the landed tip
+`b2b608b` (evaluation 16's text names `b2b608b`'s `parse_constant` hook and the
+9785→9786 manifest refresh). One additional run directory, `TnpZpj`, is a refused start —
+not an evaluation — and is archived with only its `start.json` and `refusal.json`. No §6
+round covers `b2b608b..adfd8b5`; the final architect verdict itself carved out the
+post-landing rollout-evidence work as remaining open items.
+
 ## Full finding rows
 
 The per-finding rows (stable source ID, verbatim summary, source gate + run directory +
 attestation, original label, blocking class, defect class, derived tier with anchor,
 affected SHA, and exactly one disposition) are reproduced in the slice's final report.
-Attested gate artifacts live in their run directories under `/tmp/cdx-gate-review.*` and
-`/tmp/cdx-review.*` for the duration of the session; the durable summary is this file.
+An earlier revision of this paragraph said the attested gate artifacts "live in their run
+directories under `/tmp` for the duration of the session"; those session-lifetime
+directories are now archived durably — byte-verified, hash-manifested, and indexed — at
+`docs/architecture/evidence/issue-152/` (see its `README.md` for the authority order:
+copied artifacts prove provenance, `index.jsonl` is the archive contract, this ledger
+governs reconciliation and closure, operator hooks guard live claims). The raw
+in-progress working report, the only durable home of the pre-terminal per-finding
+narrative, is archived there as `review-report.raw.md` (historical; its rollout tail is
+stale — this file's "Rollout evidence (post-landing)" section onward is the closure
+authority).
 
 ### Terminal correction loop — finding rows
 
@@ -543,8 +594,10 @@ ledger already committed, and re-decide both deferrals against it.
 **Checkpoint — slice #152, closing.**
 
 - **Loops covered:** Stage-1 QA (darkness proofs, dark slice throughout), Stage-2 repo
-  Codex review (30 evaluations), §6 architect review (11 evaluations, rounds 9–11
-  attested), composite wave gate.
+  Codex review (30 evaluations), §6 architect review (**16 completed evaluations plus one
+  refused start** — recorded at close as "11 evaluations, rounds 9–11 attested", corrected
+  post-close 2026-08-15; see "§6 architect review — evaluations 12–16" above), composite
+  wave gate.
 - **Tree:** `docs/architecture/ISSUE_152_AUDIT_LEDGER.md` present and committed before
   this decision; deferral citations updated only afterwards.
 - **Per-tier residue:** critical **0** unresolved. Standard: 0 unresolved in-slice; two
@@ -733,3 +786,45 @@ false, since `resolve_baseline()` selects a different path per event kind
 The underlying gap — no non-PR trigger, and `ci` accepts no `--base` — is filed as
 **#171** with acceptance criteria, reason class `out-of-scope-by-design`, slotted before
 #153.
+
+## Post-close record (2026-08-15)
+
+Written after the issue closed, as part of the Wave-0A adjustments batch. Nothing above
+this section is rewritten by it; where earlier rows are wrong, the corrections above are
+dated and the originals retained.
+
+**Final tree.** The slice landed and closed at `adfd8b5` (sole parent `b2b608b`). Its
+push run — <https://github.com/RenEra-ai/boomi-mcp-server/actions/runs/31883765763>, the
+first non-BOOTSTRAP push-baseline run, so the first real execution of the push-path
+transition validation — completed GREEN: interpreter 3.11, baseline `b2b608b` (push),
+manifests ok (9787 required nodes, 60 active goldens), collection ok (9787), suite green
+(9768 passed + 19 skipped = 9787). This ledger structurally cannot contain its own
+push's run result at close; it is recorded here and in the issue's closure report.
+
+**Review coverage of the final delta.** Evaluation 13 (`rnxOao`) was an auto-scope
+dirty-tree review collected at `b2b608b` BEFORE its three fixes were applied, so the
+committed `adfd8b5` delta (the TC13 fixes plus this ledger's closing rows; its only
+`scripts/wave_gate.py` change is docstring text, verified by diff) had no review
+coverage at close — the exact "final non-blocking batch mutated the tree unvalidated"
+case the policy names. Disposition: this adjustments batch owes and runs ONE
+delta-scoped Codex review with base `b2b608b`, covering both that delta and this batch;
+its collected outcome is appended below when it exists — a forward-looking statement of
+owed validation, not a claim it happened.
+
+**Composite wave evidence at the final tree.** The recorded `wave --base 9080e3c
+--bootstrap` exit-0 (60 goldens deterministic, byte-exact) predates the terminal batch.
+`adfd8b5` touched no determinism input — its full diffstat is `tests.yml`, `README.md`,
+the gate spec, this ledger, docstring-only `wave_gate.py` text, the one-row
+`test_nodes.jsonl` append with its floor, and `test_wave_gate.py`; no `goldens.jsonl`,
+no `tests/fixtures/golden_xml/`, no golden corpus module, no `src/` — and the green tip
+run above rendered all 60 active goldens once each. The twice-render probe was therefore
+not re-run at `adfd8b5`; this is a recorded non-invalidation judgment, not missing
+evidence discovered later.
+
+**Durable evidence archive.** All session-lifetime run directories cited anywhere in
+this ledger are archived byte-verified at `docs/architecture/evidence/issue-152/`
+(17 architect-gate directories including the `TnpZpj` refusal, 70 commit-review
+directories, the raw working report, and the two attested plan files; `SHA256SUMS` +
+`index.jsonl` are the integrity contract). The archive records, rather than repairs,
+the known limitations: commit-review `review.json` carries no verdict, dirty reviews
+have no worktree fingerprint, and the §6 evaluation 12–16 scope SHAs are reconstructed.

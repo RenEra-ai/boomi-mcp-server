@@ -1,0 +1,11 @@
+Approvals and clarifying questions are UNAVAILABLE in this read-only review session. A question ends
+the turn with no result. Do not ask anything.
+
+Review ONLY `0602f20..HEAD` against the architect design plan inlined in the original prompt, and
+emit your findings NOW as plain text. Judge the two corrections, any new divergence, any remaining
+fail-open path, and specifically whether documenting the worktree fingerprint as a best-effort
+cross-check (given the read-only property is structural) is an acceptable resolution. Anchor every
+finding to a file and line.
+
+END your response with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'

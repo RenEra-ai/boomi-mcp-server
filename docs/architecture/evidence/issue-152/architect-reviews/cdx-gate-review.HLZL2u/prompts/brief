@@ -1,0 +1,51 @@
+DELTA-SCOPED re-review of the corrections to your three round-4 findings.
+
+**Review ONLY `1627a96..HEAD`** (3 commits). The architect design plan is inlined below solely so
+you can judge fidelity; do not re-review parts already cleared.
+
+Changed files: scripts/wave_gate.py, tests/test_wave_gate.py,
+tests/fixtures/wave_gate/test_nodes.jsonl
+
+## What each round-4 finding became
+
+1. **unreadable directories bypassed mutation accounting** (git exits 0, warns on stderr, omits the
+   subtree) → `_refuse_unreadable` now refuses when git reports an access failure. This went through
+   two further corrections in the same delta, and the second REVERSED the first:
+   - first: refuse on ANY stderr, argued explicitly against enumerating warning strings;
+   - then rejected, because git also emits benign process diagnostics in some environments
+     (`warning: confstr() failed … using /tmp instead`) alongside complete output and exit 0 — that
+     policy makes the REQUIRED gate refuse every invocation there. The asymmetry decided it:
+     over-matching disables the check entirely, under-matching leaves only the narrow residual that
+     already existed. A gate that cannot run protects nothing.
+   - finally: a narrow, deliberate enumeration of access-failure signals, read under a PINNED
+     `LC_ALL=C`/`LC_MESSAGES=C` (`_c_locale_env`), because the match is English and git/libc localise
+     those messages. The same helper is now used by the ambiguity probe, which had pinned the locale
+     already.
+2. **provider-controlled behaviour could still exit green** (an exception whose `__str__` raises
+   `SystemExit(0)`) → one encompassing fail-closed boundary around the whole fingerprint phase, not
+   just the calls into the provider.
+3. **born-tombstoned rows bypassed the retirement audit** → they stay OUT of `newly_tombstoned` (they
+   were never active, so they move no floor) but are now reported with their immutable owner and
+   disposition. Verified on the real range: `pytest-009719`, `009720`, `009723` now appear, tagged
+   `(appended already retired)`.
+
+Also fixed in this delta: the round-4 permission test used `chmod(000)`, which does not deny root —
+it now simulates the warning instead. That was the THIRD finding in this slice of the form "this
+test passes locally and fails on a runner"; all three are now simulated rather than
+environment-dependent.
+
+## What to judge
+
+- Are these corrections faithful to the plan, and did any introduce a NEW divergence?
+- Any way a corrected path still fails OPEN.
+- Specifically: is the narrow access-failure enumeration the right resolution, given the asymmetry
+  argued above, or is there a formulation that is neither over- nor under-matching? If you propose
+  one, it must be decidable without reading git's prose.
+
+Do not re-litigate general code quality: this delta has passed the full non-KB suite on Python 3.11
+(9,708 passed / 18 skipped / 0 failed) run with `GITHUB_SHA` populated exactly as CI will, the
+gate's own `wave` run (exit 0, 60/60 goldens deterministic and byte-exact), and repo Codex review,
+the most recent clean.
+
+END your response with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'

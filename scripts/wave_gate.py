@@ -2020,7 +2020,9 @@ def check_goldens(repo, goldens, tmpdir):
 #: #153 replaces this with a provider object exposing:
 #:
 #:     cases() -> list[str]
-#:     fingerprint(case, *, account, environment, mutation=None) -> str
+#:     fingerprint(case, *, account, environment, mutation=None) -> tuple[str, bytes]
+#:         # ("sha256:<hex>", canonical_material) — the gate recomputes the
+#:         # digest from the returned material and refuses a mismatch
 #:     mutations(case) -> list[str]
 #:
 #: The gate then asserts BOTH halves of the contract: the same plan under two

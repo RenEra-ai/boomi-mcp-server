@@ -1,0 +1,63 @@
+DELTA-SCOPED re-review of the corrections to your two round-5 findings.
+
+**Review ONLY `0602f20..HEAD`** (5 commits). The architect design plan is inlined below solely so
+you can judge fidelity; do not re-review parts already cleared.
+
+Changed files: scripts/wave_gate.py, tests/test_wave_gate.py,
+tests/fixtures/wave_gate/test_nodes.jsonl, README.md,
+docs/architecture/ENDGAME_VERIFICATION_GATE.md
+
+## What your two round-5 findings became
+
+1. **"the stderr enumeration still fails open"** — you showed a tracked-path symlink loop yields
+   `<path>: Too many levels of symbolic links` with exit 0, and cited git source showing the
+   directory iterator can treat `readdir()` errors as EOF with NO diagnostic at all. That second
+   point is decisive: **no stderr-based policy can be complete**, so the enumeration was not
+   extended again.
+
+   Instead the OVER-CLAIM was removed. The gate's read-only property is STRUCTURAL — it writes only
+   under `tempfile.mkdtemp()`, runs children with `PYTHONDONTWRITEBYTECODE=1` and
+   `-p no:cacheprovider`, and never invokes a mutating git command. The fingerprint is now documented
+   in code, in the gate spec and in the README as a best-effort CROSS-CHECK of that structure, naming
+   both git behaviours, with the instruction to read a pass as *"nothing this check can see changed"*.
+   Your proposed `os.scandir` inventory was not built: it is a new subsystem, needs its own review
+   rounds, and no acceptance criterion depends on it. **Judge that scoping decision.**
+
+2. **"the fingerprint boundary still trusts provider-controlled `GateFailure`"** (you reproduced
+   `main_status=0`) — fixed, then re-fixed three times as successive rounds found further dunders:
+   `__name__` via a metaclass, `__repr__` in a formatter, `__eq__` on an int subclass,
+   `__hash__`/`__str__` on a str subclass. Patching them one at a time could not terminate, so the
+   dependency was removed instead:
+
+   - `main()` now **decides the exit status BEFORE rendering any message** — from a guarded attribute
+     read, a `type(...) is int` check and a comparison against a literal, none of which can execute
+     foreign code — then renders inside its own guard.
+   - `exit_status_for()` recomputes the status rather than trusting the stored one, so
+     post-construction mutation or a subclass cannot produce a green exit.
+   - The rendering fallback leads with a documented code, `GATE_DIAGNOSTIC_UNRENDERABLE`, so the
+     stderr contract holds even there.
+   - Real `GateFailure`s still pass through unchanged, so `PLAN_FINGERPRINT_PENDING` and real
+     mismatch detail survive.
+
+## What to judge
+
+- Are these corrections faithful to the plan, and did any introduce a NEW divergence?
+- Any way a corrected path still fails OPEN.
+- **The scoping decision in (1)**: is documenting the fingerprint as a best-effort cross-check, given
+  that the read-only property is structural, an acceptable resolution — or does something in the
+  slice actually depend on the fingerprint being complete?
+
+Note on scope: findings whose premise is a HOSTILE provider are inside this repository's recorded
+trust boundary (#145 §7: *"protecting only against malicious recipe classes while trusting other
+Python in the same process is not a coherent security boundary"*; the #153 provider is registered,
+reviewed Python in the gate's own process). Such findings have been fixed where the fix was a cheap
+invariant, but further ones will be recorded as severity-refuted against that precedent rather than
+patched indefinitely. Please weight accordingly.
+
+Do not re-litigate general code quality: this delta has passed the full non-KB suite on Python 3.11
+(9,714 passed / 18 skipped / 0 failed) with `GITHUB_SHA` populated exactly as CI will, the gate's own
+`wave` run (exit 0, 60/60 goldens deterministic and byte-exact), and repo Codex review, the most
+recent clean.
+
+END your response with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'

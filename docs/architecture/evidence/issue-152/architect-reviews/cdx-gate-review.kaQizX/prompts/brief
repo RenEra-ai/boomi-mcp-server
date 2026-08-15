@@ -1,0 +1,67 @@
+You are reviewing the implementation of GitHub issue #152 ("M12.13 — Endgame
+verification gate automation and Python 3.11 CI") against the architect design plan
+that is inlined verbatim at the end of this prompt.
+
+This is ROUND 7. You have reviewed this work six times already. Read-only review.
+
+## What changed since your last round
+
+Your round-6 review returned exactly one finding, which I accepted and fixed:
+
+> [P2] The replacement "structural read-only" invariant is not enforced —
+> scripts/wave_gate.py:428. `tempfile.mkdtemp()` at line 1947 honors `TMPDIR`; with
+> `TMPDIR=<repo>`, scratch is created inside the repository and deleted before the
+> final fingerprint. Reproduced: `inside_repo=True`, while
+> `fingerprint_equal_after_cleanup=True`. This violates the plan's explicit
+> outside-repository requirement.
+
+You also recorded that the exit-status class is closed ("all seven added adversarial
+regressions pass, and I found no nonzero-to-zero route within the recorded provider
+trust boundary") and that the fingerprint's best-effort scoping is reasonable.
+
+Two commits followed, and BOTH are in scope for you:
+
+- `2977349` — first attempt: `make_scratch_dir()` compared `os.path.realpath()` of the
+  scratch against the repo root with a lexical prefix test.
+- `4784406` — the repo's own Codex gate then found that first attempt fail-open at P1:
+  on a case-insensitive filesystem `realpath()` preserves the spelling it is given, so
+  `TMPDIR=/users/.../repo` against a repo reported as `/Users/.../repo` passes the
+  prefix test while the scratch lands physically inside the worktree. I reproduced it
+  (`lexical check would refuse: False`, `PHYSICALLY inside the repo: True`) and replaced
+  the spelling comparison with `(st_dev, st_ino)` ancestor-identity in
+  `_refuse_scratch_inside_repo`, adding `SCRATCH_CONTAINMENT_UNPROVEN` (status 2) for
+  the case where an ancestor cannot be stat'd.
+
+## Files changed since round 6 (`8ef5a6d..4784406`)
+
+- scripts/wave_gate.py
+- tests/test_wave_gate.py
+- tests/fixtures/wave_gate/test_nodes.jsonl
+- docs/architecture/ENDGAME_VERIFICATION_GATE.md
+
+The full implementation (`9080e3c..4784406`) additionally covers: .github/workflows/tests.yml,
+requirements-dev.txt, tests/_wave_gate_golden_corpus.py, tests/test_wave_gate_goldens.py,
+tests/fixtures/wave_gate/goldens.jsonl, tests/test_recipe_security.py,
+tests/test_recipe_registry.py, tests/test_m12_migration_matrix_evidence.py,
+tests/fixtures/m12_12/legacy_reachability_inventory.json, README.md,
+docs/architecture/M12_COMPATIBILITY_INVENTORY.md.
+
+## What to judge
+
+1. Is the round-6 finding now genuinely closed — is the "the gate writes only outside
+   the repository" invariant ENFORCED, with no remaining route by which the gate can
+   write into the tree it is validating and have that hidden from the closing
+   fingerprint? Attack the new check specifically.
+2. Does `SCRATCH_CONTAINMENT_UNPROVEN` fail closed, and is its status correct?
+3. Is the delta consistent with the inlined architect plan? Flag any place the
+   implementation contradicts a load-bearing constraint of the plan.
+4. Anything in this delta that can make the gate pass when it should fail. Fail-open is
+   the defect class that matters most here.
+
+Do not re-report findings you already raised and I already fixed in earlier rounds
+unless they are still live in the current tree. Report only actionable findings, each
+with a file:line and a concrete failure scenario. If you cannot reproduce a suspicion,
+say so rather than reporting it as a finding.
+
+END your reply with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

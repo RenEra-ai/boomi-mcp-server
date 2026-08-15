@@ -1,0 +1,85 @@
+You are reviewing the implementation of GitHub issue #152 ("M12.13 — Endgame
+verification gate automation and Python 3.11 CI") against the architect design plan
+inlined verbatim at the end of this prompt. Read-only review. This is ROUND 10, the
+closing round.
+
+In your last (attested) round you found five issues and ratified the bootstrap judgment.
+All five were fixed; this round reviews those fixes and asks whether the slice can close.
+
+## What changed since your last round (`1083413..HEAD`)
+
+**Your Critical — scratch cleanup deleted unrelated data.** Reproduced exactly as you
+described (`dispose() -> True`, `precious.txt deleted: True`). The gate now records an
+INVENTORY of what it creates (`open_for_write`, `mkdir_owned`, `own`) and `_remove_owned`
+deletes only those, deepest first; anything else present is refused as the new
+`SCRATCH_FOREIGN_ENTRIES` and nothing further is removed.
+
+**Your P1 — `SystemExit(0)` made the gate green.** `execute()` no longer re-raises an
+unexpected exception; it normalizes to a coded status-1 `GATE_UNEXPECTED_ERROR` whose
+message inspects nothing about the object. `make_scratch_dir()` moved inside the
+closing-fingerprint boundary as you asked.
+
+**Your P1 — golden passes shared a runtime filesystem.** Each child now runs with `cwd`
+and `TMPDIR`/`TEMP`/`TMP` set to its own pass directory; every path handed to the child is
+absolute.
+
+**Your P2 — `bootstrap_base` accepted a 40-digit integer.** Now `type(v) is str` before
+the regex.
+
+**Your P2 — documentation contradicted the landed contract.** All four corrected, plus
+the README fingerprint token.
+
+Two follow-on defects were then found by the repo's own gate and fixed:
+
+- Removal by multi-component recorded name (`render-1/request-1.json`) followed a
+  replaced `render-1` symlink. Every component is now opened `O_NOFOLLOW` from its
+  parent's descriptor.
+- A foreign entry NESTED in an owned directory was reported as `SCRATCH_RETARGETED`
+  because its parent's `rmdir` fails before the top-level listing; it is now classified
+  as `SCRATCH_FOREIGN_ENTRIES`.
+- Owned CHILD directories did not re-prove their binding around deletion the way the
+  scratch root does. `_refuse_unbound_child` now makes the same `(st_dev, st_ino)`
+  assertion before and after each recursion — the root's existing proof applied
+  uniformly, not a new mechanism.
+
+## The bound on what remains, measured
+
+```
+A) a NON-empty directory moved into the repo : WORKTREE_DIRTY -> gate red
+B) an EMPTY directory moved into the repo    : BLIND (git does not track empty dirs)
+C) the child-binding proof on a renamed child: _ForeignEntry raised -> refused
+```
+
+Content cannot be smuggled past the gate; only an empty untracked directory is invisible.
+That bound is a tested property (`test_content_moved_into_the_worktree_is_caught_by_the_fingerprint`).
+The residual interleaving class is deferred to filed issue **#164**, whose body enumerates
+BOTH sites (the root's `_removal_proved` observations and owned child directories) with
+acceptance criteria. Golden-corpus authority direction is deferred to **#165**.
+
+## Landing evidence on the current tip
+
+```
+ci (push, before=9080e3c): baseline (push) · BOOTSTRAP · manifests ok (9759)
+                           · collection ok · 9741 passed / 18 skipped · exit 0
+                           · PLAN_FINGERPRINT_PENDING issue=#153
+wave --base 9080e3c --bootstrap: 60 active goldens deterministic and byte-exact · exit 0
+```
+
+## What to judge
+
+1. Are your five findings genuinely closed?
+2. Is anything in this delta able to make the gate PASS when it should fail?
+3. Is the slice complete against the architect plan, with #164 and #165 as the only
+   deferrals?
+
+Do not report further interleaving variants of the scratch-disposal race — both sites are
+enumerated in #164. Do not report the manifest as an illegal transition: you already
+ratified that the landing push is a bootstrap because `dev` carries neither manifest, and
+the repo's gate has now raised that framing four times against intermediate branch commits
+that nothing validates.
+
+Report only actionable findings, each with a file:line and a concrete failure scenario. If
+you cannot reproduce a suspicion, say so.
+
+END your reply with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

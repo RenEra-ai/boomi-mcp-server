@@ -1,0 +1,33 @@
+Approvals and shell escalation are unavailable in this read-only review session. Do not
+request approval, do not attempt to run commands that need write access, and do not wait
+for a tool that cannot be granted.
+
+Emit your COMPLETE review NOW, as plain text, from what you have already read.
+
+Review the implementation of GitHub issue #152 against the architect design plan inlined
+at the end of the original prompt. This is round 7; the delta since round 6 is
+`8ef5a6d..4784406`, touching scripts/wave_gate.py, tests/test_wave_gate.py,
+tests/fixtures/wave_gate/test_nodes.jsonl and
+docs/architecture/ENDGAME_VERIFICATION_GATE.md.
+
+Your round-6 finding was that the "structural read-only" invariant was not enforced:
+`tempfile.mkdtemp()` honors `TMPDIR`, so `TMPDIR=<repo>` put the gate's scratch inside
+the repository, and cleanup hid it from the closing fingerprint. Commit `2977349`
+answered it with a lexical `realpath()` prefix test; the repo's own Codex gate then
+showed that attempt fail-open at P1 on case-insensitive filesystems, and `4784406`
+replaced it with `(st_dev, st_ino)` ancestor-identity in `_refuse_scratch_inside_repo`
+plus a new `SCRATCH_CONTAINMENT_UNPROVEN` (status 2) for unstattable ancestors.
+
+Judge, concretely:
+
+1. Whether the "writes only outside the repository" invariant is now genuinely enforced,
+   with no remaining route to write into the validated tree undetected.
+2. Whether `SCRATCH_CONTAINMENT_UNPROVEN` fails closed with the correct status.
+3. Whether the delta contradicts any load-bearing constraint of the architect plan.
+4. Any path in this delta by which the gate can pass when it should fail.
+
+Report only actionable findings, each with a file:line and a concrete failure scenario.
+Do not re-report findings already fixed in earlier rounds unless they are still live.
+
+END with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

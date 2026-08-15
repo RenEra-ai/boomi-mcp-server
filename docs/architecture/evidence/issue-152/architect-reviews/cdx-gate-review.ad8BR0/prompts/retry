@@ -1,0 +1,82 @@
+You are reviewing the implementation of GitHub issue #152 ("M12.13 — Endgame verification
+gate automation and Python 3.11 CI") against the architect design plan inlined verbatim at
+the end of this prompt. Read-only review. This is ROUND 15.
+
+## What changed since your round 14 (`a4270df..HEAD`)
+
+Your three findings were confirmed by reproduction and fixed, and the repo's own gate then
+found two more in those fixes, also fixed.
+
+1. **[P1] Execution reconciled by aggregate count, not identity.** Fixed: the gate writes a
+   junit execution record into its owned scratch and compares the multiset of
+   `(classname, name)` records against the same projection of the collected node ids.
+   A missing node and a doubled one are both caught.
+
+   That check FAILED on its first honest run, correctly: my projection split node ids on
+   `::`, but a parameter can contain `::` — this suite has
+   `test_loopback_port_flexibility[http://[::1]:9999/callback-...]`, an IPv6 literal. The
+   parameter section is now split off first, and that real node id is in the regression.
+
+2. **[P2] / [P2] Duplicate JSON members.** Fixed at one root: `_strict_json_loads` (built on
+   the pre-existing `_no_duplicate_keys` the manifest parser already used) rejects duplicate
+   members wherever the gate reads outside JSON — the event payload and the render envelope.
+
+Then, from the repo's gate:
+
+3. **The junit artifact was owned by NAME only.** `open_for_write` now creates it
+   exclusively, `_refuse_unowned_report` proves the named file is still the created inode,
+   and the parse reads through the descriptor.
+4. **The projection was not injective** — `tests/a.py::B::test_x` and `tests/a/B.py::test_x`
+   collide. Measured: 0 collisions among the 9,785 active node ids, so the gate now asserts
+   injectivity and fails closed.
+5. **The ownership anchor was discarded by close-and-reopen.** `create_owned()` returns the
+   raw `O_EXCL` descriptor and never reopens by name; a hard-link swap in that gap
+   previously passed the ownership check on a FOREIGN inode. Verified both directions.
+
+## Explicitly NOT claimed as closed
+
+pytest opens the junit report BY NAME with `w`, and no portable mechanism makes a child
+write through an inherited descriptor. A same-user process replacing the name between
+creation and pytest's open still causes pytest to truncate whatever the name points at; the
+gate refuses afterwards and never accepts the result, but the write has happened. This is
+recorded as the THIRD site in **#164**, whose acceptance criterion now requires any fix to
+cover the scratch root, owned child directories, and the child-written report together.
+
+## Current state
+
+```
+wave --base 9080e3c --bootstrap: manifests ok (9785) · collection ok
+                                 · 9767 passed / 18 skipped · identity reconciliation OK
+                                 · 60 goldens byte-exact · exit 0
+Stage-2 repo review round 38: CLEAN, no findings
+```
+
+Deferred with filed, slotted issues: **#164** (`blocked-by-mechanism`, three sites) and
+**#165** (`window-exhausted`, consuming its single permitted one). Owed after landing and
+recorded in the in-tree ledger: the real Actions run, the five seeded-defect scratch-branch
+proofs with red URLs recorded in #152, the reverts proven green, and the `dev` ruleset —
+#152 stays open until all of them are done.
+
+## What to judge
+
+1. Are your three round-14 findings genuinely closed?
+2. Is there any remaining path by which this gate PASSES when it should fail **under
+   ordinary operation** — that is, not requiring a same-user process actively racing the
+   gate, which is the class deferred to #164?
+3. Is the CODE ready to land, with the remaining work being the post-landing evidence the
+   plan requires?
+
+Do not report the manifest as an illegal transition against an intermediate branch commit;
+that framing has been raised eleven times against baselines nothing validates, and you have
+ratified that the landing push is a bootstrap. Do not report further same-user racing
+variants against the scratch or the report; all three sites are enumerated in #164.
+
+Report only actionable findings, each with a file:line and a concrete failure scenario. If
+you cannot reproduce a suspicion, say so rather than reporting it.
+
+END your reply with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
+
+Approvals and shell escalation are unavailable in this read-only session; live GitHub API
+access is unavailable. Do not request approval. Emit your COMPLETE review NOW as plain text
+and do not end the turn without a verdict line.

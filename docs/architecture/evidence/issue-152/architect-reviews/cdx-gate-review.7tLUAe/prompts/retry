@@ -1,0 +1,40 @@
+Approvals and shell escalation are unavailable in this read-only review session. Do not
+request approval, do not attempt anything needing write access, and do not wait for a tool
+that cannot be granted. In particular, live GitHub API access is unavailable — judge the
+ruleset question from the repository's own recorded statements.
+
+Emit your COMPLETE review NOW, as plain text, from what you have already read. Do not end
+the turn without a verdict line.
+
+Review the implementation of GitHub issue #152 against the architect design plan inlined
+at the end of the original prompt. Round 12; the delta since round 11 is
+`706ec9d..HEAD`, touching docs/architecture/ISSUE_152_AUDIT_LEDGER.md,
+scripts/wave_gate.py, tests/fixtures/wave_gate/test_nodes.jsonl and
+tests/test_wave_gate.py.
+
+Your four findings were acted on: `_provider_strings` now requires `type(item) is str`
+(with a measured sibling sweep showing the other nine `isinstance(..., str)` sites take
+JSON-derived values, which `json.loads` guarantees are exactly `str`); the unconfigured
+`dev` ruleset was VERIFIED accurate — `gh api .../rulesets` returns `[]` — and is recorded
+as owed after landing, since GitHub will not accept a required check that has never run;
+the deferral ordering defect was remedied by committing a closing checkpoint (`711d0e8`)
+before re-citing #164 and #165 against it, while the claim that #165 was re-decided as
+`window-exhausted` is refuted by its own body; and the stale ledger counts and checkpoint
+table are corrected.
+
+Current state: `ci` with `before=9080e3c` takes the bootstrap path — 9773 manifest nodes,
+9755 passed / 18 skipped, exit 0; `wave` renders all 60 goldens deterministically, exit 0;
+Stage-2 rounds 30 and 31 both clean.
+
+Judge, concretely:
+
+1. Whether your four findings are correctly resolved.
+2. Any remaining path by which the gate PASSES when it should fail.
+3. Whether the slice can CLOSE with #164 and #165 as the only deferrals and the ruleset
+   configuration as the only post-landing step.
+
+Do not report the manifest as an illegal transition against an intermediate branch commit,
+and do not report further interleaving variants of the scratch-disposal race.
+
+END with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

@@ -1,0 +1,67 @@
+You are reviewing the implementation of GitHub issue #152 ("M12.13 — Endgame verification
+gate automation and Python 3.11 CI") against the architect design plan inlined verbatim at
+the end of this prompt. Read-only review. This is ROUND 16.
+
+## What changed since your round 15 (`27eda5e..HEAD`)
+
+Your single finding was reproduced and fixed.
+
+**[P2] `_strict_json_loads` accepted non-standard `NaN`/`±Infinity`.** Reproduced exactly:
+`ACCEPTED non-standard JSON: {'commits': nan}`. A `parse_constant` hook now rejects all
+three spellings; ordinary JSON is unaffected. Verified end to end through the real CLI:
+
+```
+BASELINE_EVENT_INVALID cannot read event payload: non-standard JSON constant 'NaN'
+```
+
+A regression drives the CLI itself (not just the helper) and asserts the documented code
+is the first stderr token.
+
+I also recorded, rather than discarded, the finding you explicitly declined to raise: a
+deceptive in-process `conftest.py` can rewrite a callable and its identity metadata, but
+executed test code is inside the gate's documented trust boundary. That boundary was
+established earlier in this slice and is consistent with #164's scope.
+
+## Current state
+
+```
+wave --base 9080e3c --bootstrap: manifests ok (9786) · collection ok
+                                 · 9768 passed / 18 skipped · identity reconciliation OK
+                                 · 60 goldens byte-exact · exit 0
+Stage-2 repo review round 38: CLEAN, no findings
+Stage-2 repo review round 39: clean — its only finding was the manifest-transition claim,
+                              refuted for the twelfth time, and it stated the JSON
+                              hardening is sound
+```
+
+Deferred, both with filed and slotted issues: **#164** (`blocked-by-mechanism`; three sites
+enumerated — the scratch root, owned child directories, and the child-written junit report)
+and **#165** (`window-exhausted`, consuming its single permitted one, slotted before #159).
+
+Owed after landing and recorded in `docs/architecture/ISSUE_152_AUDIT_LEDGER.md`: the real
+Actions run, the five seeded-defect scratch-branch proofs with red URLs recorded in #152,
+the reverts proven green, and the `dev` ruleset. **#152 stays open until all of them are
+done** — the slice does not close on this review.
+
+## What to judge
+
+1. Is your round-15 finding genuinely closed?
+2. Is there any remaining path by which this gate PASSES when it should fail **under
+   ordinary operation** — not requiring a same-user process actively racing the gate, which
+   is the class deferred to #164?
+3. Is the CODE ready to land, with the remaining work being the post-landing evidence the
+   plan requires?
+
+Do not report the manifest as an illegal transition against an intermediate branch commit;
+that framing has been raised twelve times against baselines nothing validates. Do not
+report further same-user racing variants against the scratch or the report.
+
+Report only actionable findings, each with a file:line and a concrete failure scenario. If
+you cannot reproduce a suspicion, say so rather than reporting it.
+
+END your reply with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
+
+Approvals and shell escalation are unavailable in this read-only session; live GitHub API
+access is unavailable. Do not request approval. Emit your COMPLETE review NOW as plain text
+and do not end the turn without a verdict line.

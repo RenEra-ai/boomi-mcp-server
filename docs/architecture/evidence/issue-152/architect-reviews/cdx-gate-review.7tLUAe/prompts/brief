@@ -1,0 +1,71 @@
+You are reviewing the implementation of GitHub issue #152 ("M12.13 — Endgame
+verification gate automation and Python 3.11 CI") against the architect design plan
+inlined verbatim at the end of this prompt. Read-only review. This is ROUND 12.
+
+## What changed since your round 11 (`706ec9d..HEAD`)
+
+All four of your findings were acted on.
+
+1. **[P1] Fingerprint mutation coverage — accepted `str` subclasses.** Confirmed and
+   fixed. `_provider_strings` now requires `type(item) is str`, so a subclass whose
+   `__eq__` matches everything can no longer make the roster believe four mutation kinds
+   are present while one is exercised. Reproduced closed:
+   `refused: PLAN_FINGERPRINT_MISMATCH`; plain strings unaffected.
+   **Sibling sweep, measured:** ten `isinstance(..., str)` sites exist. Nine validate
+   JSON-derived values, and `json.loads` yields exactly `str` (measured), so a subclass
+   cannot reach them. Only `_provider_strings` takes provider data — the trust boundary
+   the seam polices — so only it needed the change. Regression:
+   `test_provider_strings_reject_str_subclasses`.
+
+2. **[P1] The `dev` ruleset does not require the check.** Your statement is ACCURATE and
+   was verified rather than assumed: `gh api repos/.../rulesets` returns `[]`, so no
+   ruleset exists and `README.md:594` is correct, not stale. GitHub will not accept a
+   required status check that has never run, so the order is land → the workflow runs →
+   configure the ruleset. This is recorded in the ledger under **"Owed after landing"**
+   and carried into the slice's final report. It is NOT counted as done.
+
+3. **[P1] Deferral record not closure-valid.** Split:
+   * The ordering complaint is CORRECT and was the real defect — both deferral records
+     were written into their issue bodies before the ledger first entered the tree, so at
+     the moment of recording their cited row did not exist. Remedied by committing a
+     closing checkpoint (`711d0e8`) FIRST and only then re-citing #164 and #165 against
+     it. The ledger now also carries the §6 checkpoint rows that were missing.
+   * The claim that #165's body "was re-decided as the single permitted
+     `window-exhausted` deferral" is refuted: its body reads `out-of-scope-by-design` …
+     `Lineage: first deferral. Not window-exhausted.` The issue body is the evidence.
+
+4. **[P2] Ledger stale.** Fixed: DC-2 now records seven instances, and the checkpoint
+   table runs through the Stage-2 round-30 clean result and both attested §6 rounds.
+
+## Current state
+
+```
+ci (push, before=9080e3c): BOOTSTRAP · manifests ok (9773) · collection ok
+                           · 9755 passed / 18 skipped · exit 0
+wave --base 9080e3c --bootstrap: 60 goldens deterministic and byte-exact · exit 0
+Stage-2 round 30: CLEAN (no findings)
+Stage-2 round 31: clean — its single finding was the manifest-transition claim, refuted
+```
+
+Deferred, both with filed and slotted issues: **#164** (`blocked-by-mechanism`) and
+**#165** (`out-of-scope-by-design`).
+
+## What to judge
+
+1. Are your four round-11 findings correctly resolved — including whether you accept the
+   refutation in (3) and the "owed after landing" disposition in (2)?
+2. Is there ANY remaining path by which this gate PASSES when it should fail?
+3. Can this slice CLOSE, with #164 and #165 as the only deferrals and the ruleset
+   configuration as the only post-landing step?
+
+Do not report the manifest as an illegal transition against an intermediate branch commit
+— you have ratified that the landing push is a bootstrap because `dev` carries neither
+manifest, and that framing has now been raised seven times against baselines nothing
+validates. Do not report further interleaving variants of the scratch-disposal race; both
+sites are enumerated in #164.
+
+Report only actionable findings, each with a file:line and a concrete failure scenario. If
+you cannot reproduce a suspicion, say so rather than reporting it.
+
+END your reply with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

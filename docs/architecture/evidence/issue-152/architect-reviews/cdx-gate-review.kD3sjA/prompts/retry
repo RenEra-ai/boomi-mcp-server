@@ -1,0 +1,71 @@
+You are reviewing the implementation of GitHub issue #152 ("M12.13 — Endgame verification
+gate automation and Python 3.11 CI") against the architect design plan inlined verbatim at
+the end of this prompt. Read-only review. This is ROUND 14.
+
+## What changed since your round 13 (`139c862..HEAD`)
+
+All three of your findings were confirmed by reproduction and fixed.
+
+1. **[P1] Two outcomes on one physical line.** Confirmed: the one-summary rule counted
+   LINES, so `100 passed, 0 skipped in 0.01s 100 skipped in 0.01s` was one candidate and
+   the first clause of each kind won — 100 passed, 0 skipped for a fully skipped run. The
+   grammar is now anchored with exactly one duration clause; a repeated clause is
+   `PYTEST_SUMMARY_AMBIGUOUS`.
+
+2. **[P1] `deselected` unaccounted.** Confirmed: `'deselected' mentioned in the gate:
+   False`, and `229 passed, 1 deselected` parsed as `{passed: 229, skipped: 0}`. Two
+   changes: the outcome vocabulary is CLOSED (`PYTEST_OUTCOME_UNACCOUNTED` for anything the
+   gate cannot account for, while `failed`/`error` stay parseable so the specific
+   `PYTEST_FAILED` still wins), and an **accounting identity** requires
+   `passed + skipped == len(collected)`. Verified against a real run: 9762 + 18 = 9780 =
+   collected.
+
+3. **[P2] Render envelope not validated.** Confirmed and fixed. `_envelope_id` requires the
+   exact key set `{id, len, sha256, b64}`; `_envelope_payload` decodes with
+   `validate=True` and checks the payload against the child's OWN declarations — declared
+   length and declared sha256. Your forgery
+   `{"len": 0, "sha256": "not-the-payload", "b64": "PHgvPgo=!!!"}` is refused, as are an
+   unknown field, a wrong length and a wrong digest; all 60 real goldens still render
+   byte-exactly through it.
+
+The repo's own gate then found one more, also fixed: `error` and `errors` were distinct
+dict keys, so `1 passed, 1 error, 0 errors` passed the duplicate check as two outcomes and
+a plural-first lookup read the ZERO. Spellings are canonicalized before duplicate
+detection.
+
+## Current state
+
+```
+wave --base 9080e3c --bootstrap: manifests ok (9780) · collection ok
+                                 · 9762 passed / 18 skipped · 60 goldens byte-exact · exit 0
+Stage-2 repo reviews rounds 33, 35: clean (each round's only finding was the
+                                    manifest-transition claim, refuted)
+```
+
+Deferred with filed, slotted issues: **#164** (`blocked-by-mechanism`) and **#165**
+(`window-exhausted`, consuming its single permitted one). Explicitly OWED AFTER LANDING and
+recorded in `docs/architecture/ISSUE_152_AUDIT_LEDGER.md`: the real Actions run, the five
+seeded-defect scratch-branch proofs with red URLs recorded in #152, the reverts proven
+green, and the `dev` ruleset — #152 stays open until all of them are done.
+
+## What to judge
+
+1. Are your three findings genuinely closed?
+2. Is there ANY remaining path by which this gate PASSES when it should fail?
+3. Is the CODE ready to land, with the remaining work being the post-landing evidence the
+   plan requires?
+
+Do not report the manifest as an illegal transition against an intermediate branch commit;
+that framing has now been raised nine times against baselines nothing validates, and you
+have ratified that the landing push is a bootstrap. Do not report further interleaving
+variants of the scratch-disposal race.
+
+Report only actionable findings, each with a file:line and a concrete failure scenario. If
+you cannot reproduce a suspicion, say so rather than reporting it.
+
+END your reply with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
+
+Approvals and shell escalation are unavailable in this read-only session; live GitHub API
+access is unavailable. Do not request approval. Emit your COMPLETE review NOW as plain
+text and do not end the turn without a verdict line.

@@ -1,0 +1,37 @@
+Approvals and shell escalation are unavailable in this read-only review session. Do not
+request approval, do not attempt anything needing write access, and do not wait for a
+tool that cannot be granted.
+
+Emit your COMPLETE review NOW, as plain text, from what you have already read.
+
+Review the implementation of GitHub issue #152 against the architect design plan inlined
+at the end of the original prompt. Round 8; the delta since round 7 is
+`4784406..1779e5b`, touching scripts/wave_gate.py, tests/test_wave_gate.py,
+tests/fixtures/wave_gate/test_nodes.jsonl and
+docs/architecture/ENDGAME_VERIFICATION_GATE.md.
+
+Your round-7 P1 (containment vulnerable to path retargeting via a symlinked `TMPDIR`)
+was split. The path-mismatch half was ACCEPTED: `make_scratch_dir()` now resolves once
+and returns the resolved path, pinned by
+`test_the_scratch_path_returned_is_the_path_that_was_verified`. The demand for
+descriptor-relative no-follow I/O was REFUTED on two grounds: the attacker needs
+arbitrary code execution during pytest collection, which is in-boundary because the gate
+exists to execute this repository's tests; and the symlink is not load-bearing, since a
+plain write-then-delete already yields `fingerprint_equal_after_cleanup: True` and
+`check_worktree_unchanged: PASSED (blind)` with no symlink or `TMPDIR` involved.
+
+Judge, concretely:
+
+1. Whether the accepted half is genuinely fixed — is the path used always the path
+   verified?
+2. Whether the refutation is wrong: is there a route to a green gate that does NOT
+   require arbitrary code execution inside the gate's own process tree? If you agree the
+   capability is in-boundary, say so plainly.
+3. Whether the trust boundary now documented in ENDGAME_VERIFICATION_GATE.md accurately
+   describes what the code does.
+4. Any remaining route in this delta by which the gate passes when it should fail.
+
+Report only actionable findings, each with a file:line and a concrete failure scenario.
+
+END with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

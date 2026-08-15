@@ -1,0 +1,674 @@
+You are reviewing the implementation of GitHub issue #152 ("M12.13 — Endgame
+verification gate automation and Python 3.11 CI") against the architect design plan
+inlined verbatim at the end of this prompt. Read-only review. This is ROUND 10, the
+closing round.
+
+In your last (attested) round you found five issues and ratified the bootstrap judgment.
+All five were fixed; this round reviews those fixes and asks whether the slice can close.
+
+## What changed since your last round (`1083413..HEAD`)
+
+**Your Critical — scratch cleanup deleted unrelated data.** Reproduced exactly as you
+described (`dispose() -> True`, `precious.txt deleted: True`). The gate now records an
+INVENTORY of what it creates (`open_for_write`, `mkdir_owned`, `own`) and `_remove_owned`
+deletes only those, deepest first; anything else present is refused as the new
+`SCRATCH_FOREIGN_ENTRIES` and nothing further is removed.
+
+**Your P1 — `SystemExit(0)` made the gate green.** `execute()` no longer re-raises an
+unexpected exception; it normalizes to a coded status-1 `GATE_UNEXPECTED_ERROR` whose
+message inspects nothing about the object. `make_scratch_dir()` moved inside the
+closing-fingerprint boundary as you asked.
+
+**Your P1 — golden passes shared a runtime filesystem.** Each child now runs with `cwd`
+and `TMPDIR`/`TEMP`/`TMP` set to its own pass directory; every path handed to the child is
+absolute.
+
+**Your P2 — `bootstrap_base` accepted a 40-digit integer.** Now `type(v) is str` before
+the regex.
+
+**Your P2 — documentation contradicted the landed contract.** All four corrected, plus
+the README fingerprint token.
+
+Two follow-on defects were then found by the repo's own gate and fixed:
+
+- Removal by multi-component recorded name (`render-1/request-1.json`) followed a
+  replaced `render-1` symlink. Every component is now opened `O_NOFOLLOW` from its
+  parent's descriptor.
+- A foreign entry NESTED in an owned directory was reported as `SCRATCH_RETARGETED`
+  because its parent's `rmdir` fails before the top-level listing; it is now classified
+  as `SCRATCH_FOREIGN_ENTRIES`.
+- Owned CHILD directories did not re-prove their binding around deletion the way the
+  scratch root does. `_refuse_unbound_child` now makes the same `(st_dev, st_ino)`
+  assertion before and after each recursion — the root's existing proof applied
+  uniformly, not a new mechanism.
+
+## The bound on what remains, measured
+
+```
+A) a NON-empty directory moved into the repo : WORKTREE_DIRTY -> gate red
+B) an EMPTY directory moved into the repo    : BLIND (git does not track empty dirs)
+C) the child-binding proof on a renamed child: _ForeignEntry raised -> refused
+```
+
+Content cannot be smuggled past the gate; only an empty untracked directory is invisible.
+That bound is a tested property (`test_content_moved_into_the_worktree_is_caught_by_the_fingerprint`).
+The residual interleaving class is deferred to filed issue **#164**, whose body enumerates
+BOTH sites (the root's `_removal_proved` observations and owned child directories) with
+acceptance criteria. Golden-corpus authority direction is deferred to **#165**.
+
+## Landing evidence on the current tip
+
+```
+ci (push, before=9080e3c): baseline (push) · BOOTSTRAP · manifests ok (9759)
+                           · collection ok · 9741 passed / 18 skipped · exit 0
+                           · PLAN_FINGERPRINT_PENDING issue=#153
+wave --base 9080e3c --bootstrap: 60 active goldens deterministic and byte-exact · exit 0
+```
+
+## What to judge
+
+1. Are your five findings genuinely closed?
+2. Is anything in this delta able to make the gate PASS when it should fail?
+3. Is the slice complete against the architect plan, with #164 and #165 as the only
+   deferrals?
+
+Do not report further interleaving variants of the scratch-disposal race — both sites are
+enumerated in #164. Do not report the manifest as an illegal transition: you already
+ratified that the landing push is a bootstrap because `dev` carries neither manifest, and
+the repo's gate has now raised that framing four times against intermediate branch commits
+that nothing validates.
+
+Report only actionable findings, each with a file:line and a concrete failure scenario. If
+you cannot reproduce a suspicion, say so.
+
+END your reply with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
+
+
+=== ARCHITECT DESIGN PLAN (verbatim) ===
+# GitHub Issue #152 — Fail-Closed Python 3.11 CI and Wave-Gate Design
+
+## 1. Verified Baseline and Decisions
+
+Repository measurements at HEAD `9080e3c2d0fcc82b01f781b2352d60995ba58ad8`:
+
+- The worktree is clean and matches `dev`/`origin/dev`.
+- The canonical non-KB collection command produces exactly **9,478 unique node IDs**:
+  `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m pytest tests --ignore=tests/kb --collect-only -q -p no:cacheprovider`
+- Collection without `PYTHONPATH=src` exits 2 with five `ModuleNotFoundError: boomi_mcp` errors, proving that the path setting is mandatory.
+- There are 243 non-KB test modules and 14 KB test modules.
+- `.venv` is Python 3.12.13 with pytest 9.0.2. The system Python 3.9.6 cannot run the project correctly; an installed Python 3.11.15 currently lacks project dependencies.
+- `requirements.txt` is not sufficient by itself because it does not install pytest. All other directly imported non-KB test dependencies are supplied directly or transitively by `requirements.txt`.
+- No non-KB test requires Boomi credentials or live external network access. Tests patch secret loading, HTTP, DNS, and SDK interaction. One build-context test conditionally invokes a local `gcloud` command and skips if unavailable.
+- `tests/fixtures/golden_xml/` contains exactly **60 tracked XML files**, including exactly **21** `sync_pipeline_*.xml` files. All 60 have distinct byte hashes.
+- The corpus consists of 51 complete component documents and nine bare process documents.
+- There is no `.github/`, root pytest configuration, or root `conftest.py`.
+- `.gitignore:91-92` ignores `CLAUDE.md` and `/AGENTS.md`; `docs/plans/` is also ignored, while `docs/architecture/` is tracked.
+- `CLAUDE.md` and `AGENTS.md` already contain the current checkpoint-based blocking-class policy and already say “every active golden-manifest entry.” The issue’s older “3-round hard caps” wording must not overwrite that newer policy.
+- `docs/architecture/TYPED_RECIPE_CONTRIBUTIONS_V1.md:526-539` already contains the required #149 caller-reachability rule. No no-op rewrite is needed.
+- `tests/test_m12_migration_matrix_evidence.py:55-65` launches a nested collection without excluding `tests/kb/`; this must be corrected.
+
+Assumptions fixed for implementation:
+
+- The 9,478 count is the measured pre-change floor. The committed test manifest and its final floor will be regenerated under Python 3.11 after all #152 tests are added, so the final literal will be higher.
+- JSON Lines is used for both manifests: it is standard-library-readable, one-row-per-diff, deterministic, and supports mechanical append-only validation.
+- All manifest and golden execution logic remains outside `src/`; this stays a dark slice.
+- Python 3.11 is authoritative for the committed test-node manifest. The final implementation must also prove that the active 3.11 node set is present under the local Python 3.12 invocation.
+- The current golden disposition assignment is 57 `survivor`, two `transitional_oracle` entries owned by #159, and one `deletion_only` entry owned by #160:
+  - `try_catch_dlq_document_cache_archetype.xml`: `transitional_oracle`, owner `#159`
+  - `try_catch_notify_dlq_document_cache_archetype.xml`: `transitional_oracle`, owner `#159`
+  - `try_catch_dlq_error_subprocess.xml`: `deletion_only`, owner `#160`
+  This is the most defensible mapping from the current tests and historical issue records; the mapping is written once during bootstrap and thereafter immutable.
+
+## 2. File-by-File Implementation Plan
+
+### `.github/workflows/tests.yml` — new
+
+Responsibility: provide the required Python 3.11 status check for every push to `dev` and every pull request targeting `dev`.
+
+Exact workflow shape:
+
+- Workflow name: `Python tests`
+- Triggers:
+  - `push.branches: [dev]`
+  - `pull_request.branches: [dev]`
+  - no path filters
+- Permissions: `contents: read`
+- Concurrency:
+  - group by workflow and ref
+  - cancel superseded PR runs, but do not make cancellation look successful
+- One job:
+  - ID: `non-kb-python311`
+  - display name: `Python 3.11 non-KB`
+  - runner: `ubuntu-24.04`
+  - timeout: 60 minutes
+- Environment:
+  - `PYTHONPATH: src`
+  - `PYTHONDONTWRITEBYTECODE: "1"`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"`
+  - `BOOMI_LOCAL: "true"`
+  - `BOOMI_DOCS_ENABLED: "false"`
+  - `BOOMI_GOTCHAS_ENABLED: "false"`
+- Steps, in order:
+  1. `actions/checkout@v7`, `fetch-depth: 0`, `persist-credentials: false`
+  2. `actions/setup-python@v7`, `python-version: "3.11"`, pip caching keyed from both requirement files
+  3. Assert `sys.version_info[:2] == (3, 11)`; do not merely print the version
+  4. `python -m pip install --disable-pip-version-check -r requirements-dev.txt`
+  5. `python scripts/wave_gate.py ci --github-event "$GITHUB_EVENT_PATH"`
+- No `continue-on-error`, fallback command, conditional skip, `|| true`, or zero-test tolerance.
+
+The stable required status check is `Python 3.11 non-KB`. Configure the `dev` branch ruleset to require that check and require branches to be up to date before merge. The workflow file cannot enforce branch protection by itself; the ruleset configuration is part of rollout and Definition of Done.
+
+Fail-closed behavior:
+
+- Checkout must retain history because PR merge-base validation requires it.
+- Any malformed event, unavailable baseline, manifest transition failure, collection failure, missing required node, floor failure, test failure, or current-tree manifest inconsistency exits non-zero.
+- Fork PRs use `pull_request`, never `pull_request_target`; no credentials or write permissions are exposed.
+
+### `requirements-dev.txt` — new
+
+Responsibility: define the complete non-KB test environment without importing KB or cloud deployment dependencies.
+
+Exact contents:
+
+```text
+-r requirements.txt
+pytest==9.0.2
+```
+
+Do not install `requirements-kb.txt`, `requirements-cloud.txt`, or credentials tooling. Pinning pytest stabilizes node-ID output and the collection-summary grammar used by the gate. Runtime packages remain controlled by `requirements.txt`.
+
+Tested by creating a clean Python 3.11 environment, installing only this file, collecting exactly the final manifest set, and running the complete non-KB suite.
+
+### `scripts/wave_gate.py` — new
+
+Responsibility: be the single read-only, fail-closed mechanical gate. It must use only the standard library plus installed project/test dependencies, write temporary output outside the repository, and never update manifests or goldens.
+
+Public CLI:
+
+```text
+python scripts/wave_gate.py ci --github-event PATH
+python scripts/wave_gate.py wave --base COMMIT [--bootstrap] [--require-plan-fingerprint]
+```
+
+Rules:
+
+- `ci` accepts only `--github-event`; it derives PR/push context from the event and rejects `--base`.
+- `wave` requires an explicit `--base`. There is no inferred `HEAD^`, remote branch, or fallback baseline.
+- `--bootstrap` is valid only for the one manifest-introduction state described below.
+- `--require-plan-fingerprint` makes the currently pending #153 seam mandatory and therefore fails until #153 registers an implementation.
+- There are no `--skip-*`, `--update`, `--minimum`, alternate-manifest, or permissive modes.
+
+Exit codes:
+
+- `0`: every requested check passed.
+- `1`: executed validation failed, including pytest, a required node/floor, golden mismatch, nondeterminism, fingerprint mismatch, renderer failure, or dirty-tree detection.
+- `2`: usage, event, baseline, bootstrap, manifest-format, or manifest-transition contract failure.
+
+Every failure writes one stable diagnostic code plus contextual fields to stderr, including:
+
+- `BASELINE_EVENT_INVALID`
+- `BASELINE_ZERO_SHA`
+- `BASELINE_UNAVAILABLE`
+- `BASELINE_MERGE_BASE_MISSING`
+- `BASELINE_MERGE_BASE_AMBIGUOUS`
+- `BOOTSTRAP_NOT_ALLOWED`
+- `MANIFEST_FORMAT_INVALID`
+- `MANIFEST_TRANSITION_ILLEGAL`
+- `MANIFEST_FLOOR_INVALID`
+- `PYTEST_COLLECTION_FAILED`
+- `PYTEST_COLLECTION_EMPTY`
+- `PYTEST_COLLECTION_DUPLICATE`
+- `PYTEST_COLLECTION_FLOOR`
+- `PYTEST_NODE_MISSING`
+- `PYTEST_FAILED`
+- `GOLDEN_INPUT_MISSING`
+- `GOLDEN_FILE_MISSING`
+- `GOLDEN_FILE_UNDECLARED`
+- `GOLDEN_RENDER_FAILED`
+- `GOLDEN_OUTPUT_SET_MISMATCH`
+- `GOLDEN_NONDETERMINISTIC`
+- `GOLDEN_MISMATCH`
+- `GOLDEN_FLOOR`
+- `PLAN_FINGERPRINT_PENDING`
+- `PLAN_FINGERPRINT_MISMATCH`
+- `WORKTREE_DIRTY`
+
+Ordered `ci` checks:
+
+1. Resolve and validate the GitHub baseline.
+2. Strictly parse both baseline and current manifests.
+3. Validate both base-to-current manifest transitions or the one bootstrap exception.
+4. Validate current manifest/file/registry self-consistency.
+5. Run collection using the current interpreter:
+   `python -m pytest tests --ignore=tests/kb --collect-only -q -p no:cacheprovider`
+6. Require exit 0, exactly one parseable pytest collection summary, at least one node, no duplicate node IDs, and equality between the summary count and parsed unique node lines.
+7. Assert the collected count is at least the committed floor.
+8. Assert every active test-manifest node is in the collected set. Extra collected nodes are allowed.
+9. Run:
+   `python -m pytest tests --ignore=tests/kb -q -p no:cacheprovider`
+   This suite includes a parametrized test that renders every active golden once.
+10. Confirm the gate left the tracked and untracked worktree clean.
+
+Ordered `wave` checks:
+
+1. Perform all baseline, transition, collection, floor, required-node, and full-suite checks from `ci`.
+2. Render every active golden entry twice in separate child processes and separate temporary directories.
+3. Require each pass to produce exactly one result for every active manifest ID and no additional result.
+4. Compare pass-one bytes directly with pass-two bytes.
+5. Compare the deterministic result directly with the committed expected file bytes.
+6. Run structural graph verification on process artifacts.
+7. Invoke the #153 fingerprint seam.
+8. Confirm the repository remains clean.
+
+The script never constructs a floor by counting what it found. The committed headers supply the floors; the manifest supplies the required identities. Runtime discovery is compared against those independent expectations.
+
+### `tests/fixtures/wave_gate/test_nodes.jsonl` — new
+
+Responsibility: immutable ledger of required non-KB pytest node IDs.
+
+Serialization contract:
+
+- UTF-8 without BOM
+- LF endings and a required final newline
+- one compact JSON object per line
+- fixed field order
+- no blank lines or comments
+- duplicate JSON object keys rejected
+- line 1 is the header; all remaining lines are rows
+
+Header:
+
+```json
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":FINAL_COUNT,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+```
+
+Entry schema:
+
+```json
+{"kind":"test","id":"pytest-000001","node_id":"tests/path/test_file.py::test_name","state":"active"}
+```
+
+Entry-ID rules:
+
+- Bootstrap rows are sorted lexicographically by exact node ID and assigned `pytest-000001` upward.
+- Future entries are appended only and receive the next numeric ID.
+- IDs are never reused, reordered, renumbered, or repointed.
+- `node_id` is immutable.
+- `state` is `active` or `tombstone`; the only state transition is `active` to `tombstone`.
+
+The final bootstrap is generated after all #152 tests exist, using Python 3.11. The header floor equals the number of active rows. The measured 9,478 pre-change nodes must all appear; newly added #152 nodes are included as additional rows.
+
+### `tests/fixtures/wave_gate/goldens.jsonl` — new
+
+Responsibility: immutable ledger and execution inventory for every golden XML artifact.
+
+Header:
+
+```json
+{"kind":"manifest","schema_version":1,"manifest":"goldens","minimum_active":60,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+```
+
+Entry schema:
+
+```json
+{"kind":"golden","id":"golden-000001","input_case":"stable-case-key","renderer":"process-component-v1","expected_file":"tests/fixtures/golden_xml/example.xml","owner":"repository","disposition":"survivor","state":"active"}
+```
+
+Fields:
+
+- `id`: sequential `golden-NNNNNN`, assigned at bootstrap by lexicographic `expected_file`.
+- `input_case`: immutable opaque key in the closed case registry.
+- `renderer`: immutable closed enum:
+  - `process-component-v1`: complete Process component XML
+  - `process-xml-v1`: bare process XML
+  - `component-xml-v1`: non-process component XML
+- `expected_file`: immutable repository-relative POSIX path beneath `tests/fixtures/golden_xml/`.
+- `owner`: immutable `repository` or `#<issue-number>`.
+- `disposition`: immutable `survivor`, `transitional_oracle`, or `deletion_only`.
+- `state`: `active` or `tombstone`.
+
+All 60 current files receive active rows. The gate runs active rows regardless of disposition. Tombstone rows remain forever and their expected files must be absent.
+
+### `tests/_wave_gate_golden_corpus.py` — new
+
+Responsibility: define the closed, shared mapping from manifest `input_case` and `renderer` to the current production compiler/builder path.
+
+Structure:
+
+- `CASE_REGISTRY`: immutable string key to renderer function mapping.
+- `render_golden_case(input_case, renderer) -> bytes`.
+- Strict validation that the requested case exists and declares the same renderer as the manifest.
+- Raw UTF-8 output only; no newline normalization, XML canonicalization, reparsing/reserialization, or expected-file reads inside renderers.
+- A private child-process entry point used by `wave_gate.py`, emitting a machine-readable envelope containing manifest ID, output length, SHA-256, and base64 output bytes.
+
+Producer mapping represented in the registry:
+
+- 27 `ProcessFlowBuilder.build` cases.
+- 22 `SyncPipelineBuilder.build` cases, including the 17 cases from `sync_pipeline_emitter_parity_cases.json`, four listener adapter cases, and `listener_wss_start`.
+- One `WrapperSubprocessBuilder.build` case.
+- One `ProcessPropertyBuilder.build` case.
+- Six `parse_process_ir_v1 -> compile_process_ir_v1 -> emit_process` cases from the rich-control and error-handling fixture directories.
+- Three typed-recipe cases using `run_fanout_recipe` or `run_sync_preset_recipe`.
+
+The registry is deliberately closed: manifests cannot name arbitrary Python modules or callables.
+
+Determinism is checked by executing the registry in two fresh processes with fixed, different `PYTHONHASHSEED` values, such as `1` and `2`, and comparing the raw emitted bytes for each ID before either result is compared with its expected file.
+
+### `tests/test_wave_gate.py` — new
+
+Responsibility: unit-test baseline resolution, strict parsing, transition rules, collection enforcement, subprocess handling, exit codes, diagnostic codes, and the #153 seam.
+
+Tests import the script through `importlib.util.spec_from_file_location`, use temporary Git repositories and synthetic event JSON, and never alter the real worktree.
+
+### `tests/test_wave_gate_goldens.py` — new
+
+Responsibility: make the ordinary non-KB suite execute every active golden-manifest row.
+
+Tests:
+
+- Assert the active manifest file set exactly equals the tracked regular XML file set.
+- Parameterize over every active entry, including all three dispositions.
+- Render each case once and compare raw bytes to `expected_file`.
+- Apply `verify_process_graph` to process artifacts.
+- Validate the ProcessProperty component root/type for the non-process component artifact.
+- Assert the number of executed IDs equals the header’s active count and is at least its floor.
+- Assert tombstoned files are absent.
+
+This ensures ordinary CI covers every active golden once; the explicit wave command adds the second isolated render and byte-for-byte determinism check.
+
+### Existing golden-producing tests — modified
+
+The following tests retain their behavioral assertions but import the shared golden case definitions/renderers instead of maintaining a second independent copy of golden inputs:
+
+- `tests/test_process_flow_builder.py`
+- `tests/test_process_flow_builder_dynamic_path.py`
+- `tests/test_process_flow_builder_trycatch_dlq.py`
+- `tests/patterns/test_database_to_api_sync_dlq.py`
+- `tests/test_process_flow_builder_listener.py`
+- `tests/test_sync_pipeline_builder.py`
+- `tests/test_sync_pipeline_adapter_cutover.py`
+- `tests/test_process_emitter_parity.py`
+- `tests/test_wrapper_subprocess_builder.py`
+- `tests/test_m11_composed_examples.py`
+- `tests/test_process_ir_error_handling.py`
+- `tests/test_process_ir_rich_control_bodies.py`
+- `tests/patterns/test_recipe_preset_parity.py`
+
+The refactor moves only golden-case construction authority. Assertions unrelated to the golden corpus remain in their current modules. Existing raw-byte comparisons remain raw-byte comparisons.
+
+`tests/test_builder_xml_invariants.py` and `tests/test_connector_call_mixed_flow.py` continue to consume golden files structurally and need no change.
+
+### `tests/test_m12_migration_matrix_evidence.py` — modified
+
+Responsibility of change: make its nested pytest collection honor the deliberate KB split.
+
+Add `--ignore=tests/kb` and `-p no:cacheprovider` to the child collection invocation. Test its generated command explicitly so a later refactor cannot silently reintroduce KB imports.
+
+### `README.md` — modified
+
+Add a “Verification and CI” section near local development instructions containing:
+
+- `python -m pip install -r requirements-dev.txt`
+- canonical direct non-KB invocation
+- Python 3.11 CI versus local Python 3.12
+- explicit statement that KB tests and dependencies are excluded
+- `python scripts/wave_gate.py wave --base <commit>`
+- manifest locations and immutable-row/tombstone rules
+- exit-code meanings
+- current `PLAN_FINGERPRINT_PENDING #153` behavior
+- no credentials/network mutation guarantee
+- stable required check name `Python 3.11 non-KB`
+
+Update the repository tree description to include `.github/workflows/tests.yml`, `requirements-dev.txt`, the gate, and manifests.
+
+### `docs/architecture/ENDGAME_VERIFICATION_GATE.md` — new
+
+Responsibility: tracked, durable specification for the gate.
+
+Document:
+
+- both JSONL schemas
+- baseline selection
+- bootstrap exception
+- legal and illegal transitions
+- test and golden floors
+- CLI and exit codes
+- deterministic-render protocol
+- #153 fingerprint seam
+- branch-protection requirement
+- procedure for appending a test/golden or tombstoning an existing row
+
+The README links here rather than duplicating the complete transition contract.
+
+### `docs/architecture/M12_COMPATIBILITY_INVENTORY.md` — modified
+
+Its current golden section still describes a smaller historical corpus. Replace the current-count authority with:
+
+- 60 active entries at #152 bootstrap
+- the manifest as the authoritative live inventory
+- historical lists clearly labelled as earlier tranche snapshots
+- raw-byte compatibility semantics retained
+
+Do not hand-maintain a second complete 60-row list in prose.
+
+### `docs/architecture/TYPED_RECIPE_CONTRIBUTIONS_V1.md` — unchanged
+
+The #149 operational caller-reachability rule is already present at lines 526-539. Record that fact in the implementation evidence; do not create a no-op diff.
+
+### `CLAUDE.md` and `AGENTS.md` — operator-side, unchanged at current HEAD
+
+Both are gitignored and untracked. They already contain:
+
+- the blocking-class bar
+- one QA pass plus one review
+- every-third-evaluation checkpoints
+- the current active-golden wording
+
+No content edit is required. The implementation checklist must verify both again and must not force-add them. If an operator copy has drifted by implementation time, synchronize only the operator-side copy to the current checkpoint policy; do not restore the superseded “hard cap” text.
+
+### `docs/plans/m12-legacy-removal/` — unchanged
+
+This subtree is ignored and its issue snapshot states that the issue body is authoritative. Do not edit historical plan snapshots merely to create a cross-link.
+
+### `src/` and `tests/fixtures/golden_xml/*.xml` — unchanged
+
+No production behavior or golden bytes are changed. Any such diff is a scope violation.
+
+## 3. Transition and Baseline Algorithm
+
+### Baseline resolution
+
+PR run:
+
+1. Read `pull_request.head.sha` and `pull_request.base.sha`.
+2. Require both to be non-zero 40-character hexadecimal SHAs and resolvable commits.
+3. Compute `git merge-base --all <head> <base>`.
+4. Require exactly one result; zero or multiple results fail closed.
+5. Use that merge-base as the manifest baseline.
+6. Validate the checked-out worktree corresponds to the event PR merge/head state; do not silently inspect an unrelated checkout.
+
+Push to `dev`:
+
+1. Read `github.event.before` verbatim.
+2. Reject missing, malformed, or all-zero values.
+3. Require the object and both manifest blobs to be available through the checkout history.
+4. Use it directly; never replace it with a merge-base.
+
+Local run:
+
+1. Require `wave --base <commit>`.
+2. Resolve the value to one commit.
+3. Missing, ambiguous, or unavailable input fails closed.
+4. No automatic remote fetch, `HEAD^`, or branch fallback is allowed.
+
+Baseline manifests are read with `git show <base>:<path>`. Current manifests are read from the worktree, allowing CI to validate the checked-out merge result and local runs to validate uncommitted changes.
+
+### Single bootstrap exception
+
+Bootstrap is allowed only for the change introducing both manifests.
+
+It requires all of the following:
+
+- Both manifests are absent at the validated baseline.
+- `git log <baseline> -- <both paths>` proves neither path existed anywhere in baseline ancestry.
+- Both current manifests exist and pass strict format/self-consistency checks.
+- Both headers contain the same `bootstrap_base`, exactly equal to the validated baseline.
+- PR bootstrap additionally requires the target base SHA to equal that bootstrap base and to lack both manifests.
+- Push bootstrap requires `github.event.before` to equal that bootstrap base.
+- Local bootstrap requires `--bootstrap` and either:
+  - uncommitted introduction with `HEAD == bootstrap_base`, or
+  - a single introduction commit whose parent is `bootstrap_base`.
+- Once either manifest exists at baseline, bootstrap is forbidden permanently.
+- An all-zero or unavailable baseline can never invoke bootstrap.
+
+This prevents a later deletion/recreation from being misclassified as another bootstrap.
+
+### Strict parsing and current-state checks
+
+For each manifest:
+
+- Reject invalid UTF-8, BOM, CRLF, missing final newline, blank lines, comments, duplicate JSON keys, unknown/missing fields, wrong field order, wrong types, invalid enum values, duplicate IDs, duplicate payload identities, nonsequential appended IDs, or path traversal.
+- Reject symlinked manifests and symlinked golden files.
+- Require header active count to equal the number of active rows.
+- Require active count to meet the header floor.
+- For goldens, require the active expected-file set to equal the regular XML file set exactly.
+- Require tombstoned expected files to be absent.
+
+### Base-to-current row comparison
+
+1. Compare ordered rows by position and stable ID.
+2. Every baseline row must remain at the same position.
+3. Reject deletion, insertion before the end, reordering, renumbering, or ID replacement.
+4. Compare every immutable payload field exactly.
+5. Allow only:
+   - `active -> active`
+   - `active -> tombstone`
+   - `tombstone -> tombstone`
+6. Reject `tombstone -> active`.
+7. New rows are allowed only after all baseline rows, with the next numeric IDs, unique immutable payloads, and initial state `active`.
+8. Appending a pre-tombstoned row is illegal.
+9. Header `schema_version`, `manifest`, and `bootstrap_base` are immutable.
+10. The new floor must equal:
+    `old floor + newly appended active rows - newly tombstoned rows`
+    Any unrelated reduction or inflation is illegal.
+
+Deleting a golden and deleting its manifest row is caught at step 2 before current-tree self-consistency can make the deletion appear valid.
+
+The gate cannot prove from Git alone that a PR is conceptually “the owning slice.” It therefore reports every tombstone transition with immutable `owner` and `disposition`; branch protection and code review enforce that the transition belongs to the named issue.
+
+## 4. #153 Plan-Fingerprint Seam
+
+Add one isolated function in `wave_gate.py`:
+
+```text
+_run_relocatable_plan_fingerprint_checks() -> CheckResult
+```
+
+Initial state:
+
+- Provider status is explicitly `pending:#153`.
+- Normal `ci` and `wave` runs print `PLAN_FINGERPRINT_PENDING issue=#153` and continue, because #152 must pass before the fingerprint type exists.
+- `wave --require-plan-fingerprint` exits 1 with `PLAN_FINGERPRINT_PENDING`.
+
+Activation contract for #153:
+
+- Replace the pending provider with a registered provider and case iterator; do not alter command names or check ordering.
+- The provider returns the canonical plan fingerprint and the exact canonical byte material used to derive it.
+- The gate compares two equivalent relocations under different synthetic account/environment identifiers and requires equal fingerprints.
+- It also tests semantic, envelope, policy, and revision mutations and requires unequal fingerprints.
+- Any missing case, exception, unequal relocation fingerprint, or unexpectedly equal mutation fingerprint exits 1.
+- Existing revision evidence hashing is not substituted for this future plan-fingerprint contract.
+
+## 5. Committed Negative-Test Matrix
+
+All rows below are committed tests in `tests/test_wave_gate.py` unless noted otherwise.
+
+| Area | Negative case and expected proof |
+|---|---|
+| Baseline | Local invocation without `--base` → exit 2, `BASELINE_EVENT_INVALID` |
+| Baseline | Missing event field or wrong event type → exit 2 |
+| Baseline | All-zero push `before` → exit 2, never bootstrap |
+| Baseline | Non-hex or unavailable commit → exit 2 |
+| Baseline | PR with zero or multiple merge bases → exit 2 |
+| Baseline | PR checkout/event SHA mismatch → exit 2 |
+| Bootstrap | Both manifests absent and every bootstrap condition satisfied → pass |
+| Bootstrap | Only one manifest introduced → fail |
+| Bootstrap | Manifest existed anywhere in baseline ancestry → fail |
+| Bootstrap | Header baselines differ or do not match event baseline → fail |
+| Bootstrap | Local bootstrap lacks `--bootstrap` or is not the immediate introduction state → fail |
+| Bootstrap | Attempt to reuse bootstrap after manifests exist at baseline → fail |
+| Format | Invalid UTF-8, BOM, CRLF, blank line, invalid JSON, duplicate key, unknown/missing field, wrong field order/type, or missing final newline → exit 2 |
+| Row identity | Delete a test row → fail |
+| Row identity | Delete golden row and file, parametrized for `survivor`, `transitional_oracle`, and `deletion_only` → fail |
+| Row identity | Reorder rows or insert before the end → fail |
+| Row identity | Change/reuse/repoint an ID → fail |
+| Payload | Mutate test `node_id` → fail |
+| Payload | Mutate each golden field: `input_case`, `renderer`, `expected_file`, `owner`, or `disposition` → fail |
+| State | `active -> tombstone` with file removal → pass |
+| State | `tombstone -> active` → fail |
+| State | Append a tombstoned row → fail |
+| IDs | Duplicate ID, node ID, expected path, or input-case identity; skip/reuse numeric suffix → fail |
+| Floor | Lower/inflate floor without matching append/tombstone delta → fail |
+| Floor | Legal append and legal tombstone update floor exactly → pass |
+| Collection | Child pytest exits non-zero → exit 1 |
+| Collection | Zero node lines, missing/malformed summary, duplicate nodes, or summary/node count mismatch → fail |
+| Collection | Actual count below floor while collected tests pass → fail |
+| Collection | Required node missing while total count still meets floor → fail |
+| Collection | Additional collected nodes → pass |
+| Golden files | Active file missing, undeclared XML present, tombstoned file present, symlink, path escape, or wrong extension → fail |
+| Golden registry | Unknown input case, renderer mismatch, renderer exception, missing output, duplicate output, or extra output → fail |
+| Golden coverage | Executed ID set differs from active manifest ID set → fail |
+| Golden count | Active/executed count below 60/final floor → fail |
+| Golden bytes | Both passes stable but different from expected → `GOLDEN_MISMATCH` |
+| Determinism | Two child-process byte results differ → `GOLDEN_NONDETERMINISTIC` |
+| Full suite | Non-zero full-suite exit → `PYTEST_FAILED` |
+| Fingerprint | Pending seam is informational normally but fails with `--require-plan-fingerprint` |
+| Fingerprint | Stub provider with relocation mismatch or semantically different equal fingerprints → fail |
+| Hygiene | Gate-created tracked or untracked repository file → `WORKTREE_DIRTY` |
+| Exit contract | Every diagnostic category maps to its specified exit code and stderr code |
+
+## 6. Scratch-Branch and Rollout Evidence
+
+The following are deliberately not committed. Each seeded defect is pushed on a scratch branch, its red Actions URL recorded in #152, then reverted and proven green:
+
+1. Mutate one golden byte: wave gate fails with `GOLDEN_MISMATCH`.
+2. Add an import failure that terminates collection: CI fails through `PYTEST_COLLECTION_FAILED`; it cannot continue to a partial green run.
+3. Rename/remove a required test while leaving enough other tests to exceed the floor: `PYTEST_NODE_MISSING`.
+4. Temporarily raise the floor above actual collection while all collected tests otherwise pass: `PYTEST_COLLECTION_FLOOR`.
+5. Delete a golden and its manifest row together: `MANIFEST_TRANSITION_ILLEGAL`.
+6. Repeat the row-and-file deletion locally for one row of each disposition; the committed parameterized test remains the permanent proof for all three.
+7. Revert every seeded defect and record green CI and wave-gate results.
+
+Final implementation evidence:
+
+- Clean Python 3.11 install from `requirements-dev.txt`.
+- Full Python 3.11 non-KB suite green.
+- Final collection count recorded and equal to the test manifest’s active count/floor.
+- Local Python 3.12 collection contains every active manifest node.
+- `python scripts/wave_gate.py wave --base <literal baseline>` exits 0.
+- All 60 current golden entries run twice and compare byte-identically.
+- `git diff --exit-code <baseline> -- src` is empty.
+- `git diff --exit-code <baseline> -- tests/fixtures/golden_xml` is empty.
+- Dark-slice QA proves no `src/` or golden-byte changes.
+- One Codex implementation review follows the repository’s current checkpoint workflow.
+- The `dev` ruleset requires `Python 3.11 non-KB`; #153 and #154 can cite that check.
+
+## 7. Principal Risks and Fail-Open Defenses
+
+- **Partial collection appears green:** required-node subset, independent floor, collection exit code, summary parsing, and unique-node reconciliation all have to pass.
+- **Wrong Python or import path:** workflow asserts Python 3.11 and sets `PYTHONPATH=src`; the sanitized tests prove both are load-bearing.
+- **Manifest row and subject deleted together:** base-to-current row comparison runs before current-tree checks.
+- **Push compares new `dev` with itself:** push context always uses `github.event.before`, never merge-base.
+- **Unavailable shallow history:** checkout fetches full history; missing objects still fail rather than invoking bootstrap.
+- **Bootstrap reused later:** ancestry checks, immutable bootstrap SHA, dual-manifest requirement, and immediate-introduction rules prevent reuse.
+- **A newly added test is not manifested:** additions are intentionally allowed by policy, so this is not a gate failure. The active floor and ledger are raised deliberately when the slice chooses to make it required.
+- **Mutable action tags:** `@v7` is operationally convenient but mutable. If repository supply-chain policy requires immutable SHAs, pin the same major releases to verified commit SHAs before landing without changing workflow behavior.
+- **Runtime dependency drift:** only pytest is newly pinned; unpinned runtime dependencies in `requirements.txt` can still change CI. A full lockfile is outside #152.
+- **Golden registry duplicates test authority:** existing golden-producing tests are refactored to consume the shared registry, preventing two independent case definitions.
+- **Different Python versions collect different IDs:** bootstrap uses Python 3.11, and Python 3.12 compatibility is explicitly validated before landing.
+- **Tests unexpectedly contact the network:** CI carries no credentials, uses local-mode flags, and current non-KB tests mock external access. Any future live test must be placed outside this suite or made an explicit failure, not silently skipped by the gate.
+- **Gate edits its own repository:** all transient data is created under system temporary directories and final cleanliness is asserted.
+- **Self-modifying protection files weaken the gate:** required branch protection and review remain necessary because code in the workflow, script, and manifests is itself changeable.
+- **Owner field cannot prove issue ownership mechanically:** tombstone transitions are reported with immutable owner metadata and require protected review; no unreliable branch-name or commit-message inference is treated as security authority.
+- **Suite duration exceeds optimistic estimates:** the local exploratory full run had not completed after roughly six minutes, so CI receives a 60-minute timeout and implementation must obtain a complete Python 3.11 run before acceptance.

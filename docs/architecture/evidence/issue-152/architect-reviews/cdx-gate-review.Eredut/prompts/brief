@@ -1,0 +1,112 @@
+You are reviewing the implementation of GitHub issue #152 ("M12.13 — Endgame
+verification gate automation and Python 3.11 CI") against the architect design plan
+inlined verbatim at the end of this prompt. Read-only review.
+
+This is a RE-RUN of round 9. Your previous round-9 turn produced a complete review but the
+daemon reported it as failed, so it could not be attested and does not count as an
+evaluation. Its findings were nevertheless verified independently and acted on — all of
+them are listed below with their disposition, so you can check the work rather than repeat
+it.
+
+## Your round-9 findings and what happened to each
+
+Fixed:
+
+1. **Scratch never proven to be the directory `mkdtemp()` created** (you rated Critical).
+   Reproduced with a swapped directory containing `precious.txt`. `_refuse_scratch_created_here`
+   now requires the inode observed immediately after creation, mode 0700, our uid, and
+   EMPTINESS. Verified: `refused: SCRATCH_NOT_OURS`, `precious.txt still present: True`.
+2. **`shutil.rmtree(candidate)` on the constructor-failure path** (Critical). Reproduced
+   deleting a tracked subtree. Now discarded through the held descriptor
+   (`_discard_scratch_at`), never the pathname, and the descriptor is never leaked.
+   Verified: `refused: SCRATCH_INSIDE_REPO`, `the tracked subtree still exists: True`.
+3. **`execute()` caught only `GateFailure`** — now catches `BaseException`, records it, runs
+   the closing fingerprint and retargeting bookkeeping, then re-raises.
+4. **Doc overstated the mid-disposal guarantee** — corrected: `_unlink_tree_at()` runs
+   between the two binding checks, so contents CAN be deleted before the second check
+   fails; the run still goes red, which is the actual guarantee.
+5. **Both golden passes shared one scratch directory** — each pass now gets its own,
+   created and opened relative to the held descriptor.
+6. **Ancestry proof pruned by history simplification** — `--full-history` added.
+7. **Born-tombstoned rows accepted** (plan lines 462/522 say fail) — now refused as
+   `MANIFEST_TRANSITION_ILLEGAL`. The 15 tombstones were `test_wave_gate.py` tests added
+   and removed during this slice; the bootstrap was regenerated per plan line 206 as
+   all-active, lexicographically sorted, sequential from `pytest-000001`.
+8. **`goldens.jsonl` row 57 owner/disposition** — corrected to `owner:"#160"`,
+   `disposition:"deletion_only"` before landing, since the fields are immutable.
+9. **`schema_version` compared without an exact int type** — `type(v) is int` now.
+10. **Symlink rejection ignored ancestor directories** — every component is checked, and
+    the caller selects the failure class so the golden tree keeps validation status 1.
+11. **`BOOMI_LOCAL`/`BOOMI_DOCS_ENABLED`/`BOOMI_GOTCHAS_ENABLED` absent from CI** — added.
+12. **`ci` never invoked the #153 seam and `wave` emitted prose** — both arms now run it
+    and emit `PLAN_FINGERPRINT_PENDING issue=#153` verbatim.
+13. **argparse errors outside the coded boundary** — the parser raises instead of printing,
+    so `GATE_USAGE_INVALID` is the FIRST token on stderr; `--help` still exits 0.
+
+Refuted, with evidence:
+
+14. **"local `--bootstrap` is an unchecked operator assertion"** — `check_bootstrap`
+    derives eligibility regardless of the flag (both manifests absent at the baseline,
+    neither path anywhere in its ancestry, declared `bootstrap_base` matching);
+    `require_flag` only ADDS a local confirmation and can never substitute for the
+    derivation. Your reproduction demonstrates the consequence of an operator-chosen
+    `--base`, which is the local trust boundary you yourself accepted at round 5 as "a
+    legitimate structural resolution". The gate's own note said "skips manifest transition
+    validation entirely", which misdescribed it — that text is corrected.
+
+Deferred to filed issues:
+
+15. **Golden-corpus authority direction** → **#165**. The registry imports the thirteen
+    producer test modules rather than those tests consuming it. There is exactly ONE case
+    definition either way, and the ~4.9 s import cost that motivated the original
+    instruction was measured at ~0.39 s — but you named a real cost I had missed: #159's
+    `transitional_oracle` and #160's `deletion_only` exist to keep goldens running AFTER
+    their owning tests are removed, which is the removal this direction breaks.
+16. **Rollout evidence** — that IS the §8 finish; the push to `dev` produces the Actions
+    run, and the doc's status banner already says the rollout is not yet evidenced.
+
+## Also relevant: the repo's own gate disagreed with you twice, and lost
+
+The repo's Stage-2 Codex gate reported, against an intermediate commit on this branch, that
+regenerating the bootstrap and correcting the immutable golden row were illegal
+transitions. Both were refuted by measuring what the landing event actually is:
+
+```
+remote dev: 9080e3c…   dev lacks BOTH manifests
+ci (push, before=9080e3c): BOOTSTRAP — manifests are introduced by this change; exit 0
+wave --base 9080e3c --bootstrap: 60 goldens deterministic and byte-exact; exit 0
+```
+
+`dev` carries no manifests, so the landing push takes the bootstrap path and
+`validate_transition()` never runs; the branch's intermediate commits are not a ledger.
+Following that gate's advice would have landed a permanently wrong IMMUTABLE row that #160
+could never correct. The boundary is now documented in `ENDGAME_VERIFICATION_GATE.md` §9.
+
+**If you believe that reasoning is wrong, say so — it is the single most consequential
+judgment in this slice.**
+
+## Files changed since your round 8 (`1779e5b..HEAD`)
+
+- .github/workflows/tests.yml
+- docs/architecture/ENDGAME_VERIFICATION_GATE.md
+- scripts/wave_gate.py
+- tests/fixtures/wave_gate/goldens.jsonl
+- tests/fixtures/wave_gate/test_nodes.jsonl
+- tests/test_wave_gate.py
+
+## What to judge
+
+1. Are your round-9 findings genuinely closed by the fixes described above?
+2. Is the bootstrap-vs-transition reasoning correct — is the manifest that will LAND a
+   valid bootstrap under the plan (all-active, lexicographically sorted, correct immutable
+   owner/disposition fields)?
+3. Does the implementation as a whole satisfy the architect plan?
+4. Anything that can make the gate PASS when it should fail.
+
+Do not report further interleaving variants of the scratch-disposal race deferred to #164
+(two separate outcome observations that a same-user process can interleave between; bounded
+to an empty untracked directory). Report only actionable findings, each with a file:line
+and a concrete failure scenario. If you cannot reproduce a suspicion, say so.
+
+END your reply with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

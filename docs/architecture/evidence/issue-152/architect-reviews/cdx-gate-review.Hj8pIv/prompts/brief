@@ -1,0 +1,86 @@
+You are reviewing the implementation of GitHub issue #152 ("M12.13 — Endgame
+verification gate automation and Python 3.11 CI") against the architect design plan
+inlined verbatim at the end of this prompt. Read-only review. This is ROUND 11, intended
+as the closing round.
+
+## What changed since your last attested round (`1083413..HEAD`, 8 commits)
+
+Your round-10 findings were all fixed, and the repo's own gate then ran five further
+delta-scoped rounds against those fixes. Everything below is already reviewed and
+validated; you are being asked whether it CLOSES.
+
+**Your findings:**
+
+1. **[Critical] Scratch cleanup deleted unrelated data.** The gate now records an
+   INVENTORY of what it creates and removes only those entries, deepest first; anything
+   else present is refused as `SCRATCH_FOREIGN_ENTRIES` with nothing removed.
+2. **[P1] `SystemExit(0)` made the gate green.** Unexpected exceptions are normalized to
+   a coded status-1 failure; `make_scratch_dir()` moved inside the closing-fingerprint
+   boundary.
+3. **[P1] Golden passes shared a runtime filesystem.** Each child now runs with its own
+   `cwd` and `TMPDIR`/`TEMP`/`TMP`.
+4. **[P2] `bootstrap_base` accepted a 40-digit integer.** `type(v) is str` now.
+5. **[P2] Documentation contradicted the landed contract.** All four corrected, plus the
+   README fingerprint token.
+
+**Then, from the repo's gate and from a defect-class sibling sweep:**
+
+6. A **sibling sweep of all 51 `try` blocks** — mandated by the repo's amended
+   `CLAUDE.md` on the second instance of a defect class — found a FIFTH escape of the
+   same class you named in (2): the OPENING fingerprint and everything before
+   `execute()`'s inner try escaped `main()` as exit 0. The class is now closed by one
+   invariant at the process boundary: `main()` catches `BaseException` and returns 1.
+   `--help` signals through `_HelpRequested` so it is not confused with a failure.
+7. A **sixth** escape: reporting runs INSIDE the handler, so a throwing `_emit` escaped
+   it — including the older `GATE_DIAGNOSTIC_UNRENDERABLE` fallback. All in-handler
+   diagnostics go through `_report`, which cannot throw.
+8. `_report` initially swallowed everything, which met "must not throw" by breaking "must
+   still print a code" — a strict-ASCII stderr rejecting an em-dash left stderr EMPTY. It
+   is now a guarded ladder: full text → the bare documented code → fixed ASCII line.
+9. A **seventh** escape: `x in DIAGNOSTIC_CODES` runs `__hash__`/`__eq__`, so a `str`
+   subclass with a hostile `__hash__` executed foreign code inside the very check meant
+   to sanitize it. `_own_code()` now requires `type(x) is str` — the exact builtin, whose
+   `__hash__`/`__eq__` cannot be overridden — and is total.
+10. `DIAGNOSTIC_CODES` was not authoritative for the primary text, so
+    `GateFailure("UNDECLARED_CODE", "m", 1)` printed `UNDECLARED_CODE m`. The primary text
+    is now built FROM the resolved code. It is pinned bidirectionally: a test asserts the
+    set equals the codes actually raised in the file AND the roster in the docs.
+
+**Also added:** `docs/architecture/ISSUE_152_AUDIT_LEDGER.md`, the in-tree audit ledger the
+amended policy requires, carrying the defect classes, the checkpoints, and the deferral
+records (reason class, placement, lineage) for #164 and #165.
+
+## Current state
+
+```
+ci (push, before=9080e3c): BOOTSTRAP · manifests ok (9772) · collection ok
+                           · 9754 passed / 18 skipped · exit 0
+wave --base 9080e3c --bootstrap: 60 goldens deterministic and byte-exact · exit 0
+Stage-2 repo review round 30: CLEAN, no findings
+```
+
+Deferred, with filed issues: **#164** (`blocked-by-mechanism` — POSIX offers no
+remove-by-descriptor and no atomic multi-namespace observation; bound measured as an empty
+untracked directory, which git does not track) and **#165** (`out-of-scope-by-design` —
+golden-corpus authority direction, slotted before #159).
+
+## What to judge
+
+1. Are your five round-10 findings genuinely closed?
+2. Is there ANY remaining path by which this gate PASSES when it should fail? That is the
+   single property the slice exists to deliver.
+3. Does the implementation satisfy the architect plan, with #164 and #165 as the only
+   deferrals?
+4. Is the in-tree ledger an accurate record of what happened?
+
+Do not report the manifest as an illegal transition — you have already ratified that the
+landing push is a bootstrap because `dev` carries neither manifest, and the repo's gate has
+now raised that framing six times against intermediate branch commits nothing validates.
+Do not report further interleaving variants of the scratch-disposal race; both sites are
+enumerated in #164.
+
+Report only actionable findings, each with a file:line and a concrete failure scenario. If
+you cannot reproduce a suspicion, say so rather than reporting it.
+
+END your reply with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

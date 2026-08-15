@@ -1,0 +1,69 @@
+You reviewed this implementation against its architect design plan in an earlier round and
+raised eight findings. This is the DELTA-SCOPED re-review of the corrections.
+
+**Review ONLY the delta `f4235b9..HEAD`** (5 commits). Do not re-review the parts of the
+implementation that round already cleared — the plan is inlined below solely so you can judge
+whether these corrections are faithful to it.
+
+Changed files in this delta:
+    scripts/wave_gate.py
+    tests/_wave_gate_golden_corpus.py
+    tests/test_wave_gate.py
+    tests/fixtures/wave_gate/test_nodes.jsonl
+    docs/architecture/ENDGAME_VERIFICATION_GATE.md
+    README.md
+
+Commits:
+    6111f89 close architect-review findings on checkout binding, bootstrap anchoring and the #153 seam
+    ff8e310 bind the checkout to the event and harden the plan-fingerprint seam
+    f548f70 make the spent-bootstrap test decidable instead of heuristic
+    f073bf8 ask git for every ref instead of enumerating namespaces
+    00146c5 read the current branch as a full symbolic ref
+
+## What each of your eight findings became
+
+1. **PR CI can validate an unrelated checkout** → `check_checkout_matches_event`, new diagnostic
+   `CHECKOUT_EVENT_MISMATCH`. Accepts the PR head or a `refs/pull/N/merge` commit whose parents are
+   the head and the base; a push must match `after`. Event-mode runs additionally require a CLEAN
+   worktree, and `after` is now validated as strictly as `before`.
+2. **Bootstrap broader than the contract, PR half** → a PR bootstrap now requires the event's
+   `base.sha` to equal the declared `bootstrap_base`.
+3. **Bootstrap broader than the contract, local half** → a local bootstrap is refused once the
+   introducing commit is reachable from ANY ref other than the current branch's own
+   `refs/heads/...`. Your suggested framing (a required `HEAD`↔`bootstrap_base` relationship) was
+   NOT implemented literally: as a commit-count rule and as a "ledger unchanged since introduction"
+   rule it rejected ordinary multi-commit development of the very change that introduces the ledger.
+   Reachability is used instead. Please judge that substitution.
+4. **Ambiguous local baselines accepted** → `_refuse_ambiguous`.
+5. **The #153 seam can pass without a real canonical fingerprint** → the provider now returns
+   `(digest, canonical_material)`; the digest is RECOMPUTED as `sha256:` + SHA-256 of the material;
+   all four mutation kinds are required and must produce pairwise-distinct plans; the material is
+   compared across identities; provider exceptions and malformed iterables stay on the coded path.
+6. **Ordinary CI does not prove every active golden ran** → a renderer that raises any pytest
+   outcome (Skipped, Failed, XFailed, …) is converted into a hard renderer failure.
+7. **Floor equality / tombstone reporting** → `minimum_active` must EQUAL the active row count;
+   every `active → tombstone` transition is reported with its immutable owner and disposition.
+8. **CI env vars, `wave --base` diagnostic, absent codes, missing negatives** → `wave --base` now
+   raises `BASELINE_EVENT_INVALID` instead of a bare argparse exit; the named missing negatives were
+   added. The four env vars and the two alias diagnostic codes were REFUTED with measurements, and
+   the reasoning is recorded in the shipped spec §9a — please judge that refutation.
+   The worktree fingerprint now folds in `HEAD` and `git diff --numstat`.
+
+Also corrected: the spec said "Status: shipped" and the README claimed the `dev` ruleset required
+the check. Neither was true — the branch is unpushed and no ruleset exists. Both now state the
+actual position.
+
+## What to judge
+
+- Are these corrections faithful to the plan, and did any of them introduce a NEW divergence?
+- Substitutions 3 and 8 are deliberate departures from what you asked for. Accept or reject each,
+  with reasons.
+- Any way a corrected path still fails OPEN.
+
+Do not re-litigate general code quality: this delta has already passed the repo's own gates —
+the full non-KB suite on Python 3.11 (9694 passed / 18 skipped / 0 failed), the gate's own `wave`
+run (exit 0, 60/60 goldens deterministic and byte-exact), and four rounds of repo Codex review, the
+most recent clean.
+
+END your response with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'

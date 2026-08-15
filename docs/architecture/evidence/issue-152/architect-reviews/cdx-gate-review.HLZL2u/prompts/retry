@@ -1,0 +1,11 @@
+Approvals and clarifying questions are UNAVAILABLE in this read-only review session. A question ends
+the turn with no result. Do not ask anything.
+
+Review ONLY `1627a96..HEAD` against the architect design plan inlined in the original prompt, and
+emit your findings NOW as plain text. Judge whether the three corrections are faithful, whether any
+introduced a new divergence, whether any corrected path still fails OPEN, and whether the narrow
+access-failure enumeration (read under a pinned C locale) is the right resolution. Anchor every
+finding to a file and line.
+
+END your response with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'

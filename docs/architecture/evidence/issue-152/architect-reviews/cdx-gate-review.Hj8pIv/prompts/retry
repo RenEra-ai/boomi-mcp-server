@@ -1,0 +1,47 @@
+Approvals and shell escalation are unavailable in this read-only review session. Do not
+request approval, do not attempt anything needing write access, and do not wait for a tool
+that cannot be granted.
+
+Emit your COMPLETE review NOW, as plain text, from what you have already read. Do not end
+the turn without a verdict line.
+
+Review the implementation of GitHub issue #152 against the architect design plan inlined at
+the end of the original prompt. Round 11, the closing round; the delta since your last
+attested round is `1083413..HEAD` (8 commits) touching README.md,
+docs/architecture/ENDGAME_VERIFICATION_GATE.md,
+docs/architecture/ISSUE_152_AUDIT_LEDGER.md, scripts/wave_gate.py,
+tests/fixtures/wave_gate/test_nodes.jsonl and tests/test_wave_gate.py.
+
+Your five round-10 findings were fixed: an ownership INVENTORY replaces the recursive
+scratch sweep, with `SCRATCH_FOREIGN_ENTRIES` for anything else present; unexpected
+exceptions are normalized to a coded status-1 failure and `make_scratch_dir()` moved inside
+the closing-fingerprint boundary; each golden child gets its own `cwd` and `TMPDIR`;
+`bootstrap_base` requires `type(v) is str`; and the documentation contradictions plus the
+README token are corrected.
+
+A sibling sweep of all 51 `try` blocks then found a fifth escape of the exit-status class
+(the OPENING fingerprint), closed by one invariant at the process boundary — `main()`
+catches `BaseException` and returns 1, with `--help` signalling through `_HelpRequested`.
+Three further escapes followed and were closed: reporting inside the handler (now
+`_report`, which cannot throw), `_report` swallowing everything and leaving stderr empty
+under a strict-ASCII sink (now a guarded ladder), and `x in DIAGNOSTIC_CODES` running
+`__hash__` on a hostile `str` subclass (now `_own_code()`, exact-builtin only, total).
+`DIAGNOSTIC_CODES` is pinned bidirectionally against the source and the docs roster.
+
+Current state: `ci` with `before=9080e3c` takes the bootstrap path — 9772 manifest nodes,
+9754 passed / 18 skipped, exit 0; `wave` renders all 60 goldens deterministically, exit 0;
+Stage-2 repo review round 30 came back CLEAN. Deferred: #164
+(`blocked-by-mechanism`) and #165 (`out-of-scope-by-design`).
+
+Judge, concretely:
+
+1. Whether your five findings are genuinely closed.
+2. ANY remaining path by which the gate PASSES when it should fail.
+3. Whether the slice satisfies the plan with #164 and #165 as the only deferrals.
+4. Whether `docs/architecture/ISSUE_152_AUDIT_LEDGER.md` accurately records what happened.
+
+Do not report the manifest as an illegal transition, and do not report further interleaving
+variants of the scratch-disposal race.
+
+END with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

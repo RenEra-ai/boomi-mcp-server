@@ -1,0 +1,19 @@
+Approvals, clarifying questions, and interactive round-trips are UNAVAILABLE in this read-only
+review session. Nobody can answer you and nothing can be approved — a question ends the turn
+with no result.
+
+Do not ask anything. Review the implementation on branch `codex/issue-152` against the architect
+design plan that was inlined in the original prompt, and emit your findings NOW as plain text.
+
+Cover:
+- plan fidelity: what the plan promised versus what shipped
+- the seven deliberate departures listed in the original brief — accept or reject each, with reasons
+- any way the shipped gate can pass while the property it claims to check is false
+- any acceptance criterion from the issue that is not met
+
+Anchor every finding to a file and line. Do not re-litigate general code quality that the repo's
+own gates already cleared (full 3.11 suite green, the gate's own `wave` run green, three rounds of
+repo Codex review with the third clean, darkness proof clean).
+
+END your response with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'

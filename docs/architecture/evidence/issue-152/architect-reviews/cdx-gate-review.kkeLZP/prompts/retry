@@ -1,0 +1,45 @@
+Approvals and shell escalation are unavailable in this read-only review session. Do not
+request approval, do not attempt anything needing write access, and do not wait for a tool
+that cannot be granted.
+
+Emit your COMPLETE review NOW, as plain text, from what you have already read. Do not end
+the turn without a verdict line.
+
+Review the implementation of GitHub issue #152 against the architect design plan inlined at
+the end of the original prompt. Round 10, the closing round; the delta since your last
+attested round is `1083413..HEAD`, touching README.md,
+docs/architecture/ENDGAME_VERIFICATION_GATE.md, scripts/wave_gate.py,
+tests/fixtures/wave_gate/test_nodes.jsonl and tests/test_wave_gate.py.
+
+All five of your findings were fixed: scratch cleanup now deletes only an inventory of what
+the gate created and refuses anything else (`SCRATCH_FOREIGN_ENTRIES`); unexpected
+exceptions are normalized to a coded status-1 `GATE_UNEXPECTED_ERROR` instead of re-raised,
+so `SystemExit(0)` can no longer exit green, and `make_scratch_dir()` moved inside the
+closing-fingerprint boundary; each golden child runs with its own `cwd` and
+`TMPDIR`/`TEMP`/`TMP`; `bootstrap_base` requires `type(v) is str`; and the four
+documentation contradictions plus the README fingerprint token are corrected. Three
+follow-on defects found by the repo's gate were also fixed: `O_NOFOLLOW` on every
+component during removal, correct classification of foreign entries nested in owned
+directories, and the root's binding proof applied uniformly to owned child directories.
+
+Measured bound on what remains: a non-empty directory moved into the worktree is
+`WORKTREE_DIRTY` and the gate goes red; only an empty untracked directory is invisible,
+because git does not track empty directories. The residual interleaving class is deferred
+to #164 (both sites enumerated in its body); golden-corpus authority direction to #165.
+
+Landing evidence on the tip: `ci` with `before=9080e3c` takes the bootstrap path, 9759
+manifest nodes, 9741 passed / 18 skipped, exit 0, `PLAN_FINGERPRINT_PENDING issue=#153`;
+`wave --base 9080e3c --bootstrap` renders all 60 goldens deterministically, exit 0.
+
+Judge, concretely:
+
+1. Whether your five findings are genuinely closed.
+2. Any path in this delta by which the gate PASSES when it should fail.
+3. Whether the slice is complete against the plan with #164 and #165 as the only deferrals.
+
+Do not report further interleaving variants of the scratch-disposal race, and do not report
+the manifest as an illegal transition — you already ratified that the landing push is a
+bootstrap.
+
+END with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

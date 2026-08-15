@@ -1,0 +1,50 @@
+This is the DELTA-SCOPED re-review of the corrections to your five round-3 findings.
+
+**Review ONLY `2364447..HEAD`** (6 commits). The architect design plan is inlined below solely so
+you can judge fidelity; do not re-review parts already cleared.
+
+Changed files: scripts/wave_gate.py, tests/test_wave_gate.py,
+tests/fixtures/wave_gate/test_nodes.jsonl, .github/workflows/tests.yml,
+docs/architecture/ENDGAME_VERIFICATION_GATE.md
+
+## What each round-3 finding became
+
+1. **the fingerprint stored and printed complete patches** (you reproduced
+   `TOKEN=SUPER_SECRET_VALUE` in a diagnostic) → patches are now SHA-256'd via
+   `git diff --binary --full-index`; the fingerprint holds digests only. `--binary --full-index`
+   also closes the abbreviated-blob-id collision you found.
+2. **unreadable files got a stable errno token** → now FAILS CLOSED: a file that cannot be hashed
+   makes the run refuse, because the read-only claim cannot be asserted over it.
+3. **PR checkout binding did not prove the merge tree** → parentage checking is DELETED. The tree is
+   bound to `GITHUB_SHA` (Actions always sets it; for a `pull_request` it IS the merge commit
+   checked out), with `pull_request.merge_commit_sha` as a secondary because that payload field is
+   NULLABLE. `GITHUB_SHA` takes precedence when both are present and disagree, since the payload
+   value is computed asynchronously and can lag.
+4. **provider `GateFailure(..., 0)` exited green** → every provider exception, `BaseException`
+   included, becomes a status-1 `PLAN_FINGERPRINT_MISMATCH`.
+5. **the requested range was not a legal transition** (a row appended then tombstoned inside a push
+   reads as born-tombstoned) → appended rows may now arrive tombstoned; only appends that arrive
+   ACTIVE count toward the floor. The tree checks already require a tombstoned row to have no
+   artifact, so nothing is unaccounted for. `manifests --base 00146c5` now exits 0.
+
+Three subsequent repo-review rounds during this delta also fixed: a fallback that reopened (3);
+a nullable-payload rejection that would have failed legitimate PRs; a precedence bug where the code
+consulted the payload before the environment; and — the important one — an autouse fixture scrubbing
+the ambient `GITHUB_SHA`, because this suite runs INSIDE the workflow that exports it and two
+synthetic-repo tests were reading the outer checkout's sha. That last one would have turned the
+required check red on its first real run; it was reproduced (`2 failed, 173 passed` under
+`GITHUB_SHA=1111…`) and the final wave gate was re-run WITH the variable populated.
+
+## What to judge
+
+- Are these corrections faithful to the plan, and did any introduce a NEW divergence?
+- Any way a corrected path still fails OPEN.
+- The trade in finding 5 (relaxing born-tombstone) — sound, or does it lose an invariant?
+
+Do not re-litigate general code quality: this delta has passed the full non-KB suite on Python 3.11
+(9,702 passed / 18 skipped / 0 failed) run with `GITHUB_SHA` populated exactly as CI will, the
+gate's own `wave` run (exit 0, 60/60 goldens deterministic and byte-exact), and repo Codex review,
+the most recent clean.
+
+END your response with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'

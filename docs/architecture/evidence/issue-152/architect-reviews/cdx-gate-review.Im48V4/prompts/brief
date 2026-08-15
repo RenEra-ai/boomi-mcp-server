@@ -1,0 +1,65 @@
+This is the DELTA-SCOPED re-review of the corrections to your eight round-2 findings.
+
+**Review ONLY `00146c5..HEAD`** (4 commits). The architect design plan is inlined below solely
+so you can judge fidelity; do not re-review parts already cleared.
+
+Changed files: scripts/wave_gate.py, tests/_wave_gate_golden_corpus.py, tests/test_wave_gate.py,
+tests/fixtures/wave_gate/test_nodes.jsonl, .github/workflows/tests.yml,
+docs/architecture/ENDGAME_VERIFICATION_GATE.md
+
+## What each round-2 finding became
+
+1. **substitution 3 remains replayable** — the local landing check is now **REMOVED ENTIRELY**.
+   See below; this is the one judgment that matters most in this round.
+2. **ambiguous baseline detection covers only heads/tags/remotes** → the enumeration is gone; the
+   probe reads git's own `warning: refname … is ambiguous`, forced with
+   `-c core.warnAmbiguousRefs=true` and `LC_ALL=C` so it depends on neither repo config nor locale.
+   Covered by three parametrized negatives including `refs/<name>` and `<name>~0`.
+3. **HEAD/porcelain/numstat are not a content fingerprint** → now HEAD + porcelain +
+   full `git diff` patches (staged and unstaged) + SHA-256 of every untracked file, enumerated with
+   `--untracked-files=all -z` captured as BYTES and looked up as bytes via `os.fsencode`/`os.fsdecode`.
+4. **`SystemExit(0)` exits green** → `_provider_call` catches `BaseException`; attribute access moved
+   inside the guard; `cases()`/`mutations()` materialised and type-checked inside it.
+5. **`unittest.SkipTest` re-raised** → the renderer guard matches the whole MRO, including `SkipTest`.
+6. **octopus merge accepted as a PR checkout** → exactly two parents, equal to {head, target}.
+7. **the `PYTEST_DISABLE_PLUGIN_AUTOLOAD` refutation was incorrect** → accepted. Re-measured: with
+   the flag set, all nodes still collect and both async modules pass 50/50. The flag is now SET and
+   the spec records that the earlier refutation was an inference, not a measurement.
+8. **bare-`wave` asserts only status 2** → `--base` is no longer `required=True`, so the coded
+   `BASELINE_EVENT_INVALID` is raised and asserted.
+
+## The judgment this round turns on
+
+The local-bootstrap "has this ledger landed?" check produced a finding in EIGHT successive
+formulations: ancestry-only; a commit-count rule; exempting `*/<branch>` mirrors; enumerating ref
+namespaces; `rev-parse --abbrev-ref`; matching the introducing COMMIT rather than the path;
+`--all --not <own_ref>`; and default history simplification pruning a `merge -s ours` addition.
+
+It has been REMOVED rather than reformulated a ninth time, on the argument that locally the OPERATOR
+chooses the baseline, so no rule can separate "legitimately introducing the ledger" from "asserting a
+stale baseline" — and erring toward refusal blocks the introduction the exception exists for.
+`--bootstrap` is still REQUIRED locally, the run prints `WARNING — a local --bootstrap is an OPERATOR
+ASSERTION, not a verified one`, and the spec records all eight failed formulations.
+
+The enforcement that remains is in the `ci` arms, where the baseline comes from the platform rather
+than the person being checked: `push` compares against the branch tip it builds on; `pull_request`
+additionally requires the target to carry no manifests.
+
+**Judge that removal.** Is it a legitimate structural resolution or an unacceptable weakening? If you
+consider it a weakening, say precisely what a LOCAL run could soundly decide that these eight
+formulations could not — a ninth heuristic will not be accepted without that.
+
+Ten pytest node ids were retired with it, tombstoned explicitly in the same change (the gate reported
+each and accepted the transition).
+
+## Also judge
+
+- Any NEW divergence introduced by these corrections.
+- Any way a corrected path still fails OPEN.
+
+Do not re-litigate general code quality: this delta has passed the full non-KB suite on Python 3.11
+(9,697 passed / 18 skipped / 0 failed), the gate's own `wave` run (exit 0, 60/60 goldens
+deterministic), and repo Codex review, the most recent clean.
+
+END your response with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'

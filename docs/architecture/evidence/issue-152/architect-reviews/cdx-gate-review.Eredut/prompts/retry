@@ -1,0 +1,47 @@
+Approvals and shell escalation are unavailable in this read-only review session. Do not
+request approval, do not attempt anything needing write access, and do not wait for a tool
+that cannot be granted.
+
+Emit your COMPLETE review NOW, as plain text, from what you have already read. Do not end
+the turn without a verdict line.
+
+Review the implementation of GitHub issue #152 against the architect design plan inlined at
+the end of the original prompt. This is a RE-RUN of round 9; the delta since round 8 is
+`1779e5b..HEAD`, touching .github/workflows/tests.yml,
+docs/architecture/ENDGAME_VERIFICATION_GATE.md, scripts/wave_gate.py,
+tests/fixtures/wave_gate/goldens.jsonl, tests/fixtures/wave_gate/test_nodes.jsonl and
+tests/test_wave_gate.py.
+
+Every finding from your unattested round-9 turn was verified independently and acted on:
+scratch identity+emptiness (`SCRATCH_NOT_OURS`) and descriptor-based discard on the failure
+path both fixed and reproduced closed; `execute()` now catches `BaseException` so the
+closing fingerprint always runs; the mid-disposal doc overstatement corrected; separate
+per-pass render directories, opened relative to the held descriptor; `--full-history` on
+the ancestry proof; born-tombstoned rows refused and the bootstrap regenerated all-active
+and lexicographically sorted; `goldens.jsonl` row 57 corrected to `owner:"#160"`,
+`disposition:"deletion_only"`; `type(v) is int` for `schema_version`; symlinked ancestors
+checked with a caller-selected failure class; `BOOMI_LOCAL`/docs/gotchas added to CI; the
+#153 seam invoked by both arms emitting `PLAN_FINGERPRINT_PENDING issue=#153`; argparse
+diverted so the coded diagnostic is the first token on stderr. The "unchecked local
+--bootstrap" finding was refuted — eligibility is derived regardless of the flag — and the
+gate's misleading note text corrected. Golden-corpus authority direction deferred to #165.
+
+The repo's own gate twice reported the regenerated bootstrap and the corrected immutable
+golden row as illegal transitions, scoping to an intermediate branch commit. Both were
+refuted by measurement: `dev` is at 9080e3c and carries NEITHER manifest, so the landing
+push takes the bootstrap path and `validate_transition()` never runs. Both required gates
+pass on the current tree.
+
+Judge, concretely:
+
+1. Whether your round-9 findings are genuinely closed.
+2. Whether the manifest that will LAND is a valid bootstrap under the plan — all-active,
+   lexicographically sorted, correct immutable owner/disposition fields.
+3. Whether the implementation satisfies the architect plan.
+4. Any path by which the gate PASSES when it should fail.
+
+Do not report further interleaving variants of the scratch-disposal race deferred to #164.
+Report only actionable findings, each with a file:line and a concrete failure scenario.
+
+END with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

@@ -1,0 +1,5 @@
+[P1] The containment decision is vulnerable to path retargeting — `scripts/wave_gate.py:2008`. `_refuse_scratch_inside_repo()` validates the resolved directory once, but `make_scratch_dir()` returns the original, potentially symlink-bearing path. During pytest collection, imported test code can retarget a user-owned `TMPDIR` symlink from an outside directory to the repository and create the same scratch basename. The parent then writes `collected.txt` through that path at line 1299; cleanup at line 1969 removes the in-repository directory before the closing fingerprint. I reproduced `later_write_inside_repo=True` followed by `repo_equal_after_cleanup=True`. Thus the gate can still return 0 after writing inside the validated tree. Later I/O and cleanup must be anchored to the verified directory object—such as descriptor-relative, no-follow operations—not the mutable pathname.
+
+`SCRATCH_CONTAINMENT_UNPROVEN` itself correctly fails closed as a contract error with status 2. I found no other plan contradiction in this delta.
+
+VERDICT: ISSUES FOUND

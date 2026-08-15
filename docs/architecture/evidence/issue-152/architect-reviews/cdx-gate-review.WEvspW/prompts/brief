@@ -1,0 +1,85 @@
+You are reviewing an IMPLEMENTATION against the ARCHITECT DESIGN PLAN it was built from
+(inlined verbatim below). Judge impl-vs-plan: does the implementation faithfully realize the
+design's intent, and where it deliberately departs, is the departure justified and recorded?
+
+This is an ADDITIVE review. The repository's own gates have already run and are clean:
+- full non-KB suite on Python 3.11 (the production interpreter): 9663 passed, 18 skipped, 0 failed
+- the new gate's own `wave` command at the tip: exit 0, 60/60 goldens deterministic and byte-exact
+- three rounds of repo Codex code review, the third clean
+- darkness proof: zero `src/` diff, zero golden-byte diff
+So do NOT re-litigate general code quality that those gates already cleared. Focus on
+plan fidelity, on gaps between what the plan promised and what shipped, and on anything
+that would make this gate fail OPEN.
+
+## What shipped (branch `codex/issue-152`, 3 commits on top of `9080e3c`)
+
+Changed files:
+    .github/workflows/tests.yml                            (new)
+    requirements-dev.txt                                   (new)
+    scripts/wave_gate.py                                   (new)
+    tests/_wave_gate_golden_corpus.py                      (new)
+    tests/fixtures/wave_gate/goldens.jsonl                 (new)
+    tests/fixtures/wave_gate/test_nodes.jsonl              (new)
+    tests/test_wave_gate.py                                (new)
+    tests/test_wave_gate_goldens.py                        (new)
+    docs/architecture/ENDGAME_VERIFICATION_GATE.md         (new)
+    README.md                                              (modified)
+    docs/architecture/M12_COMPATIBILITY_INVENTORY.md       (modified)
+    tests/fixtures/m12_12/legacy_reachability_inventory.json (modified)
+    tests/test_m12_migration_matrix_evidence.py            (modified)
+    tests/test_recipe_registry.py                          (modified)
+    tests/test_recipe_security.py                          (modified)
+
+## Deliberate departures from the plan — assess each
+
+1. **The plan's "refactor thirteen golden-producing test modules onto a shared corpus" was
+   NOT done.** Instead `tests/_wave_gate_golden_corpus.py` IMPORTS those modules and calls
+   their existing module-level case helpers, restating only each case's invocation arguments
+   (component name, folder, variant), which the committed golden bytes pin exactly. Measured
+   import cost for all thirteen: 0.39 s. Is this a faithful realization of the plan's intent
+   (one definition of every case input, a callable renderer per manifest row), or does it lose
+   something the refactor would have provided?
+
+2. **Golden dispositions.** The plan assigned `deletion_only` to
+   `try_catch_dlq_error_subprocess.xml`. The implementation assigns `survivor` to it and commits
+   NO `deletion_only` row, on the evidence that `capability-parity-backlog.md:97` lists it as
+   working today with a canonical successor planned, while `:146` says the two `*_archetype.xml`
+   goldens "retire with the archetype" (→ `transitional_oracle`, owner #159). Rationale recorded:
+   `survivor` is the only value correctable later without an illegal edit. Is that defensible?
+
+3. **`test_wave_gate_goldens.py` parametrizes over ALL manifest rows** (active and tombstoned),
+   keyed by the immutable manifest id, rather than active rows only — so a future golden
+   tombstone cannot delete a pytest node id and trip the node manifest.
+
+4. **Local bootstrap** does not require the plan's "HEAD == bootstrap_base, or a single
+   introduction commit whose parent is bootstrap_base" (unsatisfiable on a working branch).
+
+5. **`maximum_skipped` (30) was added to the node manifest header**, beyond the plan. Reason: a
+   required node id proves a test EXISTS, not that it RAN; one module-level
+   `pytestmark = pytest.mark.skip` neutralised 119 required tests with every gate phase green.
+
+6. **Seven Python 3.11 test failures were found and fixed** in `test_recipe_security.py` (pydantic
+   refuses `typing.TypedDict` on <3.12) and `test_recipe_registry.py` (`typing.is_typeddict` is
+   False for every `pydantic_core` TypedDict on <3.12). These are test-only changes; `src/` is
+   untouched. The suite had never been run on the interpreter production uses.
+
+7. **`tests/fixtures/m12_12/legacy_reachability_inventory.json`** — one scalar bumped
+   (`python_source_count` 205→206) because `scripts/` is inside the #149 freeze's scan universe
+   and `scripts/wave_gate.py` is a new file there.
+
+## What to look for
+
+- Any way the shipped gate can pass while the thing it claims to check is false.
+- Plan requirements that silently did not ship (check the plan's file list and its negative-test
+  matrix against what exists).
+- Whether the manifest transition rules, the bootstrap exception, and the golden corpus contract
+  as IMPLEMENTED actually match what the plan specified — and where they don't, whether the
+  difference is an improvement, a regression, or an unrecorded gap.
+- Whether the #153 plan-fingerprint seam is genuinely activatable as the plan intended.
+- Anything about the acceptance criteria in the ISSUE section below that is not met.
+
+Report concrete, file-and-line-anchored findings. Do not invent problems; if the implementation
+is faithful, say so plainly.
+
+END your response with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'

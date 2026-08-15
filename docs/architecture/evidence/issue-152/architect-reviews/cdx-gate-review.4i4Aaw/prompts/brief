@@ -1,0 +1,64 @@
+You are reviewing the implementation of GitHub issue #152 ("M12.13 — Endgame verification
+gate automation and Python 3.11 CI") against the architect design plan inlined verbatim at
+the end of this prompt. Read-only review. This is ROUND 13.
+
+## What changed since your round 12 (`d90a315..HEAD`)
+
+Your three findings were all acted on.
+
+1. **[P1] `_parse_suite_summary` trusted the last summary-shaped line.** CONFIRMED by
+   reproduction and fixed. Exactly one outcome summary is now required; two are not a tie
+   to break by position, they mean the stream is not something an outcome can be read
+   from, so it fails closed as the new `PYTEST_SUMMARY_AMBIGUOUS`.
+
+   The repo's own gate then found the SECOND instance of the same class: the one-summary
+   rule was being applied to `run_suite`'s bounded 400-line ring (kept for error context),
+   so a flood of 400+ lines after pytest's genuine summary evicted it and left the
+   fabricated line alone in the buffer. Summary candidates are now counted WHILE
+   STREAMING; `tail` is only ever error context. Proven against a reconstructed pre-fix
+   copy: `PRE-FIX run_suite returned {'passed': 9773, 'skipped': 0}` — the forgery won —
+   versus `PYTEST_SUMMARY_AMBIGUOUS` now. The regression drives `run_suite`, not the
+   parser, because the parser was never the defect.
+
+2. **[P1] The ledger wrongly refuted the #165 lineage finding.** You were RIGHT and I was
+   wrong. I had checked the issue body with `head -12` and declared the text absent; line
+   68 carries a "Re-decision 2026-08-14 (falsified-justification rule)" section disposing
+   it exactly as you said. The ledger records the correction, and #165's header is
+   superseded so header and re-decision now agree: reason class **`window-exhausted`**
+   (the original ~4.9 s import ground was measured in-slice at ~0.39 s, and a justification
+   contradicted by an in-slice measurement is void), consuming the finding's single
+   permitted `window-exhausted` deferral.
+
+3. **[P1] Rollout evidence understated.** CONFIRMED. The ledger's "Owed after landing"
+   section now lists the plan's §6 requirements in full — the real Actions run, the five
+   seeded-defect scratch-branch proofs with red URLs recorded in #152, the reverts proven
+   green, and only then the ruleset — and states outright that **#152 stays open until all
+   of them are done**. It is not claimed as complete.
+
+## Current state
+
+```
+wave --base 9080e3c --bootstrap: manifests ok (9775) · collection ok
+                                 · 9757 passed / 18 skipped · 60 goldens byte-exact · exit 0
+Stage-2 repo review round 33: clean (its single finding was the manifest-transition claim,
+                              refuted for the eighth time against an intermediate baseline)
+```
+
+## What to judge
+
+1. Are your three findings correctly resolved?
+2. Is there ANY remaining path by which this gate PASSES when it should fail?
+3. With the rollout evidence explicitly owed and #164/#165 deferred with recorded reason
+   classes, is the CODE ready to land — that is, is the tree correct, with the remaining
+   work being the post-landing evidence the plan requires?
+
+Do not report the manifest as an illegal transition against an intermediate branch commit;
+you have ratified that the landing push is a bootstrap because `dev` carries neither
+manifest, and that framing has now been raised eight times against baselines nothing
+validates. Do not report further interleaving variants of the scratch-disposal race.
+
+Report only actionable findings, each with a file:line and a concrete failure scenario. If
+you cannot reproduce a suspicion, say so rather than reporting it.
+
+END your reply with a verdict on its OWN FINAL line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
