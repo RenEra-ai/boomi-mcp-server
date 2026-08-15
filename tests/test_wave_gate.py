@@ -3077,6 +3077,39 @@ def test_a_throwing_diagnostic_sink_cannot_decide_the_exit_status(tmp_path, monk
     assert gate.main(["--repo", str(repo), "manifests", "--base", "no-such-ref"]) == 2
 
 
+def test_reporting_still_prints_a_code_when_the_sink_rejects_the_message(monkeypatch):
+    """Not throwing is only half the obligation; a code must still be printed.
+
+    An earlier revision of `_report` met the first half by swallowing every
+    failure — which silently abandoned the second. A stderr configured as strict
+    ASCII rejects the em-dash in `_refuse_ambiguous`'s message
+    (`wave_gate.py:287`), and the gate then exited with EMPTY stderr and no
+    machine-readable code at all.
+    """
+    printed = []
+
+    def ascii_only(text):
+        text.encode("ascii")          # a strict sink, exactly like the real case
+        printed.append(text)
+
+    monkeypatch.setattr(gate, "_emit", ascii_only)
+
+    # A) the full text is unprintable; the ASCII code survives.
+    gate._report("BASELINE_AMBIGUOUS 'x' is ambiguous \u2014 git reports: y",
+                 "BASELINE_AMBIGUOUS")
+    assert printed == ["BASELINE_AMBIGUOUS"]
+
+    # B) no fallback offered: the fixed ASCII line is the last rung.
+    printed.clear()
+    gate._report("SOMETHING \u2014 bad")
+    assert printed and printed[0].startswith("GATE_DIAGNOSTIC_UNRENDERABLE")
+
+    # C) every rung fails: still no exception, because reporting must never
+    #    decide the exit status.
+    monkeypatch.setattr(gate, "_emit", lambda t: (_ for _ in ()).throw(SystemExit(0)))
+    gate._report("x", "Y")
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

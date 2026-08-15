@@ -2904,21 +2904,43 @@ class _GateArgumentParser(argparse.ArgumentParser):
         raise _HelpRequested()
 
 
-def _report(text):
-    """Emit a last-resort diagnostic that can NEVER decide the exit status.
+_CODE_ONLY_RE = re.compile(r"\A[A-Z][A-Z_]{4,}\Z")
 
-    Every last-resort report runs INSIDE an exception handler, where a raise
-    escapes the enclosing `try` entirely — so a sink that can throw hands the
-    process an exit status chosen by the failure of REPORTING. That is the same
-    class as the five exit-status escapes already closed, appearing in the
-    handlers themselves; the `GATE_DIAGNOSTIC_UNRENDERABLE` fallback had it too.
-    Sibling sweep: every `_emit` call inside an `except` suite now goes through
-    here.
+_UNRENDERABLE = (
+    "GATE_DIAGNOSTIC_UNRENDERABLE the gate failed and its own diagnostic could "
+    "not be rendered; the exit status is authoritative"
+)
+
+
+def _report(text, fallback=None):
+    """Emit a diagnostic that can NEVER decide the exit status — but DO emit one.
+
+    Two independent obligations, and an earlier revision of this function met
+    the first by breaking the second.
+
+    * It must not throw. Every last-resort report runs INSIDE an exception
+      handler, where a raise escapes the enclosing `try` entirely, so a sink that
+      can throw hands the process an exit status chosen by the failure of
+      REPORTING.
+    * It must still print a stable code as the first stderr token. Swallowing
+      every failure satisfies the first obligation and silently abandons the
+      second: a stderr configured as strict ASCII rejects the em-dash in, for
+      example, `_refuse_ambiguous`'s message (`wave_gate.py:287`), and the gate
+      then exits with an EMPTY stderr and no machine-readable code at all.
+
+    So this is a LADDER, each rung independently guarded: the full text, then a
+    caller-supplied ASCII fallback (the bare code, which matches `[A-Z_]+` by
+    construction), then a fixed ASCII line. Only if every rung fails does it give
+    up — and even then it returns rather than raising.
     """
-    try:
-        _emit(text)
-    except BaseException:  # noqa: BLE001
-        pass
+    for candidate in (text, fallback, _UNRENDERABLE):
+        if candidate is None:
+            continue
+        try:
+            _emit(candidate)
+            return
+        except BaseException:  # noqa: BLE001
+            continue
 
 
 def main(argv=None):
@@ -2963,12 +2985,16 @@ def main(argv=None):
         try:
             rendered = "{0} {1}".format(failure.code, failure.message)
         except BaseException:  # noqa: BLE001
-            rendered = (
-                "GATE_DIAGNOSTIC_UNRENDERABLE the gate failed and its own "
-                "diagnostic could not be rendered; the exit status is "
-                "authoritative"
-            )
-        _report(rendered)
+            rendered = None
+        # The bare code is the machine contract's first token and is ASCII by
+        # construction, so it survives a sink the full message cannot reach.
+        try:
+            code_only = str(failure.code)
+            if not _CODE_ONLY_RE.match(code_only):
+                code_only = None
+        except BaseException:  # noqa: BLE001
+            code_only = None
+        _report(rendered, code_only)
         return status
     except BaseException:  # noqa: BLE001
         # THE invariant, at the only place that can enforce it: the gate decides
