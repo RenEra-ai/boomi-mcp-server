@@ -1,0 +1,9 @@
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0754668Z [36;1mprint("interpreter ok:", sys.version)[0m
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.1006799Z interpreter ok: 3.11.15 (main, Jun 16 2026, 21:41:52) [GCC 13.3.0]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.7324055Z wave_gate: baseline 6792d0658b6da7964e35b3c493c8320dee2c1c6a (local)
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.9029720Z wave_gate: TOMBSTONE pytest-nodes pytest-009550 owner=repository disposition=n/a
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.9104480Z wave_gate: manifests ok (9789 required nodes, 60 active goldens)
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:12.9304514Z wave_gate: collection ok (9789 tests)
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9582651Z 9770 passed, 19 skipped, 20 warnings in 2186.05s (0:36:26)
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:42.6846834Z wave_gate: non-KB suite green (9770 passed, 19 skipped, cap 30)
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:42.6847491Z PLAN_FINGERPRINT_PENDING issue=#153

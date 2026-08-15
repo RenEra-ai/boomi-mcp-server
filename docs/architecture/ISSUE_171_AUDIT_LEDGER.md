@@ -130,7 +130,7 @@ Second-instance check is run against this table at row-write time.
 
 | ID | Source gate + run dir + attestation | Verbatim summary | Original label | Blocking class | Defect class | Derived tier (anchor inline) | SHA/delta | Disposition |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| INH-TC1-2 | inherited from `ISSUE_152_AUDIT_LEDGER.md` row TC1-2 (not a gate of this slice) | "Capture a green run after reverting the PR seeds" — every seeded run was `pull_request`; the only green run is `push`/BOOTSTRAP, a different baseline path | P2 | capability reachability | DC-12 (a residual claimed as owned by a follow-up; authority = that issue's acceptance criteria) | Standard — anchor: source label P2, and no critical blocking class | inherited at `6792d065` | *(open — discharged by criterion 7(a) landing plus archived scratch GREEN evidence; see the criteria matrix)* |
+| INH-TC1-2 | inherited from `ISSUE_152_AUDIT_LEDGER.md` row TC1-2 (not a gate of this slice) | "Capture a green run after reverting the PR seeds" — every seeded run was `pull_request`; the only green run is `push`/BOOTSTRAP, a different baseline path | P2 | capability reachability | DC-12 (a residual claimed as owned by a follow-up; authority = that issue's acceptance criteria) | Standard — anchor: source label P2, and no critical blocking class | inherited at `6792d065`; discharged at `15e922a` | **`fixed`** — both halves now hold. **Criterion 7(a):** the `pull_request` trigger is removed from `tests.yml`, so the never-observed-green merge-base arm is eliminated by design rather than carried; `_baseline_from_pull_request()` and its twelve unit tests are retained, so the resolver stays covered while the untested CI arm is gone. **Criterion 5:** run 31911864696 is a GREEN run on the non-`push:[dev]` path — the first ever recorded — with baseline kind `(local)`. TC1-2's original observation was that *"no non-`push` path has ever been observed reaching green"*; that is no longer true, and the run is archived rather than merely cited. Lineage closes at first deferral: its single-use `window-exhausted` allowance was never spent. |
 | S1-1 | Stage-1 QA, full non-KB suite run (no run dir — a local suite execution, not a collected gate) | `test_diagnostic_codes_named_in_the_audit_ledger_exist` failed: "the audit ledger names diagnostic codes the gate cannot emit: ['ISSUE_171_AUDIT_LEDGER']" | *(none — surfaced by the suite, not labelled by a reviewer)* | machine-served schemas/contracts (the scanner is the served checker for every ledger) | **DC-B** instance 1 | Standard — anchor: no source P0/P1/Critical/High label, and no critical blocking class | uncommitted delta at Stage 1 | `fixed` — structurally. The scanner's own comment already required stems to be allowed "by derivation … never by hand-listing", but only its all-ledgers loop did so; the #152-specific scan read a hand-listed copy. The derived set is now computed once and consumed by both. **Sibling sweep:** both 152-specific assertions (unknown-code and bare-token) plus both all-ledgers assertions — four sites, all now reading the one authority. **Non-vacuity witnesses** *(measured here)*: an invented code inside a backtick span in the new ledger is still rejected; a bare real code in its prose is still rejected; the clean ledger passes. |
 
 | A6-1 | §6 architect review, run dir `cdx-gate-review.ZxeOl1`, attestation `attestation.json` (verdict ISSUES FOUND) | "Rollout evidence is claimed before it exists." §10 says scratch RED/GREEN was demonstrated and #152's note marks TC1-2 discharged, but both runs are still pending and the archive holds no Actions logs | *(none)* | machine-served schemas/contracts (served spec + README prose) | **DC-7** (served prose drifting from the evidence; authority = the measured runs) instance 1 | Standard — anchor: no source P0/P1/Critical/High label; served text, not a critical class | `55fd417`..`e541a3d` | `fixed` — every demonstration claim reverted to its true present state. §10 now names the ledger as the single place a run claim may live; gap 4 says "addressed by configuration, see the ledger for run evidence"; #152's note explicitly declines to declare TC1-2 discharged. The claims will be restated only from measured runs. |
@@ -210,8 +210,8 @@ allowance is therefore still unspent.
 | 1 | `ci` accepts `--base` as a mutually exclusive alternative to `--github-event`; neither → fail closed | `scripts/wave_gate.py` `build_parser()`: `add_mutually_exclusive_group(required=True)`, mirroring `manifests`. Neither/both → argparse usage error, exit 2, first token `GATE_USAGE_INVALID` | applied |
 | 2 | `tests.yml` runs on `scratch/**`; the gate step selects its baseline correctly in a SINGLE step that fails closed on an unrecognised event | one `case`-based step, no step-level `if:`; `dev` → event arm, `scratch/**` → `--base` arm, default → exit 2. Routing measured against a stubbed harness for `dev`, nested `scratch/a/b/c`, `main`, `pull_request`, `workflow_dispatch`, and an empty context *(measured here)* | applied |
 | 3 | A test asserts the two selectors are mutually exclusive, with a non-vacuity witness | `test_ci_requires_exactly_one_baseline_selector` — both supplied → refusal; neither → refusal; plus both accepted forms, one of which is threaded through the execution seam | applied |
-| 4 | A RED run on a scratch branch reproducing a #152 seeded diagnostic, no PR opened | Actions rollout gate — seed 4 (`minimum_collected` raised, a free raise §5 permits) → `PYTEST_COLLECTION_FLOOR` | *(pending)* |
-| 5 | A GREEN run on that same non-`push:[dev]` path | Actions rollout gate — scratch GREEN on the candidate | *(pending)* |
+| 4 | A RED run on a scratch branch reproducing a #152 seeded diagnostic, no PR opened | run 31913525688, conclusion failure, exit 1, `PYTEST_COLLECTION_FLOOR collected 9789 tests, below the committed floor of 99999`; `gh pr list` empty | **MEASURED** |
+| 5 | A GREEN run on that same non-`push:[dev]` path | run 31911864696, conclusion success, baseline `(local)`, 9770 passed / 19 skipped; `gh pr list` empty | **MEASURED** |
 | 6 | Baseline-kind `local` confirmed correct in `ci` mode | the DC-A structural fix above: every `context["kind"]` consumer enumerated and given a verdict, the three `local`-under-`ci` cells hardened, the `wave`/`manifests` cells deliberately unchanged and witnessed | applied |
 | 7 | Resolve the `pull_request` merge-base path explicitly | **option (a), per the owner's stated preference**: the `pull_request` trigger is REMOVED from `tests.yml`. `_baseline_from_pull_request()` and its twelve unit tests are retained, so the resolver stays covered while the untested CI arm is eliminated | applied |
 
@@ -401,6 +401,73 @@ is outside the eight blocking classes, so it takes ONE batched correction pass w
 never reopens a gate; that pass is this one, and it still owes its own affected QA and a
 fix-only review, which follow. The blocking-class surface has now been clean for a full
 evaluation, which is the trend CP-2 rests on.
+
+## Actions rollout gate (roster item 4) — criteria 4 and 5, MEASURED
+
+Both runs are real GitHub Actions runs on `scratch/**` branches, triggered by push, with
+**no pull request opened** — the convention-compliant mechanism #152 lacked. Quoted from
+the run logs, not re-keyed from expectation.
+
+### Criterion 5 — GREEN on the non-`push:[dev]` path
+
+Run [31911864696](https://github.com/RenEra-ai/boomi-mcp-server/actions/runs/31911864696),
+event `push`, ref `refs/heads/scratch/171-green`, head `15e922a8f5c5a1999137899bd64a1abc23269248`,
+conclusion **success**, interpreter 3.11.15.
+
+```
+wave_gate: baseline 6792d0658b6da7964e35b3c493c8320dee2c1c6a (local)
+wave_gate: TOMBSTONE pytest-nodes pytest-009550 owner=repository disposition=n/a
+wave_gate: manifests ok (9789 required nodes, 60 active goldens)
+wave_gate: collection ok (9789 tests)
+wave_gate: non-KB suite green (9770 passed, 19 skipped, cap 30)
+PLAN_FINGERPRINT_PENDING issue=#153
+```
+
+**This is the row #152 deferred here.** No non-`push` baseline path had ever been observed
+reaching green; this one has. It also discharges **criterion 6 in CI rather than only
+locally**: the emitted baseline kind is `(local)`, resolved to `origin/dev`'s exact tip,
+and the run passed the clean-checkout and platform-`GITHUB_SHA` binding on the way through.
+
+**The one platform assumption is now MEASURED, not documented.** `actions/checkout@v7` with
+`fetch-depth: 0` DOES materialise `refs/remotes/origin/dev` on a `scratch/**` push: the step
+resolved the baseline and proceeded to collection. Had the ref been absent, the step would
+have exited 2 in seconds with `BASELINE_UNAVAILABLE`. *(Provenance: measured here, run
+31911864696.)* The fallback plan drafted for that case was not needed and was not applied.
+
+### Criterion 4 — RED, reproducing a #152 seeded defect
+
+Branch `scratch/171-seed4-collection-floor`, head `b20fce181e1d314899a251b55c3dc08156baeef9`,
+seeded with #152's seed 4 and exactly ONE edit — `minimum_collected` `9789` → `99999`, which
+§5 permits as a free raise, so the manifest transition stays legal and the FLOOR check is
+what fires. Run
+[31913525688](https://github.com/RenEra-ai/boomi-mcp-server/actions/runs/31913525688),
+event `push`, conclusion **failure**, exit code 1.
+
+```
+wave_gate: baseline 6792d0658b6da7964e35b3c493c8320dee2c1c6a (local)
+wave_gate: manifests ok (9789 required nodes, 60 active goldens)
+PYTEST_COLLECTION_FLOOR collected 9789 tests, below the committed floor of 99999; a partial collection is not a green run
+```
+
+Same diagnostic code and message structure as #152's recorded seed 4, with the ACTUAL
+current count (9789) rather than #152's historical 9786 — the plan required preserving the
+real number rather than reproducing a stale one. The seed commit was branched from the
+candidate and is **not an ancestor of it** *(measured here:
+`git merge-base --is-ancestor b20fce1 HEAD` exits non-zero)*.
+
+A late correction worth recording: the implementation plan specified seeding `9788 → 99999`,
+which was stale after the second manifest append. The architect-gate replay caught it, and
+`9788` would have been BELOW the real collection of 9789 — the floor check would not have
+fired and the run would have gone green, producing a seeded-defect proof that proved nothing.
+
+### No pull request was opened
+
+```
+$ gh pr list --state all --head scratch/171-green                 -> []
+$ gh pr list --state all --head scratch/171-seed4-collection-floor -> []
+```
+
+Both captures are archived under `docs/architecture/evidence/issue-171/no-pr/`.
 
 ## Checkpoints (written IN FLIGHT at every third evaluation of each loop)
 
