@@ -28,12 +28,14 @@ post-reconciliation across all roster gates; `finding-refuted` rows never count.
 | # | Defect class | Instances | Resolution |
 | --- | --- | --- | --- |
 | DC-1 | (compare path **strings**, filesystem identity) | 2 | **structural** — `(st_dev, st_ino)` identity, ancestry walked by `..` through descriptors. Sibling sweep: no path-string comparison remains in any security decision (only `os.path.dirname` locating the repo root from `__file__`). |
-| DC-2 | (exception escaping a boundary, **process exit status**) | 6 | **structural** — outermost `except BaseException` in `main()`; see below. |
+| DC-2 | (exception escaping a boundary, **process exit status**) | 7 | **structural** — outermost `except BaseException` in `main()`; see below. |
 | DC-3 | (destructive op resolving a **mutable name**, filesystem object identity) | 7 | **structural** — descriptor-anchored removal + post-hoc outcome proof. Irreducible residual → **#164**. |
 | DC-4 | (ownership **asserted** rather than established, exclusive creation) | 2 | **structural** — `O_EXCL`/`O_NOFOLLOW`; record appended only after the exclusive create. Sibling sweep: every create site is exclusive (`O_EXCL`, `open(...,"x")`, `os.mkdir`). |
 | DC-5 | (bool/int conflation in a discriminator, Python type semantics) | 2 | **structural** — `type(x) is int`. Sibling sweep: line 647 already excludes `bool`; all other coercions are `isinstance(..., str)`, and `bool` is not a `str` subclass. |
 | DC-6 | (test harness matching a **call shape that moved**, the code under test) | 3 | **structural** — every negative test with a CONDITIONAL patch carries an explicit `assert <hook> fired`. Sibling sweep: 16 candidates enumerated, 2 conditional (fixed), 14 unconditional/env-only and therefore non-vacuous by construction — a patch that never fires makes the assertion fail. |
 | DC-7 | (served prose drifting from code, the code) | 4 | instance-fixed; the diagnostic-code roster is pinned by `test_every_diagnostic_code_the_gate_can_raise_is_documented`, prose is not mechanically pinned. |
+| DC-8 | (a fix silently removing a property an earlier round established, that property's own test) | 3 | **structural** — every such property now has a named regression that fails when it is removed. The three that regressed were each pinned only by the narrower test of the round that introduced them. |
+| DC-9 | (a SHAPE test standing in for membership in a closed set, the set itself) | 3 | **structural** — `DIAGNOSTIC_CODES` is the single authority, pinned bidirectionally against the source and the docs roster; `_own_code()` requires the exact builtin `str`. Sibling sweep: the other nine `isinstance(..., str)` sites validate JSON-derived values, which `json.loads` guarantees are exactly `str` (measured), so only the provider-facing site needed `type(...) is str`. |
 
 ### DC-2 — the sweep that ended it
 
@@ -95,6 +97,10 @@ Content cannot be smuggled past the gate; only an empty untracked directory is i
 | Stage-2 repo review | 9 | `4784406` | `CLOSE-CLEAN` | zero residue; DC-1 closed structurally |
 | Stage-2 repo review | 12 | `6176ff9` | `CONTINUE` | DC-3 recurring → structural fix named and applied (no destructive op resolves a pathname) |
 | Stage-2 repo review | 17 | `58d6ed0` | `DEFER-STANDARD-AND-PROCEED` | zero critical residue; DC-3 remainder → #164; §6 still owed |
+| §6 architect review | 9 (attested, `/tmp/cdx-gate-review.Eredut`) | `1083413` | `CONTINUE` | five findings, all fixed; the gate ratified the bootstrap judgment; DC-3 remainder already deferred to #164, DC-6 direction to #165 |
+| §6 architect review | 10 (attested, `/tmp/cdx-gate-review.kkeLZP`) | `96ead47` | `CONTINUE` | three findings, all fixed; named next action was the DC-2 sibling sweep, which then found the fifth instance |
+| Stage-2 repo review | 30 | `706ec9d` | **`CLOSE-CLEAN`** | no findings; first clean repo review after the 2026-08-14 amendment |
+| §6 architect review | 11 (attested, `/tmp/cdx-gate-review.Hj8pIv`) | `706ec9d` | `CONTINUE` | four findings; one fail-open fixed (provider `str` subclass), one refuted on evidence, two ledger corrections applied here |
 
 ## Full finding rows
 
@@ -103,3 +109,49 @@ attestation, original label, blocking class, defect class, derived tier with anc
 affected SHA, and exactly one disposition) are reproduced in the slice's final report.
 Attested gate artifacts live in their run directories under `/tmp/cdx-gate-review.*` and
 `/tmp/cdx-review.*` for the duration of the session; the durable summary is this file.
+
+## Closing checkpoint — deferrals re-decided against an in-tree row
+
+**Defect in the first recording, and its remedy.** Both deferral records (#164, #165)
+were written into their issue bodies BEFORE this ledger first entered the tree, so at the
+moment each deferral was recorded its cited checkpoint did not yet exist as an in-tree
+row — the exact ordering the amended policy forbids. The remedy is not to argue the
+citation was "morally" present: it is to record a compliant checkpoint now, with the
+ledger already committed, and re-decide both deferrals against it.
+
+**Checkpoint — slice #152, closing.**
+
+- **Loops covered:** Stage-1 QA (darkness proofs, dark slice throughout), Stage-2 repo
+  Codex review (30 evaluations), §6 architect review (11 evaluations, rounds 9–11
+  attested), composite wave gate.
+- **Tree:** `docs/architecture/ISSUE_152_AUDIT_LEDGER.md` present and committed before
+  this decision; deferral citations updated only afterwards.
+- **Per-tier residue:** critical **0** unresolved. Standard: 0 unresolved in-slice; two
+  deferred, below.
+- **Validation current on this tree:** `ci` (push, `before=9080e3c`) → BOOTSTRAP,
+  manifests ok, collection ok, suite green, exit 0; `wave --base 9080e3c --bootstrap` →
+  60 goldens deterministic and byte-exact, exit 0; Stage-2 round 30 CLEAN.
+
+**Deferrals, re-decided:**
+
+| Issue | Reason class | Placement (roadmap owner's slotting) | Lineage |
+| --- | --- | --- | --- |
+| **#164** | `blocked-by-mechanism` — POSIX offers no remove-by-descriptor and no atomic multi-namespace observation | after #160 lands, before M12 close | first deferral; NOT `window-exhausted` |
+| **#165** | `out-of-scope-by-design` — cited to `.codex/plans/issue-152.claude.md` | after #152 lands, before #159 starts | first deferral; NOT `window-exhausted` |
+
+Both cite THIS checkpoint row, which exists in-tree at the moment of the citation.
+
+*A review round asserted that #165's body had been "re-decided as the single permitted
+`window-exhausted` deferral". That text does not exist in the issue; its body reads
+`out-of-scope-by-design` … `Lineage: first deferral. Not window-exhausted.` Recorded as
+`finding-refuted` on the issue body itself as evidence.*
+
+## Owed after landing (NOT satisfied by this slice)
+
+The architect plan's Definition of Done includes branch protection requiring the
+`Python 3.11 non-KB` check on `dev`. Measured: `gh api repos/.../rulesets` returns `[]` —
+**no ruleset exists**, so `README.md:594` stating the requirement is not yet configured is
+ACCURATE, not stale. The check must run at least once before GitHub will accept it as a
+required status check, so the order is: land → the workflow runs → configure the ruleset.
+That final step is a repository-settings change and is called out explicitly in the
+slice's final report rather than silently claimed as done.

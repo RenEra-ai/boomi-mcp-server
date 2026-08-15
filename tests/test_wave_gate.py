@@ -3215,6 +3215,37 @@ def test_an_undocumented_code_never_reaches_the_first_stderr_token(monkeypatch):
     assert printed == ["WORKTREE_DIRTY details here"]
 
 
+def test_provider_strings_reject_str_subclasses():
+    """The mutation-kind roster is checked by EQUALITY, so a subclass subverts it.
+
+    A `str` subclass whose `__eq__` matches everything makes the roster believe
+    `semantic`, `envelope`, `policy` and `revision` are all present, after which
+    the phase reports `checked:1 case(s)` having exercised ONE mutation. That is
+    a fail-open in the #153 seam.
+
+    Sibling sweep: the other nine `isinstance(..., str)` checks in the gate
+    validate JSON-derived values, and `json.loads` yields exactly `str`
+    (measured), so a subclass cannot reach them. This site takes PROVIDER data —
+    registered Python code — which is the trust boundary the seam polices.
+    """
+
+    class AnyStr(str):
+        def __eq__(self, other):
+            return True
+
+        def __hash__(self):
+            return hash("semantic")
+
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate._provider_strings(lambda: [AnyStr("semantic")], "mutation kinds")
+    assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+
+    # Plain strings are unaffected — the check must not reject honest providers.
+    assert gate._provider_strings(
+        lambda: ["semantic", "envelope"], "mutation kinds"
+    ) == ["semantic", "envelope"]
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

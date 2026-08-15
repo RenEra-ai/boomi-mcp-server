@@ -1895,7 +1895,18 @@ def _provider_strings(fn, what):
             )
         items = list(value)
         for item in items:
-            if not isinstance(item, str) or not item:
+            # `type(...) is str`, NOT `isinstance`. These strings come from the
+            # PROVIDER — registered Python code, the trust boundary this seam
+            # exists to police — and a `str` subclass whose `__eq__` matches
+            # everything makes the mutation-kind roster believe all four kinds
+            # are present while only ONE mutation is ever exercised. Reproduced:
+            # the roster saw `semantic`, `envelope`, `policy` and `revision`, and
+            # the phase reported `checked:1 case(s)`.
+            #
+            # Sibling sweep: the other nine `isinstance(..., str)` checks in this
+            # file validate JSON-derived values, and `json.loads` yields exactly
+            # `str` (measured), so a subclass cannot reach them.
+            if type(item) is not str or not item:
                 raise TypeError(
                     "{0} must contain non-empty strings, got {1!r}".format(what, item)
                 )
