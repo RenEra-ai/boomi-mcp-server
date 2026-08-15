@@ -1684,9 +1684,24 @@ _TEST_OUTCOMES = ("passed", "skipped", "failed", "errors")
 _NON_TEST_CLAUSES = ("warnings",)
 
 
+def _reject_json_constant(name):
+    """Python's decoder accepts `NaN`/`Infinity`/`-Infinity`; JSON does not.
+
+    A push event carrying valid `before`/`after` SHAs plus, say, `"commits": NaN`
+    was accepted and could complete green — the gate would have treated a
+    document that is not JSON as an authoritative event. Reproduced:
+    `ACCEPTED non-standard JSON: {'commits': nan}`.
+    """
+    raise ValueError("non-standard JSON constant {0!r}".format(name))
+
+
 def _strict_json_loads(text):
-    """`json.loads` that rejects duplicate members. Raises ValueError."""
-    return json.loads(text, object_pairs_hook=_no_duplicate_keys)
+    """`json.loads` that rejects duplicate members AND non-standard constants."""
+    return json.loads(
+        text,
+        object_pairs_hook=_no_duplicate_keys,
+        parse_constant=_reject_json_constant,
+    )
 
 
 def _is_summary_line(stripped):

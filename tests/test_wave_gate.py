@@ -3579,6 +3579,39 @@ def test_the_report_anchor_survives_a_hard_link_swap(tmp_path, monkeypatch):
         shutil.rmtree(resolved, ignore_errors=True)
 
 
+def test_non_standard_json_constants_are_refused(tmp_path):
+    """Python's decoder accepts `NaN`/`Infinity`; JSON does not.
+
+    A push event with valid `before`/`after` SHAs plus `"commits": NaN` was
+    accepted and could complete green — the gate would have treated a document
+    that is not JSON as an authoritative event. Reproduced:
+    `ACCEPTED non-standard JSON: {'commits': nan}`.
+    """
+    for text in ('{"a": NaN}', '{"a": Infinity}', '{"a": -Infinity}'):
+        with pytest.raises(ValueError):
+            gate._strict_json_loads(text)
+
+    # Ordinary JSON is unaffected.
+    assert gate._strict_json_loads('{"a": 1, "b": "x"}') == {"a": 1, "b": "x"}
+
+    # End to end: the event arm reports the documented code.
+    repo, _base = _seeded(tmp_path)
+    event = tmp_path / "push.json"
+    event.write_text(
+        '{"before":"%s","after":"%s","ref":"refs/heads/dev","commits": NaN}'
+        % ("a" * 40, "b" * 40)
+    )
+    proc = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "wave_gate.py"),
+         "--repo", str(repo), "manifests", "--github-event", str(event)],
+        capture_output=True, text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
+             "GITHUB_EVENT_NAME": "push"},
+    )
+    assert proc.returncode == 2, proc.stderr
+    assert proc.stderr.split()[0] == "BASELINE_EVENT_INVALID", proc.stderr
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 
