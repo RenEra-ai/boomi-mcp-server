@@ -2079,10 +2079,16 @@ def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
     assert len(heads) == 1, heads
     top = heads[0]
     indent = len(lines[top]) - len(lines[top].lstrip())
+    # Terminate on ANY structural dedent, not only on a sibling `- ` item. A later
+    # job whose `steps:` sequence is indented MORE deeply than this one dedents at
+    # its own `jobs:` key — a line that never starts with `- ` — so a `- `-only
+    # break would run straight through it and swallow that job into the slice.
+    # (MEASURED: with the `- ` condition, a valid two-job workflow carrying the
+    # scratch arm in the second job passed this test.)
     tail = len(lines)
     for j in range(top + 1, len(lines)):
         ln = lines[j]
-        if ln.strip() and (len(ln) - len(ln.lstrip())) <= indent and ln.lstrip().startswith("- "):
+        if ln.strip() and (len(ln) - len(ln.lstrip())) <= indent:
             tail = j
             break
     step = "\n".join(lines[top:tail])

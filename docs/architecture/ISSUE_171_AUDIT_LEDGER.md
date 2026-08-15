@@ -66,7 +66,8 @@ with the original retained.
 | **DC-7** | served prose drifting from the evidence or code it describes | the measured runs, and the implemented CLI | 2 (A6-1, A6-3) | second instance reached at the §6 gate. Structural response: run claims are now single-sourced — §10, README and #152's note all DEFER to this ledger rather than restating a run, so there is one place a demonstration claim can live and one place to correct |
 | **DC-10** | hand-modelled GitHub platform behaviour in served text | GitHub's actual semantics | 1 (A6-4) | instance-level: provenance markers added. Carried forward from #152, where this class reached ten instances; the marker convention IS that structural fix, and this slice applies it |
 | **DC-12** | a residual claimed as owned by a follow-up | that issue's existence and acceptance criteria | 2 (INH-TC1-2 inherited, A6-2) | #172 filed with number, criteria, reason class and placement before the deferral text was written |
-| **DC-13** | an assertion whose scope is wider than the property it claims | the boundary of the thing under assertion (here, the workflow step) | 1 (A6-5) | structural: assert inside the isolated step AND assert absence outside it, so both halves of "exactly one step does this" are bound |
+| **DC-13** | an assertion whose scope is wider than the property it claims | the boundary of the thing under assertion (here, the workflow step) | 2 (A6-5, R2-1) | second instance reached INSIDE the first instance's own fix. Structural response: the step boundary is now derived from indentation — the real block structure — rather than from a guessed terminator token, so the slice cannot disagree with YAML's own notion of where the step ends |
+| **DC-14** | a derived field read from a copy rather than from its source | the source run directory the copy was made from | 1 (R2-4) | instance-level fix plus a recorded `started_at_provenance` naming the authoritative source, so the next reader cannot repeat the substitution silently |
 
 **DC-A structural fix, applied in batch 1** (mandatory on second instance):
 
@@ -114,21 +115,37 @@ Second-instance check is run against this table at row-write time.
 | A6-5 | §6 architect review, `cdx-gate-review.ZxeOl1` | "The single-step workflow test is structurally vacuous" — it searches the entire YAML, so the scratch arm could move into a second step while every assertion still passed | *(none)* | capability reachability (the test is the only thing binding the workflow's shape) | **DC-13** (an assertion whose scope is wider than the property it claims; authority = the step boundary) instance 1 | Standard — anchor: no source critical label | `e541a3d` | `fixed` — the named step is now isolated by indentation-aware slicing and every arm asserted INSIDE it, plus `wave_gate.py` asserted absent from the remainder. **Non-vacuity witness** *(measured here)*: moving the scratch arm into a second unnamed step now fails the test. Implemented by slicing rather than the reviewer's suggested YAML parse — see the refutation note below. |
 | A6-6 | §6 architect review, `cdx-gate-review.ZxeOl1` | "The deliberate all-`ci` platform binding lacks push/PR witnesses" — `GITHUB_SHA` is tested only for `kind="local"`, so moving the binding back under the local arm would leave the suite green | *(none)* | capability reachability | **DC-A** instance 3 — the structural fix's own coverage claim was unwitnessed | Standard — anchor: no source critical label. *(Recorded as the most consequential of the six: it falsified this ledger's own coverage claim.)* | `e541a3d` | `fixed` — push and PR witnesses added with `ci_mode=True`, each constructed so the ARM ITSELF is already satisfied (`after` IS the checkout; `event_head` IS the checkout) so only the binding can refuse — a wrong-sha assertion alone would not discriminate, because both arms raise the same code unaided. **Non-vacuity witness** *(measured here)*: before the fix the narrowing mutant left 243/243 green; after it, the mutant dies. |
 
+| R2-1 | Stage-2 repo review round 2, run dir `cdx-review.8WTj1E` | "[P2] Stop the step slice at every structural dedent" — a later valid job indenting its `steps` sequence more deeply does not terminate the loop, so both gate invocations land inside `step` and none in `outside` | **P2** | capability reachability | **DC-13** instance 2 — the same class as A6-5, recurring in A6-5's own fix | Standard — anchor: source label P2; not in a critical class | `5fa143d` | `fixed` — the loop now terminates on ANY nonblank dedent. **Non-vacuity witness** *(measured here)*: a valid two-job workflow with the scratch arm in the second job passed before the fix and fails after it. Second instance of DC-13 → the structural response is that the slice's terminator is now derived from indentation alone (the actual block boundary) rather than from a guessed token shape. |
+| R2-2 | Stage-2 round 2, `cdx-review.8WTj1E` | "[P2] Keep A6-1 open until the discharge claim is removed" — `ISSUE_152_AUDIT_LEDGER.md` still says TC1-2 "was discharged" while its new lines say the opposite | **P2** | machine-served schemas/contracts | **DC-7** instance 3 | Standard — anchor: source label P2 | `5fa143d` | `fixed` — the note's opening now says the residual is "OWNED and tracked", not "discharged", and points at its own closing paragraph. A6-1's fix had corrected the new text but left the sentence that introduced it. |
+| R2-3 | Stage-2 round 2, `cdx-review.8WTj1E` | "[P2] Add finding and checkpoint rows for the deferrals" — #172 alone is insufficient; neither residual has its own finding row and the Checkpoints table is empty despite the text claiming a governing row exists | **P2** | *(audit-record integrity — NOT a blocking class)* | **DC-12** instance 5 | Standard — anchor: source label P2 | `5fa143d` | `fixed` — rows **D-1** and **D-2** added with reason class, placement and lineage; checkpoint **CP-1** added with its full recorded decision. The prior text asserted a checkpoint row that did not exist, which is the same claimed-before-it-exists shape as A6-1. |
+| R2-4 | Stage-2 round 2, `cdx-review.8WTj1E` | "[P3] Correct the architect review's impossible chronology" — `started_at` 20:15:19Z but `collected_at` 20:08:07.903Z, so the review was collected before it started | **P3** | *(audit-record integrity — NOT a blocking class)* | **DC-14** (a derived field read from the wrong source; authority = the source run directory) instance 1 | Standard — anchor: source label P3 | `5fa143d` | `fixed` — `started_at` recovered from the SOURCE run dir (`19:57:09Z`); the archived copy's mtime is the copy time, which is what the earlier revision read. A `started_at_provenance` field and a limitation now record which source is authoritative, and all three index rows were re-checked for chronological sanity. |
+| R2-5 | Stage-2 round 2, `cdx-review.8WTj1E` | "[P3] Correct the PyYAML availability claim" — `requirements.txt` pins FastMCP 3.1.1, which declares PyYAML unconditionally, so importing `yaml` would not cause the asserted collection error | **P3** | machine-served schemas/contracts (a recorded technical claim in the audit record) | **DC-7** instance 4 | Standard — anchor: source label P3 | `5fa143d` | `fixed` — **my refutation was wrong and is withdrawn**; see the withdrawal note below the rows. The implementation choice stands on restated, true grounds. *(Measured here: `importlib.metadata.requires("fastmcp")` → `pyyaml<7.0,>=6.0`, unconditional.)* |
+| D-1 | issue #171 body, "Also unblocks: deciding on a required status check" (a scope item of the slice, not a gate finding) | "Whether this issue changes that depends on the trigger actually chosen and should be decided **against measurement**, not predicted" | *(none — an issue scope item)* | capability reachability | **DC-12** instance 3 | Standard — anchor: no source critical label; not in a critical class | not applicable (no code delta) | **`deferred`** → **#172 item 1**, reason class **`blocked-by-mechanism`** (the blocking mechanism: only a repository ruleset can answer it, and creating an enforcing rule needs repository-admin authority on a live branch — unavailable from inside the tree), placement **M12, after #171 lands and before M12 close**, recorded in #172's body at filing time. Lineage: **first deferral, NOT `window-exhausted`**. Governed by checkpoint CP-1 below. |
+| D-2 | issue #171 body, "a push whose head commit message carries `[skip ci]` starts no run at all … Worth deciding here whether that hole is acceptable" | the `[skip ci]` hole leaves a pushed tip unchecked | *(none — an issue scope item)* | capability reachability | **DC-12** instance 4 | Standard — anchor: no source critical label | not applicable (no code delta) | **`deferred`** → **#172 item 2**, reason class **`blocked-by-mechanism`** (a skipped workflow cannot repair its own absence; the only closing mechanism is the same ruleset as D-1, which is why #172 item 1's negative control IS this hole's test), placement **M12, after #171 lands and before M12 close**. Lineage: **first deferral, NOT `window-exhausted`**. Governed by checkpoint CP-1 below. |
+
 Dispositions: `fixed` · `finding-refuted` · `severity-refuted` · `not-validated` ·
 `deferred` (issue, reason class, placement). A refutation names the disputed claim and
 the concrete evidence. An original label is never edited — a revision is a new dated line
 with the original retained.
 
-**Partial refutation of A6-5's suggested remedy (the finding itself stands, and is
-fixed).** The review proposed "Parse the workflow or isolate the named step"; the parse
-half is not available here. PyYAML is declared in neither `requirements.txt` nor
-`requirements-dev.txt`, and that file states it is the complete, authoritative set CI
-installs. A module-level `import yaml` in the gate's own test module would therefore be a
-COLLECTION ERROR on the runner — the precise failure this gate exists to prevent — while
-passing locally, because the developer virtualenv happens to carry PyYAML transitively.
-The isolate-the-step half of the remedy was taken instead, which closes the same vacuity
-with no new dependency. *(Measured here: `pip show pyyaml` reports no declaring package,
-and neither requirements file names it.)*
+**On A6-5's suggested remedy — my refutation was WRONG on the facts and is withdrawn.**
+The review proposed "Parse the workflow or isolate the named step". I recorded that the
+parse half was unavailable because PyYAML is undeclared, and that a module-level
+`import yaml` would be a collection error on the runner. **That claim was false**, and
+the round-2 review (`cdx-review.8WTj1E`, finding R2-5) corrected it: `requirements.txt`
+pins `fastmcp==3.1.1`, whose metadata declares `pyyaml<7.0,>=6.0` as an **unconditional**
+dependency — no extra marker — and `requirements-dev.txt` includes `requirements.txt`.
+PyYAML is therefore present in a clean CI install and `import yaml` would work.
+*(Measured here: `importlib.metadata.requires("fastmcp")` lists `pyyaml<7.0,>=6.0`.)*
+My original evidence was a `pip show pyyaml` invocation that printed nothing, which I
+read as "undeclared" — it establishes no such thing, and I did not check the declaring
+package's metadata before recording the conclusion.
+
+The textual-slicing implementation **stands on its own merits**, not on the withdrawn
+claim: it needs no import at all, it asserts the step boundary directly rather than
+reconstructing it from parsed structure, and its own defect (see R2-1) was a slicing bug
+that a parse would not have had. That is a genuine trade-off, recorded as one, rather
+than the false necessity originally claimed.
 
 **INH-TC1-2 lineage, carried forward unchanged:** first deferral, reason class
 `out-of-scope-by-design`, NOT `window-exhausted`. Its single-use `window-exhausted`
@@ -258,10 +275,37 @@ Two of the six are worth singling out as the ones a human should care about:
   requires the follow-up to be filed BEFORE the deferral is recorded, precisely so this
   cannot happen; it happened anyway, and the gate caught it.
 
+## Stage-2 repo Codex review (evaluation 2 — delta-scoped on the §6 correction)
+
+Round 2 — run directory `cdx-review.8WTj1E`, archived, collected via the collector,
+teardown `confirmed stopped`. Scoped to the fix delta only, per the Critical scoping
+rule: base `55fd417` (round 1's `last-reviewed-sha`), head `5fa143d`.
+
+```
+STATUS: completed
+SCOPE: branch diff against 55fd417de75ecdca4e12f6fc499cb1bb4ac6971c (55fd417)
+       head=5fa143dc996e3165283a5334af7834519067ab77 dirty=false
+```
+
+Five findings, all validated and fixed, recorded as rows R2-1 … R2-5. Two are worth
+singling out because they falsified claims this ledger had already made:
+
+- **R2-1 defeated the A6-5 fix with a case the A6-5 witness did not cover.** The step
+  slice terminated only on a sibling `- ` item, so a valid second job with a
+  more-deeply-indented `steps:` sequence was swallowed into the slice. *(Measured here:
+  a two-job workflow carrying the scratch arm in the second job PASSED the test; after
+  the fix it fails. The first two reproduction attempts were themselves invalid — one
+  changed the arm's text, one produced malformed YAML — and were discarded rather than
+  counted, since a mutant that fails for the wrong reason proves nothing.)*
+- **R2-5 refuted MY refutation, correctly.** See the withdrawal note under the finding
+  rows: the PyYAML unavailability claim was false, and the round-2 reviewer supplied the
+  specific mechanism (`fastmcp`'s unconditional dependency) that disproved it.
+
 ## Checkpoints (written IN FLIGHT at every third evaluation of each loop)
 
 | Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |
 | --- | --- | --- | --- | --- |
+| **CP-1** — §6 architect implementation review | 1 / 1 (not a forced third-evaluation checkpoint; recorded because two deferrals were taken and a deferral must cite an in-tree checkpoint row that already exists) | `5fa143d`, dirty=false at decision time | **`DEFER-STANDARD-AND-PROCEED`** | **Per-tier counts:** critical 0; standard 8 raised this loop (A6-1…A6-6 fixed, D-1/D-2 deferred); unresolved after this batch: 0 fixed-pending, 2 deferred. **Breadth:** served docs, one test-scope defect, one witness gap, one audit-record defect. **Defect classes:** new — DC-7, DC-10, DC-12, DC-13; recurring — DC-A (instance 3, the widened binding's own missing witness). **Trend:** first evaluation of this loop, so no trend is claimed and none is needed — this is not a `CONTINUE` under the improving-trend test. **Why PROCEED and not CLOSE:** this is NOT the last owed gate; the Actions rollout gate (roster item 4) and the composite wave gate (item 5) are still owed, so `DEFER-STANDARD-AND-CLOSE` is unavailable by position. **Why not ESCALATE:** validation is available, every severity is resolvable from anchors, and both deferred items have a concrete next action recorded in #172. **Why not CONTINUE:** the two deferred items cannot be advanced by another correction window inside this slice at all — their blocking mechanism is external authority, not effort. **Conditions met:** zero critical residue in this loop; both deferrals individually enumerated as rows D-1 and D-2; **#172 filed before this row was written**, carrying per-item acceptance criteria, reason class and roadmap placement; current-tip validation complete (full non-KB suite 9771 passed, gate suite 243 passed, `ci --base` exit 0). **Named finite next action:** run the Actions rollout gate — scratch GREEN, seeded RED, final GREEN — which discharges criteria 4 and 5. |
 
 Each rationale records per-tier counts and breadth, new/resolved/recurring defect classes
 derived from the rows, the trend vector, explicit rule-outs of the other outcomes, and a
@@ -293,8 +337,11 @@ per-item acceptance criteria are enumerated):
    gap 1, not as an oversight.
 
 Both deferrals were recorded at the §6 architect-review reconciliation, and #172 existed
-before this text was written — a deferral may not cite an unfiled issue. The checkpoint
-row governing them is in the Checkpoints table below.
+before this text was written — a deferral may not cite an unfiled issue. Each is
+individually enumerated as a finding row above (**D-1** and **D-2**), and the checkpoint
+governing them is row **CP-1** in the Checkpoints table below. An earlier revision of
+this section claimed a governing checkpoint row while that table was still empty; the
+round-2 review caught it (`cdx-review.8WTj1E`, finding R2-3).
 
 ## Evidence index
 

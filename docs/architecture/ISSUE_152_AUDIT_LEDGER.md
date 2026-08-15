@@ -857,7 +857,9 @@ have no worktree fingerprint, and the §6 evaluation 12–16 scope SHAs are reco
 The TC1-2 row above is unchanged and stays unchanged: original label P2, blocking class
 `capability reachability`, reason class `out-of-scope-by-design`, placement before #153,
 lineage first deferral and NOT `window-exhausted`. This note records only WHERE the
-deferred residual was discharged, which the row could not know when it was written.
+deferred residual is now OWNED and tracked, which the row could not know when it was
+written. It does not itself assert that the residual has been discharged; see the
+closing paragraph.
 
 TC1-2 deferred the observation that no non-`push` baseline path had ever been observed
 reaching green. #171 owns it via its criterion 7 and addresses it two ways:
