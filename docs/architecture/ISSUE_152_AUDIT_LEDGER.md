@@ -821,6 +821,25 @@ run above rendered all 60 active goldens once each. The twice-render probe was t
 not re-run at `adfd8b5`; this is a recorded non-invalidation judgment, not missing
 evidence discovered later.
 
+**Delta review of `b2b608b..adfd8b5` and of the adjustments batch — collected.** Three
+delta-scoped rounds ran, each collected before its correction was applied: `9a2FKW`
+(base `b2b608b`, head `736777b`) returned three P2 findings, all non-blocking —
+occurrence-level coverage in the new ledger-scanner regression, checkout line-ending
+portability of the archive checksum contract (closed by a `.gitattributes` rule), and
+plan-provenance wording — all fixed in one batch; `ue4rvu` (base `736777b`, head
+`f7f7f68`) returned two findings (P2/P3) naming false-negative paths in the new
+occurrence guard, both fixed with constructed witnesses; `DmRnQe` (base `f7f7f68`,
+head `3e7df5d`) returned one P2 — an inline span straddling an excised fence
+over-covered the fence's unparsed opener line — reproduced by construction and fixed
+with a fourth witness. The third round was this loop's checkpoint and carried
+non-blocking findings only, so the loop closed normally under the one-batched-pass
+rule. The final batch's validation: the gate test module green (242 tests, all
+witnesses included) plus one fix-only auto-scope review whose collected output is the
+completion artifact of this record-only correction — deliberately not re-recorded
+here, per the self-description regress the terminal loop measured. All three run
+directories are archived beside the slice's own under
+`evidence/issue-152/commit-reviews/`.
+
 **Durable evidence archive.** All session-lifetime run directories cited anywhere in
 this ledger are archived byte-verified at `docs/architecture/evidence/issue-152/`
 (17 architect-gate directories including the `TnpZpj` refusal, 70 commit-review
