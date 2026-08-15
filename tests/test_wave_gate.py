@@ -4450,6 +4450,7 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
     total_152_rows = 0
     seen_durable = set()
     seen_source = set()
+    seen_threads = set()
     for index in indexes:
         base = index.parent
         rows = [json.loads(line) for line in index.read_text().splitlines() if line]
@@ -4501,6 +4502,20 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
                 where + ": source run indexed twice"
             )
             seen_source.add(source_norm)
+            # The authored source path is a CLAIM; the collector-emitted thread
+            # id is the identity. A run dir copied under a new name carries its
+            # start.json along, so duplicating a round to inflate the count is
+            # caught here even when every authored string was renamed.
+            run_dir = base / durable
+            assert run_dir.is_dir(), where
+            start_meta = json.loads((run_dir / "start.json").read_text())
+            thread_id = start_meta.get("threadId")
+            assert thread_id, where + ": start.json carries no threadId"
+            assert thread_id not in seen_threads, (
+                where + ": collector thread {0} already indexed — one collected "
+                "run is one row".format(thread_id)
+            )
+            seen_threads.add(thread_id)
             expected_prefix = (
                 "cdx-gate-review." if row["collector"] == "gate-attest"
                 else "cdx-review."
@@ -4508,8 +4523,6 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
             assert os.path.basename(source_norm).startswith(expected_prefix), (
                 where + ": source run name does not match its claimed collector"
             )
-            run_dir = base / durable
-            assert run_dir.is_dir(), where
             assert os.path.basename(source_norm) == run_dir.name, (
                 where + ": durable dir does not carry its source run's name"
             )
@@ -4654,21 +4667,28 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
         # an archived run's suffix may appear in its ledger only immediately
         # preceded by `review.`.
         for name in archived_run_names:
+            prefix = name[: len(name) - len(name.split(".", 1)[1])]
             suffix = name.split(".", 1)[1]
             for m in _re.finditer(_re.escape(suffix), ledger_text):
-                assert ledger_text[max(0, m.start() - 7):m.start()] == "review.", (
-                    "{0}: bare run-suffix citation `{1}` at offset {2}; cite the "
-                    "full run-dir name so the archive check can see it".format(
-                        ledger_path.name, suffix, m.start()
+                before = ledger_text[max(0, m.start() - len(prefix)):m.start()]
+                assert before == prefix, (
+                    "{0}: run-suffix citation `{1}` at offset {2} is not the "
+                    "COMPLETE archived name {3} — a shortened form escapes the "
+                    "archive check".format(
+                        ledger_path.name, suffix, m.start(), name
                     )
                 )
 
         if header["issue"] == 152:
             total_152_rows = len(runs)
 
-    # A ledger with review citations but NO archive would never enter the loop
-    # above — its fabricated citations would go unread. Every instantiated
-    # ledger that cites runs must own an evidence archive.
+    # A ledger without an archive would never enter the loop above — its
+    # citations, in ANY spelling, would go unread. A citation-syntax detector
+    # cannot be total (a bare token like `ABC123` is indistinguishable from
+    # prose), so the requirement is unconditional: every instantiated ledger
+    # owns an evidence archive from instantiation (the template mandates the
+    # header-only skeleton in the Stage-1.5 baseline commit), and every claim
+    # then binds inside it.
     indexed_issues = {
         json.loads(idx.read_text().splitlines()[0])["issue"] for idx in indexes
     }
@@ -4676,13 +4696,11 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
         (_ROOT / "docs" / "architecture").glob("ISSUE_*_AUDIT_LEDGER.md")
     ):
         issue = int(ledger_path.name.split("_")[1])
-        if _re.search(r"cdx(?:-gate)?-review\.", ledger_path.read_text()):
-            assert issue in indexed_issues, (
-                "{0} cites review runs but has no evidence archive under "
-                "docs/architecture/evidence/issue-{1}/".format(
-                    ledger_path.name, issue
-                )
-            )
+        assert issue in indexed_issues, (
+            "{0} has no evidence archive under docs/architecture/evidence/"
+            "issue-{1}/ — instantiate the skeleton (header-only index.jsonl + "
+            "SHA256SUMS) with the ledger".format(ledger_path.name, issue)
+        )
 
     # Non-vacuous #152 coverage: the slice's 87 archived rounds plus the three
     # adjustment rounds. A floor, not equality — later record-only corrections

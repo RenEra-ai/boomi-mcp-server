@@ -91,7 +91,12 @@ Collected run directories are archived (byte-verified, allowlisted sidecars) und
 that collects them — `/tmp` is session-lifetime, and
 `test_audit_ledger_attestations_have_durable_matching_evidence` re-verifies every
 archived attestation per collector type. An attestation this file claims and the
-archive cannot back is a fabricated row.
+archive cannot back is a fabricated row. **The archive SKELETON (a header-only
+`index.jsonl` + a `SHA256SUMS` covering it) is created in the same Stage-1.5 commit as
+this file** — the scanner requires every instantiated ledger to own its archive
+unconditionally, because a citation-syntax detector cannot be total. Run citations
+always use the COMPLETE run-dir name (`cdx-review.<suffix>` / `cdx-gate-review.<suffix>`,
+backticked); a bare or shortened suffix is a scanner failure.
 
 ## Final-tree validation (filled at close; every roster gate current on the FINAL sha)
 
