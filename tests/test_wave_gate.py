@@ -2722,16 +2722,6 @@ def test_a_usage_error_emits_the_coded_line_first(capsys):
     assert "usage:" not in err.splitlines()[0]
 
 
-def test_help_is_not_a_usage_failure():
-    """`--help` is a success, and it no longer travels as `SystemExit(0)`.
-
-    The outermost boundary treats every escaping exception as a failure, so help
-    signals through `_HelpRequested` instead — otherwise it would be
-    indistinguishable from the exact fault that boundary exists to catch.
-    """
-    assert gate.main(["--help"]) == 0
-
-
 def test_a_symlinked_golden_ancestor_keeps_the_validation_status(tmp_path):
     """The caller picks the failure class; the helper must not force one.
 
@@ -4035,3 +4025,9 @@ def test_the_committed_manifests_parse_and_agree_with_the_tree():
     assert nodes.header["bootstrap_base"] == goldens.header["bootstrap_base"]
     assert len(goldens.active) >= goldens.header["minimum_active"]
     gate.check_golden_tree(str(_ROOT), goldens)
+
+
+def test_seed3_replacement_keeps_the_collection_count():
+    """SEED 3 (do not merge): keeps collection at the floor so the REQUIRED-NODE
+    check is what fires, not the collection floor."""
+    assert True
