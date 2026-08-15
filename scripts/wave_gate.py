@@ -2959,6 +2959,28 @@ _UNRENDERABLE = (
 )
 
 
+def _own_code(failure):
+    """The failure's code IF it is one of the gate's own — otherwise None.
+
+    Total and dunder-safe by construction. Two separate hazards:
+
+    * `x in DIAGNOSTIC_CODES` runs `__hash__`/`__eq__`, so a `str` SUBCLASS with
+      a hostile `__hash__` executes foreign code during the very lookup meant to
+      sanitize it — measured: `ESCAPED as SystemExit -> would exit 0`. The
+      `type(...) is str` test admits only the exact builtin, whose `__hash__` and
+      `__eq__` cannot be overridden. This is the same class `exit_status_for`
+      documents four rounds of, reintroduced through a membership test.
+    * Reading the attribute at all can raise, so the whole thing is guarded.
+    """
+    try:
+        raw = failure.code
+        if type(raw) is not str:
+            return None
+        return raw if raw in DIAGNOSTIC_CODES else None
+    except BaseException:  # noqa: BLE001
+        return None
+
+
 def _report(text, fallback=None):
     """Emit a diagnostic that can NEVER decide the exit status — but DO emit one.
 
@@ -2990,7 +3012,9 @@ def _report(text, fallback=None):
     # the one place every last-resort diagnostic passes through, so enforcing it
     # here holds for callers that do not exist yet. Checking it at one caller
     # would be an enumeration of the callers.
-    if fallback is not None and fallback not in DIAGNOSTIC_CODES:
+    if fallback is not None and (
+        type(fallback) is not str or fallback not in DIAGNOSTIC_CODES
+    ):
         fallback = None
     for candidate in (text, fallback, _UNRENDERABLE):
         if candidate is None:
@@ -3041,17 +3065,19 @@ def main(argv=None):
         # RENDERING can run foreign code (`__str__`/`__format__`), so it is
         # guarded; REPORTING can fail too, so it goes through a sink that cannot
         # throw. Neither may reach the exit status, which is already decided.
-        try:
-            rendered = "{0} {1}".format(failure.code, failure.message)
-        except BaseException:  # noqa: BLE001
-            rendered = None
-        # The bare code is the machine contract's first token and is ASCII by
-        # construction, so it survives a sink the full message cannot reach.
-        try:
-            code_only = str(failure.code)
-        except BaseException:  # noqa: BLE001
-            code_only = None
-        _report(rendered, code_only)
+        # The code is resolved FIRST, and the primary text is built from the
+        # resolved code — not from `failure.code` directly. Validating only the
+        # fallback left `text` free to carry an undocumented token into the very
+        # position the machine contract reserves: measured, a
+        # `GateFailure("UNDECLARED_CODE", "m", 1)` printed `UNDECLARED_CODE m`.
+        code = _own_code(failure)
+        rendered = None
+        if code is not None:
+            try:
+                rendered = "{0} {1}".format(code, failure.message)
+            except BaseException:  # noqa: BLE001
+                rendered = None
+        _report(rendered, code)
         return status
     except BaseException:  # noqa: BLE001
         # THE invariant, at the only place that can enforce it: the gate decides

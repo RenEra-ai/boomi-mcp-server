@@ -3145,6 +3145,76 @@ def test_the_fallback_never_emits_an_undocumented_code(monkeypatch):
     assert printed == ["WORKTREE_DIRTY"]
 
 
+class _HostileCode(str):
+    """A `str` SUBCLASS whose `__hash__` runs on any membership test."""
+
+    def __hash__(self):
+        raise SystemExit(0)
+
+
+def test_the_code_whitelist_cannot_run_foreign_code(monkeypatch):
+    """`x in DIAGNOSTIC_CODES` executes `__hash__`/`__eq__`.
+
+    So the lookup meant to SANITIZE a failure's code was itself a route onto the
+    exit path — measured before the fix: `ESCAPED as SystemExit -> would exit 0`.
+    `type(x) is str` admits only the exact builtin, whose `__hash__` and `__eq__`
+    cannot be overridden. This is the same class `exit_status_for` documents four
+    rounds of, reintroduced through a membership test.
+    """
+    printed = []
+    monkeypatch.setattr(gate, "_emit", printed.append)
+
+    # The sink survives a hostile fallback. `text=None` so the ladder actually
+    # REACHES the fallback rung — with a printable primary text it would stop at
+    # rung one and the hostile object would never be touched, which is a test
+    # that proves nothing.
+    gate._report(None, _HostileCode("WORKTREE_DIRTY"))
+    assert printed and printed[0].startswith("GATE_DIAGNOSTIC_UNRENDERABLE")
+
+    # ...and so does the whole gate, which must still report nonzero.
+    printed.clear()
+    monkeypatch.setattr(
+        gate, "execute",
+        lambda args: (_ for _ in ()).throw(
+            gate.GateFailure(_HostileCode("WORKTREE_DIRTY"), "m", 1)
+        ),
+    )
+    assert gate.main(["manifests", "--base", "HEAD"]) == 1
+    assert printed and printed[0].startswith("GATE_DIAGNOSTIC_UNRENDERABLE")
+
+
+def test_an_undocumented_code_never_reaches_the_first_stderr_token(monkeypatch):
+    """Validating only the FALLBACK left the primary text free to carry it.
+
+    Measured before the fix: `GateFailure("UNDECLARED_CODE", "m", 1)` printed
+    `UNDECLARED_CODE m`, so `DIAGNOSTIC_CODES` was not actually authoritative.
+    The primary text is now built FROM the resolved code, not from
+    `failure.code`.
+    """
+    printed = []
+    monkeypatch.setattr(gate, "_emit", printed.append)
+
+    monkeypatch.setattr(
+        gate, "execute",
+        lambda args: (_ for _ in ()).throw(gate.GateFailure("UNDECLARED_CODE", "m", 1)),
+    )
+    assert gate.main(["manifests", "--base", "HEAD"]) == 1
+    assert printed and printed[0].startswith("GATE_DIAGNOSTIC_UNRENDERABLE")
+    assert not any("UNDECLARED_CODE" in line for line in printed)
+
+    # A documented code still renders with its full message — the check must not
+    # have degraded every diagnostic to the generic line.
+    printed.clear()
+    monkeypatch.setattr(
+        gate, "execute",
+        lambda args: (_ for _ in ()).throw(
+            gate.GateFailure("WORKTREE_DIRTY", "details here", 1)
+        ),
+    )
+    assert gate.main(["manifests", "--base", "HEAD"]) == 1
+    assert printed == ["WORKTREE_DIRTY details here"]
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 
