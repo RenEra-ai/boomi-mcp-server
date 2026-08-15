@@ -3542,6 +3542,43 @@ def test_a_non_injective_junit_projection_is_refused():
     )
 
 
+def test_the_report_anchor_survives_a_hard_link_swap(tmp_path, monkeypatch):
+    """The `O_EXCL` descriptor IS the anchor; closing and reopening loses it.
+
+    Reproduced against the create-close-reopen shape: a sibling atomically
+    replaces `junit.xml` with a hard link to another same-filesystem file in the
+    gap, the reopened descriptor and the later pathname stat then identify the
+    SAME FOREIGN inode, the ownership check passes, and the child truncates
+    somebody else's file with `w`.
+    """
+    repo, _base = _seeded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setenv("TMPDIR", str(outside))
+    scratch = gate.make_scratch_dir(str(repo))
+    resolved = os.fspath(scratch)
+    victim = tmp_path / "precious.txt"
+    victim.write_text("someone else's data\n")
+
+    fd = scratch.create_owned("junit.xml")
+    try:
+        # Unmolested, the anchor verifies.
+        gate._refuse_unowned_report(scratch, fd)
+
+        # A sibling hard-links a foreign file over the name.
+        os.link(str(victim), os.path.join(resolved, "swapped"))
+        os.rename(os.path.join(resolved, "swapped"),
+                  os.path.join(resolved, "junit.xml"))
+        with pytest.raises(gate.GateFailure) as excinfo:
+            gate._refuse_unowned_report(scratch, fd)
+        assert excinfo.value.code == "PYTEST_EXECUTION_UNRECONCILED"
+        assert victim.read_text() == "someone else's data\n"
+    finally:
+        os.close(fd)
+        shutil.rmtree(resolved, ignore_errors=True)
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

@@ -1529,10 +1529,7 @@ def run_suite(repo, nodes_manifest, collected, tmpdir=None):
         # the file that was CREATED. Claiming the name alone would let a sibling
         # replace the report between the run and the parse, forging the very
         # execution evidence this check exists to establish.
-        tmpdir.open_for_write("junit.xml").close()
-        report_fd = os.open(
-            "junit.xml", os.O_RDONLY | _O_NOFOLLOW, dir_fd=tmpdir.fd
-        )
+        report_fd = tmpdir.create_owned("junit.xml")
         report_path = os.path.join(tmpdir, "junit.xml")
     argv = _pytest_argv("-q", "-rs")
     if report_path is not None:
@@ -2634,6 +2631,26 @@ class _ScratchDir(object):
         os.mkdir(name, 0o700, dir_fd=self.fd)
         self._owned.append(name)
         return os.open(name, os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW, dir_fd=self.fd)
+
+    def create_owned(self, name):
+        """Create a file exclusively and RETURN THE RAW DESCRIPTOR.
+
+        The descriptor from the `O_EXCL` creation IS the ownership anchor, so it
+        is never closed and reopened by name. Closing it first left a gap in
+        which a sibling could atomically replace the name with a hard link to
+        another file on the same filesystem: the reopened descriptor and the
+        later pathname stat would then identify the SAME FOREIGN inode, the
+        ownership check would pass, and the child would truncate somebody else's
+        file.
+        """
+        fd = os.open(
+            name,
+            os.O_RDWR | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW,
+            0o600,
+            dir_fd=self.fd,
+        )
+        self._owned.append(name)
+        return fd
 
     def own(self, relpath):
         """Record an entry the gate created below this scratch."""
