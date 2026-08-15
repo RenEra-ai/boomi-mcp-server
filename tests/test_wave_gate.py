@@ -4491,16 +4491,26 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
             assert durable not in seen_durable, "duplicate durable dir: " + durable
             seen_durable.add(durable)
             # One collected run is one row: the same SOURCE run must not be
-            # counted twice under two destination names, and the destination
-            # must be the source's own name.
-            source_key = (row["collector"], source)
-            assert source_key not in seen_source, (
+            # counted twice under ANY second identity — not another destination
+            # name, and not another collector label either (a collector field is
+            # a claim, so it must never widen the dedup key). The name prefix
+            # must also agree with the claimed collector, or one run's sidecars
+            # could be judged under the other schema.
+            source_norm = os.path.normpath(source)
+            assert source_norm not in seen_source, (
                 where + ": source run indexed twice"
             )
-            seen_source.add(source_key)
+            seen_source.add(source_norm)
+            expected_prefix = (
+                "cdx-gate-review." if row["collector"] == "gate-attest"
+                else "cdx-review."
+            )
+            assert os.path.basename(source_norm).startswith(expected_prefix), (
+                where + ": source run name does not match its claimed collector"
+            )
             run_dir = base / durable
             assert run_dir.is_dir(), where
-            assert os.path.basename(source) == run_dir.name, (
+            assert os.path.basename(source_norm) == run_dir.name, (
                 where + ": durable dir does not carry its source run's name"
             )
             archived_run_names.add(run_dir.name)
@@ -4526,10 +4536,12 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
             _assert_commit(row.get("reviewed_sha"), where)
 
             if row["collector"] == "commit-review-collect":
-                names = {os.path.basename(f) for f in row["files"]}
-                assert names <= commit_review_names, (
+                # Paths relative to the run dir, never basenames: `extra/scope`
+                # must not ride in on the name of a legal root-level sidecar.
+                rels = {os.path.relpath(f, durable) for f in row["files"]}
+                assert rels <= commit_review_names, (
                     where + ": non-allowlisted sidecar: {0}".format(
-                        sorted(names - commit_review_names)
+                        sorted(rels - commit_review_names)
                     )
                 )
                 if row["status"] == "completed":
@@ -4545,21 +4557,15 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
                     # BIND the index row to the collector's sidecars: a row
                     # claiming a newer sha than its own archived run recorded
                     # is exactly the coverage-inflation forgery this exists for.
+                    # The binding sidecars are REQUIRED, never optional — a
+                    # deleted sidecar must fail, not silently skip the binding.
                     assert row.get("reviewed_sha") == reviewed, (
                         where + ": row reviewed_sha != collector sidecar"
                     )
-                    for field, sidecar in (
-                        ("baseline", "baseline"),
-                        ("dirty", "dirty"),
-                        ("scope", "scope"),
-                    ):
-                        path = run_dir / sidecar
-                        if path.exists():
-                            assert row.get(field) == _regular(path, where), (
-                                where + ": row {0} != collector sidecar".format(
-                                    field
-                                )
-                            )
+                    for field in ("baseline", "dirty", "scope"):
+                        assert row.get(field) == _regular(run_dir / field, where), (
+                            where + ": row {0} != collector sidecar".format(field)
+                        )
                 else:
                     assert expected_not_completed.get(durable) == row["status"], (
                         where + ": non-completed row absent from the reasoned "
@@ -4567,13 +4573,18 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
                     )
                     assert (run_dir / "phase").is_file(), where
             elif row["collector"] == "gate-attest":
-                names = set()
-                for f in row["files"]:
-                    rel_in_run = os.path.relpath(f, durable)
-                    names.add(rel_in_run.split(os.sep)[0])
-                assert names <= gate_names | {"prompts"}, (
+                # Root-level names from the gate allowlist, or files directly
+                # under prompts/ — nothing deeper, nothing else.
+                rels = {os.path.relpath(f, durable) for f in row["files"]}
+                illegal = {
+                    r for r in rels
+                    if r not in gate_names
+                    and not (r.startswith("prompts" + os.sep)
+                             and os.sep not in r[len("prompts") + 1:])
+                }
+                assert illegal == set(), (
                     where + ": non-allowlisted gate artifact: {0}".format(
-                        sorted(names - gate_names - {"prompts"})
+                        sorted(illegal)
                     )
                 )
                 if row["status"] == "completed":
@@ -4582,16 +4593,27 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
                     assert att["turn"]["status"] == "completed", where
                     assert att.get("parsedVerdict"), where
                     # BIND attestation to THIS run's identity: its artifact must
-                    # live in the source run dir it is filed under, its thread
-                    # must match the archived start.json, and the row may not
-                    # soften the collector's verdict.
-                    assert str(att["artifact"]["path"]).startswith(source + "/"), (
-                        where + ": attested artifact path is from a different run"
+                    # BE this run's review.md (normalized exact path — a `..`
+                    # traversal that merely starts with the source prefix must
+                    # not resolve into another run), its thread must match the
+                    # archived start.json with both identifiers PRESENT (a
+                    # missing pair comparing None == None establishes nothing),
+                    # and the row may not soften the collector's verdict.
+                    att_path = os.path.normpath(str(att["artifact"]["path"]))
+                    assert att_path == os.path.join(source_norm, "review.md"), (
+                        where + ": attested artifact path is not this run's "
+                        "review.md: {0}".format(att_path)
                     )
                     start = json.loads((run_dir / "start.json").read_text())
-                    assert att.get("start", {}).get("threadId") == start.get(
-                        "threadId"
-                    ), where + ": attestation thread != archived start.json"
+                    att_thread = att.get("start", {}).get("threadId")
+                    start_thread = start.get("threadId")
+                    assert att_thread and start_thread, (
+                        where + ": thread identity missing from attestation or "
+                        "start.json"
+                    )
+                    assert att_thread == start_thread, (
+                        where + ": attestation thread != archived start.json"
+                    )
                     assert row.get("verdict") == att["parsedVerdict"], (
                         where + ": row verdict != attested parsedVerdict"
                     )
@@ -4620,15 +4642,47 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
         cited = set(
             _re.findall(r"cdx(?:-gate)?-review\.[A-Za-z0-9_-]+", ledger_text)
         )
-        uncited = {c for c in cited if c.rstrip(".") not in archived_run_names}
+        uncited = {c for c in cited if c not in archived_run_names}
         assert uncited == set(), (
             "{0} cites review runs the archive does not hold: {1}".format(
                 ledger_path.name, sorted(uncited)
             )
         )
+        # ...and citations must use the FULL run-dir name. A bare suffix like
+        # `7tLUAe` is invisible to the pattern above, so mutating it would
+        # never be caught — enforce the convention that makes the check total:
+        # an archived run's suffix may appear in its ledger only immediately
+        # preceded by `review.`.
+        for name in archived_run_names:
+            suffix = name.split(".", 1)[1]
+            for m in _re.finditer(_re.escape(suffix), ledger_text):
+                assert ledger_text[max(0, m.start() - 7):m.start()] == "review.", (
+                    "{0}: bare run-suffix citation `{1}` at offset {2}; cite the "
+                    "full run-dir name so the archive check can see it".format(
+                        ledger_path.name, suffix, m.start()
+                    )
+                )
 
         if header["issue"] == 152:
             total_152_rows = len(runs)
+
+    # A ledger with review citations but NO archive would never enter the loop
+    # above — its fabricated citations would go unread. Every instantiated
+    # ledger that cites runs must own an evidence archive.
+    indexed_issues = {
+        json.loads(idx.read_text().splitlines()[0])["issue"] for idx in indexes
+    }
+    for ledger_path in sorted(
+        (_ROOT / "docs" / "architecture").glob("ISSUE_*_AUDIT_LEDGER.md")
+    ):
+        issue = int(ledger_path.name.split("_")[1])
+        if _re.search(r"cdx(?:-gate)?-review\.", ledger_path.read_text()):
+            assert issue in indexed_issues, (
+                "{0} cites review runs but has no evidence archive under "
+                "docs/architecture/evidence/issue-{1}/".format(
+                    ledger_path.name, issue
+                )
+            )
 
     # Non-vacuous #152 coverage: the slice's 87 archived rounds plus the three
     # adjustment rounds. A floor, not equality — later record-only corrections

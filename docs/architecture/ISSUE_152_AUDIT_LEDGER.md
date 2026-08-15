@@ -151,15 +151,15 @@ fields; verdicts and review hashes are from `attestation.json`.
 
 | Eval | Run | Base | Reviewed head | Collected UTC | Verdict | Review SHA-256 |
 | ---: | --- | --- | --- | --- | --- | --- |
-| 12 | `7tLUAe` | `706ec9d` | `8c61d59` | 2026-08-15T02:21:00Z | Issues found | `090d12d37b9b812e0ec7159ef2759d3f7f3ffdadd335a090661852c2b05abc06` |
-| 13 | `4i4Aaw` | `d90a315` | `139c862` | 2026-08-15T03:20:20Z | Issues found | `380173b3d2f4f4550340b1b30140817d19129e21a7a8249e8961f658000cce7f` |
-| 14 | `kD3sjA` | `139c862` | `de4d0ed` | 2026-08-15T04:37:28Z | Issues found | `22c7d7b766fd4cfa134e18372f413dac911191c3520c5555dd2ab9b41cca62c9` |
-| 15 | `ad8BR0` | `a4270df` | `27eda5e` | 2026-08-15T06:23:38Z | Issues found | `cac8d7fcfdeac68fac1dff038ba3f26fe5180e22e1e08873c63d81ac4afe0089` |
-| 16 | `bFYEn9` | `27eda5e` | `b2b608b` | 2026-08-15T06:51:43Z | No issues | `7671f8828bfa47db4274397b9cb601de8ab4154da6336dcfcf62fa2ec7a088ae` |
+| 12 | `cdx-gate-review.7tLUAe` | `706ec9d` | `8c61d59` | 2026-08-15T02:21:00Z | Issues found | `090d12d37b9b812e0ec7159ef2759d3f7f3ffdadd335a090661852c2b05abc06` |
+| 13 | `cdx-gate-review.4i4Aaw` | `d90a315` | `139c862` | 2026-08-15T03:20:20Z | Issues found | `380173b3d2f4f4550340b1b30140817d19129e21a7a8249e8961f658000cce7f` |
+| 14 | `cdx-gate-review.kD3sjA` | `139c862` | `de4d0ed` | 2026-08-15T04:37:28Z | Issues found | `22c7d7b766fd4cfa134e18372f413dac911191c3520c5555dd2ab9b41cca62c9` |
+| 15 | `cdx-gate-review.ad8BR0` | `a4270df` | `27eda5e` | 2026-08-15T06:23:38Z | Issues found | `cac8d7fcfdeac68fac1dff038ba3f26fe5180e22e1e08873c63d81ac4afe0089` |
+| 16 | `cdx-gate-review.bFYEn9` | `27eda5e` | `b2b608b` | 2026-08-15T06:51:43Z | No issues | `7671f8828bfa47db4274397b9cb601de8ab4154da6336dcfcf62fa2ec7a088ae` |
 
 The §6 loop therefore ran **16 completed evaluations**, ending clean over the landed tip
 `b2b608b` (evaluation 16's text names `b2b608b`'s `parse_constant` hook and the
-9785→9786 manifest refresh). One additional run directory, `TnpZpj`, is a refused start —
+9785→9786 manifest refresh). One additional run directory, `cdx-gate-review.TnpZpj`, is a refused start —
 not an evaluation — and is archived with only its `start.json` and `refusal.json`. No §6
 round covers `b2b608b..adfd8b5`; the final architect verdict itself carved out the
 post-landing rollout-evidence work as remaining open items.
@@ -801,7 +801,7 @@ manifests ok (9787 required nodes, 60 active goldens), collection ok (9787), sui
 (9768 passed + 19 skipped = 9787). This ledger structurally cannot contain its own
 push's run result at close; it is recorded here and in the issue's closure report.
 
-**Review coverage of the final delta.** Evaluation 13 (`rnxOao`) was an auto-scope
+**Review coverage of the final delta.** Evaluation 13 (`cdx-review.rnxOao`) was an auto-scope
 dirty-tree review collected at `b2b608b` BEFORE its three fixes were applied, so the
 committed `adfd8b5` delta (the TC13 fixes plus this ledger's closing rows; its only
 `scripts/wave_gate.py` change is docstring text, verified by diff) had no review
@@ -822,13 +822,13 @@ not re-run at `adfd8b5`; this is a recorded non-invalidation judgment, not missi
 evidence discovered later.
 
 **Delta review of `b2b608b..adfd8b5` and of the adjustments batch — collected.** Three
-delta-scoped rounds ran, each collected before its correction was applied: `9a2FKW`
+delta-scoped rounds ran, each collected before its correction was applied: `cdx-review.9a2FKW`
 (base `b2b608b`, head `736777b`) returned three P2 findings, all non-blocking —
 occurrence-level coverage in the new ledger-scanner regression, checkout line-ending
 portability of the archive checksum contract (closed by a `.gitattributes` rule), and
-plan-provenance wording — all fixed in one batch; `ue4rvu` (base `736777b`, head
+plan-provenance wording — all fixed in one batch; `cdx-review.ue4rvu` (base `736777b`, head
 `f7f7f68`) returned two findings (P2/P3) naming false-negative paths in the new
-occurrence guard, both fixed with constructed witnesses; `DmRnQe` (base `f7f7f68`,
+occurrence guard, both fixed with constructed witnesses; `cdx-review.DmRnQe` (base `f7f7f68`,
 head `3e7df5d`) returned one P2 — an inline span straddling an excised fence
 over-covered the fence's unparsed opener line — reproduced by construction and fixed
 with a fourth witness. The third round was this loop's checkpoint and carried
@@ -842,7 +842,7 @@ directories are archived beside the slice's own under
 
 **Durable evidence archive.** All session-lifetime run directories cited anywhere in
 this ledger are archived byte-verified at `docs/architecture/evidence/issue-152/`
-(17 architect-gate directories including the `TnpZpj` refusal, 70 commit-review
+(17 architect-gate directories including the `cdx-gate-review.TnpZpj` refusal, 70 commit-review
 directories, the raw working report, and the two plan files — the architect plan
 gate-attested by all 16 attestations' input-plan hash, the implementation plan
 checksum-covered only, no attestation binds it; `SHA256SUMS` +
