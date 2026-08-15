@@ -849,3 +849,32 @@ checksum-covered only, no attestation binds it; `SHA256SUMS` +
 `index.jsonl` are the integrity contract). The archive records, rather than repairs,
 the known limitations: commit-review `review.json` carries no verdict, dirty reviews
 have no worktree fingerprint, and the §6 evaluation 12–16 scope SHAs are reconstructed.
+
+---
+
+## Post-close resolution note — TC1-2 (added 2026-08-15 by #171)
+
+The TC1-2 row above is unchanged and stays unchanged: original label P2, blocking class
+`capability reachability`, reason class `out-of-scope-by-design`, placement before #153,
+lineage first deferral and NOT `window-exhausted`. This note records only WHERE the
+deferred residual was discharged, which the row could not know when it was written.
+
+TC1-2 deferred the observation that no non-`push` baseline path had ever been observed
+reaching green. #171 owns it via its criterion 7 and discharges it two ways at once:
+
+- **criterion 7(a)** — the `pull_request` trigger has been REMOVED from
+  `.github/workflows/tests.yml`. The never-observed-green merge-base arm is eliminated by
+  design rather than carried, which is the disposition the owner selected on the issue.
+  `_baseline_from_pull_request()` and its unit coverage are retained, so the resolver
+  stays tested while the untested CI arm is gone.
+- **criterion 5** — a GREEN run on the scratch-push (`local` baseline) route, which is
+  the non-`push:[dev]` path #171 introduces.
+
+Both, plus the seeded RED rerun that criterion 4 required with no pull request opened,
+are recorded in [`ISSUE_171_AUDIT_LEDGER.md`](ISSUE_171_AUDIT_LEDGER.md) and archived
+under `docs/architecture/evidence/issue-171/`.
+
+One thing this note does NOT claim: that #171 made a required status check viable. That
+question is recorded there as undecided pending a measured experiment, because deciding
+it needs repository-admin authority and predicting it is the error §10 has already made
+twice.

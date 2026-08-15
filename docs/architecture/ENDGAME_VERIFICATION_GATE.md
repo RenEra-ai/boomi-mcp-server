@@ -9,17 +9,26 @@ Issue #152 (M12.13). Owner: repository.
 > diagnostic the plan expected and one produced a different, correct one; see the
 > rollout evidence in [`ISSUE_152_AUDIT_LEDGER.md`](ISSUE_152_AUDIT_LEDGER.md).
 >
-> There is deliberately **no `dev` ruleset** requiring the check: this repo
-> integrates by fast-forward push, and a required status check would reject such
-> a push outright. §10 explains the mechanism and states the resulting bound
-> honestly — this gate DETECTS a bad tip, it does not PREVENT one.
+> **Since #171 there are TWO routes, one gate.** A push to `dev` is DETECTION on
+> the pushed tip. A push to `scratch/**` is a PREFLIGHT on a candidate before it
+> is fast-forwarded, baselined on the exact fetched `origin/dev` commit and
+> required to descend from it. There is deliberately **no `pull_request`
+> trigger** — a PR run validates the synthetic merge tree rather than the commit
+> that would land, and this repo does not use pull requests
+> ([`ISSUE_171_AUDIT_LEDGER.md`](ISSUE_171_AUDIT_LEDGER.md)).
+>
+> There is still deliberately **no `dev` ruleset** requiring the check. Whether
+> the scratch preflight makes one viable is **undecided pending a measured
+> experiment**: it needs repo-admin authority, and §10 specifies the experiment
+> rather than predicting its outcome. Until it is run, this gate DETECTS a bad
+> tip on `dev`; the preflight is what lets you find out before pushing.
 
 Two committed ledgers and one fail-closed command make the mechanical half of the
 M12 endgame verification regime automatic:
 
 | Artifact | Purpose |
 |---|---|
-| `.github/workflows/tests.yml` | the required `Python 3.11 non-KB` check on `dev` |
+| `.github/workflows/tests.yml` | the `Python 3.11 non-KB` check: post-push detection on `dev`, preflight on `scratch/**` |
 | `scripts/wave_gate.py` | the gate: `ci`, `wave`, and the non-gate `manifests` |
 | `tests/fixtures/wave_gate/test_nodes.jsonl` | required pytest node ids + floors |
 | `tests/fixtures/wave_gate/goldens.jsonl` | the golden corpus inventory |
@@ -39,7 +48,7 @@ runtime.
 ## 2. Commands
 
 ```
-python scripts/wave_gate.py ci   --github-event "$GITHUB_EVENT_PATH"
+python scripts/wave_gate.py ci   (--base COMMIT | --github-event PATH)
 python scripts/wave_gate.py wave --base COMMIT [--bootstrap] [--require-plan-fingerprint]
 python scripts/wave_gate.py manifests (--base COMMIT | --github-event PATH) [--bootstrap]
 ```
@@ -47,6 +56,27 @@ python scripts/wave_gate.py manifests (--base COMMIT | --github-event PATH) [--b
 `ci` — baseline → manifest format → transition → tree self-consistency →
 collection (floor, then required nodes, then reconciliation) → the full non-KB
 suite → worktree unchanged.
+
+`ci` takes **exactly one** baseline selector, the same shape `manifests` uses:
+`--github-event` is the workflow's `dev` arm (the platform supplies the
+baseline) and `--base` is the workflow's `scratch/**` preflight arm (the
+baseline is the exact fetched `origin/dev` commit). Supplying **neither or
+both** is an argparse usage error — exit 2, with the stable first stderr token
+`GATE_USAGE_INVALID`.
+
+`ci --base` additionally requires (all three, because a preflight that does not
+validate an integration delta validates nothing):
+
+* a **clean** checkout — the bytes under test must be exactly the committed
+  candidate, not the runner's edits;
+* the baseline must be an **ancestor of `HEAD`** (equality included) — otherwise
+  there is no delta, the manifest transition is computed against an unrelated
+  tree, and a diverged branch preflights green and is then unmergeable;
+* inside GitHub Actions, `HEAD` must equal the platform's `GITHUB_SHA` — the one
+  checkout identity a workflow step cannot forge by editing the tree.
+
+`wave --base` and `manifests --base` deliberately keep their dirty-tree support:
+there the operator chose the baseline and the uncommitted work IS the subject.
 
 `wave` — everything `ci` does, then every ACTIVE golden rendered **twice** in
 separate child processes under different `PYTHONHASHSEED` values, compared
@@ -198,15 +228,30 @@ three values in `tests/test_wave_gate.py`.
 
 | Context | Baseline |
 |---|---|
-| `pull_request` | the **unique** merge base of `head.sha` and `base.sha`; zero or several is a refusal |
-| `push` | `github.event.before`, **verbatim** |
-| local | an explicit `--base`, **required** |
+| `push` — workflow: `dev` | `github.event.before`, **verbatim** |
+| local via `ci --base` — workflow: `scratch/**` | the explicit commit; clean tree, and it must be an ancestor of `HEAD` |
+| local via `wave` / `manifests --base` | the explicit commit; dirty trees supported |
+| `pull_request` | the **unique** merge base of `head.sha` and `base.sha`; zero or several is a refusal — implemented and unit-tested, but **reachable from no trigger** |
 
 A push must never use a merge base: on a push to `dev`, the merge base of HEAD
 against `dev` is HEAD itself, so the gate would compare the new tip with itself
 and validate nothing. A missing, malformed, all-zero (branch creation /
 force-push) or unresolvable baseline **fails closed**; it is never silently
 replaced, and it can never invoke the bootstrap exception.
+
+**Why the scratch arm uses the exact fetched `origin/dev`.** Not
+`github.event.before`: on the push that CREATES a scratch branch that field is
+the all-zero sha, and on later incremental pushes it is the previous scratch
+tip — so the gate would validate only the newest increment rather than the whole
+candidate. Not a merge base either: a branch that has diverged from `dev` still
+has one, so it would preflight green and then fail to fast-forward. The exact
+`origin/dev` commit plus an ancestry proof is the pair that models this
+repository's actual integration rule.
+
+The honest caveat: `origin/dev` is authoritative only **as fetched at workflow
+start**. If `dev` advances afterwards, the preflight's verdict describes a
+superseded baseline — rebase the candidate and re-run rather than pushing on a
+stale green.
 
 Baseline manifests are read with `git show <base>:<path>`; current manifests are
 read from the **worktree**, so CI validates the checked-out merge result and a
@@ -361,7 +406,13 @@ same index must carry the same `id` and identical payload fields. Then:
 
 **A tombstone records a retirement that has already happened, not an intention.**
 A tombstoned golden's file must be absent, and a tombstoned node id must not be
-collected (`PYTEST_NODE_TOMBSTONED_BUT_PRESENT`). Without the second half the two
+collected (`PYTEST_NODE_TOMBSTONED_BUT_PRESENT`). This makes one tombstone plus
+one append — floors unchanged, since `old + 1 − 1 = old` — the canonical shape
+for RENAMING a test, and #171 is the worked example: `pytest-009550` retired,
+`pytest-009789` appended, `minimum_active` and `minimum_collected` both still
+9788. The retirement is only legal because the rename happens in the SAME
+change; tombstoning a test that is still there is exactly what the
+collected-node check refuses. Without the second half the two
 parts of a retirement could be split across changes: tombstone a test that is
 still there — legally lowering both floors — and the deletion later needs no
 manifest edit at all, because the floor reduction was prepaid and a tombstoned
@@ -661,15 +712,25 @@ origin/main  .github/workflows             -> absent entirely
 origin/dev   .github/workflows             -> tests.yml
 ```
 
+`origin/main` carrying no workflows is the measurement that rules out
+`workflow_dispatch` as #171's mechanism: GitHub offers a dispatch trigger only
+for a workflow present on the **default branch**, and `dev` reaches `main` only
+at milestone end. A `push:` trigger resolves the workflow from the *pushed ref*
+instead, which is why `scratch/**` works today with the file only on `dev`.
+
 Repository **rulesets** and **classic branch protection** are distinct mechanisms;
 an earlier revision of this section inferred "no protection" from the rulesets
 query alone, which does not follow. Both are now measured. §10 states nothing
 about GitHub's behaviour that was not either measured here or is not load-bearing
 for a claim.
 
-**What the gate therefore delivers: detection on a pushed tip, not prevention.**
-Every push to `dev` that triggers the workflow runs the full gate on the pushed
-commit, and a failure is visible on it.
+**What the gate therefore delivers: detection on a pushed tip, plus an optional
+preflight — not prevention.** Every push to `dev` that triggers the workflow runs
+the full gate on the pushed commit, and a failure is visible on it. Since #171,
+every push to `scratch/**` runs the same gate on the candidate *before* it is
+fast-forwarded, so a bad tip can be found without landing it. Neither is
+compulsory: with no required check and no ruleset, nothing forces a candidate
+through the preflight, and nothing outside the pushed tree gets a vote.
 
 The gaps below are the ones currently known. They are **not claimed to be an
 exhaustive bound** — gaps 1 and 3 were each found by review *after* an earlier
@@ -685,8 +746,13 @@ seen.
    does not start the workflow. *(Provenance: GitHub-documented behaviour, raised in
    review — NOT measured in this repository. It is recorded as a gap rather than as
    a guarantee in either direction.)* With no required check and no ruleset, such a
-   commit would land on `dev` with no run at all — not a red one. Nothing here
-   currently closes that hole.
+   commit would land on `dev` with no run at all — not a red one. **#171 examined
+   this hole and deliberately did not close it:** a skipped workflow cannot repair
+   its own absence, so the only mechanism that could close it is a repository rule,
+   which is the same undecided measurement as the required-check question below.
+   It is carried as an explicitly tracked residual with a filed follow-up, reason
+   class `blocked-by-mechanism` — not as an oversight, and not as something the
+   scratch preflight fixes.
 2. **A bad tip is detected after it has landed,** because the run starts only once
    the push is accepted. Reverting is the remedy; refusal is not available.
 3. **A push can disable the gate itself.** For a `push` event GitHub loads the
@@ -702,15 +768,20 @@ seen.
    meant to check. *(Provenance: the tree-loading half is measured — the landing
    run demonstrates it; the consequences for a removing push follow from it and are
    not separately measured here.)*
-4. **The gate cannot be run on a branch by any convention-compliant means.** It is
-   reachable there today only by opening a pull request — which is how the five
-   seeded-defect runs were produced, and which violates this repository's no-PR
-   convention. So the missing capability is a **non-PR trigger**, not the ability
-   to run at all; an earlier revision claimed the gate simply could not run on a
-   scratch branch, which those five runs contradict. Note also what a PR run does
-   and does not check: it validates the synthetic **merge** tree, not the branch
-   tip, so even setting the convention aside it does not tell you that the commit
-   you are about to fast-forward is green. That is #171's scope.
+4. **~~The gate cannot be run on a branch by any convention-compliant means.~~
+   CLOSED by #171.** A push to `scratch/**` now runs the same gate on the
+   candidate itself, baselined on the exact fetched `origin/dev` and required to
+   descend from it — no pull request involved. The `pull_request` trigger has been
+   REMOVED (criterion 7a): it validated the synthetic **merge** tree rather than
+   the branch tip, so even setting the no-PR convention aside it never told you
+   that the commit you were about to fast-forward was green, and keeping a
+   never-observed-green arm is a second path without evidence. The
+   `pull_request` resolver itself remains in the gate with full unit coverage; it
+   is simply unreachable from CI.
+
+   What the preflight does NOT change: it is still not a *required* check, so a
+   push to `dev` that skips its preflight is not refused by anything. The
+   preflight is available, not compulsory.
 
 **On making it a required status check.** A required check is evaluated against the
 commit being pushed, so it needs a way for a commit to acquire a passing check
@@ -723,12 +794,31 @@ that the head SHA carries a passing check usable by a later fast-forward push.
 
 This paragraph has now been wrong in both directions — first calling a preflight
 impossible, then calling it available-but-disallowed — and both errors were the
-same mechanism: asserting platform behaviour instead of measuring it. So the
-accurate statement is the narrow one: **no preflight path has been demonstrated
-here**, whether a PR run's check can be reused for a direct push is untested, and
-whether #171's trigger changes that is untested too. Anyone enabling a ruleset
-should verify the association first, against a real run. That belongs to #171,
-decided against measurement, not to this document.
+same mechanism: asserting platform behaviour instead of measuring it. #171
+supplies the missing half of the first clause: **a convention-compliant preflight
+path now exists and has been demonstrated**, RED and GREEN, on `scratch/**`.
+
+What #171 deliberately did **not** do is answer whether that makes a ruleset
+viable. Doing so requires attaching an enforcing rule to a live branch with
+repo-admin authority, and predicting the answer is the exact error above. So the
+disposition is recorded as **undecided pending measurement**, and the experiment
+is specified here instead:
+
+1. Capture the successful check's name, app, head SHA and conclusion on a green
+   scratch candidate `H`.
+2. Create an enforcing ruleset targeting a **disposable** scratch integration
+   branch, with no applicable bypass actor.
+3. *Negative control* — try to advance it with a new, unchecked commit whose
+   message carries a skip directive. The rule must REJECT the push. (This is also
+   the only mechanism that would close gap 1.)
+4. *Positive control* — try to advance it to the exact already-green `H` from a
+   different ref. The rule must ACCEPT the check already attached to that SHA.
+5. Only if both controls pass: obtain a green preflight on the final candidate,
+   enable the same rule on `dev`, and measure a real fast-forward push.
+6. If either control fails: leave `dev` detection-only and record the result.
+
+Until that runs, nothing here asserts the outcome in either direction. Anyone
+enabling a ruleset should perform steps 1–4 first, against real runs.
 
 The job name **`Python 3.11 non-KB`** remains the stable contract that #153 and
 #154 cite as their "full non-KB Python 3.11 suite in CI" gate item. Renaming it

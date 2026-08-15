@@ -47,7 +47,7 @@ _FAKE_BASE = "1" * 40
 
 @pytest.fixture(autouse=True)
 def _no_ambient_github_sha(monkeypatch):
-    """Scrub `GITHUB_SHA` for every test in this module.
+    """Scrub `GITHUB_SHA` and `GITHUB_ACTIONS` for every test in this module.
 
     This suite RUNS inside the workflow it is testing, and that workflow exports
     `GITHUB_SHA` to the wave-gate step, which passes it into pytest. Every test
@@ -61,8 +61,15 @@ def _no_ambient_github_sha(monkeypatch):
     it per test is the same enumeration that has already been got wrong twice.
     Tests that WANT the variable set it explicitly with `monkeypatch.setenv`,
     which still wins because it runs after this fixture.
+
+    `GITHUB_ACTIONS` joins it for the same reason and by the same rule: the
+    gate's `ci` binding treats `GITHUB_ACTIONS=true` as "a platform sha is
+    MANDATORY", so leaving it ambient while scrubbing the sha would make every
+    `ci_mode` test fail on the runner only. Scrubbing one and not the other is
+    the enumeration this fixture exists to replace.
     """
     monkeypatch.delenv("GITHUB_SHA", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1573,11 +1580,62 @@ def test_manifests_announces_that_it_is_not_a_gate(tmp_path):
     assert "NOT A GATE" in stderr
 
 
-def test_the_ci_subcommand_refuses_a_bare_base(tmp_path):
-    """``ci`` derives its baseline from the event, never from an argument."""
+def test_ci_requires_exactly_one_baseline_selector(tmp_path, monkeypatch, capsys):
+    """``ci`` takes EXACTLY ONE of ``--base`` / ``--github-event`` (#171).
+
+    The two accepted forms are the workflow's two arms — the ``dev`` event arm
+    and the ``scratch/**`` preflight arm. The two EXCLUDED states are the
+    non-vacuity witnesses that "exactly one" is enforced rather than merely
+    described: a rule nobody can violate proves nothing.
+
+    Argparse's own sentence is deliberately not asserted — only the exit status,
+    the stable first-token code, both option names, and the meaningful fragment.
+    """
     repo, base = _seeded(tmp_path)
-    status, _stderr = _gate(repo, "ci", "--base", base)
-    assert status == 2
+
+    # 1. `--base` parses AND threads through the execution seam far enough to
+    #    resolve and emit `(local)`. A parser-only assertion would not notice a
+    #    handler-threading regression, so stop at the manifest phase rather than
+    #    running a whole synthetic suite.
+    parsed = gate.build_parser().parse_args(["--repo", str(repo), "ci", "--base", base])
+    assert parsed.base == base and parsed.github_event is None
+
+    seen = {}
+
+    def _sentinel(repo_arg, baseline, *, is_local, bootstrap_flag, target=None):
+        seen.update(baseline=baseline, is_local=is_local, target=target)
+        raise gate._contract("MANIFEST_MISSING", "sentinel: stop after the baseline seam")
+
+    monkeypatch.setattr(gate, "run_manifest_phase", _sentinel)
+    assert gate.main(["--repo", str(repo), "ci", "--base", base]) == 2
+    err = capsys.readouterr().err
+    assert "wave_gate: baseline {0} (local)".format(base) in err, err
+    assert seen == {"baseline": base, "is_local": True, "target": None}
+    monkeypatch.undo()
+
+    # 2. `--github-event` parses with `base is None`.
+    event = tmp_path / "push.json"
+    event.write_text(json.dumps({"before": base, "after": _head(repo)}),
+                     encoding="utf-8")
+    parsed = gate.build_parser().parse_args(
+        ["--repo", str(repo), "ci", "--github-event", str(event)]
+    )
+    assert parsed.github_event == str(event) and parsed.base is None
+
+    # 3. BOTH — the mutual-exclusion witness.
+    status, err = _gate(repo, "ci", "--base", base, "--github-event", str(event))
+    assert status == 2, err
+    assert err.split()[0] == "GATE_USAGE_INVALID", err
+    assert "--base" in err and "--github-event" in err, err
+    assert "not allowed" in err, err
+
+    # 4. NEITHER — the required-group witness. Bare `ci` must not fall through to
+    #    the resolver: the argparse layer is the documented refusal here.
+    status, err = _gate(repo, "ci")
+    assert status == 2, err
+    assert err.split()[0] == "GATE_USAGE_INVALID", err
+    assert "--base" in err and "--github-event" in err, err
+    assert "required" in err, err
 
 
 def test_there_is_no_mutation_or_skip_surface():
@@ -1648,10 +1706,21 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "CONTINUE",
     "DIAGNOSTIC_CODES",
     "EMPTY",
-    # Document filenames — the ledger cites both, and tokenizing inside compound
-    # inline spans now sees the stem of `ISSUE_152_AUDIT_LEDGER.md`.
+    # FIXED document filenames the ledgers cite, tokenized inside compound inline
+    # spans. These are singular documents, so listing them does not grow with the
+    # work. `ISSUE_*_AUDIT_LEDGER` stems are deliberately NOT here: those DO grow
+    # one-per-slice, so they are derived from the files on disk in the scanner
+    # itself — a hand-list of them goes stale the moment a ledger is added, which
+    # is exactly what happened when #171's arrived.
+    "AUDIT_LEDGER_TEMPLATE",
     "ENDGAME_VERIFICATION_GATE",
-    "ISSUE_152_AUDIT_LEDGER",
+    # Actions default variables. The #171 ledger names them when recording the
+    # checkout binding and the workflow's two routes — environment variables the
+    # gate CONSUMES, never diagnostics it can emit.
+    "GITHUB_ACTIONS",
+    "GITHUB_EVENT_NAME",
+    "GITHUB_EVENT_PATH",
+    "GITHUB_REF",
     "GITHUB_SHA",
     "O_EXCL",
     "O_NOFOLLOW",
@@ -1758,7 +1827,19 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
         _LEDGER_NON_DIAGNOSTIC_TOKENS & gate.DIAGNOSTIC_CODES
     )
 
-    unknown = named_codes(ledger) - gate.DIAGNOSTIC_CODES
+    # Ledger filenames are allowed by DERIVATION from the files on disk, never by
+    # hand-listing. Ledgers cite each other — #152's close note names #171's — so a
+    # hand-list needs a new entry for every ledger that ever exists, and #171 is
+    # where that enumeration first came due. The authority is the glob, which the
+    # all-ledgers loop below already consults; hoisted here so BOTH scans read it
+    # rather than one reading a stale copy of it.
+    all_ledgers = sorted(
+        (_ROOT / "docs" / "architecture").glob("ISSUE_*_AUDIT_LEDGER.md")
+    )
+    assert any(p.name == "ISSUE_152_AUDIT_LEDGER.md" for p in all_ledgers)
+    derived_stems = {p.stem for p in all_ledgers}
+
+    unknown = named_codes(ledger) - gate.DIAGNOSTIC_CODES - derived_stems
     assert unknown == set(), (
         "the audit ledger names diagnostic codes the gate cannot emit: "
         "{0}".format(sorted(unknown))
@@ -1880,9 +1961,13 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
     # cannot search for it. Judge every candidate token in the UNCOVERED text
     # instead: no diagnostic-like token — exact, near-miss, or merely shaped like
     # a code — may sit outside the parsed regions at all.
+    # Ledger stems are subtracted here for the same reason as above, and by the
+    # same derived authority: a markdown LINK TARGET (`](ISSUE_171_AUDIT_LEDGER.md)`)
+    # is outside every backtick span by construction, so a ledger that links to a
+    # sibling ledger would otherwise fail a check about diagnostic codes.
     bare = _judge(
         _re.findall(r"\b({0})\b".format(_CANDIDATE), _uncovered_text(ledger))
-    )
+    ) - derived_stems
     assert bare == set(), (
         "diagnostic-like tokens sit outside every parsed region, where the scans "
         "cannot judge them: {0}".format(sorted(bare))
@@ -1928,12 +2013,9 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
     # young ledger may legitimately name few codes); the CLOSED checks — no
     # unknown code, no hidden occurrence, no bare diagnostic-like token — bind
     # everywhere. Each file's own stem is allowed as a token by derivation (the
-    # ledgers cite their own filenames), never by hand-listing.
-    all_ledgers = sorted(
-        (_ROOT / "docs" / "architecture").glob("ISSUE_*_AUDIT_LEDGER.md")
-    )
-    assert any(p.name == "ISSUE_152_AUDIT_LEDGER.md" for p in all_ledgers)
-    derived_stems = {p.stem for p in all_ledgers}
+    # ledgers cite their own filenames AND each other's), never by hand-listing.
+    # `all_ledgers`/`derived_stems` are established once, above, and used by both
+    # scans — deriving the same set twice is the duplication this rule forbids.
     for path in all_ledgers:
         text = path.read_text(encoding="utf-8")
         unknown_here = named_codes(text) - gate.DIAGNOSTIC_CODES - derived_stems
@@ -1959,29 +2041,52 @@ def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
 
     * It must call `wave_gate.py ci` — not `pytest` directly, which can go green
       on a partial collection.
+    * Both routes must exist and must select the baseline the way #171 decided:
+      the event payload on `dev`, the exact fetched `origin/dev` commit on
+      `scratch/**` — never `github.event.before` (the zero sha on branch
+      creation, and only the latest increment afterwards) and never a merge-base
+      (a diverged branch would preflight green).
+    * ONE step, no step-level `if:`, and an unrecognized context REFUSES: two
+      conditional steps could both skip and leave a green job that checked
+      nothing.
     * Nothing may soften a failure.
-    * Pushes must NOT share a concurrency group (Codex Stage-2 [P2]): GitHub
-      cancels a previously PENDING run when a new one enters the group whatever
-      `cancel-in-progress` says, so three rapid pushes to `dev` would leave the
-      middle commit with no verdict — on the branch whose protection is this
-      check.
+    * No `pull_request` trigger (#171 criterion 7a) and no `concurrency` block —
+      a per-SHA group would make the same candidate SHA collide between its
+      scratch preflight and its `dev` push, which is exactly the sequence the
+      preflight route creates.
     """
     raw = (_ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
-    # Comments legitimately NAME the softeners in order to say they are absent,
-    # so scan the directives only.
+    # Comments legitimately NAME the removed triggers and the softeners in order
+    # to say they are absent, so scan the directives only.
     workflow = "\n".join(
         line for line in raw.splitlines() if not line.lstrip().startswith("#")
     )
-    assert "scripts/wave_gate.py ci --github-event" in workflow
+    assert "branches: [dev, 'scratch/**']" in workflow
+    for absent in ("pull_request", "workflow_dispatch", "concurrency",
+                   "cancel-in-progress", "github.event.before", "merge-base"):
+        assert absent not in workflow, absent
+
+    # ONE step carrying BOTH arms — not two strings loose in the file.
+    assert workflow.count("- name: Wave gate") == 1
+    assert workflow.count("scripts/wave_gate.py") == 2
+    assert 'ci \\\n                --github-event "$GITHUB_EVENT_PATH"' in workflow
+    assert 'ci --base "$base"' in workflow
+    assert "push:refs/heads/dev)" in workflow
+    assert "push:refs/heads/scratch/*)" in workflow
+    assert "refs/remotes/origin/dev^{commit}" in workflow
+    # The two fail-closed arms: an unresolvable baseline, and any other context.
+    assert "BASELINE_UNAVAILABLE cannot resolve refs/remotes/origin/dev" in workflow
+    assert "BASELINE_EVENT_INVALID unsupported event/ref" in workflow
+    assert workflow.count("exit 2") == 2
+
     assert "python-version: \"3.11\"" in workflow
     assert "requirements-dev.txt" in workflow
-    assert "fetch-depth: 0" in workflow          # PR merge-base needs full history
-    for softener in ("continue-on-error", "|| true", "if: always()"):
+    # Full ancestry: the preflight resolves origin/dev and proves descent from it.
+    assert "fetch-depth: 0" in workflow
+    for softener in ("continue-on-error", "|| true", "if: always()", "if: "):
         assert softener not in workflow, softener
-    # Push runs are keyed per commit, PR runs per ref.
-    assert "github.event_name == 'push'" in workflow
-    assert "github.sha" in workflow
-    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
+    assert "name: Python 3.11 non-KB" in workflow
+    assert "GITHUB_SHA: ${{ github.sha }}" in workflow
 
 
 # ===========================================================================
@@ -2017,6 +2122,54 @@ def test_the_checkout_must_be_the_tree_the_event_describes(tmp_path, monkeypatch
             {"kind": "pull_request", "target": base, "event_head": head},
         )
     assert excinfo.value.code == "CHECKOUT_EVENT_MISMATCH"
+
+    # ---- local CI arm (#171). The same binding, derived from the platform and
+    # from git's ancestry graph rather than from an event payload.
+    ctx_local = {"kind": "local", "sha": base, "target": None,
+                 "event_head": None, "after": None}
+    # Clean checkout, baseline in its ancestry, no Actions environment: accepted.
+    gate.check_checkout_matches_event(str(repo), ctx_local, ci_mode=True)
+
+    # Inside Actions the platform sha is MANDATORY and must BE the checkout.
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_SHA", other)          # `other` is HEAD here
+    gate.check_checkout_matches_event(str(repo), ctx_local, ci_mode=True)
+    for bad_sha in ("9" * 40, "not-a-sha", ""):
+        monkeypatch.setenv("GITHUB_SHA", bad_sha)
+        with pytest.raises(gate.GateFailure) as excinfo:
+            gate.check_checkout_matches_event(str(repo), ctx_local, ci_mode=True)
+        assert excinfo.value.code == "CHECKOUT_EVENT_MISMATCH", bad_sha
+    monkeypatch.delenv("GITHUB_SHA")                 # absent INSIDE Actions
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_checkout_matches_event(str(repo), ctx_local, ci_mode=True)
+    assert excinfo.value.code == "CHECKOUT_EVENT_MISMATCH"
+
+    # Outside Actions the variable is optional — `ci --base` stays usable
+    # locally — but a value that IS supplied is still validated.
+    monkeypatch.delenv("GITHUB_ACTIONS")
+    gate.check_checkout_matches_event(str(repo), ctx_local, ci_mode=True)
+    monkeypatch.setenv("GITHUB_SHA", "9" * 40)
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_checkout_matches_event(str(repo), ctx_local, ci_mode=True)
+    assert excinfo.value.code == "CHECKOUT_EVENT_MISMATCH"
+    monkeypatch.delenv("GITHUB_SHA")
+
+    # A baseline off this history is not an integration delta.
+    _run_git(repo, "checkout", "-q", "-b", "side")
+    off_history = _commit(repo, "a commit that is not in the candidate's ancestry")
+    _run_git(repo, "checkout", "-q", "main")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.check_checkout_matches_event(
+            str(repo), dict(ctx_local, sha=off_history), ci_mode=True
+        )
+    assert excinfo.value.code == "BASELINE_UNAVAILABLE"
+    assert "not an ancestor" in excinfo.value.message
+
+    # ...and the same non-ancestor baseline is accepted when this is NOT `ci`:
+    # `wave`/`manifests` keep their documented explicit-baseline latitude.
+    gate.check_checkout_matches_event(
+        str(repo), dict(ctx_local, sha=off_history), ci_mode=False
+    )
 
 
 def test_a_pr_merge_checkout_is_accepted(tmp_path):
@@ -2066,7 +2219,13 @@ def test_an_ambiguous_local_baseline_is_refused(tmp_path, make_second, rev):
 
 def test_an_unambiguous_local_baseline_is_accepted(tmp_path):
     repo, base = _seeded(tmp_path)
-    assert gate.resolve_baseline(str(repo), base=base)["sha"] == base
+    # The WHOLE context, not just the sha: `execute()` now derives `is_local`
+    # from `kind`, and the three event-only fields must be absent rather than
+    # carrying a stale value from some other arm.
+    assert gate.resolve_baseline(str(repo), base=base) == {
+        "sha": base, "kind": "local", "target": None,
+        "event_head": None, "after": None,
+    }
     assert gate.resolve_baseline(str(repo), base="HEAD")["sha"] == base
 
 
@@ -3032,7 +3191,10 @@ def test_a_usage_error_emits_the_coded_line_first(capsys):
     catching `SystemExit` leaves a machine consumer reading usage text first —
     the documented first-token contract says otherwise.
     """
-    status = gate.main(["ci", "--base", "HEAD"])
+    # Bare `ci` — since #171 `--base` is a VALID selector, so driving this with
+    # `ci --base HEAD` would run the whole gate against the real repository
+    # instead of exercising the usage boundary.
+    status = gate.main(["ci"])
     assert status == 2
     err = capsys.readouterr().err
     assert err.split()[0] == "GATE_USAGE_INVALID", err
@@ -3368,7 +3530,7 @@ def test_help_and_usage_survive_the_outermost_boundary(tmp_path, capsys):
     exists to catch.
     """
     assert gate.main(["--help"]) == 0
-    assert gate.main(["ci", "--base", "HEAD"]) == 2
+    assert gate.main(["ci"]) == 2          # bare `ci` — see #171 note above
     assert capsys.readouterr().err.split()[0] == "GATE_USAGE_INVALID"
 
 
@@ -4276,6 +4438,24 @@ def test_an_event_run_requires_a_clean_tree(tmp_path):
     )
     assert proc.returncode == 2, proc.stderr
     assert "CHECKOUT_EVENT_MISMATCH" in proc.stderr
+
+    # #171: `ci --base` gets the SAME rule — a preflight validates the committed
+    # candidate, never the runner's edits.
+    _expect(_gate(repo, "ci", "--base", base), 2, "CHECKOUT_EVENT_MISMATCH")
+
+    # ...and the SIBLING WITNESS that the rule is SCOPED rather than a blanket
+    # tightening: `manifests`/`wave --base` keep their documented dirty-tree
+    # support, because there the operator chose the baseline and the dirt is the
+    # subject. (`manifests` end-to-end plus the shared seam with `ci_mode=False`
+    # — running `wave` here would execute the whole suite for no extra evidence.)
+    status, stderr = _manifests(repo, base)
+    assert status == 0, stderr
+    gate.check_checkout_matches_event(
+        str(repo),
+        {"kind": "local", "sha": base, "target": None,
+         "event_head": None, "after": None},
+        ci_mode=False,
+    )
 
 
 @pytest.mark.parametrize(

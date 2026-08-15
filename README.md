@@ -539,12 +539,20 @@ run. If you develop on 3.12, expect CI to be the stricter of the two.
 
 ### The gate
 
-Every push to `dev` and every PR targeting `dev` runs
-`.github/workflows/tests.yml`, whose only step is:
+Every push to `dev` — and every push to a `scratch/**` branch — runs
+`.github/workflows/tests.yml`, whose only step selects one of two routes:
 
 ```bash
+# push to dev — DETECTION on the pushed tip; the event supplies the baseline
 python scripts/wave_gate.py ci --github-event "$GITHUB_EVENT_PATH"
+
+# push to scratch/** — PREFLIGHT on a candidate, before it is fast-forwarded
+python scripts/wave_gate.py ci --base "$(git rev-parse refs/remotes/origin/dev^{commit})"
 ```
+
+So you can run the real gate on a branch before pushing to `dev`, without
+opening a pull request. There is deliberately **no `pull_request` trigger**: a PR
+run validates the synthetic merge tree rather than the commit that would land.
 
 The gate refuses to believe a green pytest run on its own. It also checks a
 committed manifest of required node ids, a committed collection floor, and the
@@ -562,7 +570,14 @@ determinism, then equality with the committed golden) and the #153
 plan-fingerprint seam — currently reported as `PLAN_FINGERPRINT_PENDING issue=#153` and
 made fatal by `--require-plan-fingerprint`.
 
-`--base` is **required** and never inferred. Exit codes: `0` pass, `1` a
+`--base` is **required** and never inferred. `ci` takes **exactly one** of
+`--base` / `--github-event`; neither or both is a usage error. `ci --base` also
+requires a clean checkout and a baseline that is an ancestor of `HEAD` — it is a
+preflight for a commit about to be fast-forwarded, so it validates the committed
+candidate and an actual integration delta. `wave --base` and `manifests --base`
+keep their dirty-tree support on purpose.
+
+Exit codes: `0` pass, `1` a
 validation failed, `2` a contract failure (usage, baseline, manifest). Every
 failure prints a stable diagnostic code first on stderr.
 
@@ -593,17 +608,18 @@ diagnostic, so treat a pass as "nothing this check can see changed".
 
 The check is named **`Python 3.11 non-KB`**, and on `dev` it runs on each push that
 starts it — note that a head commit carrying `[skip ci]` starts no run at all.
-It is **not** a GitHub *required status check*. This repository integrates by
-pushing to `dev` directly, never by pull request, and with today's triggers a
-ruleset would reject such a push outright — the commit carries no passing check
-yet, and the check cannot run until the push lands. So what the gate provides is
-**detection on the pushed tip, not prevention**. Because nothing outside the pushed
-tree gets a vote, anything that stops the workflow from starting also stops the
-failure from being seen: a head commit carrying `[skip ci]`, or a push that removes
-the workflow from discovery or drops `dev` from its filter, lands with no run at
-all. Nor can the gate be run on a branch by any convention-compliant means — only
-by opening a pull request, which this repository does not do
-([#171](https://github.com/RenEra-ai/boomi-mcp-server/issues/171)). Spec §10
+It is **not** a GitHub *required status check*, so what the gate provides is
+**detection on the pushed tip, plus an optional preflight — not prevention**.
+Because nothing outside the pushed tree gets a vote, anything that stops the
+workflow from starting also stops the failure from being seen: a head commit
+carrying `[skip ci]`, or a push that removes the workflow from discovery or drops
+`dev` from its filter, lands with no run at all. Those remain explicitly tracked
+residuals. What is no longer true is that the gate cannot be run on a branch: a
+push to `scratch/**` runs it on the candidate itself, with no pull request
+([#171](https://github.com/RenEra-ai/boomi-mcp-server/issues/171)) — but nothing
+compels a candidate through that preflight. Whether the preflight makes a
+required-check ruleset viable is **undecided pending a measured experiment**,
+which spec §10 specifies rather than predicts. Spec §10
 enumerates the known gaps — and says plainly that the list is not claimed
 exhaustive. Full specification:
 [`docs/architecture/ENDGAME_VERIFICATION_GATE.md`](docs/architecture/ENDGAME_VERIFICATION_GATE.md).
@@ -637,7 +653,7 @@ boomi-mcp-server/
 ├── scripts/                   # Operational scripts
 │   └── wave_gate.py           # The fail-closed CI / per-wave verification gate
 ├── .github/workflows/
-│   └── tests.yml              # Verification gate: 3.11 non-KB suite on dev push
+│   └── tests.yml              # Verification gate: 3.11 non-KB suite on dev push + scratch/** preflight
 ├── local_atom/                # Helpers for the local-atom dev profile
 ├── requirements.txt           # Core dependencies (FastMCP, ...)
 ├── requirements-dev.txt       # Non-KB test environment (what CI installs)

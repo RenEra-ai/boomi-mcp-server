@@ -1,12 +1,33 @@
-# The verification gate for `dev`.
+# The verification gate for `dev`, plus a convention-compliant PREFLIGHT.
 #
-# It is NOT wired as a GitHub "required status check": this repo integrates by
-# fast-forward push to `dev`, never by pull request, and with only the two
-# triggers below a ruleset would reject such a push outright — the commit has no
-# passing check yet, and the check cannot run until the push lands. So this run is
-# DETECTION on the pushed tip, not prevention — and note that a head commit
-# carrying `[skip ci]` starts no run at all. #171 tracks running the gate on a
-# scratch branch before pushing. See §10 of the spec for the full bound.
+# Two routes, one gate:
+#   * push to `dev`         — DETECTION on the pushed tip. The baseline is the
+#                             event's own `before`, so the platform supplies it.
+#   * push to `scratch/**`  — PREFLIGHT on the candidate, before it is
+#                             fast-forwarded. The baseline is the exact fetched
+#                             `refs/remotes/origin/dev` commit, and the gate
+#                             proves the candidate descends from it.
+#
+# There is deliberately NO `pull_request` trigger: this repo integrates by
+# fast-forward push and never by PR, and a PR run validates the synthetic MERGE
+# tree rather than the commit that would actually land (#171 criterion 7a). The
+# `pull_request` baseline resolver remains in `scripts/wave_gate.py` with full
+# unit coverage; it is simply unreachable from CI. There is no
+# `workflow_dispatch` either — dispatch is honoured only for workflows present
+# on the default branch, and `main` carries no `.github/workflows`.
+#
+# There is deliberately NO `concurrency` block. Its `cancel-in-progress`
+# expression was PR-only and is now dead, and a per-SHA group would make the
+# SAME candidate SHA collide between its `scratch/**` preflight and the later
+# `dev` push — exactly the sequence this workflow now creates. Every pushed ref
+# gets its own verdict; the cost is more parallel runner minutes.
+#
+# Required-status disposition: still DETECTION, not prevention. Enabling
+# `Python 3.11 non-KB` as a required check on `dev` needs a measured
+# ruleset/check-run association experiment and repo-admin authority; that
+# experiment is specified in spec §10 and tracked separately, and nothing here
+# asserts its outcome. A head commit carrying `[skip ci]` still starts no run at
+# all — an explicitly tracked residual, also in §10.
 #
 # Runs the full non-KB suite on Python 3.11 — the interpreter production runs
 # (`Dockerfile:5`, `python:3.11-slim`). Local development uses a 3.12 `.venv`;
@@ -25,33 +46,10 @@ name: Python tests
 
 on:
   push:
-    branches: [dev]
-  pull_request:
-    branches: [dev]
+    branches: [dev, 'scratch/**']
 
 permissions:
   contents: read
-
-concurrency:
-  # Pushes get a group PER COMMIT, so they never queue against each other.
-  #
-  # `cancel-in-progress: false` is not enough on its own: GitHub cancels any
-  # previously PENDING run in a group when a new run enters it, whatever that
-  # flag says. (Provenance: documented platform behaviour, not measured here —
-  # but the design does not DEPEND on it being true. A per-SHA group has no
-  # queue to cancel either way, so this rationale explains the choice without
-  # the choice resting on it.) With a shared per-ref group, three rapid pushes
-  # to `dev` leave
-  # the middle commit cancelled with no verdict — and since a push is the only
-  # way work reaches `dev` here, a missing verdict is a commit nothing checked.
-  # A per-SHA group removes the queue entirely.
-  #
-  # PRs keep a shared per-ref group and DO cancel superseded runs: there the
-  # only verdict that matters is the head commit's.
-  group: >-
-    ${{ github.workflow }}-${{ github.event_name == 'push'
-        && github.sha || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   non-kb-python311:
@@ -83,10 +81,12 @@ jobs:
       BOOMI_GOTCHAS_ENABLED: "false"
 
     steps:
-      # fetch-depth: 0 is REQUIRED, not tidiness: the gate resolves a PR's
-      # baseline with `git merge-base`, and a shallow checkout has no merge base
-      # — which the gate reports as BASELINE_MERGE_BASE_MISSING rather than
-      # guessing.
+      # fetch-depth: 0 is REQUIRED, not tidiness. The scratch preflight resolves
+      # `refs/remotes/origin/dev` and the gate then proves the candidate descends
+      # from it, which needs the full remote ref set and complete ancestry — a
+      # shallow checkout has neither. (The `pull_request` merge-base path that
+      # originally motivated it is no longer triggered, but the requirement is
+      # unchanged and stricter.)
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -116,14 +116,39 @@ jobs:
       - name: Install the non-KB test environment
         run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
 
-      # The single gate. No `continue-on-error`, no `|| true`, no conditional
-      # skip: any non-zero exit fails the job.
+      # The single gate. No `continue-on-error`, no `|| true`, no step-level
+      # conditional: any non-zero exit fails the job, and an unrecognized context
+      # REFUSES rather than skipping — two conditional steps could both skip and
+      # leave a green job that checked nothing.
       - name: Wave gate (manifests, collection floor, required nodes, full suite)
-        # GITHUB_SHA is the commit Actions checked out — for a pull_request that
-        # is the merge commit it built. The gate binds the tree under test to it,
-        # because `pull_request.merge_commit_sha` in the payload is NULLABLE
-        # (GitHub computes mergeability asynchronously). Passed explicitly so the
-        # binding does not depend on ambient environment.
+        # GITHUB_SHA is the commit Actions checked out. The gate binds HEAD to it
+        # for every `ci` context, so a step that edited the tree cannot pass its
+        # own bytes off as the candidate. Passed explicitly so the binding does
+        # not depend on ambient environment.
         env:
           GITHUB_SHA: ${{ github.sha }}
-        run: python scripts/wave_gate.py ci --github-event "$GITHUB_EVENT_PATH"
+        run: |
+          set -euo pipefail
+          event="${GITHUB_EVENT_NAME-}"
+          ref="${GITHUB_REF-}"
+
+          case "${event}:${ref}" in
+            push:refs/heads/dev)
+              exec python scripts/wave_gate.py ci \
+                --github-event "$GITHUB_EVENT_PATH"
+              ;;
+            push:refs/heads/scratch/*)
+              if ! base="$(git rev-parse --verify \
+                  'refs/remotes/origin/dev^{commit}' 2>/dev/null)"; then
+                printf '%s\n' \
+                  'BASELINE_UNAVAILABLE cannot resolve refs/remotes/origin/dev' >&2
+                exit 2
+              fi
+              exec python scripts/wave_gate.py ci --base "$base"
+              ;;
+            *)
+              printf 'BASELINE_EVENT_INVALID unsupported event/ref: %s %s\n' \
+                "$event" "$ref" >&2
+              exit 2
+              ;;
+          esac

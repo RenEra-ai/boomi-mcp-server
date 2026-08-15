@@ -13,9 +13,16 @@ open, assert-a-floor fails closed.
 
 WHAT IT CHECKS
 --------------
-``ci``   — the verification gate wired to pushes to ``dev`` (and to PRs targeting
-           it, though this repo does not use PRs).  It runs only when GitHub
-           starts the workflow: a ``[skip ci]`` head commit starts no run at all.
+``ci``   — the verification gate.  It takes EXACTLY ONE baseline selector:
+           ``--github-event`` (the workflow's ``dev`` arm, where the platform
+           supplies the baseline) or ``--base`` (the workflow's ``scratch/**``
+           preflight arm, where the baseline is the fetched ``origin/dev``
+           commit).  Either way the checkout must be CLEAN and, for ``--base``,
+           the baseline must be an ancestor of ``HEAD`` — a preflight that does
+           not validate an integration delta validates nothing.  ``pull_request``
+           baseline resolution remains implemented and unit-tested but is no
+           longer wired to any trigger.  It runs only when GitHub starts the
+           workflow: a ``[skip ci]`` head commit starts no run at all.
            See spec §10.  Baseline + manifest transition, then collection
            (floor, required nodes, reconciliation), then the full non-KB suite.
 ``wave`` — everything ``ci`` does, plus the per-wave obligations: every ACTIVE
@@ -463,8 +470,8 @@ def _refuse_unreadable(proc, what):
         )
 
 
-def check_checkout_matches_event(repo, context):
-    """The tree under test must be the tree the event describes.
+def check_checkout_matches_event(repo, context, *, ci_mode=False):
+    """The tree under test must be the tree the run's authority describes.
 
     Without this the gate reads its baseline from one place and its evidence from
     another: a PR carrying an illegal manifest rewrite can be described by the
@@ -475,22 +482,47 @@ def check_checkout_matches_event(repo, context):
     A ``pull_request`` run legitimately checks out ``refs/pull/N/merge``, a merge
     commit whose parents are the head and the base, so both that merge and a bare
     head checkout are accepted.
+
+    ``ci_mode`` is the SCOPE of the stronger rule, and it is deliberately NOT the
+    baseline kind. ``wave --base`` and ``manifests --base`` validate uncommitted
+    work on purpose — there the operator chose the baseline and the dirt is the
+    subject. ``ci --base`` is the opposite: it is a PREFLIGHT for a commit that is
+    about to be fast-forwarded, so the bytes under test must be exactly the
+    committed candidate, and the candidate must descend from the baseline it
+    claims to integrate onto. The authority for both facts lives outside this
+    process (git's ancestry graph; the runner's ``GITHUB_SHA``), so the invariant
+    is derived from them rather than hand-modelled here.
     """
-    if context["kind"] in ("push", "pull_request"):
+    if ci_mode or context["kind"] in ("push", "pull_request"):
         # Comparing only the HEAD COMMIT would accept a runner whose worktree had
         # been edited: `_status` snapshots that dirty state and then merely checks
         # it does not change, so the gate would validate bytes that are not in the
-        # event's tree at all. CI checkouts are clean; local `--base` runs keep
-        # their dirty-tree support because the operator chose the baseline.
+        # candidate tree at all. CI checkouts are clean; local `wave`/`manifests`
+        # `--base` runs keep their dirty-tree support because the operator chose
+        # the baseline.
         dirty = _git(repo, "status", "--porcelain", "--untracked-files=normal").stdout
         if dirty.strip():
             raise _contract(
                 "CHECKOUT_EVENT_MISMATCH",
-                "the worktree is not clean, so the tree under test is not the tree "
-                "the {0} event describes:\n{1}".format(context["kind"], dirty),
+                "the worktree is not clean, so the tree under test is not the "
+                "committed tree this {0} run describes:\n{1}".format(
+                    context["kind"], dirty
+                ),
             )
 
     head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    # Every `ci` context is bound to the platform's own checkout identity, not
+    # just the local one: a single binding covers push, pull_request and local
+    # alike, where per-arm bindings would be an enumeration to keep in step.
+    if ci_mode:
+        _bind_head_to_platform_sha(head)
+
+    if context["kind"] == "local":
+        if not ci_mode:
+            return
+        _refuse_baseline_off_this_history(repo, context["sha"], head)
+        return
     if context["kind"] == "push":
         expected = context.get("after")
         if expected and head != expected:
@@ -543,6 +575,56 @@ def check_checkout_matches_event(repo, context):
             head[:12], (event_head or "?")[:12], merge_sha[:12]
         ),
     )
+
+
+def _bind_head_to_platform_sha(head):
+    """Bind the checkout to the commit the PLATFORM says it checked out.
+
+    Inside GitHub Actions ``GITHUB_SHA`` is always set and is the commit
+    ``actions/checkout`` materialised — for a push it is the pushed tip, for a
+    ``pull_request`` it is the merge commit that was built. It is the one
+    identity a workflow step cannot forge by editing the tree, so every ``ci``
+    context is bound to it. Outside Actions the variable is absent and
+    ``ci --base`` stays usable locally — but a value that IS supplied is
+    validated, because a half-honoured binding is the fail-open shape.
+    """
+    raw = os.environ.get("GITHUB_SHA")
+    in_actions = os.environ.get("GITHUB_ACTIONS") == "true"
+    if raw is None and not in_actions:
+        return
+    if not raw or not _SHA_RE.match(raw):
+        raise _contract(
+            "CHECKOUT_EVENT_MISMATCH",
+            "GITHUB_SHA is {0!r}, not a 40-character lowercase sha; the tree "
+            "under test cannot be bound to the commit the platform checked "
+            "out".format(raw),
+        )
+    if head != raw:
+        raise _contract(
+            "CHECKOUT_EVENT_MISMATCH",
+            "the checkout is at {0} but the platform reports {1} as the commit "
+            "it checked out".format(head[:12], raw[:12]),
+        )
+
+
+def _refuse_baseline_off_this_history(repo, baseline, head):
+    """An explicit ``ci`` baseline must be an ancestor of HEAD (equality included).
+
+    ``ci --base`` exists to validate an INTEGRATION DELTA: the candidate is about
+    to be fast-forwarded onto the branch the baseline names. A baseline that is
+    not in the candidate's ancestry has no such delta — the manifest transition
+    would be computed against an unrelated tree, and a diverged branch would
+    preflight green and then be unmergeable. ``git merge-base --is-ancestor`` is
+    the runtime authority; nothing here re-models reachability.
+    """
+    probe = _git(repo, "merge-base", "--is-ancestor", baseline, "HEAD", check=False)
+    if probe.returncode != 0:
+        raise _contract(
+            "BASELINE_UNAVAILABLE",
+            "the baseline {0} is not an ancestor of the checkout {1}, so this is "
+            "not an integration delta; rebase the candidate onto the baseline "
+            "and re-run".format(baseline[:12], head[:12]),
+        )
 
 
 # --------------------------------------------------------------------------
@@ -915,7 +997,8 @@ def resolve_baseline(repo, *, event_path=None, event_name=None, base=None):
               it would compare the new tip with itself and validate nothing.
     local run an explicit ``--base``.  No ``HEAD^``, no branch, no remote fetch:
               an inferred local baseline is how a gate silently reviews the
-              wrong range.
+              wrong range.  ``ci --base`` additionally requires that baseline to
+              be an ancestor of the checkout (`check_checkout_matches_event`).
     """
     if base is not None:
         if event_path is not None:
@@ -933,7 +1016,8 @@ def resolve_baseline(repo, *, event_path=None, event_name=None, base=None):
     if event_path is None:
         raise _contract(
             "BASELINE_EVENT_INVALID",
-            "no baseline: pass --base <commit> locally, or --github-event <path> in CI",
+            "no baseline: pass exactly one of --base <commit> or "
+            "--github-event <path>",
         )
 
     name = event_name or os.environ.get("GITHUB_EVENT_NAME") or ""
@@ -2387,12 +2471,15 @@ def execute(args):
         base=explicit_base,
     )
     baseline = context["sha"]
-    check_checkout_matches_event(repo, context)
+    check_checkout_matches_event(repo, context, ci_mode=args.command == "ci")
     _emit("wave_gate: baseline {0} ({1})".format(baseline, context["kind"]))
 
     current, bootstrapping = run_manifest_phase(
         repo, baseline,
-        is_local=explicit_base is not None,
+        # The RESOLVED context is the single authority for "is this a local
+        # baseline" — an `explicit_base is not None` re-derivation is a second
+        # copy of a fact `resolve_baseline` already decided.
+        is_local=context["kind"] == "local",
         bootstrap_flag=getattr(args, "bootstrap", False),
         target=context["target"],
     )
@@ -3192,8 +3279,16 @@ def build_parser():
     ci = subparsers.add_parser(
         "ci", help="the required CI check: manifests + collection + full non-KB suite",
     )
-    ci.add_argument("--github-event", required=True, metavar="PATH",
-                    help="path to the GitHub event payload ($GITHUB_EVENT_PATH)")
+    # EXACTLY ONE selector, the same shape `manifests` uses. `required=True` keeps
+    # bare `ci` an argparse usage error carrying GATE_USAGE_INVALID; making the
+    # group optional would instead surface `resolve_baseline`'s
+    # BASELINE_EVENT_INVALID and change an established public failure contract.
+    ci_source = ci.add_mutually_exclusive_group(required=True)
+    ci_source.add_argument("--base", metavar="COMMIT",
+                           help="the baseline commit (the scratch preflight arm: "
+                                "the exact fetched origin/dev commit)")
+    ci_source.add_argument("--github-event", metavar="PATH",
+                           help="path to the GitHub event payload ($GITHUB_EVENT_PATH)")
     ci.add_argument("--event-name", default=None,
                     help="override GITHUB_EVENT_NAME (tests only)")
 
@@ -3405,9 +3500,9 @@ def _report(text, fallback=None):
 def main(argv=None):
     try:
         # INSIDE the boundary. argparse exits 2 with usage text and no code, so
-        # parsing outside it left a class of invocations — `ci --base ...` — that
-        # failed without a stable diagnostic, contradicting the contract that
-        # EVERY failure carries one.
+        # parsing outside it left a class of invocations — bare `ci`, and `ci`
+        # with BOTH baseline selectors — that failed without a stable diagnostic,
+        # contradicting the contract that EVERY failure carries one.
         try:
             args = build_parser().parse_args(argv)
         except _HelpRequested:

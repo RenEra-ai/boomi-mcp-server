@@ -9548,7 +9548,7 @@
 {"kind":"test","id":"pytest-009547","node_id":"tests/test_wave_gate.py::test_the_active_floor_must_EQUAL_the_row_count","state":"active"}
 {"kind":"test","id":"pytest-009548","node_id":"tests/test_wave_gate.py::test_the_active_floor_must_track_appends_and_tombstones_exactly","state":"active"}
 {"kind":"test","id":"pytest-009549","node_id":"tests/test_wave_gate.py::test_the_checkout_must_be_the_tree_the_event_describes","state":"active"}
-{"kind":"test","id":"pytest-009550","node_id":"tests/test_wave_gate.py::test_the_ci_subcommand_refuses_a_bare_base","state":"active"}
+{"kind":"test","id":"pytest-009550","node_id":"tests/test_wave_gate.py::test_the_ci_subcommand_refuses_a_bare_base","state":"tombstone"}
 {"kind":"test","id":"pytest-009551","node_id":"tests/test_wave_gate.py::test_the_closing_fingerprint_cannot_exit_green_on_an_unexpected_error","state":"active"}
 {"kind":"test","id":"pytest-009552","node_id":"tests/test_wave_gate.py::test_the_code_whitelist_cannot_run_foreign_code","state":"active"}
 {"kind":"test","id":"pytest-009553","node_id":"tests/test_wave_gate.py::test_the_collection_floor_may_rise_freely_but_only_fall_by_a_tombstone","state":"active"}
@@ -9787,3 +9787,4 @@
 {"kind":"test","id":"pytest-009786","node_id":"tests/test_xml_profile_namespace_attribute.py::test_xsd_target_namespace_prefixed_type_ref_resolves","state":"active"}
 {"kind":"test","id":"pytest-009787","node_id":"tests/test_wave_gate.py::test_diagnostic_codes_named_in_the_audit_ledger_exist","state":"active"}
 {"kind":"test","id":"pytest-009788","node_id":"tests/test_wave_gate.py::test_audit_ledger_attestations_have_durable_matching_evidence","state":"active"}
+{"kind":"test","id":"pytest-009789","node_id":"tests/test_wave_gate.py::test_ci_requires_exactly_one_baseline_selector","state":"active"}
