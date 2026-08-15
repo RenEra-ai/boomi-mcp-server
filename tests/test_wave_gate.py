@@ -1835,11 +1835,25 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
     # (same-length whitespace, so source positions survive) exactly as
     # inline_codes() excises.
     def _covered_spans(text):
+        fences = [m.span() for m in _re.finditer(r"```.*?```", text, _re.S)]
         spans = [m.span(1) for m in _re.finditer(r"```.*?\n(.*?)```", text, _re.S)]
         blanked = _re.sub(
             r"```.*?```", lambda m: " " * len(m.group(0)), text, flags=_re.S
         )
-        spans += [m.span() for m in _re.finditer(r"(`+)(.+?)\1", blanked, _re.S)]
+        # An inline span may OPEN before an excised fence and CLOSE after it. The
+        # scan feeds _judge() only the surviving characters, so the blanked fence
+        # inside the span — including its unparsed opener line — is NOT covered:
+        # keep the gaps, or an opener token would be masked as if parsed.
+        for a, b in (m.span() for m in _re.finditer(r"(`+)(.+?)\1", blanked, _re.S)):
+            cur = a
+            for fa, fb in fences:
+                if fb <= cur or fa >= b:
+                    continue
+                if fa > cur:
+                    spans.append((cur, fa))
+                cur = max(cur, fb)
+            if cur < b:
+                spans.append((cur, b))
         return spans
 
     def _uncovered_text(text):
@@ -1898,6 +1912,14 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
     opener = "```PYTEST_FAILED\nbody text\n```"
     assert fenced_codes(opener) == set()
     assert _hidden_occurrences(opener, {"PYTEST_FAILED"}) == [("PYTEST_FAILED", 3)]
+    # 4. an inline span that OPENS before a fence and CLOSES after it: no scan
+    #    parses the opener token inside it, so the straddling span must not mask
+    #    the malformed opener from the uncovered-candidate judge.
+    straddle = "`a ```PYTEST_FAILD\nx\n``` b`"
+    assert named_codes(straddle) == set()
+    assert _judge(
+        _re.findall(r"\b({0})\b".format(_CANDIDATE), _uncovered_text(straddle))
+    ) == {"PYTEST_FAILD"}
 
 
 def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
