@@ -3267,6 +3267,40 @@ def test_a_second_outcome_summary_is_refused(capsys):
     assert excinfo.value.status == 1
 
 
+def test_a_summary_evicted_from_the_tail_is_still_counted(tmp_path, monkeypatch, capsys):
+    """The one-summary rule must bind on the STREAM, not on the retained tail.
+
+    `run_suite` keeps a bounded 400-line ring for error context. Applying the rule
+    to that ring enforced it against a DERIVED view: an `atexit` handler emitting
+    400+ lines after pytest's genuine summary evicts it, leaving the fabricated
+    one alone in the buffer — exactly one summary, zero skips, and a mass-skipped
+    suite passes. Measured on the tail-only view:
+    `{'passed': 9773, 'failed': 0, 'skipped': 0, 'errors': 0}`.
+
+    This drives `run_suite` itself. A test that only called `_parse_suite_summary`
+    would have passed against the broken version, because the parser was never
+    the defect.
+    """
+    lines = (
+        ["==== 9740 passed, 33 skipped in 700.00s ===="]
+        + ["noise line %d" % i for i in range(450)]
+        + ["==== 9773 passed in 0.01s ===="]
+    )
+
+    class _FakeProc:
+        stdout = iter("%s\n" % line for line in lines)
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(gate.subprocess, "Popen", lambda *a, **k: _FakeProc())
+
+    manifest = gate.parse_manifest(_default_nodes(), "pytest-nodes")
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate.run_suite(str(tmp_path), manifest, {"tests/test_x.py::test_1"})
+    assert excinfo.value.code == "PYTEST_SUMMARY_AMBIGUOUS"
+
+
 def test_a_failure_whose_diagnostic_explodes_still_exits_nonzero(capsys):
     """The exit decision precedes rendering, so no dunder can reach it.
 

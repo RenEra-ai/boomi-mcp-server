@@ -1455,17 +1455,27 @@ def run_suite(repo, nodes_manifest, collected):
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
     )
     tail = []
+    # Summary candidates are counted WHILE STREAMING, never from `tail`. The tail
+    # is a bounded ring for error context; applying the one-summary rule to it
+    # made the rule enforceable against a DERIVED view rather than the authority.
+    # An `atexit` handler emitting 400+ lines after pytest's genuine summary
+    # evicts that summary from the ring, leaving the fabricated one alone in the
+    # buffer — exactly one summary, zero skips, and a mass-skipped suite passes.
+    summaries = []
     # Streamed, not captured: a 13-minute silent step is unreadable in a CI log,
     # and buffering the whole run to parse it at the end would produce exactly
     # that.
     for line in proc.stdout:
         sys.stderr.write(line)
+        stripped = line.strip().strip("=").strip()
+        if _is_summary_line(stripped):
+            summaries.append(stripped)
         tail.append(line)
         if len(tail) > 400:
             del tail[0]
     sys.stderr.flush()
     status = proc.wait()
-    summary = _parse_suite_summary("".join(tail))
+    summary = _summary_from_candidates(summaries)
 
     if status != 0:
         raise _invalid(
@@ -1500,6 +1510,38 @@ def run_suite(repo, nodes_manifest, collected):
     return summary
 
 
+def _is_summary_line(stripped):
+    """Does this line have the shape of pytest's outcome summary?"""
+    if not re.search(r"\b\d+ (passed|failed|skipped|error)", stripped):
+        return False
+    return " in " in stripped
+
+
+def _summary_from_candidates(summaries):
+    """Turn the COMPLETE set of summary-shaped lines into counts, fail-closed."""
+    counts = {"passed": 0, "failed": 0, "skipped": 0, "errors": 0}
+    if len(summaries) > 1:
+        raise _invalid(
+            "PYTEST_SUMMARY_AMBIGUOUS",
+            "pytest produced {0} outcome summaries; the gate cannot tell which "
+            "is the run's result: {1!r}".format(len(summaries), summaries[:3]),
+        )
+    if not summaries:
+        raise _invalid(
+            "PYTEST_SUMMARY_UNPARSEABLE",
+            "the suite produced no parseable outcome summary; its result cannot "
+            "be accounted for, so it is not a pass",
+        )
+    for stripped in summaries:
+        for key, pattern in (
+            ("passed", r"(\d+) passed"), ("failed", r"(\d+) failed"),
+            ("skipped", r"(\d+) skipped"), ("errors", r"(\d+) error"),
+        ):
+            match = re.search(pattern, stripped)
+            counts[key] = int(match.group(1)) if match else 0
+    return counts
+
+
 def _parse_suite_summary(text):
     """Read pytest's outcome counts out of its final summary line.
 
@@ -1514,35 +1556,13 @@ def _parse_suite_summary(text):
     Two summaries are not a tie to be broken by position; they mean the stream is
     not the one thing the gate can read an outcome from, so it fails closed.
     """
-    counts = {"passed": 0, "failed": 0, "skipped": 0, "errors": 0}
-    summaries = []
-    for line in text.splitlines():
-        stripped = line.strip().strip("=").strip()
-        if not re.search(r"\b\d+ (passed|failed|skipped|error)", stripped):
-            continue
-        if " in " not in stripped:
-            continue
-        summaries.append(stripped)
-    if len(summaries) > 1:
-        raise _invalid(
-            "PYTEST_SUMMARY_AMBIGUOUS",
-            "pytest produced {0} outcome summaries; the gate cannot tell which "
-            "is the run's result: {1!r}".format(len(summaries), summaries[:3]),
-        )
-    seen = bool(summaries)
-    for stripped in summaries:
-        for key, pattern in (
-            ("passed", r"(\d+) passed"), ("failed", r"(\d+) failed"),
-            ("skipped", r"(\d+) skipped"), ("errors", r"(\d+) error"),
-        ):
-            match = re.search(pattern, stripped)
-            counts[key] = int(match.group(1)) if match else 0
-    if not seen:
-        raise _invalid(
-            "PYTEST_SUMMARY_UNPARSEABLE",
-            "the suite produced no parseable outcome summary; its result cannot "
-            "be accounted for, so it is not a pass",
-        )
+    return _summary_from_candidates(
+        [
+            line.strip().strip("=").strip()
+            for line in text.splitlines()
+            if _is_summary_line(line.strip().strip("=").strip())
+        ]
+    )
     return counts
 
 
