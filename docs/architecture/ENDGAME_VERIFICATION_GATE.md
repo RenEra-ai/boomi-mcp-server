@@ -583,7 +583,7 @@ been found inert because only their passing branch was ever exercised, so a new
 guard ships with the mutation that proves it can fail. The antecedent's reach is
 the corpus's own function boundary — arguments in, values out; state handed
 straight to a production builder without crossing it is not covered, and that
-residue is tracked as a follow-up rather than claimed here.
+residue is a known, accepted limitation rather than claimed away here.
 
 Where a case input already lives in a committed JSON fixture
 (`sync_pipeline_emitter_parity_cases.json`, the `rich_control/` and
@@ -922,21 +922,34 @@ which only affects branch creation and makes the `dev` rule the stricter of the 
 temporary ruleset and the disposable branch were removed (`measured here`, four captures
 archived: `rulesets` lists one ruleset, `rules/branches/dev` reports the required check,
 `branches/dev` now reads `protected: true` while `/protection` still 404s, and the
-`scratch/**` ref listing is empty). One piece of experiment litter was cleaned up too:
+`scratch/**` ref listing is empty). One piece of experiment litter was
+handled, and the handling is worth recording because the first account of it was wrong:
 the positive-control push started a run on the since-deleted experiment branch, which was
-cancelled so it could not leave a stray verdict for the required context on `dev`'s tip.
+cancelled. Cancelling did NOT remove a verdict — it CREATED one (`measured here`: a
+`Python 3.11 non-KB` check run with `conclusion: cancelled`, now the newest result for the
+required context on `ffae2a1`). Consequence, stated because it is a real if narrow cost:
+re-pushing `dev` at that exact tip would present a non-success newest result for the
+required context. `dev` has since moved past it, so nothing is blocked today; a rollback
+TO that tip would need the rule bypassed or a fresh run.
 
 **What is measured on `dev` itself, and what is not — stated precisely because this
 section's history is one of claiming more than was run.** The controls above were measured
 on `scratch/ruleset-experiment`; the `dev` rule is byte-identical in its required context
-and was verified live via `rules/branches/dev`. But at the time this paragraph was
-written, **no push to `dev` had yet occurred under the rule**: `dev`'s tip `ffae2a1`
-acquired its checks ~37 minutes BEFORE the rule existed. The first fast-forward to `dev`
-under the rule is therefore still OWED, and — by design — it is this slice's own landing
-push, which must first earn a green check on a `scratch/**` preflight exactly as the new
-requirement demands. Its transcript is recorded in #172's ledger and closing report. Until
-that row exists, treat every `dev`-scoped statement here as *inferred from a rule measured
-on an equivalent branch* rather than as a `dev` observation.
+and was verified live via `rules/branches/dev`. When that paragraph was first written no push to
+`dev` had yet occurred under the rule, and it said so. **That measurement has since been
+taken** (`measured here`, transcript archived as
+[`criterion5-dev-fastforward.txt`](evidence/issue-172/rulesets/criterion5-dev-fastforward.txt)):
+this slice's own landing commit `290b646` earned a green `Python 3.11 non-KB` check on a
+`scratch/**` preflight and was then fast-forwarded onto `dev` — `ffae2a1..290b646`, exit
+code 0.
+
+That landing is also the clean isolation the positive control could not provide: `290b646`
+carried **exactly one** check run for the required context, and its only source was the
+scratch preflight. So the operational claim this whole regime rests on — *a check produced
+by a `scratch/**` preflight is what satisfies the `dev` rule* — is now measured directly
+rather than inferred. A second fact falls out of the archived positive control, which
+pushed three commits at once: its two intermediates carried zero checks and it was still
+accepted, so the rule evaluates the pushed HEAD only.
 
 **What this changes.** The gate is no longer detection-only on `dev`: a push whose head
 commit lacks a successful `Python 3.11 non-KB` check is refused, including one that

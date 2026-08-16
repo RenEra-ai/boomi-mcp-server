@@ -1,0 +1,11 @@
+=== CRITERION 5: a real fast-forward push of an exact green SHA to `dev`, under the rule ===
+candidate: 290b6465216c26d3d18c9c954bf4e941132f6099
+dev before: ffae2a19906810e34ccec72628e29d09a7b4561e
+checks on the candidate (its ONLY source is the scratch preflight):
+  Python 3.11 non-KB app=github-actions status=completed conclusion=success
+command: git push origin 290b646:refs/heads/dev
+--- stdout+stderr ---
+To github.com:RenEra-ai/boomi-mcp-server.git
+   ffae2a1..290b646  290b6465216c26d3d18c9c954bf4e941132f6099 -> dev
+--- exit code: 0 ---
+dev after: 290b6465216c26d3d18c9c954bf4e941132f6099

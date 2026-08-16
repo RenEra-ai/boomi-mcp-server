@@ -67,7 +67,8 @@ CONTRACT
   sees the corpus's own function boundary, so 57 of 60 cases are covered (the
   three ``recipe:*`` cases call no corpus function), and state reaching
   production without crossing that boundary — or becoming module state during a
-  render — is out of its reach and tracked in #174.
+  render — is out of its reach. That is an accepted limitation, not tracked work:
+  no such leak exists today, and every in-tree protective copy is individually pinned.
 * Per-section import SPELLING is load-bearing.  This repo has a bare/``src.``
   dual-module hazard: importing the other spelling yields a DIFFERENT class
   object.  Each section below imports its builders with the SAME spelling the

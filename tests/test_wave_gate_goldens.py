@@ -184,7 +184,7 @@ def test_unknown_cases_and_renderer_mismatches_are_refused():
 #: widens the whole guard rather than three of its four sites. What falls
 #: outside it (a `frozenset`, state hidden in a plain object's ``__dict__``,
 #: dict KEYS) is neither watched nor traversed; that residue is enumerated in
-#: #174 rather than implied away here.
+#: an accepted limitation rather than implied away here.
 _WALKED_TYPES = (dict, list, tuple, set)
 
 
@@ -412,8 +412,8 @@ def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
     least one container-carrying corpus call; the three that do not are the
     ``recipe:*`` cases, whose factories call no corpus function at all and parse
     their inputs fresh from committed JSON. Closing the residue needs
-    interception at the production boundary — a different mechanism, tracked in
-    #174, not claimed here.
+    interception at the production boundary — a different mechanism, and an
+    accepted limitation rather than tracked work.
     """
     import inspect as _inspect
 
