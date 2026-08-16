@@ -16,12 +16,18 @@ WHO OWNS THE CASE DEFINITIONS (#165)
 This module OWNS every case definition, and the golden-producing test modules
 consume them from here (each keeps a small alias block so its own assertions
 and non-golden tests are untouched).  The direction used to be inverted — the
-registry imported the thirteen producer test modules and called their helpers —
-which meant deleting an owning test module made an otherwise-active golden
+registry imported the producer test modules and called their helpers — which
+meant deleting an owning test module made an otherwise-active golden
 unrenderable: exactly the removal the ``transitional_oracle`` (#159) and
-``deletion_only`` (#160) dispositions must survive.  This module now imports
-ZERO test modules; ``test_wave_gate_goldens.py`` proves every active golden
-still renders with every ``test_*`` module made unimportable.
+``deletion_only`` (#160) dispositions must survive.
+
+The invariant, stated so it stays true as modules come and go: **no case input
+is defined in a test module.**  Deliberately NOT stated as a module count —
+#165's own issue text says "thirteen", which was the pre-inversion registry's
+twelve direct imports plus one transitive, and no hand-typed tally survives the
+next slice that adds or retires a module.  The checkable forms are: this file
+imports zero test modules, and ``test_wave_gate_goldens.py`` renders every
+active golden in a child where every ``test_*`` module is unimportable.
 
 Where a case input already lives in a committed JSON fixture
 (``tests/fixtures/process_ir/sync_pipeline_emitter_parity_cases.json``, the
@@ -117,8 +123,6 @@ PFB_DOCCACHE_ID = "8540619c-9f1e-4832-9b1a-5128c399aa52"
 
 PFB_REST_CONN_ID_2 = "55555555-5555-5555-5555-555555555555"
 PFB_REST_OP_ID_2 = "66666666-6666-6666-6666-666666666666"
-PFB_REST_CONN_ID_3 = "77777777-7777-7777-7777-777777777777"
-PFB_REST_OP_ID_3 = "88888888-8888-8888-8888-888888888888"
 
 PFB_REST_B_CONN_ID = "55555555-5555-5555-5555-555555555555"
 PFB_REST_B_OP_ID = "66666666-6666-6666-6666-666666666666"
@@ -682,7 +686,7 @@ def _case_try_catch_dlq_error_subprocess():
 def _case_try_catch_notify_dlq_document_cache():
     cfg = dlq_config(
         {"mode": "document_cache_ref", "document_cache_id": DLQ_CACHE_ID},
-        catch_notify=DLQ_CATCH_NOTIFY,
+        catch_notify=copy.deepcopy(DLQ_CATCH_NOTIFY),
     )
     return _dlq_builder().build(
         cfg, name="TryCatch Notify DLQ Golden", folder_name="Golden/Fixtures"
@@ -690,7 +694,9 @@ def _case_try_catch_notify_dlq_document_cache():
 
 
 def _case_connector_scoped_trycatch_notify():
-    cfg = dlq_connector_config(retry_count=2, catch_notify=DLQ_CATCH_NOTIFY)
+    cfg = dlq_connector_config(
+        retry_count=2, catch_notify=copy.deepcopy(DLQ_CATCH_NOTIFY)
+    )
     return _dlq_builder().build(
         cfg, name="Connector Scope DLQ Golden", folder_name="Golden/Fixtures"
     )
@@ -1035,9 +1041,12 @@ def _error_case(anchor):
 #    byte-identically with its L1 oracle)
 # ---------------------------------------------------------------------------
 
-#: Which recipe arm renders each golden case. Invocation metadata (like a
-#: component name), pinned by the committed golden bytes: the wrong arm fails
-#: immediately.
+#: Which recipe arm renders each golden case, and with which recipe id.
+#: Dispatch below is TOTAL — an unknown arm raises rather than falling through
+#: to a default. An `if arm == "fanout": … else: …` shape was the first cut and
+#: it made only the "fanout" spelling load-bearing: mutating `"sync_preset"` to
+#: any other string left all 60 goldens byte-identical, so a third arm typed in
+#: here would have rendered silently through the sync-preset recipe.
 RECIPE_GOLDEN_ARMS = {
     "compose_stream": "fanout",
     "compose_all_cache": "fanout",
@@ -1063,18 +1072,21 @@ def _recipe_case(name):
         )
         spec = IntegrationSpecV1.model_validate(payload)
         process = spec.components[-1]
-        if RECIPE_GOLDEN_ARMS[name] == "fanout":
-            result = run_fanout_recipe(
-                recipe_id=RECIPE_DB_REST_FANOUT,
-                components=spec.components,
-                process=process,
+        arms = {
+            "fanout": (run_fanout_recipe, RECIPE_DB_REST_FANOUT),
+            "sync_preset": (run_sync_preset_recipe, RECIPE_API_TO_API_SYNC),
+        }
+        arm = RECIPE_GOLDEN_ARMS[name]
+        if arm not in arms:
+            raise KeyError(
+                "case {0!r} names recipe arm {1!r}, which is not one of {2}".format(
+                    name, arm, sorted(arms)
+                )
             )
-        else:
-            result = run_sync_preset_recipe(
-                recipe_id=RECIPE_API_TO_API_SYNC,
-                components=spec.components,
-                process=process,
-            )
+        runner, recipe_id = arms[arm]
+        result = runner(
+            recipe_id=recipe_id, components=spec.components, process=process
+        )
         return result.artifact_for(process.key).process_xml
     return render
 
@@ -1198,7 +1210,9 @@ def _case_archetype_dlq_document_cache():
 
 
 def _case_archetype_notify_dlq_document_cache():
-    spec = arch_emit(copy.deepcopy(ARCH_WIRED_DC), catch_notify=ARCH_CATCH_NOTIFY)
+    spec = arch_emit(
+        copy.deepcopy(ARCH_WIRED_DC), catch_notify=copy.deepcopy(ARCH_CATCH_NOTIFY)
+    )
     return arch_build_archetype_process_xml(spec, name="Archetype Notify DLQ Golden")
 
 
@@ -1206,7 +1220,6 @@ def _case_archetype_notify_dlq_document_cache():
 # K. Legacy listener chains (consumed by tests/test_sync_pipeline_adapter_cutover.py)
 # ---------------------------------------------------------------------------
 
-CHAIN_SRC = {"connection_id": "SRC-CONN", "operation_id": "SRC-OP"}
 CHAIN_TGT = {"connection_id": "TGT-CONN", "operation_id": "TGT-OP"}
 
 

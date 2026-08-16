@@ -51,7 +51,10 @@ import _wave_gate_golden_corpus as _corpus
 
 _stage = _corpus.chain_stage
 
-_SRC = _corpus.CHAIN_SRC
+# Local, not corpus-owned: no golden case reads a source stage built from these
+# (the listener chains all start at `chain_listen`). Test-only fixtures stay in
+# the test module so the corpus carries nothing that dies with it.
+_SRC = {"connection_id": "SRC-CONN", "operation_id": "SRC-OP"}
 _TGT = _corpus.CHAIN_TGT
 
 

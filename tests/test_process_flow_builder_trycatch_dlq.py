@@ -52,10 +52,6 @@ _FIXTURE = (
 # them. The aliases keep every existing call site and assertion unchanged.
 import _wave_gate_golden_corpus as _corpus
 
-_DB_CONN_ID = _corpus.DLQ_DB_CONN_ID
-_DB_OP_ID = _corpus.DLQ_DB_OP_ID
-_REST_CONN_ID = _corpus.DLQ_REST_CONN_ID
-_REST_OP_ID = _corpus.DLQ_REST_OP_ID
 _CACHE_ID = _corpus.DLQ_CACHE_ID
 _PROC_ID = _corpus.DLQ_PROC_ID
 
@@ -658,8 +654,6 @@ class TestNotifyValidation:
 # steps — each behaves according to its own Failure Trigger") and the target
 # retry no longer re-executes the source read.
 # ---------------------------------------------------------------------------
-
-_MAP_ID = _corpus.DLQ_MAP_ID
 
 _CONNECTOR_SCOPE_FIXTURE = (
     Path(__file__).resolve().parent

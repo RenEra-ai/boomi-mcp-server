@@ -22,7 +22,6 @@ from boomi_mcp.compiler.process_ir.contracts import (
     SHAPE_Y,
     ComponentSymbolV1,
     IdempotencyContractSymbolV1,
-    SymbolTableV1,
 )
 from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
 from boomi_mcp.compiler.process_ir.emitter_registry import emit_process

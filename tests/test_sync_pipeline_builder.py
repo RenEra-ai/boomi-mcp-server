@@ -218,6 +218,16 @@ def test_sync_pipeline_matches_golden_fixture():
     assert emitted == fixture.read_text()
     assert verify_process_graph(emitted)["errors"] == []
 
+    # `_linear_with_map()` is the SAME chain with different stage KEYS
+    # (`source/transform/target` vs the corpus corpus's `s/m/t`), and ~15 tests
+    # in this module build on it. Before #165 it was this test's input, so the
+    # golden pinned it; consuming the corpus case instead would have quietly
+    # left it anchored to nothing. Assert the equivalence rather than restating
+    # the config — stage keys must not reach the emitted XML.
+    assert SyncPipelineBuilder.build(
+        _linear_with_map(), name=case["name"], folder_name=case["folder_name"]
+    ) == emitted
+
 
 # ---------------------------------------------------------------------------
 # Byte goldens for the previously un-anchored variants (#139C)

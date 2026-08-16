@@ -179,10 +179,59 @@ def test_unknown_cases_and_renderer_mismatches_are_refused():
         corpus.render_golden_case(sample["input_case"], wrong)
 
 
+def test_rendering_every_case_mutates_no_corpus_module_state():
+    """The corpus CONTRACT bullet "every renderer deep-copies shared inputs",
+    asserted instead of described.
+
+    Three renderers passed a module-level notify dict by reference while that
+    bullet claimed otherwise; nothing caught it because the claim lived only in
+    a docstring. The repo's own lesson from #152/#171 is that a structural fix
+    which stays PROSE recurs and one that becomes EXECUTABLE holds — so the
+    property is measured here: snapshot every module-level container in the
+    corpus, render all 60 active cases, and require the snapshot to survive.
+
+    This is what makes case-to-case independence real: a renderer that mutated
+    shared state could perturb a LATER case's bytes depending on render order.
+    """
+    import copy as _copy
+
+    watched = {
+        name: getattr(corpus, name)
+        for name in dir(corpus)
+        if name.isupper() and isinstance(getattr(corpus, name), (dict, list, tuple, set))
+        and name != "CASE_REGISTRY"
+    }
+    assert watched, "no corpus module state to watch — this check would be vacuous"
+    before = {name: _copy.deepcopy(value) for name, value in watched.items()}
+
+    for row in MANIFEST.active:
+        corpus.render_golden_case(row["input_case"], row["renderer"])
+
+    drifted = sorted(
+        name for name, value in watched.items() if value != before[name]
+    )
+    assert drifted == [], (
+        "rendering mutated corpus module-level state, so one case can perturb "
+        "another through it: {0}".format(drifted)
+    )
+
+
 _UNIMPORTABLE_CHILD = r"""
 import hashlib
 import json
+import os
 import sys
+
+
+class _Blocked(ImportError):
+    '''Raised ONLY by the blocker below.
+
+    A dedicated subclass, because `ModuleNotFoundError` is itself an
+    `ImportError`: the first version of the witness caught bare `ImportError`
+    and so could not tell "the blocker refused this" from "this was never on
+    sys.path in the first place" — which made the witness pass with the blocker
+    entirely absent.
+    '''
 
 
 class _BlockTestModules:
@@ -195,23 +244,35 @@ class _BlockTestModules:
 
     def find_spec(self, name, path=None, target=None):
         if name.rsplit(".", 1)[-1].startswith("test_"):
-            raise ImportError("test modules are unimportable in this child: " + name)
+            raise _Blocked("test modules are unimportable in this child: " + name)
         return None
 
 
 sys.meta_path.insert(0, _BlockTestModules())
 
-# Non-vacuity witness: the blocker must actually be armed, or this child
-# proves nothing.
+tests_dir = sys.argv[1]
+sys.path.insert(0, tests_dir)  # the tests directory
+
+# Non-vacuity witness, and it must run AFTER the sys.path insert above: the
+# probe module has to be genuinely REACHABLE, or "it did not import" proves
+# nothing about the blocker. Assert the file is really there, then require the
+# blocker's OWN exception type — a `ModuleNotFoundError` here would mean the
+# probe was unreachable and the witness vacuous.
+probe = "test_process_flow_builder"
+if not os.path.isfile(os.path.join(tests_dir, probe + ".py")):
+    print(json.dumps({"error": "witness probe module is missing: " + probe}))
+    sys.exit(3)
 try:
-    import test_database_to_api_sync_dlq  # noqa: F401
-except ImportError:
+    __import__(probe)
+except _Blocked:
     pass
+except ModuleNotFoundError as exc:
+    print(json.dumps({"error": "witness probe was unreachable, not blocked: %s" % exc}))
+    sys.exit(3)
 else:
     print(json.dumps({"error": "the import blocker is NOT armed"}))
     sys.exit(3)
 
-sys.path.insert(0, sys.argv[1])  # the tests directory
 import _wave_gate_golden_corpus as corpus  # noqa: E402
 
 rows = json.loads(open(sys.argv[2], "rb").read().decode("utf-8"))
@@ -223,7 +284,20 @@ for row in rows:
 leaked = sorted(
     name for name in sys.modules if name.rsplit(".", 1)[-1].startswith("test_")
 )
-print(json.dumps({"shas": shas, "leaked_test_modules": leaked}))
+# ...and by FILE, not only by name: a factory could load a test module's file
+# under a non-`test_` name via importlib and the name scan above would miss it,
+# while #159/#160 deleting that file would still break the golden.
+tests_real = os.path.realpath(tests_dir)
+from_tests = sorted(
+    name for name, mod in list(sys.modules.items())
+    if getattr(mod, "__file__", None)
+    and os.path.realpath(mod.__file__).startswith(tests_real + os.sep)
+)
+print(json.dumps({
+    "shas": shas,
+    "leaked_test_modules": leaked,
+    "modules_loaded_from_tests": from_tests,
+}))
 """
 
 
@@ -288,5 +362,11 @@ def test_every_active_golden_renders_with_all_test_modules_unimportable(tmp_path
     assert set(special) == {"golden-000056", "golden-000057", "golden-000060"}, special
     assert set(special) <= set(report["shas"])
 
-    # And the child really finished with no test module loaded.
+    # And the child really finished with no test module loaded — by name, and
+    # by resolved FILE, so a file-path import under a non-`test_` name cannot
+    # hide a dependency on a module #159/#160 will delete. The corpus itself is
+    # the one legitimate resident of tests/.
     assert report["leaked_test_modules"] == [], report["leaked_test_modules"]
+    assert report["modules_loaded_from_tests"] == ["_wave_gate_golden_corpus"], (
+        report["modules_loaded_from_tests"]
+    )

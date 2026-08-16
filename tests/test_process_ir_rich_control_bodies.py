@@ -33,7 +33,7 @@ if str(_ROOT / "src") not in sys.path:
 
 from boomi_mcp.categories.components.process_graph_verifier import verify_process_graph
 from boomi_mcp.compiler.process_ir import body_capabilities as bodycaps
-from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
 from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
 from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
 from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1

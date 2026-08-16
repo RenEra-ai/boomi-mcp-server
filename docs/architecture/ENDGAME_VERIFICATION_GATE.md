@@ -260,9 +260,12 @@ read from the **worktree**, so CI validates the checked-out merge result and a
 local run validates uncommitted work.
 
 **Golden-corpus authority direction — inverted by #165.** `tests/_wave_gate_golden_corpus.py`
-OWNS every case definition and imports ZERO test modules; the thirteen golden-producing
-test modules consume the definitions from it (or from the committed JSON fixtures it
-binds — see §7). The registry used to import those test modules and call their helpers,
+OWNS every case definition and imports ZERO test modules; the golden-producing test
+modules consume the definitions from it (or from the committed JSON fixtures it binds —
+see §7). The invariant is stated without a module count on purpose: #165's issue text
+says "thirteen", which was the pre-inversion registry's twelve direct imports plus one
+transitive, and a hand-typed tally goes stale the next time a module is added or retired.
+The registry used to import those test modules and call their helpers,
 which made removing an owning test module render its golden unrenderable — exactly the
 removal `transitional_oracle` (#159) and `deletion_only` (#160) are designed to survive.
 `test_wave_gate_goldens.py::test_every_active_golden_renders_with_all_test_modules_unimportable`
@@ -556,7 +559,13 @@ block (`_base_config = _corpus.pfb_base_config`, `LISTENER_CHAINS =
 _corpus.LISTENER_CHAINS`, …) so its own assertions and non-golden tests are
 unchanged, and the corpus imports ZERO test modules — deleting an owning test
 module leaves every golden renderable, which is the property #159/#160 depend
-on and which `test_wave_gate_goldens.py` proves with an import-blocked child.
+on and which `test_wave_gate_goldens.py` proves with an import-blocked child
+(checked by module name AND by resolved file, so a file-path import cannot
+smuggle the dependency back). The corpus carries only what a case needs: a
+fixture used by no case belongs in the test module, or it becomes dead corpus
+code the day its owner is deleted. Case-to-case independence is likewise
+asserted, not described — a test renders all 60 cases and requires every
+module-level container in the corpus to be unchanged afterwards.
 
 Where a case input already lives in a committed JSON fixture
 (`sync_pipeline_emitter_parity_cases.json`, the `rich_control/` and

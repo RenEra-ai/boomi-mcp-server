@@ -385,8 +385,6 @@ def test_map_ref_transform_inserts_map_shape_with_map_id():
 
 # The canonical dataContext loop (companion data_process_groovy_step.md). The
 # bare ``<`` exercises the emitter's XML escaping (-> ``&lt;``).
-_DATAPROCESS_GROOVY_SCRIPT = _corpus.PFB_DATAPROCESS_GROOVY_SCRIPT
-
 _DATAPROCESS_GOLDEN = (
     Path(__file__).resolve().parent
     / "fixtures"
@@ -2328,8 +2326,12 @@ def test_build_bypass_raises_for_non_dict_catch_exception_with_valid_dlq():
 
 _REST_CONN_ID_2 = _corpus.PFB_REST_CONN_ID_2
 _REST_OP_ID_2 = _corpus.PFB_REST_OP_ID_2
-_REST_CONN_ID_3 = _corpus.PFB_REST_CONN_ID_3
-_REST_OP_ID_3 = _corpus.PFB_REST_OP_ID_3
+# Local, not corpus-owned: no golden case uses these. They belong to this
+# module's non-golden 3-way branch test, and the corpus exists to outlive this
+# module's deletion — migrating test-only fixtures into it would leave dead
+# corpus code behind when #159/#160 remove their owners.
+_REST_CONN_ID_3 = "77777777-7777-7777-7777-777777777777"
+_REST_OP_ID_3 = "88888888-8888-8888-8888-888888888888"
 
 _BRANCH_FANOUT_GOLDEN = (
     Path(__file__).resolve().parent / "fixtures" / "golden_xml" / "branch_fanout.xml"
@@ -3249,10 +3251,6 @@ def test_dynamic_path_profile_ref_requires_depends_on():
 # ---------------------------------------------------------------------------
 # Issue #117 M10 follow-up — multi-control-shape composition (flow_sequence)
 # ---------------------------------------------------------------------------
-
-_REST_B_CONN_ID = _corpus.PFB_REST_B_CONN_ID
-_REST_B_OP_ID = _corpus.PFB_REST_B_OP_ID
-_SEQ_GROOVY = _corpus.PFB_SEQ_GROOVY
 
 _FLOW_SEQ_DECISION_BRANCH_GOLDEN = _GOLDEN_DIR / "flow_sequence_decision_branch_map.xml"
 _FLOW_SEQ_CACHE_CRUD_GOLDEN = _GOLDEN_DIR / "flow_sequence_cache_load_retrieve_remove.xml"

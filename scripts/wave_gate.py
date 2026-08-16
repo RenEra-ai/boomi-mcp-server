@@ -1385,9 +1385,16 @@ def _pytest_env():
 
 def _render_env(repo, hashseed, tmpdir=None):
     """The golden-render child runs OUTSIDE pytest, so it must reproduce by hand
-    the ``sys.path`` entries pytest would have inserted for it: the repo root
-    (for the ``src.``-prefixed spelling one producer uses), ``tests/`` and
-    ``tests/patterns/`` (for the producers' sibling imports).
+    the ``sys.path`` entries pytest would have inserted for it: ``src`` (for the
+    bare spelling), the repo root (for the ``src.``-prefixed spelling — the
+    corpus uses both, per the module's dual-module hazard note), and ``tests/``
+    so the corpus module itself resolves.
+
+    ``tests/patterns/`` is carried for symmetry with the corpus's own
+    ``_bootstrap_sys_path``; since #165 the corpus imports no test module, so
+    nothing here depends on a producer's sibling imports any more. The corpus
+    inserts all of these itself — this env is belt-and-braces for a child
+    started some other way.
 
     Deliberately a different environment from ``_pytest_env`` — this child is not
     collecting tests, and giving pytest this wider path would change the node set.

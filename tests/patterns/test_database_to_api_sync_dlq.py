@@ -28,11 +28,7 @@ if _tests not in sys.path:
     sys.path.insert(0, _tests)
 
 from boomi_mcp.categories.integration_authoring import build_from_archetype_action
-from boomi_mcp.categories.integration_builder import (
-    _build_plan,
-    _resolve_dependency_tokens,
-)
-from boomi_mcp.categories.components.builders import ProcessFlowBuilder
+from boomi_mcp.categories.integration_builder import _build_plan
 
 # The golden-case definitions live in the corpus (#165); this module CONSUMES
 # them. The aliases keep every existing call site and assertion unchanged.
@@ -41,12 +37,7 @@ import _wave_gate_golden_corpus as _corpus
 NS = {"bns": "http://api.platform.boomi.com/"}
 _PAGINATE = "boomi_mcp.categories.integration_builder.paginate_metadata"
 
-_DB_CONN_ID = _corpus.ARCH_DB_CONN_ID
-_DB_OP_ID = _corpus.ARCH_DB_OP_ID
-_REST_CONN_ID = _corpus.ARCH_REST_CONN_ID
-_REST_OP_ID = _corpus.ARCH_REST_OP_ID
 _CACHE_ID = _corpus.ARCH_CACHE_ID
-_MAP_ID = _corpus.ARCH_MAP_ID
 _HANDLER_ID = "77777777-7777-7777-7777-777777777777"
 
 _GOLDEN = (
