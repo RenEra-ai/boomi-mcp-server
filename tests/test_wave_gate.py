@@ -1758,6 +1758,29 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
     ledgers = sorted((_ROOT / "docs" / "architecture").glob("ISSUE_*_AUDIT_LEDGER.md"))
     assert ledgers, "no ledgers found — this check would be vacuous"
 
+    # Ledger paths are FROZEN once committed — asserted as the INVARIANT ITSELF:
+    # every ledger path in HEAD's tree must still exist in the worktree. Every way
+    # a ledger can move — a staged rename, an unstaged rename, a rename with
+    # detection disabled — manifests as the OLD path disappearing, so this catches
+    # the whole family without enumerating mechanisms. Three enumerated probes
+    # were each proven bypassable before this replaced them; per the repository's
+    # Structural-fix rule, the enumeration was the bug.
+    committed_ledgers = {
+        name
+        for name in subprocess.run(
+            ["git", "ls-tree", "--name-only", "-z", "HEAD", "docs/architecture/"],
+            cwd=str(_ROOT), capture_output=True, text=True,
+        ).stdout.split("\0")
+        if _re.fullmatch(r"docs/architecture/ISSUE_.+_AUDIT_LEDGER\.md", name)
+    }
+    vanished_paths = sorted(
+        name for name in committed_ledgers if not (_ROOT / name).is_file()
+    )
+    assert vanished_paths == [], (
+        "committed ledger paths are FROZEN, and these have disappeared from the "
+        "worktree (renamed, moved, or deleted): {0}".format(vanished_paths)
+    )
+
     checked = 0
     for path in ledgers:
         text = path.read_text(encoding="utf-8")
@@ -1887,18 +1910,18 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
             # once `--follow` sees the rename. That is the verdict-flips-on-commit shape
             # this whole check was rewritten to eliminate, so ask git for the staged
             # rename and for a merge in progress before believing the path is new.
-            staged_renames = subprocess.run(
-                ["git", "diff", "--cached", "--diff-filter=R", "--name-only", "-z"],
+            # Rename arrivals are covered by the DISAPPEARANCE invariant above:
+            # any rename, staged or not, whatever the rename-detection config,
+            # leaves its source path missing from the worktree and fails there. A
+            # merge import is the one arrival that leaves nothing missing, so ask
+            # git for merge state — via rev-parse, which resolves the common git
+            # dir correctly in a linked worktree, where `.git` is a FILE and a
+            # path probe for `.git/MERGE_HEAD` can never fire.
+            merging = subprocess.run(
+                ["git", "rev-parse", "--verify", "-q", "MERGE_HEAD"],
                 cwd=str(_ROOT), capture_output=True, text=True,
-            ).stdout.split("\0")
-            assert rel not in staged_renames, (
-                "{0}: this path is the destination of a STAGED RENAME, so it is not a "
-                "new ledger — ledger paths are frozen once committed, and renaming one "
-                "hides its pre-rename history from the first-appearance walk".format(
-                    path.name
-                )
-            )
-            assert not (_ROOT / ".git" / "MERGE_HEAD").exists(), (
+            ).returncode == 0
+            assert not merging, (
                 "{0}: a merge is in progress, so a ledger arriving from the other side "
                 "cannot be distinguished from a new one; commit the merge before "
                 "trusting the first-appearance authority".format(path.name)

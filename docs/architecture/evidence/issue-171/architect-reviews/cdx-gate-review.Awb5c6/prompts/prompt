@@ -1,0 +1,435 @@
+This is the CLOSING architect-gate replay for issue #171, on the frozen landing tip. Per checkpoint CP-7 in the slice's ledger, the tree will NOT be mutated after this review: a NON-BLOCKING finding is recorded on already-filed follow-up issue #173, and only a BLOCKING-class finding (runtime behavior, secrets/security, mutation accounting, apply/update preservation, emitted XML or graph validity, machine-served schemas/contracts, capability reachability, data loss) stops the landing.
+
+Repository: `boomi-mcp-server` at /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: `codex/issue-171`
+Landing tip (frozen): `589ed2c3de2aab519fef6a450e686dfed18c13c9`
+Previous architect replay covered through: `e16b537e152cd8bd7b846adc44287c5fc373e1f2`
+
+**Review the unreviewed delta:** `git diff e16b537e152cd8bd7b846adc44287c5fc373e1f2..HEAD` — one commit.
+
+## What is in this delta
+
+The previous replay (`cdx-gate-review.PCs6hE`) raised AF-1..AF-3; a repo Codex review on the resulting tip (`cdx-review.wYzJrD`, archived) then raised two findings, both fixed in this commit:
+
+1. **RG-1**: CP-6 was a conditional close — "void if the named gates don't come back" — which is the same illegal shape AF-3 rejected. **CP-7** now records `DEFER-STANDARD-AND-PROCEED` instead: legal precisely because gates remain owed, deferring standard residue to #172/#173, with closure recorded only once the owed gates (this replay, and an exact-SHA scratch GREEN) are current.
+2. **RG-2**: the new-ledger exemption in `test_audit_ledger_revisions_are_append_only_and_fully_declared` classified a STAGED RENAME destination as "new" (absent from HEAD, no path history), skipping the rename freeze — green pre-commit, red post-commit. The exemption now refuses a staged-rename destination (`git diff --cached --diff-filter=R`) and any candidate appearing while a merge is in progress. Witnessed both ways: staging a rename of the #152 ledger fails; a genuinely new staged ledger+archive candidate passes both mandatory checks.
+
+Plus: rows RG-1/RG-2 appended to the ledger, class counts updated, the `cdx-review.wYzJrD` run archived and indexed, SHA256SUMS regenerated, and one reworded token (a git marker name that the diagnostic-code scanner flagged as code-shaped).
+
+## Gate results already current
+
+- Composite wave on `e16b537`: exit 0, 60 goldens byte-exact. (The wave's inputs — manifests, goldens, suite — are UNCHANGED in this delta: the only test-file change is the RG-2 guard inside an existing node, and the full non-KB suite re-ran green at 9773 on this tip before it was committed.)
+- Repo Codex review `27611a3..621e587`: collected, archived; its two findings are this delta.
+- Full non-KB suite on THIS tip's content: 9773 passed, 17 skipped.
+- Still owed after this replay: the `scratch/**` exact-SHA GREEN on `589ed2c`, whose URL is posted to issue #171 before close.
+
+## What to judge
+
+1. **Are RG-1 and RG-2 genuinely fixed?** Is CP-7 a legal `DEFER-STANDARD-AND-PROCEED` under CLAUDE.md — zero critical residue, deferred items enumerated in already-filed OPEN issues (#172, #173) with reason class/lineage/placement, current-tip validation for the gates that have run? Does the RG-2 guard actually close the bypass without breaking the legitimate new-ledger path?
+2. **Does this delta weaken anything** — any check now able to pass vacuously, any assertion narrowed?
+3. **Is there any BLOCKING-class defect on this tip?** That is the only category that can stop the landing. Non-blocking audit-record residue goes to #173 and should be reported as such.
+
+`scripts/wave_gate.py` and `.github/workflows/tests.yml` are unchanged in this delta. Be concrete: file, line, failure scenario, fix. If nothing blocks, say so plainly.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.
+
+
+=== ARCHITECT DESIGN PLAN (verbatim) ===
+# Issue #171 — scratch-branch verification gate design
+
+## Summary and interface decisions
+
+- Change the public CLI contract to `ci (--base COMMIT | --github-event PATH)`. The mutually exclusive group remains `required=True`, so supplying neither or both fails at argument parsing with exit 2 and first diagnostic token `GATE_USAGE_INVALID`.
+- Trigger the workflow on pushes to `dev` and `scratch/**`; remove `pull_request` entirely. Do not add `workflow_dispatch`.
+- A scratch run compares the candidate against the exact fetched `origin/dev` commit, not `github.event.before` or a merge-base.
+- Strengthen `kind == "local"` when used by `ci`: require a clean checkout, require the selected base to be an ancestor of `HEAD`, and, inside GitHub Actions, bind `HEAD` to `GITHUB_SHA`. Preserve dirty-tree support for local `wave` and `manifests`.
+- Keep `_baseline_from_pull_request()` and its unit coverage, but make it unreachable from the active workflow.
+- No Boomi MCP API, schema, or runtime behavior changes. The public surfaces are the gate CLI, stable diagnostic codes/messages, workflow triggers, manifest rows, and documented enforcement contract.
+
+Two issue premises need correction:
+
+- The scratch route is still a GitHub `push` event; it is a non-`push:[dev]` route whose gate baseline kind is `local`.
+- Bootstrap and transition do not directly branch on `context["kind"]`. `execute()` converts the presence of an explicit base into `is_local`; bootstrap uses that boolean, while ordinary transition validation is universal.
+
+## File-by-file changes
+
+### [`scripts/wave_gate.py`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/scripts/wave_gate.py:905)
+
+**Concrete change**
+
+1. In the argparse block currently around lines 3192–3198, replace:
+
+   ```python
+   ci.add_argument("--github-event", required=True, ...)
+   ```
+
+   with the same required mutually exclusive shape used by `manifests`:
+
+   ```python
+   ci_source = ci.add_mutually_exclusive_group(required=True)
+   ci_source.add_argument("--base", metavar="COMMIT", ...)
+   ci_source.add_argument("--github-event", metavar="PATH", ...)
+   ```
+
+   Leave `--event-name` outside the group as the tests-only event override.
+
+2. Keep `required=True` on the group. This preserves today’s refusal layer: bare `ci` is an argparse usage error, exit 2, with `GATE_USAGE_INVALID`. Making the group optional would instead expose `resolve_baseline()`’s `BASELINE_EVENT_INVALID`, changing the established public failure contract.
+
+3. Retain `resolve_baseline()`’s both/neither checks as defense in depth. They remain reachable by direct callers and by `wave`, whose parser intentionally permits a missing base so the coded resolver refusal fires.
+
+4. There is no `cmd_ci` handler. `execute()` around lines 2378–2395 already obtains `args.base` with `getattr`, passes it into `resolve_baseline()`, emits the resulting kind, and passes explicit-baseline state into the manifest phase. No new threading path is needed. Change only:
+   - derive `is_local` from `context["kind"] == "local"` so the resolved context is the single authority;
+   - pass `ci_mode=args.command == "ci"` into the checkout/context validation.
+
+5. Extend `check_checkout_matches_event()` without weakening the existing push or PR arms:
+   - every `ci` context must start clean;
+   - local `ci` must prove `context["sha"]` is an ancestor of `HEAD`, including equality;
+   - when `GITHUB_ACTIONS=true`, require a valid full `GITHUB_SHA` and exact `HEAD == GITHUB_SHA`;
+   - outside GitHub Actions, allow `GITHUB_SHA` to be absent so `ci --base` remains usable locally, but validate it if supplied;
+   - use `CHECKOUT_EVENT_MISMATCH` for dirty or wrong/missing platform-head identity and `BASELINE_UNAVAILABLE` when the explicit baseline is not a usable ancestor;
+   - keep dirty explicit-base behavior for `wave` and `manifests`.
+
+6. Sweep every local-kind consumer:
+
+   | Location | Current `local` behavior | Planned verdict |
+   |---|---|---|
+   | Clean-tree check near line 479 | Skipped because only push/PR are checked | Wrong for `ci`; add `ci_mode`, retain skip for non-CI local commands |
+   | Push binding near line 494 | Skips `after == HEAD` | Correct: local has no push payload; use the GitHub/local committed-tree invariant instead |
+   | PR branch near line 504 | Returns without PR head/merge validation | Correct once local CI has its own clean/head/ancestor checks |
+   | `resolve_baseline()` | Resolves explicit SHA and returns `kind=local`, `target/event_head/after=None` | Correct and unchanged |
+   | Bootstrap | `is_local=True` requires `--bootstrap`; `ci` exposes no bootstrap flag | Correct fail-closed behavior: explicit-base CI may not reopen bootstrap |
+   | Transition | Every non-bootstrap manifest runs `validate_transition()` | Correct; no local bypass exists |
+   | `target=None` | Omits PR-only target/bootstrap checks | Correct because the workflow supplies exact `origin/dev` and the gate proves ancestry |
+   | Emit near line 2391 | Prints `(local)` | Correct and required in RED/GREEN evidence |
+   | Collection/full suite | No kind branch | Correct; local CI runs the same checks as event CI |
+
+7. Update the script’s top-level `ci` description, baseline resolver prose, bootstrap comments near lines 1062–1185, parser help, and the comment near line 3408 that currently cites `ci --base` as an invalid invocation. Change the resolver’s served no-baseline message to the neutral “pass exactly one of `--base` or `--github-event`” wording.
+
+**Rationale**
+
+The parser change alone would make scratch CI runnable, but current `local` behavior permits a dirty or unrelated checkout. The structural invariant must bind the bytes under test to the committed scratch SHA and prove the candidate is an integration delta from the selected `dev` baseline.
+
+This is a recurrence of #152’s checkout/evidence-association mechanism. Under the Structural-fix rule it is not another instance patch: record the class as second-instance-on-arrival, derive the invariant from Git/GitHub’s runtime authority, sweep push/PR/local and ci/wave/manifests siblings, and include dirty, wrong-SHA, and non-ancestor non-vacuity witnesses. GitHub’s default environment variables provide the Actions-side authority for `GITHUB_ACTIONS` and `GITHUB_SHA`. [GitHub default-variable contract](https://docs.github.com/en/actions/reference/workflows-and-actions/variables)
+
+**Risk**
+
+The highest risk is accidentally making all local explicit-base commands require a clean tree or GitHub environment. Scope the stronger rule to `ci`; `wave --base` and `manifests --base` must retain their documented dirty-working-tree use. CLI help and diagnostic prose are served contract text and therefore blocking under `CLAUDE.md`.
+
+### [`.github/workflows/tests.yml`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.github/workflows/tests.yml:1)
+
+**Concrete change**
+
+1. Replace the triggers with:
+
+   ```yaml
+   on:
+     push:
+       branches: [dev, 'scratch/**']
+   ```
+
+   Remove `pull_request`. Do not add `workflow_dispatch`; the workflow does not exist on default branch `main`, so it cannot satisfy this issue today. GitHub documents the default-branch condition for dispatch events. [GitHub workflow-dispatch documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch)
+
+2. Remove the entire `concurrency` block. With only pushes, its PR cancellation expression is dead, and a per-SHA group could make the same candidate SHA on scratch and `dev` compete for a slot. The cost is more possible parallel runner use; the benefit is that every pushed ref receives its own verdict.
+
+3. Keep `fetch-depth: 0`, but rewrite its rationale: scratch validation needs complete ancestry and the fully qualified `refs/remotes/origin/dev` commit, not a PR merge-base. `actions/checkout` documents depth zero as fetching all history for branches and tags. [actions/checkout history behavior](https://github.com/actions/checkout#fetch-all-history-for-all-tags-and-branches)
+
+4. Replace the current direct gate command with one unconditional Bash step containing both recognized paths and a default refusal:
+
+   ```bash
+   set -euo pipefail
+   event="${GITHUB_EVENT_NAME-}"
+   ref="${GITHUB_REF-}"
+
+   case "${event}:${ref}" in
+     push:refs/heads/dev)
+       exec python scripts/wave_gate.py ci \
+         --github-event "$GITHUB_EVENT_PATH"
+       ;;
+     push:refs/heads/scratch/*)
+       if ! base="$(git rev-parse --verify \
+           'refs/remotes/origin/dev^{commit}' 2>/dev/null)"; then
+         printf '%s\n' \
+           'BASELINE_UNAVAILABLE cannot resolve refs/remotes/origin/dev' >&2
+         exit 2
+       fi
+       exec python scripts/wave_gate.py ci --base "$base"
+       ;;
+     *)
+       printf 'BASELINE_EVENT_INVALID unsupported event/ref: %s %s\n' \
+         "$event" "$ref" >&2
+       exit 2
+       ;;
+   esac
+   ```
+
+   Keep the step-level `GITHUB_SHA: ${{ github.sha }}` mapping. The Python invariant binds it to `HEAD`; the workflow remains responsible for selecting the exact `origin/dev` baseline. There must be one step and no step-level `if:` conditions.
+
+5. Do not use:
+   - `github.event.before`, because the first push creating a scratch branch reports the zero SHA and later incremental scratch pushes could validate only the latest scratch increment;
+   - merge-base, because a stale or diverged branch could validate without being a fast-forward candidate;
+   - two conditional gate steps, because both could skip on an unrecognized context.
+
+6. Rewrite the header comments to describe:
+   - post-push detection on `dev`;
+   - preflight validation on `scratch/**`;
+   - no PR workflow path;
+   - the measured required-status disposition;
+   - the `[skip ci]` disposition.
+   Preserve the job name `Python 3.11 non-KB`.
+
+**Rationale**
+
+A pushed workflow is loaded from the pushed ref, so this works while `tests.yml` remains absent from `main`. Exact `origin/dev` plus an ancestry proof models the repository’s fast-forward integration rule.
+
+**Risk**
+
+`origin/dev` is authoritative only as fetched at workflow start. If `dev` advances afterward, the candidate must be rebased and rerun before integration. Removing concurrency may increase Actions consumption.
+
+### [`tests/test_wave_gate.py`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/test_wave_gate.py:1576)
+
+**Concrete change**
+
+1. Replace `test_the_ci_subcommand_refuses_a_bare_base` with the single, non-parametrized test:
+
+   `test_ci_requires_exactly_one_baseline_selector`
+
+   It must cover four cases:
+   - `ci --base <sha>` parses, threads the base into the existing execution seam, and resolves/emits `kind == "local"`;
+   - `ci --github-event <path>` parses with `base is None`;
+   - both flags return exit 2, stderr’s first token is `GATE_USAGE_INVALID`, and stderr names both options plus the mutual-exclusion refusal;
+   - neither returns exit 2, the first token is `GATE_USAGE_INVALID`, and stderr states that one selector is required.
+
+   The last two cases are the criterion-3 non-vacuity witnesses. Do not assert the entire argparse sentence; assert exit status, stable first-token code, both option names, and the meaningful `not allowed`/`required` fragment.
+
+2. Preserve the direct resolver tests `test_no_baseline_at_all_is_refused` and `test_base_and_event_together_are_refused`. They should continue asserting `BASELINE_EVENT_INVALID`, proving resolver-level defense independently of the CLI.
+
+3. Extend `test_an_unambiguous_local_baseline_is_accepted` to assert the full resolved context: full SHA, `kind == "local"`, and `target`, `event_head`, and `after` all `None`.
+
+4. Extend existing checkout tests without parameterizing or renaming them:
+   - `test_the_checkout_must_be_the_tree_the_event_describes`: local CI with exact clean `HEAD`, valid Actions SHA, and ancestor base passes; wrong/missing/malformed Actions SHA and a non-ancestor base fail with the selected stable codes.
+   - `test_an_event_run_requires_a_clean_tree`: dirty local `ci` fails, while the same dirty local context under `wave`/`manifests` remains accepted.
+   - Retain all push and PR witnesses to complete the sibling sweep.
+
+5. Update `test_the_workflow_invokes_the_real_gate_and_isolates_push_runs` to pin:
+   - `dev` and `'scratch/**'` push triggers;
+   - absence of `pull_request` and `workflow_dispatch`;
+   - exactly one named gate step;
+   - the `case` arms for dev, scratch, and default exit 2;
+   - `--github-event` for dev and `--base` for scratch;
+   - exact `refs/remotes/origin/dev^{commit}`;
+   - no `github.event.before`, merge-base selection, step-level `if:`, softeners, or concurrency block;
+   - Python 3.11, requirements, `fetch-depth: 0`, and the stable job name.
+
+6. Retarget `test_a_usage_error_emits_the_coded_line_first` and `test_help_and_usage_survive_the_outermost_boundary` from the formerly invalid `ci --base HEAD` to bare `ci`.
+
+7. Keep the PR merge-base resolver and checkout tests even though the workflow trigger is removed.
+
+**Rationale**
+
+The replacement preserves one collected test node while proving both accepted selectors and both excluded states. Existing behavior-focused tests are the right place for the new checkout invariant and avoid obscuring manifest arithmetic with gratuitous new parameterized nodes.
+
+**Risk**
+
+A parser-only test could miss a handler-threading regression, so the positive base case must exercise the execution seam far enough to observe `(local)`. The workflow test must inspect the single step, not merely find both command strings somewhere in YAML.
+
+### [`tests/fixtures/wave_gate/test_nodes.jsonl`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/fixtures/wave_gate/test_nodes.jsonl:1)
+
+**Concrete change**
+
+- Change row `pytest-009550` from active to tombstone without altering its ID or old node identity.
+- Append `pytest-009789` as active for `tests/test_wave_gate.py::test_ci_requires_exactly_one_baseline_selector`.
+- Keep `minimum_active=9788`, `minimum_collected=9788`, and `maximum_skipped=30`: one node is retired and one is introduced, so active and collected counts remain constant.
+- Do not reorder or regenerate the file.
+
+**Rationale**
+
+This is the required append-only manifest transaction for renaming the existing test.
+
+**Risk**
+
+The manifest is a machine-served contract and a blocking class. Incorrect floor arithmetic or repointing `pytest-009550` would cause `MANIFEST_TRANSITION_ILLEGAL` or weaken the collection gate.
+
+### [`docs/architecture/ISSUE_171_AUDIT_LEDGER.md`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/docs/architecture/templates/AUDIT_LEDGER_TEMPLATE.md:1) — new
+
+**Concrete change**
+
+Instantiate the repository template with:
+
+- literal step-0 baseline `6792d0658b6da7964e35b3c493c8320dee2c1c6a`;
+- slice classification: CI/gate behavior-affecting, dark to the Boomi MCP runtime;
+- fixed loop roster before the first correction: Stage-1 affected CLI QA/darkness proof, Stage-2 repo review, declared architect/additive review, Actions rollout gate, composite wave, and terminal correction only by checkpoint;
+- pre-enumerated checkout/runtime-authority class as a recurrence of #152’s checkout-binding findings, triggering the structural-fix rule immediately;
+- platform-claim provenance discipline and inherited DC-12 follow-up ownership;
+- criterion 1–7 evidence matrix;
+- checkpoint and final-tree validation tables;
+- archive link `docs/architecture/evidence/issue-171/`.
+
+Use the established finding-row shape exactly:
+
+`ID | Source gate + run dir + attestation | Verbatim summary | Original label | Blocking class | Defect class | Derived tier (anchor inline) | SHA/delta | Disposition`
+
+Add an inherited row `INH-TC1-2` retaining:
+- original label P2;
+- blocking class `capability reachability`;
+- defect class DC-12;
+- derived tier Standard;
+- first deferral, `out-of-scope-by-design`, never `window-exhausted`;
+- final disposition fixed only after scratch/local GREEN evidence and removal of the PR trigger.
+
+**Rationale**
+
+This preserves #152’s deferral lineage and gives every review finding, checkpoint, and external measurement an in-tree authority.
+
+**Risk**
+
+Do not rewrite raw labels or retroactively claim checkpoints. All cited review runs must be archived with full run-directory names and matching collector evidence.
+
+### `docs/architecture/evidence/issue-171/` — new archive
+
+**Concrete change**
+
+Create the Stage-1.5 skeleton:
+
+- `index.jsonl` with schema 1, issue 171, and the full baseline/source-tip SHA;
+- `SHA256SUMS`;
+- `README.md` describing authority order and limitations.
+
+Later archive:
+
+- collector-owned Codex runs under `commit-reviews/cdx-review.<suffix>/`, with one `index.jsonl` row per run;
+- Actions metadata and raw logs under `actions/green-initial/`, `actions/red-seed4/`, and `actions/green-final/`;
+- empty PR-head queries proving no PR was opened;
+- ruleset/check-run experiment JSON and push transcripts under `rulesets/`.
+
+Hash every file except `SHA256SUMS`. Do not add Actions records as `index.jsonl` run rows: the current verifier accepts only `commit-review-collect` and `gate-attest` collector schemas. Actions artifacts remain covered by hashes and the archive README/ledger.
+
+**Rationale**
+
+Run URLs alone are not durable enough for the audit record; raw metadata/logs and hashes preserve the observed diagnostic, event, ref, head SHA, baseline SHA, kind, and conclusion.
+
+**Risk**
+
+Evidence cannot attest the commit that contains that same evidence without creating a self-reference loop. Archive the acceptance RED/GREEN runs from the code candidate, then run one final scratch GREEN on the evidence-bearing final candidate and use its exact-SHA GitHub check as the final-tree attestation without mutating the tree again.
+
+### [`docs/architecture/ISSUE_152_AUDIT_LEDGER.md`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/docs/architecture/ISSUE_152_AUDIT_LEDGER.md:196)
+
+**Concrete change**
+
+Append a dated post-close resolution note cross-linking issue #171’s ledger and evidence. State that TC1-2 was discharged by:
+- a GREEN scratch-push/local-baseline run;
+- criterion 7(a), removal of the configured PR trigger.
+
+Preserve the original TC1-2 row, P2 label, reason class, placement, and first-deferral lineage unchanged.
+
+**Rationale**
+
+The source ledger should show where its inherited residual was actually discharged.
+
+**Risk**
+
+Editing the historical row would erase audit history and could incorrectly reset deferral lineage.
+
+### [`docs/architecture/ENDGAME_VERIFICATION_GATE.md`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/docs/architecture/ENDGAME_VERIFICATION_GATE.md:647)
+
+**Concrete change**
+
+Update:
+
+- the status banner and artifact summary;
+- §2 “Commands” with the exact-one `ci` selector contract and examples;
+- §4 “Baseline resolution” with local-CI clean/head/ancestor behavior and PR support marked unit-tested but not workflow-reachable;
+- §10 “What enforces the check, and what does not” with measured scratch GREEN/RED evidence, PR-trigger removal, TC1-2 closure, the measured required-status outcome, and `[skip ci]` disposition.
+
+**Rationale**
+
+These sections currently describe the pre-#171 enforcement bound.
+
+**Risk**
+
+Keep predicted GitHub behavior out of the final prose. Label each platform claim as measured here, documented but not measured, or an assumption.
+
+### [`README.md`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/README.md:540)
+
+**Concrete change**
+
+Update:
+
+- “Verification and CI” → “The gate” with both `ci` selectors;
+- the enforcement-bound paragraphs around the `Python 3.11 non-KB` check;
+- the project-tree comment for `wave_gate.py`.
+
+Document the scratch preflight, absence of the PR trigger, exact `origin/dev` baseline, and final measured ruleset/skip result.
+
+**Rationale**
+
+The README currently says the gate is limited to post-push `dev` detection.
+
+**Risk**
+
+README and specification prose receive one batched correction pass under `CLAUDE.md`; new prose-only findings do not reopen a gate, but any correction still receives affected validation and a fix-only review.
+
+### [`CLAUDE.md`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/CLAUDE.md:1)
+
+No content change. Apply its workflow:
+
+- treat CLI help/diagnostics and manifests as blocking served contracts;
+- treat comments, README, and architecture prose as the single non-blocking prose batch;
+- apply the second-instance structural rule to checkout authority;
+- record findings, tiers, defect classes, checkpoints, and any deferral before claiming completion.
+
+## RED/GREEN rollout and acceptance sequence
+
+1. Reprint and record the literal baseline before implementation. Run targeted gate tests, `tests/test_wave_gate.py`, and the full non-KB suite in the local Python 3.12 `.venv`. Record a Boomi-runtime darkness proof: no `src/`, golden XML, component graph, or MCP-served schema delta.
+
+2. Commit the QA-validated implementation, ledger, and evidence skeleton before the first Codex review. Run the detached Stage-2 review exactly per `CLAUDE.md`; every correction receives affected QA and a delta-scoped review. Finish the composite wave checks.
+
+3. Push the clean candidate commit `H` to `scratch/171-green` and wait for GREEN before seeding any defect. Record:
+   - event `push`;
+   - ref;
+   - head `H`;
+   - resolved `origin/dev` SHA;
+   - `wave_gate: baseline <sha> (local)`;
+   - job conclusion and run URL;
+   - empty `gh pr list --state all --head scratch/171-green` output.
+
+4. Recreate #152 seed 4 on a separate branch `scratch/171-seed4-collection-floor` based on `H`. Do not cherry-pick historical commit `c4401a900fcea6247ba15b756592a53474535e1b`; its manifest count is stale. Make exactly one seeded change in `test_nodes.jsonl`: `minimum_collected: 9788 -> 99999`.
+
+5. Require RED with first stable diagnostic:
+
+   ```text
+   PYTEST_COLLECTION_FLOOR collected 9788 tests, below the committed floor of
+   99999; a partial collection is not a green…
+   ```
+
+   If the final collected count legitimately differs, preserve the actual number but require the same diagnostic code and message structure. Reproducing #152’s literal `9786` is infeasible and should not be claimed.
+
+6. Archive the initial GREEN and seeded RED metadata/logs plus empty PR queries in-tree. Delete the seed commit from candidate ancestry; verify it is not an ancestor of the integration candidate.
+
+7. Push the evidence-bearing final candidate to the green scratch branch and require one final GREEN on the exact final SHA. This final run is the current-tree CI attestation; do not mutate the tree merely to embed its own URL.
+
+8. After all evidence is secured and the final candidate is integrated, delete the exact remote scratch refs, remove their local refs/worktrees, run a remote prune, and verify the seed SHA is not reachable from `origin/dev`. Retain Actions runs and archived evidence.
+
+All pushes, Actions observation/log capture, PR queries, ruleset operations, and remote cleanup require authenticated network access and `gh`/repository permissions; they cannot be completed in this read-only planning session.
+
+## Required-status and `[skip ci]` decisions
+
+- **Required status check recommendation:** enable `Python 3.11 non-KB` on `dev` only after measurement. Do not infer viability merely from adding a scratch trigger.
+  1. Capture the successful check’s name, app, head SHA, and conclusion on candidate `H`.
+  2. Create an enforcing temporary ruleset targeting a disposable scratch integration branch, with no applicable bypass actor.
+  3. Negative control: attempt to advance it with a new unchecked `[skip ci]` commit; the rule must reject the push.
+  4. Positive control: attempt to advance it to the exact already-green `H` from a different scratch ref; the rule must accept the existing check attached to that SHA.
+  5. If both controls pass, obtain a GREEN scratch check on the final candidate, enable the same rule for `dev`, and measure the actual fast-forward push of that exact SHA.
+  6. If either control fails, leave `dev` detection-only, archive the result, and file/slot a `blocked-by-mechanism` follow-up before closure.
+
+  GitHub’s documentation defines required checks by their check identity/app and recent successful result, but does not establish this repository’s cross-ref behavior; the experiment remains authoritative. [Required status-check rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets), [ruleset troubleshooting](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/troubleshooting-rules)
+
+- **`[skip ci]` recommendation:** it is not acceptable as an undocumented enforcement hole. GitHub documents that skip instructions prevent the workflow from running and leave required checks pending. [GitHub skip-workflow behavior](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs?apiVersion=2022-11-28) If the ruleset measurement succeeds, the negative control proves such a commit cannot reach the protected branch. If it fails, document the residual explicitly and defer it only through an already-filed, roadmap-placed follow-up.
+
+## Open questions / risks
+
+- The required-status outcome is intentionally measurement-dependent and needs repository-admin authority; it cannot be decided from static repository inspection.
+- `origin/dev` may advance between checkout, GREEN scratch evidence, and integration. Any movement requires rebasing and rerunning the exact candidate.
+- Scratch pushes run the complete non-KB suite and can increase runner consumption.
+- The old `9786` diagnostic count and historical seed commit must not be reused verbatim; only the seed mechanism and stable diagnostic code carry forward.
+- Removing `pull_request` discharges criterion 7 only for the configured workflow. The resolver remains library functionality with unit coverage, not an active CI arm.
+- A skipped workflow cannot repair its own absence; prevention must come from a measured repository rule or remain an explicitly tracked gap.

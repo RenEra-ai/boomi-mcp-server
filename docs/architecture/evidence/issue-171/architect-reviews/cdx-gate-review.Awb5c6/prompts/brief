@@ -1,0 +1,34 @@
+This is the CLOSING architect-gate replay for issue #171, on the frozen landing tip. Per checkpoint CP-7 in the slice's ledger, the tree will NOT be mutated after this review: a NON-BLOCKING finding is recorded on already-filed follow-up issue #173, and only a BLOCKING-class finding (runtime behavior, secrets/security, mutation accounting, apply/update preservation, emitted XML or graph validity, machine-served schemas/contracts, capability reachability, data loss) stops the landing.
+
+Repository: `boomi-mcp-server` at /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: `codex/issue-171`
+Landing tip (frozen): `589ed2c3de2aab519fef6a450e686dfed18c13c9`
+Previous architect replay covered through: `e16b537e152cd8bd7b846adc44287c5fc373e1f2`
+
+**Review the unreviewed delta:** `git diff e16b537e152cd8bd7b846adc44287c5fc373e1f2..HEAD` — one commit.
+
+## What is in this delta
+
+The previous replay (`cdx-gate-review.PCs6hE`) raised AF-1..AF-3; a repo Codex review on the resulting tip (`cdx-review.wYzJrD`, archived) then raised two findings, both fixed in this commit:
+
+1. **RG-1**: CP-6 was a conditional close — "void if the named gates don't come back" — which is the same illegal shape AF-3 rejected. **CP-7** now records `DEFER-STANDARD-AND-PROCEED` instead: legal precisely because gates remain owed, deferring standard residue to #172/#173, with closure recorded only once the owed gates (this replay, and an exact-SHA scratch GREEN) are current.
+2. **RG-2**: the new-ledger exemption in `test_audit_ledger_revisions_are_append_only_and_fully_declared` classified a STAGED RENAME destination as "new" (absent from HEAD, no path history), skipping the rename freeze — green pre-commit, red post-commit. The exemption now refuses a staged-rename destination (`git diff --cached --diff-filter=R`) and any candidate appearing while a merge is in progress. Witnessed both ways: staging a rename of the #152 ledger fails; a genuinely new staged ledger+archive candidate passes both mandatory checks.
+
+Plus: rows RG-1/RG-2 appended to the ledger, class counts updated, the `cdx-review.wYzJrD` run archived and indexed, SHA256SUMS regenerated, and one reworded token (a git marker name that the diagnostic-code scanner flagged as code-shaped).
+
+## Gate results already current
+
+- Composite wave on `e16b537`: exit 0, 60 goldens byte-exact. (The wave's inputs — manifests, goldens, suite — are UNCHANGED in this delta: the only test-file change is the RG-2 guard inside an existing node, and the full non-KB suite re-ran green at 9773 on this tip before it was committed.)
+- Repo Codex review `27611a3..621e587`: collected, archived; its two findings are this delta.
+- Full non-KB suite on THIS tip's content: 9773 passed, 17 skipped.
+- Still owed after this replay: the `scratch/**` exact-SHA GREEN on `589ed2c`, whose URL is posted to issue #171 before close.
+
+## What to judge
+
+1. **Are RG-1 and RG-2 genuinely fixed?** Is CP-7 a legal `DEFER-STANDARD-AND-PROCEED` under CLAUDE.md — zero critical residue, deferred items enumerated in already-filed OPEN issues (#172, #173) with reason class/lineage/placement, current-tip validation for the gates that have run? Does the RG-2 guard actually close the bypass without breaking the legitimate new-ledger path?
+2. **Does this delta weaken anything** — any check now able to pass vacuously, any assertion narrowed?
+3. **Is there any BLOCKING-class defect on this tip?** That is the only category that can stop the landing. Non-blocking audit-record residue goes to #173 and should be reported as such.
+
+`scripts/wave_gate.py` and `.github/workflows/tests.yml` are unchanged in this delta. Be concrete: file, line, failure scenario, fix. If nothing blocks, say so plainly.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.
