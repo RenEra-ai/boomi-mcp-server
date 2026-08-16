@@ -179,6 +179,15 @@ def test_unknown_cases_and_renderer_mismatches_are_refused():
         corpus.render_golden_case(sample["input_case"], wrong)
 
 
+#: The container types every walker here descends, and the SINGLE authority for
+#: that set — the root collector below reads it too, so widening this constant
+#: widens the whole guard rather than three of its four sites. What falls
+#: outside it (a `frozenset`, state hidden in a plain object's ``__dict__``,
+#: dict KEYS) is neither watched nor traversed; that residue is enumerated in
+#: #174 rather than implied away here.
+_WALKED_TYPES = (dict, list, tuple, set)
+
+
 def _watched_corpus_containers():
     """Every module-level container in the corpus, by name.
 
@@ -189,8 +198,7 @@ def _watched_corpus_containers():
     return {
         name: getattr(corpus, name)
         for name in dir(corpus)
-        if name.isupper()
-        and isinstance(getattr(corpus, name), (dict, list, tuple, set))
+        if name.isupper() and isinstance(getattr(corpus, name), _WALKED_TYPES)
     }
 
 
@@ -228,14 +236,6 @@ def test_rendering_every_case_mutates_no_corpus_module_state():
         "rendering mutated corpus module-level state, so one case can perturb "
         "another through it: {0}".format(drifted)
     )
-
-
-#: The container types both walkers descend. Stated as a constant because the
-#: guards' reach is exactly this tuple — a `frozenset`, or state hidden in a
-#: plain object's ``__dict__``, is neither watched nor traversed. Corpus module
-#: state holds only these types today (asserted below), so the bound is real
-#: rather than theoretical.
-_WALKED_TYPES = (dict, list, tuple, set)
 
 
 def _walk_containers(obj, path, out):
@@ -363,13 +363,21 @@ def test_the_identity_leak_walker_reports_a_nested_share():
         "handing one to production would go unreported".format(len(missing))
     )
 
-    # Every watched object really is one of the types the walkers descend, so
-    # the stated bound (`_WALKED_TYPES`) describes the corpus as it is.
-    unwalkable = sorted(
-        {type(obj).__name__ for _path, obj in real.values()}
-        - {t.__name__ for t in _WALKED_TYPES}
+    # The stated bound is checked against the MODULE, not against the walked
+    # map: everything in that map passed an isinstance test on the way in, so
+    # reading types back out of it can only ever confirm itself. A frozenset or
+    # a plain object holding nested state would be invisible there and is
+    # exactly what the bound is about, so ask the module directly.
+    outside_bound = sorted(
+        name for name in dir(corpus)
+        if name.isupper()
+        and not name.startswith("__")
+        and isinstance(getattr(corpus, name), (frozenset, bytearray))
     )
-    assert unwalkable == [], unwalkable
+    assert outside_bound == [], (
+        "corpus module state holds container types the walkers do not descend, "
+        "so the guard's stated bound no longer describes it: {0}".format(outside_bound)
+    )
 
     # And a cycle terminates rather than recursing forever.
     cyclic = {"self": None}
@@ -393,17 +401,19 @@ def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
     by identity, not equality — a module-level container OR a container nested
     inside one.
 
-    KNOWN BOUND, stated precisely because an earlier wording understated it:
-    what is inspected is the corpus's own function boundary — arguments in,
-    values out. Module state that reaches production WITHOUT crossing that
-    boundary is NOT covered; concretely, a case factory that holds a
-    module-level config and passes it straight to a production builder would go
-    unreported here (the consequence test still covers the case where such a
-    builder actually mutates it). 24 of the 60 active cases contribute no
-    container-carrying corpus call at all, three of them because their factory
-    calls no corpus function whatsoever. Closing that gap needs interception at
-    the production boundary; it is tracked as a follow-up rather than claimed
-    here.
+    KNOWN BOUND, re-measured at this commit rather than carried forward: what
+    is inspected is the corpus's own function boundary — arguments in, values
+    out. Module state that reaches production WITHOUT crossing that boundary is
+    NOT covered; concretely, a case factory that holds a module-level config and
+    passes it straight to a production builder would go unreported here, as
+    would state that only BECOMES module state during the render (a memoising
+    helper's cache). The consequence test still covers the case where such state
+    is actually mutated. Coverage today: 57 of the 60 active cases contribute at
+    least one container-carrying corpus call; the three that do not are the
+    ``recipe:*`` cases, whose factories call no corpus function at all and parse
+    their inputs fresh from committed JSON. Closing the residue needs
+    interception at the production boundary — a different mechanism, tracked in
+    #174, not claimed here.
     """
     import inspect as _inspect
 
@@ -451,9 +461,10 @@ def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
 
     # Vacuity guard: the render must have driven calls that actually carry
     # containers, or the walk below judges nothing and passes on an empty
-    # inspection. The floor is derived from the config builders this guard
-    # exists to watch — the flow-builder family alone contributes 41 — so it
-    # cannot be met while that family is uninstrumented.
+    # inspection. Both floors are set just under the MEASURED values at this
+    # commit (flow-builder 60, overall 113) rather than at a round number with
+    # slack: an earlier pair of floors sat so far below the real counts that
+    # instrumenting ONLY the flow-builder family still cleared them.
     def _carries_container(entry):
         _name, args, kwargs, result = entry
         return (
@@ -467,11 +478,11 @@ def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
         entry for entry in with_containers
         if entry[0].startswith("pfb_") or entry[0] == "_pfb_build"
     ]
-    assert len(pfb_calls) >= 40, (
+    assert len(pfb_calls) >= 55, (
         "only {0} flow-builder corpus calls carried a container; the "
         "interception is not reaching the config builders".format(len(pfb_calls))
     )
-    assert len(with_containers) >= 60, (
+    assert len(with_containers) >= 105, (
         "only {0} recorded corpus calls carried a container; the interception "
         "is not reaching the render path".format(len(with_containers))
     )

@@ -59,12 +59,15 @@ CONTRACT
   ``dict(...)`` / ``{**...}``), so one case cannot perturb another through a
   mutated module-level fixture. Both halves are asserted rather than described,
   in ``test_wave_gate_goldens.py``: the ANTECEDENT (every argument a corpus
-  function receives during a full render is checked, by identity, against every
-  container reachable from module state) and the CONSEQUENCE (rendering every
-  case leaves module state unchanged). The consequence alone was green with the
-  copies removed, which is why the antecedent exists. Its bound is stated in
-  that test: a case whose factory calls no corpus function contributes no
-  argument to check.
+  function receives AND every value it returns during a full render is checked,
+  by identity, against every container reachable from module state) and the
+  CONSEQUENCE (rendering every case leaves module state unchanged). The
+  consequence alone was green with the copies removed, which is why the
+  antecedent exists. The antecedent's bound, measured rather than assumed: it
+  sees the corpus's own function boundary, so 57 of 60 cases are covered (the
+  three ``recipe:*`` cases call no corpus function), and state reaching
+  production without crossing that boundary — or becoming module state during a
+  render — is out of its reach and tracked in #174.
 * Per-section import SPELLING is load-bearing.  This repo has a bare/``src.``
   dual-module hazard: importing the other spelling yields a DIFFERENT class
   object.  Each section below imports its builders with the SAME spelling the

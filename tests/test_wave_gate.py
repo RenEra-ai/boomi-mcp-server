@@ -2000,6 +2000,65 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
     )
 
 
+def test_audit_ledger_finding_rows_form_one_contiguous_table():
+    """A ledger's finding rows must all sit INSIDE its Markdown table.
+
+    Appending rows after a blank line leaves them syntactically fine to
+    ``_finding_rows`` — which is line-based — while Markdown terminates the
+    table at the blank line and renders the rest as literal text. #165 fixed
+    that by hand three times and reintroduced it three times, each fix closing
+    the gap above the rows it appended and opening a new one below them. The
+    enumeration was the bug, so the property is asserted instead: between the
+    header separator and the first blank line that follows it, every line is a
+    row, and no finding row exists outside that block.
+    """
+    import re as _re
+
+    ledgers = sorted((_ROOT / "docs" / "architecture").glob("ISSUE_*_AUDIT_LEDGER.md"))
+    assert ledgers, "no ledgers found — this check would be vacuous"
+
+    # A ledger may hold SEVERAL finding tables — #152 opens one per round — so
+    # the property is not "one table" but "no row outside a table": every
+    # finding row must sit in a contiguous run of pipe lines that also contains
+    # a header separator. A row appended after a blank line forms a run with no
+    # separator, which is exactly the defect.
+    checked = 0
+    for path in ledgers:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        blocks = []
+        start = None
+        for index, line in enumerate(lines + [""]):
+            if line.startswith("|"):
+                start = index if start is None else start
+            elif start is not None:
+                blocks.append((start, index - 1))
+                start = None
+
+        orphans = []
+        for index, line in enumerate(lines):
+            if not (line.startswith("| ") and _finding_rows(line)):
+                continue
+            block = next(
+                (b for b in blocks if b[0] <= index <= b[1]), None
+            )
+            separated = block is not None and any(
+                _re.fullmatch(r"\|(?:\s*-{3,}\s*\|)+", lines[i].strip())
+                for i in range(block[0], block[1] + 1)
+            )
+            if not separated:
+                orphans.append(index)
+        assert orphans == [], (
+            "{0}: finding row(s) at line(s) {1} sit in a pipe block with no "
+            "header separator — a blank line between a table and an appended "
+            "row makes Markdown render the row as literal text".format(
+                path.name, [index + 1 for index in orphans]
+            )
+        )
+        if any(line.startswith("| ") and _finding_rows(line) for line in lines):
+            checked += 1
+
+    assert checked, "no ledger contributed a finding row — this check would be vacuous"
+
 
 def test_diagnostic_codes_named_in_the_audit_ledger_exist():
     """The ledger must not name a diagnostic the gate cannot emit.
