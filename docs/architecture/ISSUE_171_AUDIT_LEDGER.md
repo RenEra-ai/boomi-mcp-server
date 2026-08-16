@@ -507,6 +507,27 @@ $ gh pr list --state all --head scratch/171-seed4-collection-floor -> []
 
 Both captures are archived under `docs/architecture/evidence/issue-171/no-pr/`.
 
+## Composite wave gate — RE-RUN on the corrected tip (roster item 5, evaluation 2)
+
+Replay #5 required this: the first wave evidence was captured at `c5c66b6`, BEFORE the
+scanner-test changes, and the `scratch/**` CI route runs `ci`, which never exercises the
+golden/determinism portion. So the earlier evidence did not cover the tree being shipped.
+
+Run on `2d37bee`, exit status **0** captured directly:
+
+```
+wave_gate: baseline 6792d0658b6da7964e35b3c493c8320dee2c1c6a (local)
+wave_gate: TOMBSTONE pytest-nodes pytest-009550 owner=repository disposition=n/a
+wave_gate: manifests ok (9790 required nodes, 60 active goldens)
+wave_gate: collection ok (9790 tests)
+wave_gate: non-KB suite green (9773 passed, 17 skipped, cap 30)
+wave_gate: 60 active goldens deterministic and byte-exact
+PLAN_FINGERPRINT_PENDING issue=#153
+```
+
+Both wave evaluations are recorded; this one covers the tip. The earlier run below is
+retained as the evidence it was, for the tree it covered.
+
 ## Composite wave gate (roster item 5) — MEASURED
 
 One composite evaluation, run on the committed candidate `c5c66b6`, exit status **0**
