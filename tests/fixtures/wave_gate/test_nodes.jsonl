@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9793,"minimum_collected":9793,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9795,"minimum_collected":9795,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -9793,3 +9793,5 @@
 {"kind":"test","id":"pytest-009792","node_id":"tests/test_wave_gate_goldens.py::test_every_active_golden_renders_with_all_test_modules_unimportable","state":"active"}
 {"kind":"test","id":"pytest-009793","node_id":"tests/test_wave_gate_goldens.py::test_rendering_every_case_mutates_no_corpus_module_state","state":"active"}
 {"kind":"test","id":"pytest-009794","node_id":"tests/test_wave_gate_goldens.py::test_no_case_factory_hands_module_state_to_a_helper_by_reference","state":"active"}
+{"kind":"test","id":"pytest-009795","node_id":"tests/test_wave_gate_goldens.py::test_the_identity_leak_walker_reports_a_nested_share","state":"active"}
+{"kind":"test","id":"pytest-009796","node_id":"tests/test_wave_gate_goldens.py::test_the_import_blocker_witness_fails_when_the_blocker_is_disarmed","state":"active"}

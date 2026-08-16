@@ -199,9 +199,12 @@ def test_rendering_every_case_mutates_no_corpus_module_state():
     another through module-level state.
 
     Snapshot every module-level container, render all 60 active cases, require
-    the snapshot to survive. Compared against the CURRENT attribute, not the
-    object captured at snapshot time, so a rebind (``LISTENER_CHAINS = dict(...)``
-    inside a renderer) is drift too — every later case would see the new table.
+    the snapshot to survive. Compared against the CURRENT attribute rather than
+    the object captured at snapshot time, so a renderer that REBINDS a module
+    table to a different-valued one is drift too — every later case would see
+    the new table. The comparison is by equality, so a rebind to an EQUAL-valued
+    object is indistinguishable from no change and is not claimed to be caught;
+    it is also harmless, since every later case sees the same values.
 
     The ANTECEDENT the contract states — that renderers COPY rather than share —
     is a separate, stronger property; see
@@ -227,6 +230,99 @@ def test_rendering_every_case_mutates_no_corpus_module_state():
     )
 
 
+def _walk_containers(obj, path, out, depth_guard=None):
+    """Map id() -> path for every container reachable from ``obj``.
+
+    Unbounded but cycle-safe: the id map itself is the visited set. An earlier
+    revision capped the walk at depth 6 and recorded only TOP-LEVEL module
+    attributes, which let a nested table (``LISTENER_CHAINS[chain]``) be handed
+    over by reference undetected — real arguments in this corpus nest to depth 9.
+    """
+    if id(obj) in out:
+        return out
+    if not isinstance(obj, (dict, list, tuple, set)):
+        return out
+    out[id(obj)] = path
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            _walk_containers(value, "{0}[{1!r}]".format(path, key), out)
+    else:
+        for index, value in enumerate(obj):
+            _walk_containers(value, "{0}[{1}]".format(path, index), out)
+    return out
+
+
+def _watched_container_ids():
+    """Every container reachable from a corpus module-level container, by id.
+
+    Nested members count: handing production ``LISTENER_CHAINS["listener_send"]``
+    shares module state exactly as surely as handing it the whole table.
+    """
+    out = {}
+    for name, value in _watched_corpus_containers().items():
+        _walk_containers(value, name, out)
+    return out
+
+
+def _identity_leaks(obj, path, watched_by_id, seen=None):
+    """Identity hits for watched containers reachable from a recorded argument."""
+    if seen is None:
+        seen = set()
+    if id(obj) in seen:
+        return []
+    found = []
+    if id(obj) in watched_by_id:
+        found.append("{0} is {1}".format(path, watched_by_id[id(obj)]))
+    if not isinstance(obj, (dict, list, tuple, set)):
+        return found
+    seen.add(id(obj))
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            found += _identity_leaks(
+                value, "{0}[{1!r}]".format(path, key), watched_by_id, seen
+            )
+    else:
+        for index, value in enumerate(obj):
+            found += _identity_leaks(
+                value, "{0}[{1}]".format(path, index), watched_by_id, seen
+            )
+    return found
+
+
+def test_the_identity_leak_walker_reports_a_nested_share():
+    """Negative control for the walker the antecedent test depends on.
+
+    Committed rather than performed by hand: every guard in this module has now
+    been found inert at least once by review, always because its failure branch
+    was never exercised. A synthetic graph that DOES leak, and one that does not,
+    keep the walker honest without waiting for a reviewer.
+    """
+    shared_leaf = {"deep": ["state"]}
+    module_state = {"table": {"chain": shared_leaf}}
+    watched = _walk_containers(module_state, "MODULE_STATE", {})
+
+    # A nested member handed over by reference is a leak, however deep — and
+    # every shared container BELOW it is reported too, because each is its own
+    # mutable channel back into the module.
+    nested = {"a": {"b": {"c": {"d": {"e": {"f": {"g": shared_leaf}}}}}}}
+    hits = _identity_leaks(nested, "arg", watched)
+    assert hits == [
+        "arg['a']['b']['c']['d']['e']['f']['g'] is MODULE_STATE['table']['chain']",
+        "arg['a']['b']['c']['d']['e']['f']['g']['deep'] "
+        "is MODULE_STATE['table']['chain']['deep']",
+    ], hits
+
+    # A deep copy of the same shape is not.
+    import copy as _copy
+
+    assert _identity_leaks(_copy.deepcopy(nested), "arg", watched) == []
+
+    # And a cycle terminates rather than recursing forever.
+    cyclic = {"self": None}
+    cyclic["self"] = cyclic
+    assert _identity_leaks(cyclic, "arg", watched) == []
+
+
 def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
     """The ANTECEDENT of the CONTRACT bullet: renderers COPY shared inputs.
 
@@ -237,16 +333,22 @@ def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
     would object, re-opening the defect verbatim. So the antecedent is measured
     directly here.
 
-    Method: wrap every PUBLIC corpus helper (the config builders the case
-    factories call as module globals) so it records the arguments it receives,
-    render every active case, then walk those arguments for any object that IS —
-    by identity, not equality — a module-level container. One hit means a
-    renderer handed shared state to production code, which is exactly what the
-    contract forbids.
+    Method: wrap every corpus-defined FUNCTION (public and private alike, minus
+    the entry points) so it records the arguments it receives, render every
+    active case, then walk those arguments for any object that IS — by identity,
+    not equality — a module-level container OR a container nested inside one.
+
+    Known bound, stated rather than papered over: a factory that calls NO corpus
+    function contributes no recorded argument, so this test says nothing about
+    it. Today that is the three ``recipe:*`` cases, whose inputs are parsed fresh
+    from committed JSON on every render and so hold no module state to leak. A
+    future case that both skips the corpus helpers and reads module state would
+    need its own coverage.
     """
-    watched = _watched_corpus_containers()
-    assert watched, "no corpus module state to watch — this check would be vacuous"
-    watched_by_id = {id(obj): name for name, obj in watched.items()}
+    import types
+
+    watched_by_id = _watched_container_ids()
+    assert watched_by_id, "no corpus module state to watch — this check would be vacuous"
 
     recorded = []
 
@@ -256,29 +358,20 @@ def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
             return func(*args, **kwargs)
         return _recording
 
+    # Entry points and bootstrap are excluded: wrapping them would record the
+    # test's own driving calls, not a renderer's.
+    entry_points = {
+        "render_golden_case", "declared_renderer", "_main", "_bootstrap_sys_path",
+        "_build_registry",
+    }
     helpers = {
         name: getattr(corpus, name)
         for name in dir(corpus)
-        if not name.startswith("_")
-        and callable(getattr(corpus, name))
-        and getattr(getattr(corpus, name), "__module__", None) == corpus.__name__
+        if name not in entry_points
+        and isinstance(getattr(corpus, name), types.FunctionType)
+        and getattr(corpus, name).__module__ == corpus.__name__
     }
     assert helpers, "no corpus helpers to wrap — this check would be vacuous"
-
-    def _leaks(obj, path, depth=0):
-        """Identity hits for watched containers reachable from a recorded arg."""
-        if depth > 6:
-            return []
-        found = []
-        if id(obj) in watched_by_id:
-            found.append("{0} is {1}".format(path, watched_by_id[id(obj)]))
-        if isinstance(obj, dict):
-            for key, value in obj.items():
-                found += _leaks(value, "{0}[{1!r}]".format(path, key), depth + 1)
-        elif isinstance(obj, (list, tuple, set)):
-            for index, value in enumerate(obj):
-                found += _leaks(value, "{0}[{1}]".format(path, index), depth + 1)
-        return found
 
     try:
         for name, func in helpers.items():
@@ -289,13 +382,29 @@ def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
         for name, func in helpers.items():
             setattr(corpus, name, func)
 
-    assert recorded, "no corpus helper was called — this check would be vacuous"
+    # Vacuity guard with teeth: it is not enough that SOME call was recorded —
+    # the render must have driven calls that actually carry containers, or the
+    # walk below has nothing to judge and would pass on an empty inspection.
+    with_containers = [
+        entry for entry in recorded
+        if any(isinstance(v, (dict, list, tuple, set)) for v in entry[1])
+        or any(isinstance(v, (dict, list, tuple, set)) for v in entry[2].values())
+    ]
+    assert len(with_containers) >= 20, (
+        "only {0} recorded corpus calls carried a container argument; the "
+        "interception is not reaching the config builders".format(len(with_containers))
+    )
+
     leaks = []
     for func_name, args, kwargs in recorded:
         for index, value in enumerate(args):
-            leaks += _leaks(value, "{0}(arg {1})".format(func_name, index))
+            leaks += _identity_leaks(
+                value, "{0}(arg {1})".format(func_name, index), watched_by_id
+            )
         for key, value in kwargs.items():
-            leaks += _leaks(value, "{0}({1}=)".format(func_name, key))
+            leaks += _identity_leaks(
+                value, "{0}({1}=)".format(func_name, key), watched_by_id
+            )
     assert leaks == [], (
         "these renderer arguments ARE module-level corpus state rather than "
         "copies of it, so a helper that mutated one would perturb every later "
@@ -396,6 +505,41 @@ print(json.dumps({
 """
 
 
+def test_the_import_blocker_witness_fails_when_the_blocker_is_disarmed(tmp_path):
+    """Committed negative control for the witness inside the test below.
+
+    Every guard this module adds has been found inert at least once by review,
+    always the same way: its failure branch was never exercised, so it passed
+    whether or not the property held. Hand-run mutation caught each one AFTER the
+    fact. This commits the mutation instead: run the same child with the
+    ``sys.meta_path`` install replaced by ``pass`` and require it to refuse, with
+    the diagnosis that names the real cause.
+    """
+    import json as _json
+    import os
+    import subprocess
+
+    disarmed = _UNIMPORTABLE_CHILD.replace(
+        "sys.meta_path.insert(0, _BlockTestModules())", "pass  # blocker disarmed"
+    )
+    assert disarmed != _UNIMPORTABLE_CHILD, "the disarm substitution did not apply"
+
+    request_path = tmp_path / "request.json"
+    request_path.write_text(_json.dumps([]), encoding="utf-8")
+    child_path = tmp_path / "disarmed_child.py"
+    child_path.write_text(disarmed, encoding="utf-8")
+
+    env = dict(os.environ)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    proc = subprocess.run(
+        [sys.executable, str(child_path), str(_ROOT / "tests"), str(request_path)],
+        capture_output=True, text=True, cwd=str(tmp_path), env=env,
+    )
+    assert proc.returncode == 3, (proc.returncode, proc.stdout[-2000:], proc.stderr[-2000:])
+    report = _json.loads(proc.stdout)
+    assert report.get("error") == "the import blocker is NOT armed", report
+
+
 def test_every_active_golden_renders_with_all_test_modules_unimportable(tmp_path):
     """#165 acceptance criterion 3: deleting an owning test module leaves every
     golden renderable — proven for the strictly stronger condition that EVERY
@@ -405,6 +549,9 @@ def test_every_active_golden_renders_with_all_test_modules_unimportable(tmp_path
     ``deletion_only`` (#160) dispositions depend on: the gate must keep
     rendering those goldens AFTER the legacy tests that used to own their case
     definitions are removed.
+
+    The witness inside the child proves the blocker is armed; that the witness
+    itself can fail is proved by the committed negative control above.
     """
     import json as _json
     import os
