@@ -542,7 +542,9 @@ run. If you develop on 3.12, expect CI to be the stricter of the two.
 Every push to `dev` — and every push to a `scratch/**` branch — that **starts** the
 workflow runs `.github/workflows/tests.yml`, whose only step selects one of two
 routes. (The qualifier is load-bearing: a head commit carrying `[skip ci]` starts no
-run at all, as the enforcement note below and spec §10 gap 1 both record.)
+run at all. Since #172 such a commit simply cannot reach `dev` — the required check
+refuses it — but on any other branch it still means no run; see the enforcement note
+below and spec §10 gap 1.)
 
 ```bash
 # push to dev — DETECTION on the pushed tip; the event supplies the baseline
@@ -610,23 +612,25 @@ the full binary patches, and a hash per untracked file), failing with
 git can omit an unreadable subtree while exiting 0, sometimes without any
 diagnostic, so treat a pass as "nothing this check can see changed".
 
-The check is named **`Python 3.11 non-KB`**, and on `dev` it runs on each push that
-starts it — note that a head commit carrying `[skip ci]` starts no run at all.
-It is **not** a GitHub *required status check*, so what the gate provides is
-**detection on the pushed tip, plus an optional preflight — not prevention**.
-Because nothing outside the pushed tree gets a vote, anything that stops the
-workflow from starting also stops the failure from being seen: a head commit
-carrying `[skip ci]`, or a push that removes the workflow from discovery or drops
-`dev` from its filter, lands with no run at all. Those remain explicitly tracked
-residuals — and they apply to the preflight too, not only to `dev`. What is no
-longer true is that the gate cannot be run on a branch: a push to `scratch/**` that
-starts a run exercises it on the candidate itself, with no pull request
-([#171](https://github.com/RenEra-ai/boomi-mcp-server/issues/171)) — but nothing
-compels a candidate through that preflight. Whether the preflight makes a
-required-check ruleset viable is **undecided pending a measured experiment**,
-which spec §10 specifies rather than predicts. Spec §10
-enumerates the known gaps — and says plainly that the list is not claimed
-exhaustive. Full specification:
+The check is named **`Python 3.11 non-KB`**, and since
+[#172](https://github.com/RenEra-ai/boomi-mcp-server/issues/172) it is a GitHub
+**required status check on `dev`** (a ruleset, `enforcement: active`, no bypass
+actors). So the gate now **prevents** as well as detects: a push whose head commit
+lacks a successful check is refused, including one that suppressed its own run with
+`[skip ci]`. That was settled by measurement rather than prediction — both controls
+of spec §10's experiment passed, and the raw push transcripts are archived under
+`docs/architecture/evidence/issue-172/rulesets/`.
+
+**The practical consequence: every `dev` landing must first earn a green check on a
+`scratch/**` preflight push** ([#171](https://github.com/RenEra-ai/boomi-mcp-server/issues/171)'s
+route), because that is where the required check comes from. A push to `scratch/**`
+exercises the gate on the candidate itself, with no pull request.
+
+What the rule does not close: it evaluates the commit being pushed, so a tree that
+removes the workflow from discovery still starts no run — and now cannot be pushed to
+`dev` either, since the check it needs never appears. On branches the rule does not
+cover, `[skip ci]` still means no run. Spec §10 enumerates the known gaps — and says
+plainly that the list is not claimed exhaustive. Full specification:
 [`docs/architecture/ENDGAME_VERIFICATION_GATE.md`](docs/architecture/ENDGAME_VERIFICATION_GATE.md).
 
 ---

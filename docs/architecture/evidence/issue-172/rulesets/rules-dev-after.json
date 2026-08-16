@@ -1,0 +1,1 @@
+[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":false,"do_not_enforce_on_create":false,"required_status_checks":[{"context":"Python 3.11 non-KB","integration_id":15368}]},"ruleset_source_type":"Repository","ruleset_source":"RenEra-ai/boomi-mcp-server","ruleset_id":20913606}]

@@ -1,0 +1,15 @@
+=== POSITIVE CONTROL (criterion 4) ===
+Advance the ruleset-protected branch to the EXACT already-green H, from a different
+ref. The rule MUST accept the check already attached to that SHA.
+
+H:            ffae2a19906810e34ccec72628e29d09a7b4561e
+branch before: 0df53ff1367fe1bd273f5362864ed6a2aa1ab054
+checks on H (settled):
+  Python 3.11 non-KB app=github-actions status=completed conclusion=success
+  Python 3.11 non-KB app=github-actions status=completed conclusion=success
+command: git push origin ffae2a19906810e34ccec72628e29d09a7b4561e:refs/heads/scratch/ruleset-experiment
+--- stdout+stderr ---
+To github.com:RenEra-ai/boomi-mcp-server.git
+   0df53ff..ffae2a1  ffae2a19906810e34ccec72628e29d09a7b4561e -> scratch/ruleset-experiment
+--- exit code: 0 ---
+branch after: ffae2a19906810e34ccec72628e29d09a7b4561e

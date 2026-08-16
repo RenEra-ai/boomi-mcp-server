@@ -24,12 +24,14 @@
 # none, so it gets no verdict at all (see the residual note above); the cost is more
 # parallel runner minutes.
 #
-# Required-status disposition: still DETECTION, not prevention. Enabling
-# `Python 3.11 non-KB` as a required check on `dev` needs a measured
-# ruleset/check-run association experiment and repo-admin authority; that
-# experiment is specified in spec §10 and tracked separately, and nothing here
-# asserts its outcome. A head commit carrying `[skip ci]` still starts no run at
-# all — an explicitly tracked residual, also in §10.
+# Required-status disposition: since #172 this check IS required on `dev`, by a
+# repository ruleset (`enforcement: active`, no bypass actors). The experiment
+# spec §10 specified was run and both controls passed — an unchecked `[skip ci]`
+# tip is refused, and a commit already green from a `scratch/**` preflight is
+# accepted from another ref. Consequence for this workflow: the `scratch/**` arm
+# below is no longer optional, because it is where a `dev` candidate earns the
+# check the rule demands. A `[skip ci]` head commit still starts no run at all;
+# on `dev` that now means the push is refused rather than landing unchecked.
 #
 # Runs the full non-KB suite on Python 3.11 — the interpreter production runs
 # (`Dockerfile:5`, `python:3.11-slim`). Local development uses a 3.12 `.venv`;

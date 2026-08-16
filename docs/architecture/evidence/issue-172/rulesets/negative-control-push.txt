@@ -1,0 +1,19 @@
+=== NEGATIVE CONTROL (criterion 3) ===
+Push an unchecked commit whose message carries a skip directive to a branch whose
+ruleset requires the 'Python 3.11 non-KB' check. The rule MUST reject the push.
+
+commit:  3efe32424ad45dfb0562dafe0efbd7ab1d77f340
+message: issue-172 negative control [skip ci]
+checks on that commit: {"message":"No commit found for SHA: 3efe32424ad45dfb0562dafe0efbd7ab1d77f340","documentation_url":"https://docs.github.com/rest/checks/runs#list-check-runs-for-a-git-reference","status":"422"}
+command: git push origin 3efe32424ad45dfb0562dafe0efbd7ab1d77f340:refs/heads/scratch/ruleset-experiment
+--- stdout+stderr ---
+remote: error: GH013: Repository rule violations found for refs/heads/scratch/ruleset-experiment.        
+remote: Review all repository rules at https://github.com/RenEra-ai/boomi-mcp-server/rules?ref=refs%2Fheads%2Fscratch%2Fruleset-experiment        
+remote: 
+remote: - Required status check "Python 3.11 non-KB" is expected.        
+remote: 
+To github.com:RenEra-ai/boomi-mcp-server.git
+ ! [remote rejected] 3efe32424ad45dfb0562dafe0efbd7ab1d77f340 -> scratch/ruleset-experiment (push declined due to repository rule violations)
+error: failed to push some refs to 'github.com:RenEra-ai/boomi-mcp-server.git'
+--- exit code: 1 ---
+branch after: 0df53ff1367fe1bd273f5362864ed6a2aa1ab054

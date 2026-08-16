@@ -3,7 +3,8 @@
 Issue #152 (M12.13). Owner: repository.
 
 > **Status: implemented, landed on `dev`, and evidenced in CI.** The gate runs on
-> pushes to `dev` that start it (§10 gap 1: a `[skip ci]` head commit starts none);
+> pushes to `dev` that start it (a `[skip ci]` head commit starts none — but since
+> #172 such a tip cannot reach `dev` at all; see §10 gap 1);
 > the landing run passed on Python 3.11.15 with the full non-KB suite. Its ability
 > to FAIL was proven by seeded defects on scratch branches — four produced the
 > diagnostic the plan expected and one produced a different, correct one; see the
@@ -17,11 +18,13 @@ Issue #152 (M12.13). Owner: repository.
 > that would land, and this repo does not use pull requests
 > ([`ISSUE_171_AUDIT_LEDGER.md`](ISSUE_171_AUDIT_LEDGER.md)).
 >
-> There is still deliberately **no `dev` ruleset** requiring the check. Whether
-> the scratch preflight makes one viable is **undecided pending a measured
-> experiment**: it needs repo-admin authority, and §10 specifies the experiment
-> rather than predicting its outcome. Until it is run, this gate DETECTS a bad
-> tip on `dev`; the preflight is what lets you find out before pushing.
+> **Since #172 the check is REQUIRED on `dev`** — a ruleset with one
+> `required_status_checks` rule naming `Python 3.11 non-KB`, `enforcement: active`,
+> no bypass actors. That was settled by MEASUREMENT, not prediction: both controls
+> of §10's experiment passed (an unchecked `[skip ci]` tip is refused; a commit
+> already green from a `scratch/**` preflight is accepted from another ref). So the
+> gate now PREVENTS on `dev` as well as detecting, and **every landing must first
+> earn a green check on a `scratch/**` preflight push**. §10 records the captures.
 
 Two committed ledgers and one fail-closed command make the mechanical half of the
 M12 endgame verification regime automatic:
@@ -753,8 +756,9 @@ requests, and `dev` reaches `main` only at milestone end.
 configured separately and a rulesets query alone does not settle the question:
 
 ```
-gh api repos/.../rulesets                  -> []                      (no ruleset)
-gh api repos/.../branches/dev/protection   -> 404 Branch not protected (no classic rule)
+gh api repos/.../rulesets                  -> one ruleset, "dev requires the non-KB suite"
+gh api repos/.../rules/branches/dev        -> [required_status_checks: Python 3.11 non-KB]
+gh api repos/.../branches/dev/protection   -> 404 Branch not protected (no CLASSIC rule)
 gh api repos/.../branches/main/protection  -> 404 Branch not protected
 default branch                             -> main
 origin/main  .github/workflows             -> absent entirely
@@ -773,12 +777,15 @@ push loads the workflow from the tree that arrives with it.)*
 
 Repository **rulesets** and **classic branch protection** are distinct mechanisms;
 an earlier revision of this section inferred "no protection" from the rulesets
-query alone, which does not follow. Both are now measured. §10 states nothing
-about GitHub's behaviour that was not either measured here or is not load-bearing
-for a claim.
+query alone, which does not follow. Both are measured. Note the third line: `dev`
+is still not protected by a CLASSIC rule and never has been — the enforcement
+added by #172 is a RULESET, which that endpoint does not report, so reading only
+`/protection` would now conclude "unprotected" and be wrong in the opposite
+direction. §10 states nothing about GitHub's behaviour that was not either
+measured here or is not load-bearing for a claim.
 
-**What the gate therefore delivers: detection on a pushed tip, plus an optional
-preflight — not prevention.** Every push to `dev` that triggers the workflow runs
+**What the gate delivers since #172: PREVENTION on `dev`, plus detection on the
+tip that lands.** Every push to `dev` that triggers the workflow runs
 the full gate on the pushed commit, and a failure is visible on it. Since #171,
 every push to `scratch/**` **that starts a run** does the same on the candidate
 *before* it is fast-forwarded, so a bad tip can be found without landing it. The
@@ -796,18 +803,21 @@ required check and no ruleset, nothing outside the pushed tree gets a vote**, so
 anything that stops the workflow from starting also stops the failure from being
 seen.
 
-1. **A push can suppress its own run.** GitHub honours skip directives
-   (`[skip ci]`, `[ci skip]`, and siblings) in a pushed head commit's message and
-   does not start the workflow. *(Provenance: GitHub-documented behaviour, raised in
-   review — NOT measured in this repository. It is recorded as a gap rather than as
-   a guarantee in either direction.)* With no required check and no ruleset, such a
-   commit would land on `dev` with no run at all — not a red one. **#171 examined
-   this hole and deliberately did not close it:** a skipped workflow cannot repair
-   its own absence, so the only mechanism that could close it is a repository rule,
-   which is the same undecided measurement as the required-check question below.
-   It is carried as an explicitly tracked residual with a filed follow-up, reason
-   class `blocked-by-mechanism` — not as an oversight, and not as something the
-   scratch preflight fixes.
+1. **A push can suppress its own run — CLOSED on `dev` since #172.** GitHub honours
+   skip directives (`[skip ci]`, `[ci skip]`, and siblings) in a pushed head
+   commit's message and does not start the workflow. Such a commit therefore
+   acquires no check at all. A skipped workflow cannot repair its own absence —
+   nothing inside the pushed tree can observe a run that never started — so the only
+   mechanism that could close this was a repository rule, and #171 correctly declined
+   to predict whether one was viable. **#172 measured it: the required check REFUSES
+   such a tip** (`GH013 … Required status check "Python 3.11 non-KB" is expected.`,
+   push declined, branch unmoved — captured in
+   [`evidence/issue-172/rulesets/negative-control-push.txt`](evidence/issue-172/rulesets/negative-control-push.txt)).
+   *(Provenance: measured here. The skip behaviour itself is GitHub-documented; what
+   is measured is that the rule refuses the resulting unchecked tip.)* The hole
+   remains open anywhere the rule does not apply — every branch other than `dev`,
+   including `scratch/**` preflights, where a skip directive still means no run and
+   therefore no preflight.
 2. **A bad tip is detected after it has landed,** because the run starts only once
    the push is accepted. Reverting is the remedy; refusal is not available.
 3. **A push can disable the gate itself.** For a `push` event GitHub loads the
@@ -838,50 +848,63 @@ seen.
    `pull_request` resolver itself remains in the gate with full unit coverage; it
    is simply unreachable from CI.
 
-   What the preflight does NOT change: it is still not a *required* check, so a
-   push to `dev` that skips its preflight is not refused by anything. The
-   preflight is available, not compulsory.
+   What the preflight means since #172: it is no longer optional for `dev`. The
+   check it produces is exactly what the `dev` rule requires, so a candidate that
+   skips its preflight has no check to present and the push is refused.
 
-**On making it a required status check.** A required check is evaluated against the
-commit being pushed, so it needs a way for a commit to acquire a passing check
-*before* it reaches `dev`. **Historically** — while the `pull_request` trigger still
-existed, which is how #152's five seeded-defect runs were produced — opening a PR did
-run this gate, but **it validated the synthetic MERGE tree, not the branch head**: for
-a `pull_request` event `GITHUB_SHA` is the merge commit Actions built, which is why
-the gate binds to it explicitly. So a PR run did not, by itself, establish that the
-head SHA carried a passing check usable by a later fast-forward push — one of the two
-reasons #171 removed that trigger. That route no longer exists here; the
-`scratch/**` preflight replaces it.
+**On making it a required status check — MEASURED, 2026-08-16 (#172).** This paragraph
+was wrong in both directions before it was measured — first calling a preflight
+impossible, then calling it available-but-disallowed — and each error was the same
+mechanism: asserting platform behaviour instead of running it. The experiment specified
+here has now been performed, and what follows is its result rather than its prediction.
+Raw captures (pre-state, the created rule, both push transcripts with exit codes, and the
+after-state) are archived under
+[`evidence/issue-172/rulesets/`](evidence/issue-172/rulesets/); the audit record is
+[`ISSUE_172_AUDIT_LEDGER.md`](ISSUE_172_AUDIT_LEDGER.md).
 
-This paragraph has now been wrong in both directions — first calling a preflight
-impossible, then calling it available-but-disallowed — and both errors were the
-same mechanism: asserting platform behaviour instead of measuring it. #171
-CONFIGURES the missing half of the first clause — a convention-compliant preflight
-route on `scratch/**`. Whether it has been **demonstrated** RED and GREEN is
-recorded in [`ISSUE_171_AUDIT_LEDGER.md`](ISSUE_171_AUDIT_LEDGER.md) and nowhere
-else: this document does not assert a run it cannot cite.
+Method: a ruleset with one `required_status_checks` rule naming the context
+`Python 3.11 non-KB` and `integration_id` 15368, `enforcement: active`, **no bypass
+actors**, targeting a disposable `scratch/ruleset-experiment` branch created at the
+then-current `dev` tip. The context is named explicitly and deliberately: a
+`google-cloud-build` app creates a permanently QUEUED check suite with zero check runs on
+every push here (*measured here*), so an all-checks or suite-level rule would never be
+satisfiable.
 
-What #171 deliberately did **not** do is answer whether that makes a ruleset
-viable. Doing so requires attaching an enforcing rule to a live branch with
-repo-admin authority, and predicting the answer is the exact error above. So the
-disposition is recorded as **undecided pending measurement**, and the experiment
-is specified here instead:
+* **Negative control — the rule REFUSES an unchecked tip** (*measured here*). A commit
+  built with `git commit-tree` on the branch's own tree, carrying `[skip ci]` in its
+  message and therefore starting no workflow run at all, was pushed to that branch. The
+  push was declined:
 
-1. Capture the successful check's name, app, head SHA and conclusion on a green
-   scratch candidate `H`.
-2. Create an enforcing ruleset targeting a **disposable** scratch integration
-   branch, with no applicable bypass actor.
-3. *Negative control* — try to advance it with a new, unchecked commit whose
-   message carries a skip directive. The rule must REJECT the push. (This is also
-   the only mechanism that would close gap 1.)
-4. *Positive control* — try to advance it to the exact already-green `H` from a
-   different ref. The rule must ACCEPT the check already attached to that SHA.
-5. Only if both controls pass: obtain a green preflight on the final candidate,
-   enable the same rule on `dev`, and measure a real fast-forward push.
-6. If either control fails: leave `dev` detection-only and record the result.
+  ```
+  remote: error: GH013: Repository rule violations found for refs/heads/scratch/ruleset-experiment.
+  remote: - Required status check "Python 3.11 non-KB" is expected.
+   ! [remote rejected] ... (push declined due to repository rule violations)
+  ```
 
-Until that runs, nothing here asserts the outcome in either direction. Anyone
-enabling a ruleset should perform steps 1–4 first, against real runs.
+  exit code 1, branch unmoved. **This is the first measurement of gap 1's premise in this
+  repository, and it settles gap 1: a required check does close the `[skip ci]` hole.**
+
+* **Positive control — the rule ACCEPTS a check already attached to the SHA**
+  (*measured here*). The exact commit `ffae2a1`, green from a `scratch/**` preflight run
+  and pushed from a different ref, advanced the protected branch: exit code 0,
+  `0df53ff..ffae2a1`. Both of its check runs were settled `success` first, so the result
+  cannot be attributed to an in-flight run. A check earned on one ref is therefore usable
+  by a later fast-forward of another — which is the property the whole question turned on.
+
+**Both controls passed, so the rule was enabled on `dev`** (owner decision, recorded in
+the ledger before the experiment ran): ruleset "dev requires the non-KB suite", the same
+single rule, `enforcement: active`, no bypass actors. The temporary ruleset and the
+disposable branch were removed; the after-state capture shows exactly one ruleset
+remaining and zero `scratch/**` branches.
+
+**What this changes.** The gate is no longer detection-only on `dev`: a push whose head
+commit lacks a successful `Python 3.11 non-KB` check is refused, including one that
+suppresses its own run. The cost is a workflow requirement rather than a workflow option —
+**every `dev` landing must now first earn a green check on a `scratch/**` preflight push**,
+the route #171 built. Gaps 2 and 3 above are unchanged in kind: a rule evaluates the
+commit being pushed, so a tree that removes the workflow from discovery still starts no
+run — and now simply cannot be pushed to `dev`, because the check it would need never
+appears. Reverting the rule is one `DELETE` call.
 
 The job name **`Python 3.11 non-KB`** remains the stable contract that #153 and
 #154 cite as their "full non-KB Python 3.11 suite in CI" gate item. Renaming it
