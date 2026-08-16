@@ -571,11 +571,16 @@ receives during that render and refuses any object that is — by identity — a
 module-level container or a container nested inside one (the antecedent). The
 consequence test alone was green with the copies removed — today's builders
 happen not to mutate their input — so it regression-tests the property without
-pinning the mechanism. Each guard carries a committed negative control: the
-walker the antecedent depends on is exercised against a synthetic leaking graph,
-and the import blocker is run disarmed and required to refuse. Guards here have
-repeatedly been found inert because only their passing branch was ever
-exercised, so a new guard ships with the mutation that proves it can fail.
+pinning the mechanism. The two guards whose failure branch was
+found unreachable now carry COMMITTED negative controls rather than hand-run
+ones: the import blocker is run disarmed and required to refuse, and the
+antecedent's watch-set construction and leak walker are driven against a
+synthetic sharing graph plus real module state. Guards here have repeatedly
+been found inert because only their passing branch was ever exercised, so a new
+guard ships with the mutation that proves it can fail. The antecedent's reach is
+the corpus's own function boundary — arguments in, values out; state handed
+straight to a production builder without crossing it is not covered, and that
+residue is tracked as a follow-up rather than claimed here.
 
 Where a case input already lives in a committed JSON fixture
 (`sync_pipeline_emitter_parity_cases.json`, the `rich_control/` and

@@ -230,19 +230,31 @@ def test_rendering_every_case_mutates_no_corpus_module_state():
     )
 
 
-def _walk_containers(obj, path, out, depth_guard=None):
-    """Map id() -> path for every container reachable from ``obj``.
+#: The container types both walkers descend. Stated as a constant because the
+#: guards' reach is exactly this tuple — a `frozenset`, or state hidden in a
+#: plain object's ``__dict__``, is neither watched nor traversed. Corpus module
+#: state holds only these types today (asserted below), so the bound is real
+#: rather than theoretical.
+_WALKED_TYPES = (dict, list, tuple, set)
+
+
+def _walk_containers(obj, path, out):
+    """Map id() -> (path, object) for every container reachable from ``obj``.
 
     Unbounded but cycle-safe: the id map itself is the visited set. An earlier
     revision capped the walk at depth 6 and recorded only TOP-LEVEL module
-    attributes, which let a nested table (``LISTENER_CHAINS[chain]``) be handed
-    over by reference undetected — real arguments in this corpus nest to depth 9.
+    attributes, which let a nested table be handed over by reference undetected
+    — real arguments in this corpus nest to depth 9.
+
+    The walked object is kept in the map, not just its id: ids are only unique
+    among LIVE objects, so a map of bare ids could report a phantom leak if a
+    watched container were freed mid-render and its id reused.
     """
     if id(obj) in out:
         return out
-    if not isinstance(obj, (dict, list, tuple, set)):
+    if not isinstance(obj, _WALKED_TYPES):
         return out
-    out[id(obj)] = path
+    out[id(obj)] = (path, obj)
     if isinstance(obj, dict):
         for key, value in obj.items():
             _walk_containers(value, "{0}[{1!r}]".format(path, key), out)
@@ -255,8 +267,8 @@ def _walk_containers(obj, path, out, depth_guard=None):
 def _watched_container_ids():
     """Every container reachable from a corpus module-level container, by id.
 
-    Nested members count: handing production ``LISTENER_CHAINS["listener_send"]``
-    shares module state exactly as surely as handing it the whole table.
+    Nested members count: handing production one chain out of a module-level
+    table shares module state exactly as surely as handing over the whole table.
     """
     out = {}
     for name, value in _watched_corpus_containers().items():
@@ -265,15 +277,21 @@ def _watched_container_ids():
 
 
 def _identity_leaks(obj, path, watched_by_id, seen=None):
-    """Identity hits for watched containers reachable from a recorded argument."""
+    """Identity hits for watched containers reachable from a recorded argument.
+
+    Membership is confirmed with ``is`` against the STORED object, not by id
+    alone: an id map without strong references can collide with a freed
+    object's reused id and report a phantom leak.
+    """
     if seen is None:
         seen = set()
     if id(obj) in seen:
         return []
     found = []
-    if id(obj) in watched_by_id:
-        found.append("{0} is {1}".format(path, watched_by_id[id(obj)]))
-    if not isinstance(obj, (dict, list, tuple, set)):
+    hit = watched_by_id.get(id(obj))
+    if hit is not None and hit[1] is obj:
+        found.append("{0} is {1}".format(path, hit[0]))
+    if not isinstance(obj, _WALKED_TYPES):
         return found
     seen.add(id(obj))
     if isinstance(obj, dict):
@@ -317,6 +335,42 @@ def test_the_identity_leak_walker_reports_a_nested_share():
 
     assert _identity_leaks(_copy.deepcopy(nested), "arg", watched) == []
 
+    # ...and the WATCH SET the antecedent test actually uses must include nested
+    # members of REAL corpus state, not just top-level attributes. This half is
+    # the one that matters: the round-3 defect lived in the watch-set
+    # construction, and a control that built its own map (as this test's
+    # synthetic half does) stayed green while that construction was regressed.
+    real = _watched_container_ids()
+    containers = _watched_corpus_containers()
+    assert containers, "no corpus module state — this check would be vacuous"
+    nested_members = [
+        value
+        for container in containers.values()
+        if isinstance(container, dict)
+        for value in container.values()
+        if isinstance(value, _WALKED_TYPES)
+    ]
+    assert nested_members, (
+        "no corpus module container holds a nested container, so this control "
+        "cannot distinguish a nested walk from a top-level one"
+    )
+    missing = [
+        id(member) for member in nested_members
+        if id(member) not in real or real[id(member)][1] is not member
+    ]
+    assert missing == [], (
+        "the watch set omits {0} nested member(s) of corpus module state, so "
+        "handing one to production would go unreported".format(len(missing))
+    )
+
+    # Every watched object really is one of the types the walkers descend, so
+    # the stated bound (`_WALKED_TYPES`) describes the corpus as it is.
+    unwalkable = sorted(
+        {type(obj).__name__ for _path, obj in real.values()}
+        - {t.__name__ for t in _WALKED_TYPES}
+    )
+    assert unwalkable == [], unwalkable
+
     # And a cycle terminates rather than recursing forever.
     cyclic = {"self": None}
     cyclic["self"] = cyclic
@@ -333,19 +387,25 @@ def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
     would object, re-opening the defect verbatim. So the antecedent is measured
     directly here.
 
-    Method: wrap every corpus-defined FUNCTION (public and private alike, minus
-    the entry points) so it records the arguments it receives, render every
-    active case, then walk those arguments for any object that IS — by identity,
-    not equality — a module-level container OR a container nested inside one.
+    Method: wrap every corpus-defined callable (public and private alike, minus
+    the entry points) so it records the arguments it receives AND the value it
+    returns, render every active case, then walk both for any object that IS —
+    by identity, not equality — a module-level container OR a container nested
+    inside one.
 
-    Known bound, stated rather than papered over: a factory that calls NO corpus
-    function contributes no recorded argument, so this test says nothing about
-    it. Today that is the three ``recipe:*`` cases, whose inputs are parsed fresh
-    from committed JSON on every render and so hold no module state to leak. A
-    future case that both skips the corpus helpers and reads module state would
-    need its own coverage.
+    KNOWN BOUND, stated precisely because an earlier wording understated it:
+    what is inspected is the corpus's own function boundary — arguments in,
+    values out. Module state that reaches production WITHOUT crossing that
+    boundary is NOT covered; concretely, a case factory that holds a
+    module-level config and passes it straight to a production builder would go
+    unreported here (the consequence test still covers the case where such a
+    builder actually mutates it). 24 of the 60 active cases contribute no
+    container-carrying corpus call at all, three of them because their factory
+    calls no corpus function whatsoever. Closing that gap needs interception at
+    the production boundary; it is tracked as a follow-up rather than claimed
+    here.
     """
-    import types
+    import inspect as _inspect
 
     watched_by_id = _watched_container_ids()
     assert watched_by_id, "no corpus module state to watch — this check would be vacuous"
@@ -354,8 +414,9 @@ def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
 
     def _wrap(func):
         def _recording(*args, **kwargs):
-            recorded.append((func.__name__, args, kwargs))
-            return func(*args, **kwargs)
+            result = func(*args, **kwargs)
+            recorded.append((getattr(func, "__name__", "?"), args, kwargs, result))
+            return result
         return _recording
 
     # Entry points and bootstrap are excluded: wrapping them would record the
@@ -364,12 +425,18 @@ def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
         "render_golden_case", "declared_renderer", "_main", "_bootstrap_sys_path",
         "_build_registry",
     }
+    # Any non-class callable defined here — NOT only plain functions. Narrowing
+    # this to `types.FunctionType` silently dropped decorated helpers: an
+    # `lru_cache`-wrapped corpus function is callable and keeps its
+    # ``__module__``, but is a `_lru_cache_wrapper`, so memoising a helper would
+    # have removed it from this guard with nothing objecting.
     helpers = {
         name: getattr(corpus, name)
         for name in dir(corpus)
         if name not in entry_points
-        and isinstance(getattr(corpus, name), types.FunctionType)
-        and getattr(corpus, name).__module__ == corpus.__name__
+        and not _inspect.isclass(getattr(corpus, name))
+        and callable(getattr(corpus, name))
+        and getattr(getattr(corpus, name), "__module__", None) == corpus.__name__
     }
     assert helpers, "no corpus helpers to wrap — this check would be vacuous"
 
@@ -382,21 +449,35 @@ def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
         for name, func in helpers.items():
             setattr(corpus, name, func)
 
-    # Vacuity guard with teeth: it is not enough that SOME call was recorded —
-    # the render must have driven calls that actually carry containers, or the
-    # walk below has nothing to judge and would pass on an empty inspection.
-    with_containers = [
-        entry for entry in recorded
-        if any(isinstance(v, (dict, list, tuple, set)) for v in entry[1])
-        or any(isinstance(v, (dict, list, tuple, set)) for v in entry[2].values())
+    # Vacuity guard: the render must have driven calls that actually carry
+    # containers, or the walk below judges nothing and passes on an empty
+    # inspection. The floor is derived from the config builders this guard
+    # exists to watch — the flow-builder family alone contributes 41 — so it
+    # cannot be met while that family is uninstrumented.
+    def _carries_container(entry):
+        _name, args, kwargs, result = entry
+        return (
+            any(isinstance(v, _WALKED_TYPES) for v in args)
+            or any(isinstance(v, _WALKED_TYPES) for v in kwargs.values())
+            or isinstance(result, _WALKED_TYPES)
+        )
+
+    with_containers = [entry for entry in recorded if _carries_container(entry)]
+    pfb_calls = [
+        entry for entry in with_containers
+        if entry[0].startswith("pfb_") or entry[0] == "_pfb_build"
     ]
-    assert len(with_containers) >= 20, (
-        "only {0} recorded corpus calls carried a container argument; the "
-        "interception is not reaching the config builders".format(len(with_containers))
+    assert len(pfb_calls) >= 40, (
+        "only {0} flow-builder corpus calls carried a container; the "
+        "interception is not reaching the config builders".format(len(pfb_calls))
+    )
+    assert len(with_containers) >= 60, (
+        "only {0} recorded corpus calls carried a container; the interception "
+        "is not reaching the render path".format(len(with_containers))
     )
 
     leaks = []
-    for func_name, args, kwargs in recorded:
+    for func_name, args, kwargs, result in recorded:
         for index, value in enumerate(args):
             leaks += _identity_leaks(
                 value, "{0}(arg {1})".format(func_name, index), watched_by_id
@@ -405,10 +486,20 @@ def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
             leaks += _identity_leaks(
                 value, "{0}({1}=)".format(func_name, key), watched_by_id
             )
-    assert leaks == [], (
-        "these renderer arguments ARE module-level corpus state rather than "
-        "copies of it, so a helper that mutated one would perturb every later "
-        "case: {0}".format(sorted(set(leaks)))
+        # Returned values too: a helper that MEMOISED its parsed fixture and
+        # handed the cached object back would share module state just as surely
+        # as one that took it as an argument.
+        leaks += _identity_leaks(
+            result, "{0}(-> return)".format(func_name), watched_by_id
+        )
+    # Report a bounded sample: one shared object yields a hit per nested member
+    # per case, which ran to ~180 lines of identical-shaped text on the first
+    # real failure and buried the signal.
+    unique = sorted(set(leaks))
+    assert unique == [], (
+        "{0} renderer argument/return path(s) ARE module-level corpus state "
+        "rather than copies of it, so a helper that mutated one would perturb "
+        "every later case; first 10: {1}".format(len(unique), unique[:10])
     )
 
 
