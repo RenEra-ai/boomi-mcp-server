@@ -1774,7 +1774,22 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
         # parser change that silently drops an ENTIRE other ledger left this
         # check green — #152 contributed zero rows under the delimiter-count
         # parser while #171 alone kept the suite honest (#173 item 1).
-        assert parsed, (
+        #
+        # Scoped to ledgers COMMITTED IN HEAD, for the same reason the
+        # first-appearance walk below exempts a historyless file: the workflow
+        # instantiates a ledger at Stage-1 step 0 and requires a green suite
+        # BEFORE the Stage-1.5 commit that first commits it, so demanding rows
+        # from an uncommitted ledger makes that sequence unsatisfiable — a
+        # freshly instantiated ledger could never be validated, so it could
+        # never be committed. Seeding with `INH-*` rows is the convention, but
+        # it cannot be the enforcement: `ISSUE_152_AUDIT_LEDGER.md` is a
+        # committed counterexample of a slice that inherited nothing. Once the
+        # ledger IS in HEAD, a parser regression that drops it fails here.
+        committed_here = subprocess.run(
+            ["git", "cat-file", "-e", "HEAD:{0}".format(path.relative_to(_ROOT))],
+            cwd=str(_ROOT), capture_output=True, text=True,
+        ).returncode == 0
+        assert parsed or not committed_here, (
             "{0}: _finding_rows() parsed no rows, so every assertion below is "
             "vacuous for this ledger — a parser change has dropped it entirely "
             "from the append-only check".format(path.name)
@@ -1817,7 +1832,7 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
         # in-place replacement of the original — both are what this test exists to catch.
         orphans = {
             i for i in present
-            if _re.fullmatch(r"(?:INH-)?[A-Z][A-Za-z0-9]*-?\d*-\d+[a-z]", i)
+            if _re.fullmatch(_REVISION_ID_RE, i)
             and _supersedes(i) not in present
         }
         assert orphans == set(), (
@@ -2376,10 +2391,18 @@ def _finding_rows(text):
         # not append-only. Only FINDING rows carry the immutability contract.
         if rid.startswith("DC-"):
             continue
-        if _re.fullmatch(r"(?:INH-)?[A-Z][A-Za-z0-9]*-?\d*-\d+[a-z]?", rid):
+        if _re.fullmatch(_FINDING_ID_RE, rid):
             rows.setdefault(rid, line)
     return rows
 
+
+#: The finding-row ID shape — ONE authority. It was hand-copied at three sites
+#: (the parser, the orphan-revision check, and #173's fixture test), which is the
+#: unpinned-hand-copy mechanism this repository's structural-fix rule names: a
+#: widened parser would leave the fixture asserting a stale shape.
+_FINDING_ID_RE = r"(?:INH-)?[A-Z][A-Za-z0-9]*-?\d*-\d+[a-z]?"
+#: The same shape with a MANDATORY trailing letter: a revision id.
+_REVISION_ID_RE = _FINDING_ID_RE[:-1]
 
 _LEDGER_PATH_RE = r"docs/architecture/ISSUE_.+_AUDIT_LEDGER\.md"
 
@@ -2441,14 +2464,22 @@ def _vanished_frozen_ledger_paths(repo_root):
     # ...plus every ledger path this history has ever ADDED. Walking HEAD's own
     # ancestry (not `--all`, which would freeze paths from abandoned branches
     # that were never part of this line of development).
+    #
+    # `-z` for the same reason the archive scan uses it, and it is NOT optional
+    # here: without it `git log --name-only` QUOTES any path that is not plain
+    # ASCII (`"docs/architecture/ISSUE_\303\2519_AUDIT_LEDGER.md"`), which the
+    # anchored regex then fails to match — so such a ledger would never enter
+    # the frozen set at all. `--no-renames` because a ledger created by renaming
+    # an existing in-pathspec file is reported as R, not A, and would likewise
+    # never be frozen.
     committed |= {
         name
         for name in _git_or_fail(
             repo_root,
-            ["git", "log", "--format=", "--name-only", "--diff-filter=A", "--",
-             "docs/architecture/"],
+            ["git", "log", "-z", "--format=", "--name-only", "--no-renames",
+             "--diff-filter=A", "--", "docs/architecture/"],
             "frozen-ledger history walk",
-        ).split("\n")
+        ).split("\0")
         if _re.fullmatch(_LEDGER_PATH_RE, name.strip())
     }
 
@@ -2592,32 +2623,51 @@ def test_frozen_ledger_invariant_refuses_a_broken_git_query(tmp_path):
         _vanished_frozen_ledger_paths(not_a_repo)
 
 
-def test_archive_index_enumeration_keeps_a_whitespace_path(tmp_path):
-    """A whitespace-containing archive path survives enumeration (#173 item 2).
+def test_archive_index_enumeration_keeps_awkward_paths(tmp_path):
+    """Whitespace AND non-ASCII archive paths survive enumeration (#173 item 2).
 
-    #171's archive has 98 tracked paths and not one contains whitespace, so the
-    `-z` branch was correct and completely unexercised. This constructs the case
-    the repo does not supply, and — because "it works" proves little on its own —
-    also reproduces the defect it prevents: the same output split on whitespace
-    loses the path entirely.
+    #171's archive has 146 tracked paths, none containing whitespace and none
+    non-ASCII, so the `-z` branch was correct and completely unexercised. Both
+    halves of its justification are witnessed here, because they are different
+    failures:
+
+    * whitespace defeats a naive `.split()` — the caller loses the path;
+    * a non-ASCII byte makes git QUOTE the name (`"…\\303\\251…"`) unless `-z` is
+      given, so a name-shaped comparison silently stops matching.
+
+    The second is the sharper one and was missed by the first version of this
+    fixture: a whitespace-only case passes even with `-z` replaced by
+    `.splitlines()`, because `git ls-files` does not quote spaces.
     """
     repo = _new_repo(tmp_path)
     prefix = "docs/architecture/evidence/issue-9"
     _write(repo, prefix + "/index.jsonl", "{}\n")
     _write(repo, prefix + "/actions/run one/run log.txt", "green\n")
-    _commit(repo, "archive with an awkward path")
+    _write(repo, prefix + "/actions/café/run.log", "green\n")
+    _commit(repo, "archive with awkward paths")
 
     tracked, symlinked = _archive_index_entries(repo, prefix)
     assert symlinked == []
-    assert tracked == {"index.jsonl", "actions/run one/run log.txt"}
+    assert tracked == {
+        "index.jsonl", "actions/run one/run log.txt", "actions/café/run.log",
+    }
 
-    # The defect the `-z` choice prevents, demonstrated on the same repository:
-    # whitespace-splitting the non-NUL form drops the awkward name silently.
+    # Defect 1 — whitespace-splitting the non-NUL form loses the spaced name.
     naive = subprocess.run(
         ["git", "ls-files", "--stage", "--", prefix],
         cwd=str(repo), capture_output=True, text=True, check=True,
     ).stdout.split()
-    assert "actions/run one/run log.txt" not in naive
+    assert not any(entry.endswith("run log.txt") for entry in naive)
+
+    # Defect 2 — without `-z`, git QUOTES the non-ASCII name, so a line-based
+    # read yields a spelling that no longer matches the real path.
+    lines = subprocess.run(
+        ["git", "ls-files", "--stage", "--", prefix],
+        cwd=str(repo), capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
+    quoted = [line for line in lines if "\\303\\251" in line]
+    assert quoted, "expected git to quote the non-ASCII path without -z: {0}".format(lines)
+    assert not any("café" in line for line in lines)
 
 
 def test_archive_index_scan_refuses_a_tracked_symlink_materialised_as_a_file(tmp_path):
@@ -2703,7 +2753,7 @@ def test_finding_rows_parses_both_committed_row_shapes_and_excludes_class_rows()
     # would be frozen as though it were a finding.
     import re as _re
 
-    assert _re.fullmatch(r"(?:INH-)?[A-Z][A-Za-z0-9]*-?\d*-\d+[a-z]?", "DC-16")
+    assert _re.fullmatch(_FINDING_ID_RE, "DC-16")
     class_rows = (
         "| **DC-16** | a stale derived aggregate | the finding rows | **7** | "
         "regenerated from the rows |\n"

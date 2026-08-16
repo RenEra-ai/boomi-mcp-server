@@ -11,8 +11,9 @@ carry a provenance marker (`measured here` / `documented, not measured` / `assum
 - Slice kind: dark (tests + docs only; no `src/`, `server.py` or `scripts/` change)
 - Artifact trust boundary: the slice CREATES AND OWNS the per-ledger coverage assertion,
   the two extracted helpers (`_archive_index_entries`, `_vanished_frozen_ledger_paths`),
-  six new tests, two appended revision rows in `ISSUE_171_AUDIT_LEDGER.md`, one template
-  sentence, and this ledger + archive. It CONSUMES, unchanged: the committed ledgers'
+  six new tests, two appended revision rows in `ISSUE_171_AUDIT_LEDGER.md`, two template
+  paragraphs (the seeding rule this slice's own assertion requires, and the contiguity rule
+  #165 landed), and this ledger + archive. It CONSUMES, unchanged: the committed ledgers'
   finding-row bytes, both wave-gate manifests' existing rows, the evidence archives, and
   every production module.
 - Expected defect classes (pre-enumerated from #165's end state, so a second instance
@@ -48,6 +49,9 @@ the record work once and holds to that rule.
 
 | Class | Mechanism | Runtime authority | Instances (derived from rows) | Resolution |
 | --- | --- | --- | --- | --- |
+| **DC-173-1** | a guard whose failure branch cannot be reached, so it passes whether or not the property holds | the property the guard claims to prove | **4** — INH-AR6-3, INH-AR6-4, INH-CR-3, R1-1 | Every fix in this slice ships a witness that FAILS against the pre-fix code, verified by mutation and recorded in the QA evidence below; the inherited findings are themselves instances of this class, which is why the slice exists. Pre-enumerated at instantiation from #165's end state, so the second instance triggered structurally on arrival: the response is that no fix here is accepted without its mutation witness. |
+| **DC-173-2** | an unpinned hand-copy of a fact whose authority lives elsewhere | the single definition the copy shadows | **3** — INH-CR-4, R1-4, R1-5 | Structural at instance 2: the finding-id shape is now ONE module constant (`_FINDING_ID_RE`) with the revision form derived from it, replacing three hand-copies; the two DC-16 ordinals were corrected by derivation from the class table rather than by re-typing; and the stale "#171's archive has 98 tracked paths" was re-measured (146). Sibling sweep: every regex and count this slice touches now cites or derives its authority. |
+| **DC-173-3** | a doc/record claim about behaviour that no check enforces, or that the tree contradicts | the code or tree the claim describes | **3** — INH-CR-5, R1-2, R1-6 | Corrected in place: the rename comment names both authorities, the void deferral is withdrawn against its measurement, and the trust-boundary and template claims are restated to what actually shipped. |
 
 ## Finding rows (one per raw finding; append-only; exactly one disposition each)
 
@@ -60,6 +64,18 @@ the record work once and holds to that rule.
 | INH-CR-3 | inherited seed — issue #173 item 3.3 | "Unchecked `git ls-tree` returncode when deriving the frozen set — a solitary failure of that subprocess empties the set and passes the invariant vacuously" | **P3-equivalent** | *(audit-record integrity — NOT a blocking class; partially mitigated by the shallow-repository assert)* | *(a guard whose failure branch cannot be reached)* | Standard — anchor: no source critical label; lineage: first deferral | this slice's Stage-1.5 baseline commit | `fixed` — every git query behind the frozen set now runs through `_git_or_fail`, which asserts `returncode == 0` and reports the stderr; the sibling `ls-files` call and the new history walk are covered by the same helper, not just the `ls-tree` call the finding named. Witness: `test_frozen_ledger_invariant_refuses_a_broken_git_query`. |
 | INH-CR-4 | inherited seed — issue #173 item 3.4 | "Two hand-typed DC-16 inline ordinals off by one in `docs/architecture/ISSUE_171_AUDIT_LEDGER.md` (RH-2 says 'instance 8', AR6-5 says 'instance 7'; the derived table's 7 members are correct) — the same hand-tally shape RG-1a corrected for DC-12, committed in the very row recording that correction" | **P3-equivalent** | *(audit-record integrity — NOT a blocking class)* | *(a hand-typed ordinal restated rather than derived)* | Standard — anchor: no source critical label; lineage: first deferral | this slice's Stage-1.5 baseline commit | `fixed` by APPENDED revision rows `AR6-5a` and `RH-2a` in #171's ledger, with both originals retained unedited and the supersession map extended in the same commit. Verified against the derived table's chronology: applying `AR3-4a` removes AR3-4 from the class, which is what shifts AR6-5 to 6 and RH-2 to 7. |
 | INH-CR-5 | inherited seed — issue #173 item 3.5 | "Comment imprecision in the invariant's rationale: 'any rename leaves its source path missing from the worktree' understates the untracked-copy variant, which leaves the source present in the worktree and missing from the INDEX; the code checks both, the prose names one" | **P3-equivalent** | *(prose vs code — NOT a blocking class)* | *(a doc claim narrower than the code it describes)* | Standard — anchor: no source critical label; lineage: first deferral | this slice's Stage-1.5 baseline commit | `fixed` — the comment now names both authorities, says which variant breaks which, and records that a case-only rename breaks neither on a case-insensitive filesystem and is caught by the spelling comparison instead. |
+| R1-1 | Stage-2 substitute round 1 (independent Claude reviewer, delta `0df53ff..a996b4d`; no run dir — see the Deviation section) | "the per-ledger `assert parsed` deadlocks new-ledger instantiation" — the workflow instantiates a ledger at step 0 and requires a green suite BEFORE the Stage-1.5 commit, so a freshly instantiated ledger could never be validated, so it could never be committed; and `ISSUE_152_AUDIT_LEDGER.md` has zero `INH-*` rows, a committed counterexample of a slice with nothing to inherit | **P1** | **capability reachability** — a required gate made unsatisfiable for every future slice | **DC-173-1** instance 4 | **Critical** — anchor: source label P1. Fixed and validated, never deferred. | `a996b4d` → this correction | `fixed` — REPRODUCED first (instantiating a fresh ledger from the template, with its archive skeleton, made the suite RED at the tip and green at the baseline). The assertion is now scoped to ledgers present in HEAD's tree, exactly like the first-appearance walk's existing historyless exemption three assertions later: a parser regression that drops a COMMITTED ledger still fails, while a brand-new one is exempt until it is committed. Correctly caught — this is the same new-ledger-QA deadlock class `e16b537` fixed one round earlier in #171, and my seeding convention could not close it because it is a convention, not an enforcement. |
+| R1-2 | Stage-2 substitute round 1 | "the slice's only deferral is invalid on three counts" — it defers to #164, which does not mention ledgers, archives or the scanner; its justification is contradicted by an in-slice measurement; and it cites a checkpoint while the Checkpoints table is empty | **P2** | *(audit-record integrity — NOT a blocking class, but any of the three alone invalidates closure)* | **DC-173-3** instance 2 | Standard — anchor: no source critical label | `a996b4d` → this correction | `fixed` — the deferral is WITHDRAWN, not re-pointed. Independently reproduced: co-deleting `ISSUE_165_AUDIT_LEDGER.md` and `evidence/issue-165/` in one commit at the slice tip FAILS the frozen-path invariant, because a co-deletion necessarily deletes the ledger and the walk added here already covers it. CLAUDE.md voids a deferral its own slice's measurement contradicts, so the case is `fixed`; the slice now defers nothing. |
+| R1-3 | Stage-2 substitute round 1 | "the history walk's git query is under-specified; two escapes remain" — unlike its sibling queries it uses neither `-z` (so git QUOTES non-ASCII paths and the anchored regex misses them) nor `--no-renames` (so a ledger created by renaming an in-pathspec file never enters the frozen set) | **P3** | *(capability reachability of the invariant — not a blocking class; both escapes need a deliberate act)* | **DC-173-2** instance 4 | Standard — anchor: source label P3 | `a996b4d` → this correction | `fixed` — both flags added. *(Measured here: without `--no-renames`, a ledger created by `git mv` and then deleted returns an EMPTY vanished set; with it, the deletion is reported.)* Correctly caught, and the sharper half is that this is the same `-z`-vs-naive-parse class the slice's own item-2 fixture exists to pin, reintroduced in the code added beside it. |
+| R1-4 | Stage-2 substitute round 1 | "the whitespace fixture does not actually pin `-z`" — replacing `-z` with `.splitlines()` leaves all three tests green, because `git ls-files` does not quote spaces; the `-z` branch's real justification (git quotes non-ASCII paths) stays unwitnessed, and the naive-split reproduction is tautological | **P3** | *(test-guard integrity — not a blocking class)* | **DC-173-1** instance 5 | Standard — anchor: source label P3 | `a996b4d` → this correction | `fixed` — the fixture now also commits a non-ASCII archive path and asserts git quotes it without `-z`. *(Measured here: with `-z` replaced by `.splitlines()` the fixture now FAILS, where before it passed.)* |
+| R1-5 | Stage-2 substitute round 1 | "the finding-id regex is hand-copied into the new test" — the same pattern now appears verbatim at three sites, so a widened parser leaves the fixture asserting a stale shape | **P3** | *(an unpinned hand-copy — not a blocking class)* | **DC-173-2** instance 5 | Standard — anchor: source label P3 | `a996b4d` → this correction | `fixed` STRUCTURALLY at the second instance, as the rule requires: `_FINDING_ID_RE` is one module constant, `_REVISION_ID_RE` is derived from it rather than written again, and all three sites now reference them. |
+| R1-6 | Stage-2 substitute round 1 | "two stale hand-typed measurements" (#171's archive has 146 tracked paths, not 98; the walk covers 1,431 commits, not 1,425) and "two small record inconsistencies" (the trust boundary says one template sentence where two paragraphs shipped; the Defect-class table is empty while every row is disposed) | **P3** | *(audit-record integrity — not a blocking class)* | **DC-173-3** instance 3 | Standard — anchor: source label P3 | `a996b4d` → this correction | `fixed` — both counts re-measured and corrected, the trust boundary restated to what shipped, and the Defect-class table populated so the second-instance check can actually be run from the record. Exactly the class this ledger PRE-ENUMERATED at instantiation, arriving as predicted. |
+| INH-CR-2a | revision of INH-CR-2 (round-1 correction, per R1-2 and R1-6) | corrects the commit count and withdraws the deferral pointer; INH-CR-2 is retained above unedited | *(inherits INH-CR-2)* | *(inherits)* | *(inherits)* | *(inherits)* | this correction | *(inherits INH-CR-2's `fixed` disposition)* — two corrections. **(1)** The walk covers **1,431** commits at the baseline, not 1,425 (`git rev-list --count 0df53ff`); the ~0.1 s timing stands. **(2)** INH-CR-2's closing sentence says the archive half of the co-deletion case "is NOT closed here"; it IS closed here, measured — co-deleting a ledger and its archive in one commit fails the frozen-path invariant, because a co-deletion necessarily deletes the ledger. The deferral that sentence pointed at is withdrawn as void (see the Deferrals section); the slice defers nothing. |
+
+* **Supersession map** (a revision MERGES onto its original: cells the revision states
+  win, cells it marks *(inherits)* keep the original's value, and the merged row is what
+  the tally reads — the original is retained above unedited):
+  `INH-CR-2a → INH-CR-2`.
 
 Dispositions: `fixed` · `finding-refuted` · `severity-refuted` · `not-validated` ·
 `deferred` (issue, reason class, placement).
@@ -83,15 +99,19 @@ All measured here, 2026-08-16, against the step-0 baseline `0df53ff`:
 
 ## Deferrals
 
-Pointer-only; the reason class, placement and lineage live on the finding row and in the
-filed issue.
-
-- **INH-CR-2's archive half → #164.** Item 3.2's finding names two escapes: a committed
-  one-step ledger deletion (fixed here) and a ledger+archive CO-deletion in one commit,
-  which would also escape the attestation scanner's orphaned-archive assert. The second
-  needs the scanner to walk history for archives, which is a different mechanism from the
-  ledger-path walk this slice adds. Reason class `blocked-by-mechanism`; first deferral.
-  *(Recorded at this slice's reconciliation; see the checkpoint that authorizes it.)*
+**None.** An earlier revision of this section deferred "INH-CR-2's archive half" to #164 on
+the ground that a ledger+archive CO-deletion in one commit needs the scanner to walk
+history for archives. **That ground is false, and the measurement is in the record**
+(row R1-2): co-deleting `ISSUE_165_AUDIT_LEDGER.md` and `evidence/issue-165/` in one commit
+at this slice's tip FAILS `test_audit_ledger_revisions_are_append_only_and_fully_declared`
+with "committed ledger paths are FROZEN … ['docs/architecture/ISSUE_165_AUDIT_LEDGER.md']",
+because a co-deletion necessarily deletes the ledger and the ledger-path walk added here
+already covers it. Archive-alone deletion is caught by the pre-existing "every ledger owns
+an archive" assertion. CLAUDE.md voids a deferral whose justification an in-slice
+measurement contradicts; the deferral is therefore withdrawn rather than re-pointed, and
+the case is `fixed`, not deferred. The deferral was also defective in two further ways the
+reviewer named — #164 does not cover this subject at all, and it cited a checkpoint that
+did not exist — either of which alone would have invalidated closure.
 
 ## Evidence index
 
