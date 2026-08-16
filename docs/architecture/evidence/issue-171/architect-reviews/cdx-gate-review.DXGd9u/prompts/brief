@@ -1,0 +1,37 @@
+This is the FOURTH delta-scoped replay of the architect implementation-review gate for issue #171. Replay #3 (`cdx-gate-review.oAatfN`) returned ISSUES FOUND with six findings; all six are fixed, and fixing the first one surfaced a further regression which is also fixed.
+
+Repository: `boomi-mcp-server` at /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: `codex/issue-171`
+Replay #3 reviewed up to: `2682dd9725b62605b79058a552e934f91ae80109`
+Current HEAD: `d6d3e507f57a86f48650e19880bb686e5086735e`
+
+**Review the delta since replay #3:** `git diff 2682dd9725b62605b79058a552e934f91ae80109..HEAD`
+
+## What this delta contains
+
+Replay #3's six findings, fixed (ledger rows AR3-1…AR3-6):
+
+1. **AR3-1 (the blocker)** — `SHA256SUMS` listed two `run.log` files that `.gitignore`'s `*.log` excluded, so a clean checkout had fewer files than the checksums claimed and the archive scanner would have failed the final acceptance run. **Fixed by a scoped `.gitignore` negation** (`!docs/architecture/evidence/**/*.log`) rather than by `git add -f` — see the regression below.
+2. **AR3-2** — CP-2 was still presented as valid authorization. An explicit CP-2 invalidation note was added; D-1a/D-2a are now stated VOID pending CP-3.
+3. **AR3-3** — the supersession map omitted three revision rows and elided the R2 range with `…`. Every mapping is now written out.
+4. **AR3-4** — the missing-logs finding was misclassified as DC-12; reclassified to DC-20 and DC-12 recomputed 7 → 6.
+5. **AR3-5** — DC-18's fourth recurrence: an append-only check is now MECHANIZED as `test_audit_ledger_revisions_are_append_only_and_fully_declared` (new manifest node `pytest-009791`, floors 9789 → 9790).
+6. **AR3-6** — three revision rows carried premature "final replay" provenance; corrected.
+
+**A regression introduced by AR3-1's own fix, caught by the full suite and recorded as row S1-2:** `git add -f` makes a file tracked but does not stop `.gitignore` matching it, and `.gcloudignore` does `#!include:.gitignore`, so the logs became tracked AND excluded from the gcloud build-context upload — which `test_no_tracked_file_dropped_from_build_context` refuses. The force-add was replaced with the scoped negation described above.
+
+## What to judge
+
+1. **Are all six AR3 fixes real and complete?** Especially: does `git ls-files` now agree exactly with `SHA256SUMS` (no listed-but-untracked, no tracked-but-unlisted); is the `.gitignore` negation correctly SCOPED (evidence logs tracked, ordinary stray `*.log` still ignored); and does any current-state summary still imply a valid checkpoint authorizes the deferrals?
+
+2. **Is the new append-only test sound and non-vacuous?** It deliberately does NOT check byte-identity across commits (that needs the prior commit as authority and would break on a shallow checkout) and says so. Judge whether what it DOES check is correct, whether its assertions can pass vacuously, and whether the manifest arithmetic for `pytest-009791` is right (one append, no tombstone, floors 9789 → 9790).
+
+3. **Does the defect-class table still reproduce from its declared inputs**, given the new rows AR3-1…AR3-6, S1-2 and the widened DC-20 definition?
+
+4. **Is anything now worse than at replay #3** — a regression, a weakened test, or a fresh claim outrunning its evidence?
+
+5. **Is the tree closure-safe apart from the known-pending items?** Deliberately outstanding, in this order: record **CP-3** in its own commit at a validated tip; then the deferral revision rows citing it; then the final-tree validation table; then affected QA plus a fix-only repo review over that administrative delta; then a final exact-SHA GREEN scratch run with NO tree mutation afterwards; then fast-forward push to `dev`. Say whether that sequence is sufficient and whether anything else blocks.
+
+Do not re-review `scripts/wave_gate.py` or `.github/workflows/tests.yml` behaviour that earlier gates cleared unless this delta changed it. Be concrete: file, line, failure scenario, fix. If nothing is actionable, say so plainly — a clean verdict here is what unblocks CP-3 and the finish.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.

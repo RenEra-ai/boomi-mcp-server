@@ -1777,7 +1777,23 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
         )
 
         present = set(ids)
-        revisions = {i for i in present if _re.fullmatch(r".+[a-z]", i) and i[:-1] in present}
+
+        def _supersedes(rid):
+            """The row a revision id revises — its immediate PREDECESSOR, not the stem.
+
+            Revisions chain: `X` → `Xa` → `Xb`. `Xb` supersedes `Xa`, not `X`, because a
+            revision merges onto the row it revises and `Xa` may itself have changed a
+            cell. Deriving the stem instead would declare a mapping that skips a link,
+            and the tally reading that map would apply the wrong cells.
+            """
+            stem, letter = rid[:-1], rid[-1]
+            prior = stem + chr(ord(letter) - 1)
+            return prior if letter > "a" and prior in present else stem
+
+        revisions = {
+            i for i in present
+            if _re.fullmatch(r".+[a-z]", i) and _supersedes(i) in present
+        }
         # A trailing-letter id whose stem is NOT present is either a typo or an
         # in-place replacement of the original — both are what this test exists to catch.
         orphans = {
@@ -1790,14 +1806,61 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
         )
 
         if revisions:
-            for rev in sorted(revisions):
-                assert "`{0} → {1}`".format(rev, rev[:-1]) in text, (
-                    "{0}: revision row {1} is not declared in the supersession map, so "
-                    "any tally derived from that map disagrees with the rows".format(
-                        path.name, rev
+            # Parse the BOUNDED map, not the whole document: a mapping quoted anywhere
+            # else — in a finding row's prose, say — would otherwise satisfy this while
+            # the map the tally actually reads stays incomplete.
+            block = _re.search(
+                r"\*\*Supersession map\*\*(.+?)(?:\n\n|\n\*|\Z)", text, _re.S
+            )
+            assert block, "{0}: revision rows exist but no supersession map".format(path.name)
+            declared = set(_re.findall(r"`([^`]+?) → ([^`]+?)`", block.group(1)))
+            assert declared == {(r, _supersedes(r)) for r in revisions}, (
+                "{0}: the supersession map and the revision rows disagree — declared "
+                "{1}, rows imply {2}".format(
+                    path.name, sorted(declared),
+                    sorted((r, _supersedes(r)) for r in revisions),
+                )
+            )
+            checked += 1
+
+        # The half that had to become mechanical. A pre-existing row must be BYTE
+        # IDENTICAL to its last committed form: five separate #171 findings were the
+        # same in-place edit, each made while fixing the previous one, because the rule
+        # was enforced by remembering to sweep. Git is the authority for "what was
+        # committed", so ask it. Where history is unavailable (a shallow checkout, or a
+        # ledger in its first commit) this SKIPS rather than fails — an absent authority
+        # is not evidence of compliance, and is recorded as such in the ledger.
+        rel = str(path.relative_to(_ROOT))
+        prior = subprocess.run(
+            ["git", "log", "--format=%H", "-n", "2", "--", rel],
+            cwd=str(_ROOT), capture_output=True, text=True,
+        )
+        shas = prior.stdout.split() if prior.returncode == 0 else []
+        if len(shas) >= 2:
+            was = subprocess.run(
+                ["git", "show", "{0}:{1}".format(shas[1], rel)],
+                cwd=str(_ROOT), capture_output=True, text=True,
+            )
+            if was.returncode == 0:
+                def _rows(blob):
+                    out = {}
+                    for ln in blob.splitlines():
+                        if ln.startswith("| ") and ln.count("|") > 8:
+                            rid = ln.split("|")[1].strip()
+                            if rid and rid not in ("ID", "---") and not rid.startswith("**"):
+                                out[rid] = ln
+                    return out
+                before, after = _rows(was.stdout), _rows(text)
+                mutated = sorted(
+                    rid for rid in before if rid in after and before[rid] != after[rid]
+                )
+                assert mutated == [], (
+                    "{0}: these rows were EDITED IN PLACE rather than superseded by an "
+                    "appended revision row: {1}. The ledger is append-only — restore the "
+                    "committed text and append `<id>a`/`<id>b` instead.".format(
+                        path.name, mutated
                     )
                 )
-            checked += 1
 
     assert checked, (
         "no ledger exercised the revision path — the assertions above would be vacuous"
@@ -4858,6 +4921,28 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
             for p in base.rglob("*")
             if p.is_file() and p.name != "SHA256SUMS"
         }
+
+        # ...and the archive must be reproducible from GIT, not merely present in this
+        # worktree. The working-tree comparison alone is green for a file that exists
+        # locally but is not tracked — which is exactly how `.gitignore`'s `*.log`
+        # silently excluded two raw logs that `SHA256SUMS` listed (#171 row AR3-1):
+        # local runs passed, and a clean CI checkout would have had fewer files than the
+        # checksums claimed. An archive nobody else can reconstruct is not durable
+        # evidence, so compare against the index too.
+        prefix = str(base.relative_to(_ROOT))
+        listed = subprocess.run(
+            ["git", "ls-files", "--", prefix],
+            cwd=str(_ROOT), capture_output=True, text=True, check=True,
+        ).stdout.split()
+        tracked = {p[len(prefix) + 1:] for p in listed if p.startswith(prefix + "/")}
+        tracked.discard("SHA256SUMS")
+        assert set(sums) == tracked, (
+            "{0}: SHA256SUMS and the GIT INDEX disagree — listed-but-untracked "
+            "{1}, tracked-but-unlisted {2}. A file that exists only in this worktree "
+            "is not archived evidence.".format(
+                base.name, sorted(set(sums) - tracked), sorted(tracked - set(sums))
+            )
+        )
         assert set(sums) == on_disk, sorted(set(sums) ^ on_disk)
         for rel, digest in sums.items():
             assert _sha256(base / rel) == digest, "hash mismatch: {0}".format(rel)
