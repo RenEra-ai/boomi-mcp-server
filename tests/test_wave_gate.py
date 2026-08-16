@@ -1848,18 +1848,39 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
         # A SHALLOW clone truncates history, so a walk over it would compute a
         # "first appearance" that is merely the oldest commit fetched — a moving
         # authority wearing a fixed one's clothes. Refuse that outright rather than
-        # skipping, which would let a shallow CI run look verified. A COMPLETE history
-        # of one commit is fine: a ledger in its first commit has nothing to contradict.
-        shallow = (_ROOT / ".git" / "shallow").exists()
-        assert not shallow, (
-            "{0}: the repository is a shallow clone, so first-appearance history is "
-            "truncated and byte identity cannot be established. Fetch full history "
-            "(`fetch-depth: 0`) before trusting this check.".format(path.name)
+        # skipping, which would let a shallow CI run look verified.
+        #
+        # ASK GIT rather than looking for `.git/shallow`: in a linked worktree (and
+        # under `--separate-git-dir`) `.git` is a FILE and the marker lives in the
+        # common git directory, so the path probe is always false there — the guard
+        # would silently never fire in exactly the setup a CI job might use.
+        shallow = subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            cwd=str(_ROOT), capture_output=True, text=True,
+        ).stdout.strip()
+        assert shallow == "false", (
+            "{0}: the repository is a shallow clone ({1}), so first-appearance history "
+            "is truncated and byte identity cannot be established. Fetch full history "
+            "(`fetch-depth: 0`) before trusting this check.".format(path.name, shallow)
         )
-        assert history, (
-            "{0}: git reports no history for this file, so the byte-identity authority "
-            "is unavailable".format(path.name)
-        )
+
+        if not history:
+            # A ledger that git has never seen has nothing to contradict, and this is
+            # the NORMAL state at Stage-1 step 0: the completion workflow instantiates
+            # the ledger, then requires a green suite BEFORE the Stage-1.5 commit that
+            # first commits it. Failing here would make that circular — a new ledger
+            # could never be validated, so it could never be committed, so it could
+            # never gain history. But an already-TRACKED path with no history is a
+            # broken authority, not a new file, and stays fatal.
+            tracked_already = subprocess.run(
+                ["git", "ls-files", "--error-unmatch", "--", rel],
+                cwd=str(_ROOT), capture_output=True, text=True,
+            ).returncode == 0
+            assert not tracked_already, (
+                "{0}: the file is tracked but git reports no history for it, so the "
+                "byte-identity authority is unavailable".format(path.name)
+            )
+            continue
         # Renames break the path-only walk: pre-rename history is invisible, so a row
         # mutated during a rename could become canonical. Ledgers are therefore
         # rename-frozen; the check states that rather than silently mis-anchoring.
