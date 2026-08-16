@@ -65,62 +65,12 @@ EXCEPTION_TERMINAL = {"kind": "exception", "message_template": "caught {1}"}
 # ---------------------------------------------------------------------------
 
 
-def _symbols(*extra, contracts=()):
-    base = (
-        ComponentSymbolV1(
-            ref="$ref:GETOP",
-            component_id="op-get",
-            component_type="connector-action",
-            connector_type=REST,
-            action_type="GET",
-            connection_ref="$ref:CONN",
-            output_profile_ref="$ref:P1",
-        ),
-        ComponentSymbolV1(
-            ref="$ref:GETOP2",
-            component_id="op-get-2",
-            component_type="connector-action",
-            connector_type=REST,
-            action_type="GET",
-            connection_ref="$ref:CONN",
-            output_profile_ref="$ref:P2",
-        ),
-        ComponentSymbolV1(
-            ref="$ref:PATCHOP",
-            component_id="op-patch",
-            component_type="connector-action",
-            connector_type=REST,
-            action_type="PATCH",
-            connection_ref="$ref:CONN",
-            input_profile_ref="$ref:P1",
-            output_profile_ref="$ref:P2",
-        ),
-        ComponentSymbolV1(
-            ref="$ref:DBSEND",
-            component_id="op-db-send",
-            component_type="connector-action",
-            connector_type=DB,
-            action_type="Send",
-            connection_ref="$ref:DBCONN",
-            input_profile_ref="$ref:P1",
-        ),
-        ComponentSymbolV1(
-            ref="$ref:CONN",
-            component_id="conn-1",
-            component_type="connector-settings",
-            connector_type=REST,
-        ),
-        ComponentSymbolV1(
-            ref="$ref:DBCONN",
-            component_id="conn-db",
-            component_type="connector-settings",
-            connector_type=DB,
-        ),
-        ComponentSymbolV1(ref="$ref:P1", component_id="prof-1", component_type="profile.json"),
-        ComponentSymbolV1(ref="$ref:P2", component_id="prof-2", component_type="profile.json"),
-        ComponentSymbolV1(ref="$ref:CACHE", component_id="cache-1", component_type="documentcache"),
-    )
-    return SymbolTableV1(symbols=base + tuple(extra), idempotency_contracts=tuple(contracts))
+# The symbol table lives in the corpus (#165); this module CONSUMES it. The
+# `_ANCHORS` documents below stay here as WITNESSES, pinned byte-identically to
+# the committed error_handling/*.json definitions by the fixture-equality test.
+import _wave_gate_golden_corpus as _corpus
+
+_symbols = _corpus.error_symbols
 
 
 # ---------------------------------------------------------------------------
@@ -186,8 +136,7 @@ def _connector_scope(
     return _doc([{"kind": "connector_call", "operation_ref": upstream}, node])
 
 
-def _compile(doc, symbols=None):
-    return compile_process_ir_v1(parse_process_ir_v1(doc), symbols or _symbols())
+_compile = _corpus.error_compile
 
 
 def _parse_codes(doc):

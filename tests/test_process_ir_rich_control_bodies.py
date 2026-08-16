@@ -54,79 +54,14 @@ from boomi_mcp.models.process_ir import (
 
 _FIXTURES = _ROOT / "tests" / "fixtures" / "process_ir" / "rich_control"
 
+# The symbol table and compile harness live in the corpus (#165); this module
+# CONSUMES them. The three *_DOC literals below stay here as WITNESSES, pinned
+# byte-identically to the committed rich_control/*.json definitions by the
+# fixture-equality tests in this file.
+import _wave_gate_golden_corpus as _corpus
 
-def _symbol(ref, component_type, **extra):
-    return ComponentSymbolV1(
-        ref=ref, component_id="id_" + ref, component_type=component_type, **extra
-    )
-
-
-def rich_symbols() -> SymbolTableV1:
-    """Two connector families, each with its own map boundary."""
-    return SymbolTableV1(
-        symbols=(
-            _symbol("conn_rest", "connector-settings", connector_type="rest"),
-            _symbol("conn_soap", "connector-settings", connector_type="soap_client"),
-            _symbol("conn_db", "connector-settings", connector_type="database"),
-            _symbol("prof_rest_out", "profile.json"),
-            _symbol("prof_soap_in", "profile.xml"),
-            _symbol("prof_soap_out", "profile.xml"),
-            _symbol("prof_db_write", "profile.db"),
-            _symbol("prof_patch_in", "profile.json"),
-            _symbol("prof_patch_out", "profile.json"),
-            _symbol(
-                "op_rest_get",
-                "connector-action",
-                connector_type="rest",
-                action_type="GET",
-                connection_ref="conn_rest",
-                output_profile_ref="prof_rest_out",
-            ),
-            _symbol(
-                "map_rest_to_soap",
-                "transform.map",
-                input_profile_ref="prof_rest_out",
-                output_profile_ref="prof_soap_in",
-            ),
-            _symbol(
-                "map_rest_to_patch",
-                "transform.map",
-                input_profile_ref="prof_rest_out",
-                output_profile_ref="prof_patch_in",
-            ),
-            _symbol(
-                "op_soap_execute",
-                "connector-action",
-                connector_type="soap_client",
-                action_type="EXECUTE",
-                connection_ref="conn_soap",
-                input_profile_ref="prof_soap_in",
-                output_profile_ref="prof_soap_out",
-            ),
-            _symbol(
-                "op_rest_patch",
-                "connector-action",
-                connector_type="rest",
-                action_type="PATCH",
-                connection_ref="conn_rest",
-                input_profile_ref="prof_patch_in",
-                output_profile_ref="prof_patch_out",
-            ),
-            _symbol(
-                "op_db_send",
-                "connector-action",
-                connector_type="database",
-                action_type="Send",
-                connection_ref="conn_db",
-                input_profile_ref="prof_db_write",
-            ),
-            _symbol("child_process", "process"),
-            # A real document cache. The one cache_get in this file used to name
-            # `child_process` — a PROCESS component — which nothing checked until
-            # #143 gated the compiler on the unified report.
-            _symbol("doc_cache", "documentcache"),
-        )
-    )
+_symbol = _corpus.rich_symbol
+rich_symbols = _corpus.rich_symbols
 
 
 def call(ref, **extra):
@@ -167,14 +102,7 @@ BRANCH_MIXED_DOC = {
 }
 
 
-def compile_doc(doc, symbols=None, capabilities=None):
-    table = symbols or rich_symbols()
-    return (
-        compile_process_ir_v1(
-            parse_process_ir_v1(doc), table, capabilities=capabilities
-        ),
-        table,
-    )
+compile_doc = _corpus.rich_compile_doc
 
 
 def external_writer_for(cache_ref):

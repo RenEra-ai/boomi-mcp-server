@@ -177,3 +177,116 @@ def test_unknown_cases_and_renderer_mismatches_are_refused():
     wrong = next(r for r in corpus.RENDERERS if r != sample["renderer"])
     with pytest.raises(corpus.RendererMismatch):
         corpus.render_golden_case(sample["input_case"], wrong)
+
+
+_UNIMPORTABLE_CHILD = r"""
+import hashlib
+import json
+import sys
+
+
+class _BlockTestModules:
+    '''Refuse to import ANY test module — the simulated #159/#160 deletion.
+
+    Blocking every ``test_*`` name is deliberately STRONGER than deleting the
+    two modules those issues own: it proves no golden depends on any test
+    module at all.
+    '''
+
+    def find_spec(self, name, path=None, target=None):
+        if name.rsplit(".", 1)[-1].startswith("test_"):
+            raise ImportError("test modules are unimportable in this child: " + name)
+        return None
+
+
+sys.meta_path.insert(0, _BlockTestModules())
+
+# Non-vacuity witness: the blocker must actually be armed, or this child
+# proves nothing.
+try:
+    import test_database_to_api_sync_dlq  # noqa: F401
+except ImportError:
+    pass
+else:
+    print(json.dumps({"error": "the import blocker is NOT armed"}))
+    sys.exit(3)
+
+sys.path.insert(0, sys.argv[1])  # the tests directory
+import _wave_gate_golden_corpus as corpus  # noqa: E402
+
+rows = json.loads(open(sys.argv[2], "rb").read().decode("utf-8"))
+shas = {}
+for row in rows:
+    payload = corpus.render_golden_case(row["input_case"], row["renderer"])
+    shas[row["id"]] = hashlib.sha256(payload).hexdigest()
+
+leaked = sorted(
+    name for name in sys.modules if name.rsplit(".", 1)[-1].startswith("test_")
+)
+print(json.dumps({"shas": shas, "leaked_test_modules": leaked}))
+"""
+
+
+def test_every_active_golden_renders_with_all_test_modules_unimportable(tmp_path):
+    """#165 acceptance criterion 3: deleting an owning test module leaves every
+    golden renderable — proven for the strictly stronger condition that EVERY
+    ``test_*`` module is unimportable.
+
+    This is the property the ``transitional_oracle`` (#159) and
+    ``deletion_only`` (#160) dispositions depend on: the gate must keep
+    rendering those goldens AFTER the legacy tests that used to own their case
+    definitions are removed.
+    """
+    import json as _json
+    import os
+    import subprocess
+
+    request = [
+        {"id": row["id"], "input_case": row["input_case"], "renderer": row["renderer"]}
+        for row in MANIFEST.active
+    ]
+    request_path = tmp_path / "request.json"
+    request_path.write_text(_json.dumps(request), encoding="utf-8")
+    child_path = tmp_path / "render_without_test_modules.py"
+    child_path.write_text(_UNIMPORTABLE_CHILD, encoding="utf-8")
+
+    env = dict(os.environ)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    proc = subprocess.run(
+        [sys.executable, str(child_path), str(_ROOT / "tests"), str(request_path)],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        env=env,
+    )
+    assert proc.returncode == 0, (proc.returncode, proc.stdout[-2000:], proc.stderr[-2000:])
+    report = _json.loads(proc.stdout)
+    assert "error" not in report, report
+
+    # Every active golden rendered to its exact committed bytes.
+    import hashlib
+
+    expected = {
+        row["id"]: hashlib.sha256((_ROOT / row["expected_file"]).read_bytes()).hexdigest()
+        for row in MANIFEST.active
+    }
+    assert report["shas"] == expected, {
+        "missing": sorted(set(expected) - set(report["shas"])),
+        "mismatched": sorted(
+            k for k in set(expected) & set(report["shas"])
+            if expected[k] != report["shas"][k]
+        ),
+    }
+
+    # The #159/#160 rows are really in the proven set, named so their eventual
+    # retirement cannot silently drop this property.
+    special = {
+        row["id"]: row["disposition"]
+        for row in MANIFEST.active
+        if row["disposition"] in ("transitional_oracle", "deletion_only")
+    }
+    assert set(special) == {"golden-000056", "golden-000057", "golden-000060"}, special
+    assert set(special) <= set(report["shas"])
+
+    # And the child really finished with no test module loaded.
+    assert report["leaked_test_modules"] == [], report["leaked_test_modules"]

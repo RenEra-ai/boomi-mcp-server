@@ -48,12 +48,16 @@ _FIXTURE = (
     / "try_catch_dlq_document_cache.xml"
 )
 
-_DB_CONN_ID = "11111111-1111-1111-1111-111111111111"
-_DB_OP_ID = "22222222-2222-2222-2222-222222222222"
-_REST_CONN_ID = "33333333-3333-3333-3333-333333333333"
-_REST_OP_ID = "44444444-4444-4444-4444-444444444444"
-_CACHE_ID = "55555555-5555-5555-5555-555555555555"
-_PROC_ID = "66666666-6666-6666-6666-666666666666"
+# The golden-case definitions live in the corpus (#165); this module CONSUMES
+# them. The aliases keep every existing call site and assertion unchanged.
+import _wave_gate_golden_corpus as _corpus
+
+_DB_CONN_ID = _corpus.DLQ_DB_CONN_ID
+_DB_OP_ID = _corpus.DLQ_DB_OP_ID
+_REST_CONN_ID = _corpus.DLQ_REST_CONN_ID
+_REST_OP_ID = _corpus.DLQ_REST_OP_ID
+_CACHE_ID = _corpus.DLQ_CACHE_ID
+_PROC_ID = _corpus.DLQ_PROC_ID
 
 
 _NOTIFY_FIXTURE = (
@@ -63,36 +67,11 @@ _NOTIFY_FIXTURE = (
     / "try_catch_notify_dlq_document_cache.xml"
 )
 
-# Issue #89: placeholder Notify config (references the caught-error property by
-# its token; the builder substitutes it for the {1} placeholder + track param).
-_NOTIFY_TOKEN = "meta.base.catcherrorsmessage"
-_NOTIFY_TEMPLATE = f"Integration catch path failed. Caught error: {_NOTIFY_TOKEN}"
-_CATCH_NOTIFY = {"level": "ERROR", "message_template": _NOTIFY_TEMPLATE}
+_NOTIFY_TOKEN = _corpus.DLQ_NOTIFY_TOKEN
+_NOTIFY_TEMPLATE = _corpus.DLQ_NOTIFY_TEMPLATE
+_CATCH_NOTIFY = _corpus.DLQ_CATCH_NOTIFY
 
-
-def _config(dlq, transform=None, catch_notify=None):
-    cfg = {
-        "process_kind": "database_to_api_sync",
-        "source": {
-            "connector_type": "database",
-            "connection_id": _DB_CONN_ID,
-            "operation_id": _DB_OP_ID,
-            "action_type": "Get",
-            "label": "DB extract",
-        },
-        "transform": transform or {"mode": "passthrough"},
-        "target": {
-            "connector_type": "rest",
-            "connection_id": _REST_CONN_ID,
-            "operation_id": _REST_OP_ID,
-            "action_type": "POST",
-            "label": "REST send",
-        },
-        "reliability": {"retry_count": 0, "dlq": dlq},
-    }
-    if catch_notify is not None:
-        cfg["reliability"]["catch_notify"] = catch_notify
-    return cfg
+_config = _corpus.dlq_config
 
 
 def _parse_shapes(xml):
@@ -135,8 +114,7 @@ _FIXTURE_RETRY2 = (
 def test_document_cache_retry_count_2_matches_golden_fixture():
     """Issue #88: a retry_count=2 build emits the verified Try/Catch with the
     bounded retry attribute. Builder-emitted golden (no vendor XML)."""
-    cfg = _config({"mode": "document_cache_ref", "document_cache_id": _CACHE_ID})
-    cfg["reliability"]["retry_count"] = 2
+    cfg = _corpus.dlq_retry2_case_config()
     emitted = ProcessFlowBuilder.build(
         cfg, name="TryCatch DLQ Retry2 Golden", folder_name="Golden/Fixtures"
     )
@@ -681,7 +659,7 @@ class TestNotifyValidation:
 # retry no longer re-executes the source read.
 # ---------------------------------------------------------------------------
 
-_MAP_ID = "88888888-8888-8888-8888-888888888888"
+_MAP_ID = _corpus.DLQ_MAP_ID
 
 _CONNECTOR_SCOPE_FIXTURE = (
     Path(__file__).resolve().parent
@@ -690,16 +668,7 @@ _CONNECTOR_SCOPE_FIXTURE = (
     / "connector_scoped_trycatch_notify_dlq_document_cache.xml"
 )
 
-
-def _connector_config(retry_count=2, transform=None, catch_notify=None, dlq=None):
-    cfg = _config(
-        dlq or {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
-        transform=transform or {"mode": "map_ref", "map_ref": _MAP_ID},
-        catch_notify=catch_notify,
-    )
-    cfg["reliability"]["retry_count"] = retry_count
-    cfg["reliability"]["try_catch_scope"] = "connector"
-    return cfg
+_connector_config = _corpus.dlq_connector_config
 
 
 def test_connector_scope_matches_golden_fixture():
@@ -860,44 +829,13 @@ _EXCEPTION_FIXTURE = (
 )
 
 
-def _exc_config(catch_exception, dlq=None, catch_notify=None, retry_count=0, scope="process"):
-    cfg = {
-        "process_kind": "database_to_api_sync",
-        "source": {
-            "connector_type": "database",
-            "connection_id": _DB_CONN_ID,
-            "operation_id": _DB_OP_ID,
-            "action_type": "Get",
-        },
-        "transform": {"mode": "passthrough"},
-        "target": {
-            "connector_type": "rest",
-            "connection_id": _REST_CONN_ID,
-            "operation_id": _REST_OP_ID,
-            "action_type": "POST",
-        },
-        "reliability": {
-            "retry_count": retry_count,
-            "try_catch_scope": scope,
-            "catch_exception": catch_exception,
-        },
-    }
-    if dlq is not None:
-        cfg["reliability"]["dlq"] = dlq
-    if catch_notify is not None:
-        cfg["reliability"]["catch_notify"] = catch_notify
-    return cfg
+_exc_config = _corpus.dlq_exc_config
 
 
 def test_exception_catch_path_matches_golden_fixture():
     """The canonical bare catch -> exception build must match the committed golden
     (compared via C14N canonicalization — attribute ordering is not brittle)."""
-    cfg = _exc_config({
-        "title": "Stopping - Throw Uncaught POST Error",
-        "message_template": "Stopping process - uncaught error: {1}",
-        "stop_single_document": False,
-        "parameter_source": "caught_error",
-    })
+    cfg = _exc_config(dict(_corpus.DLQ_EXCEPTION_CATCH))
     emitted = ProcessFlowBuilder.build(
         cfg, name="Exception Catch Path", folder_name="Golden/Fixtures"
     )

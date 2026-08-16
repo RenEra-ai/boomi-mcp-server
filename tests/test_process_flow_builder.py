@@ -30,34 +30,19 @@ from src.boomi_mcp.categories.components.builders import (
     get_process_flow_builder,
 )
 
+# The golden-case definitions live in the corpus (#165); this module CONSUMES
+# them. The aliases keep every existing call site and assertion unchanged.
+import _wave_gate_golden_corpus as _corpus
+
 
 NS = {"bns": "http://api.platform.boomi.com/"}
 
-_DB_CONN_ID = "11111111-1111-1111-1111-111111111111"
-_DB_OP_ID = "22222222-2222-2222-2222-222222222222"
-_REST_CONN_ID = "33333333-3333-3333-3333-333333333333"
-_REST_OP_ID = "44444444-4444-4444-4444-444444444444"
+_DB_CONN_ID = _corpus.PFB_DB_CONN_ID
+_DB_OP_ID = _corpus.PFB_DB_OP_ID
+_REST_CONN_ID = _corpus.PFB_REST_CONN_ID
+_REST_OP_ID = _corpus.PFB_REST_OP_ID
 
-
-def _base_config(**overrides):
-    cfg = {
-        "process_kind": "database_to_api_sync",
-        "source": {
-            "connector_type": "database",
-            "connection_id": _DB_CONN_ID,
-            "operation_id": _DB_OP_ID,
-            "action_type": "Get",
-        },
-        "transform": {"mode": "passthrough"},
-        "target": {
-            "connector_type": "rest",
-            "connection_id": _REST_CONN_ID,
-            "operation_id": _REST_OP_ID,
-            "action_type": "POST",
-        },
-    }
-    cfg.update(overrides)
-    return cfg
+_base_config = _corpus.pfb_base_config
 
 
 def _parse_process(xml: str):
@@ -400,16 +385,7 @@ def test_map_ref_transform_inserts_map_shape_with_map_id():
 
 # The canonical dataContext loop (companion data_process_groovy_step.md). The
 # bare ``<`` exercises the emitter's XML escaping (-> ``&lt;``).
-_DATAPROCESS_GROOVY_SCRIPT = (
-    "import java.util.Properties;\n"
-    "import java.io.InputStream;\n"
-    "\n"
-    "for( int i = 0; i < dataContext.getDataCount(); i++ ) {\n"
-    "    InputStream is = dataContext.getStream(i);\n"
-    "    Properties props = dataContext.getProperties(i);\n"
-    "    dataContext.storeStream(is, props);\n"
-    "}"
-)
+_DATAPROCESS_GROOVY_SCRIPT = _corpus.PFB_DATAPROCESS_GROOVY_SCRIPT
 
 _DATAPROCESS_GOLDEN = (
     Path(__file__).resolve().parent
@@ -418,15 +394,7 @@ _DATAPROCESS_GOLDEN = (
     / "dataprocess_groovy_transform.xml"
 )
 
-
-def _dataprocess_config(steps=None, label="Tag documents", **overrides):
-    transform = {"mode": "dataprocess", "label": label}
-    transform["steps"] = (
-        steps
-        if steps is not None
-        else [{"operation": "custom_scripting", "script": _DATAPROCESS_GROOVY_SCRIPT}]
-    )
-    return _base_config(transform=transform, **overrides)
+_dataprocess_config = _corpus.pfb_dataprocess_config
 
 
 def test_dataprocess_groovy_transform_inserts_shape_between_source_and_target():
@@ -577,38 +545,13 @@ _DATAPROCESS_SPLIT_XML_GOLDEN = _GOLDEN_DIR / "dataprocess_split_xml_transform.x
 _DATAPROCESS_COMBINE_JSON_GOLDEN = _GOLDEN_DIR / "dataprocess_combine_json_transform.xml"
 _DATAPROCESS_COMBINE_XML_GOLDEN = _GOLDEN_DIR / "dataprocess_combine_xml_transform.xml"
 
-_JSON_PROFILE_ID = "55555555-5555-5555-5555-555555555555"
-_XML_PROFILE_ID = "66666666-6666-6666-6666-666666666666"
-_JSON_LINK_NAME = "ArrayElement1 (Root/Object/samplearray/samplearray/ArrayElement1)"
-_XML_LINK_NAME = "Group (Envelope/Body/Groups/Group)"
+_JSON_PROFILE_ID = _corpus.PFB_JSON_PROFILE_ID
+_XML_PROFILE_ID = _corpus.PFB_XML_PROFILE_ID
+_JSON_LINK_NAME = _corpus.PFB_JSON_LINK_NAME
+_XML_LINK_NAME = _corpus.PFB_XML_LINK_NAME
 
-
-def _split_step(profile_type="json", profile_id=None, key=None, name=None, **extra):
-    step = {
-        "operation": "split_documents",
-        "profile_type": profile_type,
-        "profile_id": profile_id
-        or (_JSON_PROFILE_ID if profile_type == "json" else _XML_PROFILE_ID),
-        "link_element_key": key or ("9" if profile_type == "json" else "4"),
-        "link_element_name": name
-        or (_JSON_LINK_NAME if profile_type == "json" else _XML_LINK_NAME),
-    }
-    step.update(extra)
-    return step
-
-
-def _combine_step(profile_type="json", profile_id=None, key=None, name=None, **extra):
-    step = {
-        "operation": "combine_documents",
-        "profile_type": profile_type,
-        "profile_id": profile_id
-        or (_JSON_PROFILE_ID if profile_type == "json" else _XML_PROFILE_ID),
-        "link_element_key": key or ("9" if profile_type == "json" else "4"),
-        "link_element_name": name
-        or (_JSON_LINK_NAME if profile_type == "json" else _XML_LINK_NAME),
-    }
-    step.update(extra)
-    return step
+_split_step = _corpus.pfb_split_step
+_combine_step = _corpus.pfb_combine_step
 
 
 def _dataprocess_split_shape(xml):
@@ -836,15 +779,9 @@ _DOCCACHE_RETRIEVE_GOLDEN = (
 
 # The live-captured Document Cache component id (work component
 # 64e5397b-... shape2; see .codex/plans/issue-109-live-captures.md).
-_DOCCACHE_ID = "8540619c-9f1e-4832-9b1a-5128c399aa52"
+_DOCCACHE_ID = _corpus.PFB_DOCCACHE_ID
 
-
-def _doccacheretrieve_config(label="Get Status Updates From Cache", **overrides):
-    transform = {"mode": "doccacheretrieve", "document_cache_id": _DOCCACHE_ID}
-    if label is not None:
-        transform["label"] = label
-    transform.update(overrides.pop("transform_extra", {}))
-    return _base_config(transform=transform, **overrides)
+_doccacheretrieve_config = _corpus.pfb_doccacheretrieve_config
 
 
 def test_doccacheretrieve_inserts_linear_shape_between_source_and_target():
@@ -1041,12 +978,7 @@ _DOCCACHE_REMOVE_GOLDEN = (
 )
 
 
-def _doccacheremove_config(label="Clear Status Cache", **overrides):
-    transform = {"mode": "doccacheremove", "document_cache_id": _DOCCACHE_ID}
-    if label is not None:
-        transform["label"] = label
-    transform.update(overrides.pop("transform_extra", {}))
-    return _base_config(transform=transform, **overrides)
+_doccacheremove_config = _corpus.pfb_doccacheremove_config
 
 
 def test_doccacheremove_inserts_linear_shape_between_source_and_target():
@@ -2394,31 +2326,17 @@ def test_build_bypass_raises_for_non_dict_catch_exception_with_valid_dlq():
 # Issue #112 M10.8 — Branch (N-way forward fan-out)
 # ---------------------------------------------------------------------------
 
-_REST_CONN_ID_2 = "55555555-5555-5555-5555-555555555555"
-_REST_OP_ID_2 = "66666666-6666-6666-6666-666666666666"
-_REST_CONN_ID_3 = "77777777-7777-7777-7777-777777777777"
-_REST_OP_ID_3 = "88888888-8888-8888-8888-888888888888"
+_REST_CONN_ID_2 = _corpus.PFB_REST_CONN_ID_2
+_REST_OP_ID_2 = _corpus.PFB_REST_OP_ID_2
+_REST_CONN_ID_3 = _corpus.PFB_REST_CONN_ID_3
+_REST_OP_ID_3 = _corpus.PFB_REST_OP_ID_3
 
 _BRANCH_FANOUT_GOLDEN = (
     Path(__file__).resolve().parent / "fixtures" / "golden_xml" / "branch_fanout.xml"
 )
 
-
-def _branch_leg(connection_id=_REST_CONN_ID_2, operation_id=_REST_OP_ID_2,
-                action_type="PUT", **extra):
-    leg = {
-        "connector_type": "rest",
-        "connection_id": connection_id,
-        "operation_id": operation_id,
-        "action_type": action_type,
-    }
-    leg.update(extra)
-    return leg
-
-
-def _branch_config(targets=None, enabled=True, **overrides):
-    branch = {"enabled": enabled, "targets": targets if targets is not None else [_branch_leg()]}
-    return _base_config(branch=branch, **overrides)
+_branch_leg = _corpus.pfb_branch_leg
+_branch_config = _corpus.pfb_branch_config
 
 
 def test_branch_inserts_branch_after_source_with_target_stop_legs():
@@ -2678,25 +2596,8 @@ _DECISION_CONDITIONAL_GOLDEN = (
 )
 
 
-def _decision_block(**overrides):
-    decision = {
-        "comparison": "equals",
-        "label": "Check Status",
-        "left": {
-            "value_type": "track",
-            "property_id": "dynamicdocument.DDP_STATUS",
-            "default_value": "",
-            "property_name": "Dynamic Document Property - DDP_STATUS",
-        },
-        "right": {"value_type": "static", "static_value": "active"},
-        "false_notify": "Decision false path: status was not active",
-    }
-    decision.update(overrides)
-    return decision
-
-
-def _decision_config(decision=None, **overrides):
-    return _base_config(decision=decision if decision is not None else _decision_block(), **overrides)
+_decision_block = _corpus.pfb_decision_block
+_decision_config = _corpus.pfb_decision_config
 
 
 def test_decision_inserts_decision_after_source_with_true_false_legs():
@@ -3001,12 +2902,7 @@ _FLOW_CONTROL_GOLDEN = (
 )
 
 
-def _flow_control_config(label="Batch by 10", for_each_count=10, **overrides):
-    flow_control = {"enabled": True, "for_each_count": for_each_count}
-    if label is not None:
-        flow_control["label"] = label
-    flow_control.update(overrides.pop("flow_control_extra", {}))
-    return _base_config(flow_control=flow_control, **overrides)
+_flow_control_config = _corpus.pfb_flow_control_config
 
 
 def test_flow_control_inserts_linear_shape_between_source_and_transform():
@@ -3354,89 +3250,19 @@ def test_dynamic_path_profile_ref_requires_depends_on():
 # Issue #117 M10 follow-up — multi-control-shape composition (flow_sequence)
 # ---------------------------------------------------------------------------
 
-_REST_B_CONN_ID = "55555555-5555-5555-5555-555555555555"
-_REST_B_OP_ID = "66666666-6666-6666-6666-666666666666"
-_SEQ_GROOVY = "dataContext.storeStream(is, props);"
+_REST_B_CONN_ID = _corpus.PFB_REST_B_CONN_ID
+_REST_B_OP_ID = _corpus.PFB_REST_B_OP_ID
+_SEQ_GROOVY = _corpus.PFB_SEQ_GROOVY
 
 _FLOW_SEQ_DECISION_BRANCH_GOLDEN = _GOLDEN_DIR / "flow_sequence_decision_branch_map.xml"
 _FLOW_SEQ_CACHE_CRUD_GOLDEN = _GOLDEN_DIR / "flow_sequence_cache_load_retrieve_remove.xml"
 _FLOW_SEQ_EXCEPTION_GOLDEN = _GOLDEN_DIR / "flow_sequence_exception_terminal.xml"
 
-
-def _rest_target(conn=_REST_CONN_ID, op=_REST_OP_ID, label="t", verb="POST"):
-    return {
-        "connector_type": "rest",
-        "connection_id": conn,
-        "operation_id": op,
-        "action_type": verb,
-        "label": label,
-    }
-
-
-def _seq_config(flow_sequence, **overrides):
-    return _base_config(flow_sequence=flow_sequence, **overrides)
-
-
-def _decision_branch_config():
-    """The canonical acceptance graph: Decision + Data Process on the true leg
-    (-> top-level target) and a Branch whose legs each carry a Map (issue #117)."""
-    return _seq_config(
-        [
-            {
-                "kind": "decision",
-                "comparison": "equals",
-                "left": {"value_type": "track", "property_id": "dynamicdocument.DDP_STATUS"},
-                "right": {"value_type": "static", "static_value": "ACTIVE"},
-                "label": "Status check",
-                "true_steps": [
-                    {
-                        "kind": "dataprocess",
-                        "label": "Tag",
-                        "steps": [{"operation": "custom_scripting", "script": _SEQ_GROOVY}],
-                    }
-                ],
-                "false_steps": [
-                    {
-                        "kind": "branch",
-                        "legs": [
-                            {
-                                "steps": [{"kind": "map_ref", "map_ref": "MAP-A", "label": "Map A"}],
-                                "target": _rest_target(label="Leg A"),
-                            },
-                            {
-                                "steps": [{"kind": "map_ref", "map_ref": "MAP-B", "label": "Map B"}],
-                                "target": _rest_target(_REST_B_CONN_ID, _REST_B_OP_ID, "Leg B"),
-                            },
-                        ],
-                    }
-                ],
-            }
-        ]
-    )
-
-
-def _cache_crud_config():
-    return _seq_config(
-        [
-            {"kind": "doccacheload", "document_cache_id": "CACHE-1", "label": "Add to cache"},
-            {"kind": "doccacheretrieve", "document_cache_id": "CACHE-1", "label": "Read cache"},
-            {"kind": "doccacheremove", "document_cache_id": "CACHE-1", "label": "Clear cache"},
-        ]
-    )
-
-
-def _exception_terminal_config():
-    return _seq_config(
-        [
-            {"kind": "message", "message_text": "processing", "label": "Log"},
-            {
-                "kind": "exception",
-                "title": "Halt",
-                "message_template": "halted: {1}",
-                "parameter_source": "caught_error",
-            },
-        ]
-    )
+_rest_target = _corpus.pfb_rest_target
+_seq_config = _corpus.pfb_seq_config
+_decision_branch_config = _corpus.pfb_decision_branch_config
+_cache_crud_config = _corpus.pfb_cache_crud_config
+_exception_terminal_config = _corpus.pfb_exception_terminal_config
 
 
 def _edges(shapes):
@@ -3959,39 +3785,7 @@ def test_flow_sequence_branch_step_without_label_stays_empty_userlabel():
 _SET_PROPERTIES_GOLDEN = _GOLDEN_DIR / "set_properties_ddp_dpp_flow_sequence.xml"
 
 
-def _set_properties_seq_config():
-    """One set_ddp (static+profile+ddp sources) + one set_dpp (current+dpp,
-    persisted) — the #121 golden graph."""
-    return _seq_config(
-        [
-            {
-                "kind": "set_ddp",
-                "name": "DDP_ORDER_PATH",
-                "label": "Build order path",
-                "source_values": [
-                    {"value_type": "static", "value": "/orders/"},
-                    {
-                        "value_type": "profile",
-                        "element_id": "7",
-                        "element_name": "id (Root/Object/id)",
-                        "profile_id": "77777777-7777-7777-7777-777777777777",
-                        "profile_type": "profile.json",
-                    },
-                    {"value_type": "ddp", "property_name": "DDP_SUFFIX", "default_value": "0"},
-                ],
-            },
-            {
-                "kind": "set_dpp",
-                "name": "DPP_LAST_PAYLOAD",
-                "label": "Carry payload",
-                "persist": True,
-                "source_values": [
-                    {"value_type": "current"},
-                    {"value_type": "dpp", "property_name": "DPP_RUN_ID", "default_value": ""},
-                ],
-            },
-        ]
-    )
+_set_properties_seq_config = _corpus.pfb_set_properties_seq_config
 
 
 def test_set_properties_sequence_matches_golden_fixture():
@@ -4240,13 +4034,7 @@ def test_set_dpp_step_non_bool_persist_rejected():
 _CACHE_PUT_GET_GOLDEN = _GOLDEN_DIR / "flow_sequence_cache_put_get.xml"
 
 
-def _cache_put_get_config():
-    return _seq_config(
-        [
-            {"kind": "cache_put", "document_cache_id": "CACHE-1", "label": "Stage rows"},
-            {"kind": "cache_get", "document_cache_id": "CACHE-1", "label": "Read staged rows"},
-        ]
-    )
+_cache_put_get_config = _corpus.pfb_cache_put_get_config
 
 
 def test_cache_put_get_sequence_matches_golden_fixture():

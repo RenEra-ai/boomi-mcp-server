@@ -23,6 +23,9 @@ import pytest
 _src = str(Path(__file__).resolve().parent.parent.parent / "src")
 if _src not in sys.path:
     sys.path.insert(0, _src)
+_tests = str(Path(__file__).resolve().parent.parent)
+if _tests not in sys.path:
+    sys.path.insert(0, _tests)
 
 from boomi_mcp.categories.integration_authoring import build_from_archetype_action
 from boomi_mcp.categories.integration_builder import (
@@ -31,17 +34,19 @@ from boomi_mcp.categories.integration_builder import (
 )
 from boomi_mcp.categories.components.builders import ProcessFlowBuilder
 
+# The golden-case definitions live in the corpus (#165); this module CONSUMES
+# them. The aliases keep every existing call site and assertion unchanged.
+import _wave_gate_golden_corpus as _corpus
+
 NS = {"bns": "http://api.platform.boomi.com/"}
 _PAGINATE = "boomi_mcp.categories.integration_builder.paginate_metadata"
 
-# Fixed ids for the archetype-path golden (mirror the builder golden's ids so
-# the only structural delta is the archetype's map shape).
-_DB_CONN_ID = "11111111-1111-1111-1111-111111111111"
-_DB_OP_ID = "22222222-2222-2222-2222-222222222222"
-_REST_CONN_ID = "33333333-3333-3333-3333-333333333333"
-_REST_OP_ID = "44444444-4444-4444-4444-444444444444"
-_CACHE_ID = "55555555-5555-5555-5555-555555555555"
-_MAP_ID = "66666666-6666-6666-6666-666666666666"
+_DB_CONN_ID = _corpus.ARCH_DB_CONN_ID
+_DB_OP_ID = _corpus.ARCH_DB_OP_ID
+_REST_CONN_ID = _corpus.ARCH_REST_CONN_ID
+_REST_OP_ID = _corpus.ARCH_REST_OP_ID
+_CACHE_ID = _corpus.ARCH_CACHE_ID
+_MAP_ID = _corpus.ARCH_MAP_ID
 _HANDLER_ID = "77777777-7777-7777-7777-777777777777"
 
 _GOLDEN = (
@@ -58,85 +63,12 @@ _NOTIFY_GOLDEN = (
     / "try_catch_notify_dlq_document_cache_archetype.xml"
 )
 
-# Issue #89: placeholder catch_notify (references the caught-error property).
-_CATCH_NOTIFY = {
-    "level": "ERROR",
-    "message_template": "Sync failed; caught error: meta.base.catcherrorsmessage",
-}
+_CATCH_NOTIFY = _corpus.ARCH_CATCH_NOTIFY
 
-
-def _params(
-    dlq: dict | None = None,
-    retry: dict | None = None,
-    catch_notify: dict | None = None,
-) -> dict:
-    """Smallest executable create/create payload; DLQ/retry/notify overridable."""
-    reliability: dict = {
-        "retry": retry or {"max_attempts": 1},
-        "dlq": dlq if dlq is not None else {"enabled": False},
-        "error_classifier": {},
-    }
-    if catch_notify is not None:
-        reliability["catch_notify"] = catch_notify
-    return {
-        "naming": {"integration_name": "demo-sync", "component_prefix": "DEMO"},
-        "source": {
-            "binding": {
-                "mode": "create",
-                "settings": {
-                    "driver": "microsoft_jdbc",
-                    "auth_mode": "username_password",
-                    "host": "db.internal",
-                    "database": "AppDB",
-                    "username": "svc_sync",
-                    "credential_ref": "secrets/db/svc_sync",
-                },
-            },
-            "read_operation": {
-                "sql": "<<user-authored DB read statement>>",
-                "result_schema": {"fields": [{"name": "source_a", "data_type": "character"}]},
-            },
-        },
-        "target": {
-            "binding": {"mode": "create", "settings": {"base_url": "https://api.example.com", "auth_mode": "none"}},
-            "send_request": {"method": "POST", "path": "/v1/items"},
-            "payload_profile": {
-                "format": "json",
-                "root": {
-                    "name": "Root",
-                    "kind": "object",
-                    "children": [{"name": "target_a", "kind": "simple", "data_type": "character"}],
-                },
-            },
-        },
-        "transform": {
-            "operations": [
-                {"operation_type": "direct", "source_field": "source_a", "target_path": "Root/target_a"}
-            ]
-        },
-        "execution": {"trigger": {"mode": "manual"}},
-        "reliability": reliability,
-    }
-
-
-def _result(
-    dlq: dict | None = None, retry: dict | None = None, catch_notify: dict | None = None
-) -> dict:
-    result = build_from_archetype_action(
-        "database_to_api_sync", _params(dlq, retry, catch_notify)
-    )
-    assert result["_success"] is True, result
-    return result
-
-
-def _emit(
-    dlq: dict | None = None, retry: dict | None = None, catch_notify: dict | None = None
-) -> dict:
-    return _result(dlq, retry, catch_notify)["integration_spec"]
-
-
-def _main_process(spec: dict) -> dict:
-    return next(c for c in spec["components"] if c["type"] == "process")
+_params = _corpus.arch_params
+_result = _corpus.arch_result
+_emit = _corpus.arch_emit
+_main_process = _corpus.arch_main_process
 
 
 def _operational_intent(spec: dict) -> dict:
@@ -422,21 +354,7 @@ def test_wrong_type_dlq_ref_flagged_by_plan_check(_mock_pag):
 # ---------------------------------------------------------------------------
 
 
-def _build_archetype_process_xml(spec: dict, name: str = "Archetype DLQ Golden") -> str:
-    cfg = _main_process(spec)["config"]
-
-    def _rk(token: str) -> str:
-        return token[len("$ref:"):]
-
-    registry = {
-        _rk(cfg["source"]["connection_id"]): _DB_CONN_ID,
-        _rk(cfg["source"]["operation_id"]): _DB_OP_ID,
-        _rk(cfg["transform"]["map_ref"]): _MAP_ID,
-        _rk(cfg["target"]["connection_id"]): _REST_CONN_ID,
-        _rk(cfg["target"]["operation_id"]): _REST_OP_ID,
-    }
-    resolved = _resolve_dependency_tokens(cfg, registry)
-    return ProcessFlowBuilder.build(resolved, name=name, folder_name="Golden/Fixtures")
+_build_archetype_process_xml = _corpus.arch_build_archetype_process_xml
 
 
 def test_archetype_document_cache_ref_matches_golden():
@@ -473,7 +391,7 @@ def test_archetype_dlq_shape_sequence_is_trycatch_with_map_and_dlq():
 # Issue #89 — catch_notify reaches process.reliability and the emitted XML
 # ---------------------------------------------------------------------------
 
-_WIRED_DC = {"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}}
+_WIRED_DC = _corpus.ARCH_WIRED_DC
 _WIRED_SUB = {"enabled": True, "target": {"mode": "error_subprocess_ref", "process_id": _HANDLER_ID}}
 
 

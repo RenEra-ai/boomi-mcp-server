@@ -14,46 +14,12 @@ from boomi_mcp.categories.components.builders.process_flow_builder import (
     ProcessFlowBuilder,
 )
 
+# The golden-case definitions live in the corpus (#165); this module CONSUMES
+# them. The aliases keep every existing call site unchanged.
+import _wave_gate_golden_corpus as _corpus
 
-def _dynamic_path():
-    return {
-        "ddp_name": "DDP_PATH_CLIENTS",
-        "request_profile_id": "PROFILE-UUID",
-        "profile_type": "profile.json",
-        "segments": [
-            {"type": "static", "value": "/admin/cdscm/api/v1/clients/"},
-            {
-                "type": "profile",
-                "element_id": 3,
-                "element_name": "clientId (Root/Object/clientId)",
-            },
-        ],
-    }
-
-
-def _config(*, dynamic_path=None, reliability=None):
-    target = {
-        "connector_type": "rest",
-        "action_type": "PATCH",
-        "connection_id": "CONN-UUID",
-        "operation_id": "OP-UUID",
-    }
-    if dynamic_path is not None:
-        target["dynamic_path"] = dynamic_path
-    cfg = {
-        "process_kind": "database_to_api_sync",
-        "source": {
-            "connector_type": "database",
-            "action_type": "Get",
-            "connection_id": "DBCONN",
-            "operation_id": "DBOP",
-        },
-        "transform": {"mode": "map_ref", "map_ref": "MAP-UUID"},
-        "target": target,
-    }
-    if reliability is not None:
-        cfg["reliability"] = reliability
-    return cfg
+_dynamic_path = _corpus.dynpath_dynamic_path
+_config = _corpus.dynpath_config
 
 
 def _shapes(xml: str):
@@ -199,19 +165,7 @@ def test_malformed_profile_segment_rejected():
 # ---------------------------------------------------------------------------
 
 
-def _ddp_dynamic_path():
-    # A ddp/dpp-only dynamic path: no profile segment -> no request_profile_id.
-    return {
-        "ddp_name": "DDP_PATH_ITEMS",
-        "request_profile_id": None,
-        "profile_type": None,
-        "segments": [
-            {"type": "static", "value": "/v1/items/"},
-            {"type": "ddp", "property_name": "client_id"},
-            {"type": "static", "value": "/notes/"},
-            {"type": "dpp", "property_name": "run_id"},
-        ],
-    }
+_ddp_dynamic_path = _corpus.dynpath_ddp_dynamic_path
 
 
 def test_ddp_dpp_segments_emit_captured_xml():

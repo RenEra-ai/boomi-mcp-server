@@ -45,15 +45,14 @@ from boomi_mcp.compiler.process_ir.legacy_adapters.sync_pipeline import (
 # ---------------------------------------------------------------------------
 
 
-def _stage(key, kind, defaults, over):
-    """A stage whose config defaults every caller may override key-by-key."""
-    config = dict(defaults)
-    config.update(over)
-    return {"key": key, "kind": kind, "config": config}
+# The stage builders and listener-chain definitions live in the corpus (#165);
+# this module CONSUMES them. The aliases keep every existing call site unchanged.
+import _wave_gate_golden_corpus as _corpus
 
+_stage = _corpus.chain_stage
 
-_SRC = {"connection_id": "SRC-CONN", "operation_id": "SRC-OP"}
-_TGT = {"connection_id": "TGT-CONN", "operation_id": "TGT-OP"}
+_SRC = _corpus.CHAIN_SRC
+_TGT = _corpus.CHAIN_TGT
 
 
 def _db_read(key="s", **cfg):
@@ -68,12 +67,13 @@ def _soap_fetch(key="s", **cfg):
     return _stage(key, "fetch", {"primitive": "soap_fetch", **_SRC}, cfg)
 
 
-def _map(key="m", **cfg):
-    return _stage(key, "map", {"primitive": "map", "map_ref": "MAP-1"}, cfg)
+_map = _corpus.chain_map
 
 
 def _rest_send(key="t", **cfg):
-    return _stage(key, "send", {"primitive": "rest_send", "action_type": "POST", **_TGT}, cfg)
+    # A delegating DEF, not a bare alias: this function object is parametrize
+    # data below, and pytest derives the node id from its __name__.
+    return _corpus.chain_rest_send(key, **cfg)
 
 
 def _soap_send(key="t", **cfg):
@@ -81,25 +81,12 @@ def _soap_send(key="t", **cfg):
 
 
 def _db_write(key="t", **cfg):
-    return _stage(key, "write", {"primitive": "db_write", **_TGT}, cfg)
+    # Same __name__-is-a-node-id constraint as _rest_send above.
+    return _corpus.chain_db_write(key, **cfg)
 
 
-def _listen(key="s", **cfg):
-    return _stage(key, "listener", {"primitive": "wss_listen", "operation_id": "WSSOP-1"}, cfg)
-
-
-def _pipeline(stages, **top):
-    keys = [s["key"] for s in stages]
-    return {
-        "process_kind": "sync_pipeline",
-        "pipeline": {
-            "stages": stages,
-            "dependencies": [
-                {"from_stage": a, "to_stage": b} for a, b in zip(keys, keys[1:])
-            ],
-        },
-        **top,
-    }
+_listen = _corpus.chain_listen
+_pipeline = _corpus.listener_pipeline
 
 
 # The six chains #139C migrates to the canonical chain, plus the SOAP family --
@@ -129,13 +116,8 @@ MIGRATED_CHAINS = {
     )["cases"].items()
 }
 
-# The four chains that stay on the legacy renderer (#140).
-LISTENER_CHAINS = {
-    "listener_send": [_listen(), _rest_send()],
-    "listener_map_send": [_listen(), _map(), _rest_send()],
-    "listener_write": [_listen(), _db_write()],
-    "listener_map_write": [_listen(), _map(), _db_write()],
-}
+# The four chains that stay on the legacy renderer (#140) — defined in the corpus.
+LISTENER_CHAINS = _corpus.LISTENER_CHAINS
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +162,7 @@ def test_listener_chain_matches_its_committed_golden(chain):
     golden = (
         Path(__file__).resolve().parent / "fixtures" / "golden_xml" / _LISTENER_GOLDENS[chain]
     )
-    name = "Sync Listener " + chain.replace("listener_", "").replace("_", " ").title() + " Golden"
+    name = _corpus.listener_chain_golden_name(chain)
     cfg = _pipeline(copy.deepcopy(LISTENER_CHAINS[chain]))
     emitted = SyncPipelineBuilder.build(cfg, name=name, folder_name="Golden/Fixtures")
     assert emitted == golden.read_text()

@@ -259,14 +259,18 @@ Baseline manifests are read with `git show <base>:<path>`; current manifests are
 read from the **worktree**, so CI validates the checked-out merge result and a
 local run validates uncommitted work.
 
-**Golden-corpus authority direction — tracked in #165.** `tests/_wave_gate_golden_corpus.py`
-obtains its cases by importing the thirteen golden-producing test modules, rather than
-those tests consuming the registry. There is exactly ONE case definition either way, so
-the "two independent definitions" risk does not apply; the measured import cost is ~0.39 s,
-not the ~4.9 s that motivated the original instruction against it. The real cost is
-directional: removing an owning test makes its golden unrenderable, and that is exactly
-the removal `transitional_oracle` (#159) and `deletion_only` (#160) are designed to
-survive. It fails loudly rather than silently, and #165 carries the inversion.
+**Golden-corpus authority direction — inverted by #165.** `tests/_wave_gate_golden_corpus.py`
+OWNS every case definition and imports ZERO test modules; the thirteen golden-producing
+test modules consume the definitions from it (or from the committed JSON fixtures it
+binds — see §7). The registry used to import those test modules and call their helpers,
+which made removing an owning test module render its golden unrenderable — exactly the
+removal `transitional_oracle` (#159) and `deletion_only` (#160) are designed to survive.
+`test_wave_gate_goldens.py::test_every_active_golden_renders_with_all_test_modules_unimportable`
+now proves the survival property directly: every active golden renders to its committed
+bytes in a child where every `test_*` module is unimportable. Import cost is measured,
+not estimated: the bare corpus import is 0.02–0.03 s (production imports are lazy inside
+the factories); a full render of all 60 active cases in one child is 0.43 s (raw outputs
+in `docs/architecture/evidence/issue-165/measurements/`).
 
 **Worktree hygiene is a cross-check, not the guarantee.** The gate's read-only
 property is STRUCTURAL and ENFORCED, not merely asserted: the scratch directory's
@@ -546,13 +550,25 @@ above.
 bytes. It is **closed**: a manifest row names a key in that dict, never an
 arbitrary module or callable.
 
-The registry **imports the owning test modules and calls their existing
-module-level case helpers** (`_dataprocess_config`, `LISTENER_CHAINS`, `_ANCHORS`,
-`SYNC_CASES`, …) rather than restating their contents. There is therefore exactly
-one definition of every case input in the tree. Only each case's *invocation*
-arguments — component name, folder, which variant helper — are named here, and
-those are pinned byte-for-byte by the committed golden. Importing all thirteen
-producer modules costs 0.39 s (measured), paid once per render child.
+The registry **owns the case definitions; the owning test modules consume them**
+(#165 inverted the original direction). Each test module keeps a small alias
+block (`_base_config = _corpus.pfb_base_config`, `LISTENER_CHAINS =
+_corpus.LISTENER_CHAINS`, …) so its own assertions and non-golden tests are
+unchanged, and the corpus imports ZERO test modules — deleting an owning test
+module leaves every golden renderable, which is the property #159/#160 depend
+on and which `test_wave_gate_goldens.py` proves with an import-blocked child.
+
+Where a case input already lives in a committed JSON fixture
+(`sync_pipeline_emitter_parity_cases.json`, the `rich_control/` and
+`error_handling/` documents, the `recipe_parity/` baseline spec dumps,
+`examples/m11/`), the JSON is the definition and the corpus is its sole Python
+binding; a test module's in-Python copy is a WITNESS, pinned by that module's
+own fixture-equality test. There is therefore exactly one definition of every
+case input in the tree. Invocation arguments — component name, folder, which
+variant — are pinned byte-for-byte by the committed golden. The bare corpus
+import costs 0.02–0.03 s (all production imports are lazy inside the
+factories); rendering all 60 cases in one child costs 0.43 s (measured —
+`docs/architecture/evidence/issue-165/measurements/`).
 
 Renderers must **emit**, never read: no renderer touches `expected_file`, and
 `test_wave_gate_goldens.py` asserts the renderer half of the module never

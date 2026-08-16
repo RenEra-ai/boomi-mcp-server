@@ -28,36 +28,10 @@ from boomi_mcp.categories.components.builders.process_flow_builder import (
 # ---------------------------------------------------------------------------
 
 
-def _listener_pipeline_config(**listener_overrides):
-    listener_config = {"primitive": "wss_listen", "operation_id": "WSSOP-1"}
-    listener_config.update(listener_overrides)
-    return {
-        "process_kind": "sync_pipeline",
-        "pipeline": {
-            "stages": [
-                {"key": "listen", "kind": "listener", "config": listener_config},
-                {
-                    "key": "map",
-                    "kind": "map",
-                    "config": {"primitive": "map", "map_ref": "MAP-1"},
-                },
-                {
-                    "key": "send",
-                    "kind": "send",
-                    "config": {
-                        "primitive": "rest_send",
-                        "action_type": "POST",
-                        "connection_id": "CONN-1",
-                        "operation_id": "OP-1",
-                    },
-                },
-            ],
-            "dependencies": [
-                {"from_stage": "listen", "to_stage": "map"},
-                {"from_stage": "map", "to_stage": "send"},
-            ],
-        },
-    }
+# The golden-case definition lives in the corpus (#165); this module CONSUMES it.
+import _wave_gate_golden_corpus as _corpus
+
+_listener_pipeline_config = _corpus.listener_pipeline_config
 
 
 def _lowered_listener_config(**extra):

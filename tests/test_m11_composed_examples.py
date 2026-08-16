@@ -24,6 +24,10 @@ if _project_root not in sys.path:
 from src.boomi_mcp.categories.integration_builder import _build_plan
 from src.boomi_mcp.categories.components.builders import ProcessFlowBuilder
 
+# The example definitions live in examples/m11/*.json; the corpus (#165) owns
+# their one loader and this module CONSUMES it.
+import _wave_gate_golden_corpus as _corpus
+
 _EXAMPLES_DIR = Path(_project_root) / "examples" / "m11"
 _GOLDEN_DIR = Path(__file__).resolve().parent / "fixtures" / "golden_xml"
 _PATCH_TARGET = "src.boomi_mcp.categories.integration_builder.paginate_metadata"
@@ -34,12 +38,7 @@ _EXAMPLE_FILES = (
     "cache_property_authoring_join.integration.json",
 )
 
-
-def _load_example(name: str) -> dict:
-    payload = json.loads((_EXAMPLES_DIR / name).read_text(encoding="utf-8"))
-    assert payload["example_not_template"] is True
-    assert payload["template_status"] == "example_only_not_reusable_template"
-    return payload["integration_spec"]
+_load_example = _corpus.load_m11_example
 
 
 def _plan(spec: dict) -> dict:

@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9790,"minimum_collected":9790,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9791,"minimum_collected":9791,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -9790,3 +9790,4 @@
 {"kind":"test","id":"pytest-009789","node_id":"tests/test_wave_gate.py::test_ci_requires_exactly_one_baseline_selector","state":"active"}
 {"kind":"test","id":"pytest-009790","node_id":"tests/test_wave_gate.py::test_the_step_slice_ends_at_a_dedented_second_job","state":"active"}
 {"kind":"test","id":"pytest-009791","node_id":"tests/test_wave_gate.py::test_audit_ledger_revisions_are_append_only_and_fully_declared","state":"active"}
+{"kind":"test","id":"pytest-009792","node_id":"tests/test_wave_gate_goldens.py::test_every_active_golden_renders_with_all_test_modules_unimportable","state":"active"}

@@ -23,6 +23,11 @@ from src.boomi_mcp.categories.components.builders.connector_builder import (
     BuilderValidationError,
 )
 
+# The golden-case definitions live in the shared JSON parity corpus, bound by
+# the golden-case registry (#165); the four byte-golden tests below CONSUME
+# them instead of restating the configs with local stage builders.
+import _wave_gate_golden_corpus as _corpus
+
 
 # ---------------------------------------------------------------------------
 # Builders / fixtures
@@ -201,18 +206,14 @@ def test_sync_pipeline_matches_golden_fixture():
     committed fixture pins the actual bytes."""
     from pathlib import Path
 
-    fixture = (
-        Path(__file__).resolve().parent
-        / "fixtures"
-        / "golden_xml"
-        / "sync_pipeline_db_read_map_rest_send.xml"
-    )
     from boomi_mcp.categories.components.process_graph_verifier import verify_process_graph
 
+    case = _corpus.sync_parity_case("db_read_map_rest_send")
+    fixture = (
+        Path(__file__).resolve().parent / "fixtures" / "golden_xml" / case["anchor"]
+    )
     emitted = SyncPipelineBuilder.build(
-        _linear_with_map(),
-        name="Sync DB Read Map REST Send Golden",
-        folder_name="Golden/Fixtures",
+        case["config"], name=case["name"], folder_name=case["folder_name"]
     )
     assert emitted == fixture.read_text()
     assert verify_process_graph(emitted)["errors"] == []
@@ -229,19 +230,18 @@ def test_sync_pipeline_matches_golden_fixture():
 # they pin pre-cut-over bytes and cannot be self-confirming.
 
 
-def _golden_chain(stages, keys):
-    return _sync_config(
-        stages, [{"from_stage": a, "to_stage": b} for a, b in zip(keys, keys[1:])]
-    )
-
-
-def _assert_matches_golden(config, *, name, fixture_name):
+def _assert_matches_corpus_golden(case_name):
     from pathlib import Path
 
     from boomi_mcp.categories.components.process_graph_verifier import verify_process_graph
 
-    fixture = Path(__file__).resolve().parent / "fixtures" / "golden_xml" / fixture_name
-    emitted = SyncPipelineBuilder.build(config, name=name, folder_name="Golden/Fixtures")
+    case = _corpus.sync_parity_case(case_name)
+    fixture = (
+        Path(__file__).resolve().parent / "fixtures" / "golden_xml" / case["anchor"]
+    )
+    emitted = SyncPipelineBuilder.build(
+        case["config"], name=case["name"], folder_name=case["folder_name"]
+    )
     assert emitted == fixture.read_text()
     assert verify_process_graph(emitted)["errors"] == []
     return emitted
@@ -256,13 +256,7 @@ def test_fetch_map_db_write_matches_golden_fixture():
     corrupt it to ``SEND`` -- see the warning above the target canonicalization
     block).
     """
-    xml = _assert_matches_golden(
-        _golden_chain(
-            [_fetch_stage("s"), _map_stage("m"), _write_stage("t")], ["s", "m", "t"]
-        ),
-        name="Sync Fetch Map DB Write Golden",
-        fixture_name="sync_pipeline_fetch_map_db_write.xml",
-    )
+    xml = _assert_matches_corpus_golden("rest_fetch_map_db_write")
     assert 'connectorType="database"' in xml
     assert 'actionType="Send"' in xml
     assert 'actionType="SEND"' not in xml
@@ -270,22 +264,14 @@ def test_fetch_map_db_write_matches_golden_fixture():
 
 def test_fetch_rest_send_no_map_matches_golden_fixture():
     """Byte anchor for a REST *source* and for the map-less passthrough chain."""
-    xml = _assert_matches_golden(
-        _golden_chain([_fetch_stage("s"), _send_stage("t")], ["s", "t"]),
-        name="Sync Fetch REST Send No Map Golden",
-        fixture_name="sync_pipeline_fetch_rest_send_no_map.xml",
-    )
+    xml = _assert_matches_corpus_golden("rest_fetch_rest_send")
     assert 'shapetype="map"' not in xml
     assert xml.count('shapetype="connectoraction"') == 2
 
 
 def test_soap_fetch_soap_send_matches_golden_fixture():
     """Byte anchor for the SOAP Client family end to end (#126 primitives)."""
-    xml = _assert_matches_golden(
-        _golden_chain([_soap_fetch_stage("s"), _soap_send_stage("t")], ["s", "t"]),
-        name="Sync SOAP Fetch SOAP Send Golden",
-        fixture_name="sync_pipeline_soap_fetch_soap_send.xml",
-    )
+    xml = _assert_matches_corpus_golden("soap_fetch_soap_send")
     assert xml.count('connectorType="wssoapclientsdk"') == 2
     assert xml.count('actionType="EXECUTE"') == 2
 

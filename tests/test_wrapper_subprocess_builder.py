@@ -33,6 +33,9 @@ from src.boomi_mcp.categories.components.builders import (
 
 NS = {"bns": "http://api.platform.boomi.com/"}
 
+# The golden-case definition lives in the corpus (#165); this module CONSUMES it.
+import _wave_gate_golden_corpus as _corpus
+
 _GOLDEN = (
     Path(__file__).resolve().parent
     / "fixtures"
@@ -40,7 +43,7 @@ _GOLDEN = (
     / "processcall_standalone_parent.xml"
 )
 
-_CHILD_ID = "11111111-1111-1111-1111-111111111111"
+_CHILD_ID = _corpus.WRAPPER_CHILD_ID
 _CHILD_ID_2 = "22222222-2222-2222-2222-222222222222"
 
 
@@ -70,13 +73,7 @@ def test_registry_exposes_wrapper_subprocess():
 
 def test_standalone_processcall_matches_golden_fixture():
     """A single-child parent build matches the committed golden (C14N-compared)."""
-    cfg = {
-        "process_kind": "wrapper_subprocess",
-        "process_calls": [
-            {"subprocess_ref": _CHILD_ID, "wait": True, "abort_on_error": False,
-             "label": "Run main-logic subprocess"},
-        ],
-    }
+    cfg = _corpus.wrapper_parent_case_config()
     emitted = WrapperSubprocessBuilder.build(
         cfg, name="Wrapper Parent Golden", folder_name="Golden/Fixtures"
     )
