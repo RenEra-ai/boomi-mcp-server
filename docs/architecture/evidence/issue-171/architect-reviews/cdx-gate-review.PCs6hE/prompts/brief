@@ -1,0 +1,38 @@
+This is the FINAL architect-gate replay for issue #171, run on the frozen landing tip. The tree will NOT be mutated after this review: any non-blocking finding you raise is recorded on already-filed follow-up issue #173 rather than by editing the tree, and any BLOCKING finding stops the landing.
+
+Repository: `boomi-mcp-server` at /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: `codex/issue-171`
+Landing tip (frozen): `e16b537e152cd8bd7b846adc44287c5fc373e1f2`
+Previous architect replay covered: `b9575fa..814e402`
+
+**Review the unreviewed delta:** `git diff 814e40217a6b0c1b9a51cb5ec005f70887977f31..HEAD`
+
+## Why this replay exists
+
+A pre-landing adversarial audit found that NO roster gate covered the tip: the newest architect replay had reviewed only through `814e402`, the newest collected repo review was further back, and the composite wave was anchored at `2d37bee` — while `635d8c8` had since rewritten the archive scanner and the append-only checker, the two mechanisms that certify this slice's audit record. The slice's own row AR6-7 had already dispositioned that gap `fixed` on the promise that these gates would run on the exact tip; the promise was recorded and the runs were not made. This replay, plus a repo review and a composite wave re-run, closes that.
+
+## What is in this delta
+
+- **CP-5** supersedes CP-4. CP-4 asserted "every other required gate is current on this tip", which was false when written; CP-4 is retained unedited as the decision that was made, and CP-5 carries the same `DEFER-STANDARD-AND-CLOSE` outcome with honest preconditions, CONDITIONAL on the owed tip gates passing.
+- **Rows RF-1…RF-4**, from a repo Codex review over `fea26a6..27611a3` (`cdx-review.E37iyU`, archived). Two were blocking-class and are fixed:
+  - **RF-1**: the append-only check asserted git history exists for every ledger, but the completion workflow instantiates a ledger at Stage-1 step 0 and commits it at Stage 1.5 with a green suite required in between — a circular deadlock that would have blocked QA for every FUTURE slice. Now an empty history is accepted only when the path is genuinely new (`git ls-files --error-unmatch` fails); a TRACKED path with no history stays fatal.
+  - **RF-2**: the shallow-clone guard probed `.git/shallow` as a path, but in a linked worktree `.git` is a FILE and the marker lives in the common git dir, so the guard could never fire there. Now `git rev-parse --is-shallow-repository`.
+- Record corrections: the closure table's finding count (26 → 61 distinct), the architect-coverage endpoint (`635d8c8` → `814e402`), final-tip rows marked PENDING rather than asserting evidence that does not exist, the literal "byte-identical since e541a3d" claim narrowed (tests.yml has 3 comment-only changed lines), criterion 6's cell extended to name `scripts/wave_gate.py:2482` and `:2484`, and the Deferrals paragraph's impossible "wait for CP-3" condition replaced.
+
+## Gate results already obtained on THIS frozen tip
+
+- Composite wave gate: **exit 0** — `manifests ok (9790 required nodes, 60 active goldens)`, `collection ok (9790 tests)`, `non-KB suite green (9773 passed, 17 skipped, cap 30)`, `60 active goldens deterministic and byte-exact`.
+- Repo Codex review over the complete unreviewed delta: collected and archived (`cdx-review.E37iyU`).
+- Still owed after this review: a `scratch/**` exact-SHA GREEN on this tip, whose URL is posted to issue #171 before close.
+
+## What to judge
+
+1. **Are RF-1 and RF-2 genuinely fixed, and are the fixes correct?** Construct the cases: does a brand-new ledger now pass while a tracked-but-historyless one still fails? Does the shallow query work where the path probe did not? Can either fix be defeated?
+2. **Does anything in this delta weaken a check** — is `_finding_rows`, the supersession map comparison, the first-appearance byte check, the git-index archive comparison, or the symlink/whitespace handling now able to pass vacuously?
+3. **Is the closure record now TRUE of this tip?** Every claim in `docs/architecture/ISSUE_171_AUDIT_LEDGER.md` about what has run, what is owed, which checkpoint authorizes what, and which issues carry deferrals (#172, #173 — verify both are filed and OPEN) should match reality. Report any statement that is false RIGHT NOW.
+4. **Is CP-5 a legal `DEFER-STANDARD-AND-CLOSE`?** Its basis: zero critical findings across all evaluations; zero OPEN blocking-class findings; standard residue deferred to already-filed, roadmap-placed #172 and #173; conditional on the owed tip gates. Judge that against `CLAUDE.md`'s checkpoint rules — including whether the `CONTINUE` alternative is correctly ruled out on the trend test.
+5. **Is there any BLOCKING-class defect left** — runtime behavior, secrets/security, mutation accounting, apply/update preservation, emitted XML or graph validity, machine-served schemas/contracts, capability reachability, or data loss? That is the only category that can stop this landing. Non-blocking audit-record residue goes to #173 by design and should be reported as such, not as a blocker.
+
+`scripts/wave_gate.py` is unchanged in this delta; `.github/workflows/tests.yml` is unchanged since `15e922a` (3 comment-only lines). Be concrete: file, line, failure scenario, fix. If nothing blocks, say so plainly.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.

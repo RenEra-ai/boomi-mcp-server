@@ -1872,13 +1872,21 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
             # could never be validated, so it could never be committed, so it could
             # never gain history. But an already-TRACKED path with no history is a
             # broken authority, not a new file, and stays fatal.
-            tracked_already = subprocess.run(
-                ["git", "ls-files", "--error-unmatch", "--", rel],
+            # Newness is decided by HEAD'S TREE, not by the index. The index says
+            # "tracked" for a file that is merely STAGED, and the Stage-1.5 candidate
+            # stages the ledger and its evidence archive TOGETHER — the archive scanner
+            # requires index membership, so a complete candidate would be staged, and an
+            # index-based probe then calls the ledger "tracked but historyless" and
+            # fails. That is the same deadlock RF-1 fixed, one step further in: passing
+            # only while the candidate is incomplete. HEAD's tree cannot disagree with
+            # history, so it is the authority that makes staged and unstaged agree.
+            committed_already = subprocess.run(
+                ["git", "cat-file", "-e", "HEAD:{0}".format(rel)],
                 cwd=str(_ROOT), capture_output=True, text=True,
             ).returncode == 0
-            assert not tracked_already, (
-                "{0}: the file is tracked but git reports no history for it, so the "
-                "byte-identity authority is unavailable".format(path.name)
+            assert not committed_already, (
+                "{0}: the file exists in HEAD's tree but git reports no history for it, "
+                "so the byte-identity authority is unavailable".format(path.name)
             )
             continue
         # Renames break the path-only walk: pre-rename history is invisible, so a row
