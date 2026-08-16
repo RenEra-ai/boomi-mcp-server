@@ -1,0 +1,37 @@
+This is the FIFTH delta-scoped replay of the architect implementation-review gate for issue #171. Replay #4 (`cdx-gate-review.DXGd9u`) returned ISSUES FOUND with five findings; all five are fixed.
+
+Repository: `boomi-mcp-server` at /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: `codex/issue-171`
+Replay #4 reviewed up to: `d6d3e507f57a86f48650e19880bb686e5086735e`
+Current HEAD: `b9575fa5d06d51bbf223f0a01f61ee9bc1fc778d`
+
+**Review the delta since replay #4:** `git diff d6d3e507f57a86f48650e19880bb686e5086735e..HEAD`
+
+## What this delta contains — replay #4's five findings, fixed
+
+1. **AR4-1** — four rows committed before that delta (`INH-TC1-2a`, `R5-1a`, `R5-2a`, `AR2-4`) had been rewritten in place. Restored to their `2682dd9` text and superseded by appended rows `INH-TC1-2b`, `R5-1b`, `R5-2b`, `AR2-4a`.
+2. **AR4-2 (the substantive one)** — the ledger claimed the archive was verified against `git ls-files`, but the scanner still compared `SHA256SUMS` to `Path.rglob()` (the worktree), leaving the AR3-1 clean-checkout failure reproducible. The archive scanner now compares against the **git index** as well, and the false claim was withdrawn.
+3. **AR4-3** — the new append-only test was partly unsound: its mapping assertion searched the whole document rather than the bounded supersession-map block. It now parses the bounded block and compares it for EXACT equality with the detected revisions. The **byte-identity check against the previous commit was also added** (it skips, with the limitation stated inline, where git history is unavailable).
+4. **AR4-4** — the CP-2 invalidation note said "final replay"; corrected to "architect replay #3".
+5. **AR4-5** — AR3-4 was assigned to DC-16 by resemblance; a new class **DC-21** records the real mechanism, and `AR3-4a` reassigns it.
+
+Also in this delta: a bug in my own new test, found while fixing AR4-3 — it assumed a revision's original is its id minus one letter, but revisions CHAIN (`X` → `Xa` → `Xb`), so `INH-TC1-2b` supersedes `INH-TC1-2a`, not `INH-TC1-2`. A `_supersedes()` helper now resolves the immediate predecessor.
+
+## What to judge
+
+1. **Are all five fixes real and complete?** In particular: are the four restored rows byte-identical to `2682dd9`; is every revision row (there are now fourteen) declared in the bounded supersession map with its correct immediate predecessor; and does the ledger still claim any verification it does not actually perform?
+
+2. **Are the two mechanized checks sound and non-vacuous?**
+   - `test_audit_ledger_attestations_have_durable_matching_evidence` now asserts `set(SHA256SUMS) == git ls-files` for each archive. *(Witnessed here: a git-ignored file added to the archive and listed in the checksums fails the test — the exact AR3-1 shape.)*
+   - `test_audit_ledger_revisions_are_append_only_and_fully_declared` now asserts bounded-map equality plus previous-commit byte-identity of pre-existing rows. *(It independently reproduced replay #4's exact four-row list on its first run.)*
+   Judge whether either can pass vacuously, whether the skip-when-history-unavailable branch is an acceptable and correctly-stated limitation, and whether the `_supersedes()` chain rule is right.
+
+3. **Does the defect-class table still reproduce from its declared inputs** given the new rows (AR4-1…AR4-5, AR2-4a, AR3-4a, INH-TC1-2b, R5-1b, R5-2b) and the new class DC-21?
+
+4. **Is anything now worse than at replay #4?**
+
+5. **Is the tree closure-safe apart from the known-pending items?** Deliberately outstanding, in order: **CP-3** in its own commit at a validated tip; then the deferral revision rows citing it; then the final-tree validation table; then affected QA and a fix-only repo review over that administrative delta; then architect-gate coverage of the final tree; then a final exact-SHA GREEN scratch run with NO tree mutation afterwards; then fast-forward push to `dev`, scratch-ref cleanup, prune, and a seed-SHA unreachability proof. Say whether that sequence is sufficient and whether anything else blocks.
+
+Do not re-review `scripts/wave_gate.py` or `.github/workflows/tests.yml` behaviour that earlier gates cleared unless this delta changed it (it does not). Be concrete: file, line, failure scenario, fix. If nothing is actionable, say so plainly — a clean verdict here is what unblocks CP-3 and the finish.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.

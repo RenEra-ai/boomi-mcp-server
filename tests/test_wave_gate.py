@@ -1762,16 +1762,18 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
     assert ledgers, "no ledgers found — this check would be vacuous"
 
     checked = 0
+    skipped_history = []
     for path in ledgers:
         text = path.read_text(encoding="utf-8")
-        ids = [
-            ln.split("|")[1].strip()
-            for ln in text.splitlines()
-            if ln.startswith("| ") and ln.count("|") > 8
-        ]
-        ids = [i for i in ids if i and i not in ("ID", "---") and not i.startswith("**")]
+        parsed = _finding_rows(text)
+        ids = list(parsed)
 
-        duplicates = {i for i in ids if ids.count(i) > 1}
+        raw = [
+            ln.split("|")[1].strip().strip("*").strip()
+            for ln in text.splitlines()
+            if ln.startswith("| ") and len(ln.split("|")) >= 6
+        ]
+        duplicates = {i for i in ids if raw.count(i) > 1}
         assert duplicates == set(), "{0}: duplicate row ids {1}".format(
             path.name, sorted(duplicates)
         )
@@ -1787,8 +1789,12 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
             and the tally reading that map would apply the wrong cells.
             """
             stem, letter = rid[:-1], rid[-1]
-            prior = stem + chr(ord(letter) - 1)
-            return prior if letter > "a" and prior in present else stem
+            if letter > "a":
+                # `Xb` supersedes `Xa` and nothing else. Falling back to the stem when
+                # `Xa` is absent would silently accept a chain with a missing link and
+                # declare a mapping that skips it.
+                return stem + chr(ord(letter) - 1)
+            return stem
 
         revisions = {
             i for i in present
@@ -1823,47 +1829,72 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
             )
             checked += 1
 
-        # The half that had to become mechanical. A pre-existing row must be BYTE
-        # IDENTICAL to its last committed form: five separate #171 findings were the
-        # same in-place edit, each made while fixing the previous one, because the rule
-        # was enforced by remembering to sweep. Git is the authority for "what was
-        # committed", so ask it. Where history is unavailable (a shallow checkout, or a
-        # ledger in its first commit) this SKIPS rather than fails — an absent authority
-        # is not evidence of compliance, and is recorded as such in the ledger.
+        # The half that had to become mechanical. A committed row must be BYTE IDENTICAL
+        # to its FIRST committed form: five separate #171 findings were the same in-place
+        # edit, each made while fixing the previous one, because the rule was enforced by
+        # remembering to sweep.
+        #
+        # The authority is each row's FIRST APPEARANCE, walking history oldest-first —
+        # NOT "the previous commit that touched this file". That was the first attempt
+        # and it is unstable by construction: its answer depends on where HEAD sits, so
+        # a batch that RESTORES rows an earlier commit had wrongly edited reads as green
+        # before commit and red immediately after, because committing moves the
+        # comparison base onto the very commit holding the bad text. It did exactly that
+        # here. First-appearance is fixed for the life of a row, so the verdict cannot
+        # flip with position.
         rel = str(path.relative_to(_ROOT))
-        prior = subprocess.run(
-            ["git", "log", "--format=%H", "-n", "2", "--", rel],
+        log = subprocess.run(
+            ["git", "log", "--format=%H", "--reverse", "--", rel],
             cwd=str(_ROOT), capture_output=True, text=True,
         )
-        shas = prior.stdout.split() if prior.returncode == 0 else []
-        if len(shas) >= 2:
-            was = subprocess.run(
-                ["git", "show", "{0}:{1}".format(shas[1], rel)],
+        history = log.stdout.split() if log.returncode == 0 else []
+        if len(history) < 2:
+            # A ledger in its first commit, or a checkout with no history to consult.
+            # An absent authority is not evidence of compliance: skip loudly rather than
+            # pass silently, so a shallow-clone run cannot look like a verified one.
+            skipped_history.append(path.name)
+            continue
+
+        first_seen = {}
+        for sha in history:
+            blob = subprocess.run(
+                ["git", "show", "{0}:{1}".format(sha, rel)],
                 cwd=str(_ROOT), capture_output=True, text=True,
             )
-            if was.returncode == 0:
-                def _rows(blob):
-                    out = {}
-                    for ln in blob.splitlines():
-                        if ln.startswith("| ") and ln.count("|") > 8:
-                            rid = ln.split("|")[1].strip()
-                            if rid and rid not in ("ID", "---") and not rid.startswith("**"):
-                                out[rid] = ln
-                    return out
-                before, after = _rows(was.stdout), _rows(text)
-                mutated = sorted(
-                    rid for rid in before if rid in after and before[rid] != after[rid]
+            assert blob.returncode == 0, (
+                "{0}: cannot read {1} at {2} — the byte-identity authority is "
+                "unavailable, which must fail rather than silently skip".format(
+                    path.name, rel, sha[:12]
                 )
-                assert mutated == [], (
-                    "{0}: these rows were EDITED IN PLACE rather than superseded by an "
-                    "appended revision row: {1}. The ledger is append-only — restore the "
-                    "committed text and append `<id>a`/`<id>b` instead.".format(
-                        path.name, mutated
-                    )
-                )
+            )
+            for rid, line in _finding_rows(blob.stdout).items():
+                first_seen.setdefault(rid, line)
+
+        current = _finding_rows(text)
+        mutated = sorted(
+            rid for rid in first_seen if rid in current and first_seen[rid] != current[rid]
+        )
+        assert mutated == [], (
+            "{0}: these rows differ from their FIRST committed form — a committed row is "
+            "never edited, it is superseded by an appended revision row: {1}".format(
+                path.name, mutated
+            )
+        )
+        # A row may never leave, either: deleting one loses the finding entirely, which
+        # is a stronger version of the same defect than editing it.
+        vanished = sorted(rid for rid in first_seen if rid not in current)
+        assert vanished == [], (
+            "{0}: these committed rows were DELETED: {1}. The record is append-only in "
+            "both directions.".format(path.name, vanished)
+        )
 
     assert checked, (
         "no ledger exercised the revision path — the assertions above would be vacuous"
+    )
+    assert skipped_history == [], (
+        "byte-identity could not be checked for {0} — git history was unavailable. This "
+        "is reported rather than passed over: a run that could not consult the authority "
+        "has not verified anything.".format(skipped_history)
     )
 
 
@@ -2168,6 +2199,35 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
                 path.name, sorted(bare_here)
             )
         )
+
+
+def _finding_rows(text):
+    """Every finding row in a ledger, keyed by id.
+
+    A row is identified by its ID CELL matching a finding-id shape, not by counting
+    pipe delimiters. The delimiter count was the first attempt and it silently excluded
+    #152's eight-delimiter tables, so a check advertised as covering every ledger
+    covered exactly one — the same wider-scope-than-the-property defect the append-only
+    test exists to catch.
+    """
+    import re as _re
+
+    rows = {}
+    for line in text.splitlines():
+        if not line.startswith("| "):
+            continue
+        cells = line.split("|")
+        if len(cells) < 6:
+            continue
+        rid = cells[1].strip().strip("*").strip()
+        # Defect-CLASS rows (`DC-7`, `DC-A`) are excluded: their instance counts are a
+        # DERIVED aggregate that is supposed to change as findings arrive, so they are
+        # not append-only. Only FINDING rows carry the immutability contract.
+        if rid.startswith("DC-"):
+            continue
+        if _re.fullmatch(r"(?:INH-)?[A-Z][A-Za-z0-9]*-?\d*-\d+[a-z]?", rid):
+            rows.setdefault(rid, line)
+    return rows
 
 
 def _split_out_gate_step(workflow):
@@ -4916,6 +4976,17 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
         for line in sums_path.read_text().splitlines():
             digest, rel = line.split("  ", 1)
             sums[rel] = digest
+        # A symlink is not evidence: `read_bytes()` would hash whatever it happens to
+        # point at on this machine, so an archive of symlinks would verify locally and
+        # mean nothing anywhere else.
+        links = sorted(
+            str(p.relative_to(base)) for p in base.rglob("*") if p.is_symlink()
+        )
+        assert links == [], (
+            "{0}: archived evidence must be regular files, not symlinks: {1}".format(
+                base.name, links
+            )
+        )
         on_disk = {
             str(p.relative_to(base))
             for p in base.rglob("*")
@@ -4930,11 +5001,16 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
         # checksums claimed. An archive nobody else can reconstruct is not durable
         # evidence, so compare against the index too.
         prefix = str(base.relative_to(_ROOT))
+        # `-z` because `.split()` corrupts any legal path containing whitespace, and a
+        # corrupted name silently drops out of the comparison — the failure mode this
+        # check exists to catch, reintroduced by the check itself.
         listed = subprocess.run(
-            ["git", "ls-files", "--", prefix],
+            ["git", "ls-files", "-z", "--", prefix],
             cwd=str(_ROOT), capture_output=True, text=True, check=True,
-        ).stdout.split()
-        tracked = {p[len(prefix) + 1:] for p in listed if p.startswith(prefix + "/")}
+        ).stdout.split("\0")
+        tracked = {
+            q[len(prefix) + 1:] for q in listed if q.startswith(prefix + "/")
+        }
         tracked.discard("SHA256SUMS")
         assert set(sums) == tracked, (
             "{0}: SHA256SUMS and the GIT INDEX disagree — listed-but-untracked "
