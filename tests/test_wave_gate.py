@@ -1880,6 +1880,29 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
             # fails. That is the same deadlock RF-1 fixed, one step further in: passing
             # only while the candidate is incomplete. HEAD's tree cannot disagree with
             # history, so it is the authority that makes staged and unstaged agree.
+            # ...but "absent from HEAD" is not the same as "new". A STAGED RENAME puts
+            # an existing ledger at a path HEAD has never seen, and a pending MERGE can
+            # import one the same way. Both would take this exemption and skip the
+            # rename assertion below — passing before the commit and going red after it,
+            # once `--follow` sees the rename. That is the verdict-flips-on-commit shape
+            # this whole check was rewritten to eliminate, so ask git for the staged
+            # rename and for a merge in progress before believing the path is new.
+            staged_renames = subprocess.run(
+                ["git", "diff", "--cached", "--diff-filter=R", "--name-only", "-z"],
+                cwd=str(_ROOT), capture_output=True, text=True,
+            ).stdout.split("\0")
+            assert rel not in staged_renames, (
+                "{0}: this path is the destination of a STAGED RENAME, so it is not a "
+                "new ledger — ledger paths are frozen once committed, and renaming one "
+                "hides its pre-rename history from the first-appearance walk".format(
+                    path.name
+                )
+            )
+            assert not (_ROOT / ".git" / "MERGE_HEAD").exists(), (
+                "{0}: a merge is in progress, so a ledger arriving from the other side "
+                "cannot be distinguished from a new one; commit the merge before "
+                "trusting the first-appearance authority".format(path.name)
+            )
             committed_already = subprocess.run(
                 ["git", "cat-file", "-e", "HEAD:{0}".format(rel)],
                 cwd=str(_ROOT), capture_output=True, text=True,
