@@ -56,10 +56,13 @@ authority-derived coverage claim.
 
 ## Finding rows (one per raw finding; append-only; exactly one disposition each)
 
-**Seed the table at instantiation — it may not be born empty.** Since #173 the append-only
-check asserts PER LEDGER that `_finding_rows()` parsed at least one row, so a parser change
-that silently drops a whole ledger fails there instead of hiding behind another ledger's
-revisions. A ledger with no rows would trip that assertion. Seed it with the `INH-*` rows
+**Seed the table at instantiation.** Since #173 the append-only check asserts PER LEDGER
+that `_finding_rows()` parsed at least one row, so a parser change that silently drops a
+whole ledger fails there instead of hiding behind another ledger's revisions. The
+assertion is scoped to ledgers already COMMITTED IN HEAD, so a freshly instantiated one
+does not trip it — the workflow requires a green suite before the Stage-1.5 commit, and a
+slice may legitimately inherit nothing (`ISSUE_152_AUDIT_LEDGER.md` has no `INH-*` rows).
+Seeding is therefore the convention, not the enforcement. Seed with the `INH-*` rows
 for the findings the slice INHERITS — the deferred findings it exists to discharge, quoted
 verbatim from the filed issue — which is the honest first content anyway: those rows are
 why the slice was opened.

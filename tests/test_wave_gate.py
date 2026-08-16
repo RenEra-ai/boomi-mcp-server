@@ -2401,8 +2401,12 @@ def _finding_rows(text):
 #: unpinned-hand-copy mechanism this repository's structural-fix rule names: a
 #: widened parser would leave the fixture asserting a stale shape.
 _FINDING_ID_RE = r"(?:INH-)?[A-Z][A-Za-z0-9]*-?\d*-\d+[a-z]?"
-#: The same shape with a MANDATORY trailing letter: a revision id.
-_REVISION_ID_RE = _FINDING_ID_RE[:-1]
+#: The same shape with a MANDATORY trailing letter: a revision id. Derived by
+#: dropping the optional-suffix marker, and asserted rather than sliced blind —
+#: positional slicing would silently change meaning if the shape ever gained a
+#: different suffix.
+assert _FINDING_ID_RE.endswith("[a-z]?"), _FINDING_ID_RE
+_REVISION_ID_RE = _FINDING_ID_RE[: -len("?")]
 
 _LEDGER_PATH_RE = r"docs/architecture/ISSUE_.+_AUDIT_LEDGER\.md"
 
@@ -2605,6 +2609,66 @@ def test_frozen_ledger_invariant_sees_a_case_only_rename(tmp_path):
     os.rename(str(original), str(renamed))
 
     assert _vanished_frozen_ledger_paths(repo) == [
+        "docs/architecture/ISSUE_9_AUDIT_LEDGER.md"
+    ]
+
+
+def test_frozen_ledger_history_walk_needs_both_z_and_no_renames(tmp_path):
+    """Committed witness for the two flags on the history walk.
+
+    Both were added after review found them missing, and both are silent when
+    absent — the frozen set simply never learns about the ledger, so a later
+    deletion reports nothing. `-z` because git QUOTES a non-ASCII path (the
+    anchored regex then misses it); `--no-renames` because a ledger created by
+    renaming an in-pathspec file is reported as R, not A.
+
+    ``core.quotePath`` is pinned rather than assumed: the quoting this test
+    depends on is git's default, but a user or CI with ``core.quotePath=false``
+    would otherwise make the fixture fail for a reason that has nothing to do
+    with the property.
+    """
+    row = "| A-1 | s | \"v\" | P2 | *(none)* | *(none)* | Standard | `a` | `fixed` |\n"
+
+    # (1) A non-ASCII ledger, added and then deleted.
+    accented = _new_repo(tmp_path, name="accented")
+    _run_git(accented, "config", "core.quotePath", "true")
+    _write(accented, "docs/architecture/ISSUE_café_AUDIT_LEDGER.md", row)
+    _commit(accented, "add an accented ledger")
+    _run_git(accented, "rm", "-q", "docs/architecture/ISSUE_café_AUDIT_LEDGER.md")
+    _run_git(
+        accented, "-c", "user.email=gate@example.invalid", "-c", "user.name=gate",
+        "commit", "-q", "-m", "delete it",
+    )
+    assert _vanished_frozen_ledger_paths(accented) == [
+        "docs/architecture/ISSUE_café_AUDIT_LEDGER.md"
+    ]
+    # ...and the reason `-z` is required: without it git quotes the name, so a
+    # name-shaped match never fires.
+    quoted = subprocess.run(
+        ["git", "log", "--format=", "--name-only", "--diff-filter=A", "--",
+         "docs/architecture/"],
+        cwd=str(accented), capture_output=True, text=True, check=True,
+    ).stdout
+    assert "\\303\\251" in quoted, quoted
+
+    # (2) A ledger created by RENAMING an in-pathspec file, then deleted.
+    renamed = _new_repo(tmp_path, name="renamed")
+    _write(renamed, "docs/architecture/NOTES.md", row)
+    _commit(renamed, "notes")
+    _run_git(
+        renamed, "mv", "docs/architecture/NOTES.md",
+        "docs/architecture/ISSUE_9_AUDIT_LEDGER.md",
+    )
+    _run_git(
+        renamed, "-c", "user.email=gate@example.invalid", "-c", "user.name=gate",
+        "commit", "-q", "-m", "rename into a ledger name",
+    )
+    _run_git(renamed, "rm", "-q", "docs/architecture/ISSUE_9_AUDIT_LEDGER.md")
+    _run_git(
+        renamed, "-c", "user.email=gate@example.invalid", "-c", "user.name=gate",
+        "commit", "-q", "-m", "delete it",
+    )
+    assert _vanished_frozen_ledger_paths(renamed) == [
         "docs/architecture/ISSUE_9_AUDIT_LEDGER.md"
     ]
 
