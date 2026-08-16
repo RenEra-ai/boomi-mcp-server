@@ -1773,12 +1773,24 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
         ).stdout.split("\0")
         if _re.fullmatch(r"docs/architecture/ISSUE_.+_AUDIT_LEDGER\.md", name)
     }
+    # "Still exists" means BOTH still tracked in the index AND still a file in
+    # the worktree — neither alone suffices, and each was tried alone first. The
+    # filesystem alone accepted a staged rename that recreated the old path as an
+    # UNTRACKED copy (the index had deleted the frozen path while a look-alike
+    # sat on disk). The index alone accepted a plain unstaged `mv` (the index
+    # still lists a path whose file is gone). Requiring both closes both, because
+    # every way a ledger moves breaks at least one of them.
+    tracked_now = set(subprocess.run(
+        ["git", "ls-files", "-z", "--", "docs/architecture/"],
+        cwd=str(_ROOT), capture_output=True, text=True,
+    ).stdout.split("\0"))
     vanished_paths = sorted(
-        name for name in committed_ledgers if not (_ROOT / name).is_file()
+        name for name in committed_ledgers
+        if name not in tracked_now or not (_ROOT / name).is_file()
     )
     assert vanished_paths == [], (
-        "committed ledger paths are FROZEN, and these have disappeared from the "
-        "worktree (renamed, moved, or deleted): {0}".format(vanished_paths)
+        "committed ledger paths are FROZEN, and these are missing from the index "
+        "or the worktree (renamed, moved, or deleted): {0}".format(vanished_paths)
     )
 
     checked = 0
