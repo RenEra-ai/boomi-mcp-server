@@ -1749,12 +1749,9 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
       defect-class tally — which reads that map — cannot silently diverge from the rows;
     * no row id appears twice, so an "edit" cannot masquerade as a second row.
 
-    What it deliberately does NOT check, stated rather than implied: that a pre-existing
-    row is BYTE-IDENTICAL to its previously committed form. That needs the prior commit as
-    the authority, and a test that reaches into git history would fail on a shallow
-    checkout and on the first commit of any new ledger. The byte-identity half stays a
-    review obligation; this test removes the failure mode that actually recurred — a
-    revision landing without its original, or without being declared.
+    It ALSO checks byte identity against each row's first committed form, and refuses a
+    committed row's deletion. Where git history cannot be consulted the check FAILS rather
+    than passing quietly: an absent authority is not evidence of compliance.
     """
     import re as _re
 
@@ -1762,7 +1759,6 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
     assert ledgers, "no ledgers found — this check would be vacuous"
 
     checked = 0
-    skipped_history = []
     for path in ledgers:
         text = path.read_text(encoding="utf-8")
         parsed = _finding_rows(text)
@@ -1804,7 +1800,8 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
         # in-place replacement of the original — both are what this test exists to catch.
         orphans = {
             i for i in present
-            if _re.fullmatch(r"(?:INH-)?[A-Z]+\d*-\d+[a-z]", i) and i[:-1] not in present
+            if _re.fullmatch(r"(?:INH-)?[A-Z][A-Za-z0-9]*-?\d*-\d+[a-z]", i)
+            and _supersedes(i) not in present
         }
         assert orphans == set(), (
             "{0}: revision rows whose ORIGINAL is missing — a revision must add a row, "
@@ -1848,12 +1845,35 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
             cwd=str(_ROOT), capture_output=True, text=True,
         )
         history = log.stdout.split() if log.returncode == 0 else []
-        if len(history) < 2:
-            # A ledger in its first commit, or a checkout with no history to consult.
-            # An absent authority is not evidence of compliance: skip loudly rather than
-            # pass silently, so a shallow-clone run cannot look like a verified one.
-            skipped_history.append(path.name)
-            continue
+        # A SHALLOW clone truncates history, so a walk over it would compute a
+        # "first appearance" that is merely the oldest commit fetched — a moving
+        # authority wearing a fixed one's clothes. Refuse that outright rather than
+        # skipping, which would let a shallow CI run look verified. A COMPLETE history
+        # of one commit is fine: a ledger in its first commit has nothing to contradict.
+        shallow = (_ROOT / ".git" / "shallow").exists()
+        assert not shallow, (
+            "{0}: the repository is a shallow clone, so first-appearance history is "
+            "truncated and byte identity cannot be established. Fetch full history "
+            "(`fetch-depth: 0`) before trusting this check.".format(path.name)
+        )
+        assert history, (
+            "{0}: git reports no history for this file, so the byte-identity authority "
+            "is unavailable".format(path.name)
+        )
+        # Renames break the path-only walk: pre-rename history is invisible, so a row
+        # mutated during a rename could become canonical. Ledgers are therefore
+        # rename-frozen; the check states that rather than silently mis-anchoring.
+        renamed = subprocess.run(
+            ["git", "log", "--follow", "--diff-filter=R", "--format=%H", "--", rel],
+            cwd=str(_ROOT), capture_output=True, text=True,
+        )
+        assert not renamed.stdout.split(), (
+            "{0}: this ledger was RENAMED ({1}). The first-appearance walk is path-only, "
+            "so a rename hides pre-rename history and a row mutated across it would read "
+            "as canonical. Ledger paths are frozen once committed.".format(
+                path.name, renamed.stdout.split()[:1]
+            )
+        )
 
         first_seen = {}
         for sha in history:
@@ -1891,11 +1911,7 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
     assert checked, (
         "no ledger exercised the revision path — the assertions above would be vacuous"
     )
-    assert skipped_history == [], (
-        "byte-identity could not be checked for {0} — git history was unavailable. This "
-        "is reported rather than passed over: a run that could not consult the authority "
-        "has not verified anything.".format(skipped_history)
-    )
+
 
 
 def test_diagnostic_codes_named_in_the_audit_ledger_exist():
@@ -5004,13 +5020,25 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
         # `-z` because `.split()` corrupts any legal path containing whitespace, and a
         # corrupted name silently drops out of the comparison — the failure mode this
         # check exists to catch, reintroduced by the check itself.
-        listed = subprocess.run(
-            ["git", "ls-files", "-z", "--", prefix],
+        staged = subprocess.run(
+            ["git", "ls-files", "--stage", "-z", "--", prefix],
             cwd=str(_ROOT), capture_output=True, text=True, check=True,
         ).stdout.split("\0")
-        tracked = {
-            q[len(prefix) + 1:] for q in listed if q.startswith(prefix + "/")
-        }
+        tracked, symlinked = set(), []
+        for entry in staged:
+            if not entry:
+                continue
+            meta, _, name = entry.partition("\t")
+            if not name.startswith(prefix + "/"):
+                continue
+            rel_name = name[len(prefix) + 1:]
+            if meta.split()[0] == "120000":
+                symlinked.append(rel_name)
+            tracked.add(rel_name)
+        assert symlinked == [], (
+            "{0}: tracked symlinks are not evidence — the archive would hash whatever "
+            "they point at on this machine: {1}".format(base.name, sorted(symlinked))
+        )
         tracked.discard("SHA256SUMS")
         assert set(sums) == tracked, (
             "{0}: SHA256SUMS and the GIT INDEX disagree — listed-but-untracked "

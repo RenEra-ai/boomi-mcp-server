@@ -1,0 +1,41 @@
+This is the SIXTH delta-scoped replay of the architect implementation-review gate for issue #171. Replay #5 (`cdx-gate-review.nio6Hn`) returned ISSUES FOUND with four findings; all four are fixed, and its two required additions (a non-authorizing checkpoint, and a wave re-run on the corrected tip) are done.
+
+Repository: `boomi-mcp-server` at /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: `codex/issue-171`
+Replay #5 reviewed up to: `b9575fa5d06d51bbf223f0a01f61ee9bc1fc778d`
+Current HEAD: `814e40217a6b0c1b9a51cb5ec005f70887977f31`
+
+**Review the delta since replay #5:** `git diff b9575fa5d06d51bbf223f0a01f61ee9bc1fc778d..HEAD`
+
+## What this delta contains
+
+**AR5-1 (the blocker) — a RED test at HEAD.** The append-only check compared each row against "the previous commit that touched the ledger", which moves when you commit: green in the worktree, red immediately after committing, because the base landed on the commit holding the bad text. The authority is now each row's **FIRST APPEARANCE**, walked oldest-first, which is fixed for the life of a row.
+*(Measured: across all 13 ledger-touching commits, 65 rows tracked, zero mutated, zero deleted; and the suite is green AFTER committing — the condition that previously failed.)*
+
+**AR5-2 — four ways the check was still incomplete.** A shared `_finding_rows()` parser now identifies rows by ID SHAPE rather than delimiter count, so #152's eight-delimiter tables are covered; defect-CLASS rows (`DC-*`) are explicitly excluded because their instance counts are a derived aggregate that is supposed to change; deleting a committed row now fails; `_supersedes()` requires the immediate predecessor with no stem fallback; an unreadable git authority fails and an absent one is reported loudly rather than skipped silently; the docstring matches the behaviour.
+
+**AR5-3 — class-table arithmetic.** DC-16 recomputed 5 → 4 (AR3-4 reassigned by `AR3-4a`), DC-21 chronology ordered AR3-4 then AR4-5, and a stray `|` that gave DC-20 six cells under a five-column header repaired.
+
+**AR5-4 — archive scanner pathname safety.** Enumeration uses `git ls-files -z` (`.split()` corrupted whitespace paths, silently dropping a file from the comparison built to catch dropped files), and tracked symlinks are now refused rather than hashed.
+
+**CP-3 recorded as an explicitly NON-AUTHORIZING `CONTINUE`** at architect evaluation 6. It does not license the deferrals — `D-1a`/`D-2a` remain void and #172's two items unauthorized — because the replay that preceded it was not clean.
+
+**Composite wave gate re-run on the corrected tip** (`2d37bee`), exit 0: `manifests ok (9790 required nodes, 60 active goldens)`, `collection ok (9790 tests)`, `non-KB suite green (9773 passed, 17 skipped, cap 30)`, `60 active goldens deterministic and byte-exact`. The earlier wave evidence at `c5c66b6` is retained as the evidence it was.
+
+## What to judge
+
+1. **Is the first-appearance authority correct and stable?** Can its verdict still change with history position, does it handle a row introduced by a merge or a rename, and is the loud-skip branch reachable and correctly stated?
+
+2. **Are the four AR5 fixes complete?** Especially whether `_finding_rows()` now genuinely covers #152's tables, whether excluding `DC-*` rows is the right boundary, and whether any assertion can pass vacuously.
+
+3. **Does the defect-class table reproduce from its declared inputs** (seed, rows, supersession map) with the AR5 rows added?
+
+4. **Is CP-3 correctly formed** — does it record what a checkpoint must, and is its non-authorizing status consistent everywhere the deferrals are described?
+
+5. **Is anything now worse than at replay #5?**
+
+6. **Is the tree closure-safe apart from the known-pending items?** Outstanding, in order: an authorizing checkpoint at a tip validated by a CLEAN replay; then the deferral revision rows citing it; then the final-tree validation table; then affected QA and a fix-only repo review over that administrative delta; then a final exact-SHA GREEN scratch run with NO tree mutation afterwards; then fast-forward push to `dev`, scratch-ref cleanup, prune, and a seed-SHA unreachability proof. Say whether that is sufficient and whether anything else blocks.
+
+`scripts/wave_gate.py` and `.github/workflows/tests.yml` are untouched in this delta. Be concrete: file, line, failure scenario, fix. If nothing is actionable, say so plainly — a clean verdict here is what unblocks the authorizing checkpoint and the finish.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.
