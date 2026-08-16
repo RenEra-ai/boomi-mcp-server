@@ -556,21 +556,24 @@ parameter is the KEY and the value is always `int` — so `counts: typing.Counte
 every honest invocation with ordinary caller input. The docstring that reads "if some generic ever
 parametrises its KEY instead" named a hypothetical that turned out to be in the standard library.
 
-**`defaultdict` is still refused, and by a different gate**: `DefaultDict[str, str]` compiles to a
-`function-plain`/`function-wrap` validator node, so the wrap/plain validator ban rejects it at
-REGISTRATION, exactly as it rejects `Sequence[str]`, `Deque[str]`, `AnyUrl`, `re.Pattern`, `Fraction` and all
-SIX `ipaddress` types (`IPv4Address`/`Network`/`Interface` and their v6 counterparts) — twelve
-annotations, each verified to carry such a node.
+**`defaultdict` registers since issue #162**: `DefaultDict[str, str]` compiles to a
+`function-plain`/`function-wrap` validator node, and the wrap/plain validator ban used to reject it
+at REGISTRATION, exactly as it rejected `Sequence[str]`, `Deque[str]`, `AnyUrl`, `re.Pattern`,
+`Fraction` and all SIX `ipaddress` types (`IPv4Address`/`Network`/`Interface` and their v6
+counterparts) — twelve annotations, each verified to carry such a node. That ban is retired
+(issue #162; the retirement record is below): all twelve families register, with the engine's
+value-first checks owning the bypass class per invocation.
 
-**The regression test pins four of those twelve, not all of them.**
-`test_the_wrap_ban_still_over_fires_on_these` is parametrised over `AnyUrl`, `IPv4Address`,
-`IPv4Network` and `re.Pattern`. `Sequence`, `Deque`, `DefaultDict`, `Fraction` and the remaining
-four `ipaddress` forms — `IPv4Interface`, `IPv6Address`, `IPv6Network` and `IPv6Interface` —
-are measured observations, not pinned behaviour: narrowing the ban so it
-stopped refusing them would leave that test green. The twelve are the measured family; the four are
-the regression surface. That ban is recorded below as known, measured and still open; it is named
-here too because a reader checking "is `defaultdict` supported?" should not have to find the answer
-two subsections away.
+**The regression tests now pin all twelve, in the accepted direction.**
+`test_the_types_the_wrap_ban_refused_all_register` is parametrised over the full measured family,
+replacing the old four-of-twelve over-fire pin. Nine of the twelve also round-trip an honest value
+to the executor (`test_nine_of_the_twelve_survive_an_engine_round_trip`); `Deque[str]`,
+`IPv4Network` and `IPv6Network` register but are refused by the ENGINE on every honest invocation
+(`test_three_registered_types_the_engine_still_refuses_at_first_use`): the strict declared-shape
+adapter demands a `list` where pydantic compiled deque validation lax-or-strict, and the network
+types define `__iter__`, which the opaque-iterable guard refuses to inspect. Those two engine
+mechanisms predate the retirement and fixing them is an engine decision with its own evidence —
+recorded here so a reader checking "is `Deque` supported?" gets the whole answer in one place.
 
 Why residue is the right disposition rather than a defeat: **every one of those attacks is dominated
 by a channel §12 already accepts.** A registered model that stashes the caller's raw mapping in a
@@ -833,7 +836,7 @@ implementation; nothing in `tests/` re-derives them, so a regression in this pat
 caught here. Read them as an order-of-magnitude statement — the check costs roughly ten times
 `model_validate`, not roughly one — and not as maintenance evidence.
 
-That the adapters are the engine's own is the whole design, and it is the conclusion of five
+That the adapters are the engine's own is the whole design, and it is the conclusion of six
 retired checks rather than a preference:
 
 | retired check | defeated by |
@@ -843,6 +846,7 @@ retired checks rather than a preference:
 | classify `function-wrap` by whether it reaches a model | undecidable from the schema; defeated four ways |
 | `ser["function"].__module__` | a plain writable attribute; also matches third-party `pydantic_*` modules |
 | ban any ser schema, read from `__pydantic_core_schema__` | that attribute is itself writable — assigning a closed twin's schema after class creation passes every registration gate while the compiled validator still accepts extras |
+| ban `function-wrap`/`function-plain` validator nodes anywhere | not defeated — retired as subsumed (issue #162): live QA drove ten wrap/plain attacks with the ban's node set emptied and the value-first checks caught every one (the attack shapes are relocated to engine-side tests), while the ban false-refused twelve honest annotation families |
 
 **The class is exhausted: every attribute of the author's class is writable, and registration
 runs after class creation.** What an author cannot reach into is an adapter the engine
@@ -853,25 +857,33 @@ Removing the serializer ban also removed false rejections it had introduced — 
 `pathlib.Path` register again, and `SecretStr` mattered: it is the type an author *should* reach
 for on a sensitive input, so refusing it pushed them toward plain `str`.
 
-**Known, measured, still open:** the wrap/plain *validator* ban refuses `Sequence[str]`,
+**CLOSED (issue #162) — the wrap/plain *validator* ban is retired.** It refused `Sequence[str]`,
 `Deque[str]`, `DefaultDict[str, str]`, `AnyUrl`, `re.Pattern`, `Fraction` and all six `ipaddress`
 types, because each compiles to a `function-plain`/`function-wrap` validator node — and the ban
-cannot tell an author's wrap validator from one pydantic emits itself. That over-fire predates the value-first check
-and is not fixed by it. The value-first check appears to subsume what that ban guards — an
-object of exactly the registered type, with no extras, whose every field matches its
-annotation, is indistinguishable from an honestly validated one — but removing a gate that took
-four review rounds to get right is a separate decision with its own evidence, not a side effect
-of this one. `test_the_wrap_ban_still_over_fires_on_these` pins four of the twelve — `AnyUrl`,
-`IPv4Address`, `IPv4Network` and `re.Pattern` — so the cost stays visible; the other eight are
-measured observations rather than pinned behaviour (§7).
+could not tell an author's wrap validator from one pydantic emits itself. The removal decision got
+its own evidence, not a side effect: live QA drove ten wrap/plain attacks end-to-end with the
+ban's node set emptied and the value-first checks caught every one; the attack shapes the ban's
+four review rounds encoded are relocated to engine-side tests
+(`test_a_handler_skipping_root_wrap_fails_closed_at_first_use`,
+`test_a_wrap_or_plain_bypass_below_the_root_is_rejected`), each registering the hostile model and
+proving the engine refuses the smuggled input; and each engine guard now carries a mutation
+witness that turns red when that guard alone is disabled. All twelve families are pinned in the
+accepted direction. Two successors are recorded, both measured: three families register but are
+refused by the engine at first use (see the twelve-family passage above), and an `Any`-annotated
+`mode="plain"` field validator with a closed `json_schema_input_type` reaches the executor with
+the caller's mapping — a published-schema lie, accepted as §12-dominated residue (the annotation
+is *declaredly* open; same family as `_HonestlyPermissiveInputV1`) and pinned by
+`test_an_any_annotated_plain_validator_is_accepted_residue`.
 
 This check moves one failure from **build time to first use**, and that is inherent rather than
 an oversight: what a validator returns is a runtime fact and cannot be read off the schema at
 registration. A bypass-shaped input model therefore registers successfully, is advertised by
-`list_capabilities` and `get_schema_template`, and is refused only when someone invokes it. The
-trade is accepted because registrations are code-owned and the production set is covered by
-tests — but *when* the failure surfaces is different from every other gate here, which is worth
-knowing before it is discovered.
+`list_capabilities` and `get_schema_template`, and is refused only when someone invokes it —
+since issue #162 this includes the wrap/plain-shaped models the retired ban used to fail at
+build time, and a handler-skipping ROOT wrap is refused on every invocation, honest input
+included. The trade is accepted because registrations are code-owned and the production set is
+covered by tests — but *when* the failure surfaces is different from every other gate here,
+which is worth knowing before it is discovered.
 
 **The second run gets its own input, built from the caller's raw mapping.** Sharing one object made
 the comparison unable to see the thing it exists to catch: `frozen=True` refuses assignment to a

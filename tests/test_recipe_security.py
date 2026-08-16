@@ -588,6 +588,52 @@ def test_the_subclass_case_actually_reaches_the_guard():
     assert getattr(validated, "smuggled", None) == "SENTINEL-SQL-SELECT-SECRETS"
 
 
+def test_a_subclass_that_declares_the_smuggled_field_is_refused():
+    """The exact-type check's own mutation witness (issue #162).
+
+    The open-subclass case above is ALSO caught by the value walk's
+    empty-``model_extra`` check, so weakening ``type(validated) is model`` to
+    ``isinstance`` left the whole suite green — measured while retiring the
+    registration-time wrap/plain ban. A subclass that DECLARES the smuggled
+    field carries it as an ordinary field of its own class: ``model_extra`` is
+    empty, every stored value matches its declaration, and only the exact-type
+    check stands between it and the executor. Mutation-checked: flipping the
+    check to ``isinstance`` turns exactly this test red while the rest of the
+    suite stays green.
+    """
+
+    class DeclaredSmuggleInputV1(RecipeInputBase):
+        a: str = "x"
+
+        @model_validator(mode="after")
+        def _swap(self):
+            return WiderSubclass.model_construct(
+                a=self.a, smuggled="SENTINEL-SQL-SELECT-SECRETS"
+            )
+
+    class WiderSubclass(DeclaredSmuggleInputV1):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+
+        smuggled: str = ""
+
+    _EXECUTOR_CALLS.clear()
+    registry = _registry_with_input(DeclaredSmuggleInputV1, executor=_recording_executor)
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.recipe", invocation_id="i1", raw_input={"a": "x"}
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
+    assert _EXECUTOR_CALLS == []
+    blob = json.dumps([d.model_dump(mode="json") for d in exc.value.diagnostics])
+    assert "SENTINEL-SQL-SELECT-SECRETS" not in blob
+
+
 def test_an_honest_after_validator_is_not_refused():
     """Firing control.
 
@@ -763,6 +809,327 @@ def test_an_honest_nested_model_is_not_refused():
         assert exc.diagnostics[0].code != RECIPE_INPUT_INVALID
 
 
+# ---------------------------------------------------------------------------
+# ...and the wrap/plain forms, which a registration-time node-type ban used to
+# refuse outright (retired, issue #162)
+#
+# These models REGISTER now — the tests below relocate four review rounds of
+# registration-gate findings to the boundary that actually closes the class:
+# the engine's per-invocation value checks. The known cost of the retirement is
+# WHEN the failure surfaces — a bypass-shaped model is refused at first use,
+# not at build time.
+# ---------------------------------------------------------------------------
+
+
+def test_a_handler_skipping_root_wrap_fails_closed_at_first_use():
+    """The registration gates PASS this model — that is the point of the test.
+
+    ``mode="wrap"`` receives the handler and may simply not call it. Pydantic
+    still compiles the inner model node with ``extra_fields_behavior="forbid"``,
+    so the forbid gate accepts the model — while validation never runs and
+    ``model_validate`` returns the RAW MAPPING instead of an instance. The
+    engine's exact-type check refuses what came back, on smuggled and on HONEST
+    input alike: the old registration ban failed this shape at build time, the
+    value check fails it on every invocation (issue #145, Codex review;
+    retired ban: issue #162).
+
+    Mutation-checked (issue #162): disabling the exact-type block in
+    ``engine._validate_input`` turns this red (with ``[returns_a_raw_dict]``
+    and the declared-field subclass witness); the per-invocation forbid
+    re-check has its own witness,
+    ``test_a_model_opened_to_ignore_after_registration_is_refused``.
+    """
+    from typing import Any as AnyType
+
+    class RootWrapBypassInputV1(RecipeInputBase):
+        a: str = "x"
+
+        @model_validator(mode="wrap")
+        @classmethod
+        def _wrap(cls, data: AnyType, handler) -> AnyType:
+            return data  # handler deliberately not invoked
+
+    # The inner config still says forbid — which is why reading it was never
+    # enough...
+    inner = RootWrapBypassInputV1.__pydantic_core_schema__["schema"]
+    assert inner["config"]["extra_fields_behavior"] == "forbid"
+    # ...and the hole is real: not even a model instance comes back. This is
+    # also what the schema gates cannot see — both accept the model below.
+    escaped = RootWrapBypassInputV1.model_validate({"a": "x", "smuggled": "v"})
+    assert isinstance(escaped, dict)
+    assert escaped["smuggled"] == "v"
+
+    _EXECUTOR_CALLS.clear()
+    registry = _registry_with_input(
+        RootWrapBypassInputV1, executor=_recording_executor
+    )  # registers — the ban is retired
+
+    for raw in ({"a": "x", "smuggled": "SENTINEL-SQL-SELECT-SECRETS"}, {"a": "x"}):
+        with pytest.raises(RecipeError) as exc:
+            run_recipes(
+                [
+                    RecipeRequestV1(
+                        recipe_id="test.recipe", invocation_id="i1", raw_input=raw
+                    )
+                ],
+                catalog=MaterializationCatalog({}),
+                registry=registry,
+            )
+        assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
+        assert _EXECUTOR_CALLS == []
+        blob = json.dumps([d.model_dump(mode="json") for d in exc.value.diagnostics])
+        assert "SENTINEL-SQL-SELECT-SECRETS" not in blob
+        assert "SENTINEL-SQL-SELECT-SECRETS" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "placement",
+    [
+        "nested",
+        "two_deep",
+        "in_list",
+        "in_dict",
+        "optional",
+        "in_union",
+        "plain_json_input_typed",
+        "wrap_over_optional",
+    ],
+)
+def test_a_wrap_or_plain_bypass_below_the_root_is_rejected(placement):
+    """Every placement the retired registration ban covered, at the value layer.
+
+    The first six are the whole-tree walk placements (a nested model carrying a
+    handler-skipping ``mode="wrap"`` — the registered outer type survives while
+    a declared position holds the caller's raw mapping); the last two are the
+    shapes that defeated wrapper-target classification (``function-plain`` with
+    ``json_schema_input_type`` and no ``schema`` key; a wrapper whose immediate
+    child is ``nullable``), here with TYPED annotations so the value walk owns
+    them. All register; ``_assert_declared_shape`` refuses each stored value
+    against its declaration (issue #145, Codex review; retired ban: issue #162).
+
+    Mutation-checked (issue #162): disabling the ``_assert_declared_shape``
+    call in ``engine._validate_input`` turns all eight params red.
+    """
+    from typing import Any as AnyType
+    from typing import Dict as DictType
+    from typing import List as ListType
+    from typing import Optional as OptionalType
+    from typing import Union as UnionType
+
+    from pydantic import BaseModel
+
+    class InnerWrap(RecipeInputBase):
+        b: str = "y"
+
+        @model_validator(mode="wrap")
+        @classmethod
+        def _wrap(cls, data: AnyType, handler) -> AnyType:
+            return data  # handler deliberately not invoked
+
+    class ClosedLeaf(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+        n: str = "x"
+
+    inner_smuggle = {"b": "y", "smuggled": "SENTINEL-SQL-SELECT-SECRETS"}
+    leaf_smuggle = {"n": "x", "smuggled": "SENTINEL-SQL-SELECT-SECRETS"}
+
+    if placement == "nested":
+
+        class Model(RecipeInputBase):
+            leaf: InnerWrap = InnerWrap()
+
+        raw = {"leaf": inner_smuggle}
+
+    elif placement == "two_deep":
+
+        class Middle(RecipeInputBase):
+            leaf: InnerWrap = InnerWrap()
+
+        class Model(RecipeInputBase):
+            holder: Middle = Middle()
+
+        raw = {"holder": {"leaf": inner_smuggle}}
+
+    elif placement == "in_list":
+
+        class Model(RecipeInputBase):
+            items: ListType[InnerWrap] = []
+
+        raw = {"items": [inner_smuggle]}
+
+    elif placement == "in_dict":
+
+        class Model(RecipeInputBase):
+            mapping: DictType[str, InnerWrap] = {}
+
+        raw = {"mapping": {"k": inner_smuggle}}
+
+    elif placement == "optional":
+
+        class Model(RecipeInputBase):
+            maybe: OptionalType[InnerWrap] = None
+
+        raw = {"maybe": inner_smuggle}
+
+    elif placement == "in_union":
+
+        class Plain(RecipeInputBase):
+            c: str = "z"
+
+        class Model(RecipeInputBase):
+            u: UnionType[Plain, InnerWrap] = Plain()
+
+        raw = {"u": inner_smuggle}
+
+    elif placement == "plain_json_input_typed":
+
+        class Model(RecipeInputBase):
+            leaf: OptionalType[ClosedLeaf] = None
+
+            @field_validator(
+                "leaf", mode="plain", json_schema_input_type=OptionalType[ClosedLeaf]
+            )
+            @classmethod
+            def _keep(cls, value):
+                return value
+
+        raw = {"leaf": leaf_smuggle}
+
+    else:
+
+        class Model(RecipeInputBase):
+            maybe: OptionalType[ClosedLeaf] = None
+
+            @field_validator("maybe", mode="wrap")
+            @classmethod
+            def _skip(cls, value, handler):
+                return value  # handler skipped
+
+        raw = {"maybe": leaf_smuggle}
+
+    # Anti-vacuity: the ROOT type survives — a root-only check accepts this —
+    # and the caller's key lands on a surface an ordinary executor reads.
+    validated = Model.model_validate(raw)
+    assert type(validated) is Model, "root check would have caught this"
+    import warnings as _warnings
+
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("ignore")
+        dumped = json.dumps(validated.model_dump(), default=str)
+    assert "SENTINEL-SQL-SELECT-SECRETS" in dumped
+
+    _EXECUTOR_CALLS.clear()
+    registry = _registry_with_input(Model, executor=_recording_executor)  # registers
+
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [RecipeRequestV1(recipe_id="test.recipe", invocation_id="i1", raw_input=raw)],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
+    assert _EXECUTOR_CALLS == []
+    blob = json.dumps([d.model_dump(mode="json") for d in exc.value.diagnostics])
+    assert "SENTINEL-SQL-SELECT-SECRETS" not in blob
+    assert "SENTINEL-SQL-SELECT-SECRETS" not in str(exc.value)
+
+
+@pytest.mark.parametrize("shape", ["root_model_wrap", "field_wrap"])
+def test_an_honest_wrap_validator_that_calls_its_handler_is_not_refused(shape):
+    """Firing control — what makes the two tests above wrap-specific evidence.
+
+    A wrap validator that CALLS its handler is ordinary supported pydantic; the
+    retired ban refused it anyway, and refusing ordinary supported Python ranks
+    above closing residue (§7). Both shapes register and honest input reaches
+    the executor (issue #162).
+    """
+    from typing import Any as AnyType
+
+    if shape == "root_model_wrap":
+
+        class Model(RecipeInputBase):
+            a: str = "x"
+
+            @model_validator(mode="wrap")
+            @classmethod
+            def _wrap(cls, data: AnyType, handler) -> AnyType:
+                return handler(data)
+
+    else:
+
+        class Model(RecipeInputBase):
+            a: str = "x"
+
+            @field_validator("a", mode="wrap")
+            @classmethod
+            def _check(cls, value, handler):
+                return handler(value)
+
+    _EXECUTOR_CALLS.clear()
+    registry = _registry_with_input(Model, executor=_recording_executor)
+    try:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.recipe", invocation_id="i1", raw_input={"a": "x"}
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    except RecipeError as exc:  # a later phase may object; input must not
+        assert exc.diagnostics[0].code != RECIPE_INPUT_INVALID
+    assert _EXECUTOR_CALLS, "honest input never reached the executor"
+    assert _EXECUTOR_CALLS[0].a == "x"
+
+
+def test_an_any_annotated_plain_validator_is_accepted_residue():
+    """Documented residue, not a defect: the value layer is DECLAREDLY open.
+
+    ``leaf: Any`` with ``field_validator(mode="plain",
+    json_schema_input_type=ClosedLeaf)`` publishes a closed schema while the
+    annotation admits anything — so the smuggled mapping reaches the executor.
+    The lie is in the PUBLISHED schema, a channel the model author already owns
+    (§12: dominated by the module-global stash; same family as
+    ``_HonestlyPermissiveInputV1`` above — nothing here is bypassed, the value
+    matches its annotation exactly). The retired ban happened to refuse this
+    shape, which was a classification accident, not a boundary; this test keeps
+    the cost of the retirement visible the way the over-fire pin once kept the
+    ban's cost visible (issue #162).
+    """
+    from typing import Any as AnyType
+
+    from pydantic import BaseModel
+
+    class ClosedLeaf(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+        n: str = "x"
+
+    class AnyPlainResidueInputV1(RecipeInputBase):
+        leaf: AnyType = None
+
+        @field_validator("leaf", mode="plain", json_schema_input_type=ClosedLeaf)
+        @classmethod
+        def _keep(cls, value):
+            return value
+
+    _EXECUTOR_CALLS.clear()
+    registry = _registry_with_input(AnyPlainResidueInputV1, executor=_recording_executor)
+    raw = {"leaf": {"n": "x", "smuggled": "SENTINEL-SQL-SELECT-SECRETS"}}
+    try:
+        run_recipes(
+            [RecipeRequestV1(recipe_id="test.recipe", invocation_id="i1", raw_input=raw)],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    except RecipeError as exc:  # a later phase may object; input must not
+        assert exc.diagnostics[0].code != RECIPE_INPUT_INVALID
+    assert _EXECUTOR_CALLS, "the run never reached the executor"
+    assert _EXECUTOR_CALLS[0].leaf == {"n": "x", "smuggled": "SENTINEL-SQL-SELECT-SECRETS"}
+
+
 class _MaskedSwapInputV1(RecipeInputBase):
     """A ``field_serializer`` that hides a swapped mapping from the sweep."""
 
@@ -846,9 +1213,11 @@ def test_a_masking_serializer_no_longer_helps():
     ``AnyUrl``, ``IPv4Address``, ``IPv4Network``, ``re.Pattern``, ``deque`` and
     ``Path`` all carry built-in ser schemas and were refused by it — and
     ``SecretStr`` is the type an author *should* reach for, so refusing it pushed
-    them toward plain ``str`` (issue #145, live QA). Five of those seven are
-    still refused, by the separate wrap/plain VALIDATOR ban; only ``SecretStr``
-    and ``Path`` register again.
+    them toward plain ``str`` (issue #145, live QA). Five of the seven stayed
+    refused by the separate wrap/plain VALIDATOR ban until that ban was retired
+    too (issue #162); all seven register now, engine-guarded, though ``deque``
+    and the network types are refused at first use (see the round-trip tests
+    below).
     """
     _SMUGGLED_RAW.clear()
     _EXECUTOR_CALLS.clear()
@@ -879,11 +1248,11 @@ def test_the_types_the_serializer_ban_refused_now_register(name):
     reach for on a sensitive input, so refusing it pushed them toward plain
     ``str`` — a security-negative outcome from a security check.
 
-    SEPARATE, MEASURED, AND STILL OPEN: ``AnyUrl``, ``IPv4Address``,
-    ``IPv4Network``, ``re.Pattern`` and ``deque`` are still refused — by the
-    wrap/plain VALIDATOR ban, not this one, since each compiles to a
-    ``function-plain``/``function-wrap`` validator node. That over-fire predates
-    this change and is not fixed by it (issue #145, live QA).
+    The sibling over-fire — ``AnyUrl``, ``IPv4Address``, ``IPv4Network``,
+    ``re.Pattern`` and ``deque`` refused by the wrap/plain VALIDATOR ban, since
+    each compiles to a ``function-plain``/``function-wrap`` validator node — is
+    CLOSED: that ban is retired (issue #162), and the twelve-family tests below
+    pin every one of them in the accepted direction.
     """
     from pathlib import PurePosixPath
 
@@ -905,42 +1274,46 @@ def test_the_types_the_serializer_ban_refused_now_register(name):
     _registry_with_input(model)  # must not raise
 
 
-@pytest.mark.parametrize("name", ["AnyUrl", "IPv4Address", "IPv4Network", "Pattern"])
-def test_the_wrap_ban_still_over_fires_on_these(name):
-    """Records a defect rather than hiding it.
+def _family_model(name):
+    """One recipe input model per measured wrap/plain annotation family.
 
-    These are honest stdlib/pydantic types that a recipe input might reasonably
-    declare, and the wrap/plain validator ban refuses all four because they
-    compile to ``function-plain``/``function-wrap`` VALIDATOR nodes. Asserting the
-    current behaviour keeps the cost visible and makes this test fail — loudly,
-    and in the right place — the moment the ban is narrowed or removed.
-
-    ``deque`` belongs to the same defect class but is NOT parametrised here.
-    ``Deque[str]`` compiles to a ``function-wrap`` node and is refused by this
-    same wrap/plain ban — measured, not assumed. An earlier version of this
-    docstring credited it to the CLOSEDNESS gate, which is wrong and contradicted
-    the sibling docstring twenty lines up.
-
-    So do not read the four parameters as the whole family. The measured family
-    is twelve annotations (``Sequence``, ``Deque``, ``DefaultDict``, ``AnyUrl``,
-    ``re.Pattern``, ``Fraction`` and all six ``ipaddress`` types); this test pins
-    four of them. Narrowing the ban so it stopped refusing the other eight would
-    leave this test green — see §7 of TYPED_RECIPE_CONTRIBUTIONS_V1.md.
+    These are the twelve honest annotations that compile to
+    ``function-plain``/``function-wrap`` VALIDATOR nodes — the measured family
+    the retired registration ban refused (issue #162).
     """
     import ipaddress
     import re
-    from typing import Optional
+    from collections import defaultdict, deque
+    from fractions import Fraction
+    from typing import DefaultDict, Deque, Optional, Sequence
 
     from pydantic import AnyUrl
 
     annotation, default = {
+        "Sequence": (Sequence[str], ("a", "b")),
+        "Deque": (Deque[str], deque()),
+        "DefaultDict": (DefaultDict[str, str], defaultdict(str)),
         "AnyUrl": (Optional[AnyUrl], None),
+        "Pattern": (Optional[re.Pattern], None),
+        "Fraction": (Fraction, Fraction(1, 2)),
         "IPv4Address": (ipaddress.IPv4Address, ipaddress.IPv4Address("1.2.3.4")),
         "IPv4Network": (ipaddress.IPv4Network, ipaddress.IPv4Network("10.0.0.0/8")),
-        "Pattern": (Optional[re.Pattern], None),
+        "IPv4Interface": (
+            ipaddress.IPv4Interface,
+            ipaddress.IPv4Interface("10.9.8.7/16"),
+        ),
+        "IPv6Address": (ipaddress.IPv6Address, ipaddress.IPv6Address("2001:db8::1")),
+        "IPv6Network": (
+            ipaddress.IPv6Network,
+            ipaddress.IPv6Network("2001:db8::/32"),
+        ),
+        "IPv6Interface": (
+            ipaddress.IPv6Interface,
+            ipaddress.IPv6Interface("2001:db8::2/64"),
+        ),
     }[name]
-    model = type(
-        f"Refused{name}InputV1",
+    return type(
+        f"Honest{name}InputV1",
         (RecipeInputBase,),
         {
             "model_config": ConfigDict(extra="forbid", frozen=True),
@@ -948,8 +1321,127 @@ def test_the_wrap_ban_still_over_fires_on_these(name):
             "field": default,
         },
     )
-    with pytest.raises(ValueError, match="validator"):
-        _registry_with_input(model)
+
+
+_FAMILY_NAMES = [
+    "Sequence",
+    "Deque",
+    "DefaultDict",
+    "AnyUrl",
+    "Pattern",
+    "Fraction",
+    "IPv4Address",
+    "IPv4Network",
+    "IPv4Interface",
+    "IPv6Address",
+    "IPv6Network",
+    "IPv6Interface",
+]
+
+
+@pytest.mark.parametrize("name", _FAMILY_NAMES)
+def test_the_types_the_wrap_ban_refused_all_register(name):
+    """The retired ban's over-fire, inverted: all twelve families register.
+
+    The wrap/plain validator ban refused every one of these honest annotations
+    because each compiles to a ``function-plain``/``function-wrap`` VALIDATOR
+    node indistinguishable — at the schema layer — from an author-supplied
+    wrapper. The ban is retired (issue #162): the engine's value-first checks
+    own the bypass class per invocation, so the classification (and its
+    over-fire) is gone. This inverts the four over-fire pins the old
+    ``test_the_wrap_ban_still_over_fires_on_these`` kept visible, and extends
+    the pinned set from four of the measured twelve to all of them — see §7 of
+    TYPED_RECIPE_CONTRIBUTIONS_V1.md.
+    """
+    _registry_with_input(_family_model(name))  # must not raise
+
+
+@pytest.mark.parametrize(
+    "name,raw_value",
+    [
+        ("Sequence", ["x", "y"]),
+        ("DefaultDict", {"k": "v"}),
+        ("AnyUrl", "https://example.test/p"),
+        ("Pattern", "^ab?c$"),
+        ("Fraction", "2/3"),
+        ("IPv4Address", "10.1.2.3"),
+        ("IPv4Interface", "10.9.8.7/16"),
+        ("IPv6Address", "2001:db8::1"),
+        ("IPv6Interface", "2001:db8::2/64"),
+    ],
+)
+def test_nine_of_the_twelve_survive_an_engine_round_trip(name, raw_value):
+    """Registering is not the whole claim — honest input reaches the executor.
+
+    For nine of the twelve families a caller's ordinary value round-trips
+    through the engine's value-first checks and lands on the executor with the
+    declared runtime type intact. This is the firing control that the
+    retirement bought authors something real, not just a different refusal
+    point (issue #162).
+    """
+    _EXECUTOR_CALLS.clear()
+    registry = _registry_with_input(_family_model(name), executor=_recording_executor)
+    try:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.recipe",
+                    invocation_id="i1",
+                    raw_input={"field": raw_value},
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    except RecipeError as exc:  # a later phase may object; input must not
+        assert exc.diagnostics[0].code != RECIPE_INPUT_INVALID
+    assert _EXECUTOR_CALLS, "honest input never reached the executor"
+
+
+@pytest.mark.parametrize(
+    "name,raw_value",
+    [
+        ("Deque", ["x"]),
+        ("IPv4Network", "192.168.0.0/16"),
+        ("IPv6Network", "2001:db8:1::/48"),
+    ],
+)
+def test_three_registered_types_the_engine_still_refuses_at_first_use(name, raw_value):
+    """Records a defect rather than hiding it — the retirement's open residual.
+
+    Three of the twelve families register but are refused by the engine on
+    every HONEST invocation, by two measured mechanisms that predate this
+    change: ``Deque[str]`` fails the engine's strict declared-shape adapter
+    (pydantic compiles deque validation ``lax-or-strict`` and the strict arm
+    demands a ``list``), and the two network types define ``__iter__``, so the
+    opaque-iterable guard refuses to inspect them. Fixing either means an
+    engine change, which is a separate decision with its own evidence — this
+    test keeps the cost visible exactly the way the old over-fire pin kept the
+    ban's cost visible (issue #162).
+    """
+    model = _family_model(name)
+    _EXECUTOR_CALLS.clear()
+    registry = _registry_with_input(model, executor=_recording_executor)
+
+    # Anti-vacuity: pydantic itself accepts the value — the refusal below is
+    # the engine's, not a validation failure.
+    validated = model.model_validate({"field": raw_value})
+    assert type(validated) is model
+
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.recipe",
+                    invocation_id="i1",
+                    raw_input={"field": raw_value},
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
+    assert _EXECUTOR_CALLS == []
 
 
 class _DeepSlot(RecipeInputBase):
@@ -1271,6 +1763,55 @@ def test_a_swapped_core_schema_does_not_reopen_the_extras_gate():
         )
     assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
     assert _EXECUTOR_CALLS == []
+
+
+def test_a_model_opened_to_ignore_after_registration_is_refused():
+    """The per-invocation forbid re-check's own mutation witness (issue #162).
+
+    The late-open case above swaps to ``extra="allow"``, so the smuggled key
+    lands in ``__pydantic_extra__`` and the VALUE walk refuses it even with the
+    per-invocation ``_check_input_model_forbids_extras`` re-check disabled —
+    measured while retiring the registration-time wrap/plain ban: that mutant
+    left the whole suite green. ``extra="ignore"`` is the shape only the
+    re-check catches: the rebuilt validator silently DROPS undeclared keys, so
+    the instance carries no extras, every stored value matches its declaration,
+    and the value walk has nothing to refuse — while the served contract says
+    undeclared keys are REJECTED, loudly. The re-check reads the recompiled
+    core schema and refuses the model itself. Mutation-checked: commenting out
+    the re-check at the engine call site turns exactly this test red.
+    """
+
+    class LateIgnoreInputV1(RecipeInputBase):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        label: str = "x"
+
+    registry = _registry_with_input(LateIgnoreInputV1, executor=_recording_executor)
+    LateIgnoreInputV1.model_config = ConfigDict(extra="ignore", frozen=True)
+    LateIgnoreInputV1.model_rebuild(force=True)
+
+    # Anti-vacuity: nothing else stands in the way — validation now accepts the
+    # smuggled key by dropping it, the type is exact, and no extra is stored.
+    accepted = LateIgnoreInputV1.model_validate({"label": "a", "smuggled": "S"})
+    assert type(accepted) is LateIgnoreInputV1
+    assert not accepted.__pydantic_extra__
+
+    _EXECUTOR_CALLS.clear()
+    with pytest.raises(RecipeError) as exc:
+        run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="test.recipe",
+                    invocation_id="i1",
+                    raw_input={"label": "a", "smuggled": "SENTINEL-SQL-SELECT-SECRETS"},
+                )
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+    assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
+    assert _EXECUTOR_CALLS == []
+    blob = json.dumps([d.model_dump(mode="json") for d in exc.value.diagnostics])
+    assert "SENTINEL-SQL-SELECT-SECRETS" not in blob
 
 
 def test_a_swapped_serializer_does_not_hide_a_declared_field_swap():
@@ -3920,8 +4461,8 @@ def test_ordinary_container_types_are_walked_and_judged():
     # NON-EMPTY, every one of them: an empty container walks no entries, so it
     # would pass whatever the element rule said. ``Counter`` and ``defaultdict``
     # appear here as walked VALUES under a ``Dict[str, Leaf]`` declaration — the
-    # ``Counter[K]`` ANNOTATION has its own test, and ``DefaultDict[...]`` cannot
-    # register at all because the wrap/plain validator ban rejects it (§7).
+    # ``Counter[K]`` ANNOTATION has its own test, and ``DefaultDict[...]``
+    # registers since the wrap/plain validator ban's retirement (issue #162, §7).
     for built in (
         dict({"k": honest}),
         OrderedDict({"k": honest}),

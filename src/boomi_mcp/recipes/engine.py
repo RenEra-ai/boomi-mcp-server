@@ -264,15 +264,18 @@ def _validate_input(descriptor: RecipeDescriptorV1, registry: RecipeRegistry, ra
     # which is a fact about arbitrary Python. ``model_validator(mode="after")``
     # receives the constructed model and its return value IS the result, so it
     # can hand back anything; combined with a ``mode="before"`` that stashes the
-    # raw mapping, a model that is genuinely frozen, closed and free of every
-    # banned node still delivered the caller's undeclared keys — ``smuggled``,
-    # ``password`` — to the executor as a plain dict.
+    # raw mapping, a model that is genuinely frozen and closed still delivered
+    # the caller's undeclared keys — ``smuggled``, ``password`` — to the
+    # executor as a plain dict.
     #
-    # Widening the node-type ban is not the fix: ``after`` cannot be banned (a
-    # production input model uses it, legitimately, and to enforce a cross-field
-    # rule), and each ban is one more classification that the next shape gets to
-    # be one node short of. This check is mechanism-independent and closes the
-    # class, including the wrap/plain form the ban already covers.
+    # Banning node types at registration is not the fix: ``after`` cannot be
+    # banned (a production input model uses it, legitimately, and to enforce a
+    # cross-field rule), and each ban is one more classification that the next
+    # shape gets to be one node short of. This check is mechanism-independent
+    # and closes the class, including the wrap/plain forms a registration-time
+    # node-type ban used to refuse outright (retired, issue #162: subsumed by
+    # this check plus ``_assert_declared_shape``, which also caught every one
+    # of live QA's ten wrap/plain attacks with the ban's node set emptied).
     #
     # EXACT TYPE, not ``isinstance``: a subclass declaring ``extra="allow"``,
     # populated via ``model_construct`` to skip revalidation, satisfies

@@ -1344,199 +1344,33 @@ def test_the_gate_walks_past_wrapper_nodes_to_find_the_model_config():
     assert wrapped_production, "no production model exercises the wrapper walk"
 
 
-def test_a_wrap_validator_that_can_skip_its_handler_fails_closed():
-    """A wrapper is not automatically passive, and this one is not.
+def test_a_bare_plain_field_validator_is_still_refused_by_the_schema_gate():
+    """The surviving half of the old bypass-mode rejection, owned by the OTHER gate.
 
-    ``mode="wrap"`` receives the handler and may simply not call it. Pydantic
-    still compiles the inner model node with ``extra_fields_behavior="forbid"``,
-    so reading the inner config accepts the model — while validation never runs,
-    ``model_validate`` returns the RAW MAPPING instead of an instance, and every
-    undeclared key reaches the executor. Whether the handler is invoked is a fact
-    about arbitrary Python, not about the schema, so the only sound answer is
-    "cannot determine" (issue #145, Codex review).
-    """
-    from typing import Any as AnyType
-
-    from pydantic import model_validator
-
-    class WrapBypass(RecipeInputBase):
-        a: str = "x"
-
-        @model_validator(mode="wrap")
-        @classmethod
-        def _wrap(cls, data: AnyType, handler) -> AnyType:
-            return data  # handler deliberately not invoked
-
-    # The inner config still says forbid — which is exactly why reading it is
-    # not enough.
-    inner = WrapBypass.__pydantic_core_schema__["schema"]
-    assert inner["config"]["extra_fields_behavior"] == "forbid"
-    # ...and the hole is real: not even a model instance comes back.
-    escaped = WrapBypass.model_validate({"a": "x", "smuggled": "value"})
-    assert isinstance(escaped, dict)
-    assert escaped["smuggled"] == "value"
-
-    with pytest.raises(ValueError, match="mode='wrap' or mode='plain'"):
-        build_test_registry((_reg(input_model=WrapBypass),))
-
-
-@pytest.mark.parametrize(
-    "placement", ["nested", "two_deep", "in_list", "in_dict", "optional", "in_union"]
-)
-def test_a_wrap_validator_is_caught_wherever_it_sits(placement):
-    """The gate walks the WHOLE tree, not the root spine.
-
-    Walking only ``schema`` from the root stops at the first model config and
-    never looks at fields — so a NESTED model carrying a handler-skipping
-    ``mode="wrap"`` validator passed both gates while its field came back as a
-    raw mapping with every undeclared key intact. The JSON-schema gate cannot
-    catch it either: the nested model still publishes
-    ``additionalProperties: false``, because it really is declared closed. What
-    is bypassed is the validation, not the declaration (issue #145, Codex
-    review).
-    """
-    from typing import Any as AnyType
-    from typing import Dict as DictType
-    from typing import List as ListType
-    from typing import Optional as OptionalType
-
-    from pydantic import model_validator
-
-    class InnerWrap(RecipeInputBase):
-        b: str = "y"
-
-        @model_validator(mode="wrap")
-        @classmethod
-        def _wrap(cls, data: AnyType, handler) -> AnyType:
-            return data  # handler deliberately not invoked
-
-    if placement == "nested":
-
-        class Model(RecipeInputBase):
-            leaf: InnerWrap = InnerWrap()
-
-    elif placement == "two_deep":
-
-        class Middle(RecipeInputBase):
-            leaf: InnerWrap = InnerWrap()
-
-        class Model(RecipeInputBase):
-            holder: Middle = Middle()
-
-    elif placement == "in_list":
-
-        class Model(RecipeInputBase):
-            items: ListType[InnerWrap] = []
-
-    elif placement == "in_dict":
-
-        class Model(RecipeInputBase):
-            mapping: DictType[str, InnerWrap] = {}
-
-    elif placement == "optional":
-
-        class Model(RecipeInputBase):
-            maybe: OptionalType[InnerWrap] = None
-
-    else:
-        # A union parks the wrap in ``choices[1]`` — a LIST position. Every other
-        # placement above reaches it through dicts only, so without this case the
-        # walk's list descent is unexercised and can be deleted with the suite
-        # green (issue #145).
-        from typing import Union as UnionType
-
-        class Plain(RecipeInputBase):
-            c: str = "z"
-
-        class Model(RecipeInputBase):
-            u: UnionType[Plain, InnerWrap] = Plain()
-
-    # The ROOT config is impeccable — which is why a spine walk accepted it.
-    assert Model.__pydantic_core_schema__["config"]["extra_fields_behavior"] == "forbid"
-    with pytest.raises(ValueError, match="mode='wrap' or mode='plain'"):
-        build_test_registry((_reg(input_model=Model),))
-
-
-def test_the_nested_wrap_hole_is_invisible_to_the_schema_gate():
-    """Why the extras gate has to carry this one alone.
-
-    The nested model is genuinely declared ``extra="forbid"``, so its published
-    schema says ``additionalProperties: false`` and the schema walk has nothing
-    to object to. Only the compiled schema shows that a wrapper sits over its
-    validation.
-    """
-    from typing import Any as AnyType
-
-    from pydantic import model_validator
-
-    class InnerWrap(RecipeInputBase):
-        b: str = "y"
-
-        @model_validator(mode="wrap")
-        @classmethod
-        def _wrap(cls, data: AnyType, handler) -> AnyType:
-            return data
-
-    class Model(RecipeInputBase):
-        leaf: InnerWrap = InnerWrap()
-
-    # The schema gate passes...
-    registry_module._check_input_schema_closed("probe", Model)
-    # ...and the leak is real: the nested field is a raw mapping, not a model.
-    leaked = Model.model_validate({"leaf": {"b": "y", "smuggled": "v"}}).leaf
-    assert isinstance(leaked, dict)
-    assert leaked["smuggled"] == "v"
-    # ...so only the extras gate stands between this and an executor.
-    with pytest.raises(ValueError, match="mode='wrap' or mode='plain'"):
-        registry_module._check_input_model_forbids_extras("probe", Model)
-
-
-@pytest.mark.parametrize("mode", ["wrap", "plain"])
-def test_a_field_validator_of_a_bypass_capable_mode_is_also_rejected(mode):
-    """The rule is "is there a wrapper", not "does this wrapper reach a model".
-
-    An earlier version rejected only wrappers sitting OVER A MODEL, so that an
-    ordinary ``field_validator(mode="wrap")`` over a ``str`` would still be
-    allowed. That classification is not decidable from the schema, and four
-    separate shapes defeated it — a ``function-plain`` with no ``schema`` key at
-    all, a wrapper whose immediate child is ``nullable``/``list``/``dict``/union
-    rather than the model beneath it, an expiring hop budget that answered "not a
-    model" instead of "cannot tell", and a container-key collision that pruned
-    whole subtrees. "Is there a wrapper" is a lookup; "does it reach a model" is
-    program analysis (issue #145, Codex review).
-
-    The cost is real but small and measured: no production input model uses
-    either mode, and a recipe input model is already frozen, closed and bounded.
+    The wrap/plain node ban is retired (issue #162) — an ordinary
+    ``field_validator(mode="wrap")`` over a ``str`` now registers, and the
+    engine's value-first checks own the bypass class per invocation. But a bare
+    ``mode="plain"`` validator with no ``json_schema_input_type`` erases the
+    field's PUBLISHED type, the field becomes unconstrained, and
+    ``_check_input_schema_closed`` refuses it for that reason — a rule about the
+    published contract, not about validator mechanism, so it survives the ban's
+    retirement unchanged.
     """
     from pydantic import field_validator
 
-    if mode == "wrap":
+    class Model(RecipeInputBase):
+        a: str = "x"
 
-        class Model(RecipeInputBase):
-            a: str = "x"
+        @field_validator("a", mode="plain")
+        @classmethod
+        def _check(cls, value):
+            return str(value)
 
-            @field_validator("a", mode="wrap")
-            @classmethod
-            def _check(cls, value, handler):
-                return handler(value)
-
-    else:
-
-        class Model(RecipeInputBase):
-            a: str = "x"
-
-            @field_validator("a", mode="plain")
-            @classmethod
-            def _check(cls, value):
-                return str(value)
-
-    # The EXTRAS gate is the one asserting the mode rule...
-    with pytest.raises(ValueError, match="mode='wrap' or mode='plain'"):
-        registry_module._check_input_model_forbids_extras("probe", Model)
-    # ...and registration fails either way. For mode="plain" the SCHEMA gate
-    # happens to reject first, because a plain validator erases the field's
-    # published type and the field becomes unconstrained — a different rule
-    # catching the same model, which is what two independent gates are for.
+    # The extras gate no longer objects to the validator mode...
+    registry_module._check_input_model_forbids_extras("probe", Model)
+    # ...but the schema gate refuses the unconstrained published field.
+    with pytest.raises(ValueError, match="unconstrained field"):
+        registry_module._check_input_schema_closed("probe", Model)
     with pytest.raises(ValueError):
         build_test_registry((_reg(input_model=Model),))
 
@@ -1547,75 +1381,29 @@ def test_a_field_named_like_an_excluded_key_is_still_walked(field_name):
 
     ``fields`` maps a field's name to its node, so filtering those same strings
     there pruned the entire subtree of any field called ``config``, ``metadata``
-    or ``default`` — and a handler-skipping validator under such a field was
-    never seen at all. A node is identified by having a string ``type``;
-    anything else is a container and every value in it is walked
-    (issue #145, Codex review).
+    or ``default`` — and an open nested model under such a field was never seen
+    at all. A node is identified by having a string ``type``; anything else is a
+    container and every value in it is walked (issue #145, Codex review).
+
+    The detector is the surviving forbid-config branch: the nested model under
+    the colliding field name declares ``extra="allow"``, so a walk that prunes
+    the field never learns it and accepts, while the real walk refuses.
+    Mutation-checked (issue #162): dropping the is-this-a-schema-node guard on
+    the exclusion (registry ``_iter_core_schema_nodes``) turns all four params
+    red.
     """
-    from typing import Any as AnyType
+    from pydantic import BaseModel, ConfigDict, create_model
 
-    from pydantic import create_model, model_validator
+    class OpenLeaf(BaseModel):
+        model_config = ConfigDict(extra="allow")
 
-    class InnerWrap(RecipeInputBase):
         b: str = "y"
 
-        @model_validator(mode="wrap")
-        @classmethod
-        def _wrap(cls, data: AnyType, handler) -> AnyType:
-            return data
-
     Model = create_model(
-        "Colliding", __base__=RecipeInputBase, **{field_name: (InnerWrap, InnerWrap())}
+        "Colliding", __base__=RecipeInputBase, **{field_name: (OpenLeaf, OpenLeaf())}
     )
-    with pytest.raises(ValueError, match="mode='wrap' or mode='plain'"):
-        build_test_registry((_reg(input_model=Model),))
-
-
-@pytest.mark.parametrize(
-    "shape", ["plain_without_schema_key", "wrap_over_optional_model"]
-)
-def test_a_wrapper_that_defeats_target_classification_is_still_rejected(shape):
-    """The two shapes that broke "does this wrapper reach a model".
-
-    ``field_validator(mode="plain", json_schema_input_type=...)`` emits a
-    ``function-plain`` node carrying ``json_schema_input_schema`` and NO
-    ``schema`` key, so a target lookup found nothing and concluded "not a model".
-    A wrapper over ``Optional[Model]`` has ``nullable`` as its immediate child
-    for the same reason. Both leaked the caller's raw mapping
-    (issue #145, Codex review).
-    """
-    from typing import Any as AnyType
-    from typing import Optional as OptionalType
-
-    from pydantic import BaseModel, ConfigDict, field_validator
-
-    class ClosedLeaf(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-
-        n: str = "x"
-
-    if shape == "plain_without_schema_key":
-
-        class Model(RecipeInputBase):
-            leaf: AnyType = None
-
-            @field_validator("leaf", mode="plain", json_schema_input_type=ClosedLeaf)
-            @classmethod
-            def _check(cls, value):
-                return value
-
-    else:
-
-        class Model(RecipeInputBase):
-            maybe: OptionalType[ClosedLeaf] = None
-
-            @field_validator("maybe", mode="wrap")
-            @classmethod
-            def _check(cls, value, handler):
-                return value  # handler skipped
-
-    with pytest.raises(ValueError, match="mode='wrap' or mode='plain'"):
-        build_test_registry((_reg(input_model=Model),))
+    with pytest.raises(ValueError, match="must reject undeclared keys"):
+        registry_module._check_input_model_forbids_extras("probe", Model)
 
 
 @pytest.mark.parametrize("colliding_name", ["type", "schema", "config", "definitions"])
@@ -1660,18 +1448,22 @@ def test_a_default_value_that_looks_like_a_schema_is_not_walked():
     build_test_registry((_reg(input_model=Model),))
 
 
-def test_a_default_value_naming_a_banned_node_type_is_not_a_rejection():
+def test_a_default_shaped_like_an_open_config_is_not_a_rejection():
     """Excluding ``default`` from the walk is load-bearing, not decoration.
 
-    Now that a bare ``function-wrap`` anywhere is rejected outright, walking DATA
-    would read a caller's default value as a node — so an ordinary closed field
-    whose default happens to contain ``{"type": "function-wrap"}`` would be
-    refused. The string is a value, not a node kind (issue #145).
+    Walking DATA would read a caller's default value as a node — so an ordinary
+    closed field whose default happens to look like an OPEN model config
+    (``{"config": {"extra_fields_behavior": "allow"}}``) would trip the
+    forbid-config branch and be refused. The dict is a value, not a node
+    (issue #145). Mutation-checked (issue #162): removing ``"default"`` from
+    ``_NON_SCHEMA_KEYS`` turns this red.
     """
     from typing import Dict as DictType
 
     class Model(RecipeInputBase):
-        settings: DictType[str, str] = {"type": "function-wrap"}
+        settings: DictType[str, DictType[str, str]] = {
+            "config": {"extra_fields_behavior": "allow"}
+        }
 
     registry_module._check_input_model_forbids_extras("probe", Model)
     build_test_registry((_reg(input_model=Model),))
@@ -1700,9 +1492,10 @@ def test_mutually_recursive_input_models_resolve():
 def test_passive_wrappers_are_not_rejected(mode):
     """``before`` and ``after`` cannot skip model validation, so they must pass.
 
-    Without this the wrap rule could be "reject every wrapper", which would
-    false-reject ``ComposeDbRestFanoutInputV1`` — a production model carrying a
-    ``mode="after"`` validator.
+    The forbid gate has to walk PAST ``function-before``/``function-after``
+    wrapper nodes to find the model config beneath them; treating any wrapper as
+    disqualifying would false-reject ``ComposeDbRestFanoutInputV1`` — a
+    production model carrying a ``mode="after"`` validator.
     """
     from typing import Any as AnyType
 
@@ -4383,10 +4176,14 @@ def test_the_reason_bar_is_not_punctuation_rather_than_verbose(reason, accepted)
 # ---------------------------------------------------------------------------
 
 
-def test_a_type_legal_custom_error_context_is_not_read_as_a_validator():
+def test_a_type_legal_custom_error_context_is_still_accepted():
     """``custom_error_context`` is declared ``dict[str, str | int | float]``, so
     ``{"type": "function-wrap"}`` is a perfectly legal value — a flat mapping of
-    strings. Walking it as a node refused a genuinely closed, frozen model."""
+    strings. While the wrap/plain node ban lived (retired, issue #162), walking
+    it as a node refused a genuinely closed, frozen model; the exclusion stays
+    because its values are DATA, and being flat they cannot fake a config node,
+    so no surviving branch could ever fire here. Kept as the firing control that
+    a data-poisoned schema position registers."""
     from typing import Annotated, Literal, Union
 
     from pydantic import ConfigDict, Discriminator, Tag
@@ -4437,13 +4234,15 @@ def test_a_type_legal_custom_error_context_is_not_read_as_a_validator():
 
 @pytest.mark.parametrize("mode", ["wrap", "plain"])
 def test_a_wrap_or_plain_field_serializer_is_not_refused(mode):
-    """``serialization`` is excluded for the BAN's sake, not only for data safety.
+    """SER-schema nodes reuse validator type strings; the walk must not care.
 
-    ``@field_serializer(mode="wrap"|"plain")`` compiles to a SER-schema node whose
-    ``type`` is the string ``function-wrap``/``function-plain`` — byte-identical to
-    the validator node types the ban keys on. Serializers run on output and cannot
-    affect extras rejection, so they are excluded rather than banned. Drop the
-    exclusion and every model carrying a wrap serializer is refused.
+    ``@field_serializer(mode="wrap"|"plain")`` compiles to a SER-schema node
+    whose ``type`` is the string ``function-wrap``/``function-plain`` — while
+    the wrap/plain validator ban lived (retired, issue #162) this collision was
+    its hardest case, and the ``serialization`` exclusion was what kept it from
+    refusing every model carrying a wrap serializer. The assertion that the
+    collision exists stays as the witness: serializers run on output, their
+    subtree is data to this walk, and the model registers.
     """
     from typing import Any as AnyType
 

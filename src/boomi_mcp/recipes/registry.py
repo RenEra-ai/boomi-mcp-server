@@ -290,23 +290,6 @@ def _is_bounded_subschema(subschema: Any, depth: int = 0) -> bool:
 
 
 
-#: Core-schema node types whose validator may return WITHOUT invoking the handler,
-#: so what the model actually does with extras cannot be read off the schema.
-#:
-#: RETIREMENT PENDING, and deliberately not done in this change: live QA drove ten
-#: wrap/plain attacks end-to-end with this set emptied and the engine's value-first
-#: check caught every one, so the ban is redundant — and it false-rejects
-#: ``AnyUrl``, ``IPv4Address``, ``IPv4Network`` and ``re.Pattern``, which compile to
-#: these node types for entirely honest reasons. Removing it deletes roughly
-#: fifteen tests that encode four review rounds of findings, so it belongs in its
-#: own delta with its own review rather than riding along on an unrelated fix.
-#:
-#: SOON rather than eventually, though: the workaround an author reaches for is
-#: plain ``str``, and for ``SecretStr`` that silently loses repr redaction as well
-#: as validation — a security check pushing authors off the secure type
-#: (issue #145, live QA r37/r38).
-_BYPASS_CAPABLE_NODES = frozenset({"function-wrap", "function-plain"})
-
 #: Keys whose values are not schema and must not be walked as if they were.
 #:
 #: ``default`` is the one that bites. A ``{"type": "default", "schema": {...},
@@ -333,12 +316,13 @@ _BYPASS_CAPABLE_NODES = frozenset({"function-wrap", "function-plain"})
 #: no container at all, so excluding it would have bought nothing while adding
 #: fail-open surface. ``test_the_function_position_is_safe_to_walk`` pins that.
 #:
-#: ``serialization`` is load-bearing for the BAN, not merely for data safety:
-#: ``@field_serializer(mode="wrap"|"plain")`` compiles to a SER-schema node whose
-#: ``type`` is the string ``function-wrap``/``function-plain`` — identical to the
-#: validator node types below. Serializers run on output and cannot affect
-#: extras rejection, so they are excluded rather than banned; dropping this key
-#: would refuse every model carrying a wrap serializer.
+#: ``serialization`` holds SER-schema nodes, which reuse validator type strings
+#: (``@field_serializer(mode="wrap"|"plain")`` compiles to a node whose ``type``
+#: is ``function-wrap``/``function-plain``) and carry non-schema payloads.
+#: Serializers run on output and cannot affect extras rejection, so their
+#: subtree is data to this walk, not schema. While the retired wrap/plain node
+#: ban lived here (issue #162), this exclusion was what kept it from refusing
+#: every model carrying a wrap serializer.
 _NON_SCHEMA_KEYS = frozenset(
     {
         "cls",
@@ -487,50 +471,46 @@ def _check_input_model_forbids_extras(recipe_id: str, model: Any) -> None:
     declared closed; what is bypassed is the validation, not the declaration
     (issue #145, Codex review).
 
-    Three node classes are judged, and each for its own reason:
+    Two node classes are judged, and each for its own reason:
 
-    * ``function-wrap`` / ``function-plain`` ANYWHERE — rejected outright. An
-      earlier version tried to reject only those sitting OVER A MODEL, on the
-      grounds that the same node types are ordinary ``field_validator`` machinery
-      over a field. That classification is not decidable from the schema, and
-      four separate shapes defeated it: a ``function-plain`` carrying
-      ``json_schema_input_schema`` and NO ``schema`` key at all; a wrapper whose
-      immediate child is ``nullable``/``list``/``dict``/union rather than the
-      model beneath it; a hop budget that returned "not a model" instead of
-      "cannot tell" when it expired; and the container-key collision below.
-      Asking "does this wrapper reach a model" is a program-analysis question;
-      asking "is there a wrapper" is a lookup. A recipe input model is already
-      frozen, closed and bounded, and no production input model uses either mode,
-      so the decidable rule costs nothing real (issue #145, Codex review).
     * every model config — must say ``forbid``.
     * ``definition-ref`` — resolved, not refused. A recursive input model parks
       itself in ``definitions`` behind a reference, and dead-ending there turned
       fail-closed into fail-WRONG: a perfectly closed model could not register.
 
-    **This gate is no longer the last line of defence, and should not be read as
-    one.** Banning node types is a classification, and a classification can be
-    one node short: ``model_validator(mode="after")`` is NOT passive — it
-    receives the model and its return value becomes the result — so a model with
-    no banned node at all still handed the caller's undeclared keys to the
-    executor. ``after`` cannot simply be added to the ban, because a production
-    input model uses it legitimately. What closes that class is a check on the
-    VALUE rather than on the schema: ``engine._validate_input`` requires
-    ``type(validated) is model``. Keep both — this one names the defect at
-    registration, where the author can act on it, and it is the only one of the
-    two that runs before a recipe is ever invoked (issue #145, live QA).
+    A third class used to be judged here and was RETIRED (issue #162): an
+    outright ban on ``function-wrap``/``function-plain`` validator nodes, on the
+    grounds that such a validator may return without invoking its handler and
+    closedness then cannot be read off the compiled schema. The ban survived
+    four review rounds of hardening (rejecting only wrappers "over a model" was
+    defeated by four separate shapes — classification from the schema is not
+    decidable; "is there a wrapper" was), but it also refused twelve honest
+    annotation families that pydantic itself compiles to those node types
+    (``Sequence``, ``Deque``, ``DefaultDict``, ``AnyUrl``, ``re.Pattern``,
+    ``Fraction`` and all six ``ipaddress`` types), and the workaround it pushed
+    authors toward — plain ``str`` in place of ``SecretStr`` — silently lost
+    repr redaction (issue #145, live QA r37/r38). Refusing ordinary supported
+    Python ranks above closing residue (§7), and the ban was redundant: live QA
+    drove ten wrap/plain attacks end-to-end with the ban's node set emptied and
+    the engine's value-first checks caught every one. What the ban guarded is
+    closed by checks on the VALUE rather than on the schema, per invocation:
+    ``engine._validate_input`` requires ``type(validated) is model``, re-runs
+    this gate, and walks every validated value against its declaration
+    (``_assert_declared_shape``). The known cost is WHEN the failure surfaces —
+    a bypass-shaped input model now registers and is refused at first use
+    rather than at build time.
+
+    **This gate is not the last line of defence, and should not be read as
+    one.** ``model_validator(mode="after")`` is NOT passive — it receives the
+    model and its return value becomes the result — so a model with a
+    perfectly ordinary schema can still hand the caller's undeclared keys to
+    the executor; only the engine's value checks close that class. This gate
+    stays because it is the only check that runs before a recipe is ever
+    invoked, and for the one question the core schema answers reliably: does
+    the compiled validator forbid undeclared keys (issue #145, live QA).
     """
     learned = False
     for node in _iter_core_schema_nodes(model):
-        node_type = node.get("type")
-        if isinstance(node_type, str) and node_type in _BYPASS_CAPABLE_NODES:
-            raise ValueError(
-                f"{recipe_id!r} input_model uses a {node_type!r} validator "
-                "(mode='wrap' or mode='plain'); a recipe input model may not, "
-                "because such a validator may return without invoking its "
-                "handler and closedness then cannot be determined from the "
-                "compiled schema. Use mode='before' or mode='after'."
-            )
-
         config = node.get("config")
         if isinstance(config, dict) and "extra_fields_behavior" in config:
             learned = True
