@@ -126,6 +126,7 @@ structural-fix trigger reads.
 | R5-13 | Stage-2 substitute round 5 | "#174's body has three content defects, and R4-7 defers residue without a deferral record" — stale counts, a criterion-5 claim the tree refutes, an Origin citing R4-6 instead of R4-7, and R4-7's residue reaching a follow-up with no reason class, placement or lineage | **P3** | *(audit-record integrity — not a blocking class)* | **DC-165-2** instance 12 | Standard — anchor: source label P3 | `9cd689a` → this correction | `fixed` — #174's body is corrected (counts, criterion 5, Origin rows) and extended with the new residue; R4-7's deferral is recorded in the Deferrals section by appended revision row **R4-7a**. The reason class for the whole #174 residue is corrected from `window-exhausted` to **`blocked-by-mechanism`** — the reviewer is right that "needs interception at a different layer" is that class by definition, and that spending a single-use lineage on it was unnecessary. |
 | R4-2a | revision of R4-2 (round-5 correction, per R5-12 and R5-8) | replaces R4-2's two-part disposition with exactly one, and corrects its counts and its "all three places" claim; R4-2 is retained above unedited | *(inherits R4-2)* | *(inherits)* | *(inherits)* | *(inherits)* | this correction | **`deferred`** → **#174**, reason class **`blocked-by-mechanism`**, placement M12 after #165, first deferral. The return-value half WAS fixed at `9cd689a` and is described here rather than carried as a second disposition. Corrected counts: 3 of 60 cases uncovered (not 24), 113 container-carrying calls (not 70), 60 flow-builder calls (not 41). The corpus CONTRACT block is updated in this batch, which R4-2 claimed but did not do. |
 | R4-7a | revision of R4-7 (round-5 correction, per R5-13) | records the deferral R4-7 made implicitly; R4-7 is retained above unedited | *(inherits R4-7)* | *(inherits)* | *(inherits)* | *(inherits)* | this correction | **`deferred`** → **#174** criterion 5 (walker reach: `frozenset`, state in a plain object's `__dict__`, dict KEYS), reason class **`blocked-by-mechanism`**, placement M12 after #165, first deferral. R4-7's own text said the residue was "enumerated in #174" while its disposition read `fixed` and the Deferrals section did not list it. |
+| R6-1 | Stage-2 substitute round 6 — TERMINAL validation of the round-5 batch (delta `9cd689a..65b9b79`; independent Claude reviewer, charter scoped to blocking-class defects and landing safety per CLAUDE.md's one-batch rule) | "The batch is sound. Every claim it makes is true of the tree; every claim I could falsify by experiment, I tried to falsify and could not. No blocking-class defect, and nothing that would make the slice unsafe or incorrect to land." — **VERDICT: NO BLOCKING ISSUES** | *(no finding)* | *(none — this row records a clean gate result, not a defect)* | *(none)* | *(none — nothing to tier)* | `65b9b79` | `not-validated` is NOT the disposition here: this row is the gate RESULT, recorded so the closure cites a verdict rather than asserting one. Independently reproduced by the reviewer: #171's edit removed 23 blank lines and zero non-blank content (three separate proofs); the contiguity gate fails on an injected orphan and tolerates #152's 19-block multi-table layout; 57/60, 113 and 60 re-measured exactly; all four class totals recompute under supersession; zero rows carry a P0/P1/Critical/High label; the trend figures 10/9/6/9/13 are arithmetically exact; goldens tree-hash identical to `da320eb`; archive 12/12. |
 * **Supersession map** (a revision MERGES onto its original: cells the revision states
   win, cells it marks *(inherits)* keep the original's value, and the merged row is what
   the tally reads — the original is retained above unedited):
@@ -215,7 +216,32 @@ raw outputs) and `substitute-reviews/` (reviewer inputs/verdicts, added in the b
 collects them). No collector run directories exist for this slice (see the Deviation
 section); the index stays header-only.
 
-## Final-tree validation (filled at close; every roster gate current on the FINAL sha)
+## Recorded residue (never re-gated, per CLAUDE.md's one-batch rule)
+
+The terminal review listed five non-blocking notes "for the record only; none should hold
+up landing". They are recorded here and NOT corrected, because non-blocking residue gets
+exactly one batched pass and that pass was the round-5 batch:
+
+1. The module-bound check hardcodes `(frozenset, bytearray)` rather than deriving the
+   complement of the walked-types constant, and its comment reaches slightly past what it
+   detects (a plain object holding nested state is not caught). Already enumerated as
+   **#174 criterion 5**.
+2. The contiguity check does not skip fenced code blocks; inert today (a ledger quoting a
+   finding row inside a fence would false-positive).
+3. Its separator regex rejects alignment-marked separators (`| :--- |`); zero occurrences.
+4. CP-3's "52 findings" and its trend figures use different counting bases (52 counts
+   revision rows, 47 counts raw findings); both are true of the record, neither states its
+   base.
+5. The archive index's `source_tip` names this commit's parent — structurally necessary,
+   since the checksum file covers the index in the same commit. Not a defect.
+
+## Final-tree validation (every roster gate current on the FINAL sha)
 
 | Gate | Evidence (quoted output / run URL / archived round) | SHA |
 | --- | --- | --- |
+| **Stage-1 QA — darkness proof** | `git diff da320eb08e5f5d9ba55a0d7b54ccbb4d28d01bbb --stat -- src/ server.py` → empty. The only non-test/doc change in the whole slice is one docstring-only hunk in `scripts/wave_gate.py`; the terminal reviewer independently confirmed "zero `src/` changes across the entire slice — genuinely dark, no runtime blast radius". | `65b9b79` |
+| **Stage-1 QA — golden-render differential** | All 60 active cases rendered before and after the inversion: id→sha256 maps byte-identical, re-measured at every round. Terminal reviewer: `tests/fixtures/golden_xml` tree hash identical to `da320eb`. | `65b9b79` |
+| **Stage-1 QA — collection differential** | Baseline node list + exactly six appended nodes, none removed or renumbered; floors 9790 → 9796, each transaction verified by `wave_gate.py manifests --base`. | `65b9b79` |
+| **Stage-2 substitute review (roster item 2)** | Six rounds, all archived under `docs/architecture/evidence/issue-165/substitute-reviews/`. Rounds 1–5 returned ISSUES FOUND (47 raw findings, all reconciled on the rows above); round 6 is the terminal validation and returned **VERDICT: NO BLOCKING ISSUES** (row R6-1). Review chain contiguous with no unreviewed commit: `da320eb → 7f20ea8 → 0b91c80 → 06976a0 → 62d6cd9 → 9cd689a → 65b9b79`. | `65b9b79` |
+| **Composite wave gate (roster item 3)** | `wave_gate.py wave --base da320eb…` → exit 0: "manifests ok (9796 required nodes, 60 active goldens)", "collection ok (9796 tests)", "non-KB suite green (9779 passed, 17 skipped, cap 30)", "60 active goldens deterministic and byte-exact". Log archived as `wave-gate-final.log`. `PLAN_FINGERPRINT_PENDING issue=#153` is the #153 seam placeholder, not a failure. | *(re-run on the closing tip — see below)* |
+| **Terminal correction loop (roster item 4)** | Not opened; no roster-addition checkpoint was recorded and none was needed. | — |
