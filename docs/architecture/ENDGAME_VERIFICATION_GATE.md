@@ -31,7 +31,7 @@ M12 endgame verification regime automatic:
 
 | Artifact | Purpose |
 |---|---|
-| `.github/workflows/tests.yml` | the `Python 3.11 non-KB` check: post-push detection on `dev`, preflight on `scratch/**` |
+| `.github/workflows/tests.yml` | the `Python 3.11 non-KB` check: REQUIRED on `dev` since #172, preflight on `scratch/**` |
 | `scripts/wave_gate.py` | the gate: `ci`, `wave`, and the non-gate `manifests` |
 | `tests/fixtures/wave_gate/test_nodes.jsonl` | required pytest node ids + floors |
 | `tests/fixtures/wave_gate/goldens.jsonl` | the golden corpus inventory |
@@ -791,17 +791,20 @@ every push to `scratch/**` **that starts a run** does the same on the candidate
 *before* it is fast-forwarded, so a bad tip can be found without landing it. The
 qualifier is not pedantry: gap 1 applies to the preflight exactly as it applies to
 `dev`, so a scratch push carrying a skip directive is preflighted by nothing. Neither is
-compulsory: with no required check and no ruleset, nothing forces a candidate
-through the preflight, and nothing outside the pushed tree gets a vote.
+compulsory. **That changed with #172:** the `dev` ruleset makes the preflight the
+only way to obtain the check a landing needs, so something outside the pushed tree
+does now get a vote on `dev` — though nowhere else.
 
 The gaps below are the ones currently known. They are **not claimed to be an
 exhaustive bound** — gaps 1 and 3 were each found by review *after* an earlier
 revision of this section asserted the then-current list was complete, and a claim of
 completeness about a platform this document cannot test is exactly the kind of
-assertion §10 exists to avoid. What unites them is worth stating plainly: **with no
-required check and no ruleset, nothing outside the pushed tree gets a vote**, so
-anything that stops the workflow from starting also stops the failure from being
-seen.
+assertion §10 exists to avoid. What united them was stated plainly: with no
+required check and no ruleset, nothing outside the pushed tree got a vote, so
+anything that stopped the workflow from starting also stopped the failure from being
+seen. **Since #172 that holds everywhere EXCEPT `dev`**, where a rule outside the
+pushed tree now votes: whatever suppresses the run also withholds the required check,
+and the push is refused rather than landing silently.
 
 1. **A push can suppress its own run — CLOSED on `dev` since #172.** GitHub honours
    skip directives (`[skip ci]`, `[ci skip]`, and siblings) in a pushed head
@@ -818,8 +821,12 @@ seen.
    remains open anywhere the rule does not apply — every branch other than `dev`,
    including `scratch/**` preflights, where a skip directive still means no run and
    therefore no preflight.
-2. **A bad tip is detected after it has landed,** because the run starts only once
-   the push is accepted. Reverting is the remedy; refusal is not available.
+2. **A bad tip is detected after it has landed** — narrowed by #172, not removed.
+   The run still starts only once the push is accepted, so a candidate that is GREEN
+   at preflight and would fail on the merged result still lands before anything says
+   so; reverting remains the remedy for that divergence. What is no longer possible
+   on `dev` is landing with NO verdict at all: a tip without a successful required
+   check is refused outright.
 3. **A push can disable the gate itself.** For a `push` event GitHub loads the
    workflow from the **pushed tree** — which is why the landing run executed the
    `tests.yml` that arrived with it. So a push that removes the workflow from
@@ -864,8 +871,13 @@ after-state) are archived under
 
 Method: a ruleset with one `required_status_checks` rule naming the context
 `Python 3.11 non-KB` and `integration_id` 15368, `enforcement: active`, **no bypass
-actors**, targeting a disposable `scratch/ruleset-experiment` branch created at the
-then-current `dev` tip. The context is named explicitly and deliberately: a
+actors**, targeting a disposable `scratch/ruleset-experiment` branch created at
+`0df53ff` — the PREVIOUS `dev` tip, deliberately, so that advancing it to the green
+`ffae2a1` would be a real fast-forward rather than a no-op. (Side effect, recorded because
+it is a measurement too: that branch's own preflight run went RED with
+`BASELINE_UNAVAILABLE … not an ancestor`, since `0df53ff` no longer descended from the
+moved `origin/dev`. The gate refusing to preflight a stale base is correct behaviour, and
+it is a real cost of the new requirement — see the note on rebasing below.) The context is named explicitly and deliberately: a
 `google-cloud-build` app creates a permanently QUEUED check suite with zero check runs on
 every push here (*measured here*), so an all-checks or suite-level rule would never be
 satisfiable.
@@ -881,21 +893,50 @@ satisfiable.
    ! [remote rejected] ... (push declined due to repository rule violations)
   ```
 
-  exit code 1, branch unmoved. **This is the first measurement of gap 1's premise in this
-  repository, and it settles gap 1: a required check does close the `[skip ci]` hole.**
+  exit code 1, branch unmoved. **What this measures, precisely:** that a tip carrying no
+  successful required check is refused. It does NOT re-measure gap 1's premise — that a
+  skip directive suppresses the run — because the push was refused before any run could
+  start; the commit was check-less by virtue of never having reached GitHub at all. The
+  skip behaviour itself remains GitHub-documented rather than measured here. The
+  consequence for gap 1 is nonetheless direct: whatever leaves a tip without the required
+  check, including a suppressed run, now cannot land it on `dev`.
 
 * **Positive control — the rule ACCEPTS a check already attached to the SHA**
-  (*measured here*). The exact commit `ffae2a1`, green from a `scratch/**` preflight run
-  and pushed from a different ref, advanced the protected branch: exit code 0,
-  `0df53ff..ffae2a1`. Both of its check runs were settled `success` first, so the result
-  cannot be attributed to an in-flight run. A check earned on one ref is therefore usable
-  by a later fast-forward of another — which is the property the whole question turned on.
+  (*measured here*). The exact commit `ffae2a1`, pushed from a different ref, advanced the
+  protected branch: exit code 0, `0df53ff..ffae2a1`. Both of its check runs were settled
+  `success` first, so the result cannot be attributed to an in-flight run. A check earned
+  on one ref is usable by a later fast-forward of another — the property the whole
+  question turned on. **Attribution limit, stated because the distinction matters
+  operationally:** at push time `ffae2a1` carried TWO green runs of the required context —
+  one from the `scratch/issue-173-preflight` route and one from its own `dev` push — so
+  this control establishes SHA-attachment in general, not specifically that a
+  `scratch/**`-produced check is what satisfies the rule. A SHA whose only check came from
+  a scratch push isolates that, and criterion 5's `dev` fast-forward is exactly such a
+  case.
 
 **Both controls passed, so the rule was enabled on `dev`** (owner decision, recorded in
-the ledger before the experiment ran): ruleset "dev requires the non-KB suite", the same
-single rule, `enforcement: active`, no bypass actors. The temporary ruleset and the
-disposable branch were removed; the after-state capture shows exactly one ruleset
-remaining and zero `scratch/**` branches.
+the ledger before the experiment ran): ruleset "dev requires the non-KB suite",
+`enforcement: active`, no bypass actors, the same pinned context. It differs from the
+experiment rule in one parameter — `do_not_enforce_on_create: false` rather than `true`,
+which only affects branch creation and makes the `dev` rule the stricter of the two. The
+temporary ruleset and the disposable branch were removed (`measured here`, four captures
+archived: `rulesets` lists one ruleset, `rules/branches/dev` reports the required check,
+`branches/dev` now reads `protected: true` while `/protection` still 404s, and the
+`scratch/**` ref listing is empty). One piece of experiment litter was cleaned up too:
+the positive-control push started a run on the since-deleted experiment branch, which was
+cancelled so it could not leave a stray verdict for the required context on `dev`'s tip.
+
+**What is measured on `dev` itself, and what is not — stated precisely because this
+section's history is one of claiming more than was run.** The controls above were measured
+on `scratch/ruleset-experiment`; the `dev` rule is byte-identical in its required context
+and was verified live via `rules/branches/dev`. But at the time this paragraph was
+written, **no push to `dev` had yet occurred under the rule**: `dev`'s tip `ffae2a1`
+acquired its checks ~37 minutes BEFORE the rule existed. The first fast-forward to `dev`
+under the rule is therefore still OWED, and — by design — it is this slice's own landing
+push, which must first earn a green check on a `scratch/**` preflight exactly as the new
+requirement demands. Its transcript is recorded in #172's ledger and closing report. Until
+that row exists, treat every `dev`-scoped statement here as *inferred from a rule measured
+on an equivalent branch* rather than as a `dev` observation.
 
 **What this changes.** The gate is no longer detection-only on `dev`: a push whose head
 commit lacks a successful `Python 3.11 non-KB` check is refused, including one that
@@ -907,8 +948,14 @@ run — and now simply cannot be pushed to `dev`, because the check it would nee
 appears. Reverting the rule is one `DELETE` call.
 
 The job name **`Python 3.11 non-KB`** remains the stable contract that #153 and
-#154 cite as their "full non-KB Python 3.11 suite in CI" gate item. Renaming it
-breaks those citations even though no ruleset depends on it.
+#154 cite as their "full non-KB Python 3.11 suite in CI" gate item. **Since #172 it
+is also the string the `dev` ruleset requires**, so renaming the job is no longer a
+documentation concern: the required context would never appear again and every push
+to `dev` would be refused with `GH013` until an admin edited or deleted the rule.
+Rename the job and the ruleset's `context` in the same change, or not at all. (An
+earlier revision of this paragraph said "no ruleset depends on it" — true when
+written, falsified by this very slice, and exactly the kind of stale authority that
+invites the one edit that deadlocks landing.)
 
 ## 11. Interaction with the #149 reachability freeze
 

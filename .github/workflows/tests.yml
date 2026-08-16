@@ -58,8 +58,11 @@ permissions:
 jobs:
   non-kb-python311:
     # This display name is the STABLE check name that #153 and #154 cite as
-    # their "full non-KB Python 3.11 suite in CI" gate item. No ruleset depends
-    # on it (see the header), but renaming it breaks those citations.
+    # their "full non-KB Python 3.11 suite in CI" gate item. Since #172 the `dev`
+    # ruleset ALSO requires this exact context string, so renaming this job does
+    # not merely break those citations — it makes the required check unobtainable
+    # and every push to `dev` is refused until an admin edits or deletes the rule.
+    # Rename only together with the ruleset's `context`.
     name: Python 3.11 non-KB
     runs-on: ubuntu-24.04
     timeout-minutes: 60
