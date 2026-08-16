@@ -1758,45 +1758,27 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
     ledgers = sorted((_ROOT / "docs" / "architecture").glob("ISSUE_*_AUDIT_LEDGER.md"))
     assert ledgers, "no ledgers found — this check would be vacuous"
 
-    # Ledger paths are FROZEN once committed — asserted as the INVARIANT ITSELF:
-    # every ledger path in HEAD's tree must still exist in the worktree. Every way
-    # a ledger can move — a staged rename, an unstaged rename, a rename with
-    # detection disabled — manifests as the OLD path disappearing, so this catches
-    # the whole family without enumerating mechanisms. Three enumerated probes
-    # were each proven bypassable before this replaced them; per the repository's
-    # Structural-fix rule, the enumeration was the bug.
-    committed_ledgers = {
-        name
-        for name in subprocess.run(
-            ["git", "ls-tree", "--name-only", "-z", "HEAD", "docs/architecture/"],
-            cwd=str(_ROOT), capture_output=True, text=True,
-        ).stdout.split("\0")
-        if _re.fullmatch(r"docs/architecture/ISSUE_.+_AUDIT_LEDGER\.md", name)
-    }
-    # "Still exists" means BOTH still tracked in the index AND still a file in
-    # the worktree — neither alone suffices, and each was tried alone first. The
-    # filesystem alone accepted a staged rename that recreated the old path as an
-    # UNTRACKED copy (the index had deleted the frozen path while a look-alike
-    # sat on disk). The index alone accepted a plain unstaged `mv` (the index
-    # still lists a path whose file is gone). Requiring both closes both, because
-    # every way a ledger moves breaks at least one of them.
-    tracked_now = set(subprocess.run(
-        ["git", "ls-files", "-z", "--", "docs/architecture/"],
-        cwd=str(_ROOT), capture_output=True, text=True,
-    ).stdout.split("\0"))
-    vanished_paths = sorted(
-        name for name in committed_ledgers
-        if name not in tracked_now or not (_ROOT / name).is_file()
-    )
+    vanished_paths = _vanished_frozen_ledger_paths(_ROOT)
     assert vanished_paths == [], (
         "committed ledger paths are FROZEN, and these are missing from the index "
-        "or the worktree (renamed, moved, or deleted): {0}".format(vanished_paths)
+        "or the worktree, or survive only under a different SPELLING (renamed, "
+        "moved, deleted, or case-renamed): {0}".format(vanished_paths)
     )
 
     checked = 0
     for path in ledgers:
         text = path.read_text(encoding="utf-8")
         parsed = _finding_rows(text)
+        # PER LEDGER, not globally. The global `checked` witness at the end is
+        # satisfied by whichever ledger happens to carry revision rows, so a
+        # parser change that silently drops an ENTIRE other ledger left this
+        # check green — #152 contributed zero rows under the delimiter-count
+        # parser while #171 alone kept the suite honest (#173 item 1).
+        assert parsed, (
+            "{0}: _finding_rows() parsed no rows, so every assertion below is "
+            "vacuous for this ledger — a parser change has dropped it entirely "
+            "from the append-only check".format(path.name)
+        )
         ids = list(parsed)
 
         raw = [
@@ -1922,9 +1904,16 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
             # once `--follow` sees the rename. That is the verdict-flips-on-commit shape
             # this whole check was rewritten to eliminate, so ask git for the staged
             # rename and for a merge in progress before believing the path is new.
-            # Rename arrivals are covered by the DISAPPEARANCE invariant above:
-            # any rename, staged or not, whatever the rename-detection config,
-            # leaves its source path missing from the worktree and fails there. A
+            # Rename arrivals are covered by the DISAPPEARANCE invariant above,
+            # which requires the source path to survive in BOTH authorities. The
+            # earlier wording here said a rename "leaves its source path missing
+            # from the worktree", which understates one variant and would have
+            # justified checking only one authority: a staged rename that
+            # recreates the source as an UNTRACKED copy leaves it present in the
+            # worktree and missing from the INDEX. Whatever the rename-detection
+            # config, every variant breaks at least one of the two — and a
+            # case-only rename, which breaks neither on a case-insensitive
+            # filesystem, is caught by the byte-exact spelling comparison. A
             # merge import is the one arrival that leaves nothing missing, so ask
             # git for merge state — via rev-parse, which resolves the common git
             # dir correctly in a linked worktree, where `.git` is a FILE and a
@@ -2390,6 +2379,352 @@ def _finding_rows(text):
         if _re.fullmatch(r"(?:INH-)?[A-Z][A-Za-z0-9]*-?\d*-\d+[a-z]?", rid):
             rows.setdefault(rid, line)
     return rows
+
+
+_LEDGER_PATH_RE = r"docs/architecture/ISSUE_.+_AUDIT_LEDGER\.md"
+
+
+def _git_or_fail(repo_root, args, what):
+    """Run a read-only git query and REFUSE to continue if it failed.
+
+    An unchecked `subprocess.run` here degrades to empty output, and every
+    caller below derives a FROZEN SET from that output — so a solitary git
+    failure emptied the set and passed the invariant vacuously (#173 item 3).
+    """
+    result = subprocess.run(
+        args, cwd=str(repo_root), capture_output=True, text=True,
+    )
+    assert result.returncode == 0, (
+        "{0}: `{1}` exited {2}, so the frozen-path authority is unavailable and "
+        "the invariant would pass on an EMPTY set: {3}".format(
+            what, " ".join(args), result.returncode, result.stderr.strip()[:400]
+        )
+    )
+    return result.stdout
+
+
+def _vanished_frozen_ledger_paths(repo_root):
+    """Committed ledger paths that no longer exist under their exact spelling.
+
+    Ledger paths are FROZEN once committed, asserted as the INVARIANT ITSELF
+    rather than by enumerating the ways a file can move: a staged rename, an
+    unstaged rename, a rename with detection disabled, or a deletion all show up
+    as the old path ceasing to exist. Three enumerated probes were each proven
+    bypassable before this replaced them.
+
+    Three properties this needs beyond "is it still there", each a real defect
+    (#173 item 3):
+
+    1. **Byte-exact spelling.** On a case-insensitive filesystem (macOS, git's
+       ``core.ignorecase=true``) a case-only rename leaves ``git ls-files``
+       reporting the ORIGINAL spelling and ``is_file()`` resolving happily, so
+       membership tests see nothing wrong. The glob, however, returns what is
+       really on disk — so the committed spelling must appear in the glob's own
+       output, not merely resolve through it.
+    2. **Ever-existed, not just HEAD.** The frozen set re-based on HEAD each
+       commit, so a single commit that deleted a ledger removed it from the set
+       that was supposed to notice. The set is therefore every ledger path that
+       has EVER been added in this history.
+    3. **Checked git calls** — see ``_git_or_fail``.
+    """
+    import re as _re
+
+    committed = {
+        name
+        for name in _git_or_fail(
+            repo_root,
+            ["git", "ls-tree", "--name-only", "-z", "HEAD", "docs/architecture/"],
+            "frozen-ledger HEAD listing",
+        ).split("\0")
+        if _re.fullmatch(_LEDGER_PATH_RE, name)
+    }
+    # ...plus every ledger path this history has ever ADDED. Walking HEAD's own
+    # ancestry (not `--all`, which would freeze paths from abandoned branches
+    # that were never part of this line of development).
+    committed |= {
+        name
+        for name in _git_or_fail(
+            repo_root,
+            ["git", "log", "--format=", "--name-only", "--diff-filter=A", "--",
+             "docs/architecture/"],
+            "frozen-ledger history walk",
+        ).split("\n")
+        if _re.fullmatch(_LEDGER_PATH_RE, name.strip())
+    }
+
+    # "Still exists" means tracked in the INDEX and present in the WORKTREE and
+    # spelled exactly as committed. Each of the first two was tried alone and
+    # each was bypassable: the filesystem alone accepted a staged rename that
+    # recreated the old path as an UNTRACKED copy (the index had deleted the
+    # frozen path while a look-alike sat on disk), and the index alone accepted a
+    # plain unstaged `mv` (the index still lists a path whose file is gone).
+    tracked_now = set(
+        _git_or_fail(
+            repo_root,
+            ["git", "ls-files", "-z", "--", "docs/architecture/"],
+            "frozen-ledger index listing",
+        ).split("\0")
+    )
+    spelled_now = {
+        str(path.relative_to(repo_root))
+        for path in (repo_root / "docs" / "architecture").glob(
+            "ISSUE_*_AUDIT_LEDGER.md"
+        )
+    }
+    return sorted(
+        name
+        for name in committed
+        if name not in tracked_now
+        or not (repo_root / name).is_file()
+        or name not in spelled_now
+    )
+
+
+def _archive_index_entries(repo_root, prefix):
+    """The archive's tracked paths and its tracked SYMLINKS, from the git INDEX.
+
+    Extracted from the attestation scanner so it can be driven against fixture
+    repositories (#173 item 2). Both properties it encodes were regressions once:
+
+    * `-z`, because ``.split()`` corrupts any legal path containing whitespace
+      and a corrupted name silently drops out of the caller's comparison — the
+      exact failure the scanner exists to catch, reintroduced by the scanner;
+    * mode ``120000`` refused from the INDEX rather than from the worktree,
+      because under ``core.symlinks=false`` git materialises a symlink as an
+      ordinary file and a worktree-shape probe sees nothing at all.
+
+    Returns ``(tracked, symlinked)`` with names relative to ``prefix``.
+    """
+    staged = subprocess.run(
+        ["git", "ls-files", "--stage", "-z", "--", prefix],
+        cwd=str(repo_root), capture_output=True, text=True, check=True,
+    ).stdout.split("\0")
+    tracked, symlinked = set(), []
+    for entry in staged:
+        if not entry:
+            continue
+        meta, _, name = entry.partition("\t")
+        if not name.startswith(prefix + "/"):
+            continue
+        rel_name = name[len(prefix) + 1:]
+        if meta.split()[0] == "120000":
+            symlinked.append(rel_name)
+        tracked.add(rel_name)
+    return tracked, symlinked
+
+
+def _seed_ledger_repo(tmp_path, name="ISSUE_9_AUDIT_LEDGER.md"):
+    """A throwaway repo holding one committed ledger, for the frozen-path tests."""
+    repo = _new_repo(tmp_path)
+    _write(
+        repo, "docs/architecture/" + name,
+        "| ID | S | V | L | B | D | T | X | Y |\n"
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+        "| A-1 | src | \"finding\" | P2 | *(none)* | *(none)* | Standard | `a` | `fixed` |\n",
+    )
+    _commit(repo, "instantiate the ledger")
+    return repo
+
+
+def test_frozen_ledger_invariant_sees_a_committed_one_step_deletion(tmp_path):
+    """Deleting a ledger IN ONE COMMIT must still be caught (#173 item 3).
+
+    The frozen set used to be derived from HEAD alone, so the destroying commit
+    also removed the path from the set that was supposed to notice its absence:
+    the invariant re-based on the damage and passed. The set is now every ledger
+    path the history has ever added, so the deletion has nowhere to hide.
+    """
+    repo = _seed_ledger_repo(tmp_path)
+    assert _vanished_frozen_ledger_paths(repo) == []
+
+    _run_git(repo, "rm", "-q", "docs/architecture/ISSUE_9_AUDIT_LEDGER.md")
+    _run_git(
+        repo, "-c", "user.email=gate@example.invalid", "-c", "user.name=gate",
+        "commit", "-q", "-m", "delete the ledger in one step",
+    )
+
+    # HEAD no longer mentions it — which is exactly why a HEAD-only frozen set
+    # was blind here.
+    head_listing = subprocess.run(
+        ["git", "ls-tree", "--name-only", "-r", "HEAD"],
+        cwd=str(repo), capture_output=True, text=True, check=True,
+    ).stdout
+    assert "ISSUE_9_AUDIT_LEDGER.md" not in head_listing
+
+    assert _vanished_frozen_ledger_paths(repo) == [
+        "docs/architecture/ISSUE_9_AUDIT_LEDGER.md"
+    ]
+
+
+def test_frozen_ledger_invariant_sees_a_case_only_rename(tmp_path):
+    """A case-only rename is caught on BOTH filesystem kinds (#173 item 3).
+
+    On a case-insensitive filesystem the index keeps reporting the original
+    spelling and ``is_file()`` resolves through the new one, so a membership
+    test sees a perfectly healthy ledger. Comparing the committed spelling
+    against what the GLOB actually returns is what makes the rename visible
+    there; on a case-sensitive filesystem the file simply is not found, and the
+    same comparison reports it.
+    """
+    repo = _seed_ledger_repo(tmp_path)
+    assert _vanished_frozen_ledger_paths(repo) == []
+
+    original = repo / "docs" / "architecture" / "ISSUE_9_AUDIT_LEDGER.md"
+    renamed = repo / "docs" / "architecture" / "issue_9_audit_ledger.md"
+    os.rename(str(original), str(renamed))
+
+    assert _vanished_frozen_ledger_paths(repo) == [
+        "docs/architecture/ISSUE_9_AUDIT_LEDGER.md"
+    ]
+
+
+def test_frozen_ledger_invariant_refuses_a_broken_git_query(tmp_path):
+    """A failed git query must FAIL the check, not empty its frozen set.
+
+    Every derivation here turns git output into a set the invariant then walks;
+    an unchecked call degrades to empty output and the walk passes vacuously.
+    Driving the helper at a path that is not a repository is the cheapest way to
+    make every query fail at once.
+    """
+    not_a_repo = tmp_path / "bare"
+    not_a_repo.mkdir()
+    with pytest.raises(AssertionError, match="frozen-path authority is unavailable"):
+        _vanished_frozen_ledger_paths(not_a_repo)
+
+
+def test_archive_index_enumeration_keeps_a_whitespace_path(tmp_path):
+    """A whitespace-containing archive path survives enumeration (#173 item 2).
+
+    #171's archive has 98 tracked paths and not one contains whitespace, so the
+    `-z` branch was correct and completely unexercised. This constructs the case
+    the repo does not supply, and — because "it works" proves little on its own —
+    also reproduces the defect it prevents: the same output split on whitespace
+    loses the path entirely.
+    """
+    repo = _new_repo(tmp_path)
+    prefix = "docs/architecture/evidence/issue-9"
+    _write(repo, prefix + "/index.jsonl", "{}\n")
+    _write(repo, prefix + "/actions/run one/run log.txt", "green\n")
+    _commit(repo, "archive with an awkward path")
+
+    tracked, symlinked = _archive_index_entries(repo, prefix)
+    assert symlinked == []
+    assert tracked == {"index.jsonl", "actions/run one/run log.txt"}
+
+    # The defect the `-z` choice prevents, demonstrated on the same repository:
+    # whitespace-splitting the non-NUL form drops the awkward name silently.
+    naive = subprocess.run(
+        ["git", "ls-files", "--stage", "--", prefix],
+        cwd=str(repo), capture_output=True, text=True, check=True,
+    ).stdout.split()
+    assert "actions/run one/run log.txt" not in naive
+
+
+def test_archive_index_scan_refuses_a_tracked_symlink_materialised_as_a_file(tmp_path):
+    """A tracked mode-120000 entry is refused even when the worktree hides it.
+
+    Under ``core.symlinks=false`` git checks a symlink out as a REGULAR FILE
+    containing its target path, so the scanner's worktree probe (`is_symlink()`)
+    sees nothing while the index still records mode 120000 — and the archive
+    would hash whatever the link points at on some other machine. The index is
+    therefore the authority, and this builds exactly that state (#173 item 2).
+    """
+    repo = _new_repo(tmp_path)
+    _run_git(repo, "config", "core.symlinks", "false")
+    prefix = "docs/architecture/evidence/issue-9"
+    _write(repo, prefix + "/index.jsonl", "{}\n")
+    _write(repo, prefix + "/real.txt", "genuine evidence\n")
+    _commit(repo, "archive")
+
+    # Create the symlink ENTRY directly in the index: `git add` on a worktree
+    # file would stage mode 100644, which is the very state this test must not
+    # accidentally build.
+    blob = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"],
+        cwd=str(repo), input="real.txt", capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    _run_git(
+        repo, "update-index", "--add", "--cacheinfo",
+        "120000,{0},{1}/link.txt".format(blob, prefix),
+    )
+    # `git commit` directly, NEVER the `_commit` helper: its `git add -A` would
+    # restage the materialised worktree file as mode 100644 and destroy the
+    # 120000 entry this test exists to build.
+    (repo / prefix / "link.txt").write_text("real.txt")
+    _run_git(
+        repo, "-c", "user.email=gate@example.invalid", "-c", "user.name=gate",
+        "commit", "-q", "-m", "add a tracked symlink",
+    )
+
+    staged_modes = subprocess.run(
+        ["git", "ls-files", "--stage", "--", prefix + "/link.txt"],
+        cwd=str(repo), capture_output=True, text=True, check=True,
+    ).stdout
+    assert staged_modes.startswith("120000"), staged_modes
+
+    # The worktree probe the scanner ALSO runs is blind here — that is the point.
+    assert not (repo / prefix / "link.txt").is_symlink()
+
+    tracked, symlinked = _archive_index_entries(repo, prefix)
+    assert symlinked == ["link.txt"], symlinked
+    assert "link.txt" in tracked
+
+
+def test_finding_rows_parses_both_committed_row_shapes_and_excludes_class_rows():
+    """`_finding_rows` is exercised on FIXTURES, not only on what is on disk.
+
+    The parser's job is to see every ledger's rows whatever their column count:
+    #152's tables carry seven columns (eight delimiters) and #171's carry nine
+    (ten), and the first implementation counted delimiters, which silently
+    excluded #152 entirely. The per-ledger non-empty assertion in the append-only
+    test catches that today — but only while both shapes happen to sit in the
+    repo. These fixtures pin the behaviour independently of the tree (#173 item 1).
+    """
+    eight_delimiter = (
+        "| ID | Verbatim summary | Label | Blocking class | Defect class | "
+        "Tier (anchor) | Disposition |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        "| TC1-2 | \"Capture a green run after reverting the PR seeds\" | P1 | "
+        "capability reachability | **DC-3** instance 1 | **Critical** | `fixed` |\n"
+    )
+    assert set(_finding_rows(eight_delimiter)) == {"TC1-2"}
+
+    ten_delimiter = (
+        "| ID | Source gate | Verbatim summary | Original label | Blocking class | "
+        "Defect class | Derived tier | SHA/delta | Disposition |\n"
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+        "| R2-1 | Stage-2 round 2 | \"[P2] something\" | **P2** | *(none)* | "
+        "**DC-7** instance 1 | Standard | `abc1234` | `fixed` |\n"
+    )
+    assert set(_finding_rows(ten_delimiter)) == {"R2-1"}
+
+    # Defect-CLASS rows are excluded by prefix, and the exclusion is load-bearing:
+    # `DC-16` matches the finding-id shape, so without it a derived aggregate
+    # would be frozen as though it were a finding.
+    import re as _re
+
+    assert _re.fullmatch(r"(?:INH-)?[A-Z][A-Za-z0-9]*-?\d*-\d+[a-z]?", "DC-16")
+    class_rows = (
+        "| **DC-16** | a stale derived aggregate | the finding rows | **7** | "
+        "regenerated from the rows |\n"
+        "| **DC-7** | a hand-copy | the runtime authority | **14** | swept |\n"
+    )
+    assert _finding_rows(class_rows) == {}
+
+    # Inherited-seed and revision ids both parse; the first occurrence wins, which
+    # is what makes the byte-identity check compare against FIRST committed form.
+    mixed = (
+        "| INH-D-1 | src | \"inherited\" | P2 | *(none)* | *(none)* | Standard | `a` | `fixed` |\n"
+        "| R1-5a | revision of R1-5 | \"corrects\" | *(inherits)* | *(inherits)* | "
+        "*(inherits)* | *(inherits)* | `b` | `fixed` |\n"
+        "| INH-D-1 | LATER DUPLICATE that must not win | P2 | x | y | z | w | `c` | `fixed` |\n"
+    )
+    parsed = _finding_rows(mixed)
+    assert set(parsed) == {"INH-D-1", "R1-5a"}
+    assert "LATER DUPLICATE" not in parsed["INH-D-1"]
+
+    # A row with too few cells is not a finding row at all.
+    assert _finding_rows("| A-1 | too | few |\n") == {}
 
 
 def _split_out_gate_step(workflow):
@@ -5163,24 +5498,7 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
         # checksums claimed. An archive nobody else can reconstruct is not durable
         # evidence, so compare against the index too.
         prefix = str(base.relative_to(_ROOT))
-        # `-z` because `.split()` corrupts any legal path containing whitespace, and a
-        # corrupted name silently drops out of the comparison — the failure mode this
-        # check exists to catch, reintroduced by the check itself.
-        staged = subprocess.run(
-            ["git", "ls-files", "--stage", "-z", "--", prefix],
-            cwd=str(_ROOT), capture_output=True, text=True, check=True,
-        ).stdout.split("\0")
-        tracked, symlinked = set(), []
-        for entry in staged:
-            if not entry:
-                continue
-            meta, _, name = entry.partition("\t")
-            if not name.startswith(prefix + "/"):
-                continue
-            rel_name = name[len(prefix) + 1:]
-            if meta.split()[0] == "120000":
-                symlinked.append(rel_name)
-            tracked.add(rel_name)
+        tracked, symlinked = _archive_index_entries(_ROOT, prefix)
         assert symlinked == [], (
             "{0}: tracked symlinks are not evidence — the archive would hash whatever "
             "they point at on this machine: {1}".format(base.name, sorted(symlinked))

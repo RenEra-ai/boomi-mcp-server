@@ -56,6 +56,19 @@ authority-derived coverage claim.
 
 ## Finding rows (one per raw finding; append-only; exactly one disposition each)
 
+**Seed the table at instantiation — it may not be born empty.** Since #173 the append-only
+check asserts PER LEDGER that `_finding_rows()` parsed at least one row, so a parser change
+that silently drops a whole ledger fails there instead of hiding behind another ledger's
+revisions. A ledger with no rows would trip that assertion. Seed it with the `INH-*` rows
+for the findings the slice INHERITS — the deferred findings it exists to discharge, quoted
+verbatim from the filed issue — which is the honest first content anyway: those rows are
+why the slice was opened.
+
+Rows must sit in ONE unbroken table: appending after a blank line leaves them
+syntactically parseable but renders them as literal text, which
+`test_audit_ledger_finding_rows_form_one_contiguous_table` now refuses (#165 hand-fixed
+that four times before it became a check).
+
 | ID | Source gate + run dir + attestation | Verbatim summary | Original label | Blocking class | Defect class | Derived tier (anchor inline) | SHA/delta | Disposition |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 
