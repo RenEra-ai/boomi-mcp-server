@@ -87,7 +87,7 @@ The count for a class is `len(seed[class]) + len(rows carrying that class, revis
 * **Supersession map** (a revision MERGES onto its original: cells the revision states
   win, cells it marks *(inherits)* keep the original's value, and the merged row is what
   the tally reads — the original is retained above unedited):
-  `D-1a → D-1`, `D-2a → D-2`, `R2-1a → R2-1`, `R2-2a → R2-2`, `R2-3a → R2-3`, `R2-4a → R2-4`, `R2-5a → R2-5`, `INH-TC1-2a → INH-TC1-2`, `R5-1a → R5-1`, `R5-2a → R5-2`, `AR2-4a → AR2-4`, `AR3-4a → AR3-4`, `INH-TC1-2b → INH-TC1-2a`, `R5-1b → R5-1a`, `R5-2b → R5-2a`, `AR5-3a → AR5-3`, `AR4-5a → AR4-5`. Every mapping is written out: an earlier revision elided the middle of the R2 range with `…`, which reads fine and declares nothing — the append-only check caught it on its first run, and now compares this block for EXACT equality with the revision rows present. So D-1/D-2 contribute
+  `D-1a → D-1`, `D-2a → D-2`, `R2-1a → R2-1`, `R2-2a → R2-2`, `R2-3a → R2-3`, `R2-4a → R2-4`, `R2-5a → R2-5`, `INH-TC1-2a → INH-TC1-2`, `R5-1a → R5-1`, `R5-2a → R5-2`, `AR2-4a → AR2-4`, `AR3-4a → AR3-4`, `INH-TC1-2b → INH-TC1-2a`, `R5-1b → R5-1a`, `R5-2b → R5-2a`, `AR5-3a → AR5-3`, `AR4-5a → AR4-5`, `D-1b → D-1a`, `D-2b → D-2a`. Every mapping is written out: an earlier revision elided the middle of the R2 range with `…`, which reads fine and declares nothing — the append-only check caught it on its first run, and now compares this block for EXACT equality with the revision rows present. So D-1/D-2 contribute
   nothing (their revisions state *not an instance*), while R2-1…R2-5 still contribute
   their inherited classes and R2-3 contributes the revised ordinal. A first attempt at
   this rule said a superseded row "contributes nothing", which silently dropped four
@@ -222,6 +222,9 @@ Second-instance check is run against this table at row-write time.
 | AR6-7 | **§6 architect gate REPLAY #6**, run dir `cdx-gate-review.aOKfpA`, verdict ISSUES FOUND | "The proposed closure sequence is insufficient" — the wave rerun covers `2d37bee` not `814e402`, and the planned checkpoint/deferral/final-table commits will further invalidate both architect and wave evidence | **P2-equivalent** | **capability reachability** — a stale gate is an unrun gate | **DC-19** instance 2 | Standard — anchor: no source critical label | `814e402` | `fixed` — the closure sequence is restructured: ONE final administrative commit carries every remaining record change, and the architect gate plus the ENTIRE composite wave then run on that exact tip, followed by the exact-SHA scratch GREEN with no later mutation. Correct and load-bearing: `ci` omits goldens and determinism, so the scratch route cannot stand in for the wave. |
 | AR5-3a | revision of AR5-3 (replay #6, per AR6-5) | corrects the DC-16 ordinal AND supersedes AR5-3's malformed cell layout; AR5-3 is retained above unedited, unescaped pipe and all | *(inherits AR5-3)* | *(inherits)* | **DC-16** instance 5 — not 6; applying `AR3-4a` removes AR3-4 from this class | *(inherits)* | `814e402` | *(inherits AR5-3's disposition.)* **On the malformed original:** AR5-3's summary contains an unescaped pipe, so that row renders with ten cells. It is left exactly as committed. Repairing it would be an in-place edit — which the append-only check caught when I attempted precisely that, reporting `AR5-3` as differing from its first committed form. A record that edits its own history to look tidy is the defect this contract exists to prevent, so the malformed row IS the record and this row is its correction. |
 | AR4-5a | revision of AR4-5 (replay #6, per AR6-5) | corrects the DC-21 ordinal; AR4-5 is retained above unedited | *(inherits AR4-5)* | *(inherits)* | **DC-21** instance 2 — AR3-4 is instance 1 by chronology | *(inherits)* | `814e402` | *(inherits AR4-5's disposition)* |
+
+| D-1b | revision of D-1a (per CP-4) | records the AUTHORIZED deferral; D-1 and D-1a are retained above unedited | *(inherits)* | *(inherits)* | *(inherits — not an instance)* | *(inherits)* | `36df755` | **`deferred`** → **#172 item 1**, reason class `blocked-by-mechanism`, placement M12 after #171 lands, lineage first deferral. **Authorized by CP-4**, recorded in commit `36df755` — which precedes this row, so the cited checkpoint genuinely pre-exists the citation. CP-1 and CP-2 were both back-dated and authorize nothing; CP-3/CP-3a were explicitly non-authorizing. |
+| D-2b | revision of D-2a (per CP-4) | records the AUTHORIZED deferral; D-2 and D-2a are retained above unedited | *(inherits)* | *(inherits)* | *(inherits — not an instance)* | *(inherits)* | `36df755` | **`deferred`** → **#172 item 2**, reason class `blocked-by-mechanism`, placement M12 after #171 lands, lineage first deferral. **Authorized by CP-4**; see D-1b. |
 
 Dispositions: `fixed` · `finding-refuted` · `severity-refuted` · `not-validated` ·
 `deferred` (issue, reason class, placement). A refutation names the disputed claim and
@@ -665,7 +668,27 @@ accepts only the `commit-review-collect` and `gate-attest` collector schemas, an
 shaped like a collector row without a collector behind it is precisely the fabrication
 this archive exists to prevent.
 
-## Final-tree validation (filled at close; every roster gate current on the FINAL sha)
+## Final-tree validation (every roster gate current on the FINAL sha)
+
+Final tree: the commit carrying this table. Every gate below runs on it; nothing mutates
+the tree afterwards except the fast-forward push itself, which changes no bytes.
 
 | Gate | Evidence (quoted output / run URL / archived round) | SHA |
 | --- | --- | --- |
+| 1. Stage-1 QA — darkness proof | `git diff --stat <baseline> -- src/ server.py server_http.py tests/fixtures/golden_xml/ tests/fixtures/wave_gate/goldens.jsonl` → **no output**. Zero MCP-served surface touched, re-confirmed on the final tree. | final |
+| 1. Stage-1 QA — full non-KB suite | `9773 passed, 17 skipped` on the 3.12 local interpreter | final |
+| 2. Stage-2 repo Codex review | round 1 clean over the whole Stage-1 delta (`cdx-review.oDMlDK`); rounds 2-5 bill the §6 loop per R3-3 and are archived | `55fd417` + delta |
+| 3. §6 architect implementation review | initial `cdx-gate-review.ZxeOl1` + six delta-scoped replays (`cdx-gate-review.moELMO`, `cdx-gate-review.EOm65x`, `cdx-gate-review.oAatfN`, `cdx-gate-review.DXGd9u`, `cdx-gate-review.nio6Hn`, `cdx-gate-review.aOKfpA`), all collected and archived; 26 findings, all dispositioned; residue deferred to #173 under CP-4 | through `635d8c8` |
+| 4. Actions rollout gate — criterion 5 GREEN | run [31911864696](https://github.com/RenEra-ai/boomi-mcp-server/actions/runs/31911864696) — `push` to `scratch/171-green`, conclusion **success**, `wave_gate: baseline 6792d065… (local)`, `non-KB suite green (9770 passed, 19 skipped, cap 30)` | `15e922a` |
+| 4. Actions rollout gate — criterion 4 RED | run [31913525688](https://github.com/RenEra-ai/boomi-mcp-server/actions/runs/31913525688) — conclusion **failure**, exit 1, `PYTEST_COLLECTION_FLOOR collected 9789 tests, below the committed floor of 99999` | `b20fce1` (seed; NOT an ancestor of the candidate) |
+| 4. Actions rollout gate — no pull request | `gh pr list --state all --head scratch/171-green` → `[]`; same for the seed branch. Archived under `evidence/issue-171/no-pr/` | both |
+| 4. Actions rollout gate — final exact-SHA GREEN | recorded in the slice's final report and on issue #171: writing its URL into the tree would mutate the thing it attests | final |
+| 5. Composite wave gate | exit 0 — `manifests ok (9790 required nodes, 60 active goldens)`, `collection ok (9790 tests)`, `non-KB suite green (9773 passed, 17 skipped, cap 30)`, **`60 active goldens deterministic and byte-exact`** | final |
+| 6. Terminal correction loop | not entered; no roster-addition checkpoint was recorded | n/a |
+
+**Archive integrity on the final tree** — `SHA256SUMS` equals the git index exactly (not
+merely the worktree), every hash verifies, every run the ledger cites is present under its
+complete run-directory name, and no tracked entry is a symlink. Enforced by
+`test_audit_ledger_attestations_have_durable_matching_evidence`, which now consults
+`git ls-files --stage -z` precisely because a worktree-only comparison let `.gitignore`
+hide two files it had listed (row AR3-1).
