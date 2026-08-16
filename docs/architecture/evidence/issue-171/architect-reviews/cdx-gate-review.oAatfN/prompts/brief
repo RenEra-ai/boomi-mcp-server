@@ -1,0 +1,35 @@
+This is the THIRD delta-scoped replay of the architect implementation-review gate for issue #171. Replay #2 (`cdx-gate-review.EOm65x`) returned ISSUES FOUND with six findings; all six have been fixed.
+
+Repository: `boomi-mcp-server` at /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: `codex/issue-171`
+Replay #2 reviewed up to: `7abf5d4523caed785e6255cb6d876eaad474b1dd`
+Current HEAD: `2682dd9725b62605b79058a552e934f91ae80109`
+
+**Review the delta since replay #2:** `git diff 7abf5d4523caed785e6255cb6d876eaad474b1dd..HEAD`
+
+## What this delta contains — replay #2's six findings, fixed
+
+1. **AR2-1** — three current-state summaries still called CP-2 valid while R5-1 said no checkpoint authorizes the deferrals. Every current-state summary now says authorization is **pending CP-3**, and that CP-1 and CP-2 were both back-dated and authorize nothing.
+2. **AR2-2** — `INH-TC1-2`, R5-1 and R5-2 had been rewritten in place. Restored to their `0029826` text; the updates now live in appended rows `INH-TC1-2a`, `R5-1a`, `R5-2a`.
+3. **AR2-3** — the archive README and ledger index had gone stale in the opposite direction after evidence capture. Both corrected; the archive README now states only the RULE and names the ledger's criteria matrix as the single place execution status lives.
+4. **AR2-4** — only curated stderr excerpts were archived. Full raw logs added: `actions/green-initial/run.log` (777 lines) and `actions/red-seed4/run.log` (530 lines).
+5. **AR2-5** — `ISSUE_152_AUDIT_LEDGER.md` was still in its pre-run state. A dated Resolution subsection was appended citing run 31911864696 and criterion 7(a); the pre-run paragraph is retained beneath it as history.
+6. **AR2-6** — two remaining unqualified preflight claims in the specification, qualified to pushes that START a run.
+
+Six new finding rows (AR2-1…AR2-6) were recorded, the defect-class table updated, and replay #2 archived and indexed.
+
+## What to judge
+
+1. **Are all six fixes real and complete?** Specifically: does any current-state summary anywhere still imply a valid checkpoint authorizes the deferrals; were the restored rows restored byte-accurately against `git show 0029826:docs/architecture/ISSUE_171_AUDIT_LEDGER.md`; and does any surface still carry an unqualified claim that a scratch push runs the gate?
+
+2. **Does the archive still verify?** `SHA256SUMS` covers every file exactly once, every hash matches, the new raw logs contain the diagnostics the ledger quotes, and every run the ledger cites exists with its complete run-directory name.
+
+3. **Is the defect-class table still reproducible from its declared inputs** (seed input, row cells, supersession map), now that `INH-TC1-2a`, `R5-1a`, `R5-2a` and AR2-1…AR2-6 exist?
+
+4. **Is anything now worse than at replay #2** — a regression, a weakened test, or a fresh claim outrunning its evidence?
+
+5. **Is the tree now closure-safe apart from the known-pending items?** Those are, deliberately and in this order: record **CP-3** in its own commit at this validated tip; then the deferral revision rows citing it in a following commit; then fill the final-tree validation table; then a final exact-SHA GREEN scratch run with NO tree mutation afterwards; then fast-forward push to `dev`. Say whether that sequence is sufficient and whether anything else blocks.
+
+Do not re-review `scripts/wave_gate.py` or `.github/workflows/tests.yml` behaviour that earlier gates cleared unless this delta changed it. Be concrete: file, line, failure scenario, fix. If nothing is actionable, say so plainly — a clean verdict here is what unblocks CP-3.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.

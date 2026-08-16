@@ -1733,6 +1733,77 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
 })
 
 
+def test_audit_ledger_revisions_are_append_only_and_fully_declared():
+    """A ledger revision must ADD a row, and the supersession map must know about it.
+
+    The append-only rule was violated three times in #171, each time while fixing the
+    previous violation, because it was enforced by remembering to sweep — and each sweep
+    covered the rows a finding NAMED rather than the rows the batch touched. Sweeping by
+    memory demonstrably does not work, so the checkable half is mechanised here.
+
+    What this DOES check, from the ledger text alone:
+
+    * a revision row (`<id>a`) has its original `<id>` present, so a revision can never
+      quietly replace what it revises;
+    * every revision row present is declared in the ledger's own supersession map, so the
+      defect-class tally — which reads that map — cannot silently diverge from the rows;
+    * no row id appears twice, so an "edit" cannot masquerade as a second row.
+
+    What it deliberately does NOT check, stated rather than implied: that a pre-existing
+    row is BYTE-IDENTICAL to its previously committed form. That needs the prior commit as
+    the authority, and a test that reaches into git history would fail on a shallow
+    checkout and on the first commit of any new ledger. The byte-identity half stays a
+    review obligation; this test removes the failure mode that actually recurred — a
+    revision landing without its original, or without being declared.
+    """
+    import re as _re
+
+    ledgers = sorted((_ROOT / "docs" / "architecture").glob("ISSUE_*_AUDIT_LEDGER.md"))
+    assert ledgers, "no ledgers found — this check would be vacuous"
+
+    checked = 0
+    for path in ledgers:
+        text = path.read_text(encoding="utf-8")
+        ids = [
+            ln.split("|")[1].strip()
+            for ln in text.splitlines()
+            if ln.startswith("| ") and ln.count("|") > 8
+        ]
+        ids = [i for i in ids if i and i not in ("ID", "---") and not i.startswith("**")]
+
+        duplicates = {i for i in ids if ids.count(i) > 1}
+        assert duplicates == set(), "{0}: duplicate row ids {1}".format(
+            path.name, sorted(duplicates)
+        )
+
+        present = set(ids)
+        revisions = {i for i in present if _re.fullmatch(r".+[a-z]", i) and i[:-1] in present}
+        # A trailing-letter id whose stem is NOT present is either a typo or an
+        # in-place replacement of the original — both are what this test exists to catch.
+        orphans = {
+            i for i in present
+            if _re.fullmatch(r"(?:INH-)?[A-Z]+\d*-\d+[a-z]", i) and i[:-1] not in present
+        }
+        assert orphans == set(), (
+            "{0}: revision rows whose ORIGINAL is missing — a revision must add a row, "
+            "never replace one: {1}".format(path.name, sorted(orphans))
+        )
+
+        if revisions:
+            for rev in sorted(revisions):
+                assert "`{0} → {1}`".format(rev, rev[:-1]) in text, (
+                    "{0}: revision row {1} is not declared in the supersession map, so "
+                    "any tally derived from that map disagrees with the rows".format(
+                        path.name, rev
+                    )
+                )
+            checked += 1
+
+    assert checked, (
+        "no ledger exercised the revision path — the assertions above would be vacuous"
+    )
+
+
 def test_diagnostic_codes_named_in_the_audit_ledger_exist():
     """The ledger must not name a diagnostic the gate cannot emit.
 

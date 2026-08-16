@@ -1,0 +1,777 @@
+Python 3.11 non-KB	Set up job	﻿2026-08-15T22:20:24.3678807Z Current runner version: '2.336.0'
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3706551Z ##[group]Runner Image Provisioner
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3707477Z Hosted Compute Agent
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3708317Z Version: 20260729.566
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3709061Z Commit: cf7153fe6e25b664e8693c24944bf2b00355d109
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3709861Z Build Date: 2026-07-29T19:17:02Z
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3710596Z Worker ID: {e05a1594-1f45-4b6f-894b-124f1aa7d501}
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3711374Z Azure Region: westcentralus
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3712004Z ##[endgroup]
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3713425Z ##[group]Operating System
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3714114Z Ubuntu
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3714643Z 24.04.4
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3715539Z LTS
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3716081Z ##[endgroup]
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3716690Z ##[group]Runner Image
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3717336Z Image: ubuntu-24.04
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3717971Z Version: 20260810.271.1
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3719110Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260810.271/images/ubuntu/Ubuntu2404-Readme.md
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3720882Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260810.271
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3721932Z ##[endgroup]
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3723011Z ##[group]GITHUB_TOKEN Permissions
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3725327Z Contents: read
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3725970Z Metadata: read
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3726659Z ##[endgroup]
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3728805Z Secret source: Actions
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.3729926Z Prepare workflow directory
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.4173086Z Prepare all required actions
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.4221070Z Getting action download info
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.6927219Z Download action repository 'actions/checkout@v7' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:24.9743501Z Download action repository 'actions/setup-python@v7' (SHA:5fda3b95a4ea91299a34e894583c3862153e4b97)
+Python 3.11 non-KB	Set up job	2026-08-15T22:20:25.1955926Z Complete job name: Python 3.11 non-KB
+Python 3.11 non-KB	Run actions/checkout@v7	﻿2026-08-15T22:20:25.2753007Z ##[group]Run actions/checkout@v7
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2753965Z with:
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2754466Z   fetch-depth: 0
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2755157Z   persist-credentials: false
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2755758Z   repository: RenEra-ai/boomi-mcp-server
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2759815Z   token: ***
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2760290Z   ssh-strict: true
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2760779Z   ssh-user: git
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2761237Z   clean: true
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2761715Z   sparse-checkout-cone-mode: true
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2762279Z   fetch-tags: false
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2762772Z   show-progress: true
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2763251Z   lfs: false
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2763718Z   submodules: false
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2764197Z   set-safe-directory: true
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2764738Z   allow-unsafe-pr-checkout: false
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2765603Z env:
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2766049Z   PYTHONPATH: src
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2766546Z   PYTHONDONTWRITEBYTECODE: 1
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2767099Z   PYTEST_DISABLE_PLUGIN_AUTOLOAD: 1
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2767743Z   BOOMI_LOCAL: true
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2768238Z   BOOMI_DOCS_ENABLED: false
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2768792Z   BOOMI_GOTCHAS_ENABLED: false
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.2769334Z ##[endgroup]
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.3842857Z Syncing repository: RenEra-ai/boomi-mcp-server
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.3846374Z ##[group]Getting Git version info
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.3847844Z Working directory is '/home/runner/work/boomi-mcp-server/boomi-mcp-server'
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.3849986Z [command]/usr/bin/git version
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.3867572Z git version 2.54.0
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.3888923Z ##[endgroup]
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.3900329Z Temporarily overriding HOME='/home/runner/work/_temp/21922e40-5f7b-494c-a595-ee25e105d115' before making global git config changes
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.3903049Z Adding repository directory to the temporary git global config as a safe directory
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.3907592Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/boomi-mcp-server/boomi-mcp-server
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.3957316Z Deleting the contents of '/home/runner/work/boomi-mcp-server/boomi-mcp-server'
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.3969865Z ##[group]Determining repository object format
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.3976407Z ##[endgroup]
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.3977421Z ##[group]Initializing the repository
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.3978975Z [command]/usr/bin/git init /home/runner/work/boomi-mcp-server/boomi-mcp-server
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4052178Z hint: Using 'master' as the name for the initial branch. This default branch name
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4057556Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4060128Z hint: to use in all of your new repositories, which will suppress this warning,
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4061339Z hint: call:
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4061827Z hint:
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4062427Z hint: 	git config --global init.defaultBranch <name>
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4063099Z hint:
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4063729Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4064751Z hint: 'development'. The just-created branch can be renamed via this command:
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4066097Z hint:
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4066778Z hint: 	git branch -m <name>
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4067503Z hint:
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4068465Z hint: Disable this message with "git config set advice.defaultBranchName false"
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4070620Z Initialized empty Git repository in /home/runner/work/boomi-mcp-server/boomi-mcp-server/.git/
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4074063Z [command]/usr/bin/git remote add origin https://github.com/RenEra-ai/boomi-mcp-server
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4143460Z ##[endgroup]
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4145161Z ##[group]Disabling automatic garbage collection
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4146787Z [command]/usr/bin/git config --local gc.auto 0
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4187598Z ##[endgroup]
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4188978Z ##[group]Setting up auth
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4189978Z Removing SSH command configuration
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4191327Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4257538Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4657205Z Removing HTTP extra header
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4666362Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4721716Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.4994626Z Removing includeIf entries pointing to credentials config files
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.5000257Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.5040620Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.5301634Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-af210161-f2f1-4882-8c09-bc6af5f40e91.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.5346372Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/boomi-mcp-server/boomi-mcp-server/.git.path /home/runner/work/_temp/git-credentials-af210161-f2f1-4882-8c09-bc6af5f40e91.config
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.5382365Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/boomi-mcp-server/boomi-mcp-server/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-af210161-f2f1-4882-8c09-bc6af5f40e91.config
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.5421122Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-af210161-f2f1-4882-8c09-bc6af5f40e91.config
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.5463119Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-af210161-f2f1-4882-8c09-bc6af5f40e91.config
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.5498967Z ##[endgroup]
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.5500259Z ##[group]Fetching the repository
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:25.5507975Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.1367857Z From https://github.com/RenEra-ai/boomi-mcp-server
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.1370455Z  * [new branch]      dev               -> origin/dev
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.1371835Z  * [new branch]      main              -> origin/main
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.1373190Z  * [new branch]      scratch/171-green -> origin/scratch/171-green
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.1410383Z [command]/usr/bin/git branch --list --remote origin/scratch/171-green
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.1444451Z   origin/scratch/171-green
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.1454545Z [command]/usr/bin/git rev-parse refs/remotes/origin/scratch/171-green
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.1484463Z 15e922a8f5c5a1999137899bd64a1abc23269248
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.1491117Z ##[endgroup]
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.1493406Z ##[group]Determining the checkout info
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.1496314Z ##[endgroup]
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.1497513Z [command]/usr/bin/git sparse-checkout disable
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.1552138Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.1592721Z ##[group]Checking out the ref
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.1598126Z [command]/usr/bin/git checkout --progress --force -B scratch/171-green refs/remotes/origin/scratch/171-green
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.3621868Z Switched to a new branch 'scratch/171-green'
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.3627188Z branch 'scratch/171-green' set up to track 'origin/scratch/171-green'.
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.3669390Z ##[endgroup]
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.3724503Z [command]/usr/bin/git log -1 --format=%H
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.3761743Z 15e922a8f5c5a1999137899bd64a1abc23269248
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.3771966Z ##[group]Removing auth
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.3775562Z Removing SSH command configuration
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.3777689Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.3816582Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4066614Z Removing HTTP extra header
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4069641Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4115296Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4361487Z Removing includeIf entries pointing to credentials config files
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4364667Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4398402Z includeif.gitdir:/home/runner/work/boomi-mcp-server/boomi-mcp-server/.git.path
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4401611Z includeif.gitdir:/home/runner/work/boomi-mcp-server/boomi-mcp-server/.git/worktrees/*.path
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4403966Z includeif.gitdir:/github/workspace/.git.path
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4406040Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4410566Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/boomi-mcp-server/boomi-mcp-server/.git.path
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4444856Z /home/runner/work/_temp/git-credentials-af210161-f2f1-4882-8c09-bc6af5f40e91.config
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4457573Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/boomi-mcp-server/boomi-mcp-server/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-af210161\-f2f1\-4882\-8c09\-bc6af5f40e91\.config
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4499366Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/boomi-mcp-server/boomi-mcp-server/.git/worktrees/*.path
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4531737Z /home/runner/work/_temp/git-credentials-af210161-f2f1-4882-8c09-bc6af5f40e91.config
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4543745Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/boomi-mcp-server/boomi-mcp-server/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-af210161\-f2f1\-4882\-8c09\-bc6af5f40e91\.config
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4588142Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4620179Z /github/runner_temp/git-credentials-af210161-f2f1-4882-8c09-bc6af5f40e91.config
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4631001Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-af210161\-f2f1\-4882\-8c09\-bc6af5f40e91\.config
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4668290Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4695925Z /github/runner_temp/git-credentials-af210161-f2f1-4882-8c09-bc6af5f40e91.config
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4704101Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-af210161\-f2f1\-4882\-8c09\-bc6af5f40e91\.config
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4749818Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.4994720Z Removing credentials config '/home/runner/work/_temp/git-credentials-af210161-f2f1-4882-8c09-bc6af5f40e91.config'
+Python 3.11 non-KB	Run actions/checkout@v7	2026-08-15T22:20:29.5005266Z ##[endgroup]
+Python 3.11 non-KB	Run actions/setup-python@v7	﻿2026-08-15T22:20:29.5386610Z ##[group]Run actions/setup-python@v7
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5387839Z with:
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5388721Z   python-version: 3.11
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5389715Z   cache: pip
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5390948Z   cache-dependency-path: requirements.txt
+Python 3.11 non-KB	Run actions/setup-python@v7	requirements-dev.txt
+Python 3.11 non-KB	Run actions/setup-python@v7	
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5392513Z   check-latest: false
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5400891Z   token: ***
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5401830Z   update-environment: true
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5402921Z   allow-prereleases: false
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5403990Z   freethreaded: false
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5405036Z env:
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5405915Z   PYTHONPATH: src
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5406905Z   PYTHONDONTWRITEBYTECODE: 1
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5408045Z   PYTEST_DISABLE_PLUGIN_AUTOLOAD: 1
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5409196Z   BOOMI_LOCAL: true
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5410160Z   BOOMI_DOCS_ENABLED: false
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5411237Z   BOOMI_GOTCHAS_ENABLED: false
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.5412297Z ##[endgroup]
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.6726751Z ##[group]Installed versions
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.7028707Z Successfully set up CPython (3.11.15)
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.7031764Z ##[endgroup]
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:29.7410917Z [command]/opt/hostedtoolcache/Python/3.11.15/x64/bin/pip cache dir
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:30.7874422Z /home/runner/.cache/pip
+Python 3.11 non-KB	Run actions/setup-python@v7	2026-08-15T22:20:31.0611555Z pip cache is not found
+Python 3.11 non-KB	Assert the interpreter is 3.11	﻿2026-08-15T22:20:31.0753328Z ##[group]Run python - <<'PY'
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0753709Z [36;1mpython - <<'PY'[0m
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0753971Z [36;1mimport sys[0m
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0754279Z [36;1massert sys.version_info[:2] == (3, 11), sys.version[0m
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0754668Z [36;1mprint("interpreter ok:", sys.version)[0m
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0755437Z [36;1mPY[0m
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0806374Z shell: /usr/bin/bash -e {0}
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0806670Z env:
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0806890Z   PYTHONPATH: src
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0807143Z   PYTHONDONTWRITEBYTECODE: 1
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0807429Z   PYTEST_DISABLE_PLUGIN_AUTOLOAD: 1
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0807706Z   BOOMI_LOCAL: true
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0807926Z   BOOMI_DOCS_ENABLED: false
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0808174Z   BOOMI_GOTCHAS_ENABLED: false
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0808486Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.15/x64
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0808943Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib/pkgconfig
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0809375Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0809817Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0810195Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0810579Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.0811169Z ##[endgroup]
+Python 3.11 non-KB	Assert the interpreter is 3.11	2026-08-15T22:20:31.1006799Z interpreter ok: 3.11.15 (main, Jun 16 2026, 21:41:52) [GCC 13.3.0]
+Python 3.11 non-KB	Install the non-KB test environment	﻿2026-08-15T22:20:31.1068018Z ##[group]Run python -m pip install --disable-pip-version-check -r requirements-dev.txt
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1068683Z [36;1mpython -m pip install --disable-pip-version-check -r requirements-dev.txt[0m
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1112934Z shell: /usr/bin/bash -e {0}
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1113210Z env:
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1113416Z   PYTHONPATH: src
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1113654Z   PYTHONDONTWRITEBYTECODE: 1
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1113918Z   PYTEST_DISABLE_PLUGIN_AUTOLOAD: 1
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1114178Z   BOOMI_LOCAL: true
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1114395Z   BOOMI_DOCS_ENABLED: false
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1114635Z   BOOMI_GOTCHAS_ENABLED: false
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1115220Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.15/x64
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1115711Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib/pkgconfig
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1116160Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1116530Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1116894Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1117303Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:31.1117624Z ##[endgroup]
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:32.3587929Z Collecting fastmcp==3.1.1 (from -r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:32.4565492Z   Downloading fastmcp-3.1.1-py3-none-any.whl.metadata (8.1 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:32.6039993Z Collecting pydantic>=2.0.0 (from -r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 2))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:32.6237748Z   Downloading pydantic-2.13.4-py3-none-any.whl.metadata (109 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:32.6882699Z Collecting pyjwt>=2.8.0 (from -r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 3))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:32.7079263Z   Downloading pyjwt-2.13.0-py3-none-any.whl.metadata (3.4 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:32.8958100Z Collecting cryptography>=41.0.0 (from -r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 4))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:32.9163839Z   Downloading cryptography-50.0.0-cp311-abi3-manylinux_2_34_x86_64.whl.metadata (4.3 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:32.9467393Z Collecting httpx>=0.25.0 (from -r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 5))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:32.9660750Z   Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:32.9962248Z Collecting python-dotenv>=1.0.0 (from -r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 6))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.0156916Z   Downloading python_dotenv-1.2.2-py3-none-any.whl.metadata (27 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.0528048Z Collecting requests>=2.31.0 (from -r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 7))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.0725433Z   Downloading requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.1003241Z Collecting itsdangerous>=2.1.0 (from -r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 8))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.1197987Z   Downloading itsdangerous-2.2.0-py3-none-any.whl.metadata (1.9 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.1474492Z Collecting py-key-value-aio<0.5.0,>=0.4.4 (from py-key-value-aio[mongodb]<0.5.0,>=0.4.4->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 9))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.1668057Z   Downloading py_key_value_aio-0.4.5-py3-none-any.whl.metadata (16 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.2010371Z Collecting motor<4.0,>=3.3 (from -r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 10))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.2211398Z   Downloading motor-3.7.1-py3-none-any.whl.metadata (21 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.2911908Z Collecting boomi>=3.0.1 (from -r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 11))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.3491596Z   Downloading boomi-3.0.1-py3-none-any.whl.metadata (6.1 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.3860536Z Collecting pytest==9.0.2 (from -r requirements-dev.txt (line 18))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.4076350Z   Downloading pytest-9.0.2-py3-none-any.whl.metadata (7.6 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.4402911Z Collecting typing_extensions>=4.0.0 (from -r requirements-dev.txt (line 27))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.4607318Z   Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.4921893Z Collecting authlib>=1.6.5 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.5121330Z   Downloading authlib-1.7.2-py2.py3-none-any.whl.metadata (10 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.5503555Z Collecting cyclopts>=4.0.0 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.5701996Z   Downloading cyclopts-4.22.5-py3-none-any.whl.metadata (12 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.6003082Z Collecting exceptiongroup>=1.2.2 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.6201146Z   Downloading exceptiongroup-1.3.1-py3-none-any.whl.metadata (6.7 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.6474434Z Collecting jsonref>=1.1.0 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.6667992Z   Downloading jsonref-1.1.0-py3-none-any.whl.metadata (2.7 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.6955158Z Collecting jsonschema-path>=0.3.4 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.7158024Z   Downloading jsonschema_path-0.5.0-py3-none-any.whl.metadata (8.1 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.7466409Z Collecting mcp<2.0,>=1.24.0 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.7662053Z   Downloading mcp-1.29.0-py3-none-any.whl.metadata (9.3 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.7929238Z Collecting openapi-pydantic>=0.5.1 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.8123770Z   Downloading openapi_pydantic-0.5.1-py3-none-any.whl.metadata (10 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.8442888Z Collecting opentelemetry-api>=1.20.0 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.8639005Z   Downloading opentelemetry_api-1.44.0-py3-none-any.whl.metadata (1.4 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.8922333Z Collecting packaging>=24.0 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.9118324Z   Downloading packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.9427842Z Collecting platformdirs>=4.0.0 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.9623403Z   Downloading platformdirs-4.11.3-py3-none-any.whl.metadata (5.5 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:33.9913189Z Collecting pyperclip>=1.9.0 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.0105648Z   Downloading pyperclip-1.11.0-py3-none-any.whl.metadata (2.4 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.0590575Z Collecting pyyaml<7.0,>=6.0 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.0789420Z   Downloading pyyaml-6.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.1197288Z Collecting rich>=13.9.4 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.1396401Z   Downloading rich-15.0.0-py3-none-any.whl.metadata (18 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.1694624Z Collecting uncalled-for>=0.2.0 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.1896163Z   Downloading uncalled_for-0.4.0-py3-none-any.whl.metadata (4.4 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.2566909Z Collecting uvicorn>=0.35 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.2766580Z   Downloading uvicorn-0.52.3-py3-none-any.whl.metadata (6.6 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.3568981Z Collecting watchfiles>=1.0.0 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.3766310Z   Downloading watchfiles-1.2.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.9 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.4795727Z Collecting websockets>=15.0.1 (from fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.4994065Z   Downloading websockets-17.0.1-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (6.3 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.5263646Z Collecting iniconfig>=1.0.1 (from pytest==9.0.2->-r requirements-dev.txt (line 18))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.5457194Z   Downloading iniconfig-2.3.0-py3-none-any.whl.metadata (2.5 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.5739849Z Collecting pluggy<2,>=1.5 (from pytest==9.0.2->-r requirements-dev.txt (line 18))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.5936047Z   Downloading pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.6257347Z Collecting pygments>=2.7.2 (from pytest==9.0.2->-r requirements-dev.txt (line 18))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.6450823Z   Downloading pygments-2.20.0-py3-none-any.whl.metadata (2.5 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.6783391Z Collecting anyio (from httpx>=0.25.0->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 5))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.6979855Z   Downloading anyio-4.14.2-py3-none-any.whl.metadata (4.6 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.7300134Z Collecting certifi (from httpx>=0.25.0->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 5))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.7500928Z   Downloading certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.7800395Z Collecting httpcore==1.* (from httpx>=0.25.0->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 5))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.7995715Z   Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.8301118Z Collecting idna (from httpx>=0.25.0->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 5))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.8494091Z   Downloading idna-3.18-py3-none-any.whl.metadata (6.1 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.8832498Z Collecting beartype>=0.20.0 (from py-key-value-aio<0.5.0,>=0.4.4->py-key-value-aio[mongodb]<0.5.0,>=0.4.4->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 9))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:34.9028012Z   Downloading beartype-0.22.9-py3-none-any.whl.metadata (37 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.2117269Z Collecting pymongo<5.0,>=4.9 (from motor<4.0,>=3.3->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 10))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.2323360Z   Downloading pymongo-4.17.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (10 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.2617121Z Collecting h11>=0.16 (from httpcore==1.*->httpx>=0.25.0->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 5))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.2810099Z   Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.3085614Z Collecting httpx-sse>=0.4 (from mcp<2.0,>=1.24.0->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.3282326Z   Downloading httpx_sse-0.4.3-py3-none-any.whl.metadata (9.7 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.3620808Z Collecting jsonschema>=4.20.0 (from mcp<2.0,>=1.24.0->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.3816670Z   Downloading jsonschema-4.26.0-py3-none-any.whl.metadata (7.6 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.4123240Z Collecting pydantic-settings>=2.5.2 (from mcp<2.0,>=1.24.0->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.4318097Z   Downloading pydantic_settings-2.15.0-py3-none-any.whl.metadata (3.9 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.4641104Z Collecting python-multipart>=0.0.9 (from mcp<2.0,>=1.24.0->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.4838366Z   Downloading python_multipart-0.0.32-py3-none-any.whl.metadata (2.1 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.5146293Z Collecting sse-starlette>=1.6.1 (from mcp<2.0,>=1.24.0->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.5342658Z   Downloading sse_starlette-3.4.8-py3-none-any.whl.metadata (15 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.5729167Z Collecting starlette>=0.27 (from mcp<2.0,>=1.24.0->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.5927174Z   Downloading starlette-1.6.0-py3-none-any.whl.metadata (6.4 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.6202193Z Collecting typing-inspection>=0.4.1 (from mcp<2.0,>=1.24.0->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.6409191Z   Downloading typing_inspection-0.4.4-py3-none-any.whl.metadata (2.6 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.6693319Z Collecting annotated-types>=0.6.0 (from pydantic>=2.0.0->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 2))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:35.6891738Z   Downloading annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.2681346Z Collecting pydantic-core==2.46.4 (from pydantic>=2.0.0->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 2))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.2878384Z   Downloading pydantic_core-2.46.4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.6 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.3259250Z Collecting aiofile>=3.5.0 (from py-key-value-aio[filetree,keyring,memory]<0.5.0,>=0.4.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.3453795Z   Downloading aiofile-3.12.3-py3-none-any.whl.metadata (17 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.3837850Z Collecting keyring>=25.6.0 (from py-key-value-aio[filetree,keyring,memory]<0.5.0,>=0.4.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.4068079Z   Downloading keyring-25.7.0-py3-none-any.whl.metadata (21 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.4418013Z Collecting cachetools>=5.0.0 (from py-key-value-aio[filetree,keyring,memory]<0.5.0,>=0.4.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.4615373Z   Downloading cachetools-7.1.7-py3-none-any.whl.metadata (5.5 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.4932059Z Collecting dnspython<3.0.0,>=2.6.1 (from pymongo<5.0,>=4.9->motor<4.0,>=3.3->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 10))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.5125572Z   Downloading dnspython-2.8.0-py3-none-any.whl.metadata (5.7 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.6528437Z Collecting cffi>=2.0.0 (from cryptography>=41.0.0->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 4))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.6726173Z   Downloading cffi-2.1.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.5 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.7841625Z Collecting charset_normalizer<4,>=2 (from requests>=2.31.0->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 7))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.8040372Z   Downloading charset_normalizer-3.5.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (45 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.8430397Z Collecting urllib3<3,>=1.26 (from requests>=2.31.0->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 7))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.8629601Z   Downloading urllib3-2.7.0-py3-none-any.whl.metadata (6.9 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.9190692Z Collecting caio~=0.12.0 (from aiofile>=3.5.0->py-key-value-aio[filetree,keyring,memory]<0.5.0,>=0.4.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.9386710Z   Downloading caio-0.12.2-cp311-cp311-manylinux_2_34_x86_64.whl.metadata (4.5 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.9724857Z Collecting joserfc>=1.6.0 (from authlib>=1.6.5->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:36.9926549Z   Downloading joserfc-1.7.4-py3-none-any.whl.metadata (3.1 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.0218627Z Collecting pycparser (from cffi>=2.0.0->cryptography>=41.0.0->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 4))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.0433305Z   Downloading pycparser-3.0-py3-none-any.whl.metadata (8.2 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.0748607Z Collecting attrs>=23.1.0 (from cyclopts>=4.0.0->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.0942579Z   Downloading attrs-26.1.0-py3-none-any.whl.metadata (8.8 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.1230006Z Collecting docstring-parser<4.0,>=0.15 (from cyclopts>=4.0.0->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.1422279Z   Downloading docstring_parser-0.18.0-py3-none-any.whl.metadata (3.5 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.1721480Z Collecting rich-rst<3.0.0,>=1.3.1 (from cyclopts>=4.0.0->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.1918936Z   Downloading rich_rst-2.1.0-py3-none-any.whl.metadata (4.7 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.2371415Z Collecting jsonschema-specifications>=2023.03.6 (from jsonschema>=4.20.0->mcp<2.0,>=1.24.0->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.2566030Z   Downloading jsonschema_specifications-2025.9.1-py3-none-any.whl.metadata (2.9 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.2903774Z Collecting referencing>=0.28.4 (from jsonschema>=4.20.0->mcp<2.0,>=1.24.0->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.3097120Z   Downloading referencing-0.37.0-py3-none-any.whl.metadata (2.8 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.5870254Z Collecting rpds-py>=0.25.0 (from jsonschema>=4.20.0->mcp<2.0,>=1.24.0->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.6078550Z   Downloading rpds_py-2026.6.3-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.1 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.6372135Z Collecting pathable<0.7.0,>=0.6.0 (from jsonschema-path>=0.3.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.6564862Z   Downloading pathable-0.6.0-py3-none-any.whl.metadata (7.2 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.6911003Z Collecting SecretStorage>=3.2 (from keyring>=25.6.0->py-key-value-aio[filetree,keyring,memory]<0.5.0,>=0.4.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.7106016Z   Downloading secretstorage-3.5.0-py3-none-any.whl.metadata (4.0 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.7377058Z Collecting jeepney>=0.4.2 (from keyring>=25.6.0->py-key-value-aio[filetree,keyring,memory]<0.5.0,>=0.4.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.7571333Z   Downloading jeepney-0.9.0-py3-none-any.whl.metadata (1.2 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.7949108Z Collecting importlib_metadata>=4.11.4 (from keyring>=25.6.0->py-key-value-aio[filetree,keyring,memory]<0.5.0,>=0.4.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.8144153Z   Downloading importlib_metadata-9.0.0-py3-none-any.whl.metadata (4.5 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.8423227Z Collecting jaraco.classes (from keyring>=25.6.0->py-key-value-aio[filetree,keyring,memory]<0.5.0,>=0.4.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.8615955Z   Downloading jaraco.classes-3.4.0-py3-none-any.whl.metadata (2.6 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.8918952Z Collecting jaraco.functools (from keyring>=25.6.0->py-key-value-aio[filetree,keyring,memory]<0.5.0,>=0.4.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.9111630Z   Downloading jaraco_functools-4.6.0-py3-none-any.whl.metadata (2.9 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.9409638Z Collecting jaraco.context (from keyring>=25.6.0->py-key-value-aio[filetree,keyring,memory]<0.5.0,>=0.4.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.9603047Z   Downloading jaraco_context-6.1.2-py3-none-any.whl.metadata (4.2 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:37.9915487Z Collecting zipp>=3.20 (from importlib_metadata>=4.11.4->keyring>=25.6.0->py-key-value-aio[filetree,keyring,memory]<0.5.0,>=0.4.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.0108275Z   Downloading zipp-4.1.0-py3-none-any.whl.metadata (3.6 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.0513501Z Collecting email-validator>=2.0.0 (from pydantic[email]>=2.11.7->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.0710507Z   Downloading email_validator-2.3.0-py3-none-any.whl.metadata (26 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.1118228Z Collecting markdown-it-py>=2.2.0 (from rich>=13.9.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.1316644Z   Downloading markdown_it_py-4.2.0-py3-none-any.whl.metadata (7.4 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.1648880Z Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=13.9.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.1843872Z   Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.2329185Z Collecting click>=7.0 (from uvicorn>=0.35->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.2528116Z   Downloading click-8.4.2-py3-none-any.whl.metadata (2.6 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.2891214Z Collecting more-itertools (from jaraco.classes->keyring>=25.6.0->py-key-value-aio[filetree,keyring,memory]<0.5.0,>=0.4.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.3089687Z   Downloading more_itertools-11.1.0-py3-none-any.whl.metadata (41 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.3389130Z Collecting backports.tarfile (from jaraco.context->keyring>=25.6.0->py-key-value-aio[filetree,keyring,memory]<0.5.0,>=0.4.4->fastmcp==3.1.1->-r /home/runner/work/boomi-mcp-server/boomi-mcp-server/requirements.txt (line 1))
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.3584326Z   Downloading backports.tarfile-1.2.0-py3-none-any.whl.metadata (2.0 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.3863650Z Downloading fastmcp-3.1.1-py3-none-any.whl (633 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.4475975Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 633.8/633.8 kB 15.3 MB/s  0:00:00
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.4672634Z Downloading pytest-9.0.2-py3-none-any.whl (374 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.4948730Z Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.5162822Z Downloading py_key_value_aio-0.4.5-py3-none-any.whl (170 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.5400091Z Downloading motor-3.7.1-py3-none-any.whl (74 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.5616959Z Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.5833849Z Downloading mcp-1.29.0-py3-none-any.whl (223 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.6065185Z Downloading pydantic-2.13.4-py3-none-any.whl (472 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.6330643Z Downloading pydantic_core-2.46.4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.6736424Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 49.1 MB/s  0:00:00
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.6931044Z Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.7151223Z Downloading pymongo-4.17.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.5 MB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.7241505Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.5/1.5 MB 197.0 MB/s  0:00:00
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.7442603Z Downloading dnspython-2.8.0-py3-none-any.whl (331 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.7685503Z Downloading pyyaml-6.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (806 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.7749885Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 806.6/806.6 kB 161.9 MB/s  0:00:00
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.7948766Z Downloading pyjwt-2.13.0-py3-none-any.whl (31 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.8170353Z Downloading cryptography-50.0.0-cp311-abi3-manylinux_2_34_x86_64.whl (4.7 MB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.8463277Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.7/4.7 MB 167.4 MB/s  0:00:00
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.8658900Z Downloading python_dotenv-1.2.2-py3-none-any.whl (22 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.8871566Z Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.9095945Z Downloading charset_normalizer-3.5.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (262 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.9321755Z Downloading idna-3.18-py3-none-any.whl (65 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.9539000Z Downloading urllib3-2.7.0-py3-none-any.whl (131 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.9756960Z Downloading itsdangerous-2.2.0-py3-none-any.whl (16 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:38.9988507Z Downloading boomi-3.0.1-py3-none-any.whl (1.0 MB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.0071969Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.0/1.0 MB 165.4 MB/s  0:00:00
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.0269785Z Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.0486533Z Downloading aiofile-3.12.3-py3-none-any.whl (22 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.0714568Z Downloading caio-0.12.2-cp311-cp311-manylinux_2_34_x86_64.whl (192 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.0933796Z Downloading annotated_types-0.8.0-py3-none-any.whl (13 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.1150768Z Downloading anyio-4.14.2-py3-none-any.whl (125 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.1370774Z Downloading authlib-1.7.2-py2.py3-none-any.whl (259 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.1589956Z Downloading beartype-0.22.9-py3-none-any.whl (1.3 MB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.1653144Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 264.3 MB/s  0:00:00
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.1852101Z Downloading cachetools-7.1.7-py3-none-any.whl (16 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.2064149Z Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.2279819Z Downloading cffi-2.1.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (217 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.2496756Z Downloading cyclopts-4.22.5-py3-none-any.whl (234 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.2717859Z Downloading docstring_parser-0.18.0-py3-none-any.whl (22 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.2929153Z Downloading rich_rst-2.1.0-py3-none-any.whl (272 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.3152007Z Downloading attrs-26.1.0-py3-none-any.whl (67 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.3371399Z Downloading exceptiongroup-1.3.1-py3-none-any.whl (16 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.3591435Z Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.3813106Z Downloading httpx_sse-0.4.3-py3-none-any.whl (9.0 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.4027823Z Downloading iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.4250728Z Downloading joserfc-1.7.4-py3-none-any.whl (71 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.4474679Z Downloading jsonref-1.1.0-py3-none-any.whl (9.4 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.4693556Z Downloading jsonschema-4.26.0-py3-none-any.whl (90 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.4910657Z Downloading jsonschema_path-0.5.0-py3-none-any.whl (24 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.5148380Z Downloading pathable-0.6.0-py3-none-any.whl (18 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.5367733Z Downloading referencing-0.37.0-py3-none-any.whl (26 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.5581339Z Downloading jsonschema_specifications-2025.9.1-py3-none-any.whl (18 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.5792619Z Downloading keyring-25.7.0-py3-none-any.whl (39 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.6004858Z Downloading importlib_metadata-9.0.0-py3-none-any.whl (27 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.6237161Z Downloading jeepney-0.9.0-py3-none-any.whl (49 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.6450788Z Downloading openapi_pydantic-0.5.1-py3-none-any.whl (96 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.6666348Z Downloading opentelemetry_api-1.44.0-py3-none-any.whl (60 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.6888993Z Downloading packaging-26.3-py3-none-any.whl (129 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.7105993Z Downloading platformdirs-4.11.3-py3-none-any.whl (23 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.7324420Z Downloading pydantic_settings-2.15.0-py3-none-any.whl (69 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.7538124Z Downloading email_validator-2.3.0-py3-none-any.whl (35 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.7755306Z Downloading pygments-2.20.0-py3-none-any.whl (1.2 MB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.7822099Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 233.1 MB/s  0:00:00
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.8036775Z Downloading pyperclip-1.11.0-py3-none-any.whl (11 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.8251856Z Downloading python_multipart-0.0.32-py3-none-any.whl (30 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.8476805Z Downloading rich-15.0.0-py3-none-any.whl (310 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.8715319Z Downloading markdown_it_py-4.2.0-py3-none-any.whl (91 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.8965735Z Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.9390154Z Downloading rpds_py-2026.6.3-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (371 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:39.9909477Z Downloading secretstorage-3.5.0-py3-none-any.whl (15 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.0149426Z Downloading sse_starlette-3.4.8-py3-none-any.whl (16 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.0364692Z Downloading starlette-1.6.0-py3-none-any.whl (75 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.0590681Z Downloading typing_inspection-0.4.4-py3-none-any.whl (14 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.0814305Z Downloading uncalled_for-0.4.0-py3-none-any.whl (15 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.1031218Z Downloading uvicorn-0.52.3-py3-none-any.whl (79 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.1249361Z Downloading click-8.4.2-py3-none-any.whl (119 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.1467274Z Downloading watchfiles-1.2.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (456 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.1694905Z Downloading websockets-17.0.1-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (219 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.1913383Z Downloading zipp-4.1.0-py3-none-any.whl (10 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.2127724Z Downloading jaraco.classes-3.4.0-py3-none-any.whl (6.8 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.2342714Z Downloading jaraco_context-6.1.2-py3-none-any.whl (7.9 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.2557733Z Downloading backports.tarfile-1.2.0-py3-none-any.whl (30 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.2769324Z Downloading jaraco_functools-4.6.0-py3-none-any.whl (11 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.2979712Z Downloading more_itertools-11.1.0-py3-none-any.whl (72 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.3190763Z Downloading pycparser-3.0-py3-none-any.whl (48 kB)
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:40.6991837Z Installing collected packages: pyperclip, zipp, websockets, urllib3, uncalled-for, typing_extensions, rpds-py, pyyaml, python-multipart, python-dotenv, pyjwt, pygments, pycparser, pluggy, platformdirs, pathable, packaging, more-itertools, mdurl, jsonref, jeepney, itsdangerous, iniconfig, idna, httpx-sse, h11, docstring-parser, dnspython, click, charset_normalizer, certifi, caio, cachetools, beartype, backports.tarfile, attrs, annotated-types, uvicorn, typing-inspection, requests, referencing, pytest, pymongo, pydantic-core, py-key-value-aio, opentelemetry-api, markdown-it-py, jaraco.functools, jaraco.context, jaraco.classes, importlib_metadata, httpcore, exceptiongroup, email-validator, cffi, anyio, aiofile, watchfiles, starlette, rich, pydantic, motor, jsonschema-specifications, jsonschema-path, httpx, cryptography, boomi, sse-starlette, SecretStorage, rich-rst, pydantic-settings, openapi-pydantic, jsonschema, joserfc, mcp, keyring, cyclopts, authlib, fastmcp
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:47.2790750Z 
+Python 3.11 non-KB	Install the non-KB test environment	2026-08-15T22:20:47.2827993Z Successfully installed SecretStorage-3.5.0 aiofile-3.12.3 annotated-types-0.8.0 anyio-4.14.2 attrs-26.1.0 authlib-1.7.2 backports.tarfile-1.2.0 beartype-0.22.9 boomi-3.0.1 cachetools-7.1.7 caio-0.12.2 certifi-2026.7.22 cffi-2.1.1 charset_normalizer-3.5.1 click-8.4.2 cryptography-50.0.0 cyclopts-4.22.5 dnspython-2.8.0 docstring-parser-0.18.0 email-validator-2.3.0 exceptiongroup-1.3.1 fastmcp-3.1.1 h11-0.16.0 httpcore-1.0.9 httpx-0.28.1 httpx-sse-0.4.3 idna-3.18 importlib_metadata-9.0.0 iniconfig-2.3.0 itsdangerous-2.2.0 jaraco.classes-3.4.0 jaraco.context-6.1.2 jaraco.functools-4.6.0 jeepney-0.9.0 joserfc-1.7.4 jsonref-1.1.0 jsonschema-4.26.0 jsonschema-path-0.5.0 jsonschema-specifications-2025.9.1 keyring-25.7.0 markdown-it-py-4.2.0 mcp-1.29.0 mdurl-0.1.2 more-itertools-11.1.0 motor-3.7.1 openapi-pydantic-0.5.1 opentelemetry-api-1.44.0 packaging-26.3 pathable-0.6.0 platformdirs-4.11.3 pluggy-1.6.0 py-key-value-aio-0.4.5 pycparser-3.0 pydantic-2.13.4 pydantic-core-2.46.4 pydantic-settings-2.15.0 pygments-2.20.0 pyjwt-2.13.0 pymongo-4.17.0 pyperclip-1.11.0 pytest-9.0.2 python-dotenv-1.2.2 python-multipart-0.0.32 pyyaml-6.0.3 referencing-0.37.0 requests-2.34.2 rich-15.0.0 rich-rst-2.1.0 rpds-py-2026.6.3 sse-starlette-3.4.8 starlette-1.6.0 typing-inspection-0.4.4 typing_extensions-4.16.0 uncalled-for-0.4.0 urllib3-2.7.0 uvicorn-0.52.3 watchfiles-1.2.0 websockets-17.0.1 zipp-4.1.0
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	﻿2026-08-15T22:20:47.5152648Z ##[group]Run set -euo pipefail
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5153011Z [36;1mset -euo pipefail[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5153290Z [36;1mevent="${GITHUB_EVENT_NAME-}"[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5153578Z [36;1mref="${GITHUB_REF-}"[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5153816Z [36;1m[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5154018Z [36;1mcase "${event}:${ref}" in[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5154286Z [36;1m  push:refs/heads/dev)[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5154579Z [36;1m    exec python scripts/wave_gate.py ci \[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5154913Z [36;1m      --github-event "$GITHUB_EVENT_PATH"[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5155514Z [36;1m    ;;[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5155739Z [36;1m  push:refs/heads/scratch/*)[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5156031Z [36;1m    if ! base="$(git rev-parse --verify \[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5156389Z [36;1m        'refs/remotes/origin/dev^{commit}' 2>/dev/null)"; then[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5156750Z [36;1m      printf '%s\n' \[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5157099Z [36;1m        'BASELINE_UNAVAILABLE cannot resolve refs/remotes/origin/dev' >&2[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5157527Z [36;1m      exit 2[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5157754Z [36;1m    fi[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5158024Z [36;1m    exec python scripts/wave_gate.py ci --base "$base"[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5158345Z [36;1m    ;;[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5158534Z [36;1m  *)[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5158849Z [36;1m    printf 'BASELINE_EVENT_INVALID unsupported event/ref: %s %s\n' \[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5159227Z [36;1m      "$event" "$ref" >&2[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5159472Z [36;1m    exit 2[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5159680Z [36;1m    ;;[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5159873Z [36;1mesac[0m
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5200773Z shell: /usr/bin/bash -e {0}
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5201052Z env:
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5201263Z   PYTHONPATH: src
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5201504Z   PYTHONDONTWRITEBYTECODE: 1
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5201776Z   PYTEST_DISABLE_PLUGIN_AUTOLOAD: 1
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5202036Z   BOOMI_LOCAL: true
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5202252Z   BOOMI_DOCS_ENABLED: false
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5202496Z   BOOMI_GOTCHAS_ENABLED: false
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5202829Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.15/x64
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5203282Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib/pkgconfig
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5203703Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5204074Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5204441Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5204807Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5205366Z   GITHUB_SHA: 15e922a8f5c5a1999137899bd64a1abc23269248
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.5205664Z ##[endgroup]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.7324055Z wave_gate: baseline 6792d0658b6da7964e35b3c493c8320dee2c1c6a (local)
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.9029720Z wave_gate: TOMBSTONE pytest-nodes pytest-009550 owner=repository disposition=n/a
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:20:47.9104480Z wave_gate: manifests ok (9789 required nodes, 60 active goldens)
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:12.9304514Z wave_gate: collection ok (9789 tests)
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:35.8587022Z ........................................................................ [  0%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:36.1160454Z ........................................................................ [  1%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:36.2951288Z ........................................................................ [  2%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:36.5022222Z ........................................................................ [  2%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:36.6868035Z ........................................................................ [  3%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:36.7875684Z ........................................................................ [  4%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:36.8426180Z ........................................................................ [  5%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:36.9217201Z ........................................................................ [  5%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:36.9624872Z ........................................................................ [  6%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:38.0855544Z ........................................................................ [  7%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:38.1710767Z ........................................................................ [  8%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:38.4707445Z ........................................................................ [  8%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:39.2072178Z ........................................................................ [  9%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:44.0653059Z ......s................................................................. [ 10%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:49.1244407Z ........................................................................ [ 11%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:49.1798239Z ........................................................................ [ 11%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:49.2633961Z ........................................................................ [ 12%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:49.3326596Z ........................................................................ [ 13%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:49.3824534Z ........................................................................ [ 13%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:49.4225381Z ........................................................................ [ 14%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:49.4670598Z ........................................................................ [ 15%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:49.5108547Z ........................................................................ [ 16%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:49.5523707Z ........................................................................ [ 16%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:49.6188068Z ........................................................................ [ 17%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:49.6770943Z ........................................................................ [ 18%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:49.7463589Z ........................................................................ [ 19%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:49.8025775Z ........................................................................ [ 19%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:49.8560856Z ........................................................................ [ 20%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:52.3256336Z ........................................................................ [ 21%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:52.5346665Z ........................................................................ [ 22%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:52.6202581Z ........................................................................ [ 22%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:52.7127467Z ........................................................................ [ 23%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:52.8043569Z ........................................................................ [ 24%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:52.9035692Z ........................................................................ [ 25%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:53.0216921Z ........................................................................ [ 25%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:53.2355839Z ........................................................................ [ 26%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:53.3239562Z ........................................................................ [ 27%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:21:54.0426123Z ........................................................................ [ 27%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:33:08.8949863Z ........................................................................ [ 28%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:52:36.3141915Z ........................................................................ [ 29%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:14.0538391Z ........................................................................ [ 30%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:14.1160960Z ........................................................................ [ 30%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:14.2733638Z ........................................................................ [ 31%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:14.5071717Z ........................................................................ [ 32%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:15.4440038Z ........................................................................ [ 33%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:24.0370857Z ........................................................................ [ 33%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:48.1064527Z ........................................................................ [ 34%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:48.1772786Z ........................................................................ [ 35%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:48.2247795Z ........................................................................ [ 36%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:48.2616027Z ........................................................................ [ 36%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:48.2970497Z ........................................................................ [ 37%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:51.8180775Z ........................................................................ [ 38%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:52.2224731Z ........................................................................ [ 38%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:52.2827666Z ........................................................................ [ 39%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:52.3600329Z ........................................................................ [ 40%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:54:52.4242373Z ........................................................................ [ 41%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:55:07.0358661Z ........................................................................ [ 41%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:55:07.1866783Z ........................................................................ [ 42%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:55:07.2645145Z ........................................................................ [ 43%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:55:07.3076125Z ........................................................................ [ 44%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:55:07.3494365Z ........................................................................ [ 44%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:55:07.3938540Z ........................................................................ [ 45%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:55:07.4547392Z ........................................................................ [ 46%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:55:07.5210669Z ........................................................................ [ 47%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:55:07.5656242Z ........................................................................ [ 47%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:55:07.6815835Z ........................................................................ [ 48%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:55:21.1394488Z ........................................................................ [ 49%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:55:37.3973022Z ........................................................................ [ 50%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:08.5130700Z ........................................................................ [ 50%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:08.9233789Z ........................................................................ [ 51%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:09.0834431Z ........................................................................ [ 52%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:10.2174327Z ........................................................................ [ 52%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:10.3495895Z ........................................................................ [ 53%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:13.0268711Z ........................................................................ [ 54%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:16.5053967Z ........................................................................ [ 55%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:16.8481989Z ........................................................................ [ 55%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:16.9499629Z ........................................................................ [ 56%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:17.0134868Z ........................................................................ [ 57%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:17.0573894Z ........................................................................ [ 58%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:17.1002140Z ........................................................................ [ 58%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:17.8247343Z ........................................................................ [ 59%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:17.9415813Z ........................................................................ [ 60%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:18.0211717Z ........................................................................ [ 61%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:18.0794877Z ........................................................................ [ 61%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:19.7455168Z ........................................................................ [ 62%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:19.7837711Z ........................................................................ [ 63%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:19.8243291Z ........................................................................ [ 63%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:19.8646788Z ........................................................................ [ 64%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:19.9073451Z ........................................................................ [ 65%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:20.0164562Z ........................................................................ [ 66%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:20.3170364Z ........................................................................ [ 66%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:20.4416866Z ........................................................................ [ 67%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:20.9324001Z ........................................................................ [ 68%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:56:37.7984592Z ........................................................................ [ 69%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:10.6156470Z ........................................................................ [ 69%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:10.9066865Z ........................................................................ [ 70%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:11.2098475Z ..............................s......................................... [ 71%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:12.0366445Z ........................................................................ [ 72%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:15.0474042Z ........................................................................ [ 72%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:15.0923970Z ........................................................................ [ 73%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:15.1343625Z ........................................................................ [ 74%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:15.1749763Z ........................................................................ [ 75%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:15.2158650Z ........................................................................ [ 75%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:15.2551400Z ........................................................................ [ 76%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:15.3018831Z ........................................................................ [ 77%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:16.7247548Z ........................................................................ [ 77%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:18.8114704Z ........................................................................ [ 78%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:18.8535469Z ........................................................................ [ 79%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:18.8880994Z ........................................................................ [ 80%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:18.9326175Z ........................................................................ [ 80%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:18.9654564Z ........................................................................ [ 81%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:19.0092202Z ........................................................................ [ 82%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:19.0520677Z ........................................................................ [ 83%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:19.1407869Z ........................................................................ [ 83%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:19.1961561Z ........................................................................ [ 84%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:19.2588638Z ........................................................................ [ 85%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:19.3763144Z ........................................................................ [ 86%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:19.4422976Z ........................................................................ [ 86%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:19.4967844Z ........s.....sssssssss...s........s........s........s.................. [ 87%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:19.5493066Z ........................................................................ [ 88%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:19.6148000Z ........................................................................ [ 88%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:20.0166501Z ........................................................................ [ 89%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:22.9565190Z .................................................s.......s.............. [ 90%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:23.9725161Z ........................................................................ [ 91%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:28.7315526Z ........................................................................ [ 91%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:28.8041224Z ........................................................................ [ 92%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:28.9911073Z ........................................................................ [ 93%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:32.5731798Z ........................................................................ [ 94%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:32.6159422Z ........................................................................ [ 94%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:32.8640044Z ........................................................................ [ 95%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:35.2561428Z ........................................................................ [ 96%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:36.7919369Z ........................................................................ [ 97%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:38.1546099Z ...s.................................................................... [ 97%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.0376846Z ........................................................................ [ 98%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.0857372Z ........................................................................ [ 99%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1830868Z .....................................................................    [100%]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1831630Z =============================== warnings summary ===============================
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1832345Z tests/test_recipe_security.py:657
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1833587Z   /home/runner/work/boomi-mcp-server/boomi-mcp-server/tests/test_recipe_security.py:657: UserWarning: A custom validator is returning a value other than `self`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1835215Z   Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1836596Z   See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1837475Z     slot: _NestedSlot = _NestedSlot()
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1837755Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1837919Z tests/test_recipe_security.py:1830
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1838946Z   /home/runner/work/boomi-mcp-server/boomi-mcp-server/tests/test_recipe_security.py:1830: UserWarning: A custom validator is returning a value other than `self`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1840423Z   Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1841449Z   See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1842064Z     leaf: _DeclaredKeysOnlyLeaf = _DeclaredKeysOnlyLeaf()
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1842307Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1842649Z ../../../../../opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/fastmcp/server/auth/jwt_issuer.py:14
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1843989Z   /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/fastmcp/server/auth/jwt_issuer.py:14: AuthlibDeprecationWarning: authlib.jose module is deprecated, please use joserfc instead.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1844827Z   It will be compatible before version 2.0.0.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1845375Z     from authlib.jose import JsonWebToken
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1845578Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1845940Z tests/test_recipe_registry.py::test_a_wrap_validator_is_caught_wherever_it_sits[nested]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1846784Z   /home/runner/work/boomi-mcp-server/boomi-mcp-server/tests/test_recipe_registry.py:1416: UserWarning: A custom validator is returning a value other than `self`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1847667Z   Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1848447Z   See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1849157Z     leaf: InnerWrap = InnerWrap()
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1849329Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1849578Z tests/test_recipe_registry.py::test_a_wrap_validator_is_caught_wherever_it_sits[two_deep]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1850370Z   /home/runner/work/boomi-mcp-server/boomi-mcp-server/tests/test_recipe_registry.py:1421: UserWarning: A custom validator is returning a value other than `self`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1851241Z   Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1851986Z   See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1852511Z     leaf: InnerWrap = InnerWrap()
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1852672Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1852908Z tests/test_recipe_registry.py::test_the_nested_wrap_hole_is_invisible_to_the_schema_gate
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1853684Z   /home/runner/work/boomi-mcp-server/boomi-mcp-server/tests/test_recipe_registry.py:1481: UserWarning: A custom validator is returning a value other than `self`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1854536Z   Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1855540Z   See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1856083Z     leaf: InnerWrap = InnerWrap()
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1856252Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1856521Z tests/test_recipe_registry.py::test_a_field_named_like_an_excluded_key_is_still_walked[config]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1857126Z tests/test_recipe_registry.py::test_a_field_named_like_an_excluded_key_is_still_walked[metadata]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1857756Z tests/test_recipe_registry.py::test_a_field_named_like_an_excluded_key_is_still_walked[default]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1858376Z tests/test_recipe_registry.py::test_a_field_named_like_an_excluded_key_is_still_walked[serialization]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1859243Z   /home/runner/work/boomi-mcp-server/boomi-mcp-server/tests/test_recipe_registry.py:1568: UserWarning: A custom validator is returning a value other than `self`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1860148Z   Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1860924Z   See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1861583Z     "Colliding", __base__=RecipeInputBase, **{field_name: (InnerWrap, InnerWrap())}
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1861886Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1862194Z tests/test_recipe_registry.py::test_a_field_named_like_a_schema_keyword_does_not_break_the_core_walk[schema]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1863164Z   /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/pydantic/main.py:1828: UserWarning: Field name "schema" in "Colliding" shadows an attribute in parent "RecipeInputBase"
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1863891Z     return meta(
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1864016Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1864412Z tests/test_recipe_security.py::test_a_swap_below_one_container_level_is_caught[dict_value]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1865257Z   /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/pydantic/main.py:475: UserWarning: Pydantic serializer warnings:
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1866360Z     PydanticSerializationUnexpectedValue(Expected `str` - serialized value may not be as expected [field_name='label', input_value={'slots': {'a': {'label':...NEL-SQL-SELECT-SECRETS'}, input_type=dict])
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1867188Z     return self.__pydantic_serializer__.to_python(
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1867413Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1867688Z tests/test_recipe_security.py::test_a_swap_below_one_container_level_is_caught[tuple_of_tuple]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1868462Z   /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/pydantic/main.py:475: UserWarning: Pydantic serializer warnings:
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1869547Z     PydanticSerializationUnexpectedValue(Expected `str` - serialized value may not be as expected [field_name='label', input_value={'slots': [[{'label': 'y'...NEL-SQL-SELECT-SECRETS'}, input_type=dict])
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1870473Z     return self.__pydantic_serializer__.to_python(
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1870671Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1870933Z tests/test_recipe_security.py::test_a_swap_below_one_container_level_is_caught[dict_of_list]
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1871654Z   /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/pydantic/main.py:475: UserWarning: Pydantic serializer warnings:
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1872728Z     PydanticSerializationUnexpectedValue(Expected `str` - serialized value may not be as expected [field_name='label', input_value={'slots': {'a': [{'label'...NEL-SQL-SELECT-SECRETS'}, input_type=dict])
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1873497Z     return self.__pydantic_serializer__.to_python(
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1873693Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1873935Z tests/test_recipe_security.py::test_a_typed_dict_field_is_judged_by_its_per_key_hints
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1874755Z   /home/runner/work/boomi-mcp-server/boomi-mcp-server/tests/test_recipe_security.py:2684: UserWarning: A custom validator is returning a value other than `self`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1875758Z   Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1876537Z   See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1877103Z     field: TD = {"member": _DeclaredKeysOnlyLeaf()}
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1877319Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1877567Z tests/test_recipe_security.py::test_a_failed_trial_does_not_mark_nodes_seen_for_the_next_one
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1878374Z   /home/runner/work/boomi-mcp-server/boomi-mcp-server/tests/test_recipe_security.py:2762: UserWarning: A custom validator is returning a value other than `self`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1879230Z   Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1879977Z   See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1880672Z     payload: _DeclaredKeysOnlyLeaf = _DeclaredKeysOnlyLeaf()
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1880953Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1881303Z tests/test_recipe_security.py::test_a_failed_trial_does_not_mark_nodes_seen_for_the_next_one
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1882124Z   /home/runner/work/boomi-mcp-server/boomi-mcp-server/tests/test_recipe_security.py:2765: UserWarning: A custom validator is returning a value other than `self`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1883006Z   Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1883773Z   See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1884365Z     payload: _DeclaredKeysOnlyLeaf = _DeclaredKeysOnlyLeaf()
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1884612Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1884837Z tests/test_recipe_security.py::test_a_hook_on_a_base_after_basemodel_is_still_found
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1886058Z   /home/runner/work/boomi-mcp-server/boomi-mcp-server/tests/test_recipe_security.py:4424: UserWarning: A custom validator is returning a value other than `self`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1886940Z   Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1887689Z   See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1888341Z     _assert_declared_shape(EvilOrder.model_construct(leaf=_DeclaredKeysOnlyLeaf()))
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1888653Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1888877Z tests/test_recipe_security.py::test_a_hook_on_a_base_after_basemodel_is_still_found
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:39.1890114Z   /home/runner/work/boomi-mcp-server/boomi-mcp-server/tests/test_recipe_security.py:4429: UserWarning: Field name "leaf" in "test_a_hook_on_a_base_after_basemodel_is_still_found.<locals>.EvilDescriptor" shadows an attribute in parent "test_a_hook_on_a_base_after_basemodel_is_still_found.<locals>.DescriptorMixin"
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9569641Z     class EvilDescriptor(RecipeInputBase, DescriptorMixin):
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9570155Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9570664Z tests/test_recipe_security.py::test_a_hook_on_a_base_after_basemodel_is_still_found
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9571625Z   /home/runner/work/boomi-mcp-server/boomi-mcp-server/tests/test_recipe_security.py:4434: UserWarning: A custom validator is returning a value other than `self`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9572554Z   Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9573356Z   See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9574046Z     _assert_declared_shape(EvilDescriptor.model_construct(leaf=_DeclaredKeysOnlyLeaf()))
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9574434Z 
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9574669Z -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9575448Z =========================== short test summary info ============================
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9576073Z SKIPPED [1] tests/test_authoring_examples_policy.py:108: authoring_workflow_sequence_example.json carries no tool parameters
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9578051Z SKIPPED [1] tests/test_recipe_security.py:2867: pydantic refuses a typing.TypedDict field on Python < 3.12 (PydanticUserError typed-dict-version) and will not create the model, so this spelling cannot reach the engine at all on the production interpreter — there is no judging behaviour to assert. The typing_extensions arm below covers < 3.12.
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9579593Z SKIPPED [6] tests/test_sync_pipeline_adapter_cutover.py:736: chain rejected upstream: SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9580347Z SKIPPED [8] tests/test_sync_pipeline_adapter_cutover.py:736: chain rejected upstream: SYNC_PIPELINE_CONFIG_INVALID
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9581083Z SKIPPED [2] tests/test_system_topology_models.py:154: identity is supplied by a binding; covered by the bound tests
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9581955Z SKIPPED [1] tests/test_wave_gate.py:2733: case-sensitive filesystem: a same-inode/different-spelling TMPDIR cannot be constructed here without root (bind mount)
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:40.9582651Z 9770 passed, 19 skipped, 20 warnings in 2186.05s (0:36:26)
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:42.6846834Z wave_gate: non-KB suite green (9770 passed, 19 skipped, cap 30)
+Python 3.11 non-KB	Wave gate (manifests, collection floor, required nodes, full suite)	2026-08-15T22:57:42.6847491Z PLAN_FINGERPRINT_PENDING issue=#153
+Python 3.11 non-KB	Post Run actions/setup-python@v7	﻿2026-08-15T22:57:42.7222476Z Post job cleanup.
+Python 3.11 non-KB	Post Run actions/setup-python@v7	2026-08-15T22:57:42.8671315Z [command]/usr/bin/tar --posix -cf cache.tzst --exclude cache.tzst -P -C /home/runner/work/boomi-mcp-server/boomi-mcp-server --files-from manifest.txt --use-compress-program zstdmt
+Python 3.11 non-KB	Post Run actions/setup-python@v7	2026-08-15T22:57:44.2220995Z Sent 25575520 of 25575520 (100.0%), 24.4 MBs/sec
+Python 3.11 non-KB	Post Run actions/setup-python@v7	2026-08-15T22:57:44.4527016Z Cache saved with the key: setup-python-Linux-x64-24.04-Ubuntu-python-3.11.15-pip-02d0f76ca60e7656f28450a6e52e10cfcf749279b321d8559c2770d85348adde
+Python 3.11 non-KB	Post Run actions/checkout@v7	﻿2026-08-15T22:57:44.4670476Z Post job cleanup.
+Python 3.11 non-KB	Post Run actions/checkout@v7	2026-08-15T22:57:44.5569465Z [command]/usr/bin/git version
+Python 3.11 non-KB	Post Run actions/checkout@v7	2026-08-15T22:57:44.5593287Z git version 2.54.0
+Python 3.11 non-KB	Post Run actions/checkout@v7	2026-08-15T22:57:44.5634313Z Temporarily overriding HOME='/home/runner/work/_temp/da7e7ca7-cedb-4018-ad96-02f01f84cc9a' before making global git config changes
+Python 3.11 non-KB	Post Run actions/checkout@v7	2026-08-15T22:57:44.5635738Z Adding repository directory to the temporary git global config as a safe directory
+Python 3.11 non-KB	Post Run actions/checkout@v7	2026-08-15T22:57:44.5650794Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/boomi-mcp-server/boomi-mcp-server
+Python 3.11 non-KB	Post Run actions/checkout@v7	2026-08-15T22:57:44.5687747Z Removing SSH command configuration
+Python 3.11 non-KB	Post Run actions/checkout@v7	2026-08-15T22:57:44.5695302Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Python 3.11 non-KB	Post Run actions/checkout@v7	2026-08-15T22:57:44.5731736Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Python 3.11 non-KB	Post Run actions/checkout@v7	2026-08-15T22:57:44.6010900Z Removing HTTP extra header
+Python 3.11 non-KB	Post Run actions/checkout@v7	2026-08-15T22:57:44.6018494Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Python 3.11 non-KB	Post Run actions/checkout@v7	2026-08-15T22:57:44.6061519Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Python 3.11 non-KB	Post Run actions/checkout@v7	2026-08-15T22:57:44.6327101Z Removing includeIf entries pointing to credentials config files
+Python 3.11 non-KB	Post Run actions/checkout@v7	2026-08-15T22:57:44.6335837Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Python 3.11 non-KB	Post Run actions/checkout@v7	2026-08-15T22:57:44.6378640Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Python 3.11 non-KB	Complete job	﻿2026-08-15T22:57:44.6834243Z Cleaning up orphan processes
