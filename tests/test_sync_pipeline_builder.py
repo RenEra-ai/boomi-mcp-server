@@ -219,7 +219,7 @@ def test_sync_pipeline_matches_golden_fixture():
     assert verify_process_graph(emitted)["errors"] == []
 
     # `_linear_with_map()` is the SAME chain with different stage KEYS
-    # (`source/transform/target` vs the corpus corpus's `s/m/t`), and ~15 tests
+    # (`source/transform/target` vs the corpus `s/m/t`), and ~15 tests
     # in this module build on it. Before #165 it was this test's input, so the
     # golden pinned it; consuming the corpus case instead would have quietly
     # left it anchored to nothing. Assert the equivalence rather than restating

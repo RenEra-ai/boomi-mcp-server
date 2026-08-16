@@ -564,8 +564,13 @@ on and which `test_wave_gate_goldens.py` proves with an import-blocked child
 smuggle the dependency back). The corpus carries only what a case needs: a
 fixture used by no case belongs in the test module, or it becomes dead corpus
 code the day its owner is deleted. Case-to-case independence is likewise
-asserted, not described — a test renders all 60 cases and requires every
-module-level container in the corpus to be unchanged afterwards.
+asserted in BOTH directions, not described: one test renders all 60 cases and
+requires every module-level container in the corpus to be unchanged afterwards
+(the consequence), and a second records the arguments every corpus helper
+receives during that render and refuses any that IS module state rather than a
+copy of it (the antecedent). The consequence test alone was green with the
+copies removed — today's builders happen not to mutate their input — so it
+regression-tests the property without pinning the mechanism.
 
 Where a case input already lives in a committed JSON fixture
 (`sync_pipeline_emitter_parity_cases.json`, the `rich_control/` and

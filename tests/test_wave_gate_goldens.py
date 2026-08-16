@@ -179,28 +179,39 @@ def test_unknown_cases_and_renderer_mismatches_are_refused():
         corpus.render_golden_case(sample["input_case"], wrong)
 
 
+def _watched_corpus_containers():
+    """Every module-level container in the corpus, by name.
+
+    No exclusions: an earlier revision skipped ``CASE_REGISTRY`` for no stated
+    reason, which left the registry itself an unwatched blind spot while the
+    docstring claimed "every module-level container".
+    """
+    return {
+        name: getattr(corpus, name)
+        for name in dir(corpus)
+        if name.isupper()
+        and isinstance(getattr(corpus, name), (dict, list, tuple, set))
+    }
+
+
 def test_rendering_every_case_mutates_no_corpus_module_state():
-    """The corpus CONTRACT bullet "every renderer deep-copies shared inputs",
-    asserted instead of described.
+    """The CONSEQUENCE half of the corpus CONTRACT: one case cannot perturb
+    another through module-level state.
 
-    Three renderers passed a module-level notify dict by reference while that
-    bullet claimed otherwise; nothing caught it because the claim lived only in
-    a docstring. The repo's own lesson from #152/#171 is that a structural fix
-    which stays PROSE recurs and one that becomes EXECUTABLE holds — so the
-    property is measured here: snapshot every module-level container in the
-    corpus, render all 60 active cases, and require the snapshot to survive.
+    Snapshot every module-level container, render all 60 active cases, require
+    the snapshot to survive. Compared against the CURRENT attribute, not the
+    object captured at snapshot time, so a rebind (``LISTENER_CHAINS = dict(...)``
+    inside a renderer) is drift too — every later case would see the new table.
 
-    This is what makes case-to-case independence real: a renderer that mutated
-    shared state could perturb a LATER case's bytes depending on render order.
+    The ANTECEDENT the contract states — that renderers COPY rather than share —
+    is a separate, stronger property; see
+    ``test_no_case_factory_hands_module_state_to_a_helper_by_reference``. This
+    test alone is satisfied by builders that happen not to mutate their input,
+    which is why it cannot stand in for that one.
     """
     import copy as _copy
 
-    watched = {
-        name: getattr(corpus, name)
-        for name in dir(corpus)
-        if name.isupper() and isinstance(getattr(corpus, name), (dict, list, tuple, set))
-        and name != "CASE_REGISTRY"
-    }
+    watched = _watched_corpus_containers()
     assert watched, "no corpus module state to watch — this check would be vacuous"
     before = {name: _copy.deepcopy(value) for name, value in watched.items()}
 
@@ -208,11 +219,87 @@ def test_rendering_every_case_mutates_no_corpus_module_state():
         corpus.render_golden_case(row["input_case"], row["renderer"])
 
     drifted = sorted(
-        name for name, value in watched.items() if value != before[name]
+        name for name in watched if getattr(corpus, name) != before[name]
     )
     assert drifted == [], (
         "rendering mutated corpus module-level state, so one case can perturb "
         "another through it: {0}".format(drifted)
+    )
+
+
+def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
+    """The ANTECEDENT of the CONTRACT bullet: renderers COPY shared inputs.
+
+    The consequence test above is green even with every ``copy.deepcopy`` in the
+    corpus reverted — measured, not assumed — because today's builders happen not
+    to mutate what they are given. That makes it a fine regression test and a
+    useless pin: a maintainer could delete the copies as redundant and nothing
+    would object, re-opening the defect verbatim. So the antecedent is measured
+    directly here.
+
+    Method: wrap every PUBLIC corpus helper (the config builders the case
+    factories call as module globals) so it records the arguments it receives,
+    render every active case, then walk those arguments for any object that IS —
+    by identity, not equality — a module-level container. One hit means a
+    renderer handed shared state to production code, which is exactly what the
+    contract forbids.
+    """
+    watched = _watched_corpus_containers()
+    assert watched, "no corpus module state to watch — this check would be vacuous"
+    watched_by_id = {id(obj): name for name, obj in watched.items()}
+
+    recorded = []
+
+    def _wrap(func):
+        def _recording(*args, **kwargs):
+            recorded.append((func.__name__, args, kwargs))
+            return func(*args, **kwargs)
+        return _recording
+
+    helpers = {
+        name: getattr(corpus, name)
+        for name in dir(corpus)
+        if not name.startswith("_")
+        and callable(getattr(corpus, name))
+        and getattr(getattr(corpus, name), "__module__", None) == corpus.__name__
+    }
+    assert helpers, "no corpus helpers to wrap — this check would be vacuous"
+
+    def _leaks(obj, path, depth=0):
+        """Identity hits for watched containers reachable from a recorded arg."""
+        if depth > 6:
+            return []
+        found = []
+        if id(obj) in watched_by_id:
+            found.append("{0} is {1}".format(path, watched_by_id[id(obj)]))
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                found += _leaks(value, "{0}[{1!r}]".format(path, key), depth + 1)
+        elif isinstance(obj, (list, tuple, set)):
+            for index, value in enumerate(obj):
+                found += _leaks(value, "{0}[{1}]".format(path, index), depth + 1)
+        return found
+
+    try:
+        for name, func in helpers.items():
+            setattr(corpus, name, _wrap(func))
+        for row in MANIFEST.active:
+            corpus.render_golden_case(row["input_case"], row["renderer"])
+    finally:
+        for name, func in helpers.items():
+            setattr(corpus, name, func)
+
+    assert recorded, "no corpus helper was called — this check would be vacuous"
+    leaks = []
+    for func_name, args, kwargs in recorded:
+        for index, value in enumerate(args):
+            leaks += _leaks(value, "{0}(arg {1})".format(func_name, index))
+        for key, value in kwargs.items():
+            leaks += _leaks(value, "{0}({1}=)".format(func_name, key))
+    assert leaks == [], (
+        "these renderer arguments ARE module-level corpus state rather than "
+        "copies of it, so a helper that mutated one would perturb every later "
+        "case: {0}".format(sorted(set(leaks)))
     )
 
 
@@ -251,13 +338,21 @@ class _BlockTestModules:
 sys.meta_path.insert(0, _BlockTestModules())
 
 tests_dir = sys.argv[1]
-sys.path.insert(0, tests_dir)  # the tests directory
+repo_root = os.path.dirname(tests_dir)
+# The FULL path the probe needs, established BEFORE the witness runs. Inserting
+# only `tests/` was not enough: the probe module imports `boomi_mcp`, so with
+# the blocker disarmed it failed on that transitive import instead of loading —
+# which made the "blocker is NOT armed" branch unreachable and the diagnostic
+# wrong. The probe must be genuinely importable for its refusal to mean
+# anything.
+for _entry in (os.path.join(repo_root, "src"), repo_root, tests_dir):
+    if _entry not in sys.path:
+        sys.path.insert(0, _entry)
 
-# Non-vacuity witness, and it must run AFTER the sys.path insert above: the
-# probe module has to be genuinely REACHABLE, or "it did not import" proves
-# nothing about the blocker. Assert the file is really there, then require the
-# blocker's OWN exception type — a `ModuleNotFoundError` here would mean the
-# probe was unreachable and the witness vacuous.
+# Non-vacuity witness. Assert the probe's file exists, then require the
+# blocker's OWN exception type: a `ModuleNotFoundError` here would mean the
+# probe was unreachable and the witness vacuous, and a clean import would mean
+# the blocker is not armed. Both are explicit failures.
 probe = "test_process_flow_builder"
 if not os.path.isfile(os.path.join(tests_dir, probe + ".py")):
     print(json.dumps({"error": "witness probe module is missing: " + probe}))

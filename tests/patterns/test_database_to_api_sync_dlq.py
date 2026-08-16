@@ -18,8 +18,6 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 _src = str(Path(__file__).resolve().parent.parent.parent / "src")
 if _src not in sys.path:
     sys.path.insert(0, _src)
