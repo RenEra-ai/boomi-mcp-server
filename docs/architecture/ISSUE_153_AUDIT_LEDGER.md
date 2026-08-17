@@ -213,6 +213,7 @@ committed.
 
 | SHA | Kind | Tree state | Why it is NOT the Stage-1.5 boundary |
 | --- | --- | --- | --- |
+| `e833edf` … `06b9b40` | step-5 increments (shared preservation policy, execution profile, relocatable plan, wave-gate provider) | step-5 boundary suite: 9938 passed, 17 skipped, 1 failed → the ledger's own diagnostic scanner, fixed by allowlisting four production identifiers | Same reason as below — Stage-1 live QA still has not run. |
 | `ec015d5` | work-preservation checkpoint (steps 1–4) | full non-KB suite green at the preceding tree: 9874 passed, 17 skipped, 0 failures | Stage 1.5 commits the **QA-validated** tree. Stage-1 live QA has not run — the implementation is incomplete (4 of 10 planned steps), so there is nothing coherent to exercise through the MCP boundary yet. This commit exists only so the work is not held solely in a working tree. **The Stage-2 review base remains the step-0 baseline `9f19aad5b280d58c02ef5cd840ff150d0193c1dd`**, so this commit does not move any review anchor. |
 
 ## Checkpoints (a row is written IN FLIGHT at every third evaluation of each loop — 3, 6, 9, … —
