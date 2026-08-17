@@ -730,7 +730,21 @@ def build_integration_spec_preview(normalized: _NormalizedIntent) -> Integration
     per-root artifact fingerprints — both computed from the REAL root, which is
     what makes them evidence rather than an echo.
     """
-    spec = normalized.integration_spec
+    return _withhold_process_roots(normalized.integration_spec)
+
+
+def _withhold_process_roots(spec: IntegrationSpecV1) -> IntegrationSpecV1:
+    """Drop the authored ProcessIR roots from a SERVED spec projection.
+
+    One function, called at every point a spec becomes a served preview, because
+    #153's first attempt withheld the roots in the preview BUILDER and was then
+    silently undone fifty lines later by the legacy component-plan echo — which
+    is rebuilt from the normalized spec and therefore carries the roots back in.
+    QA measured planted canaries in every served plan and compile response while
+    the builder itself was provably withholding them.
+
+    Idempotent, so the belt-and-braces second call is safe.
+    """
     if not spec.processes:
         return spec
     return spec.model_copy(update={"processes": []})
@@ -1447,8 +1461,24 @@ def plan_authoring_request_v1(
             errors = sort_authoring_diagnostics(errors + unexecutable)
         # The redacted echo REPLACES the caller's spec. This is the single line
         # that stops a plaintext password from riding back out in the preview.
+        #
+        # #153 (QA-153-r1-02): the echo is rebuilt from the NORMALIZED spec,
+        # which since this slice carries `processes[]` — so this line restored
+        # every authored ProcessIR body that
+        # `build_integration_spec_preview` had just withheld, and the planted
+        # canaries appeared in every served plan and compile response. The
+        # withholding is therefore re-applied AFTER the overwrite rather than
+        # only before it.
+        #
+        # Re-applied rather than moved: the legacy redaction above is what
+        # protects the COMPONENT configs, and the root withholding is what
+        # protects the process bodies. Both are needed, and the last write wins,
+        # so the order is load-bearing. `_withhold_process_roots` is idempotent,
+        # which is why calling it twice is safe rather than merely tolerable.
         if isinstance(legacy.get("integration_spec"), dict):
-            spec_preview = IntegrationSpecV1(**legacy["integration_spec"])
+            spec_preview = _withhold_process_roots(
+                IntegrationSpecV1(**legacy["integration_spec"])
+            )
         # ACCUMULATED, not reassigned: the advisory unexecutable-step findings
         # above must survive alongside the planner's own warning strings.
         legacy_warnings = (() if blocks_apply else unexecutable) + tuple(

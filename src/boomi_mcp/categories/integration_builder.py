@@ -3227,6 +3227,12 @@ def _apply_structured_update(
         "profile": profile,
         "update_mode": "read_merge_write",
         "preserves_unknown_xml": True,
+        # #153: the bytes actually PUSHED. An update attestation must digest the
+        # merged result, not the desired XML — the merge preserves live state
+        # (overrides, unknown children, current folder attributes), so the two
+        # differ on every healthy update and digesting the wrong one would attest
+        # bytes the platform never received. Additive: no existing caller reads it.
+        "submitted_xml": merged_xml,
     }
 
 
@@ -5892,6 +5898,15 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     "name": envelope.name,
                     "component_id": envelope.component_id,
                     "depends_on": list(envelope.depends_on),
+                    # Keys `_apply_plan` reads for EVERY step, canonical or not.
+                    # Omitting them was QA-153-r1-01: `existing_ids` is built with
+                    # an unconditional `step["existing_component_id"]`, so a
+                    # canonical step raised `KeyError` before any Boomi write and
+                    # the whole direct-apply capability was unreachable. The
+                    # comprehension is shared by both step kinds, so the step
+                    # shapes have to agree.
+                    "existing_component_id": envelope.component_id,
+                    "planned_action": envelope.action,
                     # The canonical marker. A reader — and the apply loop — can
                     # tell a ProcessIR root from a legacy process component
                     # without inspecting config, which is the point: a canonical
@@ -7061,6 +7076,294 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+#: Wire version of the MATERIALIZER's contribution to a plan fingerprint. Bumped
+#: by hand when the envelope layout, the option-byte mapping or the override
+#: layout changes — the things that alter emitted bytes without changing the IR,
+#: the emission plan or any registry the other two revisions already cover.
+_MATERIALIZER_WIRE_VERSION = "1"
+
+
+def _materializer_revision() -> str:
+    """``sha256:<hex>`` over the materializer's byte-affecting constants.
+
+    Derived from the option strings and the envelope/override layout the neutral
+    materializer actually emits, so a change to any of them moves the recorded
+    revision — and therefore the plan fingerprint. A hand-typed constant here
+    would be a fourth hand-model of the same fact.
+    """
+    import hashlib
+
+    from ..authoring.revisions import canonical_json_bytes
+    from .components.process_component_materializer import (
+        DEFAULT_PROCESS_OPTIONS,
+        LISTENER_PROCESS_OPTIONS,
+        assemble_component_xml,
+        render_process_overrides,
+    )
+
+    material = canonical_json_bytes(
+        {
+            "wire_version": _MATERIALIZER_WIRE_VERSION,
+            "scheduled_options": DEFAULT_PROCESS_OPTIONS,
+            "listener_options": LISTENER_PROCESS_OPTIONS,
+            # The layouts themselves, exercised on fixed inputs. Hashing the
+            # OUTPUT rather than the source keeps this a behaviour fingerprint:
+            # a comment change leaves it still, a layout change moves it.
+            "envelope_layout": assemble_component_xml(
+                ("<shape/>",), name="revision-probe"
+            ),
+            "override_layout": render_process_overrides(
+                (
+                    {
+                        "connection_id": "probe",
+                        "fields": [{"id": "f", "label": "l", "xpath": "x"}],
+                    },
+                )
+            ),
+        }
+    )
+    return "sha256:" + hashlib.sha256(material).hexdigest()
+
+
+def _process_update_shim(envelope):
+    """The minimal component-shaped view ``_apply_structured_update`` reads.
+
+    That function takes an ``IntegrationComponentSpec`` because every caller
+    before #153 had one. A canonical root does not — and building a real one
+    would add a ``process``-typed component spec to the #149 reachability census,
+    growing exactly the legacy surface #160 must retire. It reads only ``key``,
+    ``name`` and ``config``, so a small view is both sufficient and honest about
+    what a canonical root is.
+    """
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        key=envelope.component_key, name=envelope.name, config={}, type="process"
+    )
+
+
+#: pydantic error `type` -> the served machine code. Only codes this repository
+#: OWNS are mapped: a pydantic builtin like `missing` is not a named contract
+#: code, and inventing one would publish a code no taxonomy declares.
+_NAMED_VALIDATION_CODES = {
+    "integration_component_key_duplicate": INTEGRATION_COMPONENT_KEY_DUPLICATE,
+    "process_materialization_reference_not_relocatable": (
+        "PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE"
+    ),
+    "process_materialization_fingerprint_mismatch": (
+        "PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH"
+    ),
+    "process_materialization_plan_invalid": "PROCESS_MATERIALIZATION_PLAN_INVALID",
+}
+
+
+def _named_error_code_from_validation(exc) -> Optional[str]:
+    """The served code for a pydantic error that carries one of ours, else None.
+
+    Returns ``None`` for anything unrecognised so the generic envelope is
+    unchanged for every pre-existing failure — this widens what is NAMED, never
+    what is refused.
+    """
+    errors = getattr(exc, "errors", None)
+    if not callable(errors):
+        return None
+    try:
+        rows = errors()
+    except Exception:  # noqa: BLE001 — a diagnostic must not raise
+        return None
+    for row in rows or ():
+        code = _NAMED_VALIDATION_CODES.get(str(row.get("type", "")))
+        if code is not None:
+            return code
+    return None
+
+
+def _execute_canonical_process(
+    *,
+    boomi_client,
+    profile: str,
+    unit,
+    spec,
+    conflict_policy: str,
+    existing_id: Optional[str],
+    id_registry: Dict[str, str],
+    account_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Materialize and apply ONE canonical ProcessIR root, and attest it.
+
+    The seam that makes the canonical chain reachable from the public tool
+    boundary. QA-153-r1-03 found the chain complete but WIRED TO NOTHING: every
+    piece existed and was unit-tested, and no served path constructed a
+    materialization plan — so the published
+    ``PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE`` code could not be
+    raised by any tool call, and a literal account component id in an extension
+    binding was silently accepted. Building the plan HERE is what puts the
+    relocatability validator on the live path.
+
+    Returns ``{"result", "component_id", "mutation", "readback"}``. The result
+    dict matches the shape the component arm produces, so the caller's
+    ``results`` map is uniform across both participant kinds — the issue requires
+    process units to report per-key results "in the same results/verification
+    maps as components".
+    """
+    from ..authoring.contract import get_authoring_revisions
+    from ..authoring.process_materialization import build_materialization_plan
+    from ..authoring.revisions import account_scope_fingerprint
+    from ..compiler.process_ir.emitter_registry import emitter_revision
+    from ..recipes.materialization import build_symbol_table
+    from .components.canonical_process_apply import (
+        CanonicalProcessApplyError,
+        build_mutation_attestation,
+        build_readback_attestation,
+        materialize_canonical_process_xml,
+    )
+
+    envelope = unit.envelope
+    key = envelope.component_key
+
+    try:
+        symbols = build_symbol_table(
+            list(spec.components),
+            process_keys=[u.envelope.component_key for u in (spec.processes or ())],
+            connector_metadata=_connector_metadata_from_components(spec.components),
+        )
+        plan = build_materialization_plan(
+            envelope=envelope,
+            process_ir=unit.process_ir,
+            symbols=symbols,
+            conflict_policy=conflict_policy,
+            compiler_revision=get_authoring_revisions()["compiler_revision"],
+            emitter_revision=emitter_revision(),
+            materializer_revision=_materializer_revision(),
+        )
+        xml = materialize_canonical_process_xml(
+            plan=plan, id_registry=id_registry, symbols=symbols
+        )
+    except CanonicalProcessApplyError as exc:
+        return {
+            "result": {"_success": False, "status": "failed", "type": "process",
+                       "name": envelope.name, "error": str(exc)},
+            "error": str(exc),
+            "error_code": exc.error_code,
+            "component_id": None,
+            "mutation": None,
+            "readback": None,
+        }
+    except Exception as exc:  # noqa: BLE001 — a plan defect must not leak internals
+        return {
+            "result": {"_success": False, "status": "failed", "type": "process",
+                       "name": envelope.name, "error": str(exc)},
+            "error": str(exc),
+            "error_code": "PROCESS_MATERIALIZATION_PLAN_INVALID",
+            "component_id": None,
+            "mutation": None,
+            "readback": None,
+        }
+
+    # Reuse follows the SAME rule the component arm follows: an `action="create"`
+    # that resolves to an existing component reuses under `conflict_policy="reuse"`.
+    # No mutation happens, so no mutation attestation is recorded — an attestation
+    # for a write that never occurred would be a false entry in the record.
+    target_id = envelope.component_id or existing_id
+    if envelope.action == "create" and existing_id and conflict_policy == "reuse":
+        return {
+            "result": {"status": "reused", "component_id": existing_id,
+                       "type": "process", "name": envelope.name, "_success": True},
+            "component_id": existing_id,
+            "mutation": None,
+            "readback": None,
+        }
+    if envelope.action == "create" and existing_id and conflict_policy == "fail":
+        message = (
+            f"Component '{envelope.name or key}' already exists and "
+            f"conflict_policy=fail"
+        )
+        return {
+            "result": {"_success": False, "status": "failed", "type": "process",
+                       "name": envelope.name, "error": message},
+            "error": message,
+            "error_code": None,
+            "component_id": None,
+            "mutation": None,
+            "readback": None,
+        }
+
+    action = "update" if (envelope.action == "update" or target_id) else "create"
+    if action == "update":
+        if not target_id:
+            message = f"Missing component_id for update of process '{key}'"
+            return {
+                "result": {"_success": False, "status": "failed", "type": "process",
+                           "name": envelope.name, "error": message},
+                "error": message,
+                "error_code": "PROCESS_MATERIALIZATION_PLAN_INVALID",
+                "component_id": None, "mutation": None, "readback": None,
+            }
+        # Read-merge-write through the EXISTING preservation machinery, under the
+        # shared process policy — not a second update path.
+        from .components.builders._process_preservation import (
+            PROCESS_PRESERVATION_POLICY,
+        )
+
+        exec_result = _apply_structured_update(
+            boomi_client,
+            profile,
+            target_id,
+            _process_update_shim(envelope),
+            xml,
+            PROCESS_PRESERVATION_POLICY,
+        )
+    else:
+        exec_result = create_component(boomi_client, profile, {"xml": xml})
+
+    component_id = _extract_component_id(exec_result) or (
+        target_id if action == "update" else None
+    )
+    result = {
+        "status": "updated" if action == "update" else "created",
+        "component_id": component_id,
+        "type": "process",
+        "name": envelope.name,
+        "result": exec_result,
+        "_success": bool(exec_result.get("_success", False)),
+    }
+    if not result["_success"]:
+        return {"result": result, "error": f"Failed at step '{key}'",
+                "error_code": None, "component_id": component_id,
+                "mutation": None, "readback": None}
+
+    # The mutation attestation — over the bytes that were SENT. For an update
+    # those are the MERGED bytes; `_apply_structured_update` reports them so the
+    # digest describes what the platform received, not what we desired.
+    submitted = exec_result.get("submitted_xml") or xml
+    try:
+        mutation = build_mutation_attestation(
+            plan=plan,
+            action=action,
+            target_component_id=target_id if action == "update" else None,
+            result_component_id=component_id,
+            submitted_xml=submitted,
+            account_scope_hash=account_scope_fingerprint(profile, account_id),
+        )
+    except CanonicalProcessApplyError as exc:
+        # A create that reported success without an id fails CLOSED: the mutation
+        # stands but cannot be attested, and recording nothing would be worse.
+        return {"result": {**result, "_success": False, "error": str(exc)},
+                "error": str(exc), "error_code": exc.error_code,
+                "component_id": component_id, "mutation": None, "readback": None}
+
+    # ...and the post-apply readback, recorded SEPARATELY. A failure records
+    # digest=None: the mutation stands, and an unavailable baseline must read as
+    # unknown rather than as agreement.
+    readback = build_readback_attestation(
+        component_key=key,
+        component_id=component_id,
+        digest=_live_component_digest(boomi_client, component_id),
+    )
+    return {"result": result, "component_id": component_id,
+            "mutation": mutation, "readback": readback}
+
+
 def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Dict[str, Any]:
     dry_run = bool(config.get("dry_run", True))
 
@@ -7355,8 +7658,55 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
 
     id_registry: Dict[str, str] = {}
     results: Dict[str, Dict[str, Any]] = {}
+    # #153: the canonical process units, keyed like any other participant. Read
+    # from the SPEC rather than from `planned["steps"]`: the plan round-trips
+    # through JSON, and a materialization plan is not JSON — it is rebuilt here
+    # from the authored unit against the ids this loop has actually published.
+    process_units_by_key = {
+        unit.envelope.component_key: unit
+        for unit in (getattr(spec, "processes", ()) or ())
+    }
+    process_mutations: List[Any] = []
+    process_readbacks: List[Any] = []
 
     for key in execution_order:
+        # #153: a canonical ProcessIR root. Materialized through the neutral
+        # chain — compile with placeholders, rebind to the ids published above,
+        # emit, wrap — then attested twice. Handled BEFORE the component lookup
+        # because `components_by_key` does not contain process keys (QA-153-r1-01).
+        unit = process_units_by_key.get(key)
+        if unit is not None:
+            outcome = _execute_canonical_process(
+                boomi_client=boomi_client,
+                profile=profile,
+                unit=unit,
+                spec=spec,
+                conflict_policy=conflict_policy,
+                existing_id=existing_ids.get(key),
+                id_registry=id_registry,
+                account_id=config.get("account_id"),
+            )
+            results[key] = outcome["result"]
+            if outcome.get("component_id"):
+                id_registry[key] = outcome["component_id"]
+            if outcome.get("mutation") is not None:
+                process_mutations.append(outcome["mutation"])
+            if outcome.get("readback") is not None:
+                process_readbacks.append(outcome["readback"])
+            if not outcome["result"].get("_success", True):
+                return {
+                    "_success": False,
+                    "error": outcome.get("error") or f"Failed at step '{key}'",
+                    "error_code": outcome.get("error_code"),
+                    "failed_step": key,
+                    "partial_results": results,
+                    # Roots applied BEFORE the failure keep their attestations;
+                    # unapplied roots record none. That asymmetry is the record.
+                    "process_mutations": [m.model_dump(mode="json") for m in process_mutations],
+                    "process_readbacks": [r.model_dump(mode="json") for r in process_readbacks],
+                }
+            continue
+
         comp = components_by_key[key]
         existing_id = existing_ids.get(key)
         resolved_config = _resolve_dependency_tokens(comp.config, id_registry)
@@ -8183,11 +8533,27 @@ def build_integration_action(
             "hint": "Valid actions are: " + ", ".join(_valid_actions()),
         }
     except ValueError as exc:
-        return {
+        # #153 (QA-153-r1-04): a pydantic error carrying one of THIS slice's
+        # named codes is served with that code, not as anonymous prose.
+        #
+        # The shared component/process key-namespace rule fires inside
+        # `IntegrationSpecV1` construction, so it surfaces as a `ValidationError`
+        # and reached this arm without an `error_code` — while its two sibling
+        # graph rules (`INTEGRATION_DEPENDENCY_REQUIRED`, `_CYCLE`) were served
+        # properly. One rule family, two serving behaviours, is drift.
+        #
+        # Read from the pydantic error's own `type` rather than matched on the
+        # message: the message is prose that will be reworded, the type is the
+        # `PydanticCustomError` identifier the validator raised.
+        code = _named_error_code_from_validation(exc)
+        envelope = {
             "_success": False,
             "error": f"Validation error: {exc}",
             "exception_type": "ValidationError",
         }
+        if code is not None:
+            envelope["error_code"] = code
+        return envelope
     except Exception as exc:
         return {
             "_success": False,

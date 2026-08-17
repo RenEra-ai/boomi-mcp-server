@@ -622,3 +622,52 @@ def test_the_served_plan_never_echoes_an_authored_process_ir_value(spy):
     assert watermark in json.dumps({"authored": doc})
     assert watermark not in served, "authored ProcessIR leaked into the served plan"
     assert result.integration_spec_preview.processes == []
+
+
+def test_the_legacy_component_plan_echo_cannot_restore_withheld_roots(spy, monkeypatch):
+    """QA-153-r1-02. The FIRST withholding fix was silently undone downstream.
+
+    ``build_integration_spec_preview`` withholds the authored roots, and fifty
+    lines later the legacy component-plan lint's echo REPLACED the preview with
+    one rebuilt from the normalized spec — which since #153 carries
+    ``processes[]``. Live QA measured planted canaries in every served plan and
+    compile response while the builder itself was provably withholding them.
+
+    **Why the original guard missed it, and why this test forces the echo.**
+    ``_legacy_plan_echo`` returns ``None`` when there is no ``boomi_client``, so
+    in a unit test the overwriting line never executes and a canary sweep cannot
+    discriminate — measured: with the fix reverted, an unforced probe still
+    reported no leak. Forcing the echo is what makes this a control rather than
+    a coincidence. Verified in both directions: with the fix reverted this test
+    FAILS, with it in place it passes.
+    """
+    import copy
+    import json
+
+    import boomi_mcp.authoring.workflow as workflow
+
+    watermark = "M12_15_ECHO_RESTORE_WATERMARK"
+    doc = copy.deepcopy(UNRESOLVABLE_IR_DOC) if False else None
+
+    def _echo(normalized, request, boomi_client):
+        # Exactly what a live client produces: the NORMALIZED spec, roots and all.
+        return {
+            "_success": True,
+            "integration_spec": normalized.integration_spec.model_dump(mode="json"),
+            "steps": [],
+        }
+
+    monkeypatch.setattr(workflow, "_legacy_plan_echo", _echo)
+
+    from _m12_11_support import VALID_IR_DOC
+
+    authored = copy.deepcopy(VALID_IR_DOC)
+    authored["body"]["steps"].insert(1, {"kind": "message", "text": watermark})
+
+    result = _plan(process_ir_request(authored))
+    served = result.model_dump_json()
+
+    # Positive control: the sweep can see the watermark when it IS present.
+    assert watermark in json.dumps({"authored": authored})
+    assert watermark not in served, "the legacy echo restored the withheld roots"
+    assert result.integration_spec_preview.processes == []
