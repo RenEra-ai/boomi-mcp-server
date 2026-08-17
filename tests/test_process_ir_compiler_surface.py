@@ -241,7 +241,7 @@ def test_compiler_package_is_importable_directly():
     assert callable(compile_process_ir_v1)
 
 
-def test_connector_call_is_in_the_internal_ir_schema_but_no_public_tool_surface():
+def test_connector_call_is_in_the_internal_ir_schema_but_no_public_surface():
     """#140's node kind is authored IR, so it MUST appear in the internal
     ProcessIR schema — and must still reach no MCP tool surface.
 

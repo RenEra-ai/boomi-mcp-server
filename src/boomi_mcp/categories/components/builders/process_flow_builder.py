@@ -49,7 +49,6 @@ from pydantic import ValidationError
 
 from ....models.cache_property_models import PROPERTY_SOURCE_FIELD_CONTRACT
 from ....models.pipeline_models import PipelineSpec, StageSpec
-from ._preservation_policy import OwnedPath, PreservationPolicy
 from ._process_preservation import PROCESS_PRESERVATION_POLICY
 from .cache_property_lineage import validate_config_lineage
 from .connector_builder import (

@@ -2185,19 +2185,10 @@ class _CanonicalProcessPlanFingerprintProvider:
 
         from boomi_mcp.authoring.contract import get_authoring_revisions
         from boomi_mcp.authoring.process_materialization import (
-            ProcessComponentMaterializationPlanV1,
-            build_plan_fingerprint_fields,
-            preservation_policy_v1,
+            build_materialization_plan,
             process_plan_fingerprint,
         )
-        from boomi_mcp.compiler.process_ir.contracts import (
-            canonical_emission_plan_json,
-        )
         from boomi_mcp.compiler.process_ir.emitter_registry import emitter_revision
-        from boomi_mcp.compiler.process_ir.execution_profile import (
-            derive_process_execution_profile,
-        )
-        from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
         from boomi_mcp.models.integration_models import IntegrationComponentSpec
         from boomi_mcp.models.process_component import ProcessComponentEnvelopeV1
         from boomi_mcp.models.process_ir import parse_process_ir_v1
@@ -2263,7 +2254,6 @@ class _CanonicalProcessPlanFingerprintProvider:
         )
 
         ir = parse_process_ir_v1(doc)
-        cfg, emission_plan = compile_process_ir_v1(ir, symbols)
 
         envelope = ProcessComponentEnvelopeV1(
             component_key="wave_gate_root",
@@ -2277,13 +2267,13 @@ class _CanonicalProcessPlanFingerprintProvider:
             else None,
         )
 
-        covered = dict(
+        # The builder OWNS compilation and forces placeholder-backed symbols, so
+        # the emission plan the fingerprint covers cannot carry account ids.
+        plan = build_materialization_plan(
             envelope=envelope,
             process_ir=ir,
-            emission_plan=_json.loads(canonical_emission_plan_json(emission_plan)),
-            execution_profile=derive_process_execution_profile(cfg, symbols),
+            symbols=symbols,
             conflict_policy="fail" if mutation == "policy" else "reuse",
-            preservation_policy=preservation_policy_v1(),
             compiler_revision=get_authoring_revisions()["compiler_revision"],
             emitter_revision=emitter_revision(),
             # The one revision the provider may vary, so the `revision` mutation
@@ -2293,8 +2283,6 @@ class _CanonicalProcessPlanFingerprintProvider:
             # ACCOUNT-BOUND, EXCLUDED — same reason as component_id above.
             resolved_folder_id="{0}-{1}-folder".format(account, environment),
         )
-        digest = build_plan_fingerprint_fields(**covered)
-        plan = ProcessComponentMaterializationPlanV1(plan_fingerprint=digest, **covered)
         return process_plan_fingerprint(plan)
 
 

@@ -866,10 +866,29 @@ def emitter_revision() -> str:
     """``sha256:<hex>`` over the emitter registry's behavioural projection (#153).
 
     Recorded on a canonical materialization plan so a plan compiled by one
-    emitter build cannot be applied by another without the mismatch being
-    visible. It fingerprints BEHAVIOUR, not source: the projection is the
-    registry's own declared columns, so a comment change leaves it still while a
-    changed cardinality, capability, input model or shape type moves it.
+    emitter REGISTRATION TABLE cannot be applied against a different one without
+    the mismatch being visible.
+
+    **Scope, stated precisely rather than generously.** This fingerprints the
+    registration TABLE — kinds, input models, shape types, capabilities,
+    cardinalities, and which callable each kind is bound to. It does NOT
+    fingerprint what an emitter emits: rewriting the BODY of an ``_emit_*``
+    function leaves this value unchanged. An earlier docstring claimed it
+    "fingerprints BEHAVIOUR", which an adversarial review correctly refuted by
+    swapping an emit callable's body and observing an identical digest.
+
+    Covering bodies was considered and rejected: the only mechanical option is
+    hashing ``__code__.co_code``, which differs between CPython versions — and
+    this repository runs 3.12 locally against 3.11 in CI, so it would report
+    drift between two correct deployments and destroy the relocatability the
+    plan fingerprint exists to provide. ``__qualname__`` IS included, so a kind
+    REPOINTED at a different function is caught even though an edit in place is
+    not.
+
+    Deliberately not a source hash or a git SHA, matching
+    ``authoring.contract._compiler_revision``: equivalent packaged code must
+    produce the same revision, or a rebuilt-but-identical deployment reports
+    drift against itself.
 
     Deliberately NOT a source hash or a git SHA, matching
     ``authoring.contract._compiler_revision``: equivalent packaged code must
@@ -893,8 +912,15 @@ def emitter_revision() -> str:
                 # PRESENCE, not identity: a function object's repr carries a
                 # memory address, which would make the revision vary per process
                 # and destroy relocatability.
-                "has_requirements": reg.requirements is not _no_requirements,
-                "has_precondition": reg.precondition is not None,
+                # Qualified NAMES, not identities: a repr carries a memory
+                # address, which would vary per process and destroy
+                # relocatability. Names catch a kind repointed at a different
+                # callable; they cannot catch an edit inside one (see docstring).
+                "emit": getattr(reg.emit, "__qualname__", ""),
+                "requirements": getattr(reg.requirements, "__qualname__", ""),
+                "precondition": getattr(reg.precondition, "__qualname__", "")
+                if reg.precondition is not None
+                else None,
             }
             for reg in _REGISTRATIONS
         ),

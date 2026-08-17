@@ -11,40 +11,44 @@ cannot certify emitted XML, because the XML does not exist yet in its final form
 compilation runs with PLACEHOLDER component ids, the real Boomi ids bind only
 during ordered apply, and an update merges live preserved state that is not
 knowable beforehand. So this fingerprint covers a RELOCATABLE plan — what would
-be built, independent of which account builds it — and the concrete, account-bound
-result is attested separately at apply time. Collapsing them into one is the
-failure mode the issue explicitly names.
+be built, independent of which account builds it — and the concrete,
+account-bound result is attested separately at apply time.
 
-**What "relocatable" has to mean.** Two different accounts, with different real
-component ids and different folder ids, authoring the same logical process, must
-produce BYTE-IDENTICAL canonical material. That is asserted on the bytes, not
-only on the digest — a provider returning a constant would match on digests
-alone. The account-bound fields are therefore excluded by construction rather
-than by hoping they never appear:
+**What "relocatable" has to mean.** Two accounts, with different real component
+ids and different folder ids, authoring the same logical process, must produce
+BYTE-IDENTICAL canonical material. That is asserted on the bytes, not only on the
+digest — a provider returning a constant would match on digests alone.
 
-* ``component_id`` — the update target, or the server-assigned create result.
-* ``resolved_folder_id`` — resolved from a folder NAME at apply time.
-* the fingerprint field itself, which cannot cover itself.
+**Three structural guarantees, because the first draft of this module got each
+of them wrong and an adversarial review caught all three.** They are recorded
+here as mechanisms rather than intentions, because "we exclude the account-bound
+fields" turned out to be a claim the code did not keep:
 
-Everything else is covered: the normalized envelope, the normalized ProcessIR,
-the placeholder-backed emission plan, the unresolved symbol slots, the
-compiler-derived execution profile, the conflict and preservation policies, and
-the recorded behaviour revisions.
-
-**Why literal component references are refused here.**
-:data:`~boomi_mcp.models.process_ir.ComponentRefV1` admits either a ``$ref:KEY``
-token or a literal Boomi component id. A literal id is an ACCOUNT-BOUND value, so
-a root carrying one cannot have a relocatable plan at all — the same logical
-process would fingerprint differently in a second account, silently. Rather than
-let that produce a plan whose central promise is false, materialization planning
-refuses it with ``PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE`` and points
-the caller at the component plan, where an existing component is referenced by
-logical key.
+1. **Coverage is DERIVED, not hand-listed.** The canonical material is built by
+   iterating the model's own fields minus :data:`EXCLUDED_PLAN_FIELDS`. The first
+   draft hand-built a ten-key payload while *documenting* the exclusion set as
+   the authority — so the set was dead documentation and a new field would have
+   been silently uncovered. A new field is now covered BY DEFAULT, which fails
+   loudly at the wave gate if it is account-bound, rather than silently.
+2. **Literal component references are refused.**
+   :data:`~boomi_mcp.models.process_ir.ComponentRefV1` admits a literal Boomi id
+   as well as a ``$ref:KEY`` token, and the envelope's extension bindings carry
+   one. The first draft covered those bindings wholesale, so a literal id made
+   the plan non-relocatable while every test still passed — measured: the same
+   logical process produced different bytes in two accounts.
+3. **The emission plan is compiled HERE, with placeholders forced.** The first
+   draft accepted a caller-supplied plan and merely assumed it was
+   placeholder-backed; ``build_symbol_table`` exposes ``resolver`` publicly, so a
+   real-id plan was one keyword away. The builder now rebuilds the symbol table
+   with :func:`placeholder_component_id` before compiling, so an account-bound
+   emission plan cannot be constructed at all.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
+import json
 from typing import Any, Dict, Literal, Mapping, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -54,25 +58,23 @@ from ..models.process_component import ProcessComponentEnvelopeV1
 from ..models.process_ir import ProcessIRV1
 from .revisions import canonical_json_bytes
 
-#: Wire version of the CANONICAL MATERIAL below. Bumped by hand only when the
+#: Wire version of the CANONICAL MATERIAL. Bumped by hand only when the
 #: material's SHAPE changes. It is covered by the material itself, so an old plan
 #: and a new plan can never collide even if every other covered value matches.
-PLAN_MATERIAL_WIRE_VERSION = "1"
+PLAN_MATERIAL_WIRE_VERSION = "2"
 
-#: The reference prefix that makes a reference logical rather than account-bound.
 _REF_PREFIX = "$ref:"
 
-#: Envelope fields the fingerprint deliberately does NOT cover, with the reason.
-#: Named as data so the coverage-accounting test can read them instead of
-#: re-listing them — a second hand-written copy of this set is exactly how a new
-#: field ends up silently uncovered.
+#: Envelope fields the fingerprint does NOT cover, with the reason. READ by
+#: :func:`canonical_plan_material` — not decoration.
 EXCLUDED_ENVELOPE_FIELDS: Mapping[str, str] = {
     "component_id": (
         "account-bound: the update target, or the server-assigned create result"
     ),
 }
 
-#: Plan fields excluded from the material, with the reason.
+#: Plan fields the fingerprint does NOT cover, with the reason. READ by
+#: :func:`canonical_plan_material`.
 EXCLUDED_PLAN_FIELDS: Mapping[str, str] = {
     "resolved_folder_id": "account-bound: resolved from a folder NAME at apply time",
     "plan_fingerprint": "cannot cover itself",
@@ -80,7 +82,7 @@ EXCLUDED_PLAN_FIELDS: Mapping[str, str] = {
 
 
 class _PlanModel(BaseModel):
-    """Strict, frozen, tuple-only — and repr-suppressed like every authored shape."""
+    """Strict, frozen, and repr-suppressed like every authored shape."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -92,13 +94,12 @@ class _PlanModel(BaseModel):
                 yield key, "..."
 
 
-class ProcessComponentSymbolSlotV1(_PlanModel):
-    """One logical reference the plan must bind to a real component id at apply.
+def _canonical_json_text(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
-    Recorded so ordered apply can verify, BEFORE mutating anything, that every
-    reference this root needs is already resolvable — rather than discovering a
-    missing dependency halfway through emitting XML.
-    """
+
+class ProcessComponentSymbolSlotV1(_PlanModel):
+    """One logical reference the plan must bind to a real component id at apply."""
 
     slot_id: str
     ref: str
@@ -119,7 +120,7 @@ class ProcessComponentSymbolSlotV1(_PlanModel):
     def _check_ref_is_logical(cls, value: str) -> str:
         """Exactly ``$ref:KEY`` — never a literal component id.
 
-        Stricter than ``ComponentRefV1`` on purpose. A literal id is
+        Stricter than ``ComponentRefV1`` on purpose: a literal id is
         account-bound, so a slot carrying one would make the plan
         non-relocatable while still looking well-formed.
         """
@@ -140,56 +141,68 @@ class ProcessComponentSymbolSlotV1(_PlanModel):
 class ProcessPreservationPolicyV1(_PlanModel):
     """The update-preservation policy this plan will execute under.
 
-    A PROJECTION of the single runtime constant
-    (``builders._process_preservation.PROCESS_PRESERVATION_POLICY``), never an
-    independent restatement of it: two descriptions of one preservation rule
-    could disagree, and the disagreement would be a structured update that
-    discards live state the plan promised to keep. :func:`preservation_policy_v1`
-    is the only supported way to build one.
+    A COMPLETE projection of the single runtime constant, carried as canonical
+    JSON derived with :func:`dataclasses.asdict`. Complete by construction rather
+    than by field list: the first draft hand-read two of ``PreservationPolicy``'s
+    eight fields and one of ``OwnedPath``'s eleven, which meant two materially
+    different preservation policies — differing in ``OwnedPath.mode``, the field
+    that decides whether a subtree is REPLACED or merged, or in
+    ``owned_encrypted_paths``, which decides whether live credentials survive —
+    projected to byte-identical material and therefore to the same fingerprint.
+
+    :func:`preservation_policy_v1` is the only supported way to build one.
     """
 
     policy_id: Literal["process.read_merge_write.v1"] = "process.read_merge_write.v1"
-    component_type: Literal["process"] = "process"
-    owned_root_attributes: Tuple[str, ...]
-    owned_paths: Tuple[str, ...]
+    #: The whole runtime policy, canonically serialized. Opaque on purpose: its
+    #: job is to be COMPLETE and comparable, not to be re-read field by field.
+    canonical_policy_json: str
 
 
 def preservation_policy_v1() -> ProcessPreservationPolicyV1:
-    """Project the ONE runtime preservation policy onto the plan.
+    """Project the ONE runtime preservation policy onto the plan, in full.
 
     Imported lazily: ``authoring`` must not import ``categories`` at module
     scope (the builders import authoring models, and the reverse at import time
-    would cycle). The same lazy-import discipline the rest of this package uses.
-
-    Every field is READ from the runtime constant. Nothing is restated, so a
-    change to the policy reaches the plan automatically instead of leaving the
-    plan describing a rule the builders no longer follow.
+    would cycle).
     """
     from ..categories.components.builders._process_preservation import (
         PROCESS_PRESERVATION_POLICY,
     )
 
-    policy = PROCESS_PRESERVATION_POLICY
     return ProcessPreservationPolicyV1(
-        owned_root_attributes=tuple(policy.owned_root_attrs),
-        owned_paths=tuple(owned.path for owned in policy.owned_paths),
+        canonical_policy_json=_canonical_json_text(
+            dataclasses.asdict(PROCESS_PRESERVATION_POLICY)
+        )
     )
+
+
+def _iter_envelope_refs(envelope: ProcessComponentEnvelopeV1):
+    """Every component reference the ENVELOPE carries, with a JSON-pointer-ish path."""
+    for index, connection in enumerate(envelope.process_extensions.connections):
+        yield (
+            "process_extensions/connections/{0}/connection_id".format(index),
+            connection.connection_id,
+        )
 
 
 class ProcessComponentMaterializationPlanV1(_PlanModel):
     """Everything apply needs to materialize ONE process root, plus its fingerprint.
 
-    Internal by design — see the module docstring. The ``plan_fingerprint`` is
-    STORED rather than computed on demand so ordered apply can verify, before
-    mutating anything, that the plan it is about to execute is the plan that was
-    compiled. The model re-derives it on construction and refuses a mismatch, so
-    a hand-assembled plan carrying someone else's fingerprint cannot exist.
+    ``plan_fingerprint`` is STORED rather than computed on demand so ordered
+    apply can verify, before mutating anything, that the plan it is about to
+    execute is the plan that was compiled. The model re-derives it and refuses a
+    mismatch.
     """
 
     version: Literal["1"] = "1"
     envelope: ProcessComponentEnvelopeV1
     process_ir: ProcessIRV1
-    emission_plan: Mapping[str, Any]
+    #: Canonical JSON TEXT, not a mapping. A ``Mapping`` field is mutable even on
+    #: a frozen model — measured: a single in-place write desynchronized the
+    #: stored fingerprint from the plan's own material after validation, which
+    #: defeats the tamper-evidence the stored digest exists to provide.
+    emission_plan_canonical_json: str
     unresolved_symbol_slots: Tuple[ProcessComponentSymbolSlotV1, ...] = ()
     execution_profile: Literal["scheduled", "listener"]
     conflict_policy: Literal["reuse", "clone", "fail"]
@@ -197,8 +210,6 @@ class ProcessComponentMaterializationPlanV1(_PlanModel):
     compiler_revision: str
     emitter_revision: str
     materializer_revision: str
-    #: Account-bound apply overlay. Excluded from the canonical material — see
-    #: :data:`EXCLUDED_PLAN_FIELDS`.
     resolved_folder_id: Optional[str] = None
     plan_fingerprint: str
 
@@ -215,9 +226,36 @@ class ProcessComponentMaterializationPlanV1(_PlanModel):
                 "duplicate symbol slot_id(s): {ids}",
                 {"ids": ", ".join(duplicated)},
             )
-        # Canonical ORDER, so the caller's iteration order cannot reach the
-        # fingerprint. The slots are a set of requirements, not a sequence.
         return tuple(sorted(value, key=lambda slot: slot.slot_id))
+
+    @model_validator(mode="after")
+    def _envelope_references_are_relocatable(
+        self,
+    ) -> "ProcessComponentMaterializationPlanV1":
+        """No literal component id may reach the covered material.
+
+        ``ComponentRefV1`` admits a literal Boomi id, and the envelope's
+        extension bindings are COVERED by the fingerprint — so a literal id makes
+        the plan non-relocatable while looking perfectly well-formed. Measured on
+        the first draft: the same logical process produced different bytes under
+        two account identities. Refused here rather than excluded, because
+        dropping the bindings from coverage would stop a real override change
+        from moving the fingerprint.
+        """
+        offenders = [
+            path
+            for path, ref in _iter_envelope_refs(self.envelope)
+            if not ref.startswith(_REF_PREFIX)
+        ]
+        if offenders:
+            raise PydanticCustomError(
+                "process_materialization_reference_not_relocatable",
+                "literal component id(s) at {paths}; a materializable plan may "
+                "carry only '$ref:KEY' tokens — reference an existing component "
+                "by logical key in the component plan instead",
+                {"paths": ", ".join(offenders)},
+            )
+        return self
 
     @model_validator(mode="after")
     def _fingerprint_matches_its_own_material(
@@ -232,39 +270,48 @@ class ProcessComponentMaterializationPlanV1(_PlanModel):
         return self
 
 
+def covered_plan_fields() -> Tuple[str, ...]:
+    """The plan fields the fingerprint covers — DERIVED from the model.
+
+    The single authority for coverage. A field added to the model is covered
+    automatically unless it is named in :data:`EXCLUDED_PLAN_FIELDS`, so the
+    exclusion set is load-bearing rather than documentation.
+    """
+    return tuple(
+        name
+        for name in ProcessComponentMaterializationPlanV1.model_fields
+        if name not in EXCLUDED_PLAN_FIELDS
+    )
+
+
+def _dump(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, tuple):
+        return [_dump(item) for item in value]
+    return value
+
+
 def canonical_plan_material(plan: "ProcessComponentMaterializationPlanV1") -> bytes:
     """The exact bytes the fingerprint is taken over.
 
-    Returned as bytes rather than a dict so callers compare what was HASHED, not
-    a re-serialization of it. The wave gate compares these bytes across two
-    synthetic account identities; if they differ, the plan is not relocatable
-    even when the digests happen to agree.
+    Built by walking :func:`covered_plan_fields`, so the material cannot drift
+    from the model. Returned as bytes rather than a dict so callers compare what
+    was HASHED, not a re-serialization of it.
     """
-    envelope = plan.envelope.model_dump(mode="json")
-    for excluded in EXCLUDED_ENVELOPE_FIELDS:
-        envelope.pop(excluded, None)
-
     payload: Dict[str, Any] = {
         "kind": "process_component_materialization_plan",
         "wire_version": PLAN_MATERIAL_WIRE_VERSION,
-        "version": plan.version,
-        "envelope": envelope,
-        "process_ir": plan.process_ir.model_dump(mode="json"),
-        "emission_plan": dict(plan.emission_plan),
-        "unresolved_symbol_slots": [
-            slot.model_dump(mode="json") for slot in plan.unresolved_symbol_slots
-        ],
-        "execution_profile": plan.execution_profile,
-        "policies": {
-            "conflict_policy": plan.conflict_policy,
-            "preservation_policy": plan.preservation_policy.model_dump(mode="json"),
-        },
-        "revisions": {
-            "compiler_revision": plan.compiler_revision,
-            "emitter_revision": plan.emitter_revision,
-            "materializer_revision": plan.materializer_revision,
-        },
     }
+    for name in covered_plan_fields():
+        value = getattr(plan, name)
+        if name == "envelope":
+            envelope = value.model_dump(mode="json")
+            for excluded in EXCLUDED_ENVELOPE_FIELDS:
+                envelope.pop(excluded, None)
+            payload[name] = envelope
+        else:
+            payload[name] = _dump(value)
     return canonical_json_bytes(payload)
 
 
@@ -276,31 +323,90 @@ def _fingerprint_of(plan: "ProcessComponentMaterializationPlanV1") -> Tuple[str,
 def process_plan_fingerprint(
     plan: "ProcessComponentMaterializationPlanV1",
 ) -> Tuple[str, bytes]:
-    """``(digest, canonical_material)`` for a plan — the ONE way to compute it.
+    """``(digest, canonical_material)`` — the ONE way to compute it.
 
-    Both values come from one function on purpose. The wave gate RECOMPUTES the
-    digest from the returned bytes and refuses a mismatch, so a second code path
-    that derived the digest independently could drift from the material it
-    claims to describe and would be caught only there. One function makes the
-    drift unrepresentable.
+    Both values come from one function on purpose: the wave gate RECOMPUTES the
+    digest from the returned bytes, so a second code path deriving the digest
+    independently could drift from the material it claims to describe.
     """
     return _fingerprint_of(plan)
 
 
-def build_plan_fingerprint_fields(**covered: Any) -> str:
-    """Compute the fingerprint for a plan that does not exist yet.
+def placeholder_backed_symbols(symbols):
+    """A symbol table with every ``component_id`` forced to its placeholder.
 
-    The plan stores its own fingerprint and validates it, which is circular at
-    construction time: the value is needed before the model can be built. This
-    resolves it by constructing the model with a placeholder digest through
-    ``model_construct`` (no validation), taking the material, and returning the
-    real digest for the caller to pass in.
+    The structural guarantee behind relocatability. ``build_symbol_table``
+    exposes ``resolver`` publicly and the legacy arm already passes a real one,
+    so accepting a caller's table verbatim would let real account ids reach the
+    covered emission plan. Rebuilding the table here makes that unrepresentable
+    rather than merely discouraged.
     """
+    from ..compiler.process_ir.contracts import SymbolTableV1
+    from ..recipes.materialization import placeholder_component_id
+
+    return SymbolTableV1(
+        symbols=tuple(
+            symbol.model_copy(
+                update={"component_id": placeholder_component_id(symbol.ref)}
+            )
+            for symbol in symbols.symbols
+        ),
+        idempotency_contracts=symbols.idempotency_contracts,
+    )
+
+
+def build_materialization_plan(
+    *,
+    envelope: ProcessComponentEnvelopeV1,
+    process_ir: ProcessIRV1,
+    symbols,
+    conflict_policy: str,
+    compiler_revision: str,
+    emitter_revision: str,
+    materializer_revision: str,
+    unresolved_symbol_slots: Tuple[ProcessComponentSymbolSlotV1, ...] = (),
+    resolved_folder_id: Optional[str] = None,
+) -> ProcessComponentMaterializationPlanV1:
+    """Compile, derive, and fingerprint ONE root — the only supported constructor.
+
+    Owning compilation is what makes the emission plan provably placeholder-backed
+    (see the module docstring). The execution profile is derived here for the same
+    reason: a caller-supplied profile could contradict the graph.
+    """
+    from ..compiler.process_ir.contracts import canonical_emission_plan_json
+    from ..compiler.process_ir.execution_profile import (
+        derive_process_execution_profile,
+    )
+    from ..compiler.process_ir.pipeline import compile_process_ir_v1
+
+    relocatable_symbols = placeholder_backed_symbols(symbols)
+    cfg, emission_plan = compile_process_ir_v1(process_ir, relocatable_symbols)
+
+    covered: Dict[str, Any] = dict(
+        envelope=envelope,
+        process_ir=process_ir,
+        emission_plan_canonical_json=canonical_emission_plan_json(emission_plan),
+        # Sorted BEFORE the digest is taken. The first draft computed the digest
+        # from a `model_construct`ed provisional plan, which skips validators —
+        # so the canonicalizing sort never ran on the hashed bytes and a plan with
+        # unsorted slots was impossible to construct.
+        unresolved_symbol_slots=tuple(
+            sorted(unresolved_symbol_slots, key=lambda slot: slot.slot_id)
+        ),
+        execution_profile=derive_process_execution_profile(cfg, relocatable_symbols),
+        conflict_policy=conflict_policy,
+        preservation_policy=preservation_policy_v1(),
+        compiler_revision=compiler_revision,
+        emitter_revision=emitter_revision,
+        materializer_revision=materializer_revision,
+        resolved_folder_id=resolved_folder_id,
+    )
+
     provisional = ProcessComponentMaterializationPlanV1.model_construct(
         plan_fingerprint="sha256:" + "0" * 64, **covered
     )
     digest, _material = _fingerprint_of(provisional)
-    return digest
+    return ProcessComponentMaterializationPlanV1(plan_fingerprint=digest, **covered)
 
 
 __all__ = [
@@ -310,8 +416,10 @@ __all__ = [
     "ProcessComponentMaterializationPlanV1",
     "ProcessComponentSymbolSlotV1",
     "ProcessPreservationPolicyV1",
-    "build_plan_fingerprint_fields",
+    "build_materialization_plan",
     "canonical_plan_material",
+    "covered_plan_fields",
+    "placeholder_backed_symbols",
     "preservation_policy_v1",
     "process_plan_fingerprint",
 ]

@@ -2044,7 +2044,7 @@
     {
       "census": "registry_lookup",
       "count": 1,
-      "evidence_line": 6152,
+      "evidence_line": 6151,
       "form": "PROCESS_FLOW_BUILDERS (read)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LR-47b36d32",
@@ -2053,7 +2053,7 @@
     {
       "census": "registry_lookup",
       "count": 1,
-      "evidence_line": 6152,
+      "evidence_line": 6151,
       "form": "PROCESS_FLOW_BUILDERS.get(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LR-a4b26efd",
@@ -2323,7 +2323,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6159,
+      "evidence_line": 6158,
       "form": "'PROCESS_FLOW_BUILDERS' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-e8179527",
@@ -2332,7 +2332,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6156,
+      "evidence_line": 6155,
       "form": "'ProcessFlowBuilder' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-e79baecd",
@@ -2341,7 +2341,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6158,
+      "evidence_line": 6157,
       "form": "'SyncPipelineBuilder' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-9ea5e934",
@@ -2350,7 +2350,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6157,
+      "evidence_line": 6156,
       "form": "'WrapperSubprocessBuilder' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-ae78d786",
@@ -2359,7 +2359,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6160,
+      "evidence_line": 6159,
       "form": "'get_process_flow_builder' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-2ca4aab3",
@@ -2548,7 +2548,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 6150,
+      "evidence_line": 6149,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-81d88cd1",
@@ -2557,7 +2557,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6148,
+      "evidence_line": 6147,
       "form": "process_kind (unclassified selector parameter)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-d75ee4b6",
@@ -5621,7 +5621,7 @@
     {
       "census": "registry_lookup",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 6152,
+      "evidence_line": 6151,
       "forms": [
         "PROCESS_FLOW_BUILDERS (read)",
         "PROCESS_FLOW_BUILDERS.get(...)"
@@ -6013,7 +6013,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 6148,
+      "evidence_line": 6147,
       "forms": [
         "process_kind (unclassified selector name)",
         "process_kind (unclassified selector parameter)"
@@ -6846,7 +6846,7 @@
       "symbol",
       "form"
     ],
-    "python_source_count": 209,
+    "python_source_count": 212,
     "roots": [
       "*.py (repo root)",
       "src/boomi_mcp",
@@ -7218,7 +7218,7 @@
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "65004d0f8ace6a712f90dc3643c9e1fa220cb33dc37841c91dde9bce26fd9586",
+      "sha256": "a5ba894ec6fa0271bd108e3fc0e0a01dcef891bf6bc0e7b1c3cdadc7d5a4218e",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7324,10 +7324,10 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:2d1e3665141310efc4a5f6206354b6d89b7710656fa5a3ee118b94b2b1711ec2",
+          "actual_capability_revision": "sha256:c0d9cd34a611783d4316acf672bca6a1f5bdd23d6b0b8be704f10031c600b9b0",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:2d1e3665141310efc4a5f6206354b6d89b7710656fa5a3ee118b94b2b1711ec2",
+        "capability_revision": "sha256:c0d9cd34a611783d4316acf672bca6a1f5bdd23d6b0b8be704f10031c600b9b0",
         "compiler_revision": "sha256:e271daa590dd5acaf81ee94809b5150f6aeadeac7365c6714de615cb561e362d",
         "contract_version": "2",
         "intent_kinds": [
@@ -7559,7 +7559,7 @@
             "constraint_only",
             "executable_recipe"
           ],
-          "registry_revision": "0d306218be828bad334a4d8ab8860f8c77e7f5c1f0f75a94f909c42b6dbda8af",
+          "registry_revision": "926fc3f2248d243f54b540e594ee33550bc772b281b86633583983577cc71782",
           "schema_version": "1",
           "source_version": "0.1.0"
         },
@@ -13772,7 +13772,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "3da212abf8aabfaf026f4200ec2a71da418ba7cf75a9b2bbda24eecd462a95e2",
+      "sha256": "8d081f8e226dd41ccb1e1a9592bd3518931bd54db937bf692fc2d03d62990db5",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -16957,7 +16957,7 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:2d1e3665141310efc4a5f6206354b6d89b7710656fa5a3ee118b94b2b1711ec2",
+          "capability_revision": "sha256:c0d9cd34a611783d4316acf672bca6a1f5bdd23d6b0b8be704f10031c600b9b0",
           "compiler_revision": "sha256:e271daa590dd5acaf81ee94809b5150f6aeadeac7365c6714de615cb561e362d",
           "contract_version": "2",
           "schema_revision": "sha256:b7d6b00e248a2d78af00e1e44a77b979a0233e7c805b6152fc79e0b42ffb3ac5"
@@ -16978,7 +16978,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "c8acc576fb5b860e5ea1295161cad6091484598566d7d50f531934901257c9d6",
+      "sha256": "07156c9aa880e9b7bbb6f4e7e38db3e1ad9272f5fb62ae40bb63342cacdc1492",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -20093,7 +20093,7 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:2d1e3665141310efc4a5f6206354b6d89b7710656fa5a3ee118b94b2b1711ec2",
+          "capability_revision": "sha256:c0d9cd34a611783d4316acf672bca6a1f5bdd23d6b0b8be704f10031c600b9b0",
           "compiler_revision": "sha256:e271daa590dd5acaf81ee94809b5150f6aeadeac7365c6714de615cb561e362d",
           "contract_version": "2",
           "schema_revision": "sha256:b7d6b00e248a2d78af00e1e44a77b979a0233e7c805b6152fc79e0b42ffb3ac5"
@@ -20115,7 +20115,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "bb6aa957533012e669e2920d659ad3f5a0d3f5cdea07ffa3a6a9d3298d5cc8b5",
+      "sha256": "5279e93782183f4f93ae1d5ddd18d72176b08fc62fe557328f5a17f4cae7f928",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -23613,7 +23613,7 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:2d1e3665141310efc4a5f6206354b6d89b7710656fa5a3ee118b94b2b1711ec2",
+          "capability_revision": "sha256:c0d9cd34a611783d4316acf672bca6a1f5bdd23d6b0b8be704f10031c600b9b0",
           "compiler_revision": "sha256:e271daa590dd5acaf81ee94809b5150f6aeadeac7365c6714de615cb561e362d",
           "contract_version": "2",
           "schema_revision": "sha256:b7d6b00e248a2d78af00e1e44a77b979a0233e7c805b6152fc79e0b42ffb3ac5"
@@ -37053,7 +37053,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "f481c6cde47bc26c097176bc65c06c0e95ab145ec0d2a74d6b422f91ff92a4a4",
+      "sha256": "2654a00907a7bd7e422fb350b63415375c282af70e03e13e82b21d26d574d4b1",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "8327243ec482fa1641f49265c87694e33616f12db015b3f234dc73db9ed8057c",
@@ -37335,14 +37335,14 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "1434b9a78e84a02420b274109bbf27676fc9a5acfdca9701b360e4cc6bcdbe10",
-        "schema_name=AuthoringCompileResultV1": "3da212abf8aabfaf026f4200ec2a71da418ba7cf75a9b2bbda24eecd462a95e2",
-        "schema_name=AuthoringPlanResultV1": "c8acc576fb5b860e5ea1295161cad6091484598566d7d50f531934901257c9d6",
-        "schema_name=AuthoringRequestV1": "bb6aa957533012e669e2920d659ad3f5a0d3f5cdea07ffa3a6a9d3298d5cc8b5",
-        "schema_name=AuthoringRevisionBindingV1": "8d2f35d407fe740575da4e492152e5c45c82c140d010fb2df3a50aad1ae74257",
+        "schema_name=AuthoringBuildProvenanceV1": "45519ddf69ba0eb997b941543a4ef62ed151afa83881cf952b5c872a6ffbc1b2",
+        "schema_name=AuthoringCompileResultV1": "8d081f8e226dd41ccb1e1a9592bd3518931bd54db937bf692fc2d03d62990db5",
+        "schema_name=AuthoringPlanResultV1": "07156c9aa880e9b7bbb6f4e7e38db3e1ad9272f5fb62ae40bb63342cacdc1492",
+        "schema_name=AuthoringRequestV1": "5279e93782183f4f93ae1d5ddd18d72176b08fc62fe557328f5a17f4cae7f928",
+        "schema_name=AuthoringRevisionBindingV1": "24a7165b3a2365dc72dc6180a56426ba5f0282650cb582eeb88c9472f5eca69d",
         "schema_name=IntegrationSpecV1": "32c816eb0857ad45938dd1d8401d46b60c1e28978a97b1cded14f0e524cfefe7",
-        "schema_name=ProcessIRV1": "19ccc21bbfbd67b8768c3a3588ca25d0ba7184665eb6ab4ccf739d4edab85f2a",
-        "schema_name=SystemTopologySpecV1": "5a306a12ac0e57736eadc699db09db18a3f6cd481bb644c672df783919352d76",
+        "schema_name=ProcessIRV1": "336435905b0be3044bbf40d7aa44ca380c95c383a93ed0869d8e2e61f266fe4f",
+        "schema_name=SystemTopologySpecV1": "313b716f2161f26c090a3145416d301f1e42206aa6174be1d22fef39c6eb98dd",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
@@ -37351,7 +37351,7 @@
         "schema_name=archetype:http_listener_to_db": "b21d41d870324ce66e872957fa09126dc641354753a0d7681d14d3489f7dcf3f",
         "schema_name=archetype:http_listener_to_rest": "cdd6c9c6fb51cd8afda5c7245a2ef37548939610c1c5235cd9abe1ed9deac3d9",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "23d244eef964a5ae4a16597ec4c0201e32c02e7f6f0994e3204eef14a6f06dd4",
+        "schema_name=authoring_workflow": "e030d3e4f7c0fa7b97bae18e0b3a02fa67530d6e4e6ac44e3960a6e7a10751e2",
         "schema_name=cache_property_authoring": "ccce138186570a6e4d8091aa1a05eb471d8e82f39b6394551f8f24f3f964d083",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "a2d8264db302d6a9ab04696e98a6f31c7b84b4ad1f8bc5b2c43858afa72c44aa",
@@ -37414,21 +37414,21 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "d4ed83420623e6cab1866fdf13a042a0b932bef9de9d38861e255dc541d9c25b",
+        "schema_name=process_ir_authoring": "bdfee92109077308240f2bf4e133477150e424a1c09f637c20fcb7b9ca131266",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
-        "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "bd8ad166a4e0b8d17f76aa8a9a59e707fd7b2cda6864db8b897c92332f56c3e3",
-        "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "7b41e53f0ebc9b1239971da1742932b5167b2f76b6cc3c100692565c4e18a772",
-        "schema_name=recipe:boomi.adapter.compose_archetypes@1.0.0": "d51be40f50fda638e50de6b24b41731ecc6c27df39eab595774ffeadc5fd054c",
-        "schema_name=recipe:boomi.advisory.integration_design@1.0.0": "6d751dbf3052f25dd03cd6666683a3c8e3ae34fb22c3ebf55a19558fc03d3e73",
-        "schema_name=recipe:boomi.archetype.api_to_api_sync@0.1.0": "632cff2bcab620bb3326d53c5e1a09b820644f27efebf048e01e8b42a0cb7bac",
-        "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "ade548c16451a19d82397ee63b14dc8f5371f85b76a1e7718cb42caf2367c83a",
-        "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "ae63341b87dc1215e2278b4495cef53b93919e52b0d4508714119f4b17ff640a",
-        "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "5827fa0f80212bfa053d784f1dfd933f259724953bbddd4c4a732515d6eedf15",
+        "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "b1038701e851a175ac8436121bb092edeb634f4dc4ac21b57905ba610bb7286f",
+        "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "fd1def3383798a8241842b0d52d3db1563aa626f5f35ab8d707bb16a4e489940",
+        "schema_name=recipe:boomi.adapter.compose_archetypes@1.0.0": "504772c753081df94aaaef9f035fdc04ba0815713eacd770010b9d55b0096e78",
+        "schema_name=recipe:boomi.advisory.integration_design@1.0.0": "0dda31d9e6cef3cfd2273f65c76db404f45e637730798ee06abddc1c59cbf383",
+        "schema_name=recipe:boomi.archetype.api_to_api_sync@0.1.0": "a87ce2a56cc2b960dfb267019b983af5ea33356cc26b26e0f86208a0309f9db5",
+        "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "18acdb1bf2576b390341774208246ad59939d1c821823d8a099c4f12b639e513",
+        "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "a955c5d534c12480c83a2ef58f5626d6b25fad7e229adb50e9d4c42323509e25",
+        "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "0b008218cc4ee190a9bfff9cefd146bd9ffa753f10d22f037dd3e4debd6751d0",
         "schema_name=recipe_contributions": "54b8601215fcdc4f8eb2e1465fe4310b4bfadaa0c975228b3294a2847c106b44",
-        "schema_name=recipe_registry": "33bbebb2455c96f8469bcd2f2b7795faeb11b73689874dc677adcb339db01fe7",
+        "schema_name=recipe_registry": "f52070780d9da160b075076e30f77df05c212b44cc816f8550bbf79eed65135d",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "acf7f04dcb3f183d0f2db5dcc5302e062f8e76f4d1a689fe8feaea62143b3c05",
+        "schema_name=validation_report": "0285505b6df28f7028d4575d1fab62b959fd7e2dfdfbbfc92e9f8a3073d0406e",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",

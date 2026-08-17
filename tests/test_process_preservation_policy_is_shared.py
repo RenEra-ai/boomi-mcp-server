@@ -31,18 +31,20 @@ from boomi_mcp.categories.components.builders._process_preservation import (  # 
     PROCESS_PRESERVATION_POLICY,
 )
 from boomi_mcp.categories.components.builders.process_flow_builder import (  # noqa: E402
-    ProcessFlowBuilder,
-    SyncPipelineBuilder,
-    WrapperSubprocessBuilder,
+    PROCESS_FLOW_BUILDERS,
 )
 
-#: Every builder that emits a Boomi ``process`` component. Enumerated once here
-#: so a new process builder that forgets the shared policy fails the identity
-#: test below rather than silently starting a fourth hand-copy.
-_PROCESS_BUILDERS = (
-    ProcessFlowBuilder,
-    WrapperSubprocessBuilder,
-    SyncPipelineBuilder,
+#: Every builder that emits a Boomi ``process`` component — DERIVED from the
+#: runtime dispatch table, never hand-listed.
+#:
+#: An adversarial review refuted the hand-listed version: a FOURTH registered
+#: process builder carrying its own hand-copied policy passed every test here,
+#: because the list the tests parametrized over was itself a hand-copy of the
+#: dispatch table. That is the exact defect class this guard exists to close,
+#: reintroduced inside the guard. Reading `PROCESS_FLOW_BUILDERS` means a newly
+#: registered builder is covered the moment it is registered.
+_PROCESS_BUILDERS = tuple(
+    dict.fromkeys(PROCESS_FLOW_BUILDERS.values())  # de-duplicated, order-stable
 )
 
 
@@ -108,34 +110,71 @@ def test_the_policy_still_says_exactly_what_the_three_originals_said():
     assert "folderFullPath" not in PROCESS_PRESERVATION_POLICY.owned_root_attrs
 
 
-def test_changing_the_shared_constant_moves_every_consumer_at_once(monkeypatch):
-    """THE non-vacuity witness: a case the invariant excludes.
+def test_all_consumers_observe_one_object_so_a_change_cannot_reach_only_some():
+    """THE non-vacuity witness — rewritten after an adversarial review.
 
-    A replacement policy is installed on the shared module and every consumer is
-    re-read. Under the old three-hand-copy arrangement this test could not pass —
-    each site held its own instance, so changing one changed nothing else. It is
-    the observable difference between "three copies that agree" and "one fact",
-    and it is what makes the identity assertions above meaningful rather than
-    decorative.
+    The previous version monkeypatched the module attribute and asserted the
+    module attribute had changed. It touched no consumer, and the reviewer
+    MEASURED it passing against a pristine pre-extraction tree that still
+    carried all three hand-copies — so its docstring claim that "under the old
+    three-hand-copy arrangement this test could not pass" was simply false.
+
+    This version asserts the property that actually distinguishes one fact from
+    three agreeing copies: every consumer, plus the plan projection, resolves to
+    the SAME object, so there is exactly one place a change can be made. Under
+    the old arrangement the builders held three distinct instances and the
+    identity set below would have had size 3.
     """
-    from boomi_mcp.categories.components.builders import _process_preservation
-
-    replacement = PreservationPolicy(
-        component_type="process",
-        owned_paths=(OwnedPath(path="bns:object/process/SENTINEL"),),
-    )
-    monkeypatch.setattr(
-        _process_preservation, "PROCESS_PRESERVATION_POLICY", replacement
+    from boomi_mcp.authoring.process_materialization import preservation_policy_v1
+    from boomi_mcp.categories.components.builders._process_preservation import (
+        PROCESS_PRESERVATION_POLICY,
     )
 
-    # The builders bound the object at import time, so they still hold the
-    # original — which is the honest result and is asserted rather than hidden.
-    # What the shared constant guarantees is that there is ONE place to change;
-    # a consumer that re-reads the module sees the change immediately.
-    reread = _process_preservation.PROCESS_PRESERVATION_POLICY
-    assert reread is replacement
-    assert reread is not PROCESS_PRESERVATION_POLICY
-    assert [p.path for p in reread.owned_paths] == ["bns:object/process/SENTINEL"]
+    observed = {id(b.PRESERVATION_POLICY) for b in _PROCESS_BUILDERS}
+    assert len(observed) == 1, (
+        "the process builders hold {0} distinct policy objects — the extraction "
+        "has been partially reverted".format(len(observed))
+    )
+    assert observed == {id(PROCESS_PRESERVATION_POLICY)}
+
+    # The fourth consumer — the #153 plan projection — must describe THAT object
+    # and no other. Compared on the projection's own canonical form, which is
+    # derived from the runtime constant rather than restated.
+    import dataclasses
+    import json
+
+    projected = json.loads(preservation_policy_v1().canonical_policy_json)
+    assert projected == json.loads(
+        json.dumps(dataclasses.asdict(PROCESS_PRESERVATION_POLICY), sort_keys=True)
+    )
+
+
+def test_the_plan_projection_is_complete_not_a_lossy_restatement():
+    """Every runtime policy field reaches the plan.
+
+    The first projection read two of ``PreservationPolicy``'s eight fields and
+    one of ``OwnedPath``'s eleven — so two materially different policies, one
+    replacing a subtree and one merging it, projected to identical bytes and
+    therefore to the same plan fingerprint. ``OwnedPath.mode`` and
+    ``owned_encrypted_paths`` are named explicitly below because those are the
+    two whose loss silently changes whether live state survives an update.
+    """
+    import dataclasses
+    import json
+
+    from boomi_mcp.authoring.process_materialization import preservation_policy_v1
+    from boomi_mcp.categories.components.builders._process_preservation import (
+        PROCESS_PRESERVATION_POLICY,
+    )
+
+    projected = json.loads(preservation_policy_v1().canonical_policy_json)
+    runtime_fields = {f.name for f in dataclasses.fields(PROCESS_PRESERVATION_POLICY)}
+    assert set(projected) == runtime_fields, runtime_fields - set(projected)
+
+    owned_fields = {f.name for f in dataclasses.fields(OwnedPath)}
+    assert set(projected["owned_paths"][0]) == owned_fields
+    assert "mode" in projected["owned_paths"][0]
+    assert "owned_encrypted_paths" in projected
 
 
 def test_no_process_builder_hand_builds_its_own_policy_any_more():
@@ -157,12 +196,28 @@ def test_no_process_builder_hand_builds_its_own_policy_any_more():
         / "process_flow_builder.py"
     ).read_text()
 
-    assert 'PreservationPolicy(\n    component_type="process"' not in source
-    # Positive control: the sweep can see the shape it forbids.
-    planted = 'PreservationPolicy(\n    component_type="process",\n)'
-    assert 'PreservationPolicy(\n    component_type="process"' in planted
+    # WHITESPACE-INSENSITIVE. The first version matched the literal string
+    # `'PreservationPolicy(\n    component_type="process"'` — a 4-space indent and
+    # that exact line break — so a copy written on one line, or at any other
+    # indent, was invisible to it. An adversarial review demonstrated exactly
+    # that bypass.
+    import re
 
-    # ...and every process builder assignment now points at the shared name.
+    inline = re.compile(r"PreservationPolicy\s*\(\s*component_type\s*=\s*[\"']process")
+    assert not inline.search(source), (
+        "a process PreservationPolicy is constructed inline in "
+        "process_flow_builder.py — it must reference PROCESS_PRESERVATION_POLICY"
+    )
+
+    # Positive control: the pattern really does match the shape it forbids, in
+    # BOTH spellings the literal match missed.
+    assert inline.search('PreservationPolicy(\n    component_type="process",\n)')
+    assert inline.search("PreservationPolicy(component_type='process')")
+    assert inline.search('    x = PreservationPolicy(  component_type = "process" )')
+
+    # ...and every process builder assignment now points at the shared name. The
+    # count is compared against the RUNTIME dispatch table, so a newly registered
+    # builder that forgets the shared constant fails here too.
     assert source.count("PRESERVATION_POLICY = PROCESS_PRESERVATION_POLICY") == len(
         _PROCESS_BUILDERS
     )
