@@ -1793,6 +1793,18 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "PROCESS_KIND",
     "RECIPE_LAYER_MODULES",
     "RESERVED_DIALECTS",
+    # #153 (M12.15). Three module constants and one ERROR-TAXONOMY code the
+    # ledger names when recording the relocatable plan fingerprint.
+    #
+    # `PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE` is a real, registered
+    # code in `boomi_mcp.errors.ERROR_TAXONOMY` — it is simply not a WAVE-GATE
+    # diagnostic, which is the only family this scanner governs. Listing it keeps
+    # the two taxonomies distinct instead of letting a legitimate error code look
+    # like a gate code the gate cannot emit.
+    "EXCLUDED_ENVELOPE_FIELDS",
+    "EXCLUDED_PLAN_FIELDS",
+    "PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE",
+    "PROCESS_PRESERVATION_POLICY",
 })
 
 
