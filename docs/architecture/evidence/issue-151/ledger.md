@@ -317,6 +317,29 @@ goldens weak. The corpus renderer resolves the `src.`-prefixed module while the 
 one, and those are different module objects (the dual-module gotcha this repo has documented). No claim
 about golden coverage of this case is made in either direction; the pin rests on its own controls.
 
+### L2 — Stage-2 repo Codex commit-review, evaluation 5 — **CLEAN, loop closed**
+
+Run directory `/tmp/cdx-review.eUXad1`, `STATUS: completed`, teardown `confirmed stopped`,
+`SCOPE: branch diff against 2f4544ca… (2f4544c) head=c180bddd… dirty=false`. Verbatim verdict: *"The
+exact alias-table assertion closes the lockstep-oracle gap without changing runtime behavior. The
+affected reachability and audit-evidence tests pass, and no blocking defects were identified."* Zero
+findings; L2's second window ends at evaluation 2 of 3 with no residue of either tier.
+
+**L2 summary across both windows:** 5 evaluations — clean, 2×P1, 1×P1 (checkpoint → `CONTINUE`), 1×P1,
+clean. Every finding validated and fixed; none deferred, none refuted. Four of the five findings
+targeted the reachability freeze itself, which is the gate #160 depends on, and each fix replaced the
+mechanism rather than patching a case:
+
+| round | what the gate did | how it was evaded | replacement |
+|---|---|---|---|
+| §6 R-01 | floored `len(_FLOW_SEQUENCE_ALLOWED_KINDS) >= 14` | an allowed kind with no specimen | exact two-way kind equality + per-path attribution |
+| L2 C-01 | per-path attribution | a step the ADAPTER drops has no IR node to be unattributed | per-case authored-vs-IR step census |
+| L2 C-03 | per-case TOTAL census | swap `set_ddp`→`set_dpp`, or drop-one/duplicate-another | per-KIND multiset via `_KIND_ALIASES` |
+| L2 C-04 | per-kind census keyed on `_KIND_ALIASES` | a regression inside that table moves both sides in lockstep | bidirectional exact pin of the closed alias contract |
+
+Every replacement carries a mutation control that fires on its predecessor's blind spot and stays
+silent on the identity case.
+
 ## Observations recorded, not fixed (out of scope for this slice)
 
 | # | Observation | Why not fixed here |
