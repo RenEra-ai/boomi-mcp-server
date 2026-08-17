@@ -1860,3 +1860,46 @@ class ApiTransformConfig(BaseModel):
                                 "supported; see issue #42 for the XSLT decision."
                             )
         return data
+
+
+#: The public model surface of the neutral parameter layer.
+#:
+#: Only the reusable PARAMETER MODELS are exported. The private validators
+#: (``_stripped_nonblank``, ``_scan_for_secret_shaped_keys``,
+#: ``_flatten_payload_profile_leaves``, ``_required_simple_leaf_paths``) stay
+#: importable for the surviving archetypes and ``integration_import`` that
+#: already depend on them, but they are deliberately NOT listed: a leading
+#: underscore is the contract that they are internal, and #159 should not read
+#: this list as a promise about them.
+__all__ = [
+    "ApiFetchRequest",
+    "ApiSendRequest",
+    "ApiSource",
+    "ApiTarget",
+    "ApiTransformConfig",
+    "ApiTransformOperation",
+    "DBResultField",
+    "DBResultSchema",
+    "DatabaseSource",
+    "DbConnectionBinding",
+    "DbCreateSettings",
+    "DbReadOperation",
+    "DbReadParameter",
+    "DirectApiTransformOperation",
+    "DirectTransformOperation",
+    "JSONPayloadProfile",
+    "JSONProfileNode",
+    "MapFunctionApiTransformOperation",
+    "MapFunctionTransformOperation",
+    "MapScriptApiTransformOperation",
+    "MapScriptTransformOperation",
+    "NamingConfig",
+    "RestConnectionBinding",
+    "RestCreateSettings",
+    "RestPathReplacement",
+    "RestQueryParameter",
+    "RestSendRequest",
+    "RestTarget",
+    "TransformConfig",
+    "TransformOperation",
+]

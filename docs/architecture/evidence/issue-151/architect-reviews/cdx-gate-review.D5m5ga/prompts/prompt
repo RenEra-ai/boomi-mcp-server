@@ -1,0 +1,858 @@
+You are reviewing an implementation AGAINST ITS APPROVED ARCHITECT DESIGN PLAN.
+
+Repository: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: codex/issue-151, single commit 13eb7574c25195cfeddfb6457e1de1b6e8e0dd02
+Baseline: 47b20dd776a158c6fd096779262bbadd2867b7e3
+Review the delta: `git diff 47b20dd776a158c6fd096779262bbadd2867b7e3..HEAD`
+
+This is issue #151 (M12.14). The design plan is inlined verbatim below; the issue's acceptance
+criteria follow it under their own header. Your job is to judge whether the implementation
+FAITHFULLY REALIZES THAT PLAN and those criteria — not to re-derive a design of your own.
+
+Changed files (22):
+  docs/architecture/M12_COMPATIBILITY_INVENTORY.md
+  docs/architecture/evidence/issue-151/ledger.md
+  src/boomi_mcp/categories/integration_import.py
+  src/boomi_mcp/patterns/archetype_assembly.py            (NEW)
+  src/boomi_mcp/patterns/archetype_parameters.py          (NEW)
+  src/boomi_mcp/patterns/archetypes/api_to_api_sync.py
+  src/boomi_mcp/patterns/archetypes/api_to_database_sync.py
+  src/boomi_mcp/patterns/archetypes/database_to_api_sync.py
+  src/boomi_mcp/patterns/archetypes/http_listener_to_db.py
+  src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py
+  src/boomi_mcp/patterns/composition.py
+  src/boomi_mcp/patterns/registry.py
+  src/boomi_mcp/recipes/registry.py
+  tests/fixtures/compatibility/issue_135/authoring_boundaries.json
+  tests/fixtures/m12_12/legacy_reachability_inventory.json
+  tests/fixtures/wave_gate/test_nodes.jsonl
+  tests/patterns/test_archetype_composition.py
+  tests/patterns/test_registry.py
+  tests/test_integration_models.py                        (NEW)
+  tests/test_issue_135_compatibility_freeze.py
+  tests/test_issue_151_reachability_freeze.py             (NEW)
+  tests/test_recipe_registry.py
+
+## Deliberate, recorded DEVIATIONS from the plan — judge each on its merits
+
+The implementer did not follow the plan blindly. Please assess whether each deviation is justified,
+and say so explicitly if any is wrong:
+
+1. **The plan's freeze-test route derivation was rejected as a tautology.** The plan (see
+   "Findings from the code" / the route-map recipe) proposed seeding each emitter key's route set from
+   `EmitterRegistration.supported_capability`. That field is the literal constant
+   `CAPABILITY_PROCESS_IR_V1` on all 18 rows, so `routes <= deletion_routes` could never hold and the
+   gate would freeze nothing. The implementation instead DERIVES the direct route by walking the closed
+   `ProcessNodeV1` union through the real lowering over committed specimens. Is that derivation sound,
+   and is it genuinely non-vacuous?
+
+2. **The extraction set was narrowed.** The plan listed a broad set of models/helpers to move. The
+   implementation moved exactly the transitive closure of what the SURVIVING modules import from the
+   two scheduled modules — which excludes `Schedule`/`ExecutionTrigger`/`Watermark`/`ExecutionConfig`
+   (no survivor imports them). Is the narrower set correct and sufficient for the issue's goal?
+
+3. **`DELETION_ROUTES` is derived differently than planned.** The plan proposed
+   `PROCESS_FLOW_BUILDERS | migrated_dialects() | RESERVED_DIALECTS`, which would mark the SURVIVING
+   `sync_pipeline` and `wrapper_subprocess` as scheduled for deletion. The implementation derives
+   `{ProcessFlowBuilder.PROCESS_KIND} | {sub-dialects of it}` instead. Which is right?
+
+4. **Two changes NOT in the plan at all**, both added in response to live-QA findings:
+   - `src/boomi_mcp/patterns/registry.py`: `from_package` now registers a pattern class only from the
+     module whose `__module__` matches (a re-export is no longer a registration path). Justified as
+     the mandatory structural fix for a second instance of the same defect class; the sibling sweep
+     found 30 of 31 patterns were registering from a re-export, including `db_extract` from a module
+     issue #160 deletes. Is this in scope, correct, and safe?
+   - `src/boomi_mcp/recipes/registry.py` + `tests/test_recipe_registry.py`: the two new neutral modules
+     were added to `RECIPE_LAYER_MODULES` (and to the test's `allowed_outside` plus a new "clause 4"
+     bound), because the extraction moved ~949 executed lines out of a listed module and thereby
+     shrank the served source-provenance digest's coverage. Is the clause-4 bound sound, and is the
+     membership justified?
+
+## What to look for
+
+- Does the implementation satisfy the issue's acceptance criteria (inlined below)?
+- Any place the plan required something that was silently dropped or only partially done.
+- Correctness bugs in the extraction: a moved model whose validator/discriminator/alias/error string
+  changed; an import repointed to the wrong flavour of a same-named helper (there are THREE distinct
+  `_build_field_map_params` and TWO distinct `_build_rest_send_params` in this tree); a survivor still
+  importing from a scheduled module.
+- Whether the new freeze test would actually FAIL when it should, or is vacuous in some way not yet
+  considered. Be adversarial here — this test is the machine-checked gate that issue #160's deletion
+  depends on, so a false-green is the worst outcome in the whole change.
+- Whether `registry.py`'s new filter could drop a pattern under any import order or entry path.
+- Whether the wave-gate manifest transition is arithmetically correct: baseline floor 9826, 9 nodes
+  added, 3 flipped active->tombstone, 2 more added later, final floor 9834.
+
+## Out of scope — do NOT report these
+
+- The deletion itself (issue #160), fused `start_listen` (#158), migrating examples/callers to
+  ProcessIR roots (#159), canonical `notify` (#156), connector `dynamic_path` (#155).
+- Backward compatibility of any kind: this server has no external consumers and the issue explicitly
+  forbids preserving anything for compatibility alone.
+- The `patterns/recipe_bridge.py:36` unused import — pre-existing, deliberately untouched.
+
+END your review with a verdict on its OWN FINAL LINE: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
+
+
+=== ARCHITECT DESIGN PLAN (verbatim) ===
+# Issue #151 (M12.14) — Neutral extraction, parity oracle, and derived reachability freeze
+
+## Summary
+
+The implementation will extract shared parameter models and assembly helpers into two neutral modules, then repoint all surviving archetypes and authoring entry points without changing dispatch, schema spellings, or emitted XML. The legacy `flow_sequence` adapter remains untouched as a parity oracle reached only through the existing `database_to_api_sync` entry; no public process kind or semantic capability is added. A new deletion gate will derive emitter reachability from the actual registries, builder tables, adapters, and lowering pipeline, with explicit fail-closed floors and an injected deleted-route-only counterexample. Three surviving compatibility assertions will move to a neutral integration-model test, while examples, goldens, and inventory records will be retained or assigned to their existing roadmap owners.
+
+## Findings from the code
+
+### Repository baseline
+
+- The current branch and `origin/dev` both resolve to `47b20dd776a158c6fd096779262bbadd2867b7e3`; this literal SHA is the implementation baseline.
+- The working tree is currently clean.
+
+### Neutral extraction boundary
+
+- `database_to_api_sync.py` currently owns shared validation utilities and parameter models: URL and secret-key validation starts at `src/boomi_mcp/patterns/archetypes/database_to_api_sync.py:139`, `NamingConfig` at `:211`, database source models at `:310`, REST target models at `:715`, JSON profile models at `:999`, transform models at `:1182`, execution models at `:1481`, and profile-leaf helpers at `:1947`.
+- Database-specific preservation and execution machinery must remain in that module: `RetryPolicy` through `ReliabilityConfig` occupy `src/boomi_mcp/patterns/archetypes/database_to_api_sync.py:1623-1937`; `EnvironmentExtensionsConfig` starts at `:2000`; the root `DatabaseToApiSyncParameters` starts at `:2062`; database extraction and process assembly start at `:2397`; `DatabaseToApiSyncArchetype` starts at `:3359`.
+- `api_to_api_sync.py` imports its shared dependency surface directly from the scheduled database archetype at `src/boomi_mcp/patterns/archetypes/api_to_api_sync.py:86-100`. Its reusable API request/source/target and transform models occupy `:179-581`, while the scheduled root `ApiToApiSyncParameters` starts at `:587` and its pipeline/process assembly remains route-specific at `:1091-1182`.
+- Additional surviving import sites are:
+  - `src/boomi_mcp/patterns/archetypes/api_to_database_sync.py:82-105`
+  - `src/boomi_mcp/patterns/archetypes/http_listener_to_db.py:78-107`
+  - `src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py:62-97`
+  - `src/boomi_mcp/patterns/composition.py:65-81`
+  - `src/boomi_mcp/categories/integration_import.py:51-55`
+
+### Registry behavior and re-export drift
+
+- `PatternRegistry.from_package` walks every submodule and scans every class found in `vars(submodule).values()` at `src/boomi_mcp/patterns/registry.py:78-106`. There is no `candidate.__module__ == submodule.__name__` filter.
+- Consequently, the direct import of `DatabaseToApiSyncArchetype` in `src/boomi_mcp/patterns/composition.py:71` makes that class independently discoverable from `composition.py`, even though its defining module is also walked.
+- Composition invokes that class at the current anchors `src/boomi_mcp/patterns/composition.py:922-923`.
+- The issue’s general `composition.py:71` anchor is still accurate, but merely deleting the defining archetype file would not remove the registration while the re-export remained.
+- All six intended archetypes are also exported by `src/boomi_mcp/patterns/archetypes/__init__.py:3-26`. The current catalog is exactly:
+  `api_to_api_sync`, `api_to_database_sync`, `database_to_api_sync`, `http_listener_to_db`, `http_listener_to_rest`, and `stub_minimal_integration`.
+- Removing the `composition.py` class binding therefore drops only its incidental discovery path. Issue #151 changes no catalog membership: `database_to_api_sync` remains registered through its defining module and `archetypes/__init__.py`; the other five surviving registrations remain unchanged. Issue #160 owns deleting the scheduled entries later.
+
+### Runtime reachability authority and drifted anchors
+
+- The issue locates `_REGISTRATIONS` in `process_flow_builder.py`, but that anchor has drifted: the actual 18-entry emitter registry is `src/boomi_mcp/compiler/process_ir/emitter_registry.py:592-611`. Registry construction and cross-checks are at `:614-649`, and `registry_keys()` is at `:652-653`.
+- `EmitterRegistration` and its `supported_capability` field are defined at `src/boomi_mcp/compiler/process_ir/emitter_registry.py:163-175`. All current registrations use canonical `process_ir_v1`, imported at `:85`.
+- The 14 `flow_sequence` kinds are still authoritative in:
+  - `_FLOW_SEQUENCE_LINEAR_KINDS`, `src/boomi_mcp/categories/components/builders/process_flow_builder.py:297-309`
+  - `_CONTROL_KINDS`, `:312-319`
+  - `_TERMINAL_KINDS`, `:322-324`
+- `_flow_sequence_enabled` remains key-presence selection at `src/boomi_mcp/categories/components/builders/process_flow_builder.py:3659-3667`: absent and explicit `None` are disabled; an empty list is enabled.
+- The legacy adapter is invoked at `src/boomi_mcp/categories/components/builders/process_flow_builder.py:4437-4448`; the issue’s `:4448` endpoint remains accurate.
+- The issue’s `_SYNC_PIPELINE_SUPPORTED_KINDS` anchor has drifted from `:5236-5248` to `src/boomi_mcp/categories/components/builders/process_flow_builder.py:5177-5179`. The primitive lowering tables are at `:5183-5199`, the canonical-route predicate at `:5201-5219`, reserved hints at `:5222-5234`, and the accepted chain grammar at `:5434-5449`.
+- The listener fallback remains exactly at `src/boomi_mcp/categories/components/builders/process_flow_builder.py:6049-6050`.
+- The public builder registry is at `src/boomi_mcp/categories/components/builders/process_flow_builder.py:6116-6120`, preservation policy at `:6123-6145`, and lookup at `:6148-6152`. Its current public keys are exactly `database_to_api_sync`, `sync_pipeline`, and `wrapper_subprocess`.
+- `ProcessFlowBuilder.PROCESS_KIND = "database_to_api_sync"` remains at `src/boomi_mcp/categories/components/builders/process_flow_builder.py:473` and must not change.
+
+### Legacy parity oracle
+
+- `FLOW_SEQUENCE_DIALECT = "database_to_api_sync/flow_sequence"` is at `src/boomi_mcp/compiler/process_ir/legacy_adapters/registry.py:36`.
+- `_MIGRATED` maps only the wrapper, `flow_sequence`, and raw sync-pipeline dialects at `src/boomi_mcp/compiler/process_ir/legacy_adapters/registry.py:53-65`. Ordinary `database_to_api_sync` remains reserved rather than migrated at `:42-50`.
+- `adapt_flow_sequence` builds the existing canonical plan and derives requirements from the compiled IR at `src/boomi_mcp/compiler/process_ir/legacy_adapters/flow_sequence.py:274-364` and `:390-408`.
+- No production change is required in `flow_sequence.py`, its registry, or the process builder. Retaining those files unchanged is the correct implementation of scope item 2.
+
+### Derived 14-kind to 11-key mapping
+
+The mapping below is the current result of the real lowering, not a proposed hand-maintained test table. Semantic lowering is at `src/boomi_mcp/compiler/process_ir/lowering.py:254-350`, and emitter-input selection is at `:893-1002`.
+
+| Runtime step kind | Lowered emitter key |
+|---|---|
+| `branch` | `branch` |
+| `cache_get` | `doccacheretrieve` |
+| `cache_put` | `doccacheload` |
+| `dataprocess` | `dataprocess` |
+| `decision` | `decision` |
+| `doccacheload` | `doccacheload` |
+| `doccacheremove` | `doccacheremove` |
+| `doccacheretrieve` | `doccacheretrieve` |
+| `exception` | `exception` |
+| `flow_control` | `flowcontrol` |
+| `map_ref` | `map` |
+| `message` | `message` |
+| `set_ddp` | `setproperties_step` |
+| `set_dpp` | `setproperties_step` |
+
+This confirms the issue’s 14→11 claim. Of those 11, `map` is also sync-pipeline reachable. The other ten are currently legacy-`flow_sequence`-only among migrated authoring routes: `branch`, `dataprocess`, `decision`, `doccacheload`, `doccacheremove`, `doccacheretrieve`, `exception`, `flowcontrol`, `message`, and `setproperties_step`.
+
+`stop` and `returndocuments` are shared by wrapper/sync routes; `processcall` is wrapper-only. `catcherrors` belongs to the ordinary unmigrated database reliability arm, but its emitter registration survives through direct canonical ProcessIR and must not be confused with a migrated `flow_sequence` route.
+
+### Surviving compatibility assertions
+
+The three surviving assertions are the first three tests under the “Surviving integration-envelope semantics” heading at `tests/test_issue_135_compatibility_freeze.py:91-131`:
+
+- `test_integration_spec_defaults_serialization`
+- `test_spec_envelope_ignores_unknown_fields`
+- `test_component_envelope_ignores_unknown_fields_but_preserves_config`
+
+They are neutral model behavior, not legacy route oracles, and will move to `tests/test_integration_models.py`.
+
+### Coverage and counterpart state
+
+- The four shipped examples still use `database_to_api_sync` at:
+  - `examples/m8/composed_db_to_api_fanout.integration.json:353`
+  - `examples/m8/cache_handoff_staged_fanout.integration.json:402`
+  - `examples/m11/cache_property_authoring_basic.integration.json:16`
+  - `examples/m11/cache_property_authoring_join.integration.json:76`
+- Their #159 ownership is already recorded at `docs/architecture/M12_COMPATIBILITY_INVENTORY.md:2246-2249`.
+- Existing plan coverage is at `tests/patterns/test_archetype_composition.py:346-371` and `:692-717`, plus `tests/test_m11_composed_examples.py:58-84` and `:109-143`.
+- The golden manifest remains the execution authority at `docs/architecture/M12_COMPATIBILITY_INVENTORY.md:389-409`; the 21 sync-pipeline goldens are inventoried at `:1184-1199`.
+- The #156 counterpart anchors have not drifted:
+  - notify invariant: `tests/test_builder_xml_invariants.py:951-956`
+  - display-property binding: `tests/test_builder_xml_invariants.py:972-977`
+- The issue’s `kb/design_doctrine.py:121` path is stale. The actual file is `src/boomi_mcp/kb/design_doctrine.py:121`, and that line is still the notify registry entry. Issue #151 must not edit or duplicate any of those three counterpart assertions.
+
+### Manifest and served-revision state
+
+- `tests/fixtures/wave_gate/test_nodes.jsonl:1` currently has `minimum_active: 9826` and `minimum_collected: 9826`; the repository-memory value is correct.
+- The final current node is `pytest-009845` at `tests/fixtures/wave_gate/test_nodes.jsonl:9846`.
+- Active-set equality is enforced at `scripts/wave_gate.py:753-766`; append/tombstone validation is at `:866-940`; exact base-plus-additions-minus-tombstones arithmetic is at `:943-953`.
+- Recipe source revisions include the scheduled API archetypes and composition at `src/boomi_mcp/recipes/registry.py:171-190`. Because this plan changes three directly tracked invoker modules, the five served archetype revision records must be rebaselined with the existing inventory writer. Neutral transitive modules should not be added to the recipe source list; the direct-invoker boundary is intentional and tested at `tests/test_recipe_registry.py:2524-2555`, `:2751-2810`, and `:2905-2930`.
+
+## File-by-file plan
+
+### `src/boomi_mcp/patterns/archetype_parameters.py` — create
+
+Concrete change:
+
+- Move the neutral validation utilities:
+  `_URL_RE`, `_stripped_nonblank`, `_FORBIDDEN_SECRET_KEY_SUBSTRINGS`,
+  `_key_matches_secret_shape`, and `_scan_for_secret_shaped_keys`.
+- Move shared scheduled parameter models:
+  `NamingConfig`; database result/source models; REST request/target models;
+  JSON profile models; transform models; execution trigger/schedule/watermark models;
+  `_flatten_payload_profile_leaves`; and `_required_simple_leaf_paths`.
+- Move API request/source/target and API transform models from `api_to_api_sync.py`, together with `_DYNAMIC_PATH_TOKEN_RE` and `_reject_dynamic_path`.
+- Preserve class bodies, field order, defaults, validators, discriminators, aliases, and error messages byte-for-byte except for imports.
+- Declare an explicit export surface for the intended reusable model names. Private validators may remain importable internally but are not compatibility aliases.
+- Define no `ArchetypePattern` or `PrimitivePattern` subclass.
+
+Why:
+
+- This gives #159 a neutral parameter layer and allows surviving archetypes/importers to load their schemas without importing either scheduled-to-delete archetype module.
+
+Risk:
+
+- Medium. Although the move is XML-dark, Pydantic schema identity and served archetype schema output are machine-facing contracts. Tests must compare served schemas and revision artifacts rather than treating this as a cosmetic refactor.
+
+### `src/boomi_mcp/patterns/archetype_assembly.py` — create
+
+Concrete change:
+
+- Move neutral assembly constants and helpers from the database module:
+  `_SOURCE_PREFIX`, `_TRANSFORM_PREFIX`, `_TARGET_PREFIX`, `_MAIN_PROCESS_KEY`,
+  `_REST_CREATE_AUTH_MAP`, `UNSUPPORTED_REST_AUTH_MODE`,
+  `UNSUPPORTED_SCRIPT_COMPONENT_REF`, `_coerce_primitive_params`,
+  `_component_names`, and `_named`.
+- Move reusable REST/API assembly from `api_to_api_sync.py`:
+  `_SOURCE_RESPONSE_PROFILE_KEY`, `_ROLE_SOURCE_PROFILE`,
+  `_NON_IDENTIFIER_RE`, `_script_var_name`, `_map_rest_connection`,
+  `_create_default_headers`, `_reject_case_variant_headers`,
+  `_merge_request_headers`, `_build_rest_fetch_params`,
+  `_build_field_map_params`, `_build_rest_send_params`,
+  `_build_source_response_profile`, and `_operation_summaries`.
+- Replace references to scheduled root parameter classes with narrow private protocols for the attributes each helper reads. This avoids importing an archetype module back into the neutral layer.
+- Do not move `_EXAMPLE_PATH_SENTINEL`, `_build_pipeline_dict`, `_build_main_process`, database extract assembly, reliability assembly, or operational-intent construction.
+
+Why:
+
+- These helpers are used by multiple surviving archetypes, but they are not parameter models and should not force assembly dependencies into the neutral schema module.
+
+Risk:
+
+- Medium. Prefix/constants and helper ordering influence component names and payload shape; all committed goldens and example plans must remain byte-identical.
+
+### `src/boomi_mcp/patterns/archetypes/database_to_api_sync.py`
+
+Concrete change:
+
+- Import the moved parameter models from `patterns.archetype_parameters`.
+- Import shared assembly constants/helpers from `patterns.archetype_assembly`.
+- Retain `RetryPolicy` through `ReliabilityConfig`, `EnvironmentExtensionsConfig`,
+  `DatabaseToApiSyncParameters`, all database-specific assembly functions, and
+  `DatabaseToApiSyncArchetype`.
+- Do not provide compatibility aliases solely to preserve former private import paths.
+- Do not alter `archetype_name`, schema behavior, assembly ordering, or emitted specifications.
+
+Why:
+
+- The scheduled archetype must continue operating until #160, while no longer owning shared machinery needed by survivors.
+
+Risk:
+
+- Medium behavior surface, intended byte-dark.
+
+### `src/boomi_mcp/patterns/archetypes/api_to_api_sync.py`
+
+Concrete change:
+
+- Replace the database-archetype sibling import at current lines 86-100 with imports from the two neutral modules.
+- Import the moved API parameter classes back from `archetype_parameters`.
+- Import reusable REST assembly helpers from `archetype_assembly`.
+- Retain `ApiToApiSyncParameters`, `_EXAMPLE_PATH_SENTINEL`,
+  `_build_pipeline_dict`, `_build_main_process`, and `ApiToApiSyncArchetype`.
+- Do not change route names, parameter semantics, or output.
+
+Why:
+
+- Removes the scheduled API archetype’s dependency on another scheduled archetype and makes its neutral pieces available to survivors.
+
+Risk:
+
+- Medium because this module participates directly in served archetype revision digests.
+
+### `src/boomi_mcp/patterns/archetypes/api_to_database_sync.py`
+
+Concrete change:
+
+- Repoint the shared API model/helper imports at current lines 82-95 to the neutral modules.
+- Repoint the shared database/REST imports at current lines 98-105 to the neutral modules.
+- Leave its root parameters, archetype class, preservation policy, and assembly unchanged.
+
+Why:
+
+- This is a surviving archetype and must not import either module #160 will delete.
+
+Risk:
+
+- Medium served-schema and emitted-spec surface; expected output change is zero.
+
+### `src/boomi_mcp/patterns/archetypes/http_listener_to_db.py`
+
+Concrete change:
+
+- Repoint current shared API imports at lines 78-86 and database/REST imports at lines 100-107 to the neutral modules.
+- Leave WSS listener models, listener assembly, and archetype identity unchanged.
+
+Why:
+
+- Removes deletion-bound dependencies from a surviving listener archetype.
+
+Risk:
+
+- Medium due to the separate #158 listener fallback dependency; this issue must not change listener lowering or fused `start_listen`.
+
+### `src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py`
+
+Concrete change:
+
+- Repoint current shared API imports at lines 62-72 and database/REST imports at lines 92-97.
+- Leave listener-specific and REST-listener assembly intact.
+
+Why:
+
+- Keeps the surviving listener-to-REST archetype independent of scheduled modules.
+
+Risk:
+
+- Medium for the same #158 boundary; emitted listener XML must remain unchanged.
+
+### `src/boomi_mcp/patterns/composition.py`
+
+Concrete change:
+
+- Replace shared model/helper imports at current lines 65-81 with neutral imports.
+- Remove the direct `DatabaseToApiSyncArchetype` class binding.
+- Until #159 removes the scheduled composition route, import the defining module under a private module alias and call:
+  `_database_to_api_sync.DatabaseToApiSyncArchetype.validate_parameters(...)` and
+  `.emit_spec(...)` at current lines 922-923.
+- Do not create a local class alias, re-export, or compatibility shim.
+
+Why:
+
+- A module alias lets current composition behavior survive without placing the archetype class itself in `composition.py` globals, so `PatternRegistry.from_package` can no longer register it through the re-export.
+
+Risk:
+
+- Medium. Registry discovery and composed integration output are both affected surfaces, though expected catalog and bytes remain unchanged.
+
+### `src/boomi_mcp/categories/integration_import.py`
+
+Concrete change:
+
+- Repoint the JSON-profile and secret-shape helper imports at current lines 51-55 to `patterns.archetype_parameters`.
+- Change no import conversion, confidence, or mutation behavior.
+
+Why:
+
+- Prevents the neutral integration importer from loading a scheduled archetype merely for shared validation helpers.
+
+Risk:
+
+- Low-to-medium. Import output should remain identical, but this is a served authoring wrapper and needs `.fn()` QA.
+
+### `tests/test_issue_151_reachability_freeze.py` — create
+
+Concrete change:
+
+- Add the three deletion-gate tests specified below.
+- Keep the only hand-declared roadmap input as a small `_M12_22_DELETION_ROUTES` set constructed from runtime constants:
+  `ProcessFlowBuilder.PROCESS_KIND`,
+  `WrapperSubprocessBuilder.PROCESS_KIND`,
+  `SyncPipelineBuilder.PROCESS_KIND`, and
+  `FLOW_SEQUENCE_DIALECT`.
+- Do not hand-list emitter survivors, emitter-to-route mappings, or the 14→11 mapping.
+
+Why:
+
+- This is #160’s fail-closed, machine-checked deletion prerequisite.
+
+Risk:
+
+- Low runtime risk, high gate-design risk. A false-green test would permit capability loss, so the test must contain both structural floors and a deliberately excluded counterexample.
+
+### `tests/test_integration_models.py` — create
+
+Concrete change:
+
+- Move the three surviving model tests from the issue-135 compatibility file without renaming their node suffixes.
+- Inline their two small neutral fixtures so the file does not depend on the legacy compatibility-oracle JSON.
+
+Why:
+
+- These assertions protect surviving integration-envelope behavior and must not be removed when issue-135 legacy oracles are retired.
+
+Risk:
+
+- Low; relocation is verification-only but requires manifest removal-plus-addition accounting.
+
+### `tests/test_issue_135_compatibility_freeze.py`
+
+Concrete change:
+
+- Remove the three surviving tests at current lines 95-131.
+- Update the module description at current lines 6-8 so it describes only the remaining legacy compatibility oracles.
+- Leave all actual legacy-oracle tests unchanged.
+
+Why:
+
+- Separates permanent model invariants from a suite scheduled for eventual removal.
+
+Risk:
+
+- Low, provided the three nodes are added in the new home and their old manifest rows are tombstoned.
+
+### `tests/fixtures/compatibility/issue_135/authoring_boundaries.json`
+
+Concrete change:
+
+- Remove `spec_extra_ignore` and `component_extra_ignore_config_preserved` at current lines 3-37 after the relocated tests inline those cases.
+- Update the fixture comment so it describes only the remaining legacy oracle data.
+
+Why:
+
+- Avoids leaving survivor fixtures coupled to the old compatibility suite.
+
+Risk:
+
+- Low and test-only.
+
+### `tests/patterns/test_archetype_composition.py`
+
+Concrete change:
+
+- Strengthen existing `test_compose_registry_and_archetype_list_unchanged` at current lines 310-315:
+  - assert the exact six-name catalog;
+  - assert `"DatabaseToApiSyncArchetype" not in vars(boomi_mcp.patterns.composition)`;
+  - launch an isolated subprocess that imports both neutral modules and asserts neither scheduled archetype module appears in `sys.modules`.
+- Extend existing `test_golden_example_plans_clean` at `:346-371` and
+  `test_cache_handoff_golden_example_plans_clean` at `:692-717` to dry-run apply their already-built plans, assert success, preserve action order/count, and verify no client mutation.
+- Keep existing node names, avoiding manifest additions.
+
+Why:
+
+- Pins registry membership, proves neutral imports do not accidentally load deletion-bound modules, and gives plan-plus-apply coverage for the two M8 examples.
+
+Risk:
+
+- Low production risk; subprocess isolation is important because the main test process may already have imported the scheduled modules.
+
+### `tests/test_m11_composed_examples.py`
+
+Concrete change:
+
+- Extend existing `test_every_example_plans_clean` at current lines 58-64 to dry-run apply each M11 example plan with pagination patched and a non-networking fake client.
+- Assert success, `dry_run`, no client calls, and equality of planned/applied step action sequences.
+- Preserve the existing test node name.
+
+Why:
+
+- Ensures the two M11 `flow_sequence` examples still plan and apply through the current entry without adding a parallel test inventory.
+
+Risk:
+
+- Low; test-only and no manifest change.
+
+### `tests/fixtures/wave_gate/test_nodes.jsonl`
+
+Concrete change:
+
+- Tombstone the three old issue-135 node IDs in place.
+- Append six new active rows with sequential IDs `pytest-009846` through `pytest-009851`.
+- Raise both header floors from 9826 to 9829.
+- Do not regenerate, reorder, or sort the file.
+
+Why:
+
+- A relocation counts as three removals plus three additions, and the new deletion-gate suite contributes three more additions.
+
+Risk:
+
+- Medium verification-gate risk; a single arithmetic or ordering error makes the manifest invalid.
+
+### `tests/fixtures/m12_12/legacy_reachability_inventory.json`
+
+Concrete change:
+
+- Regenerate only through `tests/_m12_12_legacy_inventory.py --write` after production source has stabilized.
+- Accept changes only for the five served archetype records affected by the tracked invoker modules:
+  `api_to_api_sync`, `api_to_database_sync`, `database_to_api_sync`,
+  `http_listener_to_db`, and `http_listener_to_rest`.
+- Inspect the diff to ensure changes are explainable revision/schema/lineage consequences of neutral relocation and contain no capability or route change.
+
+Why:
+
+- The recipes package’s served source-revision contract includes changed direct invoker modules.
+
+Risk:
+
+- Medium machine-served contract risk. This is a deliberate rebaseline, not a blanket acceptance of regenerated output.
+
+### `docs/architecture/M12_COMPATIBILITY_INVENTORY.md`
+
+Concrete change:
+
+- Add an M12.14 orphaned-survivor coverage disposition subsection, derived from the existing golden manifest rather than copying filenames into a second authority.
+- Record these dispositions:
+  - five active `flow_sequence` goldens remain #151 parity oracles; #159 re-points author input to direct IR, and #160 may retire the legacy route only after equivalent surviving goldens remain;
+  - 17 non-listener sync-pipeline goldens remain until #159/#160;
+  - four listener sync-pipeline goldens plus `listener_wss_start.xml` remain owned by #158;
+  - wrapper coverage moves through #159;
+  - composed/archetype goldens and the four shipped examples are owned by #159;
+  - direct ProcessIR rich/error goldens already exercise the surviving route;
+  - dynamic-path and notify/recovery coverage remains owned by #155/#156;
+  - deletion-only legacy artifacts remain owned by #160.
+- Explicitly state that #151 does not duplicate the assertions at
+  `tests/test_builder_xml_invariants.py:951-956`, `:972-977`, or
+  `src/boomi_mcp/kb/design_doctrine.py:121`.
+- Refresh generated inventory sections 11.2–11.6 from the inventory emitter, following the existing commands at current lines 2029-2038.
+
+Why:
+
+- Makes every potentially orphaned survivor artifact reviewable without creating a second hand-maintained runtime reachability map.
+
+Risk:
+
+- Low runtime risk, medium roadmap-accounting risk.
+
+## Implementation order and risk
+
+1. Record the literal baseline SHA `47b20dd776a158c6fd096779262bbadd2867b7e3` before edits.
+2. Create the two neutral modules by moving definitions without semantic edits.
+3. Repoint database/API and all surviving archetype/importer dependencies; run focused model and assembly tests.
+4. Remove the composition class re-export using the temporary module alias; immediately run the registry/isolation test.
+5. Add the runtime-derived reachability gate and legacy-oracle pin.
+6. Re-home the three survivor assertions and adjust their fixture.
+7. Extend existing example tests with dry-run apply coverage.
+8. Update the test-node manifest with the exact arithmetic below.
+9. Add the coverage-disposition record.
+10. Rebaseline served revision artifacts only after all production imports stabilize.
+11. Run targeted tests, all golden checks, the full non-KB suite, and scoped public-tool `.fn()` QA.
+12. Follow the repository completion workflow: commit the QA-validated tree, then perform the required detached Codex review over the baseline delta.
+
+The production extraction is behavior-affecting because it touches served Pydantic schemas, discovery, and direct authoring wrappers, despite being designed to preserve XML bytes. The freeze tests, compatibility-test relocation, manifest, and inventory prose are dark changes. No live Boomi mutation is needed; the appropriate live QA is public MCP tool-wrapper `.fn()` execution using dry-run/read-only inputs and no credentials.
+
+## New tests
+
+### `tests/test_issue_151_reachability_freeze.py::test_runtime_derived_route_map_has_no_m12_22_stranded_survivors`
+
+The test will derive `emitter_key -> set[route]` as follows:
+
+1. Iterate `emitter_registry._REGISTRATIONS`.
+2. Assert its keys exactly match both `registry_keys()` and the ProcessIR emitter discriminator keys.
+3. Seed every registration with its `supported_capability`; this is the direct canonical ProcessIR route and defines the surviving capabilities.
+4. Derive the `flow_sequence` kind universe from the union of `_FLOW_SEQUENCE_LINEAR_KINDS`, `_CONTROL_KINDS`, and `_TERMINAL_KINDS`.
+5. Load `tests/fixtures/process_ir/flow_sequence_compat_cases.json`, resolve its existing `@shared` references, and assert the fixture’s observed kinds exactly cover the runtime-derived kind universe.
+6. Run the registered `FLOW_SEQUENCE_DIALECT` adapter for those specimens, build its symbol table from the adapter’s actual requirements, lower through `lower_process_ir_to_cfg` and `lower_cfg_to_emission_plan`, and read each emitted node’s actual `emitter_input.emitter_kind`.
+7. Attribute linear steps by their `/body/steps/<ordinal>` source paths and control/terminal nodes by `/body/terminal`. Accumulate the actual emitter key reached by each runtime kind rather than embedding the 14→11 mapping in the test.
+8. Derive sync-pipeline candidates from `_SYNC_PIPELINE_SUPPORTED_KINDS`, the primary/alternative primitive tables, the real builder validator/lowerer, and `_sync_pipeline_is_canonical`. Use the existing sync emitter-parity fixture only as valid payload specimens, then run the registered migrated adapter and real lowering to collect emitted keys.
+9. Build and lower both accepted `wrapper_subprocess` terminal forms through its registered migrated adapter.
+10. Do not invent a canonical-adapter model for ordinary `database_to_api_sync`: it is deliberately in `RESERVED_DIALECTS`, not `_MIGRATED`. Its canonical emitter registrations still survive through step 3.
+
+Fail-closed assertions:
+
+- derived route keys equal the registry/discriminator keys;
+- every survivor has at least one route;
+- `len(route_map) >= 18`;
+- derived `flow_sequence` runtime kinds are at least 14;
+- their lowered emitter-key set is at least 11;
+- at least ten of those keys are exclusive to `FLOW_SEQUENCE_DIALECT` among migrated legacy routes;
+- there is no survivor for which all derived routes are a subset of `_M12_22_DELETION_ROUTES`.
+
+Exact failure condition:
+
+```python
+stranded = {
+    key: routes
+    for key, routes in survivor_routes.items()
+    if routes and routes <= deletion_routes
+}
+```
+
+The assertion fails with each stranded key and its derived routes. Missing or empty routes fail before this comparison so “unknown” cannot be treated as safe.
+
+### `tests/test_issue_151_reachability_freeze.py::test_reachability_freeze_rejects_injected_deleted_only_capability`
+
+Non-vacuity witness:
+
+- Derive the real route map normally.
+- Copy it without mutating production globals.
+- Inject `__sentinel_deleted_only__` as a surviving capability whose only route is `{FLOW_SEQUENCE_DIALECT}`.
+- Invoke the same invariant helper and assert it raises, naming the sentinel and deleted route.
+
+This proves the gate excludes a concrete unsafe configuration and prevents a repeat of issue #149’s “walked nonexistent keys and froze nothing” defect. The independent `>=18`, `>=14`, `>=11`, and `>=10` floors ensure a collapsed derivation also fails even if the sentinel test itself remains operational.
+
+### `tests/test_issue_151_reachability_freeze.py::test_flow_sequence_remains_a_legacy_oracle_without_a_public_kind`
+
+Assertions:
+
+- `_MIGRATED[FLOW_SEQUENCE_DIALECT] is adapt_flow_sequence`.
+- The public builder registry remains exactly:
+  `database_to_api_sync`, `sync_pipeline`, and `wrapper_subprocess`.
+- `FLOW_SEQUENCE_DIALECT` is not a public `process_kind`.
+- `ProcessFlowBuilder.PROCESS_KIND` remains `database_to_api_sync`.
+- `_flow_sequence_enabled({})` and explicit `None` are false, while an empty list is true.
+- The parity fixture covers the runtime-derived 14-kind vocabulary.
+- No new adapter registry entry or spelling exists.
+
+This is the explicit “no new capability” pin; the validation diff guard below additionally requires the three runtime files to remain byte-unchanged.
+
+### `tests/test_integration_models.py::test_integration_spec_defaults_serialization`
+
+Moved unchanged from the issue-135 suite. It pins the surviving integration-spec default serialization behavior.
+
+### `tests/test_integration_models.py::test_spec_envelope_ignores_unknown_fields`
+
+Moved unchanged. It pins neutral envelope handling of unknown fields.
+
+### `tests/test_integration_models.py::test_component_envelope_ignores_unknown_fields_but_preserves_config`
+
+Moved unchanged. It pins the distinction between ignored envelope extras and preserved component configuration.
+
+### Existing nodes strengthened without relocation
+
+- `tests/patterns/test_archetype_composition.py::test_compose_registry_and_archetype_list_unchanged`
+- `tests/patterns/test_archetype_composition.py::test_golden_example_plans_clean`
+- `tests/patterns/test_archetype_composition.py::test_cache_handoff_golden_example_plans_clean`
+- `tests/test_m11_composed_examples.py::test_every_example_plans_clean`
+
+Because their node IDs do not change, they require no manifest rows.
+
+## Manifest arithmetic
+
+Current state:
+
+- `minimum_active = 9826`
+- `minimum_collected = 9826`
+- last ID = `pytest-009845`
+
+Tombstone in place:
+
+```json
+{"id":"pytest-002611","node_id":"tests/test_issue_135_compatibility_freeze.py::test_component_envelope_ignores_unknown_fields_but_preserves_config","kind":"pytest","state":"tombstone"}
+{"id":"pytest-002619","node_id":"tests/test_issue_135_compatibility_freeze.py::test_integration_spec_defaults_serialization","kind":"pytest","state":"tombstone"}
+{"id":"pytest-002629","node_id":"tests/test_issue_135_compatibility_freeze.py::test_spec_envelope_ignores_unknown_fields","kind":"pytest","state":"tombstone"}
+```
+
+Append, in this order:
+
+```json
+{"id":"pytest-009846","node_id":"tests/test_integration_models.py::test_integration_spec_defaults_serialization","kind":"pytest","state":"active"}
+{"id":"pytest-009847","node_id":"tests/test_integration_models.py::test_spec_envelope_ignores_unknown_fields","kind":"pytest","state":"active"}
+{"id":"pytest-009848","node_id":"tests/test_integration_models.py::test_component_envelope_ignores_unknown_fields_but_preserves_config","kind":"pytest","state":"active"}
+{"id":"pytest-009849","node_id":"tests/test_issue_151_reachability_freeze.py::test_runtime_derived_route_map_has_no_m12_22_stranded_survivors","kind":"pytest","state":"active"}
+{"id":"pytest-009850","node_id":"tests/test_issue_151_reachability_freeze.py::test_reachability_freeze_rejects_injected_deleted_only_capability","kind":"pytest","state":"active"}
+{"id":"pytest-009851","node_id":"tests/test_issue_151_reachability_freeze.py::test_flow_sequence_remains_a_legacy_oracle_without_a_public_kind","kind":"pytest","state":"active"}
+```
+
+Exact floor arithmetic:
+
+```text
+9826 current active
++ 6 appended active nodes
+- 3 old nodes tombstoned
+= 9829 resulting active nodes
+```
+
+Set both `minimum_active` and `minimum_collected` to `9829`. The script treats `minimum_collected` as a lower bound, but keeping both floors equal preserves the current exact-manifest convention.
+
+## Validation commands
+
+All commands run from the repository root and use the Python 3.12 virtual environment.
+
+### Focused neutral extraction and registry tests
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m pytest -q -p no:cacheprovider \
+  tests/patterns/test_database_to_api_sync.py \
+  tests/patterns/test_database_to_api_sync_assembly.py \
+  tests/patterns/test_api_to_api_sync.py \
+  tests/patterns/test_api_to_database_sync.py \
+  tests/patterns/test_http_listener_to_db.py \
+  tests/patterns/test_http_listener_to_rest.py \
+  tests/patterns/test_archetype_composition.py \
+  tests/patterns/test_registry.py \
+  tests/test_integration_import.py
+```
+
+### Derived freeze and re-homed model tests
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m pytest -q -p no:cacheprovider \
+  tests/test_issue_151_reachability_freeze.py \
+  tests/test_integration_models.py \
+  tests/test_issue_135_compatibility_freeze.py
+```
+
+### Adapter and lowering parity
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m pytest -q -p no:cacheprovider \
+  tests/test_process_emitter_parity.py \
+  tests/test_process_ir_compiler.py \
+  tests/test_process_ir_flow_sequence_codec.py \
+  tests/test_legacy_adapter_cutover.py \
+  tests/test_sync_pipeline_adapter_cutover.py
+```
+
+### Four shipped examples: plan and dry-run apply
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m pytest -q -p no:cacheprovider \
+  tests/patterns/test_archetype_composition.py \
+  tests/test_m11_composed_examples.py
+```
+
+### Byte identity for every committed surviving golden
+
+The active golden test executes the manifest and performs byte comparison:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m pytest -q -p no:cacheprovider \
+  tests/test_wave_gate_goldens.py
+```
+
+Also prove that no committed XML/parity anchor changed relative to the implementation baseline:
+
+```bash
+git diff --exit-code 47b20dd776a158c6fd096779262bbadd2867b7e3 -- \
+  tests/fixtures/golden_xml \
+  tests/fixtures/process_ir/emitter_parity
+```
+
+This covers all active goldens, including the 21 `sync_pipeline_*.xml` files and all five current `flow_sequence` oracle goldens.
+
+### Explicit no-new-capability production guard
+
+```bash
+git diff --exit-code 47b20dd776a158c6fd096779262bbadd2867b7e3 -- \
+  src/boomi_mcp/categories/components/builders/process_flow_builder.py \
+  src/boomi_mcp/compiler/process_ir/legacy_adapters/registry.py \
+  src/boomi_mcp/compiler/process_ir/legacy_adapters/flow_sequence.py
+```
+
+### Served revision-digest rebaseline
+
+```bash
+PYTHONPATH=src .venv/bin/python tests/_m12_12_legacy_inventory.py \
+  --write tests/fixtures/m12_12/legacy_reachability_inventory.json
+
+PYTHONPATH=src .venv/bin/python tests/_m12_12_legacy_inventory.py --emit-markdown
+```
+
+Review the JSON diff and paste the emitted replacement for inventory sections 11.2–11.6. Then run:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m pytest -q -p no:cacheprovider \
+  tests/test_recipe_registry.py \
+  tests/test_m12_12_legacy_inventory.py
+```
+
+### Wave-gate manifest verification
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/wave_gate.py manifests \
+  --base 47b20dd776a158c6fd096779262bbadd2867b7e3
+```
+
+### Scoped public MCP wrapper `.fn()` QA
+
+Use one read-only local script through the actual decorated tool functions. It must:
+
+- call `list_integration_archetypes.fn()` and assert the exact six-name catalog;
+- call `get_integration_archetype.fn()` and `build_from_archetype.fn()` for each of the five non-stub archetypes using its shipped example parameters;
+- call `compose_archetypes.fn()` for both M8 examples;
+- call `import_integration_draft.fn()` with the existing minimal REST-to-REST artifact shape from `tests/test_integration_import.py:55-78`;
+- assert success/read-only flags, no raw XML, expected plan action sequence, and no fake-client mutation.
+
+Run it with:
+
+```bash
+BOOMI_LOCAL=true PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=.:src \
+  .venv/bin/python /tmp/issue_151_live_fn_qa.py
+```
+
+The QA script is temporary and must not be added to the repository. No Boomi credentials or external mutation are required.
+
+### Full non-KB suite
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m pytest \
+  tests --ignore=tests/kb -q -p no:cacheprovider
+```
+
+After Stage-1 QA is current, commit the validated tree and run the repository-required detached Codex review over the literal baseline `47b20dd776a158c6fd096779262bbadd2867b7e3`.
+
+## Open questions / assumptions
+
+- **Neutral-module granularity:** The issue says “module(s)” without naming them. Use the two-module split above—parameter/schema definitions versus assembly helpers—because it prevents Pydantic schema code from importing process construction machinery and gives #159 a clean parameter import target.
+- **Temporary composition dependency:** Issue #151 cannot remove the scheduled composition implementation without doing #159. Use a private module import solely for the two current class calls; do not leave a class re-export in module globals.
+- **Meaning of a surviving capability:** Treat each emitter registration as a capability and its `supported_capability` as the canonical survivor route. This is the only definition grounded directly in the runtime emitter authority and makes all 18 current keys surviving independently of legacy authoring routes.
+- **Deletion-scope constant:** A short explicit route set is appropriate because deletion scheduling is roadmap policy, not derivable runtime behavior. Everything surrounding it—survivors, lowered keys, and reachable route sets—must remain derived.
+- **Ordinary database reliability route:** Do not manufacture a migrated adapter for it. Its absence from `_MIGRATED` is authoritative; `catcherrors` remains protected through the canonical ProcessIR registration and existing legacy coverage.
+- **Floor behavior:** Use additive fail-closed floors (`18`, `14`, `11`, `10`) so future additions do not require editing the gate, while accidental derivation collapse still fails.
+- **Recipe revision scope:** Rebaseline the five affected served archetype artifacts because direct tracked invokers change. Do not add neutral transitive helpers to `RECIPE_LAYER_MODULES`.
+- **Backward compatibility:** No aliases or forwarding imports should be added solely to preserve old internal import paths. There are no external consumers, and such aliases would undermine the neutral-dependency objective.
+
+
+=== ISSUE ACCEPTANCE CRITERIA ===
+## Acceptance criteria
+
+- The derived reachability-freeze test exists and is wired as #160's deletion gate: it derives the
+  survivor/route map from the runtime authority (emitter registry + lowering tables), covers the
+  14 step kinds and the emitter keys they reach (derived from the lowering, not assumed 1:1), and
+  fails whenever any surviving capability is reachable **only** through a `process_kind` (or
+  sub-dialect) scheduled for deletion — derived, not hand-listed, so a kind added later cannot
+  silently lack a route.
+- The shared parameter/preservation-policy helpers are importable without importing a to-be-deleted
+  archetype module, and `PatternRegistry.from_package` no longer registers an archetype via the
+  `composition.py` re-export.
+- Emitted XML for every surviving path is byte-identical to `dev` @`9711a9c` (the neutral
+  extraction is an import change; the 21 committed `sync_pipeline_*.xml` goldens and all
+  `flow_sequence` goldens hold).
+- Every surviving freeze assertion has a home outside the legacy-oracle suite.
+- The orphaned-coverage inventory is recorded and each item re-pointed or explicitly deferred to
+  its owning issue, without duplicating #156's counterpart coverage (see the counterpart note).
+- The four shipped examples still plan and apply unchanged through the existing entry (their
+  migration to ProcessIR roots is #159's).
+
+## Required tests
+
+- The derived reachability-freeze test (registry + lowering as the authority).
+- Byte-golden parity across all surviving goldens before/after the neutral extraction.
+- Archetype registry membership test after the re-export removal.
+- The four shipped examples plan and apply unchanged through the existing entry.
+- Live `.fn()` QA for the affected authoring wrappers.
+
+## Definition of done

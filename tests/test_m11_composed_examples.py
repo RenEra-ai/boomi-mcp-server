@@ -21,7 +21,7 @@ _project_root = str(Path(__file__).resolve().parent.parent)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from src.boomi_mcp.categories.integration_builder import _build_plan
+from src.boomi_mcp.categories.integration_builder import _apply_plan, _build_plan
 from src.boomi_mcp.categories.components.builders import ProcessFlowBuilder
 
 # The example definitions live in examples/m11/*.json; the corpus (#165) owns
@@ -62,6 +62,52 @@ def test_every_example_plans_clean():
         for step in plan["steps"]:
             assert "validation_error" not in step, (name, step["key"], step.get("validation_error"))
             assert step["planned_action"] in ("create", "reuse"), (name, step["key"])
+
+
+def test_every_example_applies_clean_in_dry_run():
+    """#151 (M12.14): the shipped examples must PLAN AND APPLY through the entry.
+
+    The issue's acceptance criterion says "plan and apply", and planning alone was
+    the coverage gap the architect review caught: `_build_plan` stops before the
+    apply entry point, so a defect between the two would have been invisible here.
+    Dry run, so this asserts the apply path is reached and refuses to mutate —
+    `_apply_plan` returns before any create/update when `dry_run` is set.
+    """
+    for name in _EXAMPLE_FILES:
+        spec = _load_example(name)
+        client = MagicMock()
+        with patch(_PATCH_TARGET, return_value=[]):
+            planned = _build_plan(
+                MagicMock(), {"integration_spec": spec, "conflict_policy": "reuse"}
+            )
+            applied = _apply_plan(
+                client,
+                "test-profile",
+                {
+                    "integration_spec": spec,
+                    "conflict_policy": "reuse",
+                    "dry_run": True,
+                },
+            )
+        assert applied.get("_success") is not False, name
+        assert applied["dry_run"] is True, name
+        # The apply path must describe exactly what planning described — a
+        # divergence here is the whole reason the criterion says "and apply".
+        assert [s["planned_action"] for s in applied["steps"]] == [
+            s["planned_action"] for s in planned["steps"]
+        ], name
+        assert [s["key"] for s in applied["steps"]] == [
+            s["key"] for s in planned["steps"]
+        ], name
+        for step in applied["steps"]:
+            assert "validation_error" not in step, (name, step["key"])
+            assert step["planned_action"] in ("create", "reuse"), (name, step["key"])
+        # No mutation reached the client.
+        mutating = [
+            call for call in client.mock_calls
+            if any(verb in str(call) for verb in (".create(", ".update(", ".delete("))
+        ]
+        assert mutating == [], (name, mutating)
 
 
 def test_basic_example_process_matches_golden():

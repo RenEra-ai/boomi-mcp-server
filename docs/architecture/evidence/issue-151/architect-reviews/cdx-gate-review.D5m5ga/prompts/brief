@@ -1,0 +1,95 @@
+You are reviewing an implementation AGAINST ITS APPROVED ARCHITECT DESIGN PLAN.
+
+Repository: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: codex/issue-151, single commit 13eb7574c25195cfeddfb6457e1de1b6e8e0dd02
+Baseline: 47b20dd776a158c6fd096779262bbadd2867b7e3
+Review the delta: `git diff 47b20dd776a158c6fd096779262bbadd2867b7e3..HEAD`
+
+This is issue #151 (M12.14). The design plan is inlined verbatim below; the issue's acceptance
+criteria follow it under their own header. Your job is to judge whether the implementation
+FAITHFULLY REALIZES THAT PLAN and those criteria — not to re-derive a design of your own.
+
+Changed files (22):
+  docs/architecture/M12_COMPATIBILITY_INVENTORY.md
+  docs/architecture/evidence/issue-151/ledger.md
+  src/boomi_mcp/categories/integration_import.py
+  src/boomi_mcp/patterns/archetype_assembly.py            (NEW)
+  src/boomi_mcp/patterns/archetype_parameters.py          (NEW)
+  src/boomi_mcp/patterns/archetypes/api_to_api_sync.py
+  src/boomi_mcp/patterns/archetypes/api_to_database_sync.py
+  src/boomi_mcp/patterns/archetypes/database_to_api_sync.py
+  src/boomi_mcp/patterns/archetypes/http_listener_to_db.py
+  src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py
+  src/boomi_mcp/patterns/composition.py
+  src/boomi_mcp/patterns/registry.py
+  src/boomi_mcp/recipes/registry.py
+  tests/fixtures/compatibility/issue_135/authoring_boundaries.json
+  tests/fixtures/m12_12/legacy_reachability_inventory.json
+  tests/fixtures/wave_gate/test_nodes.jsonl
+  tests/patterns/test_archetype_composition.py
+  tests/patterns/test_registry.py
+  tests/test_integration_models.py                        (NEW)
+  tests/test_issue_135_compatibility_freeze.py
+  tests/test_issue_151_reachability_freeze.py             (NEW)
+  tests/test_recipe_registry.py
+
+## Deliberate, recorded DEVIATIONS from the plan — judge each on its merits
+
+The implementer did not follow the plan blindly. Please assess whether each deviation is justified,
+and say so explicitly if any is wrong:
+
+1. **The plan's freeze-test route derivation was rejected as a tautology.** The plan (see
+   "Findings from the code" / the route-map recipe) proposed seeding each emitter key's route set from
+   `EmitterRegistration.supported_capability`. That field is the literal constant
+   `CAPABILITY_PROCESS_IR_V1` on all 18 rows, so `routes <= deletion_routes` could never hold and the
+   gate would freeze nothing. The implementation instead DERIVES the direct route by walking the closed
+   `ProcessNodeV1` union through the real lowering over committed specimens. Is that derivation sound,
+   and is it genuinely non-vacuous?
+
+2. **The extraction set was narrowed.** The plan listed a broad set of models/helpers to move. The
+   implementation moved exactly the transitive closure of what the SURVIVING modules import from the
+   two scheduled modules — which excludes `Schedule`/`ExecutionTrigger`/`Watermark`/`ExecutionConfig`
+   (no survivor imports them). Is the narrower set correct and sufficient for the issue's goal?
+
+3. **`DELETION_ROUTES` is derived differently than planned.** The plan proposed
+   `PROCESS_FLOW_BUILDERS | migrated_dialects() | RESERVED_DIALECTS`, which would mark the SURVIVING
+   `sync_pipeline` and `wrapper_subprocess` as scheduled for deletion. The implementation derives
+   `{ProcessFlowBuilder.PROCESS_KIND} | {sub-dialects of it}` instead. Which is right?
+
+4. **Two changes NOT in the plan at all**, both added in response to live-QA findings:
+   - `src/boomi_mcp/patterns/registry.py`: `from_package` now registers a pattern class only from the
+     module whose `__module__` matches (a re-export is no longer a registration path). Justified as
+     the mandatory structural fix for a second instance of the same defect class; the sibling sweep
+     found 30 of 31 patterns were registering from a re-export, including `db_extract` from a module
+     issue #160 deletes. Is this in scope, correct, and safe?
+   - `src/boomi_mcp/recipes/registry.py` + `tests/test_recipe_registry.py`: the two new neutral modules
+     were added to `RECIPE_LAYER_MODULES` (and to the test's `allowed_outside` plus a new "clause 4"
+     bound), because the extraction moved ~949 executed lines out of a listed module and thereby
+     shrank the served source-provenance digest's coverage. Is the clause-4 bound sound, and is the
+     membership justified?
+
+## What to look for
+
+- Does the implementation satisfy the issue's acceptance criteria (inlined below)?
+- Any place the plan required something that was silently dropped or only partially done.
+- Correctness bugs in the extraction: a moved model whose validator/discriminator/alias/error string
+  changed; an import repointed to the wrong flavour of a same-named helper (there are THREE distinct
+  `_build_field_map_params` and TWO distinct `_build_rest_send_params` in this tree); a survivor still
+  importing from a scheduled module.
+- Whether the new freeze test would actually FAIL when it should, or is vacuous in some way not yet
+  considered. Be adversarial here — this test is the machine-checked gate that issue #160's deletion
+  depends on, so a false-green is the worst outcome in the whole change.
+- Whether `registry.py`'s new filter could drop a pattern under any import order or entry path.
+- Whether the wave-gate manifest transition is arithmetically correct: baseline floor 9826, 9 nodes
+  added, 3 flipped active->tombstone, 2 more added later, final floor 9834.
+
+## Out of scope — do NOT report these
+
+- The deletion itself (issue #160), fused `start_listen` (#158), migrating examples/callers to
+  ProcessIR roots (#159), canonical `notify` (#156), connector `dynamic_path` (#155).
+- Backward compatibility of any kind: this server has no external consumers and the issue explicitly
+  forbids preserving anything for compatibility alone.
+- The `patterns/recipe_bridge.py:36` unused import — pre-existing, deliberately untouched.
+
+END your review with a verdict on its OWN FINAL LINE: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

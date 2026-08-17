@@ -149,6 +149,63 @@ than described. The comment now states plainly that the bound is a NECESSARY con
 characterization, and that the explicit pair plus the downstream-compiler boundary pin are what fix
 membership.
 
+### L1 — Stage-1 QA, evaluation 2 addendum (procedural)
+
+| # | Source ID | Verbatim summary | Gate / evidence | Orig. label | Blocking class | Defect class | Derived tier + anchor | SHA/delta | Disposition |
+|---|---|---|---|---|---|---|---|---|---|
+| Q-07 | QA-151-r2-03 | "The tree was edited during **both** of my full-suite runs." Run 1 void (three files moved mid-run, spurious `inspect.getsource` failure); run 2 green (9813 passed) but `test_issue_151_reachability_freeze.py` gained 112 lines 5 s before it ended and `test_m11_composed_examples.py` moved after, so neither file is covered by it. | L1 eval 2 | procedural | — (evidence completeness, not behaviour) | (validation evidence collected over a moving tree, the suite's own collection-time import) | Standard | fix delta | `fixed` — one full-suite run on a frozen tree, recorded below |
+
+Valid, and it repeats a lesson this repo already recorded (#172: never edit the tree while the gate
+runs). `src/` and `server.py` were frozen across both of QA's runs, so this is an evidence gap rather
+than a behavioural risk — but a suite run that did not import the final bytes of two test files is not
+evidence for those files. The counts reconcile exactly (QA's 9813 + 4 nodes it deselects = my 9817;
+both collect the same set). Discharged by the frozen-tree run recorded in the closing checkpoint.
+
+### L3 — §6 architect implementation review, evaluation 1
+
+Run directory `/tmp/cdx-gate-review.D5m5ga`, gate `review`, `ok:true`, `stopped:true`, turn kind
+`turn`, turnToken 1, `promptSha256 f1015c72…`, `messageSha256 385e8c6e…`, plan bytes verified present
+in the prompt by the collector. `parsedVerdict: ISSUES FOUND`. The reviewer explicitly judged all four
+recorded plan deviations JUSTIFIED (the rejected `supported_capability` seeding, the narrowed
+extraction set, the redefined `DELETION_ROUTES`, and both live-QA additions) and confirmed the manifest
+arithmetic.
+
+| # | Source ID | Verbatim summary | Gate / run dir | Orig. label | Blocking class | Defect class | Derived tier + anchor | SHA/delta | Disposition |
+|---|---|---|---|---|---|---|---|---|---|
+| R-01 | §6 P1 #1 | "The deletion gate does not actually freeze each of the 14 `flow_sequence` kinds. It only checks `len(_FLOW_SEQUENCE_ALLOWED_KINDS) >= 14` and aggregates emitter keys across every specimen … A newly allowed kind with no fixture would silently pass." | L3 / cdx-gate-review.D5m5ga | **P1** | capability reachability | (an aggregate assertion standing in for a per-item one, the emitter registry + lowering) — 1st instance | **Critical** — anchor: reviewer labelled it P1 | fix delta | `fixed` |
+| R-02 | §6 P1 #2 | "None of the four shipped examples is tested through dry-run apply … The required dry-run result, planned/applied action equality, and no-client-mutation assertions were silently omitted." | L3 / cdx-gate-review.D5m5ga | **P1** | apply/update preservation | (a planned acceptance test dropped on a mistaken premise, the issue's own acceptance criteria) — 1st instance | **Critical** — anchor: reviewer labelled it P1 | fix delta | `fixed` |
+| R-03 | §6 P2 #1 | "The architecture inventory contradicts the final implementation … Both statements are false after the live-QA fixes, making the #160 handoff misleading." | L3 / cdx-gate-review.D5m5ga | P2 | — (handoff record accuracy; not served to callers) | (a stale authority statement outliving the change it described, the code it describes) — 2nd instance in this slice (1st was clause 4's comment, Q-06) | Standard | fix delta | `fixed` |
+| R-04 | §6 P2 #2 | "`archetype_parameters.py` has no explicit `__all__`, despite the plan requiring a declared reusable export surface … `_ApiParametersLike` omits `naming`, although `_build_source_response_profile` reads `parameters.naming`." | L3 / cdx-gate-review.D5m5ga | P2 | machine-served schemas/contracts (the neutral layer's declared export surface) | (an export/shape declaration hand-written from memory rather than from the consumed set, the modules' actual importers) | Standard | fix delta | `fixed` |
+
+**R-01 — verified, and it is the same blind spot I criticised in the architect plan, one level down.**
+My own comment claimed "flow_sequence authored-kind coverage" above an assertion that only floored a
+runtime constant. Fixed by attributing every authored step to the plan node carrying its
+`source_path`, then asserting (a) authored specimen kinds == `_FLOW_SEQUENCE_ALLOWED_KINDS` EXACTLY in
+both directions, (b) every authored step produced an emitter node (only the `sequence` body container
+is exempt), and (c) per-kind attribution covers >= 14 kinds with no routeless kind. **Mutation control
+run:** injecting a phantom allowed kind with no specimen leaves the OLD floors passing
+(`len(allowed)=15 >= 14`) while the NEW assertion fires and names the phantom.
+
+**R-02 — verified; my implementation plan dropped it on a factually wrong premise.** The plan's
+deviation 7 said dry-run apply was "not an acceptance criterion of #151"; the criterion says the four
+examples must "plan **and** apply unchanged through the existing entry". Two nodes added covering all
+four shipped examples (plus the third M11 example): assert `dry_run` is true, `_success`, step-key and
+planned-action equality between plan and apply, no `validation_error`, and no create/update/delete
+reached the client.
+
+**R-03 — verified.** §12.5 claimed `RECIPE_LAYER_MODULES` "was not edited"; §12.1 described
+`from_package` as having no `__module__` filter. Both were true when written and false after the
+live-QA fixes. Corrected in place, with the reason for the change recorded rather than the claim
+silently swapped. Second instance of the stale-statement class in this slice, so both were swept: a
+grep for the two falsified claims across the inventory and the ledger now returns nothing.
+
+**R-04 — verified.** `__all__` was absent (count 0); `_ApiParametersLike` declared
+`source`/`transform`/`target` while the moved helpers also read `parameters.naming` (`:572`). `__all__`
+now declares the 30 reusable model names, derived by measuring what the tree actually imports from the
+module rather than hand-listing, and deliberately excludes the underscore-prefixed private validators.
+`naming` added to the protocol. A latent docstring corruption from the original bulk forward-reference
+rewrite (which had turned the protocol's own explanation circular) was corrected in the same pass.
+
 ## Observations recorded, not fixed (out of scope for this slice)
 
 | # | Observation | Why not fixed here |

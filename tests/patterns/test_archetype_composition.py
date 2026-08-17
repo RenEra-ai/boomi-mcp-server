@@ -780,6 +780,54 @@ def test_cache_handoff_golden_example_plans_clean():
         assert "validation_error" not in step, (step["key"], step.get("validation_error"))
 
 
+def test_the_shipped_m8_examples_apply_clean_in_dry_run():
+    """#151 (M12.14): the shipped examples must PLAN AND APPLY through the entry.
+
+    The issue's acceptance criterion says "plan and apply". The two tests above
+    stop at `_build_plan`, which never reaches the apply entry point — the gap the
+    architect review caught. Dry run, so this proves the apply path is reached AND
+    that it refuses to mutate: `_apply_plan` returns before any create/update when
+    `dry_run` is set, and the client is asserted untouched.
+    """
+    from boomi_mcp.categories.integration_builder import _apply_plan
+
+    for path in (_EXAMPLE_PATH, _CACHE_EXAMPLE_PATH):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        spec = payload["integration_spec"]
+        client = MagicMock()
+        with patch(_PAGINATE_TARGET, return_value=[]):
+            planned = _build_plan(
+                MagicMock(),
+                {"integration_spec": spec, "conflict_policy": "reuse"},
+            )
+            applied = _apply_plan(
+                client,
+                "test-profile",
+                {
+                    "integration_spec": spec,
+                    "conflict_policy": "reuse",
+                    "dry_run": True,
+                },
+            )
+        assert applied.get("_success") is not False, path.name
+        assert applied["dry_run"] is True, path.name
+        # Apply must describe exactly what planning described.
+        assert [s["key"] for s in applied["steps"]] == [
+            s["key"] for s in planned["steps"]
+        ], path.name
+        assert [s["planned_action"] for s in applied["steps"]] == [
+            s["planned_action"] for s in planned["steps"]
+        ], path.name
+        for step in applied["steps"]:
+            assert "validation_error" not in step, (path.name, step["key"])
+            assert step["planned_action"] in ("create", "reuse"), (path.name, step["key"])
+        mutating = [
+            call for call in client.mock_calls
+            if any(verb in str(call) for verb in (".create(", ".update(", ".delete("))
+        ]
+        assert mutating == [], (path.name, mutating)
+
+
 def test_explicit_star_links_accepted_and_wrong_links_rejected():
     options = _options()
     options["links"] = [

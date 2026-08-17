@@ -274,6 +274,88 @@ def _legacy_route_keys():
     return out
 
 
+def _authored_flow_sequence_kinds(config):
+    """Every ``kind`` authored anywhere in a legacy config's ``flow_sequence``."""
+    found = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            if isinstance(node.get("kind"), str):
+                found.add(node["kind"])
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(config.get("flow_sequence") or [])
+    return found
+
+
+def _ir_kinds_by_source_path(process_ir):
+    """``{source_path: ir_kind}`` for every node in an adapted IR body.
+
+    The path spelling is the compiler's own (`/body/steps/1`, `/body/terminal`,
+    …) because it is read back off ``EmissionPlanNodeV1.source_path`` — the two
+    are the same identity, so attribution needs no second model of the shape.
+    """
+    document = json.loads(process_ir.model_dump_json())
+    paths = {}
+
+    def walk(node, path):
+        if isinstance(node, dict):
+            if isinstance(node.get("kind"), str):
+                paths[path] = node["kind"]
+            for key, value in node.items():
+                walk(value, path + "/" + key)
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                walk(value, path + "/" + str(index))
+
+    walk(document.get("body"), "/body")
+    return paths
+
+
+def _flow_sequence_kind_attribution():
+    """Per-STEP attribution for the `flow_sequence` route.
+
+    Returns ``(authored_kinds, ir_kind -> {emitter_key}, unattributed_ir_kinds)``.
+
+    Aggregating emitter keys across a corpus is not enough to satisfy the issue's
+    "a kind added later cannot silently lack a route" criterion: two kinds can
+    lower onto the same key, so one can stop lowering while the other keeps the
+    aggregate whole. This walks each authored step to the plan node carrying its
+    `source_path`, so every step has to produce an emitter node of its own.
+    """
+    shared, cases = _shared_block()
+    authored = set()
+    routes = {}
+    unattributed = {}
+    for name in sorted(cases):
+        config = _resolve(cases[name], shared)["config"]
+        if config.get("process_kind") == "wrapper_subprocess":
+            continue
+        authored |= _authored_flow_sequence_kinds(config)
+        result = LAR._MIGRATED[LAR.FLOW_SEQUENCE_DIALECT](config)
+        _cfg, plan = compile_process_ir_v1(
+            result.process_ir,
+            EM._symbol_table(result, lambda ref: ref),
+            validation_policy=lookup_policy(_policy_key(LAR.FLOW_SEQUENCE_DIALECT)),
+        )
+        by_path = _ir_kinds_by_source_path(result.process_ir)
+        emitted = {}
+        for node in plan.nodes:
+            path = getattr(node, "source_path", None)
+            if path is not None:
+                emitted.setdefault(path, set()).add(node.emitter_input.emitter_kind)
+        for path, kind in by_path.items():
+            if path in emitted:
+                routes.setdefault(kind, set()).update(emitted[path])
+            else:
+                unattributed.setdefault(kind, set()).add("%s::%s" % (name, path))
+    return authored, routes, unattributed
+
+
 def _route_map():
     """{emitter_key: {route, ...}} over every registry key."""
     direct = _direct_route_keys()
@@ -388,6 +470,36 @@ def test_no_emitter_key_is_reachable_only_through_a_deletion_scheduled_route():
     assert len(fs) >= 11, (
         "flow_sequence lowered onto fewer emitter keys than the 11 it is known to "
         "reach: %s" % sorted(fs))
+
+    # PER-KIND, not aggregate. The floor above says only how many kinds the runtime
+    # allows and how many keys the corpus reaches in total; neither notices a kind
+    # that is allowed but has no specimen, nor one that stops lowering while a
+    # sibling keeps the aggregate whole (two kinds share `setproperties_step`, and
+    # `cache_get`/`document_cache_retrieve` share `doccacheretrieve`).
+    authored, per_kind, unattributed = _flow_sequence_kind_attribution()
+
+    # EXACT equality, both directions: an allowed kind with no committed specimen
+    # fails here rather than passing silently, which is the criterion "a kind added
+    # later cannot silently lack a route".
+    assert authored == set(_FLOW_SEQUENCE_ALLOWED_KINDS), (
+        "the committed flow_sequence specimens and the builder's allowed-kind "
+        "union disagree — allowed but unauthored: %s; authored but not allowed: %s"
+        % (sorted(set(_FLOW_SEQUENCE_ALLOWED_KINDS) - authored),
+           sorted(authored - set(_FLOW_SEQUENCE_ALLOWED_KINDS)))
+    )
+
+    # Every authored step must reach an emitter of its own. `sequence` is the only
+    # legitimate exception: it is the body container, not a step, and emits nothing.
+    assert set(unattributed) <= _CONTAINER_KINDS, (
+        "authored flow_sequence steps produced no emitter node: %s"
+        % {k: sorted(v) for k, v in sorted(unattributed.items())
+           if k not in _CONTAINER_KINDS}
+    )
+    assert len(per_kind) >= 14, (
+        "per-kind attribution collapsed: only %d IR kinds attributed" % len(per_kind))
+    routeless_kinds = sorted(k for k, v in per_kind.items() if not v)
+    assert not routeless_kinds, (
+        "IR kinds reached from flow_sequence with no emitter key: %s" % routeless_kinds)
     others = set().union(*(v for k, v in legacy.items()
                            if k != LAR.FLOW_SEQUENCE_DIALECT))
     exclusive = fs - others

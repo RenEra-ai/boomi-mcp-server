@@ -57,10 +57,19 @@ class _ApiParametersLike(Protocol):
     """The narrow shape the moved REST helpers read off a root parameters model.
 
     Structural, so it costs nothing at runtime and — unlike the former
-    ``"_ApiParametersLike"`` forward reference — does not point this neutral
-    module back at an archetype scheduled for deletion.
+    ``"ApiToApiSyncParameters"`` forward reference these helpers carried before
+    the #151 extraction — does not point this neutral module back at an archetype
+    scheduled for deletion.
+
+    The member list is exactly the attribute set the moved helpers read off
+    ``parameters`` (``naming``, ``source``, ``transform``, ``target``); it is not
+    a partial sketch. ``naming`` was missing in the first cut and
+    ``_build_source_response_profile`` reads it, so an incomplete protocol here
+    is a type-checker blind spot rather than a runtime failure — which is exactly
+    why it needs stating rather than inferring.
     """
 
+    naming: Any
     source: Any
     transform: Any
     target: Any

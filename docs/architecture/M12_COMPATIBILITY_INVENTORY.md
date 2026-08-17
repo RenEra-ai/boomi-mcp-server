@@ -2195,7 +2195,7 @@ rather than aspirational.
 | LG-c2f0b85e | unclassified_reference | src/boomi_mcp/compiler/process_ir/semantic_validation/legacy_bridge.py | validate_legacy_process_config | 2 | 100 | #151 | re-home onto the neutral extraction |
 | LG-cf15d311 | unclassified_reference | src/boomi_mcp/models/_process_ir_compat.py | <module> | 4 | 216 | #159 | migrate the compatibility codec, then delete |
 | LG-f26f5a1c | unclassified_reference | src/boomi_mcp/models/_process_ir_compat.py | legacy_flow_sequence_to_ir | 5 | 678 | #159 | migrate the compatibility codec, then delete |
-| LG-e24ae58a | unclassified_reference | src/boomi_mcp/patterns/archetype_assembly.py | _build_rest_send_params | 7 | 509 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-e24ae58a | unclassified_reference | src/boomi_mcp/patterns/archetype_assembly.py | _build_rest_send_params | 7 | 518 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-4291f7db | unclassified_reference | src/boomi_mcp/patterns/archetype_parameters.py | ApiTarget | 1 | 1583 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-0c08b2d9 | unclassified_reference | src/boomi_mcp/patterns/archetype_parameters.py | RestTarget | 1 | 1064 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-fd0fb833 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype | 2 | 445 | #159 | migrate the archetype to canonical ProcessIR |
@@ -2575,12 +2575,18 @@ deliverables are this section, the batched §7/§12 corrections in
    `http_listener_to_rest`, `patterns/composition.py`, `categories/integration_import.py`) import from
    the two scheduled modules. `Schedule` / `ExecutionTrigger` / `Watermark` / `ExecutionConfig` are
    therefore NOT in the neutral layer — no survivor imports them.
-2. **The `composition.py` re-export is gone.** `DatabaseToApiSyncArchetype` is no longer a class in
-   that module's globals; the two call sites go through a module alias
-   (`_database_to_api_sync.DatabaseToApiSyncArchetype`). `PatternRegistry.from_package`
-   (`patterns/registry.py:78-106`) walks every class in each module's `vars()` with no `__module__`
-   filter, so the re-export was a second discovery path for a scheduled archetype. The six-name
-   catalog is unchanged.
+2. **The `composition.py` re-export is gone, and re-exports no longer register at all.**
+   `DatabaseToApiSyncArchetype` is no longer a class in that module's globals; the two call sites go
+   through a module alias (`_database_to_api_sync.DatabaseToApiSyncArchetype`).
+   `PatternRegistry.from_package` USED to walk every class in each module's `vars()` with no
+   `__module__` filter, which made any re-export a second discovery path. Live QA showed removing the
+   `composition.py` binding did not close that path — `patterns/archetypes/__init__.py` re-exports the
+   same class and, being walked earlier, was the LIVE registration path — and that the mechanism was
+   near-universal: **30 of 31** patterns registered from a re-export rather than their definer,
+   including `db_extract` from `archetypes/database_to_api_sync.py`, a module #160 deletes. As the
+   structural fix for the second instance of that defect class, `from_package` now registers a class
+   only from the module whose `__module__` matches. Measured catalog-neutral: the same 31 patterns,
+   six archetypes, before and after.
 3. **The parity oracle is untouched.** `legacy_adapters/flow_sequence.py`,
    `legacy_adapters/registry.py` and `process_flow_builder.py` are byte-identical to the baseline. No
    new public `process_kind`, no new spelling, `_flow_sequence_enabled` unchanged.
@@ -2681,5 +2687,20 @@ changes at exactly four leaf paths — `capability_revision`, `capability_compar
 `recipe_registry.registry_revision`, and `revision_binding.capability_revision` (plus the per-schema
 digests those feed). Zero fields were added, removed, retyped or resized; every served `json_schema`
 body is byte-identical; and the catalog's `actions`, `archetypes`, versions and `migrated` flags are
-unchanged. `RECIPE_LAYER_MODULES` was not edited — the neutral modules are deliberately NOT added to
-it, and no recipe-engine entry-point call moved.
+unchanged.
+
+**`RECIPE_LAYER_MODULES` WAS edited, deliberately — and this paragraph originally claimed the
+opposite.** The first cut left the two neutral modules out, on the reasoning that they invoke no
+recipe-engine entry point (true, and no such call moved). Live QA showed that reasoning graded the
+membership RULE rather than its coverage CONSEQUENCE: the digest is over module SOURCE TEXT, so moving
+~949 executed lines out of the listed `patterns.archetypes.api_to_api_sync` shrank what it covers.
+Measured — `_SOURCE_PREFIX = "source" -> "sourceQA"` changes emitted component keys while leaving
+`source_digest` unmoved. Both neutral modules are therefore now listed, restoring the pre-extraction
+coverage; re-measured after the fix, a body edit to either one moves the digest. Membership is pinned
+in two places by design (`RECIPE_LAYER_MODULES` plus the `allowed_outside` set in
+`tests/test_recipe_registry.py`), and the list's own guard requires every module outside the recipes
+package to be claimed by a RULE, so this is a named **clause 4** — the neutral parameter/assembly
+layer — bounded to `boomi_mcp.patterns.*` modules that a clause-3 invoker imports. That bound
+excludes every module `test_the_downstream_compiler_is_not_in_the_layer_digest` forbids, asserted
+directly rather than described; it is a necessary condition, not a characterization, and the explicit
+pair plus that boundary pin are what actually fix membership.

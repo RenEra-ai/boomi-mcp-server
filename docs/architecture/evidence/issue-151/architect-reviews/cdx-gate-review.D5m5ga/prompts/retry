@@ -1,0 +1,38 @@
+Approvals and interactive clarifying questions are UNAVAILABLE in this read-only review session.
+Do not ask; do not stop after a reasoning preamble; do not reply with a status update.
+
+Emit the FULL review NOW, as plain text, in your final message.
+
+You are reviewing the implementation of issue #151 (M12.14) on branch codex/issue-151, commit
+13eb7574c25195cfeddfb6457e1de1b6e8e0dd02, against the architect design plan and acceptance criteria
+that were inlined in the original prompt. Review the delta
+`git diff 47b20dd776a158c6fd096779262bbadd2867b7e3..HEAD` across the 22 changed files.
+
+Cover, concretely and with `file:line` citations:
+
+1. Whether the implementation faithfully realizes the approved design plan, and whether it meets the
+   issue's acceptance criteria.
+2. The four recorded deviations from the plan — the rejected `supported_capability` route seeding
+   (replaced by a measured walk of the closed `ProcessNodeV1` union through the real lowering), the
+   narrowed extraction set (the transitive closure of what SURVIVING modules import), the redefined
+   `DELETION_ROUTES` (the scheduled process kind plus its sub-dialects, deliberately excluding the
+   surviving `sync_pipeline`/`wrapper_subprocess`), and the two unplanned changes to
+   `patterns/registry.py` and `recipes/registry.py`. Judge each: justified or not.
+3. Correctness bugs in the extraction — a moved model whose validator, discriminator, alias, default
+   or error string changed; an import repointed to the wrong flavour of a same-named helper (this tree
+   has THREE distinct `_build_field_map_params` and TWO distinct `_build_rest_send_params`); any
+   surviving archetype still importing from a module scheduled for deletion.
+4. Whether `tests/test_issue_151_reachability_freeze.py` would genuinely FAIL when it should. Be
+   adversarial: it is the machine-checked gate issue #160's deletion depends on, so a false-green is
+   the worst possible outcome here.
+5. Whether the new `__module__` filter in `PatternRegistry.from_package` could drop a pattern under
+   any import order or entry path, and whether it fails closed on a broken module.
+6. The wave-gate manifest arithmetic: baseline floor 9826, 9 nodes appended, 3 flipped
+   active -> tombstone, 2 further nodes appended, final floor 9834.
+
+Do NOT report: issue #160's deletion, #158 fused `start_listen`, #159 caller/example migration, #156
+notify, #155 dynamic_path, backward compatibility of any kind (this server has no external consumers
+and the issue forbids preserving it), or the pre-existing unused import at
+`patterns/recipe_bridge.py:36`.
+
+END with a verdict on its OWN FINAL LINE: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
