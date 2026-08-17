@@ -59,16 +59,22 @@ from ..primitives.wss_listen import WssListenPrimitive
 
 # Reuse #73's REST target contract + assembly helpers verbatim (duck-typed on
 # ``parameters.target`` / ``parameters.transform`` / ``parameters.naming``).
-from .api_to_api_sync import (
+from ..archetype_parameters import (
     ApiTarget,
     ApiTransformConfig,
     DirectApiTransformOperation,
     MapFunctionApiTransformOperation,
     MapScriptApiTransformOperation,
+    NamingConfig,
+    _flatten_payload_profile_leaves,
+    _required_simple_leaf_paths,
+)
+from ..archetype_assembly import (
+    _TARGET_PREFIX,
     _build_field_map_params,
     _build_rest_send_params,
+    _component_names,
     _script_var_name,
-    _TARGET_PREFIX,
 )
 
 # Shared listener source contract + assembly helpers (M6 sibling preset).
@@ -89,12 +95,6 @@ from .http_listener_to_db import (
 )
 
 # Reuse the sibling archetypes' proven naming contract + secret-safe helpers.
-from .database_to_api_sync import (
-    NamingConfig,
-    _component_names,
-    _flatten_payload_profile_leaves,
-    _required_simple_leaf_paths,
-)
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List
@@ -313,6 +314,68 @@ def test_compose_registry_and_archetype_list_unchanged():
     names = {a["name"] for a in listed["archetypes"]}
     assert "compose_archetypes" not in names
     assert "database_to_api_sync" in names
+    # #151 (M12.14): the neutral extraction and the removal of composition.py's
+    # `DatabaseToApiSyncArchetype` class binding must not change the catalog.
+    assert names == {
+        "api_to_api_sync",
+        "api_to_database_sync",
+        "database_to_api_sync",
+        "http_listener_to_db",
+        "http_listener_to_rest",
+        "stub_minimal_integration",
+    }
+
+
+def test_composition_no_longer_re_exports_the_scheduled_archetype_class():
+    """`PatternRegistry.from_package` walks every class in each module's globals with
+    no `__module__` filter, so a re-exported archetype class is a SECOND discovery
+    path. #160 deletes the defining module; a surviving re-export elsewhere in the
+    package would keep registering it (or break the walk). #151 replaced the class
+    binding in composition.py with a module alias.
+    """
+    import boomi_mcp.patterns.archetypes.database_to_api_sync as _defining
+    import boomi_mcp.patterns.composition as _composition
+
+    assert "DatabaseToApiSyncArchetype" not in vars(_composition)
+    # Positive control: the assertion above is only meaningful while the class is
+    # still discoverable from its DEFINING module — otherwise it would pass
+    # vacuously after an unrelated rename.
+    assert "DatabaseToApiSyncArchetype" in vars(_defining)
+    # The composition route itself still works, through the module alias (#159
+    # migrates the route; #151 only moves how it is referenced).
+    assert _composition._database_to_api_sync is _defining
+
+
+def test_the_neutral_modules_do_not_import_a_deletion_scheduled_archetype():
+    """The point of the #151 extraction: a survivor can reach the shared parameter
+    and assembly layer without loading either module #160 deletes.
+
+    Run in a CHILD interpreter — this process has almost certainly imported the
+    archetypes already, so an in-process `sys.modules` check would pass vacuously.
+    """
+    import subprocess
+    import sys as _sys
+
+    probe = (
+        "import sys;"
+        "import boomi_mcp.patterns.archetype_parameters;"
+        "import boomi_mcp.patterns.archetype_assembly;"
+        "bad=[m for m in sys.modules if m.startswith("
+        "'boomi_mcp.patterns.archetypes.')];"
+        "print(sorted(bad));"
+        "sys.exit(1 if bad else 0)"
+    )
+    proc = subprocess.run(
+        [_sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[2]),
+        env={**os.environ, "PYTHONPATH": "src"},
+    )
+    assert proc.returncode == 0, (
+        "importing the neutral modules pulled in a scheduled archetype module: %s\n%s"
+        % (proc.stdout.strip(), proc.stderr.strip())
+    )
 
 
 # ---------------------------------------------------------------------------

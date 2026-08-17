@@ -79,30 +79,30 @@ from ..primitives.rest_fetch import RestFetchPrimitive
 # verbatim so the two presets stay byte-aligned and the diff stays minimal. The
 # source-build helpers are duck-typed on ``parameters.source`` / ``parameters.naming``
 # (an ApiSource + NamingConfig), which this archetype's parameters also carry.
-from .api_to_api_sync import (
+from ..archetype_parameters import (
     ApiSource,
     ApiTransformConfig,
     DirectApiTransformOperation,
     MapFunctionApiTransformOperation,
     MapScriptApiTransformOperation,
-    _build_rest_fetch_params,
-    _build_source_response_profile,
-    _operation_summaries,
-    _script_var_name,
+    NamingConfig,
+    _flatten_payload_profile_leaves,
+)
+from ..archetype_assembly import (
+    UNSUPPORTED_SCRIPT_COMPONENT_REF,
     _SOURCE_PREFIX,
     _SOURCE_RESPONSE_PROFILE_KEY,
     _TRANSFORM_PREFIX,
+    _build_rest_fetch_params,
+    _build_source_response_profile,
+    _coerce_primitive_params,
+    _component_names,
+    _named,
+    _operation_summaries,
+    _script_var_name,
 )
 
 # Reuse the sibling archetype's proven naming contract + secret-safe helpers.
-from .database_to_api_sync import (
-    UNSUPPORTED_SCRIPT_COMPONENT_REF,
-    NamingConfig,
-    _coerce_primitive_params,
-    _component_names,
-    _flatten_payload_profile_leaves,
-    _named,
-)
 from ...categories.components.builders.connector_builder import (
     BuilderValidationError,
 )

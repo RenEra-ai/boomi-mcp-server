@@ -62,23 +62,31 @@ from ..models.integration_models import (
     IntegrationComponentSpec,
     IntegrationSpecV1,
 )
-from .archetypes.database_to_api_sync import (
-    _MAIN_PROCESS_KEY,
-    _REST_CREATE_AUTH_MAP,
-    _TARGET_PREFIX,
-    _TRANSFORM_PREFIX,
+from .archetype_parameters import (
     DatabaseSource,
-    DatabaseToApiSyncArchetype,
     DirectTransformOperation,
     MapFunctionTransformOperation,
     MapScriptTransformOperation,
     RestTarget,
     TransformConfig,
-    UNSUPPORTED_REST_AUTH_MODE,
-    _coerce_primitive_params,
     _flatten_payload_profile_leaves,
     _required_simple_leaf_paths,
 )
+from .archetype_assembly import (
+    _MAIN_PROCESS_KEY,
+    _REST_CREATE_AUTH_MAP,
+    _TARGET_PREFIX,
+    _TRANSFORM_PREFIX,
+    UNSUPPORTED_REST_AUTH_MODE,
+    _coerce_primitive_params,
+)
+# The db->api archetype is bound as a MODULE, never as a class in this module's
+# globals: `PatternRegistry.from_package` walks every class it finds in each
+# module's `vars()` with no `__module__` filter, so a re-exported class name here
+# registers a SECOND discovery path for an archetype scheduled for deletion in
+# #160 (issue #151, M12.14). A module object is not a class, so the walk skips it.
+# The composition route itself is #159's to migrate.
+from .archetypes import database_to_api_sync as _database_to_api_sync
 from ..recipes.builtins.catalog import (
     ADAPTER_COMPOSE_ARCHETYPES,
     RECIPE_DB_REST_FANOUT,
@@ -919,8 +927,10 @@ def compose_archetypes(
     payload = _base_parameters_payload(
         db_part, transform_part, target_parts[0], options_model, component_prefix_hint
     )
-    params_obj = DatabaseToApiSyncArchetype.validate_parameters(payload)
-    spec = DatabaseToApiSyncArchetype.emit_spec(params_obj)
+    params_obj = _database_to_api_sync.DatabaseToApiSyncArchetype.validate_parameters(
+        payload
+    )
+    spec = _database_to_api_sync.DatabaseToApiSyncArchetype.emit_spec(params_obj)
 
     naming = params_obj.naming
     context = PrimitiveBuildContext(

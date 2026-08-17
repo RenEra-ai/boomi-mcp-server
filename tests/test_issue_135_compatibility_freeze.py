@@ -3,8 +3,6 @@
 Pins the CURRENT measured behavior of the authoring boundaries that the M12
 ProcessIR consolidation (ADR-001, docs/architecture/) will migrate:
 
-- ``IntegrationSpecV1`` / ``IntegrationComponentSpec`` envelope leniency
-  (pydantic default ``extra="ignore"``; nested ``config`` preserved verbatim),
 - ``PipelineSpec`` / ``StageSpec`` / ``PipelineEdgeSpec`` strictness
   (``extra="forbid"``; ``StageSpec.config`` stays open),
 - ``_normalize_to_spec`` routing for the three public input shapes (only
@@ -31,6 +29,11 @@ These are freeze tests: if one fails after an intentional M12 change, the
 owning issue must update BOTH this pin and the compatibility inventory
 (docs/architecture/M12_COMPATIBILITY_INVENTORY.md) — never silently.
 
+The ``IntegrationSpecV1`` / ``IntegrationComponentSpec`` envelope pins that this
+suite used to carry now live in tests/test_integration_models.py: they cover the
+surviving surface, so #151 (M12.14) re-homed them out of this legacy-oracle suite
+before #160 retires it.
+
 Fixture: tests/fixtures/compatibility/issue_135/authoring_boundaries.json
 (synthetic sentinel data only; no secrets, no live-account values).
 """
@@ -50,10 +53,7 @@ _project_root = str(Path(__file__).resolve().parent.parent)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from src.boomi_mcp.models.integration_models import (
-    IntegrationComponentSpec,
-    IntegrationSpecV1,
-)
+from src.boomi_mcp.models.integration_models import IntegrationSpecV1
 from src.boomi_mcp.models.pipeline_models import (
     PipelineEdgeSpec,
     PipelineSpec,
@@ -89,50 +89,12 @@ def _case(name):
 
 
 # ---------------------------------------------------------------------------
-# 1-3. IntegrationSpecV1 / IntegrationComponentSpec envelope (extra="ignore")
-# ---------------------------------------------------------------------------
-
-def test_integration_spec_defaults_serialization():
-    """Pin the exact default serialization of a minimal IntegrationSpecV1."""
-    assert IntegrationSpecV1(name="Sentinel").model_dump() == {
-        "version": "1.0",
-        "name": "Sentinel",
-        "mode": "lift_shift",
-        "components": [],
-        "goals": [],
-        "endpoints": [],
-        "flows": [],
-        "naming": {},
-        "folders": {},
-        "runtime": {},
-        "validation_rules": {},
-        "profile_indexes_by_component_id": None,
-        "pipeline": None,
-    }
-
-
-def test_spec_envelope_ignores_unknown_fields():
-    case = _case("spec_extra_ignore")
-    spec = IntegrationSpecV1(**case["input"])
-    unknown = case["unknown_key"]
-    assert not hasattr(spec, unknown)
-    dump = spec.model_dump()
-    assert unknown not in dump
-    assert dump == case["expected_dump"]
-
-
-def test_component_envelope_ignores_unknown_fields_but_preserves_config():
-    case = _case("component_extra_ignore_config_preserved")
-    comp = IntegrationComponentSpec(**case["input"])
-    unknown = case["unknown_key"]
-    assert not hasattr(comp, unknown)
-    assert unknown not in comp.model_dump()
-    # The free-form config dict passes through verbatim (never schema-validated).
-    assert comp.config == case["input"]["config"]
-
-
-# ---------------------------------------------------------------------------
-# 4-5. PipelineSpec graph envelope (extra="forbid") vs open StageSpec.config
+# 1-2. PipelineSpec graph envelope (extra="forbid") vs open StageSpec.config
+#
+# The three ``IntegrationSpecV1`` / ``IntegrationComponentSpec`` envelope pins that
+# used to open this file moved to tests/test_integration_models.py in #151 (M12.14):
+# they characterize the SURVIVING surface, so retiring this legacy-oracle suite with
+# the #160 deletion must not take them along.
 # ---------------------------------------------------------------------------
 
 def test_pipeline_envelope_forbids_extras():

@@ -59,7 +59,7 @@ from .contracts import (
     RecipeVersionMismatchV1,
     parse_semver,
 )
-from .errors import RecipeError, recipe_error
+from .errors import recipe_error
 
 _CANONICAL = dict(sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
@@ -174,6 +174,18 @@ RECIPE_LAYER_MODULES: Tuple[str, ...] = (
     f"{_IMPORT_PREFIX}.authoring.workflow",
     f"{_IMPORT_PREFIX}.build_info",
     f"{_IMPORT_PREFIX}.models.recipe_contributions",
+    # The neutral parameter/assembly layer (#151, M12.14). These do NOT call the
+    # bridge, so the engine-invoker scan does not require them — but the digest is
+    # over SOURCE TEXT, and #151 moved 949 executed lines (the Api* models, the
+    # REST fetch/send/field-map builders, the component-key prefixes) out of
+    # `archetypes.api_to_api_sync`, which IS listed. Leaving them out would have
+    # shrunk coverage: measured, `_SOURCE_PREFIX = "source" -> "sourceQA"` changes
+    # emitted component keys while leaving `source_digest` unmoved. They are here
+    # to RESTORE the coverage the extraction removed, not to widen the layer into
+    # a package hash — the boundary
+    # `test_the_downstream_compiler_is_not_in_the_layer_digest` asserts is intact.
+    f"{_IMPORT_PREFIX}.patterns.archetype_assembly",
+    f"{_IMPORT_PREFIX}.patterns.archetype_parameters",
     # Migrated surfaces — they call the bridge, so they are in the path.
     f"{_IMPORT_PREFIX}.patterns.archetypes.api_to_api_sync",
     f"{_IMPORT_PREFIX}.patterns.archetypes.api_to_database_sync",

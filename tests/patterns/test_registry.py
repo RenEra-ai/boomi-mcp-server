@@ -399,6 +399,131 @@ def test_from_package_discovers_concrete_patterns(tmp_path, cleanup_sys_path):
     assert "discovered_archetype" in names
 
 
+def test_from_package_registers_a_pattern_only_from_its_defining_module(
+    tmp_path, cleanup_sys_path
+):
+    """A re-export is not a registration path (issue #151, M12.14).
+
+    NON-VACUITY WITNESS for the `__module__` filter in `from_package`: this test
+    FAILS if the filter is reverted or inverted, verified by running it against
+    both.
+
+    Getting this witness right took two attempts, and the first failure is worth
+    recording. The obvious assertion — "the registered class's `__module__` is the
+    definer" — is a TAUTOLOGY: `__module__` is a class attribute recording where
+    the class was defined, and a re-export binds the same class object, so it reads
+    `definer` whether the walk registered it from the definer or from the
+    re-exporter. It cannot observe the only thing the filter changes. Live QA
+    caught that it passed with the filter reverted AND inverted.
+
+    The discriminating case is a stale re-export binding: reload the definer, and
+    the re-exporting module's globals still hold the OLD class object while the
+    definer now holds a NEW one. Two distinct objects, so the `seen` set (keyed on
+    `id`) cannot collapse them:
+
+      * without the filter — both are walked and registered, and the second
+        collides on name: `DUPLICATE_PATTERN_NAME`;
+      * with the filter — the stale binding's `__module__` names the definer, not
+        the re-exporter, so it is skipped and only the live class registers.
+
+    That is also a real production fault the filter removes, not a contrived one:
+    on `dev` this raises `DUPLICATE_PATTERN_NAME` for `branch_fanout`.
+    """
+    pkg_name = "reexport_pkg"
+    _write_pkg(
+        tmp_path,
+        pkg_name,
+        {
+            "definer": """
+                from pydantic import BaseModel, Field
+
+                from boomi_mcp.models.integration_models import IntegrationSpecV1
+                from boomi_mcp.patterns import (
+                    ArchetypePattern,
+                    PatternKind,
+                    PatternMetadata,
+                )
+
+
+                class _ReexportParams(BaseModel):
+                    integration_name: str = Field(...)
+
+
+                class ReexportedArchetype(ArchetypePattern):
+                    metadata = PatternMetadata(
+                        name="reexported_archetype",
+                        version="1.0.0",
+                        kind=PatternKind.ARCHETYPE,
+                        description="Defined here, re-exported by the package init",
+                    )
+                    parameters_model = _ReexportParams
+
+                    @classmethod
+                    def emit_spec(cls, parameters):
+                        return IntegrationSpecV1(name=parameters.integration_name)
+                """,
+            # Walked BEFORE `definer`, and imports the class into its own globals.
+            "aaa_reexporter": """
+                from .definer import ReexportedArchetype  # noqa: F401
+                """,
+        },
+    )
+    sys.path.insert(0, str(tmp_path))
+
+    # Baseline: a clean walk registers it exactly once, from either world.
+    registry = PatternRegistry.from_package(pkg_name)
+    listed = [c for c in registry.list_patterns()
+              if c.metadata.name == "reexported_archetype"]
+    assert len(listed) == 1, "the pattern must register exactly once"
+
+    # Now create the stale binding the filter has to survive. `aaa_reexporter`
+    # keeps its reference to the pre-reload class; `definer` rebinds to a new one.
+    import importlib
+
+    definer = importlib.import_module(pkg_name + ".definer")
+    reexporter = importlib.import_module(pkg_name + ".aaa_reexporter")
+    stale = reexporter.ReexportedArchetype
+    definer = importlib.reload(definer)
+    live = definer.ReexportedArchetype
+    assert stale is not live, (
+        "reload did not produce a distinct class object — the witness would be "
+        "inert, since the `seen` set would collapse the two bindings by id"
+    )
+    assert reexporter.ReexportedArchetype is stale, "the re-export must stay stale"
+
+    registry = PatternRegistry.from_package(pkg_name)
+    listed = [c for c in registry.list_patterns()
+              if c.metadata.name == "reexported_archetype"]
+    assert len(listed) == 1, (
+        "a stale re-export registered a second time: without the __module__ "
+        "filter this raises DUPLICATE_PATTERN_NAME"
+    )
+    assert listed[0] is live, (
+        "discovery returned the STALE re-exported class, not the one its defining "
+        "module currently holds"
+    )
+
+
+def test_the_production_catalog_registers_every_pattern_from_its_definer():
+    """The same invariant over the REAL package, with a fail-closed floor.
+
+    The floor matters: if the walk or the new `__module__` filter ever degenerated
+    to selecting nothing, a per-item loop over an empty catalog would pass
+    silently. 31 is the measured count when #151 introduced the filter, which was
+    verified catalog-neutral (the same 31 patterns before and after).
+    """
+    import boomi_mcp.patterns as patterns_pkg
+
+    registry = PatternRegistry.from_package(patterns_pkg)
+    listed = registry.list_patterns()
+    assert len(listed) >= 31, "pattern discovery collapsed: %d found" % len(listed)
+    for cls in listed:
+        assert cls.__module__.startswith("boomi_mcp.patterns."), cls.__module__
+        # The defining module is a real, importable module — not a package whose
+        # `__init__` happened to re-export the class.
+        assert sys.modules[cls.__module__].__dict__.get(cls.__name__) is cls
+
+
 def test_from_package_skips_abstract_and_base_classes(tmp_path, cleanup_sys_path):
     pkg_name = "skip_abstract_pkg"
     _write_pkg(

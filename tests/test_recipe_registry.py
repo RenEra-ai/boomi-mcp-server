@@ -6,6 +6,8 @@ mechanically, discovery is independent of registration order, and provenance is
 derived from code rather than accepted from anyone.
 """
 
+import ast
+import importlib
 import json
 import os
 import random
@@ -2549,10 +2551,83 @@ def test_the_layer_module_list_covers_the_whole_recipe_package():
     # exactly the gap live QA found (issue #145).
     outside = set(RECIPE_LAYER_MODULES) - listed
     contract_modules = {"boomi_mcp.build_info", "boomi_mcp.models.recipe_contributions"}
-    unclaimed = outside - contract_modules - _engine_invoking_modules()
+    # Clause 4 (#151, M12.14): the neutral parameter/assembly layer. These invoke
+    # no engine entry point, so clause 3 cannot claim them — but they hold code
+    # EXTRACTED OUT of `patterns.archetypes.api_to_api_sync`, which clause 3 does
+    # claim. Excluding them would have shrunk the digest's coverage relative to
+    # the pre-extraction baseline: measured, `_SOURCE_PREFIX = "source" ->
+    # "sourceQA"` changes emitted component keys while leaving `source_digest`
+    # unmoved. The clause is BOUNDED below by an import relation, not by taste: a
+    # module qualifies only if a clause-3 invoker actually imports it, so it
+    # cannot silently reach outside the patterns package.
+    #
+    # What the bound below DOES guarantee: nothing outside `boomi_mcp.patterns.*`
+    # can ever be claimed by clause 4, so the whole compiler, `models.*` and
+    # `categories.*` are excluded by construction — including all five forbidden
+    # modules that a bare "imported by an invoker" test would have admitted (live
+    # QA measured that weaker form: 37 admitted, 5 of them forbidden).
+    # What it does NOT guarantee: uniqueness. It admits 11 modules today, so it is
+    # a necessary condition, not a characterization — the explicit pair below and
+    # `test_the_downstream_compiler_is_not_in_the_layer_digest` are what actually
+    # fix membership. Stated because crediting the safety to the wrong mechanism
+    # is how a guard gets weakened later by someone trusting the comment.
+    neutral_layer_modules = {
+        "boomi_mcp.patterns.archetype_assembly",
+        "boomi_mcp.patterns.archetype_parameters",
+    }
+    unclaimed = (
+        outside - contract_modules - neutral_layer_modules - _engine_invoking_modules()
+    )
     assert unclaimed == set(), unclaimed
-    # ...and neither clause is carrying a module the other already claims.
+    # ...and no clause is carrying a module another already claims.
     assert contract_modules & _engine_invoking_modules() == set()
+    assert neutral_layer_modules & _engine_invoking_modules() == set()
+    assert neutral_layer_modules & contract_modules == set()
+
+    # Clause 4's own bound, asserted rather than asserted-by-comment: every module
+    # it claims must live under `boomi_mcp.patterns.` (but not be an archetype,
+    # which is clause 3's own turf) AND be imported by a module clause 3 claims.
+    # A module nobody in the layer imports has no business moving the layer's
+    # revision, and one outside the patterns package is someone else's authority.
+    invokers = _engine_invoking_modules()
+    importers = set()
+    for invoker in invokers:
+        module = importlib.import_module(invoker)
+        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+        pkg = invoker.rsplit(".", 1)[0]
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if node.level:
+                parts = pkg.split(".")
+                base = parts[: len(parts) - node.level + 1]
+                target = ".".join(base + ([node.module] if node.module else []))
+            else:
+                target = node.module or ""
+            importers.add(target)
+    admissible = {
+        t for t in importers
+        if t.startswith("boomi_mcp.patterns.")
+        and not t.startswith("boomi_mcp.patterns.archetypes.")
+    }
+    orphans = neutral_layer_modules - admissible
+    assert orphans == set(), (
+        "clause 4 claims modules outside the patterns package, or that no engine "
+        "invoker imports: %s" % sorted(orphans)
+    )
+    # The bound is load-bearing, not decorative: it must EXCLUDE everything the
+    # downstream-compiler boundary forbids. Without the package restriction this
+    # set is non-empty (measured: 5 of the 7), which is exactly the weaker form
+    # live QA rejected.
+    assert admissible & {
+        "boomi_mcp.compiler.process_ir.pipeline",
+        "boomi_mcp.compiler.process_ir.emitter_registry",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.sync_pipeline",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.flow_sequence",
+        "boomi_mcp.models.process_ir",
+        "boomi_mcp.categories.components.process_graph_verifier",
+        "boomi_mcp.categories.integration_builder",
+    } == set()
 
 
 def test_the_contract_clause_covers_exactly_the_two_modules_it_names():
@@ -2945,6 +3020,13 @@ def test_no_listed_module_lies_outside_the_layer_this_issue_owns():
     allowed_outside = {
         "boomi_mcp.build_info",
         "boomi_mcp.models.recipe_contributions",
+        # #151 (M12.14): the neutral parameter/assembly layer extracted OUT of
+        # `archetypes.api_to_api_sync`. They invoke no engine entry point, so the
+        # invoker scan does not name them — this pin is the second of the two
+        # deliberate places, and it is what keeps the digest covering the executed
+        # code the extraction relocated.
+        "boomi_mcp.patterns.archetype_assembly",
+        "boomi_mcp.patterns.archetype_parameters",
         "boomi_mcp.patterns.archetypes.api_to_api_sync",
         "boomi_mcp.patterns.archetypes.api_to_database_sync",
         "boomi_mcp.patterns.composition",

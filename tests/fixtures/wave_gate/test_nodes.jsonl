@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9826,"minimum_collected":9826,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9834,"minimum_collected":9834,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -2609,7 +2609,7 @@
 {"kind":"test","id":"pytest-002608","node_id":"tests/test_issue_135_compatibility_freeze.py::test_collision_reuse_with_agreeing_top_level_pipeline_plans_clean_and_echoes","state":"active"}
 {"kind":"test","id":"pytest-002609","node_id":"tests/test_issue_135_compatibility_freeze.py::test_collision_reuse_with_top_level_pipeline_plans_clean_and_echoes","state":"active"}
 {"kind":"test","id":"pytest-002610","node_id":"tests/test_issue_135_compatibility_freeze.py::test_component_bearing_pipeline_secret_config_now_rejected","state":"active"}
-{"kind":"test","id":"pytest-002611","node_id":"tests/test_issue_135_compatibility_freeze.py::test_component_envelope_ignores_unknown_fields_but_preserves_config","state":"active"}
+{"kind":"test","id":"pytest-002611","node_id":"tests/test_issue_135_compatibility_freeze.py::test_component_envelope_ignores_unknown_fields_but_preserves_config","state":"tombstone"}
 {"kind":"test","id":"pytest-002612","node_id":"tests/test_issue_135_compatibility_freeze.py::test_contradictory_pipelines_coexist_and_nested_wins_lowering","state":"active"}
 {"kind":"test","id":"pytest-002613","node_id":"tests/test_issue_135_compatibility_freeze.py::test_contradictory_pipelines_silent_precedence_through_build_plan","state":"active"}
 {"kind":"test","id":"pytest-002614","node_id":"tests/test_issue_135_compatibility_freeze.py::test_flow_sequence_accepts_single_step_and_ignores_root_extras","state":"active"}
@@ -2617,7 +2617,7 @@
 {"kind":"test","id":"pytest-002616","node_id":"tests/test_issue_135_compatibility_freeze.py::test_flow_sequence_rejects_branch_leg_and_recursive_step_extras","state":"active"}
 {"kind":"test","id":"pytest-002617","node_id":"tests/test_issue_135_compatibility_freeze.py::test_flow_sequence_step_rejects_unknown_keys","state":"active"}
 {"kind":"test","id":"pytest-002618","node_id":"tests/test_issue_135_compatibility_freeze.py::test_flow_sequence_step_rejects_unknown_kind","state":"active"}
-{"kind":"test","id":"pytest-002619","node_id":"tests/test_issue_135_compatibility_freeze.py::test_integration_spec_defaults_serialization","state":"active"}
+{"kind":"test","id":"pytest-002619","node_id":"tests/test_issue_135_compatibility_freeze.py::test_integration_spec_defaults_serialization","state":"tombstone"}
 {"kind":"test","id":"pytest-002620","node_id":"tests/test_issue_135_compatibility_freeze.py::test_malformed_pipeline_stage_secret_does_not_leak_through_validation_error","state":"active"}
 {"kind":"test","id":"pytest-002621","node_id":"tests/test_issue_135_compatibility_freeze.py::test_multi_authored_collision_reuse_keeps_acceptance_and_echo","state":"active"}
 {"kind":"test","id":"pytest-002622","node_id":"tests/test_issue_135_compatibility_freeze.py::test_multi_authored_spec_with_top_level_pipeline_accepted_today","state":"active"}
@@ -2627,7 +2627,7 @@
 {"kind":"test","id":"pytest-002626","node_id":"tests/test_issue_135_compatibility_freeze.py::test_normalize_keeps_nested_integration_spec_pipeline","state":"active"}
 {"kind":"test","id":"pytest-002627","node_id":"tests/test_issue_135_compatibility_freeze.py::test_normalize_string_source_description_becomes_goal","state":"active"}
 {"kind":"test","id":"pytest-002628","node_id":"tests/test_issue_135_compatibility_freeze.py::test_pipeline_envelope_forbids_extras","state":"active"}
-{"kind":"test","id":"pytest-002629","node_id":"tests/test_issue_135_compatibility_freeze.py::test_spec_envelope_ignores_unknown_fields","state":"active"}
+{"kind":"test","id":"pytest-002629","node_id":"tests/test_issue_135_compatibility_freeze.py::test_spec_envelope_ignores_unknown_fields","state":"tombstone"}
 {"kind":"test","id":"pytest-002630","node_id":"tests/test_issue_135_compatibility_freeze.py::test_stage_config_remains_open","state":"active"}
 {"kind":"test","id":"pytest-002631","node_id":"tests/test_issue_135_compatibility_freeze.py::test_sync_pipeline_gated_blocks_exact_codes[branch]","state":"active"}
 {"kind":"test","id":"pytest-002632","node_id":"tests/test_issue_135_compatibility_freeze.py::test_sync_pipeline_gated_blocks_exact_codes[process_calls]","state":"active"}
@@ -9844,3 +9844,14 @@
 {"kind":"test","id":"pytest-009843","node_id":"tests/test_recipe_security.py::test_three_registered_types_the_engine_still_refuses_at_first_use[IPv4Network-192.168.0.0/16]","state":"active"}
 {"kind":"test","id":"pytest-009844","node_id":"tests/test_recipe_security.py::test_three_registered_types_the_engine_still_refuses_at_first_use[IPv6Network-2001:db8:1::/48]","state":"active"}
 {"kind":"test","id":"pytest-009845","node_id":"tests/test_recipe_security.py::test_a_model_opened_to_ignore_after_registration_is_refused","state":"active"}
+{"kind":"test","id":"pytest-009846","node_id":"tests/test_integration_models.py::test_integration_spec_defaults_serialization","state":"active"}
+{"kind":"test","id":"pytest-009847","node_id":"tests/test_integration_models.py::test_spec_envelope_ignores_unknown_fields","state":"active"}
+{"kind":"test","id":"pytest-009848","node_id":"tests/test_integration_models.py::test_component_envelope_ignores_unknown_fields_but_preserves_config","state":"active"}
+{"kind":"test","id":"pytest-009849","node_id":"tests/test_issue_151_reachability_freeze.py::test_the_direct_process_ir_corpus_covers_the_closed_step_kind_union","state":"active"}
+{"kind":"test","id":"pytest-009850","node_id":"tests/test_issue_151_reachability_freeze.py::test_no_emitter_key_is_reachable_only_through_a_deletion_scheduled_route","state":"active"}
+{"kind":"test","id":"pytest-009851","node_id":"tests/test_issue_151_reachability_freeze.py::test_the_freeze_fires_when_a_key_loses_its_direct_process_ir_route","state":"active"}
+{"kind":"test","id":"pytest-009852","node_id":"tests/test_issue_151_reachability_freeze.py::test_flow_sequence_remains_a_legacy_oracle_without_a_public_kind","state":"active"}
+{"kind":"test","id":"pytest-009853","node_id":"tests/patterns/test_archetype_composition.py::test_composition_no_longer_re_exports_the_scheduled_archetype_class","state":"active"}
+{"kind":"test","id":"pytest-009854","node_id":"tests/patterns/test_archetype_composition.py::test_the_neutral_modules_do_not_import_a_deletion_scheduled_archetype","state":"active"}
+{"kind":"test","id":"pytest-009855","node_id":"tests/patterns/test_registry.py::test_from_package_registers_a_pattern_only_from_its_defining_module","state":"active"}
+{"kind":"test","id":"pytest-009856","node_id":"tests/patterns/test_registry.py::test_the_production_catalog_registers_every_pattern_from_its_definer","state":"active"}

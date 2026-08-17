@@ -48,7 +48,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import ValidationError
 
 from ..models.pipeline_models import PipelineSpec
-from ..patterns.archetypes.database_to_api_sync import (
+from ..patterns.archetype_parameters import (
     JSONPayloadProfile,
     _flatten_payload_profile_leaves,
     _scan_for_secret_shaped_keys,

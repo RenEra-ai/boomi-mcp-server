@@ -101,6 +101,23 @@ class PatternRegistry:
                     continue
                 if obj in _BASE_CLASSES or inspect.isabstract(obj):
                     continue
+                # A pattern registers from the module that DEFINES it, never from
+                # one that merely imports it (issue #151, M12.14). Without this,
+                # any `from .x import SomePattern` in a walked module is a second
+                # discovery path, and which one wins is decided by `walk_packages`
+                # alphabetical order — an accident. It was not hypothetical: 30 of
+                # the 31 patterns were registering from a re-export site, and
+                # `db_extract` registered from `archetypes/database_to_api_sync.py`,
+                # a module #160 DELETES. Deleting it would then have silently moved
+                # (or, with the package `__init__` re-export still present, broken)
+                # registrations for patterns that survive.
+                #
+                # The invariant replaces an enumeration: rather than auditing every
+                # module for stray re-exports, the runtime authority — the class's
+                # own `__module__` — decides. Verified catalog-neutral when
+                # introduced: the same 31 patterns, each now keyed to its definer.
+                if getattr(obj, "__module__", None) != mod_name:
+                    continue
                 seen.add(id(obj))
                 registry.register(obj)
         return registry

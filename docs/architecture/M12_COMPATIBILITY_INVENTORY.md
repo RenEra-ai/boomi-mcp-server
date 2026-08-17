@@ -2136,9 +2136,9 @@ rather than aspirational.
 | LG-2a6651d0 | legacy_transitive_call | src/boomi_mcp/categories/schema_discovery.py | discover_soap_wsdl_action | 1 | 1735 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-568713cc | legacy_transitive_call | src/boomi_mcp/categories/shared_resources.py | _action_update_channel | 1 | 471 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-dec16977 | legacy_transitive_call | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | evaluate_pipeline_authority | 2 | 392 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-8c220ac8 | legacy_transitive_call | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype.emit_spec | 1 | 1668 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-8c220ac8 | legacy_transitive_call | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype.emit_spec | 1 | 756 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-492bfbd5 | legacy_transitive_call | src/boomi_mcp/patterns/archetypes/api_to_database_sync.py | ApiToDatabaseSyncArchetype.emit_spec | 1 | 843 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-492d9518 | legacy_transitive_call | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncArchetype.emit_spec | 1 | 3920 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-492d9518 | legacy_transitive_call | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncArchetype.emit_spec | 1 | 2450 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-d88fe3f1 | legacy_transitive_call | src/boomi_mcp/patterns/recipe_bridge.py | run_sync_preset_recipe | 1 | 244 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-a6b08ee4 | registry_lookup | src/boomi_mcp/categories/components/builders/process_flow_builder.py | get_process_flow_builder | 2 | 6152 | #160 | delete the legacy semantic shell |
 | LG-e131eb91 | registry_lookup | src/boomi_mcp/categories/integration_builder.py | _execute_component | 3 | 3532 | #153 | replace with canonical ProcessIR materialization/apply |
@@ -2153,8 +2153,8 @@ rather than aspirational.
 | LG-8e9df2b4 | renderer_call | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _core_from_authored_pipeline | 1 | 252 | #151 | re-home onto the neutral extraction |
 | LG-f973cf28 | renderer_call | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _core_from_submitted_config | 4 | 289 | #151 | re-home onto the neutral extraction |
 | LG-819f78b4 | renderer_call | src/boomi_mcp/compiler/process_ir/legacy_adapters/sync_pipeline.py | adapt_sync_pipeline_config | 1 | 481 | #151 | re-home onto the neutral extraction |
-| LG-bfc762c3 | renderer_call | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_main_process | 1 | 2955 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-08a97ecd | renderer_call | src/boomi_mcp/patterns/composition.py | compose_archetypes | 1 | 1103 | #160 | delete with the legacy renderer |
+| LG-bfc762c3 | renderer_call | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_main_process | 1 | 1485 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-08a97ecd | renderer_call | src/boomi_mcp/patterns/composition.py | compose_archetypes | 1 | 1113 | #160 | delete with the legacy renderer |
 | LG-a1863ac0 | unclassified_reference | server.py | <module> | 3 | 390 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-8cf67bd6 | unclassified_reference | src/boomi_mcp/authoring/contract.py | authoring_workflow_contract | 1 | 578 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-0a2735c3 | unclassified_reference | src/boomi_mcp/authoring/workflow.py | _normalize_intent | 1 | 413 | #160 | residue: a watched name mentioned in a shape the census does not classify |
@@ -2195,25 +2195,25 @@ rather than aspirational.
 | LG-c2f0b85e | unclassified_reference | src/boomi_mcp/compiler/process_ir/semantic_validation/legacy_bridge.py | validate_legacy_process_config | 2 | 100 | #151 | re-home onto the neutral extraction |
 | LG-cf15d311 | unclassified_reference | src/boomi_mcp/models/_process_ir_compat.py | <module> | 4 | 216 | #159 | migrate the compatibility codec, then delete |
 | LG-f26f5a1c | unclassified_reference | src/boomi_mcp/models/_process_ir_compat.py | legacy_flow_sequence_to_ir | 5 | 678 | #159 | migrate the compatibility codec, then delete |
-| LG-aef88b5e | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiTarget | 1 | 300 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-fd0fb833 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype | 2 | 1357 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-c23b1925 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype.emit_spec | 4 | 1495 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-c65a6048 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | _build_pipeline_dict | 1 | 1129 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-4166bdd1 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | _build_rest_send_params | 7 | 1002 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-a34a1a82 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncArchetype | 2 | 3479 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-b9ecf83d | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncArchetype.emit_spec | 3 | 3671 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-12c696f9 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncParameters._enforce_watermark_consistency | 1 | 2129 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-a209f251 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncParameters._validate_transform_refs | 7 | 2206 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-45d2d0f9 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | RestTarget | 1 | 1158 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-176df664 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_dynamic_path | 9 | 2796 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-f58c90b7 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_operational_intent | 4 | 3195 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-2b21dfd2 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_rest_send_params | 7 | 2594 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-05070148 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_sync_pipeline_adapter_config | 3 | 2892 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-e24ae58a | unclassified_reference | src/boomi_mcp/patterns/archetype_assembly.py | _build_rest_send_params | 7 | 509 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-4291f7db | unclassified_reference | src/boomi_mcp/patterns/archetype_parameters.py | ApiTarget | 1 | 1583 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-0c08b2d9 | unclassified_reference | src/boomi_mcp/patterns/archetype_parameters.py | RestTarget | 1 | 1064 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-fd0fb833 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype | 2 | 445 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-c23b1925 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype.emit_spec | 4 | 583 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-c65a6048 | unclassified_reference | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | _build_pipeline_dict | 1 | 273 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-a34a1a82 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncArchetype | 2 | 2009 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-b9ecf83d | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncArchetype.emit_spec | 3 | 2201 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-12c696f9 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncParameters._enforce_watermark_consistency | 1 | 734 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-a209f251 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncParameters._validate_transform_refs | 7 | 811 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-176df664 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_dynamic_path | 9 | 1326 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-f58c90b7 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_operational_intent | 4 | 1725 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-2b21dfd2 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_rest_send_params | 7 | 1124 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-05070148 | unclassified_reference | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_sync_pipeline_adapter_config | 3 | 1422 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-e4d03e77 | unclassified_reference | src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py | HttpListenerToRestArchetype | 1 | 327 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-91586a36 | unclassified_reference | src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py | HttpListenerToRestArchetype.emit_spec | 2 | 378 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-d6d3360b | unclassified_reference | src/boomi_mcp/patterns/composition.py | _fanout_target_params | 5 | 695 | #160 | residue: a watched name mentioned in a shape the census does not classify |
-| LG-48a0cf76 | unclassified_reference | src/boomi_mcp/patterns/composition.py | compose_archetypes | 5 | 968 | #160 | residue: a watched name mentioned in a shape the census does not classify |
-| LG-1dd09f43 | unclassified_reference | src/boomi_mcp/patterns/composition.py | validate_composition | 2 | 584 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-d6d3360b | unclassified_reference | src/boomi_mcp/patterns/composition.py | _fanout_target_params | 5 | 703 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-48a0cf76 | unclassified_reference | src/boomi_mcp/patterns/composition.py | compose_archetypes | 5 | 978 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-1dd09f43 | unclassified_reference | src/boomi_mcp/patterns/composition.py | validate_composition | 2 | 592 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-c5756eb3 | unclassified_reference | src/boomi_mcp/patterns/primitives/branch.py | BranchPrimitive | 1 | 135 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-a554a9c4 | unclassified_reference | src/boomi_mcp/patterns/primitives/data_process.py | DataProcessPrimitive | 1 | 212 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-e38ae137 | unclassified_reference | src/boomi_mcp/patterns/primitives/decision.py | DecisionPrimitive | 1 | 178 | #160 | residue: a watched name mentioned in a shape the census does not classify |
@@ -2267,12 +2267,12 @@ example producers are globbed, never enumerated: a sixth example is a diff, not 
 | LG-275fe665 | process_kind_producer | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _canonical_core | 1 | 230 | #151 | re-home onto the neutral extraction |
 | LG-826a5241 | process_kind_producer | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _core_from_authored_pipeline | 1 | 253 | #151 | re-home onto the neutral extraction |
 | LG-036eebde | process_kind_producer | src/boomi_mcp/models/_process_ir_compat.py | ir_to_legacy_flow_sequence | 2 | 1067 | #159 | migrate the compatibility codec, then delete |
-| LG-135ab897 | process_kind_producer | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype.emit_spec | 1 | 1704 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-6bbdfefd | process_kind_producer | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | _build_main_process | 2 | 1158 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-135ab897 | process_kind_producer | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype.emit_spec | 1 | 792 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-6bbdfefd | process_kind_producer | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | _build_main_process | 2 | 302 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-dc90b5ae | process_kind_producer | src/boomi_mcp/patterns/archetypes/api_to_database_sync.py | ApiToDatabaseSyncArchetype.emit_spec | 1 | 879 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-76cde1a2 | process_kind_producer | src/boomi_mcp/patterns/archetypes/api_to_database_sync.py | _build_main_process | 2 | 521 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-0bf8b950 | process_kind_producer | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_main_process | 1 | 3065 | #159 | migrate the archetype to canonical ProcessIR |
-| LG-22b7f2cc | process_kind_producer | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_sync_pipeline_adapter_config | 1 | 2894 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-0bf8b950 | process_kind_producer | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_main_process | 1 | 1595 | #159 | migrate the archetype to canonical ProcessIR |
+| LG-22b7f2cc | process_kind_producer | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_sync_pipeline_adapter_config | 1 | 1424 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-78a58f1a | process_kind_producer | src/boomi_mcp/patterns/archetypes/http_listener_to_db.py | HttpListenerToDbArchetype.emit_spec | 1 | 1104 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-2749063b | process_kind_producer | src/boomi_mcp/patterns/archetypes/http_listener_to_db.py | _build_listener_main_process | 2 | 746 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-1e119c4f | process_kind_producer | src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py | HttpListenerToRestArchetype.emit_spec | 1 | 537 | #159 | migrate the archetype to canonical ProcessIR |
@@ -2380,7 +2380,7 @@ over the census, so a row cannot be silently orphaned when a file moves.
 | #153 | WRT-build-integration-preservation-merge: preserved, re-homed onto the canonical apply path. | 1 |
 | #153 | replace with canonical ProcessIR materialization/apply | 7 |
 | #153/#160 | WRT-build-integration-generic: content guard at BOTH plan and apply boundaries, placed BEFORE all type dispatch (the process and connector arms dispatch before the fall-through ever runs); mutation-tested with an unknown/future declared type. · WRT-build-integration-structured-process: replaced by canonical ProcessIR materialization/apply. · WRT-build-integration-typed-nonprocess: unchanged — the content guard never matches these roots. | 1 |
-| #159 | migrate the archetype to canonical ProcessIR | 31 |
+| #159 | migrate the archetype to canonical ProcessIR | 28 |
 | #159 | migrate the boundary to canonical ProcessIR | 4 |
 | #159 | migrate the compatibility codec, then delete | 4 |
 | #159 | migrate the example to canonical ProcessIR | 4 |
@@ -2406,7 +2406,7 @@ over the census, so a row cannot be silently orphaned when a file moves.
 | #160 | delete with the legacy renderer | 3 |
 | #160 | delete with the legacy semantic shell | 2 |
 | #160 | follow the callee's row; this is an edge, not a site | 56 |
-| #160 | residue: a watched name mentioned in a shape the census does not classify | 31 |
+| #160 | residue: a watched name mentioned in a shape the census does not classify | 34 |
 | #160 | retract the served legacy guidance / guard the raw route | 2 |
 
 Owner semantics: **#151** neutral extraction and `flow_sequence` parity/reachability; **#153**
@@ -2560,3 +2560,126 @@ value either way.
 `git diff 9711a9c0cb6c88dda41ada94d88694915b659f36 -- src/boomi_mcp server.py` is empty. The only
 deliverables are this section, the batched §7/§12 corrections in
 `TYPED_RECIPE_CONTRIBUTIONS_V1.md`, the test-only helper, the fixture, and the freeze suite.
+
+# 12. Issue #151 (M12.14) — neutral extraction, parity oracle, and the reachability freeze
+
+**Baseline:** `47b20dd776a158c6fd096779262bbadd2867b7e3`.
+
+## 12.1 What landed
+
+1. **Neutral extraction.** The shared parameter models and REST/naming assembly helpers moved out of
+   the two archetype modules #160 deletes (`patterns/archetypes/database_to_api_sync.py`,
+   `patterns/archetypes/api_to_api_sync.py`) into `patterns/archetype_parameters.py` and
+   `patterns/archetype_assembly.py`. The extraction set was **derived, not chosen**: it is exactly the
+   transitive closure of what the surviving modules (`api_to_database_sync`, `http_listener_to_db`,
+   `http_listener_to_rest`, `patterns/composition.py`, `categories/integration_import.py`) import from
+   the two scheduled modules. `Schedule` / `ExecutionTrigger` / `Watermark` / `ExecutionConfig` are
+   therefore NOT in the neutral layer — no survivor imports them.
+2. **The `composition.py` re-export is gone.** `DatabaseToApiSyncArchetype` is no longer a class in
+   that module's globals; the two call sites go through a module alias
+   (`_database_to_api_sync.DatabaseToApiSyncArchetype`). `PatternRegistry.from_package`
+   (`patterns/registry.py:78-106`) walks every class in each module's `vars()` with no `__module__`
+   filter, so the re-export was a second discovery path for a scheduled archetype. The six-name
+   catalog is unchanged.
+3. **The parity oracle is untouched.** `legacy_adapters/flow_sequence.py`,
+   `legacy_adapters/registry.py` and `process_flow_builder.py` are byte-identical to the baseline. No
+   new public `process_kind`, no new spelling, `_flow_sequence_enabled` unchanged.
+4. **The derived reachability freeze** landed as `tests/test_issue_151_reachability_freeze.py` — the
+   machine-checked gate #160 depends on.
+
+## 12.2 Why the freeze test derives rather than reads a capability field
+
+`EmitterRegistration.supported_capability` is the literal constant `CAPABILITY_PROCESS_IR_V1` on all
+18 rows (`compiler/process_ir/emitter_registry.py:592-611`). Seeding each key's route set from that
+field looks derived but is a **tautology**: every key would carry a never-deleted route by
+construction, `routes ⊆ deletion_routes` could never hold, and the gate would freeze nothing — the
+same shape of defect as #149's walk down echo keys that did not exist.
+
+The gate therefore MEASURES both halves:
+
+| Route | How it is derived | Emitter keys reached |
+|---|---|---|
+| direct canonical ProcessIR | every member of the closed `ProcessNodeV1` union (`models/process_ir.py:1538-1562`, read via `_kinds_of`) exercised through its committed specimen and lowered by the real compiler | **18 of 18** |
+| `database_to_api_sync/flow_sequence` | the registered adapter in `_MIGRATED`, over the committed `flow_sequence_compat_cases.json` configs | 16 |
+| `sync_pipeline` | the registered adapter, over `sync_pipeline_emitter_parity_cases.json` | 5 |
+| `wrapper_subprocess` | the registered adapter, over the committed wrapper config | 3 |
+
+Ten emitter keys are reached by `flow_sequence` and by no other **legacy** route — `branch`,
+`dataprocess`, `decision`, `doccacheload`, `doccacheremove`, `doccacheretrieve`, `exception`,
+`flowcontrol`, `message`, `setproperties_step` — confirming the issue's count by measurement. All ten
+also carry the direct route, so nothing is stranded today.
+
+**Deletion scope is derived too**, from `ProcessFlowBuilder.PROCESS_KIND` plus every migrated
+sub-dialect of it: `{database_to_api_sync, database_to_api_sync/flow_sequence}`. It deliberately does
+NOT include `sync_pipeline` or `wrapper_subprocess`, which survive the deletion.
+
+**Non-vacuity.** The gate carries fail-closed floors (≥20 union kinds, ≥18 registry keys, ≥14
+`flow_sequence` authoring kinds, ≥11 lowered keys, ≥10 exclusive keys, and every key must have at
+least one route) plus an explicit witness node that removes a real key's direct route and asserts the
+freeze FIRES. The failure mode was additionally hand-run against a mutated corpus before the claim was
+written.
+
+**Honest bound.** Because the direct route reaches all 18 keys, today's stranded set is empty with
+margin. The gate's value is as a REGRESSION gate for #158/#159/#160: if a union kind, a lowering arm,
+or a specimen stops producing a key, that key falls back to legacy-only and the gate fires.
+
+## 12.3 Orphaned-coverage disposition
+
+Derived from the active golden manifest (`tests/fixtures/wave_gate/goldens.jsonl`, 60 active rows)
+rather than by copying filenames into a second authority.
+
+| Coverage family | Count | Disposition |
+|---|---|---|
+| `flow_sequence` goldens | 5 | RETAINED as #151 parity oracles. #159 re-points authoring input to direct ProcessIR; #160 may retire the legacy route only once equivalent surviving goldens remain. |
+| `sync_pipeline` goldens (non-listener) | 17 | RETAINED until #159/#160 — `sync_pipeline` survives the deletion. |
+| `sync_pipeline_listener` goldens + `listener_wss_start.xml` | 4 + 1 | Owned by **#158** (fused `start_listen`); untouched here. |
+| wrapper / `processcall` coverage | via 2 composed + wrapper cases | Owned by **#159**. |
+| composed / archetype goldens and the 4 shipped examples | 2 goldens + 4 examples | Owned by **#159**, already recorded at §11.3 (`LG-8cbd0b5b`, `LG-04ef53a3`, `LG-3740584a`, `LG-637793a5`). |
+| direct ProcessIR `rich_control` / `error_handling` goldens | 3 | Already exercise the SURVIVING route; they are the freeze test's specimens. |
+| dynamic-path and notify/recovery coverage | — | Owned by **#155** / **#156**; out of scope here. |
+| deletion-only legacy artifacts | — | Owned by **#160**. |
+
+**Re-homed, not deleted.** The three `IntegrationSpecV1` / `IntegrationComponentSpec` envelope
+assertions moved from `tests/test_issue_135_compatibility_freeze.py` to
+`tests/test_integration_models.py` with their node names unchanged; their two fixture cases were
+inlined there as module literals and removed from
+`tests/fixtures/compatibility/issue_135/authoring_boundaries.json`. They pin the surviving surface, so
+retiring the legacy-oracle suite must not take them along.
+
+**Counterpart boundary (#156).** This issue does not edit or duplicate
+`tests/test_builder_xml_invariants.py:951-956` (notify invariant), `:972-977` (display-property
+binding), or `src/boomi_mcp/kb/design_doctrine.py:121` (the notify registry entry). The issue text's
+`kb/design_doctrine.py:121` path is stale — the file lives under `src/`.
+
+## 12.4 Recorded observations, not changed here
+
+1. **Split dialect vocabulary.** The adapter registry keys on the full
+   `database_to_api_sync/flow_sequence`; the semantic-validation policy registry and the production
+   call site (`process_flow_builder.py:4448`) key on the leaf `flow_sequence`. `lookup_policy` on the
+   full dialect returns `None` (strict). Neither file may change here — both are pinned byte-identical
+   by the parity-oracle criterion. The freeze test derives the leaf (`rsplit("/", 1)[-1]`) and asserts
+   `set(registered_adapters()) == {leaf(d) for d in migrated_dialects()}`, so further drift fails a
+   gate instead of silently selecting the strict path.
+2. **§11.5's `#151` ownership rows point elsewhere.** The 15 rows it assigns to `#151`
+   ("re-home onto the neutral extraction") are compiler-side —
+   `legacy_adapters/authority.py`, `sync_pipeline.py`, `wrapper_subprocess.py`,
+   `semantic_validation/legacy_bridge.py` — not the `patterns/archetypes` parameter layer this issue
+   actually extracted. Ownership is assigned by #149's path-scoped rules over the census, not by hand;
+   re-deriving them would drift a served artifact for no acceptance-criterion benefit. Recorded so
+   #160 is not misled into expecting those four compiler modules to have moved.
+
+## 12.5 Served-artifact movement
+
+The neutral extraction changes the content of three modules the recipe-layer digest tracks
+(`patterns/composition.py`, `patterns/archetypes/api_to_api_sync.py`,
+`patterns/archetypes/api_to_database_sync.py`), so five served artifacts were rebaselined:
+`SS-CAPABILITY-CATALOG:authoring_contract`, the `AuthoringRequestV1` / `AuthoringPlanResultV1` /
+`AuthoringCompileResultV1` schema templates, and `SS-SCHEMA-TEMPLATES:walked_surface_digest`.
+
+**Verified benign before acceptance.** A field-by-field deep diff of all 110 served artifacts found
+changes at exactly four leaf paths — `capability_revision`, `capability_comparison.actual_capability_revision`,
+`recipe_registry.registry_revision`, and `revision_binding.capability_revision` (plus the per-schema
+digests those feed). Zero fields were added, removed, retyped or resized; every served `json_schema`
+body is byte-identical; and the catalog's `actions`, `archetypes`, versions and `migrated` flags are
+unchanged. `RECIPE_LAYER_MODULES` was not edited — the neutral modules are deliberately NOT added to
+it, and no recipe-engine entry-point call moved.
