@@ -68,6 +68,7 @@ from pydantic import (
     StrictInt,
     StringConstraints,
     field_validator,
+    model_validator,
 )
 from pydantic_core import PydanticCustomError
 
@@ -615,6 +616,101 @@ class AuthoringCompileResultV1(_AuthoringResultV1):
     normalized_intent_digest: Optional[DigestString] = None
 
 
+class ResolvedProcessPlacementV1(_AuthoringModel):
+    """Where a materialized process actually landed (issue #153).
+
+    Both fields are optional because account-root placement supplies neither,
+    and because the two are recorded from DIFFERENT sources depending on the
+    action — see :class:`ProcessMutationAttestationV1`.
+    """
+
+    folder_name: Optional[NonEmptyString] = None
+    folder_id: Optional[NonEmptyString] = None
+
+
+class ProcessMutationAttestationV1(_AuthoringModel):
+    """What apply actually did to ONE process root, bound to the plan it executed.
+
+    The SECOND of #153's two attestations. The first — the relocatable plan
+    fingerprint — certifies what WOULD be built, independent of account. This one
+    certifies what WAS built, in a specific account, and the two cannot be
+    collapsed:
+
+    * ``action`` never appears in the submitted XML at all. Create and update are
+      different API endpoints, so the verb is a property of the CALL, not of the
+      bytes.
+    * On create, ``result_component_id`` is assigned by the server. It cannot be
+      in the bytes that were sent, by definition.
+    * The update path's submitted bytes carry the component's CURRENT folder
+      attributes, preserved from the live readback — deliberately not the
+      requested placement. So the placement that was executed is not derivable
+      from the submitted digest either.
+
+    ``submitted_xml_digest`` is PROVENANCE — the bytes this mutation sent. It is
+    never compared against a live readback: a readback carries server-assigned
+    attributes and would mismatch on every healthy apply. Drift is detected by
+    comparing readback to readback, which is what
+    :class:`ProcessLiveReadbackAttestationV1` records.
+    """
+
+    component_key: NonEmptyString
+    plan_fingerprint: DigestString
+    account_scope_hash: DigestString
+    action: Literal["create", "update"]
+    target_component_id: Optional[NonEmptyString] = None
+    result_component_id: NonEmptyString
+    resolved_placement: ResolvedProcessPlacementV1
+    submitted_xml_digest: DigestString
+
+    @model_validator(mode="after")
+    def _targeting_matches_the_action(self) -> "ProcessMutationAttestationV1":
+        """An update targets something; a create cannot.
+
+        Checked because this is the mutation-accounting record: an attestation
+        that says "update" while naming no target, or "create" while naming one,
+        describes a mutation that did not happen.
+        """
+        if self.action == "update":
+            if not self.target_component_id:
+                raise PydanticCustomError(
+                    "process_materialization_plan_invalid",
+                    "an update attestation must name the component it targeted",
+                )
+            if self.target_component_id != self.result_component_id:
+                raise PydanticCustomError(
+                    "process_materialization_plan_invalid",
+                    "an update must resolve to the component it targeted "
+                    "(target {target!r} != result {result!r})",
+                    {
+                        "target": self.target_component_id,
+                        "result": self.result_component_id,
+                    },
+                )
+        elif self.target_component_id is not None:
+            raise PydanticCustomError(
+                "process_materialization_plan_invalid",
+                "a create attestation must not name a target component; its "
+                "result id is server-assigned",
+            )
+        return self
+
+
+class ProcessLiveReadbackAttestationV1(_AuthoringModel):
+    """A digest of the component as the PLATFORM reports it, after the mutation.
+
+    ``digest`` is ``None`` when the readback itself failed. That is deliberate
+    and load-bearing: the mutation still happened, so the record must exist, and
+    an unavailable baseline must read as UNKNOWN rather than as agreement. Verify
+    compares this digest against a second readback taken later — readback to
+    readback — which is the only comparison in which both sides carry the same
+    server-assigned attributes.
+    """
+
+    component_key: NonEmptyString
+    component_id: NonEmptyString
+    digest: Optional[DigestString] = None
+
+
 class AuthoringBuildProvenanceV1(_AuthoringModel):
     """What a typed apply recorded, and what verify compared it against.
 
@@ -630,6 +726,15 @@ class AuthoringBuildProvenanceV1(_AuthoringModel):
     artifact_fingerprints: Tuple[ArtifactFingerprintV1, ...] = ()
     resolved_references: Tuple[ResolvedReferenceSummaryV1, ...] = ()
     live_comparison: Optional["LiveDeploymentComparisonV1"] = None
+    #: #153. ORDERED, one per root that was actually mutated. A root whose apply
+    #: never ran records nothing — which is what makes a partial multi-root
+    #: failure readable: the roots applied before the failure keep their
+    #: attestations, and the unapplied ones are absent rather than empty.
+    process_mutations: Tuple[ProcessMutationAttestationV1, ...] = ()
+    #: #153. Recorded SEPARATELY from the mutation, and per root. A readback
+    #: failure leaves `digest=None` here without weakening the mutation record
+    #: beside it.
+    process_readbacks: Tuple[ProcessLiveReadbackAttestationV1, ...] = ()
 
 
 class LiveDeploymentComparisonV1(_AuthoringModel):
