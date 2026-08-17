@@ -565,12 +565,32 @@ def test_no_emitter_key_is_reachable_only_through_a_deletion_scheduled_route():
         "authored flow_sequence steps did not survive adaptation intact "
         "(case, expected-by-kind, actual-by-kind): %s" % diverged
     )
-    # The alias table must actually cover the renames it is being trusted for; a
-    # silently emptied table would make every expectation the identity and hide a
-    # rename regression.
-    assert set(_KIND_ALIASES) >= {
-        "dataprocess", "doccacheload", "doccacheretrieve", "doccacheremove"
-    }, "the adapter's legacy->IR alias table lost entries: %s" % sorted(_KIND_ALIASES)
+    # BIDIRECTIONAL PIN of the whole alias table, not a superset check.
+    #
+    # The census above maps authored kinds through `_KIND_ALIASES` — the same table
+    # the adapter uses. That is what makes the correspondence derived rather than
+    # hand-modelled, but it also means a regression introduced INSIDE the table
+    # moves both sides of the comparison in lockstep: adding `"set_ddp": "set_dpp"`
+    # would rewrite every authored `set_ddp` and the census would still balance.
+    # A superset check does not help, because it constrains neither the values nor
+    # any additional entry.
+    #
+    # Exact equality closes that: the table is a small CLOSED contract, so pinning
+    # it whole is the sanctioned form (a bidirectionally pinned closed contract is
+    # not a duplicate-authority instance) rather than a second model of a fact that
+    # lives elsewhere. A lost entry, a changed target, and an added rename all fail
+    # here. Any deliberate change to the adapter's rename contract must therefore
+    # be made in both places, which is the point.
+    assert _KIND_ALIASES == {
+        "dataprocess": "data_process",
+        "doccacheload": "cache_put",
+        "doccacheretrieve": "document_cache_retrieve",
+        "doccacheremove": "cache_remove",
+    }, (
+        "the adapter's legacy->IR alias contract changed; the per-kind census "
+        "derives from it, so this pin must be updated deliberately: %r"
+        % (dict(_KIND_ALIASES),)
+    )
 
     # EXACT equality, both directions: an allowed kind with no committed specimen
     # fails here rather than passing silently, which is the criterion "a kind added

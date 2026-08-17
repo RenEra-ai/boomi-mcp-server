@@ -290,6 +290,33 @@ FIRES; drop-one/duplicate-another FIRES; plain drop FIRES; identity does NOT fir
   cover the current tree: the C-03 fix has not been reviewed, and L3 (§6) and L4 (wave) are still owed.
   The next evaluation is the delta-scoped re-review of the C-03 fix.
 
+### L2 — Stage-2 repo Codex commit-review, evaluation 4 (new window, evaluation 1 of 3)
+
+Run directory `/tmp/cdx-review.evsTA9`, `SCOPE: branch diff against dd7583ca… head=2f4544c…`.
+
+| # | Source ID | Verbatim summary | Gate / run dir | Orig. label | Blocking class | Defect class | Derived tier + anchor | SHA/delta | Disposition |
+|---|---|---|---|---|---|---|---|---|---|
+| C-04 | L2e4 P1 | "If the adapter regression is introduced through `_KIND_ALIASES` itself, the expected census changes in lockstep with the actual IR. For example, adding `\"set_ddp\": \"set_dpp\"` to that table rewrites every authored `set_ddp` while this entire reachability test still passes; the later assertion only requires four keys and does not constrain additional entries or values." | L2 / cdx-review.evsTA9 | **P1** | capability reachability | (a guard deriving its expectation from the artefact it guards, `_KIND_ALIASES`) — **1st instance of this pair** | **Critical** — anchor: reviewer labelled it P1 | fix delta | `fixed` |
+
+**Verified and fixed with the sanctioned form.** This is a different defect class from C-01/C-03 (which
+were aggregate-for-per-item): here the correspondence WAS per-item, but its oracle was the very table a
+regression would live in. It is also a class this repo has recorded before — #165's lesson that a
+guard's control must not derive its expectation from the guard's own collector. CLAUDE.md's
+structural-fix rule names the answer directly: *a deliberately pinned closed contract with a
+bidirectional pin is NOT an instance*. The superset assertion was replaced with exact equality over the
+whole four-entry table, so a lost entry, a changed target, and an ADDED rename all fail, and any
+deliberate change to the adapter's rename contract must be made in both places by design.
+
+**Mutation controls, all four run:** added rename `set_ddp -> set_dpp` FIRES (the reviewer's exact
+scenario); dropped entry FIRES; changed target FIRES; identity does NOT fire.
+
+**A claim I checked and withdrew.** I expected the committed goldens to catch this rename
+independently, which would have made the pin a second line rather than the only one. Measured: the
+golden renderer showed NO byte change under the injected rename — but the probe was INERT, not the
+goldens weak. The corpus renderer resolves the `src.`-prefixed module while the probe mutated the bare
+one, and those are different module objects (the dual-module gotcha this repo has documented). No claim
+about golden coverage of this case is made in either direction; the pin rests on its own controls.
+
 ## Observations recorded, not fixed (out of scope for this slice)
 
 | # | Observation | Why not fixed here |
