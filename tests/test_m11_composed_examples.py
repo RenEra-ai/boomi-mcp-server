@@ -102,12 +102,15 @@ def test_every_example_applies_clean_in_dry_run():
         for step in applied["steps"]:
             assert "validation_error" not in step, (name, step["key"])
             assert step["planned_action"] in ("create", "reuse"), (name, step["key"])
-        # No mutation reached the client.
-        mutating = [
-            call for call in client.mock_calls
-            if any(verb in str(call) for verb in (".create(", ".update(", ".delete("))
-        ]
-        assert mutating == [], (name, mutating)
+        # A dry run must not touch the client AT ALL — asserted as "no calls",
+        # not by matching method names. The real SDK writes are
+        # `component.create_component(...)`, `update_component_raw(...)`,
+        # `delete_component_metadata(...)`; none contains `.create(` / `.update(` /
+        # `.delete(`, so a name matcher would have passed a genuine write.
+        assert client.mock_calls == [], (
+            name,
+            [str(call) for call in client.mock_calls],
+        )
 
 
 def test_basic_example_process_matches_golden():

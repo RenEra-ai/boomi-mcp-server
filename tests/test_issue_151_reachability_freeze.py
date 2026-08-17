@@ -316,21 +316,60 @@ def _ir_kinds_by_source_path(process_ir):
     return paths
 
 
+#: IR node kinds the SURROUNDING config contributes rather than the authored
+#: `flow_sequence` list — the source/target endpoints, the compiler's terminal
+#: Stop, the body container, and a config-level `return_documents`. None of them
+#: is a member of `_FLOW_SEQUENCE_ALLOWED_KINDS`, which is asserted rather than
+#: assumed, so excluding them from the step census is derived, not chosen.
+_CONFIG_LEVEL_IR_KINDS = frozenset(
+    {"sequence", "source", "target", "stop", "return_documents"}
+)
+
+
+def _count_authored_steps(config):
+    """How many `flow_sequence` steps a legacy config authors, nested included."""
+    total = 0
+
+    def walk(node):
+        nonlocal total
+        if isinstance(node, dict):
+            if isinstance(node.get("kind"), str):
+                total += 1
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(config.get("flow_sequence") or [])
+    return total
+
+
 def _flow_sequence_kind_attribution():
     """Per-STEP attribution for the `flow_sequence` route.
 
-    Returns ``(authored_kinds, ir_kind -> {emitter_key}, unattributed_ir_kinds)``.
+    Returns ``(authored_kinds, ir_kind -> {emitter_key}, unattributed_ir_kinds,
+    census)`` where ``census`` is ``[(case, authored_step_count, ir_step_count)]``.
 
     Aggregating emitter keys across a corpus is not enough to satisfy the issue's
     "a kind added later cannot silently lack a route" criterion: two kinds can
     lower onto the same key, so one can stop lowering while the other keeps the
-    aggregate whole. This walks each authored step to the plan node carrying its
-    `source_path`, so every step has to produce an emitter node of its own.
+    aggregate whole.
+
+    The census closes a SECOND hole that per-path attribution alone does not.
+    `unattributed` can only report an IR node that reached no plan node — so a
+    step the ADAPTER drops outright produces no IR node, appears in neither map,
+    and is invisible. Measured: simulating an adapter that drops every `set_ddp`
+    leaves all four of the kind assertions passing, because `set_dpp` keeps
+    supplying the shared `setproperties_step` key. Counting authored steps against
+    the IR nodes they became links each legacy step to its adapted output, which
+    is what the review required.
     """
     shared, cases = _shared_block()
     authored = set()
     routes = {}
     unattributed = {}
+    census = []
     for name in sorted(cases):
         config = _resolve(cases[name], shared)["config"]
         if config.get("process_kind") == "wrapper_subprocess":
@@ -353,7 +392,13 @@ def _flow_sequence_kind_attribution():
                 routes.setdefault(kind, set()).update(emitted[path])
             else:
                 unattributed.setdefault(kind, set()).add("%s::%s" % (name, path))
-    return authored, routes, unattributed
+        census.append((
+            name,
+            _count_authored_steps(config),
+            sum(1 for kind in by_path.values()
+                if kind not in _CONFIG_LEVEL_IR_KINDS),
+        ))
+    return authored, routes, unattributed, census
 
 
 def _route_map():
@@ -476,7 +521,25 @@ def test_no_emitter_key_is_reachable_only_through_a_deletion_scheduled_route():
     # that is allowed but has no specimen, nor one that stops lowering while a
     # sibling keeps the aggregate whole (two kinds share `setproperties_step`, and
     # `cache_get`/`document_cache_retrieve` share `doccacheretrieve`).
-    authored, per_kind, unattributed = _flow_sequence_kind_attribution()
+    authored, per_kind, unattributed, census = _flow_sequence_kind_attribution()
+
+    # The config-level exclusion used by the census must not quietly swallow an
+    # authored kind — derived, so a kind promoted into the flow_sequence
+    # vocabulary later cannot be excluded by an unexamined constant.
+    assert not (_CONFIG_LEVEL_IR_KINDS & set(_FLOW_SEQUENCE_ALLOWED_KINDS)), (
+        "a config-level IR kind is also an authored flow_sequence kind: %s"
+        % sorted(_CONFIG_LEVEL_IR_KINDS & set(_FLOW_SEQUENCE_ALLOWED_KINDS))
+    )
+
+    # Every authored step must become an IR node. Per-path attribution alone
+    # cannot see a step the adapter DROPS (no IR node exists to be unattributed),
+    # and a sibling sharing its emitter key hides the loss from the key sets.
+    assert census, "flow_sequence census is empty — the walk found no specimens"
+    dropped = [(name, n, m) for name, n, m in census if n != m]
+    assert not dropped, (
+        "authored flow_sequence steps did not survive adaptation "
+        "(case, authored, ir_steps): %s" % dropped
+    )
 
     # EXACT equality, both directions: an allowed kind with no committed specimen
     # fails here rather than passing silently, which is the criterion "a kind added

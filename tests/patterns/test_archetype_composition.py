@@ -821,11 +821,17 @@ def test_the_shipped_m8_examples_apply_clean_in_dry_run():
         for step in applied["steps"]:
             assert "validation_error" not in step, (path.name, step["key"])
             assert step["planned_action"] in ("create", "reuse"), (path.name, step["key"])
-        mutating = [
-            call for call in client.mock_calls
-            if any(verb in str(call) for verb in (".create(", ".update(", ".delete("))
-        ]
-        assert mutating == [], (path.name, mutating)
+        # A dry run must not touch the client AT ALL — asserted as "no calls",
+        # not by matching method names. A name matcher was the first attempt and
+        # was ineffective: the real SDK writes are `component.create_component(...)`,
+        # `update_component_raw(...)`, `delete_component_metadata(...)`, none of
+        # which contains the substrings `.create(` / `.update(` / `.delete(`, so a
+        # genuine write would have passed. Zero calls is both stronger and immune
+        # to the SDK renaming its methods; measured, the dry-run path makes none.
+        assert client.mock_calls == [], (
+            path.name,
+            [str(call) for call in client.mock_calls],
+        )
 
 
 def test_explicit_star_links_accepted_and_wrong_links_rejected():

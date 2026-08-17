@@ -206,6 +206,39 @@ module rather than hand-listing, and deliberately excludes the underscore-prefix
 `naming` added to the protocol. A latent docstring corruption from the original bulk forward-reference
 rewrite (which had turned the protocol's own explanation circular) was corrected in the same pass.
 
+### L2 — Stage-2 repo Codex commit-review, evaluation 2 (fix delta)
+
+Run directory `/tmp/cdx-review.FIX5ln`, `STATUS: completed`, teardown `confirmed stopped`,
+`SCOPE: branch diff against 13eb7574c25195cfeddfb6457e1de1b6e8e0dd02 (13eb757) head=610c98d5… dirty=false`.
+Evaluation 1 (against the Stage-1.5 baseline) was clean; this one reviewed the delta that fixed the §6
+findings and found two P1s — **both against the fixes themselves**, both valid.
+
+| # | Source ID | Verbatim summary | Gate / run dir | Orig. label | Blocking class | Defect class | Derived tier + anchor | SHA/delta | Disposition |
+|---|---|---|---|---|---|---|---|---|---|
+| C-01 | L2e2 P1 #1 | "Because `authored` is collected from the legacy config while `by_path` is collected only from the adapter's resulting IR, a step dropped by the adapter never enters `unattributed` … dropping every `set_ddp` step still leaves `set_dpp` supplying the shared `setproperties_step` emitter, and the complete test passes." | L2 / cdx-review.FIX5ln | **P1** | capability reachability | (an aggregate assertion standing in for a per-item one, the emitter registry + lowering) — **2nd instance** (1st was R-01) | **Critical** — anchor: reviewer labelled it P1 | fix delta | `fixed` |
+| C-02 | L2e2 P1 #2 | "`MagicMock` records names such as `call.component.create_component(...)`, `update_component_raw(...)`, or `delete_component_metadata(...)`; none contains the exact strings `.create(`, `.update(`, or `.delete(`. Consequently this assertion remains empty after a write-method invocation." | L2 / cdx-review.FIX5ln | **P1** | mutation accounting | (a guard matching a hand-guessed spelling instead of the runtime's own, the SDK's method names) | **Critical** — anchor: reviewer labelled it P1; also a mutation-accounting finding, which derives Critical independently | fix delta | `fixed` |
+
+**C-01 — verified by simulation before fixing.** Deleting `set_ddp` from the derived per-kind map
+(exactly what an adapter that dropped the step would produce) left ALL FOUR kind assertions passing:
+`authored == ALLOWED` (read from the config, unaffected), `unattributed <= containers` (there is no IR
+node to be unattributed), `len(per_kind) >= 14` (16 ≥ 14), and the routeless check. My R-01 fix closed
+"an allowed kind with no fixture" but not "an adapter that drops a step". This is the SECOND instance
+of the aggregate-for-per-item defect class in this slice, and the structural answer is the one the
+review named: link each legacy step to its adapted output. Added a per-case census — authored
+`flow_sequence` step count vs the IR nodes those steps became — which is exact for all 9 specimens and
+needs no legacy→IR rename model. The config-level exclusion set is itself guarded: the test asserts
+none of `{sequence, source, target, stop, return_documents}` is an allowed `flow_sequence` kind, so a
+kind promoted into the vocabulary later cannot be silently excluded. **Mutation control:** simulating
+the dropped step now fires with `[('set_properties_ddp_dpp', 2, 1)]`.
+
+**C-02 — verified by construction.** `MagicMock` renders the real SDK writes as
+`call.component.create_component(...)`, `call.component.update_component_raw(...)`,
+`call.component.delete_component_metadata(...)`; my substring matcher scored `False` on all three, so a
+genuine write would have passed. Replaced in both files with `client.mock_calls == []` — strictly
+stronger, immune to SDK renames, and measured valid: the dry-run path makes ZERO client calls.
+**Mutation control:** a planted `create_component` call is missed by the old matcher and caught by the
+new assertion.
+
 ## Observations recorded, not fixed (out of scope for this slice)
 
 | # | Observation | Why not fixed here |
