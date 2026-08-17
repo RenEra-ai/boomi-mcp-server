@@ -442,6 +442,21 @@ current on the final tree; zero unresolved findings of either tier.
 | Orphaned-coverage inventory recorded, each item re-pointed or deferred to its owner, without duplicating #156 | `M12_COMPATIBILITY_INVENTORY.md` §12.3, derived from the active golden manifest |
 | The four shipped examples plan **and apply** unchanged | `test_the_shipped_m8_examples_apply_clean_in_dry_run` + `test_every_example_applies_clean_in_dry_run`: dry-run apply, plan/apply key + action equality, and `client.mock_calls == []` |
 
+### Last validated tree
+
+`cff2fdee885f61936f9c413ca442cdae9ea88ec8` — the tree the composite wave gate passed on, clean worktree:
+
+```
+wave_gate: non-KB suite green (9819 passed, 17 skipped, cap 30)
+wave_gate: 60 active goldens deterministic and byte-exact
+PLAN_FINGERPRINT_PENDING issue=#153
+```
+
+The gate ran three times before this. The first two runs FAILED, both on defects in this ledger's own
+prose rather than in the slice: a renamed ledger path, and identifiers written in a shape the
+diagnostic-code scanner reads as claims about codes the gate can emit. Recorded because a gate that
+went red and then green must show why, and because the cause was mine.
+
 ### Scope corrections made against the plans, and why
 
 1. **The architect's freeze-test route seeding was a tautology.** `EmitterRegistration.supported_capability`
