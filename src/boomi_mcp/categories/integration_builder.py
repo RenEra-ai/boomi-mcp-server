@@ -226,6 +226,10 @@ from pydantic import ValidationError
 from ..errors import (
     AUTHORING_APPLY_VALIDATION_REQUIRED,
     AUTHORING_LIVE_DEPLOYMENT_DRIFT,
+    INTEGRATION_COMPONENT_KEY_DUPLICATE,
+    INTEGRATION_DEPENDENCY_CYCLE,
+    INTEGRATION_DEPENDENCY_NOT_FOUND,
+    INTEGRATION_DEPENDENCY_REQUIRED,
     INVALID_INPUT,
     LEGACY_ADAPTER_AUTHORITY_CONFLICT,
 )
@@ -872,20 +876,135 @@ def _build_auto_wrapper_spec(
     )
 
 
-def _topological_order(spec: IntegrationSpecV1) -> List[str]:
-    components_by_key = {comp.key: comp for comp in spec.components}
-    if len(components_by_key) != len(spec.components):
-        raise ValueError("Duplicate component keys are not allowed")
+class IntegrationDependencyError(ValueError):
+    """A named failure of the ONE integration dependency graph (issue #153).
 
-    indegree = {key: 0 for key in components_by_key}
+    Subclasses ``ValueError`` deliberately: every existing caller catches
+    ``ValueError`` and reports ``str(exc)``, so naming these failures is purely
+    additive — nothing that handled them before stops handling them now. What it
+    adds is a machine-readable ``error_code``, which callers could not branch on
+    when the graph raised a bare ``ValueError`` with prose.
+    """
+
+    def __init__(self, message: str, *, error_code: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
+def _integration_participants(spec: IntegrationSpecV1):
+    """Every key the ONE dependency graph orders, with its declared edges.
+
+    Yields ``(key, depends_on, kind)`` for components AND canonical process
+    roots. The two tuples share one key namespace (issue #153 in-scope item 5),
+    so ordering them separately would be two graphs pretending to be one — and a
+    component -> process edge, which is already real today for an API Service
+    route's ``$ref:KEY`` target, would have no sorter that could see both ends.
+    """
+    for comp in spec.components:
+        yield comp.key, tuple(comp.depends_on or ()), "component"
+    for unit in getattr(spec, "processes", ()) or ():
+        envelope = unit.envelope
+        yield envelope.component_key, tuple(envelope.depends_on or ()), "process"
+
+
+def _check_process_root_dependencies(spec: IntegrationSpecV1):
+    """Every ``$ref:KEY`` a process root uses must appear in its ``depends_on``.
+
+    Ordered apply binds a root's references from the id registry, and the
+    registry is populated in TOPOLOGICAL order — so a reference the envelope
+    does not declare is one whose component may not exist yet when the root is
+    materialized. Declaring it is what puts the edge in the graph.
+
+    Checked at PLAN time so the caller learns before any mutation, and enforced
+    again in the apply loop: a plan-only guard is bypassable by anything that
+    reaches apply through the compiled bundle rather than the planner.
+
+    Returns ``None`` when every root is satisfied, else an
+    :class:`IntegrationDependencyError`.
+    """
+    from ..authoring.process_materialization import _iter_envelope_refs
+
+    _REF = "$ref:"
+    for unit in getattr(spec, "processes", ()) or ():
+        envelope = unit.envelope
+        declared = set(envelope.depends_on or ())
+        referenced = set()
+        # References the IR itself carries, read from the authored document so
+        # this needs no compile — plan time must not require one.
+        body = unit.process_ir.model_dump(mode="json")
+
+        def _walk(node):
+            if isinstance(node, dict):
+                for value in node.values():
+                    _walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    _walk(value)
+            elif isinstance(node, str) and node.startswith(_REF):
+                key = node[len(_REF):].strip()
+                if key:
+                    referenced.add(key)
+
+        _walk(body)
+        # ...plus the envelope's own extension bindings.
+        for _path, ref in _iter_envelope_refs(envelope):
+            if ref.startswith(_REF):
+                key = ref[len(_REF):].strip()
+                if key:
+                    referenced.add(key)
+
+        missing = sorted(referenced - declared - {envelope.component_key})
+        if missing:
+            return IntegrationDependencyError(
+                "Process '{0}' references {1} but does not declare {2} in "
+                "depends_on".format(
+                    envelope.component_key,
+                    ", ".join(repr(m) for m in missing),
+                    "them" if len(missing) > 1 else "it",
+                ),
+                error_code=INTEGRATION_DEPENDENCY_REQUIRED,
+            )
+    return None
+
+
+def _topological_order(spec: IntegrationSpecV1) -> List[str]:
+    """Deterministic execution order over components AND process roots.
+
+    ONE sorter, one cycle check, one key namespace. All four dependency
+    directions — component->component, component->process, process->component,
+    process->process — fall out of that rather than needing a case each.
+    """
+    participants: Dict[str, str] = {}
+    edges: Dict[str, Tuple[str, ...]] = {}
+    duplicates: List[str] = []
+    for key, depends_on, kind in _integration_participants(spec):
+        if key in participants:
+            duplicates.append(key)
+            continue
+        participants[key] = kind
+        edges[key] = depends_on
+    if duplicates:
+        raise IntegrationDependencyError(
+            "Duplicate component keys are not allowed: {0}".format(
+                ", ".join(sorted(set(duplicates)))
+            ),
+            error_code=INTEGRATION_COMPONENT_KEY_DUPLICATE,
+        )
+
+    indegree = {key: 0 for key in participants}
     graph: Dict[str, List[str]] = defaultdict(list)
 
-    for comp in spec.components:
-        for dep in comp.depends_on:
-            if dep not in components_by_key:
-                raise ValueError(f"Component '{comp.key}' depends on unknown component '{dep}'")
-            graph[dep].append(comp.key)
-            indegree[comp.key] += 1
+    for key in participants:
+        for dep in edges[key]:
+            if dep not in participants:
+                raise IntegrationDependencyError(
+                    "Component '{0}' depends on unknown component '{1}'".format(
+                        key, dep
+                    ),
+                    error_code=INTEGRATION_DEPENDENCY_NOT_FOUND,
+                )
+            graph[dep].append(key)
+            indegree[key] += 1
 
     ready = sorted([key for key, degree in indegree.items() if degree == 0])
     ordered: List[str] = []
@@ -899,8 +1018,14 @@ def _topological_order(spec: IntegrationSpecV1) -> List[str]:
                 ready.append(dependent)
         ready.sort()
 
-    if len(ordered) != len(spec.components):
-        raise ValueError("Circular dependency detected in integration components")
+    if len(ordered) != len(participants):
+        unresolved = sorted(set(participants) - set(ordered))
+        raise IntegrationDependencyError(
+            "Circular dependency detected in integration components: {0}".format(
+                ", ".join(unresolved)
+            ),
+            error_code=INTEGRATION_DEPENDENCY_CYCLE,
+        )
 
     return ordered
 
@@ -1918,6 +2043,7 @@ def _check_api_service_route_dependencies(
     comp: IntegrationComponentSpec,
     raw_config: Dict[str, Any],
     components_by_key: Optional[Dict[str, IntegrationComponentSpec]] = None,
+    process_units_by_key: Optional[Dict[str, Any]] = None,
 ) -> Optional[BuilderValidationError]:
     """Cross-step route checks specific to webservice / API Service Components
     (M6.1 #133).
@@ -1985,6 +2111,26 @@ def _check_api_service_route_dependencies(
             )
         if components_by_key is None:
             continue
+        # #153: routes resolve against BOTH tuples. The two share one key
+        # namespace, so a route naming a canonical process root must not be
+        # reported as "does not exist in the spec" — it exists, it is simply not
+        # a legal ASC target yet. Reporting the wrong reason would send a caller
+        # to add a component they already declared.
+        if ref_key in (process_units_by_key or {}):
+            return BuilderValidationError(
+                f"{field} $ref target {ref_key!r} is a canonical ProcessIR root, "
+                f"which cannot yet publish an API Service route",
+                error_code="API_SERVICE_ROUTE_PROCESS_NOT_LISTEN",
+                field=field,
+                hint=(
+                    "ASC routes publish WSS Listen processes. A canonical "
+                    "ProcessIR root compiles to a SCHEDULED process today — "
+                    "listener entry arrives with #158, which activates the "
+                    "compiler-recorded execution profile. Until then, publish "
+                    "the listener through a legacy process component."
+                ),
+                details={"ref_key": ref_key, "actual_role": "process_ir_root"},
+            )
         target = components_by_key.get(ref_key)
         if target is None:
             return BuilderValidationError(
@@ -5696,8 +5842,21 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             "error": f"Invalid conflict_policy '{conflict_policy}'. Valid values: reuse, clone, fail.",
         }
 
+    _root_dep_error = _check_process_root_dependencies(spec)
+    if _root_dep_error is not None:
+        return {
+            "_success": False,
+            "error": str(_root_dep_error),
+            "error_code": _root_dep_error.error_code,
+        }
+
     try:
         execution_order = _topological_order(spec)
+    except IntegrationDependencyError as exc:
+        # #153: the graph now names its failures. Surfaced as `error_code` so a
+        # caller can branch on the reason instead of matching prose; the prose
+        # itself is unchanged, so nothing that read `error` before breaks.
+        return {"_success": False, "error": str(exc), "error_code": exc.error_code}
     except ValueError as exc:
         return {"_success": False, "error": str(exc)}
 
@@ -6477,7 +6636,13 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     )
                     if gen_profile_err is None:
                         gen_profile_err = _check_api_service_route_dependencies(
-                            comp, effective_config, components_by_key
+                            comp,
+                            effective_config,
+                            components_by_key,
+                            {
+                                unit.envelope.component_key: unit
+                                for unit in (getattr(spec, "processes", ()) or ())
+                            },
                         )
                 elif is_transform_function_wrapper:
                     # Issue #41 r3: transform.function wrappers are auto-
