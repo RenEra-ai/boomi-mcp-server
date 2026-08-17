@@ -1730,6 +1730,27 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "SCOPE",
     "STATUS",
     "UPPER_SNAKE",
+    # PRODUCTION identifiers a ledger names when recording what a slice changed —
+    # module constants, a class attribute, and one document filename. None is a
+    # diagnostic this gate can emit, which the `& gate.DIAGNOSTIC_CODES == set()`
+    # assertion above enforces for every entry here.
+    #
+    # These are listed rather than scrubbed from the ledger because an audit record
+    # that cannot name the constant it changed is a worse record: #151 moved
+    # RECIPE_LAYER_MODULES membership and derived DELETION_ROUTES from
+    # PROCESS_FLOW_BUILDERS, RESERVED_DIALECTS and ProcessFlowBuilder.PROCESS_KIND,
+    # and the rows have to say so. Unlike ledger stems, this set does NOT grow one
+    # per slice — these are durable identifiers any later ledger touching the same
+    # area would name.
+    "ARCHETYPE_BUILD_FAILED",
+    "CAPABILITY_PROCESS_IR_V1",
+    "DELETION_ROUTES",
+    "DUPLICATE_PATTERN_NAME",
+    "M12_COMPATIBILITY_INVENTORY",
+    "PROCESS_FLOW_BUILDERS",
+    "PROCESS_KIND",
+    "RECIPE_LAYER_MODULES",
+    "RESERVED_DIALECTS",
 })
 
 

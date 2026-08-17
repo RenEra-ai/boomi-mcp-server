@@ -1,0 +1,30 @@
+Approvals and interactive clarifying questions are UNAVAILABLE in this read-only review session.
+Do not ask; do not stop after a reasoning preamble; do not reply with a status update.
+
+Emit the FULL review NOW, as plain text, in your final message.
+
+This is ROUND 2 of the architect implementation gate for issue #151 (M12.14) on branch
+codex/issue-151, HEAD 0646286. Review ONLY the fix delta
+`git diff 13eb7574c25195cfeddfb6457e1de1b6e8e0dd02..HEAD` against the architect design plan and
+acceptance criteria inlined in the original prompt. Round 1's four findings are all addressed; do not
+re-review the original extraction except where this delta touched it.
+
+Cover, with `file:line` citations:
+
+1. Whether round 1's four findings are genuinely resolved — the per-kind freeze attribution, dry-run
+   apply coverage for the four shipped examples, the corrected inventory statements, and the
+   `__all__` / `_ApiParametersLike.naming` additions.
+2. **Adversarially: is `tests/test_issue_151_reachability_freeze.py` still false-green anywhere?** It
+   is #160's machine-checked deletion prerequisite. Consider a kind allowed but unauthored; a step
+   dropped, duplicated, or rewritten by the adapter; a regression inside `_KIND_ALIASES`; a fixture
+   that stops compiling; an emitter key losing its direct-ProcessIR route; and any assertion that can
+   pass vacuously.
+3. Whether the dry-run apply tests genuinely prove no mutation reached the client.
+4. The wave-gate manifest arithmetic: baseline floor 9826 → 9836, 3 tombstoned, 13 appended.
+5. Whether anything in the delta changes runtime behaviour.
+
+Do NOT report: issue #160's deletion, #158, #159, #156, #155, backward compatibility of any kind, the
+pre-existing unused import at `patterns/recipe_bridge.py:36`, or the
+`docs/architecture/evidence/issue-151/**` audit-evidence files.
+
+END with a verdict on its OWN FINAL LINE: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

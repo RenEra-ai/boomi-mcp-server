@@ -1,0 +1,66 @@
+You are reviewing a FIX DELTA against the approved architect design plan — ROUND 2 of this gate.
+
+Repository: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: codex/issue-151, HEAD 0646286
+Review ONLY the delta since round 1: `git diff 13eb7574c25195cfeddfb6457e1de1b6e8e0dd02..HEAD`
+(Round 1 already reviewed everything up to 13eb757 and its findings are all addressed; do not
+re-review the original extraction except where this delta changed it.)
+
+The design plan is inlined verbatim below, followed by the issue's acceptance criteria.
+
+## What round 1 found, and what this delta did about it
+
+Round 1 returned ISSUES FOUND with four items. All four were verified and fixed:
+
+1. **[P1] The deletion gate did not freeze each of the 14 `flow_sequence` kinds** — it floored
+   `len(_FLOW_SEQUENCE_ALLOWED_KINDS) >= 14` and aggregated emitter keys.
+2. **[P1] No dry-run apply coverage for the four shipped examples** — the criterion says "plan and
+   apply"; only planning was tested.
+3. **[P2] The inventory contradicted the implementation** (claimed no `__module__` filter, and that
+   `RECIPE_LAYER_MODULES` was not edited).
+4. **[P2] `archetype_parameters.py` had no `__all__`; `_ApiParametersLike` omitted `naming`.**
+
+## Since round 1, the repo's OWN Codex commit-review gate ran four more times on these fixes and found four more P1s, each of which was fixed. Please verify the FINAL state of each, adversarially:
+
+- **C-01** — per-path attribution could not see a step the ADAPTER drops (no IR node exists to be
+  reported unattributed). Answer: a per-case census of authored steps vs the IR nodes they became.
+- **C-03** — that census compared per-case TOTALS, so a swap (`set_ddp`→`set_dpp`) or a
+  drop-one/duplicate-another kept it balanced. Answer: compare PER-KIND multisets, mapping authored
+  kinds through `_KIND_ALIASES` (`src/boomi_mcp/models/_process_ir_compat.py`), the adapter's own
+  legacy→IR rename table. An order-based zip was tried first and REJECTED as unsound — the adapter
+  flattens nested branch legs/decision arms elsewhere, so authored order does not align with IR path
+  order (it pairs `message` with `branch`).
+- **C-04** — deriving the expectation from `_KIND_ALIASES` meant a regression inside that table moved
+  both sides in lockstep. Answer: a BIDIRECTIONAL exact pin of the whole four-entry alias table.
+
+**The central question for this round:** is `tests/test_issue_151_reachability_freeze.py` now a gate
+that genuinely fails when a capability loses its route, or is there still a path by which it is
+false-green? This test is #160's machine-checked deletion prerequisite, so a false-green is the worst
+possible outcome. Attack it. Consider at least: a kind allowed but unauthored; a step dropped,
+duplicated, or rewritten by the adapter; a regression inside the alias table; a fixture that stops
+compiling; an emitter key that loses its direct-ProcessIR route; and whether any assertion can pass
+vacuously (several earlier versions did — one asserted `cls.__module__`, which is invariant under the
+change it was meant to detect).
+
+Also verify:
+- the dry-run apply tests genuinely prove no mutation (an earlier version matched the substrings
+  `.create(`/`.update(`/`.delete(`, which miss the real SDK names `create_component`,
+  `update_component_raw`, `delete_component_metadata`; it now asserts `client.mock_calls == []`);
+- the wave-gate manifest arithmetic: floor 9826 at baseline → 9836 now, with 3 nodes tombstoned and
+  13 appended across the slice;
+- that nothing in the delta changed runtime behaviour (`src/` changes in this delta are limited to
+  `archetype_parameters.py` gaining `__all__` and `archetype_assembly.py` gaining `naming` on a
+  Protocol plus a docstring correction).
+
+## Out of scope — do NOT report
+
+- Issue #160's deletion, #158 fused `start_listen`, #159 caller/example migration to ProcessIR roots,
+  #156 notify, #155 dynamic_path.
+- Backward compatibility of any kind — this server has no external consumers and the issue forbids
+  preserving it.
+- The pre-existing unused import at `patterns/recipe_bridge.py:36` (untouched by this slice).
+- The `docs/architecture/evidence/issue-151/**` files — these are the slice's own durable audit
+  evidence (collector artifacts and the audit ledger), not implementation.
+
+END your review with a verdict on its OWN FINAL LINE: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
