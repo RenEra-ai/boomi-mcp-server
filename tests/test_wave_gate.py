@@ -1805,6 +1805,14 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "EXCLUDED_PLAN_FIELDS",
     "PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE",
     "PROCESS_PRESERVATION_POLICY",
+    # #153 steps 6-9. Two more production constants and one ERROR-TAXONOMY code
+    # the ledger names when recording the extraction and the capability flip.
+    # `AUTHORING_COMPILE_BLOCKED` is a registered member of
+    # `boomi_mcp.errors.ERROR_TAXONOMY` (owned by #146) — again, a real code from
+    # a DIFFERENT taxonomy than the one this scanner governs.
+    "AUTHORING_CAPABILITY_REGISTRY",
+    "AUTHORING_COMPILE_BLOCKED",
+    "DEFAULT_PROCESS_OPTIONS",
 })
 
 
