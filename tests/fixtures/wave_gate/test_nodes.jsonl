@@ -3142,7 +3142,7 @@
 {"kind":"test","id":"pytest-003141","node_id":"tests/test_m12_11_apply_verify.py::test_a_config_carrying_both_roots_is_rejected[apply]","state":"active"}
 {"kind":"test","id":"pytest-003142","node_id":"tests/test_m12_11_apply_verify.py::test_a_config_carrying_both_roots_is_rejected[compile]","state":"active"}
 {"kind":"test","id":"pytest-003143","node_id":"tests/test_m12_11_apply_verify.py::test_a_config_carrying_both_roots_is_rejected[plan]","state":"active"}
-{"kind":"test","id":"pytest-003144","node_id":"tests/test_m12_11_apply_verify.py::test_a_direct_process_ir_intent_cannot_be_applied","state":"active"}
+{"kind":"test","id":"pytest-003144","node_id":"tests/test_m12_11_apply_verify.py::test_a_direct_process_ir_intent_cannot_be_applied","state":"tombstone"}
 {"kind":"test","id":"pytest-003145","node_id":"tests/test_m12_11_apply_verify.py::test_a_drift_failing_verify_carries_a_top_level_error_code","state":"active"}
 {"kind":"test","id":"pytest-003146","node_id":"tests/test_m12_11_apply_verify.py::test_a_legacy_build_record_keeps_exactly_its_five_keys","state":"active"}
 {"kind":"test","id":"pytest-003147","node_id":"tests/test_m12_11_apply_verify.py::test_a_malformed_typed_apply_still_publishes_its_mutation_status","state":"active"}
@@ -3180,7 +3180,7 @@
 {"kind":"test","id":"pytest-003179","node_id":"tests/test_m12_11_apply_verify.py::test_revision_skew_is_reported_separately_from_component_drift","state":"active"}
 {"kind":"test","id":"pytest-003180","node_id":"tests/test_m12_11_apply_verify.py::test_swapping_conflict_policy_after_compile_is_refused","state":"active"}
 {"kind":"test","id":"pytest-003181","node_id":"tests/test_m12_11_apply_verify.py::test_the_bound_conflict_policy_survives_into_materialization","state":"active"}
-{"kind":"test","id":"pytest-003182","node_id":"tests/test_m12_11_apply_verify.py::test_the_materialization_refusal_keys_on_the_compiled_artifact","state":"active"}
+{"kind":"test","id":"pytest-003182","node_id":"tests/test_m12_11_apply_verify.py::test_the_materialization_refusal_keys_on_the_compiled_artifact","state":"tombstone"}
 {"kind":"test","id":"pytest-003183","node_id":"tests/test_m12_11_apply_verify.py::test_the_preflight_runs_before_the_first_materializer_call","state":"active"}
 {"kind":"test","id":"pytest-003184","node_id":"tests/test_m12_11_apply_verify.py::test_the_published_digest_is_really_sha256_of_the_canonical_bytes","state":"active"}
 {"kind":"test","id":"pytest-003185","node_id":"tests/test_m12_11_apply_verify.py::test_the_response_says_how_SURE_it_is_that_something_was_written","state":"active"}
@@ -3255,7 +3255,7 @@
 {"kind":"test","id":"pytest-003254","node_id":"tests/test_m12_11_capabilities.py::test_the_manifest_carries_no_secret_path_timestamp_or_account_identity","state":"active"}
 {"kind":"test","id":"pytest-003255","node_id":"tests/test_m12_11_capabilities.py::test_the_manifest_is_deterministic","state":"active"}
 {"kind":"test","id":"pytest-003256","node_id":"tests/test_m12_11_capabilities.py::test_the_new_authoring_workflow_survives_the_capability_catalog_filter","state":"active"}
-{"kind":"test","id":"pytest-003257","node_id":"tests/test_m12_11_capabilities.py::test_the_published_support_matrix_matches_the_runtime_refusal","state":"active"}
+{"kind":"test","id":"pytest-003257","node_id":"tests/test_m12_11_capabilities.py::test_the_published_support_matrix_matches_the_runtime_refusal","state":"tombstone"}
 {"kind":"test","id":"pytest-003258","node_id":"tests/test_m12_11_capabilities.py::test_the_schema_revision_covers_the_whole_served_authoring_contract","state":"active"}
 {"kind":"test","id":"pytest-003259","node_id":"tests/test_m12_11_capabilities.py::test_the_schema_revision_moves_when_an_inherited_schema_moves","state":"active"}
 {"kind":"test","id":"pytest-003260","node_id":"tests/test_m12_11_capabilities.py::test_the_support_matrix_covers_every_intent_kind_and_action","state":"active"}
@@ -4829,9 +4829,9 @@
 {"kind":"test","id":"pytest-004828","node_id":"tests/test_process_ir_authoring_contract.py::test_both_revalidation_call_sites_refuse_a_corrupted_page","state":"active"}
 {"kind":"test","id":"pytest-004829","node_id":"tests/test_process_ir_authoring_contract.py::test_comparison_semantics_are_unchanged","state":"active"}
 {"kind":"test","id":"pytest-004830","node_id":"tests/test_process_ir_authoring_contract.py::test_compile_reachability_contains_plan_reachability","state":"active"}
-{"kind":"test","id":"pytest-004831","node_id":"tests/test_process_ir_authoring_contract.py::test_direct_planning_ends_at_compile_and_publishes_the_apply_refusal","state":"active"}
+{"kind":"test","id":"pytest-004831","node_id":"tests/test_process_ir_authoring_contract.py::test_direct_planning_ends_at_compile_and_publishes_the_apply_refusal","state":"tombstone"}
 {"kind":"test","id":"pytest-004832","node_id":"tests/test_process_ir_authoring_contract.py::test_direct_planning_returns_bounded_constructs_gaps_and_a_query","state":"active"}
-{"kind":"test","id":"pytest-004833","node_id":"tests/test_process_ir_authoring_contract.py::test_direct_process_ir_next_steps_never_prepare_the_caller_for_apply","state":"active"}
+{"kind":"test","id":"pytest-004833","node_id":"tests/test_process_ir_authoring_contract.py::test_direct_process_ir_next_steps_never_prepare_the_caller_for_apply","state":"tombstone"}
 {"kind":"test","id":"pytest-004834","node_id":"tests/test_process_ir_authoring_contract.py::test_direct_process_ir_planning_needs_no_archetype","state":"active"}
 {"kind":"test","id":"pytest-004835","node_id":"tests/test_process_ir_authoring_contract.py::test_each_semantic_filter_returns_only_matching_entries[filters0]","state":"active"}
 {"kind":"test","id":"pytest-004836","node_id":"tests/test_process_ir_authoring_contract.py::test_each_semantic_filter_returns_only_matching_entries[filters1]","state":"active"}
@@ -4943,7 +4943,7 @@
 {"kind":"test","id":"pytest-004942","node_id":"tests/test_process_ir_authoring_contract_clean_room.py::test_no_cited_entry_sends_the_caller_to_an_unfetchable_artifact[branch_leg_order]","state":"active"}
 {"kind":"test","id":"pytest-004943","node_id":"tests/test_process_ir_authoring_contract_clean_room.py::test_no_cited_entry_sends_the_caller_to_an_unfetchable_artifact[decision_route_connector_map]","state":"active"}
 {"kind":"test","id":"pytest-004944","node_id":"tests/test_process_ir_authoring_contract_clean_room.py::test_no_cited_entry_sends_the_caller_to_an_unfetchable_artifact[try_catch_retry_bound]","state":"active"}
-{"kind":"test","id":"pytest-004945","node_id":"tests/test_process_ir_authoring_contract_clean_room.py::test_the_apply_refusal_is_discoverable_before_authoring_anything","state":"active"}
+{"kind":"test","id":"pytest-004945","node_id":"tests/test_process_ir_authoring_contract_clean_room.py::test_the_apply_refusal_is_discoverable_before_authoring_anything","state":"tombstone"}
 {"kind":"test","id":"pytest-004946","node_id":"tests/test_process_ir_authoring_contract_clean_room.py::test_the_behavioural_facts_a_caller_needs_are_all_reachable","state":"active"}
 {"kind":"test","id":"pytest-004947","node_id":"tests/test_process_ir_authoring_contract_clean_room.py::test_the_citation_harness_actually_fails_on_a_dangling_id","state":"active"}
 {"kind":"test","id":"pytest-004948","node_id":"tests/test_process_ir_authoring_contract_clean_room.py::test_the_clean_room_coverage_census_matches_the_fixtures","state":"active"}
@@ -9857,3 +9857,9 @@
 {"kind":"test","id":"pytest-009856","node_id":"tests/patterns/test_registry.py::test_the_production_catalog_registers_every_pattern_from_its_definer","state":"active"}
 {"kind":"test","id":"pytest-009857","node_id":"tests/patterns/test_archetype_composition.py::test_the_shipped_m8_examples_apply_clean_in_dry_run","state":"active"}
 {"kind":"test","id":"pytest-009858","node_id":"tests/test_m11_composed_examples.py::test_every_example_applies_clean_in_dry_run","state":"active"}
+{"kind":"test","id":"pytest-009859","node_id":"tests/test_m12_11_apply_verify.py::test_a_direct_process_ir_intent_is_no_longer_refused_at_apply","state":"active"}
+{"kind":"test","id":"pytest-009860","node_id":"tests/test_m12_11_apply_verify.py::test_the_materialization_refusal_is_retired_not_reworded","state":"active"}
+{"kind":"test","id":"pytest-009861","node_id":"tests/test_m12_11_capabilities.py::test_the_published_support_matrix_matches_what_apply_actually_does","state":"active"}
+{"kind":"test","id":"pytest-009862","node_id":"tests/test_process_ir_authoring_contract.py::test_direct_planning_now_reaches_apply_and_publishes_no_refusal","state":"active"}
+{"kind":"test","id":"pytest-009863","node_id":"tests/test_process_ir_authoring_contract.py::test_direct_process_ir_next_steps_are_internally_consistent_about_apply","state":"active"}
+{"kind":"test","id":"pytest-009864","node_id":"tests/test_process_ir_authoring_contract_clean_room.py::test_the_apply_capability_is_discoverable_before_authoring_anything","state":"active"}
