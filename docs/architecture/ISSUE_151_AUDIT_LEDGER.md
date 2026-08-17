@@ -480,6 +480,29 @@ Not used. No correction was ever left unvalidated at HEAD: every applied fix rec
 tests, a full non-KB suite run on a provably frozen tree, and a delta-scoped re-review before the next
 mutation.
 
+### Ledger path, and a process defect this slice caused
+
+This ledger was first committed at `docs/architecture/evidence/issue-151/ledger.md` — the wrong
+place. The repo's convention, and what the attestation scanner requires of any evidence archive
+carrying an `index.jsonl`, is `docs/architecture/ISSUE_<N>_AUDIT_LEDGER.md`. Correcting it with
+`git mv` then tripped a different guard,
+`test_audit_ledger_revisions_are_append_only_and_fully_declared`, which freezes ledger paths once
+committed because a rename hides pre-rename history and a row mutated across it would read as
+canonical. The guard was right.
+
+History rewriting was NOT available as a remedy: the evidence archive's collector sidecars cite the
+branch's commit SHAs (`start-head`, `baseline`, `last-reviewed-sha`) and the index header's
+`source_tip`, so rewriting would have invalidated the attestations this ledger rests on. Since the
+rename lived only in the final commit, that one commit was uncommitted with `git reset --soft` — every
+cited SHA verified still an ancestor of HEAD afterwards — and the canonical ledger was then authored as
+an ADD while the original file was retained, with the working copy removed in a later commit. Measured
+in a throwaway repository first: `git mv`, and add-plus-delete in a single commit, both leave a rename
+in `git log --follow --diff-filter=R`; add-with-source-retained followed by a later delete leaves none.
+Confirmed on this branch: the canonical path's history contains no rename.
+
+Recorded rather than quietly fixed because the cause was mine — the ledger should have been
+instantiated at its conventional path at Stage-1 step 0, which is what the template prescribes.
+
 ### Known limitation, recorded not hidden
 
 The §3 architect **plan** gate's run directory was deleted immediately after a successful
