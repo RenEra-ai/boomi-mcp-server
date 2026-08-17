@@ -2121,7 +2121,184 @@ def check_goldens(repo, goldens, tmpdir):
 #: (relocatability), and every declared semantic mutation must yield a
 #: DIFFERENT one (discrimination).  Checking only the first would be satisfied
 #: by a constant.
-PLAN_FINGERPRINT_PROVIDER = None
+class _CanonicalProcessPlanFingerprintProvider:
+    """#153's provider: the relocatable process materialization plan fingerprint.
+
+    This activates the seam #152 built. Until now ``PLAN_FINGERPRINT_PROVIDER``
+    was ``None`` and ``--require-plan-fingerprint`` could only report
+    ``PLAN_FINGERPRINT_PENDING``; the issue's acceptance criteria require that
+    flag to PASS and the pending token to disappear from successful output.
+
+    **Import discipline.** This module is stdlib-only at import time by design —
+    the gate must be able to run before the project's imports are proven — so
+    every ``boomi_mcp`` import happens INSIDE :meth:`fingerprint`, never at module
+    scope. The provider also bootstraps ``sys.path`` itself, mirroring
+    ``tests/_wave_gate_golden_corpus.py``, because the gate is not run under
+    pytest and so does not inherit pytest's rootdir path handling.
+
+    **Why the identities must reach the EXCLUDED fields.** The gate proves
+    relocatability by building each case under two synthetic account/environment
+    identities and demanding byte-identical canonical material. That proof is
+    vacuous unless the identity actually reaches something — a provider that
+    ignored its ``account`` argument would trivially produce identical bytes
+    while proving nothing. So the identity is woven into precisely the fields the
+    fingerprint excludes: ``envelope.component_id`` and ``resolved_folder_id``.
+    If either ever became covered, these bytes would diverge and the gate would
+    fail — which is the point.
+    """
+
+    #: Two cases, differing in the ONE envelope field that changes execution
+    #: policy rather than semantics. A single case could not show that `action`
+    #: is covered by the fingerprint.
+    _CASES = ("scheduled_create_with_dependency", "scheduled_update_with_dependency")
+
+    #: All four kinds the gate requires. Declared as data so `mutations()` cannot
+    #: drift from what `fingerprint()` actually implements.
+    _MUTATIONS = ("semantic", "envelope", "policy", "revision")
+
+    def cases(self):
+        return list(self._CASES)
+
+    def mutations(self, case):
+        return list(self._MUTATIONS)
+
+    @staticmethod
+    def _bootstrap():
+        import sys as _sys
+
+        # Belt-and-braces: `__pycache__/` is gitignored and `git status` does not
+        # report ignored paths, so this is not load-bearing for the worktree
+        # hygiene check — but the gate compares the worktree before and after
+        # itself, and a gate that writes files while auditing for writes is a bad
+        # shape regardless.
+        _sys.dont_write_bytecode = True
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for candidate in (os.path.join(root, "src"), root):
+            if candidate not in _sys.path:
+                _sys.path.insert(0, candidate)
+
+    def fingerprint(self, case, *, account, environment, mutation=None):
+        import copy as _copy
+        import json as _json
+
+        self._bootstrap()
+
+        from boomi_mcp.authoring.contract import get_authoring_revisions
+        from boomi_mcp.authoring.process_materialization import (
+            ProcessComponentMaterializationPlanV1,
+            build_plan_fingerprint_fields,
+            preservation_policy_v1,
+            process_plan_fingerprint,
+        )
+        from boomi_mcp.compiler.process_ir.contracts import (
+            canonical_emission_plan_json,
+        )
+        from boomi_mcp.compiler.process_ir.emitter_registry import emitter_revision
+        from boomi_mcp.compiler.process_ir.execution_profile import (
+            derive_process_execution_profile,
+        )
+        from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+        from boomi_mcp.models.integration_models import IntegrationComponentSpec
+        from boomi_mcp.models.process_component import ProcessComponentEnvelopeV1
+        from boomi_mcp.models.process_ir import parse_process_ir_v1
+        from boomi_mcp.recipes.materialization import build_symbol_table
+
+        if case not in self._CASES:
+            raise ValueError("unknown plan-fingerprint case: {0!r}".format(case))
+        if mutation is not None and mutation not in self._MUTATIONS:
+            raise ValueError("unknown mutation kind: {0!r}".format(mutation))
+
+        # A self-contained authored root. Deliberately built here rather than
+        # imported from a test fixture: the gate must not depend on tests/.
+        doc = {
+            "version": "1",
+            "body": {
+                "kind": "sequence",
+                "steps": [
+                    {
+                        "kind": "source",
+                        "connection_ref": "$ref:src_conn",
+                        "operation_ref": "$ref:src_op",
+                    },
+                    {"kind": "message", "text": "wave-gate plan fingerprint case"},
+                    {
+                        "kind": "target",
+                        "connection_ref": "$ref:dst_conn",
+                        "operation_ref": "$ref:dst_op",
+                    },
+                    {"kind": "stop"},
+                ],
+            },
+        }
+        if mutation == "semantic":
+            doc = _copy.deepcopy(doc)
+            doc["body"]["steps"].insert(
+                1, {"kind": "message", "text": "semantic mutation"}
+            )
+
+        components = (
+            IntegrationComponentSpec(
+                key="src_conn", type="connector-settings", name="Src Conn",
+                config={"connector_type": "database"},
+            ),
+            IntegrationComponentSpec(
+                key="src_op", type="connector-operation", name="Src Op",
+                config={"connection_ref_key": "src_conn"},
+            ),
+            IntegrationComponentSpec(
+                key="dst_conn", type="connector-settings", name="Dst Conn",
+                config={"connector_type": "http"},
+            ),
+            IntegrationComponentSpec(
+                key="dst_op", type="connector-operation", name="Dst Op",
+                config={"connection_ref_key": "dst_conn"},
+            ),
+        )
+        symbols = build_symbol_table(
+            list(components),
+            connector_metadata={
+                "src_op": ("database", "GET"),
+                "dst_op": ("http", "SEND"),
+            },
+        )
+
+        ir = parse_process_ir_v1(doc)
+        cfg, emission_plan = compile_process_ir_v1(ir, symbols)
+
+        envelope = ProcessComponentEnvelopeV1(
+            component_key="wave_gate_root",
+            name="Wave Gate MUTATED" if mutation == "envelope" else "Wave Gate Root",
+            action="update" if case.startswith("scheduled_update") else "create",
+            depends_on=("src_conn", "src_op", "dst_conn", "dst_op"),
+            # ACCOUNT-BOUND, and therefore EXCLUDED from the material. Present so
+            # the gate's byte-equality assertion across identities is non-vacuous.
+            component_id="{0}-component".format(account)
+            if case.startswith("scheduled_update")
+            else None,
+        )
+
+        covered = dict(
+            envelope=envelope,
+            process_ir=ir,
+            emission_plan=_json.loads(canonical_emission_plan_json(emission_plan)),
+            execution_profile=derive_process_execution_profile(cfg, symbols),
+            conflict_policy="fail" if mutation == "policy" else "reuse",
+            preservation_policy=preservation_policy_v1(),
+            compiler_revision=get_authoring_revisions()["compiler_revision"],
+            emitter_revision=emitter_revision(),
+            # The one revision the provider may vary, so the `revision` mutation
+            # kind is exercisable without pretending the compiler changed.
+            materializer_revision="sha256:"
+            + ("b" if mutation == "revision" else "a") * 64,
+            # ACCOUNT-BOUND, EXCLUDED — same reason as component_id above.
+            resolved_folder_id="{0}-{1}-folder".format(account, environment),
+        )
+        digest = build_plan_fingerprint_fields(**covered)
+        plan = ProcessComponentMaterializationPlanV1(plan_fingerprint=digest, **covered)
+        return process_plan_fingerprint(plan)
+
+
+PLAN_FINGERPRINT_PROVIDER = _CanonicalProcessPlanFingerprintProvider()
 
 _RELOCATION_A = {"account": "wave-gate-account-a", "environment": "wave-gate-env-a"}
 _RELOCATION_B = {"account": "wave-gate-account-b", "environment": "wave-gate-env-b"}

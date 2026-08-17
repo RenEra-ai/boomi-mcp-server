@@ -1498,15 +1498,57 @@ class _StubProvider:
         return digest, material
 
 
-def test_the_pending_seam_is_informational_by_default():
+#: #153 REGISTERED a real provider, so the module global is no longer ``None``
+#: and the pending branch is unreachable through the ambient default. The branch
+#: is still LIVE CODE that must fail closed — a future refactor that unregistered
+#: the provider must be refused, not silently pass — so these tests now patch the
+#: global explicitly instead of relying on it happening to be unset.
+#:
+#: Patching the GLOBAL rather than passing ``provider=None`` is deliberate and
+#: load-bearing: ``run_plan_fingerprint_checks`` reads
+#: ``provider if provider is not None else PLAN_FINGERPRINT_PROVIDER``, so a
+#: ``None`` ARGUMENT now falls through to the registered provider and the test
+#: would quietly assert the healthy path while claiming to assert the pending one.
+def _no_provider(monkeypatch):
+    monkeypatch.setattr(gate, "PLAN_FINGERPRINT_PROVIDER", None)
+
+
+def test_the_pending_seam_is_informational_by_default(monkeypatch):
+    _no_provider(monkeypatch)
     assert gate.run_plan_fingerprint_checks(False) == "pending:#153"
 
 
-def test_the_pending_seam_fails_when_required():
+def test_the_pending_seam_fails_when_required(monkeypatch):
+    _no_provider(monkeypatch)
     with pytest.raises(gate.GateFailure) as excinfo:
         gate.run_plan_fingerprint_checks(True)
     assert excinfo.value.code == "PLAN_FINGERPRINT_PENDING"
     assert excinfo.value.status == 1
+
+
+def test_passing_provider_none_falls_through_to_the_registered_provider(monkeypatch):
+    """The trap the two tests above would otherwise have fallen into.
+
+    Pinned as a PROPERTY rather than left as a comment, because it is the exact
+    reason those tests patch the global. If the fallback is ever removed, the
+    tests above would still pass while silently changing meaning — this one
+    fails instead.
+    """
+    assert gate.PLAN_FINGERPRINT_PROVIDER is not None
+    assert gate.run_plan_fingerprint_checks(True, provider=None).startswith("checked")
+
+
+def test_the_registered_provider_satisfies_the_gate_it_activates():
+    """#153's acceptance criterion, asserted directly.
+
+    ``--require-plan-fingerprint`` must PASS and the successful output must not
+    contain the pending token.
+    """
+    status = gate.run_plan_fingerprint_checks(True)
+    assert status.startswith("checked"), status
+    line = gate._fingerprint_line(status)
+    assert "PLAN_FINGERPRINT_PENDING" not in line, line
+    assert line == "wave_gate: plan fingerprint {0}".format(status)
 
 
 def test_a_healthy_provider_passes():
@@ -3457,16 +3499,24 @@ def test_the_phase_boundary_preserves_real_gate_diagnostics():
     added to harden it. Safe to re-raise now because `GateFailure` guarantees its
     own status is 1 or 2.
     """
-    with pytest.raises(gate.GateFailure) as excinfo:
-        gate.run_fingerprint_phase(True)
-    assert excinfo.value.code == "PLAN_FINGERPRINT_PENDING"
+    # The global is patched for the same reason as the pending-seam tests above:
+    # since #153 a real provider is registered, so the pending branch is only
+    # reachable by unregistering it.
+    _saved = gate.PLAN_FINGERPRINT_PROVIDER
+    try:
+        gate.PLAN_FINGERPRINT_PROVIDER = None
+        with pytest.raises(gate.GateFailure) as excinfo:
+            gate.run_fingerprint_phase(True)
+        assert excinfo.value.code == "PLAN_FINGERPRINT_PENDING"
 
-    with pytest.raises(gate.GateFailure) as excinfo:
-        gate.run_fingerprint_phase(True, _StubProvider(relocatable=False))
-    assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
-    assert "not relocatable" in excinfo.value.message
+        with pytest.raises(gate.GateFailure) as excinfo:
+            gate.run_fingerprint_phase(True, _StubProvider(relocatable=False))
+        assert excinfo.value.code == "PLAN_FINGERPRINT_MISMATCH"
+        assert "not relocatable" in excinfo.value.message
 
-    assert gate.run_fingerprint_phase(False) == "pending:#153"
+        assert gate.run_fingerprint_phase(False) == "pending:#153"
+    finally:
+        gate.PLAN_FINGERPRINT_PROVIDER = _saved
 
 
 def test_the_phase_boundary_never_inspects_a_hostile_exception():
