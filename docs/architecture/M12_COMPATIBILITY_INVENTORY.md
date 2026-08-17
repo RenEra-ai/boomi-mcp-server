@@ -2075,13 +2075,13 @@ rather than aspirational.
 |---|---|---|---|---|---|---|---|
 | LG-aee1eb03 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_emitters/legacy.py | _emit_setproperties | 3 | 532 | #160 | delete with the legacy renderer |
 | LG-420f1954 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_emitters/legacy.py | _emit_setproperties_step | 3 | 472 | #160 | delete with the legacy renderer |
-| LG-a8efa464 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | <module> | 29 | 72 | #160 | delete the legacy semantic shell |
-| LG-e3bb78f3 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_branch_shapes | 1 | 3560 | #160 | delete the legacy semantic shell |
-| LG-09c051cf | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_catch_leg | 5 | 4647 | #160 | delete the legacy semantic shell |
-| LG-43cb4e79 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_connector_scoped_try_catch_shapes | 3 | 4761 | #160 | delete the legacy semantic shell |
-| LG-51f10b57 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_decision_shapes | 1 | 3637 | #160 | delete the legacy semantic shell |
-| LG-e1ff295b | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_flow_shape | 14 | 3457 | #160 | delete the legacy semantic shell |
-| LG-e9731d65 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_try_catch_shapes | 2 | 4517 | #160 | delete the legacy semantic shell |
+| LG-a8efa464 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | <module> | 29 | 79 | #160 | delete the legacy semantic shell |
+| LG-e3bb78f3 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_branch_shapes | 1 | 3274 | #160 | delete the legacy semantic shell |
+| LG-09c051cf | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_catch_leg | 5 | 4361 | #160 | delete the legacy semantic shell |
+| LG-43cb4e79 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_connector_scoped_try_catch_shapes | 3 | 4475 | #160 | delete the legacy semantic shell |
+| LG-51f10b57 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_decision_shapes | 1 | 3351 | #160 | delete the legacy semantic shell |
+| LG-e1ff295b | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_flow_shape | 14 | 3171 | #160 | delete the legacy semantic shell |
+| LG-e9731d65 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_try_catch_shapes | 2 | 4231 | #160 | delete the legacy semantic shell |
 | LG-9f90fa64 | legacy_semantic_validation | src/boomi_mcp/categories/integration_builder.py | _process_component_preflight | 1 | 5552 | #160 | delete with the legacy semantic shell |
 | LG-599ecc0d | legacy_semantic_validation | src/boomi_mcp/categories/integration_builder.py | _process_ir_semantic_error | 1 | 5578 | #160 | delete with the legacy semantic shell |
 | LG-48cc5eb8 | legacy_transitive_call | server.py | analyze_component | 1 | 1892 | #160 | follow the callee's row; this is an edge, not a site |
@@ -2102,14 +2102,14 @@ rather than aspirational.
 | LG-14572d6c | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | plan_authoring_request_v1 | 1 | 1478 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-f57fd778 | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | preflight_typed_apply_v1 | 1 | 1962 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-3f49de44 | legacy_transitive_call | src/boomi_mcp/categories/components/analyze_component.py | analyze_component_action | 1 | 900 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-bb10b9ca | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.build | 3 | 1071 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-a4d26b62 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_branch_shapes | 2 | 3547 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-020c9559 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_connector_scoped_try_catch_shapes | 7 | 4753 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-2296966e | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_decision_leg | 1 | 3589 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-8375bff7 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_decision_shapes | 3 | 3623 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-2dd324b1 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_flow_shape | 2 | 3476 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-0b2a5bd8 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_linear_shapes | 1 | 3518 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-3ac90371 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_try_catch_shapes | 2 | 4511 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-bb10b9ca | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.build | 3 | 1078 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-a4d26b62 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_branch_shapes | 2 | 3261 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-020c9559 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_connector_scoped_try_catch_shapes | 7 | 4467 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-2296966e | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_decision_leg | 1 | 3303 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-8375bff7 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_decision_shapes | 3 | 3337 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-2dd324b1 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_flow_shape | 2 | 3190 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-0b2a5bd8 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_linear_shapes | 1 | 3232 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-3ac90371 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_try_catch_shapes | 2 | 4225 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-225b9aa0 | legacy_transitive_call | src/boomi_mcp/categories/components/connectors.py | create_connector | 3 | 382 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-b0e06309 | legacy_transitive_call | src/boomi_mcp/categories/components/connectors.py | manage_connector_action | 2 | 727 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-6f781717 | legacy_transitive_call | src/boomi_mcp/categories/components/manage_component.py | clone_component | 1 | 376 | #160 | follow the callee's row; this is an edge, not a site |
@@ -2140,13 +2140,13 @@ rather than aspirational.
 | LG-492bfbd5 | legacy_transitive_call | src/boomi_mcp/patterns/archetypes/api_to_database_sync.py | ApiToDatabaseSyncArchetype.emit_spec | 1 | 843 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-492d9518 | legacy_transitive_call | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncArchetype.emit_spec | 1 | 2450 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-d88fe3f1 | legacy_transitive_call | src/boomi_mcp/patterns/recipe_bridge.py | run_sync_preset_recipe | 1 | 244 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-a6b08ee4 | registry_lookup | src/boomi_mcp/categories/components/builders/process_flow_builder.py | get_process_flow_builder | 2 | 6151 | #160 | delete the legacy semantic shell |
+| LG-a6b08ee4 | registry_lookup | src/boomi_mcp/categories/components/builders/process_flow_builder.py | get_process_flow_builder | 2 | 5865 | #160 | delete the legacy semantic shell |
 | LG-e131eb91 | registry_lookup | src/boomi_mcp/categories/integration_builder.py | _execute_component | 3 | 3532 | #153 | replace with canonical ProcessIR materialization/apply |
 | LG-85b86f7b | registry_lookup | src/boomi_mcp/categories/integration_builder.py | _process_component_preflight | 3 | 5318 | #153 | replace with canonical ProcessIR materialization/apply |
 | LG-f76e62cd | registry_lookup | src/boomi_mcp/categories/integration_builder.py | _resolve_preservation_policy | 1 | 1234 | #153 | replace with canonical ProcessIR materialization/apply |
 | LG-4e882820 | registry_lookup | src/boomi_mcp/categories/integration_builder.py | build_structured_update_xml | 3 | 3148 | #153 | replace with canonical ProcessIR materialization/apply |
-| LG-e4a0a304 | renderer_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.build | 1 | 6050 | #160 | delete the legacy semantic shell |
-| LG-088efd1d | renderer_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.validate_config | 1 | 5994 | #160 | delete the legacy semantic shell |
+| LG-e4a0a304 | renderer_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.build | 1 | 5764 | #160 | delete the legacy semantic shell |
+| LG-088efd1d | renderer_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.validate_config | 1 | 5708 | #160 | delete the legacy semantic shell |
 | LG-9532f2cf | renderer_call | src/boomi_mcp/categories/integration_builder.py | _execute_component | 1 | 3561 | #153 | replace with canonical ProcessIR materialization/apply |
 | LG-e5f61bc6 | renderer_call | src/boomi_mcp/categories/integration_builder.py | _process_component_preflight | 2 | 5446 | #153 | replace with canonical ProcessIR materialization/apply |
 | LG-7c23f2fd | renderer_call | src/boomi_mcp/categories/integration_builder.py | build_structured_update_xml | 1 | 3165 | #153 | replace with canonical ProcessIR materialization/apply |
@@ -2159,16 +2159,16 @@ rather than aspirational.
 | LG-8cf67bd6 | unclassified_reference | src/boomi_mcp/authoring/contract.py | authoring_workflow_contract | 1 | 578 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-0a2735c3 | unclassified_reference | src/boomi_mcp/authoring/workflow.py | _normalize_intent | 1 | 435 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-a3b03f12 | unclassified_reference | src/boomi_mcp/categories/components/builders/__init__.py | <module> | 5 | 57 | #160 | residue: a watched name mentioned in a shape the census does not classify |
-| LG-bd39ea58 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | <module> | 17 | 5275 | #160 | delete the legacy semantic shell |
-| LG-36bd73fc | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.validate_config | 6 | 656 | #160 | delete the legacy semantic shell |
-| LG-3bd11d29 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder | 1 | 5301 | #160 | delete the legacy semantic shell |
-| LG-42425307 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.lower_config | 1 | 5488 | #160 | delete the legacy semantic shell |
-| LG-513dee34 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.validate_config | 6 | 5975 | #160 | delete the legacy semantic shell |
-| LG-65e5dfbc | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | WrapperSubprocessBuilder | 1 | 4967 | #160 | delete the legacy semantic shell |
-| LG-69d179d0 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | WrapperSubprocessBuilder.validate_config | 6 | 5005 | #160 | delete the legacy semantic shell |
-| LG-67ac22ad | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _reliability_requests_try_catch | 1 | 2412 | #160 | delete the legacy semantic shell |
-| LG-b4eb25cd | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _source_dynamic_path_connector_scope_error | 1 | 1969 | #160 | delete the legacy semantic shell |
-| LG-943d38e3 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | get_process_flow_builder | 3 | 6147 | #160 | delete the legacy semantic shell |
+| LG-bd39ea58 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | <module> | 17 | 4989 | #160 | delete the legacy semantic shell |
+| LG-36bd73fc | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.validate_config | 6 | 663 | #160 | delete the legacy semantic shell |
+| LG-3bd11d29 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder | 1 | 5015 | #160 | delete the legacy semantic shell |
+| LG-42425307 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.lower_config | 1 | 5202 | #160 | delete the legacy semantic shell |
+| LG-513dee34 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.validate_config | 6 | 5689 | #160 | delete the legacy semantic shell |
+| LG-65e5dfbc | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | WrapperSubprocessBuilder | 1 | 4681 | #160 | delete the legacy semantic shell |
+| LG-69d179d0 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | WrapperSubprocessBuilder.validate_config | 6 | 4719 | #160 | delete the legacy semantic shell |
+| LG-67ac22ad | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _reliability_requests_try_catch | 1 | 2126 | #160 | delete the legacy semantic shell |
+| LG-b4eb25cd | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _source_dynamic_path_connector_scope_error | 1 | 1683 | #160 | delete the legacy semantic shell |
+| LG-943d38e3 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | get_process_flow_builder | 3 | 5861 | #160 | delete the legacy semantic shell |
 | LG-98073b97 | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _authored_process_validation_error | 4 | 5214 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-cd5de55e | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _bracketed_naming_warning | 2 | 4845 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-32fcd45b | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _build_plan | 5 | 5802 | #160 | residue: a watched name mentioned in a shape the census does not classify |
@@ -2248,9 +2248,9 @@ example producers are globbed, never enumerated: a sixth example is a diff, not 
 | LG-3740584a | example_producer | examples/m8/cache_handoff_staged_fanout.integration.json | integration_spec.components[10].config.process_kind | 1 | 402 | #159 | migrate the example to canonical ProcessIR |
 | LG-637793a5 | example_producer | examples/m8/composed_db_to_api_fanout.integration.json | integration_spec.components[9].config.process_kind | 1 | 353 | #159 | migrate the example to canonical ProcessIR |
 | LG-851b002a | process_kind_consumer | src/boomi_mcp/authoring/workflow.py | _normalize_intent | 1 | 435 | #160 | delete with the legacy consumer |
-| LG-65a53d30 | process_kind_consumer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.validate_config | 2 | 656 | #160 | delete the legacy semantic shell |
-| LG-bba865c6 | process_kind_consumer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.validate_config | 2 | 5976 | #160 | delete the legacy semantic shell |
-| LG-42e9928c | process_kind_consumer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | WrapperSubprocessBuilder.validate_config | 2 | 5006 | #160 | delete the legacy semantic shell |
+| LG-65a53d30 | process_kind_consumer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.validate_config | 2 | 663 | #160 | delete the legacy semantic shell |
+| LG-bba865c6 | process_kind_consumer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.validate_config | 2 | 5690 | #160 | delete the legacy semantic shell |
+| LG-42e9928c | process_kind_consumer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | WrapperSubprocessBuilder.validate_config | 2 | 4720 | #160 | delete the legacy semantic shell |
 | LG-18b251bf | process_kind_consumer | src/boomi_mcp/categories/integration_builder.py | _authored_process_validation_error | 2 | 5215 | #160 | delete with the legacy consumer |
 | LG-0f6e121e | process_kind_consumer | src/boomi_mcp/categories/integration_builder.py | _bracketed_naming_warning | 2 | 4845 | #160 | delete with the legacy consumer |
 | LG-adf3120a | process_kind_consumer | src/boomi_mcp/categories/integration_builder.py | _build_plan | 2 | 5803 | #160 | delete with the legacy consumer |
@@ -2262,7 +2262,7 @@ example producers are globbed, never enumerated: a sixth example is a diff, not 
 | LG-0e50752e | process_kind_consumer | src/boomi_mcp/categories/integration_builder.py | build_structured_update_xml | 2 | 3135 | #160 | delete with the legacy consumer |
 | LG-f82294a9 | process_kind_consumer | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _resolve_process_kind | 2 | 217 | #151 | re-home onto the neutral extraction |
 | LG-af904e61 | process_kind_consumer | src/boomi_mcp/models/_process_ir_compat.py | legacy_flow_sequence_to_ir | 2 | 678 | #159 | migrate the compatibility codec, then delete |
-| LG-885d1a16 | process_kind_producer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.lower_config | 1 | 5488 | #160 | delete the legacy semantic shell |
+| LG-885d1a16 | process_kind_producer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.lower_config | 1 | 5202 | #160 | delete the legacy semantic shell |
 | LG-e846e889 | process_kind_producer | src/boomi_mcp/categories/meta_tools.py | <module> | 6 | 7692 | #160 | retract the served legacy guidance / guard the raw route |
 | LG-275fe665 | process_kind_producer | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _canonical_core | 1 | 230 | #151 | re-home onto the neutral extraction |
 | LG-826a5241 | process_kind_producer | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _core_from_authored_pipeline | 1 | 253 | #151 | re-home onto the neutral extraction |
