@@ -8,6 +8,13 @@ from .integration_models import (
     IntegrationSpecV1,
     IntegrationComponentSpec,
 )
+from .process_component import (
+    ProcessAuthoringUnitV1,
+    ProcessComponentEnvelopeV1,
+    ProcessConnectionOverrideV1,
+    ProcessExtensionBindingsV1,
+    ProcessOverrideFieldV1,
+)
 from .pipeline_models import (
     PipelineSpec,
     StageSpec,
@@ -210,6 +217,14 @@ from .authoring_workflow import (
 __all__ = [
     'IntegrationSpecV1',
     'IntegrationComponentSpec',
+    # Process component envelope/unit contracts (issue #153). The INTERNAL
+    # materialization plan lives in authoring/process_materialization.py and is
+    # deliberately NOT exported — it is apply's own record, not a caller shape.
+    'ProcessAuthoringUnitV1',
+    'ProcessComponentEnvelopeV1',
+    'ProcessConnectionOverrideV1',
+    'ProcessExtensionBindingsV1',
+    'ProcessOverrideFieldV1',
     'PipelineSpec',
     'StageSpec',
     'PipelineEdgeSpec',

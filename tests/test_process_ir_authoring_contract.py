@@ -492,8 +492,34 @@ def test_the_wrapper_matches_the_action_function():
 # ---------------------------------------------------------------------------
 
 
+def _to_units(request):
+    """Reshape a legacy singular ``process_ir`` intent into #153's ``units``.
+
+    Applied to the fixture payloads rather than rewriting each nested literal by
+    hand: the wire change is `component_key` + `process_ir` -> one unit pairing
+    an envelope with a root, and expressing that once keeps every fixture below
+    exercising the SAME reshape the production normalizer performs.
+
+    ``name``/``action`` are supplied because #153 makes them required with no
+    default — a fixture that omitted them would be testing a shape the contract
+    refuses.
+    """
+    intent = request["authoring_request"]["intent"]
+    if "process_ir" in intent and "units" not in intent:
+        envelope = {
+            "component_key": intent.pop("component_key"),
+            "name": "Contract Fixture Process",
+            "action": "create",
+        }
+        intent["units"] = [
+            {"envelope": envelope, "process_ir": intent.pop("process_ir")}
+        ]
+    request["authoring_request"]["contract_version"] = "2"
+    return request
+
+
 def _process_ir_request(*steps):
-    return {
+    return _to_units({
         "authoring_request": {
             "contract_version": "1",
             "intent": {
@@ -506,7 +532,7 @@ def _process_ir_request(*steps):
                 },
             },
         }
-    }
+    })
 
 
 SOURCE = {"kind": "source", "connection_ref": "$ref:c", "operation_ref": "$ref:o"}
@@ -564,7 +590,7 @@ def test_a_malformed_process_ir_reports_its_own_code_and_pointer(bad_step, expec
     codes = {row["code"] for row in payload["validation_errors"]}
     assert codes == {expected_code}, sorted(codes)
     for row in payload["validation_errors"]:
-        assert row["path"].startswith("/intent/process_ir")
+        assert row["path"].startswith("/intent/units/0/process_ir")
 
 
 def test_the_public_rejection_carries_remediation_and_resolvable_citations():
@@ -688,7 +714,7 @@ def test_a_code_the_compile_action_really_raises_is_filed_under_compile():
     reachable by ``workflow_stage='compile'``, or the filter is advertising a
     phase model the server does not implement.
     """
-    request = {
+    request = _to_units({
         "authoring_request": {
             "contract_version": "1",
             "intent": {
@@ -719,7 +745,7 @@ def test_a_code_the_compile_action_really_raises_is_filed_under_compile():
                 },
             },
         }
-    }
+    })
     result = integration_builder._compile_authoring(None, "p", request)
     raised = {row["code"] for row in result["validation_errors"]}
     assert raised
@@ -944,7 +970,7 @@ def test_a_remediation_pointer_delivers_more_than_the_sentence_that_cited_it():
 
 
 def _malformed_apply_config():
-    return {
+    return _to_units({
         "authoring_request": {
             "contract_version": "1",
             "intent": {
@@ -977,7 +1003,7 @@ def _malformed_apply_config():
             "expected_capability_revision": "sha256:" + "0" * 64,
             "expected_compile_hash": "sha256:" + "0" * 64,
         }
-    }
+    })
 
 
 def test_apply_reports_a_malformed_process_ir_like_plan_and_compile_do():
@@ -1000,7 +1026,7 @@ def test_apply_reports_a_malformed_process_ir_like_plan_and_compile_do():
     diagnostics = result["authoring_diagnostics"]
     assert diagnostics
     assert diagnostics[0]["code"].startswith("PROCESS_IR_")
-    assert diagnostics[0]["path"].startswith("/intent/process_ir")
+    assert diagnostics[0]["path"].startswith("/intent/units/0/process_ir")
 
 
 @pytest.mark.parametrize("action", ["plan", "compile", "apply"])
@@ -3995,7 +4021,7 @@ def test_a_terminal_that_is_not_last_reports_its_own_code_at_the_body():
     assert payload["_success"] is False
     rows = payload["validation_errors"]
     assert {row["code"] for row in rows} == {"PROCESS_IR_SCHEMA_INVALID_CARDINALITY"}
-    assert {row["path"] for row in rows} == {"/intent/process_ir/body"}
+    assert {row["path"] for row in rows} == {"/intent/units/0/process_ir/body"}
 
 
 def test_a_compile_diagnostic_serves_the_message_its_authority_wrote():
@@ -4126,14 +4152,17 @@ def test_a_non_object_process_ir_gets_the_canonical_diagnostic(authored):
         integration_builder._compile_authoring,
     ):
         request = json.loads(json.dumps(_process_ir_request({"kind": "stop"})))
-        request["authoring_request"]["intent"]["process_ir"] = authored
+        # #153: the root lives at `units[0].process_ir`, so the malformed value
+        # is injected there. The pointer is unit-INDEXED for the same reason —
+        # with several roots, an unindexed pointer would not say which one.
+        request["authoring_request"]["intent"]["units"][0]["process_ir"] = authored
         payload = action(None, "p", request)
 
         assert payload["_success"] is False
         codes = {row["code"] for row in payload["validation_errors"]}
         assert codes == {"PROCESS_IR_SCHEMA_INVALID"}, codes
         assert {row["path"] for row in payload["validation_errors"]} == {
-            "/intent/process_ir"
+            "/intent/units/0/process_ir"
         }
         diagnostics = payload["authoring_diagnostics"]
         assert diagnostics
@@ -4150,7 +4179,10 @@ def test_an_absent_process_ir_still_reports_missing_not_a_shape_error():
     than pydantic's `missing`.
     """
     request = json.loads(json.dumps(_process_ir_request({"kind": "stop"})))
-    request["authoring_request"]["intent"].pop("process_ir")
+    # #153: the root now sits at `units[0].process_ir`, so THAT is the key whose
+    # absence must still read as pydantic's `missing`. The pre-parse skips a unit
+    # with no `process_ir` for exactly this reason.
+    request["authoring_request"]["intent"]["units"][0].pop("process_ir")
     payload = integration_builder._plan_authoring(None, "p", request)
 
     assert payload["_success"] is False
@@ -4589,7 +4621,7 @@ def test_a_plan_shaped_like_a_real_primitive_compiles_end_to_end():
         "connector_type": "database",
         "connection_ref_key": "src_conn",
     }
-    request = {
+    request = _to_units({
         "authoring_request": {
             "contract_version": "1",
             "intent": {
@@ -4619,7 +4651,7 @@ def test_a_plan_shaped_like_a_real_primitive_compiles_end_to_end():
                 },
             },
         }
-    }
+    })
     for action in (
         integration_builder._plan_authoring,
         integration_builder._compile_authoring,

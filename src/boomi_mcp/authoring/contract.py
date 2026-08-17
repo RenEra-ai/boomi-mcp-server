@@ -79,27 +79,27 @@ AUTHORING_SCHEMA_REGISTRY: Mapping[str, AuthoringSchemaRegistration] = MappingPr
             "runtime_schema_registry",
         ),
         "AuthoringRequestV1": (
-            "1",
+            "2",
             authoring_request_v1_json_schema,
             "runtime_schema_registry",
         ),
         "AuthoringPlanResultV1": (
-            "1",
+            "2",
             authoring_plan_result_v1_json_schema,
             "runtime_schema_registry",
         ),
         "AuthoringCompileResultV1": (
-            "1",
+            "2",
             authoring_compile_result_v1_json_schema,
             "runtime_schema_registry",
         ),
         "AuthoringRevisionBindingV1": (
-            "1",
+            "2",
             authoring_revision_binding_v1_json_schema,
             "runtime_schema_registry",
         ),
         "AuthoringBuildProvenanceV1": (
-            "1",
+            "2",
             authoring_build_provenance_v1_json_schema,
             "runtime_schema_registry",
         ),

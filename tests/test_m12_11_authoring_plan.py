@@ -22,6 +22,7 @@ from _m12_11_support import (  # noqa: E402
     components,
     integration_spec_request,
     process_ir_request,
+    supporting_components,
 )
 from boomi_mcp.authoring.workflow import (  # noqa: E402
     AuthoringWorkflowError,
@@ -53,14 +54,36 @@ def _plan(request):
 
 
 def test_a_process_ir_plan_validates_and_previews_without_mutating(spy):
+    """#153 moved the ROOT out of `components`, and the preview WITHHOLDS it.
+
+    Two separate facts, both asserted here because each is easy to break while
+    the other still holds:
+
+    * the supporting components are previewed exactly as before, and the process
+      is no longer among them — it is not a component any more;
+    * the served preview carries NO process roots at all. That is deliberate:
+      `build_integration_spec_preview` withholds them so the served envelope
+      cannot replay authored ProcessIR (ADR-001 §11). The root is not lost — it
+      is still resolved as an in-plan reference below, and compile reports it in
+      `process_cfg` and the artifact fingerprints.
+    """
     result = _plan(process_ir_request())
     assert result.mutation_performed is False
     assert result.validation_report.is_valid is True
     assert result.errors == ()
-    assert result.integration_spec_preview.name == "M12.11 Integration"
-    assert {c.key for c in result.integration_spec_preview.components} == {
-        c.key for c in components()
+    preview = result.integration_spec_preview
+    assert preview.name == "M12.11 Integration"
+
+    assert {c.key for c in preview.components} == {
+        c.key for c in supporting_components()
     }
+    assert "proc" not in {c.key for c in preview.components}
+    # The served projection withholds every authored root.
+    assert preview.processes == []
+    # ...but the root is still a DECLARED participant, so a reference to it
+    # resolves. Without this the assertion above would be satisfied by a
+    # regression that simply dropped the root from the request entirely.
+    assert {r.ref for r in result.resolved_references} >= {"$ref:proc"}
     assert spy.calls == []
 
 
@@ -550,3 +573,52 @@ def test_a_failed_legacy_lint_blocks_instead_of_echoing_the_raw_request(spy):
     assert excinfo.value.code == AUTHORING_COMPILE_BLOCKED
     causes = {c for d in excinfo.value.diagnostics for c in d.cause_codes}
     assert "PLAINTEXT_SECRET_REJECTED" in causes
+
+
+def test_the_served_plan_never_echoes_an_authored_process_ir_value(spy):
+    """#153 secrets regression guard: the spec echo must not replay authored IR.
+
+    Moving process roots INTO ``IntegrationSpecV1`` (issue #153 item 4) put the
+    caller's ProcessIR inside a SERVED field for the first time — both
+    ``integration_spec_preview`` and the legacy ``integration_spec`` envelope
+    echo the spec. A ``set_property`` value or a scripting step is caller content
+    that can carry a credential, so replaying it through a logged, cached,
+    LLM-visible response weakens the secrets posture even though the caller sent
+    it. ADR-001 §11: results carry hashes, opaque references and value-free
+    diagnostics, never authored payload.
+
+    The watermark is planted in the AUTHORED root and swept for across the whole
+    serialized result, which is the only way to catch it wherever it surfaces.
+    """
+    import json
+
+    watermark = "M12_15_PLAN_ECHO_WATERMARK"
+    doc = {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                {
+                    "kind": "source",
+                    "connection_ref": "$ref:db_conn",
+                    "operation_ref": "$ref:db_op",
+                },
+                {"kind": "message", "text": watermark},
+                {
+                    "kind": "target",
+                    "connection_ref": "$ref:api_conn",
+                    "operation_ref": "$ref:api_op",
+                },
+                {"kind": "stop"},
+            ],
+        },
+    }
+    result = _plan(process_ir_request(doc))
+    served = result.model_dump_json()
+
+    # POSITIVE CONTROL first: the sweep can see the watermark when it IS there.
+    # Without this the assertion below passes just as happily against a probe
+    # that looks at the wrong object.
+    assert watermark in json.dumps({"authored": doc})
+    assert watermark not in served, "authored ProcessIR leaked into the served plan"
+    assert result.integration_spec_preview.processes == []

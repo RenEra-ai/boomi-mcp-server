@@ -487,7 +487,7 @@ def test_the_repair_derived_from_the_cited_rules_reaches_a_clean_compile():
     assert "earlier leg" in remediation or "order" in remediation
 
     derived = json.loads(json.dumps(fixture["invalid_request"]))
-    legs = derived["intent"]["process_ir"]["body"]["steps"][1]["legs"]
+    legs = derived["intent"]["units"][0]["process_ir"]["body"]["steps"][1]["legs"]
     legs.reverse()
     assert derived == fixture["repaired_request"], (
         "the repair derived from the served remediation must be the fixture's "
@@ -612,7 +612,7 @@ def test_a_first_class_connector_call_compiles_through_the_public_surface():
     request = json.loads(
         json.dumps(_load("decision_route_connector_map.json")["request"])
     )
-    request["intent"]["process_ir"]["body"] = {
+    request["intent"]["units"][0]["process_ir"]["body"] = {
         "kind": "sequence",
         "steps": [
             {"kind": "connector_call", "operation_ref": "$ref:src_op"},

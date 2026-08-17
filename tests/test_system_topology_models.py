@@ -1474,12 +1474,24 @@ def test_models_package_exports_are_pinned():
         "ProcessIRAuthoringContractPageV1",
         "process_ir_authoring_contract_v1_json_schema",
     }
+    #: #153 (M12.15) — the typed per-root process component contracts. The
+    #: INTERNAL materialization plan is deliberately absent: it is apply's own
+    #: record, not a caller-authored shape, and exporting it would publish a
+    #: surface no caller may construct.
+    _ISSUE_153_EXPORTS = {
+        "ProcessAuthoringUnitV1",
+        "ProcessComponentEnvelopeV1",
+        "ProcessConnectionOverrideV1",
+        "ProcessExtensionBindingsV1",
+        "ProcessOverrideFieldV1",
+    }
     non_topology = (
         set(models.__all__)
         - expected
         - _PRE_144_EXPORTS
         - _ISSUE_145_EXPORTS
         - _ISSUE_146_EXPORTS
+        - _ISSUE_153_EXPORTS
     )
     assert non_topology == set(), non_topology
     assert expected <= set(models.__all__), expected - set(models.__all__)
@@ -1489,7 +1501,13 @@ def test_models_package_exports_are_pinned():
     assert _ISSUE_146_EXPORTS <= set(models.__all__), _ISSUE_146_EXPORTS - set(
         models.__all__
     )
-    for name in expected | _ISSUE_145_EXPORTS | _ISSUE_146_EXPORTS:
+    assert _ISSUE_153_EXPORTS <= set(models.__all__), _ISSUE_153_EXPORTS - set(
+        models.__all__
+    )
+    # The internal plan model must NOT be exported — pinned as an explicit
+    # absence, because "we simply did not add it" is not a contract.
+    assert "ProcessComponentMaterializationPlanV1" not in set(models.__all__)
+    for name in expected | _ISSUE_145_EXPORTS | _ISSUE_146_EXPORTS | _ISSUE_153_EXPORTS:
         assert hasattr(models, name), name
 
 

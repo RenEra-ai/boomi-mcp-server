@@ -81,18 +81,36 @@ def test_only_apply_is_declared_as_mutating():
 
 
 def test_a_bare_selector_stays_valid_and_a_pinned_version_resolves():
-    """Adding version selection must not break a one-argument call."""
+    """Adding version selection must not break a one-argument call.
+
+    Pinned at "2" since #153: the `process_ir` intent reshape (`component_key` +
+    `process_ir` -> `units`) is a breaking request-shape change, so the served
+    version moved with it.
+    """
     bare = _get_authoring_schema_by_name("AuthoringRequestV1")
-    pinned = _get_authoring_schema_by_name("AuthoringRequestV1@1")
+    pinned = _get_authoring_schema_by_name("AuthoringRequestV1@2")
     assert bare["_success"] is True and pinned["_success"] is True
     assert bare["json_schema"] == pinned["json_schema"]
+
+
+def test_the_superseded_request_version_is_no_longer_served():
+    """#153 ships NO compatibility alias — the issue records zero users.
+
+    Asserted explicitly rather than left implicit. A silently surviving v1 would
+    serve the OLD singular request shape under a contract whose runtime only
+    accepts `units`, which is worse than refusing: a caller would bind to a
+    schema the server cannot honour.
+    """
+    refused = _get_authoring_schema_by_name("AuthoringRequestV1@1")
+    assert refused["_success"] is False
+    assert refused["error_code"] == AUTHORING_SCHEMA_VERSION_UNAVAILABLE
 
 
 def test_an_unserved_version_is_refused_with_the_supported_list():
     refused = _get_authoring_schema_by_name("AuthoringRequestV1@99")
     assert refused["_success"] is False
     assert refused["error_code"] == AUTHORING_SCHEMA_VERSION_UNAVAILABLE
-    assert refused["supported_versions"] == ["1"]
+    assert refused["supported_versions"] == ["2"]
     assert refused["supported_versions"] == sorted(refused["supported_versions"])
 
 

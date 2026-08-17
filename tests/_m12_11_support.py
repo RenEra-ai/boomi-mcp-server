@@ -24,6 +24,10 @@ from boomi_mcp.models.integration_models import (  # noqa: E402
     IntegrationComponentSpec,
     IntegrationSpecV1,
 )
+from boomi_mcp.models.process_component import (  # noqa: E402
+    ProcessAuthoringUnitV1,
+    ProcessComponentEnvelopeV1,
+)
 from boomi_mcp.models.process_ir import parse_process_ir_v1  # noqa: E402
 
 #: A minimal VALID connector flow: source -> message -> target -> stop.
@@ -114,14 +118,45 @@ def components(process_kind=None):
     )
 
 
-def process_ir_request(doc=None, process_kind=None, **extra):
-    """A typed ProcessIR authoring request over the fixture component plan."""
+def process_unit(key="proc", name="M12.11 Process", doc=None, **envelope_extra):
+    """One ``ProcessAuthoringUnitV1`` over the fixture root (issue #153).
+
+    ``name`` and ``action`` are REQUIRED on the direct authoring surface, so the
+    helper supplies both rather than letting a default decide what gets created.
+    """
+    envelope_kwargs = {"component_key": key, "name": name, "action": "create"}
+    envelope_kwargs.update(envelope_extra)
+    return ProcessAuthoringUnitV1(
+        envelope=ProcessComponentEnvelopeV1(**envelope_kwargs),
+        process_ir=parse_process_ir_v1(doc or VALID_IR_DOC),
+    )
+
+
+def supporting_components(process_kind=None):
+    """The fixture plan MINUS the process entry.
+
+    Since #153 a direct ProcessIR intent carries its process as a UNIT, and
+    `components[].key` shares one namespace with
+    `processes[].envelope.component_key` — so leaving `proc` in both would be a
+    duplicate key, not a convenience.
+    """
+    return tuple(c for c in components(process_kind) if c.key != "proc")
+
+
+def process_ir_request(doc=None, process_kind=None, units=None, **extra):
+    """A typed ProcessIR authoring request over the fixture component plan.
+
+    ``process_kind`` is retained ONLY so callers that still pass it keep working
+    on the supporting components; it no longer has any bearing on whether the
+    process itself can be applied. That is the point of #153: a ProcessIR root is
+    materialized from its own compiled artifact through the canonical chain, not
+    by resolving a legacy dialect on a component config.
+    """
     return AuthoringRequestV1(
         intent=ProcessIRAuthoringIntentV1(
             integration_name="M12.11 Integration",
-            component_key="proc",
-            process_ir=parse_process_ir_v1(doc or VALID_IR_DOC),
-            components=components(process_kind),
+            units=units if units is not None else (process_unit(doc=doc),),
+            components=supporting_components(process_kind),
         ),
         **extra,
     )

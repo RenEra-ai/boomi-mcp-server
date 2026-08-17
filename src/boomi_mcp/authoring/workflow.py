@@ -38,7 +38,7 @@ reinterpret a legacy request as something it is not.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from ..errors import (
@@ -48,6 +48,8 @@ from ..errors import (
     AUTHORING_LIVE_DEPLOYMENT_DRIFT,
     AUTHORING_PLAN_STALE,
     AUTHORING_REQUIRED_DECISION_MISSING,
+    PROCESS_COMPONENT_SCHEMA_INVALID,
+    PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,
 )
 from ..models.authoring_workflow import (
     ArtifactFingerprintV1,
@@ -220,13 +222,33 @@ def _contract_ids_for(code: str) -> Tuple[str, ...]:
 
 @dataclass(frozen=True)
 class _NormalizedIntent:
+    #: Since #153 the process roots live IN the spec, as
+    #: ``integration_spec.processes`` — one representation, not two. Before that
+    #: they travelled alongside it as a parallel tuple, which meant a root could
+    #: be present in one and absent from the other with nothing to notice.
     integration_spec: IntegrationSpecV1
-    #: ``(component_key, ProcessIRV1)`` sorted by key. Sorted rather than
-    #: insertion-ordered because the semantic hash is computed over it, and a
-    #: hash that depends on mapping insertion order is not a fingerprint.
-    process_roots: Tuple[Tuple[str, Any], ...]
     gaps: Tuple[CapabilityGapV1, ...]
     connector_metadata: Mapping[str, Tuple[Optional[str], Optional[str]]]
+
+    @property
+    def process_roots(self) -> Tuple[Tuple[str, Any], ...]:
+        """``(component_key, ProcessIRV1)`` sorted by key.
+
+        DERIVED from the spec rather than stored beside it, so the two cannot
+        disagree. Sorted rather than authored-order because the semantic hash is
+        computed over this projection, and a hash that depends on the order a
+        caller happened to list their roots is not a fingerprint — the same two
+        roots swapped would bind to a different revision and re-plan for nothing.
+        The apply ORDER is unaffected: that comes from ``_topological_order``,
+        never from list position.
+        """
+        return tuple(
+            (unit.envelope.component_key, unit.process_ir)
+            for unit in sorted(
+                self.integration_spec.processes,
+                key=lambda unit: unit.envelope.component_key,
+            )
+        )
 
 
 def _action_type_from_config(config: Mapping[str, Any]) -> Optional[str]:
@@ -427,19 +449,24 @@ def _normalize_intent(request: AuthoringRequestV1) -> _NormalizedIntent:
         )
         return _NormalizedIntent(
             integration_spec=spec,
-            process_roots=(),
             gaps=gaps,
             connector_metadata=_connector_metadata_from_components(spec.components),
         )
 
     if kind == "process_ir":
+        # The units go into the spec SORTED by key. `_NormalizedIntent.process_roots`
+        # sorts its own projection too, but the spec is what the semantic-hash
+        # payload dumps wholesale, so canonicalizing once here is what actually
+        # makes the fingerprint independent of the order the caller listed them.
         spec = IntegrationSpecV1(
             name=intent.integration_name,
             components=list(intent.components),
+            processes=sorted(
+                intent.units, key=lambda unit: unit.envelope.component_key
+            ),
         )
         return _NormalizedIntent(
             integration_spec=spec,
-            process_roots=((intent.component_key, intent.process_ir),),
             gaps=(),
             connector_metadata=_connector_metadata_from_components(intent.components),
         )
@@ -513,14 +540,221 @@ def _normalize_recipe_intent(intent) -> _NormalizedIntent:
         ) from None
 
     components = list(result.components)
-    spec = IntegrationSpecV1(name=intent.integration_name, components=components)
     roots = tuple(sorted(result.composed.process_roots, key=lambda pair: pair[0]))
+    supporting, units = _lift_recipe_roots_into_units(components, roots)
+    spec = IntegrationSpecV1(
+        name=intent.integration_name,
+        components=supporting,
+        processes=units,
+    )
     return _NormalizedIntent(
         integration_spec=spec,
-        process_roots=roots,
         gaps=(),
+        # Connector metadata is derived from the components the recipe emitted,
+        # INCLUDING the process entries that were just lifted into units: the
+        # projection keys on component type, and a lifted process contributes no
+        # connector family, so passing the full list keeps the mapping identical
+        # to what it was before the lift.
         connector_metadata=_connector_metadata_from_components(components),
     )
+
+
+def _extension_bindings_from_config(raw):
+    """Legacy ``config["process_extensions"]`` -> typed bindings.
+
+    The NORMALIZATION BOUNDARY between the legacy reader's tolerance and the
+    typed models' strictness. The legacy reader strips a padded
+    ``connection_id``/``id``/``xpath``; the typed models refuse padding outright,
+    because on the direct authoring surface silently canonicalizing a caller's
+    reference is how a ``$ref`` ends up pointing somewhere they did not mean.
+    Doing the strip HERE keeps both true: every input the legacy path accepts
+    still normalizes to the identical bytes, and nothing accepts padding twice.
+
+    Shape errors are left to the typed models rather than re-diagnosed here — a
+    second copy of the legacy reader's twelve refusals is exactly the
+    hand-remodelling this milestone exists to remove.
+    """
+    from ..models.process_component import (
+        ProcessConnectionOverrideV1,
+        ProcessExtensionBindingsV1,
+        ProcessOverrideFieldV1,
+    )
+
+    if not isinstance(raw, Mapping):
+        return ProcessExtensionBindingsV1()
+
+    def _clean(value):
+        return value.strip() if isinstance(value, str) else value
+
+    connections = []
+    for entry in raw.get("connections") or ():
+        if not isinstance(entry, Mapping):
+            continue
+        fields = []
+        for field in entry.get("fields") or ():
+            if not isinstance(field, Mapping):
+                continue
+            kwargs = {
+                "id": _clean(field.get("id")),
+                # `label` is NOT cleaned — the legacy renderer emits its exact
+                # bytes, so stripping it here would move emitted XML.
+                "label": field.get("label"),
+            }
+            if field.get("xpath") is not None:
+                kwargs["xpath"] = _clean(field.get("xpath"))
+            fields.append(ProcessOverrideFieldV1(**kwargs))
+        connection_kwargs = {
+            "connection_id": _clean(entry.get("connection_id")),
+            "fields": tuple(fields),
+        }
+        connector_type = _clean(entry.get("connector_type"))
+        if connector_type:
+            connection_kwargs["connector_type"] = connector_type
+        connections.append(ProcessConnectionOverrideV1(**connection_kwargs))
+    return ProcessExtensionBindingsV1(connections=tuple(connections))
+
+
+def _lift_recipe_roots_into_units(components, roots):
+    """Pair each composed ProcessIR root with the process component describing it.
+
+    An interim bridge, and deliberately labelled one: #159 migrates recipe /
+    composition authoring to author units directly. Until then a recipe still
+    emits its process as an ``IntegrationComponentSpec`` alongside a composed
+    root, and this is where those two halves become the single
+    :class:`ProcessAuthoringUnitV1` the canonical chain requires.
+
+    Returns ``(supporting_components, units)``. The lifted process entries are
+    REMOVED from the component list: leaving them in both places would put one
+    process in two tuples of one shared key namespace, which the spec validator
+    correctly rejects — and, worse, would make it ambiguous which of the two
+    descriptions apply should build from.
+
+    ``process_kind`` is never read. That is the whole point of the milestone: a
+    recipe's process is materialized from its ProcessIR root through the
+    canonical chain, not by resolving a legacy dialect.
+    """
+    from ..models.process_component import (
+        ProcessAuthoringUnitV1,
+        ProcessComponentEnvelopeV1,
+    )
+
+    #: Config keys promoted onto the typed envelope. An ALLOWLIST, not a
+    #: passthrough: every other config key belongs to the legacy component
+    #: surface and must not silently become envelope contract.
+    _ENVELOPE_CONFIG_KEYS = ("description", "folder_name", "process_extensions")
+
+    by_key = {}
+    for component in components:
+        if component.type == "process":
+            by_key.setdefault(component.key, []).append(component)
+
+    units = []
+    lifted_keys = set()
+    for component_key, ir in roots:
+        matches = by_key.get(component_key, ())
+        # Reference-only entries describe an EXISTING component to reuse; they
+        # author no XML, so they are not a root's envelope and must stay in
+        # `components`.
+        authored = [
+            component
+            for component in matches
+            if not (component.config or {}).get("reference_only")
+        ]
+        if len(authored) != 1:
+            raise AuthoringWorkflowError(
+                AUTHORING_COMPILE_BLOCKED,
+                (
+                    _diag(
+                        AUTHORING_COMPILE_BLOCKED,
+                        "error",
+                        message=(
+                            "A composed process root must correspond to exactly "
+                            "one authored process component with the same key."
+                        ),
+                        subject_kind="process",
+                        subject_id=component_key,
+                        remediation=(
+                            "The recipe emitted "
+                            f"{len(authored)} authored process components for this "
+                            "root. Emit exactly one."
+                        ),
+                        cause_codes=(
+                            PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,
+                        ),
+                    ),
+                ),
+            )
+        component = authored[0]
+        config = component.config or {}
+
+        # `name` must be REAL, not defaulted. The legacy assembler already
+        # refuses a blank process name, so a missing one is a failure either
+        # way; failing here names the recipe and the root instead of surfacing
+        # as a builder error much later.
+        name = component.name or config.get("component_name")
+        if not name or not str(name).strip():
+            raise AuthoringWorkflowError(
+                AUTHORING_COMPILE_BLOCKED,
+                (
+                    _diag(
+                        AUTHORING_COMPILE_BLOCKED,
+                        "error",
+                        message=(
+                            "A composed process root needs a component name to "
+                            "materialize; the recipe supplied none."
+                        ),
+                        subject_kind="process",
+                        subject_id=component_key,
+                        remediation=(
+                            "Emit a non-blank 'name' on the process component "
+                            "this root belongs to."
+                        ),
+                        cause_codes=(PROCESS_COMPONENT_SCHEMA_INVALID,),
+                    ),
+                ),
+            )
+
+        envelope_kwargs = {
+            "component_key": component_key,
+            "name": str(name),
+            # The component's own action is honoured, default included. Demanding
+            # an EXPLICIT action here would be a new hard requirement on every
+            # existing recipe, and `IntegrationComponentSpec.action` has carried
+            # `default="create"` since M2 — the acceptance criteria make `action`
+            # required on the DIRECT authoring surface, which is a different
+            # caller.
+            "action": component.action,
+            "depends_on": tuple(component.depends_on or ()),
+        }
+        if component.component_id:
+            envelope_kwargs["component_id"] = component.component_id
+        for key in _ENVELOPE_CONFIG_KEYS:
+            value = config.get(key)
+            if value in (None, "", {}, []):
+                continue
+            if key == "process_extensions":
+                envelope_kwargs[key] = _extension_bindings_from_config(value)
+            else:
+                envelope_kwargs[key] = value
+
+        units.append(
+            ProcessAuthoringUnitV1(
+                envelope=ProcessComponentEnvelopeV1(**envelope_kwargs),
+                process_ir=ir,
+            )
+        )
+        lifted_keys.add(component_key)
+
+    supporting = [
+        component
+        for component in components
+        if not (
+            component.type == "process"
+            and component.key in lifted_keys
+            and not (component.config or {}).get("reference_only")
+        )
+    ]
+    return supporting, units
 
 
 # ---------------------------------------------------------------------------
@@ -533,8 +767,45 @@ def build_integration_spec_preview(normalized: _NormalizedIntent) -> Integration
 
     Named a preview and not a plan: it is what apply WOULD materialize, and
     calling it the plan invites reading it as something already true.
+
+    **The authored ProcessIR roots are WITHHELD from this projection (#153).**
+
+    This return value is SERVED — echoed as
+    ``authoring_result.integration_spec_preview`` and as the legacy
+    ``integration_spec`` envelope — and ADR-001 §11 is explicit that results
+    carry hashes, opaque references and value-free diagnostics, never authored
+    payload. Before #153 that held for free: the roots travelled BESIDE the spec,
+    so the spec echo contained only components. Moving them INTO the spec made
+    the echo replay every authored step verbatim. Measured with the clean-room
+    watermark, the authored value appeared in exactly two served fields and in
+    zero diagnostics — so the diagnostics stayed value-free and the SPEC ECHO was
+    the whole of the regression. A ``set_property`` value or a scripting step is
+    caller content that can carry a credential, and replaying it through a
+    logged, cached, LLM-visible response is a real weakening of the secrets
+    posture even though the caller is the one who sent it.
+
+    **Why the roots are dropped rather than redacted.** There is no such thing as
+    an empty ``ProcessIRV1``: the body's cardinality rule refuses a lone ``stop``,
+    a lone ``return_documents``, and a ``message`` + terminal pair alike (measured
+    — all four candidate placeholders raised
+    ``PROCESS_IR_SCHEMA_INVALID_CARDINALITY`` at ``/body``). Any stand-in root
+    would therefore have to be a fabricated source/target the caller never wrote,
+    served inside a field named "preview" — a lie that reads as fact. Dropping
+    the tuple says exactly what is true: this projection does not describe the
+    semantics.
+
+    **Nothing is lost.** The roots remain fully present in the INTERNAL
+    normalized spec that compilation, fingerprinting and apply all read; only
+    this served projection withholds them. And the served result still describes
+    every root, value-free and by key, through ``process_cfg`` summaries
+    (``ProcessCfgSummaryV1.component_key`` plus node/edge counts) and the
+    per-root artifact fingerprints — both computed from the REAL root, which is
+    what makes them evidence rather than an echo.
     """
-    return normalized.integration_spec
+    spec = normalized.integration_spec
+    if not spec.processes:
+        return spec
+    return spec.model_copy(update={"processes": []})
 
 
 def build_component_dependencies(
@@ -731,6 +1002,37 @@ def _resolve_component_by_id(boomi_client: Any, component_id: str):
     return matches[0] if matches else None
 
 
+@dataclass(frozen=True)
+class _ParticipantView:
+    """A canonical process root, seen as a DECLARED reference target (#153).
+
+    Deliberately not an ``IntegrationComponentSpec``. Three reasons, in order of
+    weight:
+
+    1. The #149 reachability census enumerates every site that produces a
+       process-typed component spec, so #160 can retire the legacy process
+       surface with a complete list. Minting one here — purely as an internal
+       shim — would have added a row to that inventory for a construct that is
+       never materialized and never carries ``process_kind``. Measured: the
+       census flagged exactly that when this projection first used the real
+       model.
+    2. A canonical root IS NOT a legacy component. Reusing the legacy model to
+       describe one blurs the distinction this milestone exists to draw.
+    3. It exposes only what the lookup below reads, so it cannot accidentally
+       acquire component semantics later.
+
+    ``type`` is fixed and ``config`` is empty so the existing read-only
+    metadata lookup (``_metadata_type_for_component`` /
+    ``_resolve_existing_components``) works unchanged by duck typing.
+    """
+
+    key: str
+    name: Optional[str]
+    component_id: Optional[str]
+    type: str = "process"
+    config: Mapping[str, Any] = field(default_factory=dict)
+
+
 def build_resolved_reference_summary(
     spec: IntegrationSpecV1,
     *,
@@ -757,6 +1059,31 @@ def build_resolved_reference_summary(
     """
     summaries: List[ResolvedReferenceSummaryV1] = []
     declared = {component.key: component for component in spec.components}
+    # #153: canonical process roots are declared participants too. They live in
+    # `spec.processes`, not among the components, so without this projection a
+    # `$ref` naming a root — a `process_call`, or an API Service route target —
+    # is absent from the summary entirely and reads as dangling in a plan that
+    # is complete.
+    #
+    # Projected as `_ParticipantView`, NOT as an `IntegrationComponentSpec`.
+    # Building a real component spec here was the first attempt and the #149
+    # reachability census immediately flagged it as a new `process_kind_producer`
+    # — correctly: that census enumerates every site that produces a
+    # process-typed component spec so #160 can retire the legacy surface, and a
+    # synthetic internal shim would have grown exactly the inventory #160 must
+    # shrink. The view is also the more honest object: a canonical root is not a
+    # legacy component, and only the four read-only attributes the lookup below
+    # consults are exposed.
+    for unit in spec.processes:
+        envelope = unit.envelope
+        declared.setdefault(
+            envelope.component_key,
+            _ParticipantView(
+                key=envelope.component_key,
+                name=envelope.name,
+                component_id=envelope.component_id,
+            ),
+        )
 
     for key, component in sorted(declared.items()):
         component_id: Optional[str] = component.component_id
@@ -835,6 +1162,13 @@ def _validate_processes(
 
     symbols = build_symbol_table(
         list(normalized.integration_spec.components),
+        # #153: the roots are participants too. Without them a `$ref` naming
+        # another root resolves to nothing and a complete plan reports a
+        # dangling reference.
+        process_keys=[
+            unit.envelope.component_key
+            for unit in normalized.integration_spec.processes
+        ],
         connector_metadata=normalized.connector_metadata,
     )
 
@@ -1235,7 +1569,15 @@ def plan_authoring_request_v1(
     )
 
     references = build_resolved_reference_summary(
-        spec_preview,
+        # The INTERNAL spec, never `spec_preview`. The preview withholds the
+        # authored roots because it is served (see
+        # `build_integration_spec_preview`), and reference resolution is an
+        # internal computation over the real plan — feeding it the redacted
+        # projection dropped every process participant and reported a `$ref` to
+        # a declared root as DANGLING, which is the precise distinction this
+        # summary exists to draw. Redaction belongs at the serving boundary, not
+        # in the data the server reasons over.
+        normalized.integration_spec,
         boomi_client=boomi_client,
         authored_refs=_iter_authored_refs(
             [ir.model_dump(mode="json") for _key, ir in normalized.process_roots]
@@ -1246,7 +1588,11 @@ def plan_authoring_request_v1(
     # to learn that this intent is plan/compile-only before spending a compile.
     gaps = sort_by_key(
         normalized.gaps
-        + _materialization_gaps(request, spec_preview, normalized.process_roots)
+        # Same rule as the reference summary above: the gap is derived from the
+        # REAL plan, not from the redacted projection.
+        + _materialization_gaps(
+            request, normalized.integration_spec, normalized.process_roots
+        )
     )
 
     semantic_hash = semantic_fingerprint(_normalized_payload(normalized, request))

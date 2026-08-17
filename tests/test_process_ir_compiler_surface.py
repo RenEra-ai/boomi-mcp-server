@@ -241,18 +241,47 @@ def test_compiler_package_is_importable_directly():
     assert callable(compile_process_ir_v1)
 
 
-def test_connector_call_is_in_the_internal_ir_schema_but_no_public_surface():
+def test_connector_call_is_in_the_internal_ir_schema_but_no_public_tool_surface():
     """#140's node kind is authored IR, so it MUST appear in the internal
-    ProcessIR schema — and must reach no MCP tool or IntegrationSpec schema,
-    because direct ProcessIR authoring is #146's to ship, not this issue's."""
+    ProcessIR schema — and must still reach no MCP tool surface.
+
+    **Scope amended by #153 (M12.15), deliberately and with the premise named.**
+    The original clause also forbade ``connector_call`` anywhere in
+    ``IntegrationSpecV1``'s JSON schema, on the stated grounds that "direct
+    ProcessIR authoring is #146's to ship, not this issue's". #146 shipped it,
+    and #153 then makes ProcessIR roots a FIRST-CLASS member of the spec
+    (``IntegrationSpecV1.processes``, issue #153 in-scope item 4). So the spec
+    schema now legitimately embeds the ProcessIR schema, and asserting its
+    absence would assert against the contract this milestone exists to build.
+
+    The limit is WITHDRAWN where it expired and RESTATED where it still bites,
+    rather than reworded into something vacuous: ProcessIR may enter the spec
+    only through ``processes``, and the LEGACY component surface must stay free
+    of it. ``IntegrationComponentSpec`` is the shape every pre-#153 caller
+    authors; if IR leaked into it, a component config would become a second,
+    unpoliced place to author process semantics — exactly the dual-authority
+    the milestone is consolidating away.
+    """
     assert "connector_call" in canonical_process_ir_schema_json()
     offenders = [
         tool.name for tool in ALL_TOOLS if "connector_call" in _tool_surface(tool)
     ]
     assert offenders == [], offenders
+
+    component = getattr(models, "IntegrationComponentSpec", None)
+    if component is not None:
+        assert "connector_call" not in json.dumps(
+            component.model_json_schema(), sort_keys=True
+        )
+
+    # Positive control for the restated rule: the spec DOES carry the IR now,
+    # and only by way of `processes`. Without this the assertion above could go
+    # green because ProcessIR vanished from the spec entirely — which would mean
+    # #153's roots were never wired in.
     spec = getattr(models, "IntegrationSpecV1", None)
     if spec is not None:
-        assert "connector_call" not in json.dumps(spec.model_json_schema(), sort_keys=True)
+        assert "processes" in spec.model_fields
+        assert "connector_call" in json.dumps(spec.model_json_schema(), sort_keys=True)
 
 
 def test_connector_call_internals_stay_out_of_the_package_all():

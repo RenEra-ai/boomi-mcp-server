@@ -878,6 +878,7 @@
       }
     },
     "pipeline": null,
-    "profile_indexes_by_component_id": null
+    "profile_indexes_by_component_id": null,
+    "processes": []
   }
 }

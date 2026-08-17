@@ -28,13 +28,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from pydantic_core import PydanticCustomError
+
 from ..errors import (
     RECIPE_CONSTRAINT_FAILED,
     RECIPE_PATCH_CONFLICT,
     RECIPE_PATCH_TARGET_NOT_FOUND,
 )
-from ..models.process_ir import ProcessIRV1
-from ..models.recipe_contributions import canonical_recipe_contribution_json
+from ..models.process_ir import (
+    ProcessIRV1,
+    ProcessIRValidationError,
+    parse_process_ir_v1,
+)
+from ..models.recipe_contributions import (
+    _validate_component_key,
+    canonical_recipe_contribution_json,
+)
 from .contracts import RecipeDescriptorV1, RecipeInputBase, parse_semver
 from .errors import DIRECT_AUTHORING_PRODUCER, RecipeError, recipe_diagnostic
 
@@ -212,6 +221,75 @@ def _terminal_split(steps: List[Any]) -> int:
     return len(steps)
 
 
+def _validated_direct_roots(
+    direct_process_roots: Mapping[str, Any] = None,
+) -> Dict[str, ProcessIRV1]:
+    """Parse and validate caller-supplied direct roots BEFORE composition begins.
+
+    The inherited #149 item 1, discharged here. The annotation
+    ``Mapping[str, ProcessIRV1]`` is a promise nothing enforces: ``compose`` is
+    an ordinary Python function, so a caller may pass raw dictionaries. Phase 2
+    then reaches ``roots[key]["body"]`` and a malformed root surfaces as a bare
+    ``KeyError`` from deep inside composition — an untyped crash naming an
+    internal expression rather than the caller's input.
+
+    **Honest scope.** ``direct_process_roots`` still has ZERO production callers
+    at this commit (measured: the only occurrences in ``src/`` are this
+    parameter's own definition and its use here), and #153's recipe-root lifting
+    reads the recipe RESULT rather than these roots. So this is preventive
+    hardening of an uncalled public signature, not the repair of a live defect —
+    recorded that way in the audit ledger rather than claiming a trigger the code
+    contradicts.
+
+    Only ``ProcessIRValidationError`` is caught. A blanket ``except`` would
+    convert an internal defect into a caller-blaming diagnostic, which is the
+    failure mode the typed recipe taxonomy exists to prevent.
+    """
+    roots: Dict[str, ProcessIRV1] = {}
+    for key, value in dict(direct_process_roots or {}).items():
+        # The key is validated with the SAME rule the contribution models use,
+        # so a direct root and a contributed one cannot disagree about what a
+        # component key is.
+        try:
+            _validate_component_key(key)
+        except PydanticCustomError as exc:
+            raise RecipeError(
+                (
+                    recipe_diagnostic(
+                        RECIPE_CONSTRAINT_FAILED,
+                        phase="composition",
+                        target="direct_process_root_key",
+                    ),
+                )
+            ) from exc
+
+        # An already-parsed root is taken as-is: re-parsing a validated model
+        # would be wasted work, and `_compose_process_roots` dumps it anyway.
+        if isinstance(value, ProcessIRV1):
+            roots[key] = value
+            continue
+        try:
+            roots[key] = parse_process_ir_v1(value)
+        except ProcessIRValidationError as exc:
+            raise RecipeError(
+                (
+                    recipe_diagnostic(
+                        RECIPE_CONSTRAINT_FAILED,
+                        phase="composition",
+                        target=f"direct_process:{key}",
+                        # The ProcessIR authority's own codes travel value-free,
+                        # exactly as the recipe layer carries every other
+                        # canonical diagnostic.
+                        cause_codes=tuple(
+                            getattr(diagnostic, "code", "") or ""
+                            for diagnostic in (exc.diagnostics or ())
+                        ),
+                    ),
+                )
+            ) from None
+    return roots
+
+
 def compose(
     attributed: Sequence[AttributedContributionV1],
     descriptors: Mapping[Tuple[str, str], RecipeDescriptorV1],
@@ -220,7 +298,9 @@ def compose(
     direct_topologies: Mapping[str, Dict[str, Any]] = None,
 ) -> ComposedContributionsV1:
     """Apply every contribution in the fixed phase order."""
-    direct_roots = dict(direct_process_roots or {})
+    # Validated BEFORE any classification, patching or root combination — the
+    # inherited #149 item this slice discharges. See `_validated_direct_roots`.
+    direct_roots = _validated_direct_roots(direct_process_roots)
     direct_topos = dict(direct_topologies or {})
 
     process_patches = [

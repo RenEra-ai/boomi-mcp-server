@@ -355,6 +355,72 @@ AUTHORING_PLAN_STALE = "AUTHORING_PLAN_STALE"
 AUTHORING_APPLY_VALIDATION_REQUIRED = "AUTHORING_APPLY_VALIDATION_REQUIRED"
 
 
+# --- Canonical process component materialization (M12.15 / issue #153) --------
+# Three families, one introducer. #153 is the SOLE introducer of
+# ``PROCESS_COMPONENT_*``, ``INTEGRATION_DEPENDENCY_*`` and
+# ``PROCESS_MATERIALIZATION_*``, so the guard test asserts the same biconditional
+# #144/#145/#146 carry: every code below is owned by #153 AND every key in the
+# taxonomy carrying one of those three prefixes is owned by #153.
+#
+# They are deliberately NOT folded into the existing families:
+#
+# * ``TOPOLOGY_*`` is reserved to #144 by ADR-001 §7 and closed there.
+# * ``AUTHORING_*`` blames the MCP authoring SURFACE — the contract addressed,
+#   the revision bound, the phase order. These blame the authored process
+#   component, its dependency graph, or the materialization plan itself, which
+#   is a different subject even when the caller reaches them through that
+#   surface.
+#
+# The split by prefix matches the subject each code blames:
+#
+# * ``PROCESS_COMPONENT_*`` — the authored envelope/unit SHAPE.
+# * ``INTEGRATION_DEPENDENCY_*`` — the one shared key namespace and the single
+#   topological order over BOTH ``components`` and ``processes``. Before #153
+#   these conditions raised a bare ``ValueError`` with a prose message, so a
+#   caller could not branch on them; naming them is a served-contract
+#   improvement, not a new restriction.
+# * ``PROCESS_MATERIALIZATION_*`` — the relocatable plan, its late symbol
+#   binding, and the placement/result accounting that apply performs.
+
+# Shape of the authored process component envelope / unit.
+PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD = "PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD"
+PROCESS_COMPONENT_SCHEMA_INVALID = "PROCESS_COMPONENT_SCHEMA_INVALID"
+PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY = (
+    "PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY"
+)
+PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT = (
+    "PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT"
+)
+
+# The unified component+process dependency graph.
+INTEGRATION_COMPONENT_KEY_DUPLICATE = "INTEGRATION_COMPONENT_KEY_DUPLICATE"
+INTEGRATION_DEPENDENCY_NOT_FOUND = "INTEGRATION_DEPENDENCY_NOT_FOUND"
+INTEGRATION_DEPENDENCY_CYCLE = "INTEGRATION_DEPENDENCY_CYCLE"
+INTEGRATION_DEPENDENCY_REQUIRED = "INTEGRATION_DEPENDENCY_REQUIRED"
+
+# The materialization plan, its binding, and apply-time accounting.
+PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE = (
+    "PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE"
+)
+PROCESS_MATERIALIZATION_EXECUTION_PROFILE_INVALID = (
+    "PROCESS_MATERIALIZATION_EXECUTION_PROFILE_INVALID"
+)
+PROCESS_MATERIALIZATION_PLAN_INVALID = "PROCESS_MATERIALIZATION_PLAN_INVALID"
+PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH = (
+    "PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH"
+)
+PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID = (
+    "PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID"
+)
+PROCESS_MATERIALIZATION_PLACEMENT_NOT_FOUND = (
+    "PROCESS_MATERIALIZATION_PLACEMENT_NOT_FOUND"
+)
+PROCESS_MATERIALIZATION_PLACEMENT_AMBIGUOUS = (
+    "PROCESS_MATERIALIZATION_PLACEMENT_AMBIGUOUS"
+)
+PROCESS_MATERIALIZATION_RESULT_ID_MISSING = "PROCESS_MATERIALIZATION_RESULT_ID_MISSING"
+
+
 @dataclass(frozen=True)
 class ErrorCodeSpec:
     """Catalog entry for one stable error code."""
@@ -1463,6 +1529,167 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "binding; nothing was mutated."
             ),
             owner="#146",
+        ),
+        # --- M12.15 / issue #153 -------------------------------------------
+        ErrorCodeSpec(
+            code=PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD,
+            category="process_component",
+            retryable=False,
+            summary=(
+                "A process component envelope, unit or extension binding carried "
+                "a field the closed schema does not define."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_COMPONENT_SCHEMA_INVALID,
+            category="process_component",
+            retryable=False,
+            summary=(
+                "A process component envelope or extension binding field failed "
+                "its value rule (blank, padded, or contradictory)."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,
+            category="process_component",
+            retryable=False,
+            summary=(
+                "A process authoring unit did not pair exactly one envelope with "
+                "exactly one ProcessIR root."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT,
+            category="process_component",
+            retryable=False,
+            summary=(
+                "A process component reference was not an exact '$ref:KEY' token "
+                "or literal component id."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=INTEGRATION_COMPONENT_KEY_DUPLICATE,
+            category="integration_dependency",
+            retryable=False,
+            summary=(
+                "One key was declared more than once across the shared "
+                "components / process-envelope namespace."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=INTEGRATION_DEPENDENCY_NOT_FOUND,
+            category="integration_dependency",
+            retryable=False,
+            summary=(
+                "A depends_on entry names a key that no component and no process "
+                "envelope declares."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=INTEGRATION_DEPENDENCY_CYCLE,
+            category="integration_dependency",
+            retryable=False,
+            summary=(
+                "The combined component/process dependency graph contains a "
+                "cycle, so no execution order exists."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=INTEGRATION_DEPENDENCY_REQUIRED,
+            category="integration_dependency",
+            retryable=False,
+            summary=(
+                "A process root references a key its envelope does not declare in "
+                "depends_on, so ordered apply could not bind it."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE,
+            category="process_materialization",
+            retryable=False,
+            summary=(
+                "A materializable process referenced a literal account component "
+                "id; a relocatable plan may only carry '$ref:KEY' tokens."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_MATERIALIZATION_EXECUTION_PROFILE_INVALID,
+            category="process_materialization",
+            retryable=False,
+            summary=(
+                "The compiler could not derive a supported scheduled/listener "
+                "execution profile from the ProcessIR entry node."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_MATERIALIZATION_PLAN_INVALID,
+            category="process_materialization",
+            retryable=False,
+            summary=(
+                "A materialization plan was internally inconsistent: malformed or "
+                "duplicated symbol slots, or plan/envelope disagreement."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH,
+            category="process_materialization",
+            retryable=False,
+            summary=(
+                "A plan's recorded fingerprint does not equal the fingerprint "
+                "recomputed from its canonical material; nothing was mutated."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID,
+            category="process_materialization",
+            retryable=False,
+            summary=(
+                "Late binding could not resolve a required symbol slot to a real "
+                "component id, or a placeholder survived into the emitted XML."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_MATERIALIZATION_PLACEMENT_NOT_FOUND,
+            category="process_materialization",
+            retryable=False,
+            summary=(
+                "The requested folder name matched no live, non-deleted account "
+                "folder, so placement could not be resolved."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_MATERIALIZATION_PLACEMENT_AMBIGUOUS,
+            category="process_materialization",
+            retryable=False,
+            summary=(
+                "The requested folder name matched more than one live account "
+                "folder; placement is refused rather than guessed."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_MATERIALIZATION_RESULT_ID_MISSING,
+            category="process_materialization",
+            retryable=False,
+            summary=(
+                "A create reported success without a component id, so the "
+                "mutation could not be attested; it fails closed."
+            ),
+            owner="#153",
         ),
     )
 }

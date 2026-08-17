@@ -120,10 +120,24 @@ def placeholder_component_id(selector: str) -> str:
 def build_symbol_table(
     components: Sequence[IntegrationComponentSpec],
     *,
+    process_keys: Sequence[str] = (),
     connector_metadata: Optional[Mapping[str, Tuple[Optional[str], Optional[str]]]] = None,
     resolver: Callable[[str], str] = placeholder_component_id,
 ):
     """Project components into the compiler's ``SymbolTableV1``.
+
+    ``process_keys`` (issue #153) carries the canonical process roots, which
+    since M12.15 live in ``IntegrationSpecV1.processes`` rather than among the
+    components. They enter the table as ordinary ``process``-typed symbols so a
+    ``$ref:KEY`` naming another root — a ``process_call``, or an API Service
+    route target — resolves exactly as it did when every process was a component.
+    Omitting them does not fail loudly: reference resolution simply reports the
+    root as UNRESOLVED, which reads as a dangling reference in a plan that is
+    actually complete.
+
+    Only the key is taken, not an envelope: a process participant contributes no
+    connector family and no connection edge, so there is nothing else about it
+    the symbol table can honestly carry.
 
     Every symbol's ``ref`` is the STABLE ``$ref:KEY`` — never an occurrence-scoped
     alias. That single choice is what lets a recipe's cache fan-out pass the
@@ -188,6 +202,28 @@ def build_symbol_table(
                 connection_ref=(
                     f"{_REF_PREFIX}{connection_ref_key}" if connection_ref_key else None
                 ),
+            )
+        )
+
+    # Canonical process roots. Appended after the components and de-duplicated
+    # against them: the two tuples share one key namespace, so a key appearing in
+    # both is a caller error the spec validator already refuses — this loop must
+    # not quietly mint a second symbol for it and hand the compiler an ambiguous
+    # table.
+    seen = {symbol.ref for symbol in symbols}
+    for key in process_keys:
+        ref = f"{_REF_PREFIX}{key}"
+        if ref in seen:
+            continue
+        seen.add(ref)
+        symbols.append(
+            ComponentSymbolV1(
+                ref=ref,
+                component_id=resolver(ref),
+                component_type="process",
+                connector_type=None,
+                action_type=None,
+                connection_ref=None,
             )
         )
     return SymbolTableV1(symbols=tuple(symbols))

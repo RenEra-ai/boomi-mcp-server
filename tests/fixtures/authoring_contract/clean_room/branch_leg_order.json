@@ -1,7 +1,7 @@
 {
   "design_decisions": [
     {
-      "authored_path": "/intent/process_ir/body/steps/1",
+      "authored_path": "/intent/units/0/process_ir/body/steps/1",
       "contract_entry_ids": [
         "node.branch",
         "semantic_rule.branch.path_order",
@@ -11,7 +11,7 @@
       "why": "Nothing in the JSON Schema says Branch paths are sequential; the contract does."
     },
     {
-      "authored_path": "/intent/process_ir/body/steps/1/legs/0/steps/0",
+      "authored_path": "/intent/units/0/process_ir/body/steps/1/legs/0/steps/0",
       "contract_entry_ids": [
         "state_visibility.dpp",
         "node.set_dpp"
@@ -20,7 +20,7 @@
       "why": "Execution scope is what makes the ordering observable at all."
     },
     {
-      "authored_path": "/intent/process_ir/body/steps/1/legs/1/steps/0",
+      "authored_path": "/intent/units/0/process_ir/body/steps/1/legs/1/steps/0",
       "contract_entry_ids": [
         "state_visibility.ddp",
         "node.set_ddp"
@@ -29,7 +29,7 @@
       "why": "The contrast that decides which scope the watermark must use."
     },
     {
-      "authored_path": "/intent/process_ir/body/steps/1/legs/0/terminal",
+      "authored_path": "/intent/units/0/process_ir/body/steps/1/legs/0/terminal",
       "contract_entry_ids": [
         "semantic_rule.control.no_continuation",
         "placement.branch_path.terminal",
@@ -39,7 +39,7 @@
       "why": "No continuation and no join, so every path needs its own terminal."
     },
     {
-      "authored_path": "/intent/process_ir/body/steps/0",
+      "authored_path": "/intent/units/0/process_ir/body/steps/0",
       "contract_entry_ids": [
         "node.source",
         "connector_action.database.get"
@@ -48,7 +48,7 @@
       "why": "Placement and document semantics of the entry connector call."
     },
     {
-      "authored_path": "/intent/process_ir/body/steps/0/operation_ref",
+      "authored_path": "/intent/units/0/process_ir/body/steps/0/operation_ref",
       "contract_entry_ids": [
         "semantic_rule.references.opaque"
       ],
@@ -60,9 +60,8 @@
   "fixture_id": "branch_leg_order",
   "intent": "Read a watermark set by a sibling Branch path. The grammar admits both orderings; only the behavioural contract says which one runs first.",
   "invalid_request": {
-    "contract_version": "1",
+    "contract_version": "2",
     "intent": {
-      "component_key": "watermark_router",
       "components": [
         {
           "config": {
@@ -85,65 +84,73 @@
       ],
       "integration_name": "clean-room-branch-order",
       "intent_kind": "process_ir",
-      "process_ir": {
-        "body": {
-          "kind": "sequence",
-          "steps": [
-            {
-              "connection_ref": "$ref:src_conn",
-              "kind": "source",
-              "operation_ref": "$ref:src_op"
-            },
-            {
-              "kind": "branch",
-              "legs": [
+      "units": [
+        {
+          "envelope": {
+            "component_key": "watermark_router",
+            "name": "Clean Room watermark_router",
+            "action": "create"
+          },
+          "process_ir": {
+            "body": {
+              "kind": "sequence",
+              "steps": [
                 {
-                  "steps": [
-                    {
-                      "kind": "set_ddp",
-                      "name": "COPY",
-                      "source_values": [
-                        {
-                          "property_name": "WATERMARK",
-                          "value_type": "dpp"
-                        }
-                      ]
-                    }
-                  ],
-                  "terminal": {
-                    "kind": "stop"
-                  }
+                  "connection_ref": "$ref:src_conn",
+                  "kind": "source",
+                  "operation_ref": "$ref:src_op"
                 },
                 {
-                  "steps": [
+                  "kind": "branch",
+                  "legs": [
                     {
-                      "kind": "set_dpp",
-                      "name": "WATERMARK",
-                      "source_values": [
+                      "steps": [
                         {
-                          "value": "CLEANROOM_SENTINEL_WATERMARK",
-                          "value_type": "static"
+                          "kind": "set_ddp",
+                          "name": "COPY",
+                          "source_values": [
+                            {
+                              "property_name": "WATERMARK",
+                              "value_type": "dpp"
+                            }
+                          ]
                         }
-                      ]
+                      ],
+                      "terminal": {
+                        "kind": "stop"
+                      }
+                    },
+                    {
+                      "steps": [
+                        {
+                          "kind": "set_dpp",
+                          "name": "WATERMARK",
+                          "source_values": [
+                            {
+                              "value": "CLEANROOM_SENTINEL_WATERMARK",
+                              "value_type": "static"
+                            }
+                          ]
+                        }
+                      ],
+                      "terminal": {
+                        "kind": "stop"
+                      }
                     }
-                  ],
-                  "terminal": {
-                    "kind": "stop"
-                  }
+                  ]
                 }
               ]
-            }
-          ]
-        },
-        "version": "1"
-      }
+            },
+            "version": "1"
+          }
+        }
+      ]
     }
   },
   "repair_summary": "Swap the paths so the write precedes the read. Derived from the served remediation and the cited entries alone.",
   "repaired_request": {
-    "contract_version": "1",
+    "contract_version": "2",
     "intent": {
-      "component_key": "watermark_router",
       "components": [
         {
           "config": {
@@ -166,58 +173,67 @@
       ],
       "integration_name": "clean-room-branch-order",
       "intent_kind": "process_ir",
-      "process_ir": {
-        "body": {
-          "kind": "sequence",
-          "steps": [
-            {
-              "connection_ref": "$ref:src_conn",
-              "kind": "source",
-              "operation_ref": "$ref:src_op"
-            },
-            {
-              "kind": "branch",
-              "legs": [
+      "units": [
+        {
+          "envelope": {
+            "component_key": "watermark_router",
+            "name": "Clean Room watermark_router",
+            "action": "create"
+          },
+          "process_ir": {
+            "body": {
+              "kind": "sequence",
+              "steps": [
                 {
-                  "steps": [
-                    {
-                      "kind": "set_dpp",
-                      "name": "WATERMARK",
-                      "source_values": [
-                        {
-                          "value": "CLEANROOM_SENTINEL_WATERMARK",
-                          "value_type": "static"
-                        }
-                      ]
-                    }
-                  ],
-                  "terminal": {
-                    "kind": "stop"
-                  }
+                  "connection_ref": "$ref:src_conn",
+                  "kind": "source",
+                  "operation_ref": "$ref:src_op"
                 },
                 {
-                  "steps": [
+                  "kind": "branch",
+                  "legs": [
                     {
-                      "kind": "set_ddp",
-                      "name": "COPY",
-                      "source_values": [
+                      "steps": [
                         {
-                          "property_name": "WATERMARK",
-                          "value_type": "dpp"
+                          "kind": "set_dpp",
+                          "name": "WATERMARK",
+                          "source_values": [
+                            {
+                              "value": "CLEANROOM_SENTINEL_WATERMARK",
+                              "value_type": "static"
+                            }
+                          ]
                         }
-                      ]
+                      ],
+                      "terminal": {
+                        "kind": "stop"
+                      }
+                    },
+                    {
+                      "steps": [
+                        {
+                          "kind": "set_ddp",
+                          "name": "COPY",
+                          "source_values": [
+                            {
+                              "property_name": "WATERMARK",
+                              "value_type": "dpp"
+                            }
+                          ]
+                        }
+                      ],
+                      "terminal": {
+                        "kind": "stop"
+                      }
                     }
-                  ],
-                  "terminal": {
-                    "kind": "stop"
-                  }
+                  ]
                 }
               ]
-            }
-          ]
-        },
-        "version": "1"
-      }
+            },
+            "version": "1"
+          }
+        }
+      ]
     }
   },
   "sentinel_value": "CLEANROOM_SENTINEL_WATERMARK"

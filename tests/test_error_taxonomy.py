@@ -664,3 +664,77 @@ def test_a_recipe_diagnostic_rejects_a_code_outside_the_closed_family():
             ).code
             == good
         )
+
+
+# ---------------------------------------------------------------------------
+# M12.15 / issue #153 — canonical process component materialization
+# ---------------------------------------------------------------------------
+
+#: The three prefixes #153 opens. Kept as data so the biconditional below reads
+#: from ONE authority instead of repeating the prefix list per assertion.
+_ISSUE_153_PREFIXES = (
+    "PROCESS_COMPONENT_",
+    "INTEGRATION_DEPENDENCY_",
+    "PROCESS_MATERIALIZATION_",
+)
+
+#: ``INTEGRATION_COMPONENT_KEY_DUPLICATE`` belongs to the dependency family by
+#: subject but not by prefix — it blames the shared key namespace, which is the
+#: same authority the depends_on codes blame. Named explicitly rather than
+#: widening the prefix tuple to ``INTEGRATION_``, which would sweep in unrelated
+#: future codes.
+_ISSUE_153_EXTRA_CODES = frozenset({"INTEGRATION_COMPONENT_KEY_DUPLICATE"})
+
+
+def test_issue_153_owns_its_three_families_as_a_biconditional():
+    """#153 is the SOLE introducer of its three families.
+
+    The same biconditional #144 carries for ``TOPOLOGY_*``: every code #153 owns
+    sits under one of its prefixes (or is the named key-namespace code), AND
+    every taxonomy key under those prefixes is owned by #153. The forward half
+    alone would let a later issue append to a family whose semantics #153
+    defined; the reverse half alone would let #153 scatter codes into families
+    it does not own.
+    """
+    owned = {code for code, spec in ERROR_TAXONOMY.items() if spec.owner == "#153"}
+    assert owned, "no #153 codes registered — this check would be vacuous"
+
+    for code in owned:
+        assert code.startswith(_ISSUE_153_PREFIXES) or code in _ISSUE_153_EXTRA_CODES, code
+
+    for code, spec in ERROR_TAXONOMY.items():
+        if code.startswith(_ISSUE_153_PREFIXES) or code in _ISSUE_153_EXTRA_CODES:
+            assert spec.owner == "#153", code
+
+
+def test_issue_153_does_not_extend_a_family_it_does_not_own():
+    """#153 introduces no ``TOPOLOGY_*``, ``AUTHORING_*`` or ``PROCESS_IR_*`` code.
+
+    ``TOPOLOGY_*`` is closed to #144 by ADR-001 §7; ``AUTHORING_*`` blames the
+    MCP authoring surface rather than the authored process component; the
+    ProcessIR families belong to the compiler. #153 reaches callers THROUGH the
+    authoring surface, which is exactly why this is worth pinning — proximity is
+    not ownership.
+    """
+    owned = {code for code, spec in ERROR_TAXONOMY.items() if spec.owner == "#153"}
+    for code in owned:
+        assert not code.startswith(("TOPOLOGY_", "AUTHORING_", "PROCESS_IR_")), code
+
+
+def test_issue_153_codes_carry_distinct_registered_categories():
+    """Each family declares its own category, and every #153 spec is complete.
+
+    A duplicated ``code=`` in the ``ERROR_TAXONOMY`` comprehension silently
+    overwrites the earlier entry and shrinks the dict, so the count is asserted
+    against the source tuple rather than trusted.
+    """
+    owned = {code: spec for code, spec in ERROR_TAXONOMY.items() if spec.owner == "#153"}
+    categories = {spec.category for spec in owned.values()}
+    assert categories == {
+        "process_component",
+        "integration_dependency",
+        "process_materialization",
+    }, sorted(categories)
+    for code, spec in owned.items():
+        assert spec.summary.strip(), code
+        assert spec.retryable is False, code

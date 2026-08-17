@@ -4,9 +4,11 @@ Pydantic models for high-level integration orchestration.
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 
 from .pipeline_models import PipelineSpec
+from .process_component import ProcessAuthoringUnitV1
 
 
 class IntegrationComponentSpec(BaseModel):
@@ -69,6 +71,26 @@ class IntegrationSpecV1(BaseModel):
     name: str = Field(..., description="Integration name")
     mode: Literal["lift_shift", "redesign"] = Field(default="lift_shift")
     components: List[IntegrationComponentSpec] = Field(default_factory=list)
+    processes: List[ProcessAuthoringUnitV1] = Field(
+        default_factory=list,
+        description=(
+            "Issue #153 M12.15 — canonical process roots authored as ProcessIR. "
+            "Each entry is one ProcessAuthoringUnitV1: exactly one "
+            "ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These "
+            "are compiled by the canonical chain and materialized by the neutral "
+            "ProcessComponentMaterializer — they resolve NO legacy process_kind. "
+            "'components' remains the home of supporting components and of "
+            "reference-only existing processes. Both tuples share ONE key "
+            "namespace: a key used by a component and by a process envelope is a "
+            "duplicate, and all four depends_on directions (component->component, "
+            "component->process, process->component, process->process) enter one "
+            "topological order with one cycle check. "
+            "A LIST, not a tuple, deliberately: IntegrationSpecV1 is the legacy "
+            "mutable authoring surface that build_integration edits in place, and "
+            "every sibling collection here is a List. Immutability lives where it "
+            "belongs — on the frozen ProcessAuthoringUnitV1 elements."
+        ),
+    )
     goals: List[str] = Field(default_factory=list)
     endpoints: List[Dict[str, Any]] = Field(default_factory=list)
     flows: List[Dict[str, Any]] = Field(default_factory=list)
@@ -123,3 +145,40 @@ class IntegrationSpecV1(BaseModel):
         ),
     )
 
+    @model_validator(mode="after")
+    def validate_shared_key_namespace(self) -> "IntegrationSpecV1":
+        """``components[].key`` and ``processes[].envelope.component_key`` are ONE namespace.
+
+        Deliberately scoped to the keys this slice introduces: duplicates WITHIN
+        ``processes``, and collisions ACROSS the two lists. A components-only
+        duplicate is left exactly where it has always been raised —
+        ``integration_builder._topological_order`` — because tightening it here
+        would change the legacy authoring surface for specs that carry no
+        ``processes`` at all, which is precisely the silent strictification this
+        additive field must not cause. No pre-#153 spec has a ``processes``
+        entry, so nothing that validates today can begin failing.
+        """
+        if not self.processes:
+            return self
+
+        process_keys = [unit.envelope.component_key for unit in self.processes]
+        duplicated = sorted(
+            {key for key in process_keys if process_keys.count(key) > 1}
+        )
+        if duplicated:
+            raise PydanticCustomError(
+                "integration_component_key_duplicate",
+                "process envelope key(s) declared more than once: {keys}",
+                {"keys": ", ".join(duplicated)},
+            )
+
+        collisions = sorted(set(process_keys) & {comp.key for comp in self.components})
+        if collisions:
+            raise PydanticCustomError(
+                "integration_component_key_duplicate",
+                "key(s) used by both a component and a process envelope: {keys}. "
+                "components[].key and processes[].envelope.component_key share one "
+                "namespace",
+                {"keys": ", ".join(collisions)},
+            )
+        return self

@@ -2344,7 +2344,7 @@ if build_integration_action:
 
                 config = {
                   "authoring_request": {
-                    "contract_version": "1",
+                    "contract_version": "2",
                     "intent": {...},
                     "expected_capability_revision": "sha256:...",  # typed apply: REQUIRED
                     "expected_compile_hash": "sha256:...",         # typed apply: REQUIRED
@@ -2380,7 +2380,7 @@ if build_integration_action:
                   normalized intent, deterministic artifact fingerprints, the
                   validation report, and the compile hash an apply must bind to
                 Example:
-                    config='{"authoring_request":{"contract_version":"1","intent":{"intent_kind":"process_ir","integration_name":"Order Sync","component_key":"proc","process_ir":{...},"components":[...]}}}'
+                    config='{"authoring_request":{"contract_version":"2","intent":{"intent_kind":"process_ir","integration_name":"Order Sync","units":[{"envelope":{"component_key":"proc","name":"Order Sync Process","action":"create"},"process_ir":{...}}],"components":[...]}}}'
 
             apply:
                 - Execute plan in dependency order

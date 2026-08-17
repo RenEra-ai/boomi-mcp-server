@@ -69,14 +69,23 @@ from pydantic import (
     StringConstraints,
     field_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from .integration_models import IntegrationComponentSpec, IntegrationSpecV1
+from .process_component import ProcessAuthoringUnitV1
 from .process_ir import ProcessIRV1
 from .system_topology import SystemTopologySpecV1
 
 #: The authoring CONTRACT version. Distinct from every schema's own version: this
 #: names the shape of the request/result envelope, not of ProcessIR or topology.
-AUTHORING_CONTRACT_VERSION = "1"
+#:
+#: Bumped to "2" by #153 (M12.15), together with — and never separately from —
+#: the breaking ``process_ir`` intent reshape below (``component_key`` +
+#: ``process_ir`` -> ``units``). Version travels with SHAPE: publishing the new
+#: request shape under ``contract_version: "1"`` would leave the served contract
+#: self-inconsistent for any caller that bound to revision 1. There is no
+#: compatibility alias, because the issue records zero users.
+AUTHORING_CONTRACT_VERSION = "2"
 
 #: The closed action set the whole surface agrees on. ``server.py``'s docstring,
 #: the ``list_capabilities`` catalog, the workflow schema, and the builder's
@@ -146,14 +155,67 @@ class ProcessIRAuthoringIntentV1(_AuthoringModel):
     against. It is REQUIRED and not derived: a ``$ref`` names a component the
     caller intends to materialize, and guessing that plan from the IR is exactly
     the legacy inference ADR-001 §6 removed.
+
+    **#153 (M12.15) reshape — breaking, no alias.** The singular
+    ``component_key`` + ``process_ir`` pair is replaced by ``units``: one
+    :class:`ProcessAuthoringUnitV1` per root, each pairing exactly one envelope
+    with exactly one root. Two reasons, both structural rather than cosmetic:
+
+    * **Cardinality.** Multi-root is already real on the recipe arm, which
+      normalizes several composed roots at once. A singular pair could only ever
+      express one, so direct authoring was the odd surface out.
+    * **Materializability.** A root cannot be APPLIED without the envelope data
+      (name, action, placement, dependencies, extension bindings) that
+      ``ProcessIRV1`` deliberately refuses to carry. Pairing them in one required
+      model is what makes "no root applies without an envelope" unexpressible to
+      violate, rather than a runtime check that can be forgotten.
+
+    ``AUTHORING_CONTRACT_VERSION`` moves to "2" in the same change — see the
+    note there. No compatibility alias for the singular fields: the issue
+    records zero users, so an alias would be dead contract surface that still
+    has to be served, documented and tested.
     """
 
     intent_kind: Literal["process_ir"] = "process_ir"
     integration_name: NonEmptyString
-    component_key: NonEmptyString
-    process_ir: ProcessIRV1
+    units: Tuple[ProcessAuthoringUnitV1, ...]
     components: Tuple[IntegrationComponentSpec, ...] = ()
     conflict_policy: Literal["reuse", "clone", "fail"] = "reuse"
+
+    @field_validator("units")
+    @classmethod
+    def _check_units(
+        cls, value: Tuple[ProcessAuthoringUnitV1, ...]
+    ) -> Tuple[ProcessAuthoringUnitV1, ...]:
+        """At least one unit, and no two units claiming the same key.
+
+        Non-emptiness is enforced HERE rather than with ``Field(min_length=1)``,
+        and that is a correctness fix rather than a style choice. A field-level
+        ``min_length`` is evaluated against the elements that VALIDATED, so a
+        request carrying exactly one unit with a malformed root was reported as
+        BOTH ``missing`` (right) and ``too_short`` on ``units`` (wrong, and
+        actively misleading — it tells a caller who forgot one key to send a
+        second unit). A validator does not run at all when an element fails, so
+        the caller now sees only the diagnostic that names their actual mistake.
+
+        Duplicate keys are caught here as well as on ``IntegrationSpecV1`` so the
+        caller is told against the shape they actually authored — the spec-level
+        check reports against a normalized structure they never wrote.
+        """
+        if not value:
+            raise PydanticCustomError(
+                "process_component_cardinality_invalid",
+                "a process_ir intent must author at least one unit",
+            )
+        keys = [unit.envelope.component_key for unit in value]
+        duplicated = sorted({key for key in keys if keys.count(key) > 1})
+        if duplicated:
+            raise PydanticCustomError(
+                "integration_component_key_duplicate",
+                "units declare the same component_key more than once: {keys}",
+                {"keys": ", ".join(duplicated)},
+            )
+        return value
 
 
 class RecipeInvocationRequestV1(_AuthoringModel):
@@ -218,7 +280,7 @@ class AuthoringRequestV1(_AuthoringModel):
     a mutation).
     """
 
-    contract_version: Literal["1"] = "1"
+    contract_version: Literal["2"] = "2"
     intent: AuthoringIntentV1
     topology_spec: Optional[SystemTopologySpecV1] = None
     decisions: Tuple[DecisionResolutionV1, ...] = ()
@@ -400,7 +462,15 @@ class ArtifactFingerprintV1(_AuthoringModel):
 
     component_key: NonEmptyString
     component_type: NonEmptyString
-    artifact_kind: Literal["process_ir_emission_plan", "process_ir_normalized"]
+    artifact_kind: Literal[
+        "process_ir_emission_plan",
+        "process_ir_normalized",
+        # #153: the RELOCATABLE materialization plan. A third kind rather
+        # than a reuse of the two above, because it fingerprints a
+        # different quantity: those cover semantics and emission, this
+        # covers the deployable plan minus its account-bound fields.
+        "process_component_materialization_plan",
+    ]
     artifact_version: str = "1"
     byte_length: int = Field(ge=0)
     digest: DigestString
@@ -427,7 +497,7 @@ class AuthoringRevisionBindingV1(_AuthoringModel):
     and list_capabilities().
     """
 
-    contract_version: Literal["1"] = "1"
+    contract_version: Literal["2"] = "2"
     schema_revision: DigestString
     capability_revision: DigestString
     compiler_revision: DigestString
@@ -509,7 +579,7 @@ class ValidationReportSummaryV1(_AuthoringModel):
 class _AuthoringResultV1(_AuthoringModel):
     """Fields both read-only phases carry."""
 
-    contract_version: Literal["1"] = "1"
+    contract_version: Literal["2"] = "2"
     revision_binding: AuthoringRevisionBindingV1
     #: Typed ``False``, not a convention. A read-only phase that claimed to have
     #: mutated — or was edited into doing so — cannot be constructed.
@@ -555,7 +625,7 @@ class AuthoringBuildProvenanceV1(_AuthoringModel):
     surface emits (issue #146 QA, bug #407).
     """
 
-    contract_version: Literal["1"] = "1"
+    contract_version: Literal["2"] = "2"
     revision_binding: AuthoringRevisionBindingV1
     artifact_fingerprints: Tuple[ArtifactFingerprintV1, ...] = ()
     resolved_references: Tuple[ResolvedReferenceSummaryV1, ...] = ()
@@ -653,7 +723,13 @@ class AuthoringRequestProcessIRValidationError(Exception):
 #: Where a ProcessIR document sits inside a typed request. Pointers from
 #: ProcessIR's own parser address the DOCUMENT, so they are prefixed with this to
 #: address the request the caller actually sent.
-_PROCESS_IR_POINTER_PREFIX = "/intent/process_ir"
+#: RFC 6901 prefix for a ProcessIR diagnostic raised out of a direct intent.
+#: #153 moved the roots under ``units``, so the pointer is unit-INDEXED and
+#: the index is appended by the caller: ``/intent/units/0/process_ir/...``.
+#: The old unindexed ``/intent/process_ir`` prefix is gone rather than kept
+#: as a fallback — it names a path that no longer exists in the payload, and
+#: a pointer into a non-existent path is worse than no pointer at all.
+_UNITS_POINTER_PREFIX = "/intent/units"
 
 
 def parse_authoring_request_v1(raw_payload: Any) -> "AuthoringRequestV1":
@@ -675,38 +751,53 @@ def parse_authoring_request_v1(raw_payload: Any) -> "AuthoringRequestV1":
 
     if isinstance(raw_payload, Mapping):
         intent = raw_payload.get("intent")
-        if (
-            isinstance(intent, Mapping)
-            and intent.get("intent_kind") == "process_ir"
-            # PRESENCE, not shape. Gating on `Mapping` meant `process_ir: []`,
-            # a string, a number or `null` skipped the ProcessIR parser entirely
-            # — on plan, compile AND apply — and fell through to raw pydantic,
-            # which answers `model_type` at `intent.process_ir.process_ir` with
-            # no PROCESS_IR_* code, no remediation and no contract citations.
-            # `parse_process_ir_v1` has a purpose-built answer for exactly that
-            # input, so the shape gate discarded a diagnostic that already
-            # existed. Still a presence check and not an unconditional call: an
-            # ABSENT `process_ir` must stay pydantic's "missing" rather than
-            # become a misleading "payload must be a JSON object".
-            and "process_ir" in intent
-        ):
-            authored = intent["process_ir"]
-            try:
-                parse_process_ir_v1(
-                    dict(authored) if isinstance(authored, Mapping) else authored
-                )
-            except ProcessIRValidationError as exc:
-                raise AuthoringRequestProcessIRValidationError(
-                    tuple(
-                        {
-                            "code": diagnostic.code,
-                            "path": f"{_PROCESS_IR_POINTER_PREFIX}{diagnostic.path}",
-                            "message": diagnostic.message,
-                            "remediation": diagnostic.remediation,
-                        }
-                        for diagnostic in exc.diagnostics
-                    )
-                ) from None
+        if isinstance(intent, Mapping) and intent.get("intent_kind") == "process_ir":
+            # #153: the roots moved from ONE `process_ir` to `units[i].process_ir`,
+            # so the pre-parse walks the units. Every property the singular form
+            # had is preserved PER UNIT, and one is added:
+            #
+            # * PRESENCE, not shape. Gating on `Mapping` meant `process_ir: []`,
+            #   a string, a number or `null` skipped the ProcessIR parser
+            #   entirely — on plan, compile AND apply — and fell through to raw
+            #   pydantic, which answers `model_type` with no PROCESS_IR_* code,
+            #   no remediation and no contract citations. Still a presence check
+            #   and not an unconditional call: an ABSENT `process_ir` must stay
+            #   pydantic's "missing" rather than become a misleading "payload
+            #   must be a JSON object".
+            # * The pointer is now unit-INDEXED. With several roots in one
+            #   request, an unindexed `/intent/process_ir/...` pointer would name
+            #   a path that does not exist and would not say WHICH root failed —
+            #   the diagnostic would be actively misleading rather than merely
+            #   coarse.
+            #
+            # A non-list `units`, or a non-Mapping entry, is left to pydantic:
+            # this pre-parse exists to improve a ProcessIR diagnostic, not to
+            # reimplement envelope validation.
+            units = intent.get("units")
+            if isinstance(units, (list, tuple)):
+                for index, unit in enumerate(units):
+                    if not isinstance(unit, Mapping) or "process_ir" not in unit:
+                        continue
+                    authored = unit["process_ir"]
+                    try:
+                        parse_process_ir_v1(
+                            dict(authored)
+                            if isinstance(authored, Mapping)
+                            else authored
+                        )
+                    except ProcessIRValidationError as exc:
+                        prefix = f"{_UNITS_POINTER_PREFIX}/{index}/process_ir"
+                        raise AuthoringRequestProcessIRValidationError(
+                            tuple(
+                                {
+                                    "code": diagnostic.code,
+                                    "path": f"{prefix}{diagnostic.path}",
+                                    "message": diagnostic.message,
+                                    "remediation": diagnostic.remediation,
+                                }
+                                for diagnostic in exc.diagnostics
+                            )
+                        ) from None
 
     return AuthoringRequestV1.model_validate(raw_payload)
 
