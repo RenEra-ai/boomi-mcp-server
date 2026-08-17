@@ -50,6 +50,7 @@ from pydantic import ValidationError
 from ....models.cache_property_models import PROPERTY_SOURCE_FIELD_CONTRACT
 from ....models.pipeline_models import PipelineSpec, StageSpec
 from ._preservation_policy import OwnedPath, PreservationPolicy
+from ._process_preservation import PROCESS_PRESERVATION_POLICY
 from .cache_property_lineage import validate_config_lineage
 from .connector_builder import (
     BuilderValidationError,
@@ -6126,23 +6127,22 @@ PROCESS_FLOW_BUILDERS: Dict[str, type] = {
 # override values via UI) is NOT in owned_paths, so it survives a
 # structured update. bns:encryptedValues and any unknown
 # bns:Component-level children are also preserved.
-ProcessFlowBuilder.PRESERVATION_POLICY = PreservationPolicy(
-    component_type="process",
-    owned_paths=(OwnedPath(path="bns:object/process"),),
-)
+#
+# Issue #153 (M12.15): the three identical hand-written policies that used to
+# stand here are now ONE shared constant. All three builders own the same
+# subtree — that was always true and stated three times — and the canonical
+# materialization plan needs to record the same fact a fourth time. The
+# instances were byte-identical, and both `PreservationPolicy` and `OwnedPath`
+# are frozen dataclasses of strings and tuples, so sharing one instance is
+# behaviour-preserving with no aliasing hazard.
+ProcessFlowBuilder.PRESERVATION_POLICY = PROCESS_PRESERVATION_POLICY
 
 # The wrapper-parent builder owns the same `<process>` subtree (issue #90).
-WrapperSubprocessBuilder.PRESERVATION_POLICY = PreservationPolicy(
-    component_type="process",
-    owned_paths=(OwnedPath(path="bns:object/process"),),
-)
+WrapperSubprocessBuilder.PRESERVATION_POLICY = PROCESS_PRESERVATION_POLICY
 
 # The sync_pipeline builder emits the same `<process>` subtree via the delegated
 # ProcessFlowBuilder.build, so it owns the same path (issue #70 M5.2).
-SyncPipelineBuilder.PRESERVATION_POLICY = PreservationPolicy(
-    component_type="process",
-    owned_paths=(OwnedPath(path="bns:object/process"),),
-)
+SyncPipelineBuilder.PRESERVATION_POLICY = PROCESS_PRESERVATION_POLICY
 
 
 def get_process_flow_builder(process_kind: Optional[str]):

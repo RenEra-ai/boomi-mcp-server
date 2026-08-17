@@ -157,6 +157,12 @@ disposition whose recorded justification is contradicted by an in-slice measurem
 `CLAUDE.md`; this correction is made before the record is created so no void justification is ever
 committed.
 
+## Commit boundaries (distinct from Stage-1.5 — recorded so the two are not confused)
+
+| SHA | Kind | Tree state | Why it is NOT the Stage-1.5 boundary |
+| --- | --- | --- | --- |
+| `ec015d5` | work-preservation checkpoint (steps 1–4) | full non-KB suite green at the preceding tree: 9874 passed, 17 skipped, 0 failures | Stage 1.5 commits the **QA-validated** tree. Stage-1 live QA has not run — the implementation is incomplete (4 of 10 planned steps), so there is nothing coherent to exercise through the MCP boundary yet. This commit exists only so the work is not held solely in a working tree. **The Stage-2 review base remains the step-0 baseline `9f19aad5b280d58c02ef5cd840ff150d0193c1dd`**, so this commit does not move any review anchor. |
+
 ## Checkpoints (a row is written IN FLIGHT at every third evaluation of each loop — 3, 6, 9, … —
 ## in the batch it governs, never reconstructed at close)
 
