@@ -854,6 +854,63 @@ def emit_process(
     )
 
 
+#: Wire version of the EMITTER revision projection below. Bumped by hand only
+#: when the PROJECTION's shape changes — never when a registration changes,
+#: because a registration change already moves the digest through the projection
+#: itself. Two knobs for one fact would let a real change hide behind an
+#: unbumped version.
+_EMITTER_REVISION_WIRE_VERSION = "1"
+
+
+def emitter_revision() -> str:
+    """``sha256:<hex>`` over the emitter registry's behavioural projection (#153).
+
+    Recorded on a canonical materialization plan so a plan compiled by one
+    emitter build cannot be applied by another without the mismatch being
+    visible. It fingerprints BEHAVIOUR, not source: the projection is the
+    registry's own declared columns, so a comment change leaves it still while a
+    changed cardinality, capability, input model or shape type moves it.
+
+    Deliberately NOT a source hash or a git SHA, matching
+    ``authoring.contract._compiler_revision``: equivalent packaged code must
+    produce the same revision, or a rebuilt-but-identical deployment reports
+    drift against itself — and a plan fingerprint that varies by checkout is not
+    relocatable, which is the one thing #153's plan fingerprint may never be.
+
+    Sorted by ``emitter_kind`` so registration ORDER cannot reach the digest.
+    """
+    import hashlib
+    import json
+
+    projection = sorted(
+        (
+            {
+                "emitter_kind": reg.emitter_kind,
+                "input_type": reg.input_type.__name__,
+                "produced_shape_type": reg.produced_shape_type,
+                "capability": str(reg.supported_capability),
+                "outgoing": str(reg.outgoing),
+                # PRESENCE, not identity: a function object's repr carries a
+                # memory address, which would make the revision vary per process
+                # and destroy relocatability.
+                "has_requirements": reg.requirements is not _no_requirements,
+                "has_precondition": reg.precondition is not None,
+            }
+            for reg in _REGISTRATIONS
+        ),
+        key=lambda row: row["emitter_kind"],
+    )
+
+    payload = {
+        "wire_version": _EMITTER_REVISION_WIRE_VERSION,
+        "registrations": projection,
+    }
+    material = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(material).hexdigest()
+
+
 __all__ = [
     "CAPABILITY_PROCESS_IR_V1",
     "CapabilityLevel",
@@ -866,6 +923,7 @@ __all__ = [
     "VerifierIssueV1",
     "discriminator_keys",
     "emit_process",
+    "emitter_revision",
     "registration_for",
     "registry_keys",
 ]
