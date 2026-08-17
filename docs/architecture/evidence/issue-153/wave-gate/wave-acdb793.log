@@ -1,0 +1,13 @@
+wave_gate: baseline 9f19aad5b280d58c02ef5cd840ff150d0193c1dd (local)
+wave_gate: TOMBSTONE pytest-nodes pytest-003144 owner=repository disposition=n/a
+wave_gate: TOMBSTONE pytest-nodes pytest-003182 owner=repository disposition=n/a
+wave_gate: TOMBSTONE pytest-nodes pytest-003257 owner=repository disposition=n/a
+wave_gate: TOMBSTONE pytest-nodes pytest-004831 owner=repository disposition=n/a
+wave_gate: TOMBSTONE pytest-nodes pytest-004833 owner=repository disposition=n/a
+wave_gate: TOMBSTONE pytest-nodes pytest-004945 owner=repository disposition=n/a
+wave_gate: manifests ok (9836 required nodes, 60 active goldens)
+wave_gate: collection ok (9997 tests)
+9980 passed, 17 skipped, 18 warnings in 798.32s (0:13:18)
+wave_gate: non-KB suite green (9980 passed, 17 skipped, cap 30)
+wave_gate: 60 active goldens deterministic and byte-exact
+wave_gate: plan fingerprint checked:2 case(s)
