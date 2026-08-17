@@ -124,7 +124,17 @@ def process_unit(key="proc", name="M12.11 Process", doc=None, **envelope_extra):
     ``name`` and ``action`` are REQUIRED on the direct authoring surface, so the
     helper supplies both rather than letting a default decide what gets created.
     """
-    envelope_kwargs = {"component_key": key, "name": name, "action": "create"}
+    envelope_kwargs = {
+        "component_key": key,
+        "name": name,
+        "action": "create",
+        # #153: a root must DECLARE every `$ref` it uses. The fixture IR
+        # references all four supporting components, so the envelope declares
+        # them — ordered apply binds references from the id registry in
+        # topological order, and an undeclared reference is one whose component
+        # may not exist yet when the root is materialized.
+        "depends_on": ("api_conn", "api_op", "db_conn", "db_op"),
+    }
     envelope_kwargs.update(envelope_extra)
     return ProcessAuthoringUnitV1(
         envelope=ProcessComponentEnvelopeV1(**envelope_kwargs),

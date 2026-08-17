@@ -117,7 +117,14 @@
           "envelope": {
             "component_key": "router",
             "name": "Clean Room router",
-            "action": "create"
+            "action": "create",
+            "depends_on": [
+              "src_conn",
+              "src_op",
+              "tgt_conn",
+              "tgt_op",
+              "xform"
+            ]
           },
           "process_ir": {
             "body": {

@@ -350,78 +350,6 @@ def _connector_metadata_from_components(
     return metadata
 
 
-#: Why an intent that COMPILES a process cannot be applied.
-#:
-#: Boomi processes are created by the legacy builders, which emit XML from
-#: ``config.process_kind``. Nothing on a production path materializes a ProcessIR
-#: root: the compiler stops at the emission plan, and promoting its emitter to a
-#: production component writer is an ADR-001 §9 byte-parity cutover with its own
-#: issue.
-#:
-#: The rule keys on the COMPILED ARTIFACT, not on the intent kind: if compilation
-#: fingerprinted a ProcessIR root, apply must materialize that root. It applies
-#: equally to a direct ``process_ir`` intent and to a ``recipe`` intent whose
-#: composed roots were compiled — refusing one while permitting the other made
-#: the safety argument incoherent, since both certify one representation and
-#: build another.
-#:
-#: A ``process_kind`` on the component would not rescue either: the builder would
-#: emit from the component config while the binding attested to the emission
-#: plan, so the compile hash would certify an artifact that was never created. A
-#: silent divergence is worse than a missing capability, and "the binding means
-#: what it says" is the whole point of this milestone.
-#:
-#: ``integration_spec`` is unaffected — it produces no process roots, so its
-#: binding never claims a process artifact.
-MATERIALIZATION_CAPABILITY = "authoring.typed_apply.process_materialization"
-
-
-def _materialization_gaps(
-    request: AuthoringRequestV1,
-    spec: IntegrationSpecV1,
-    process_roots: Tuple[Tuple[str, Any], ...] = (),
-) -> Tuple[CapabilityGapV1, ...]:
-    """Any intent whose COMPILED process is not what apply would BUILD.
-
-    Keyed on the compiled artifact, not on the intent kind. The rule is one
-    sentence: if compilation fingerprinted a ProcessIR root, apply must
-    materialize THAT — and no production path does, because process XML is
-    emitted from the component plan's ``process_kind`` by the legacy builders.
-
-    An earlier version keyed on ``intent_kind == "process_ir"`` alone, which was
-    an inconsistency rather than a policy: a typed RECIPE intent also has its
-    composed ProcessIR roots compiled and fingerprinted, while apply builds from
-    the component configuration the recipe emitted alongside them. That is the
-    identical divergence — one representation certified, another built — and
-    refusing it for one intent while permitting it for the other made the safety
-    argument incoherent.
-
-    ``integration_spec`` is unaffected: it produces no process roots, so the
-    binding never claims a process artifact and apply is the legacy behaviour
-    plus a binding over the component plan.
-    """
-    if not process_roots:
-        return ()
-    kind = request.intent.intent_kind
-    return (
-        CapabilityGapV1(
-            capability_id=MATERIALIZATION_CAPABILITY,
-            state="unsupported",
-            path=f"/intent/{kind}",
-            reason_code="PROCESS_KIND_REQUIRED",
-            detail=(
-                "This intent compiles a ProcessIR root, so it can be planned and "
-                "compiled — both read-only — but not applied: process "
-                "materialization emits XML from the component plan, so applying "
-                "it would create an artifact the compile hash does not describe. "
-                "Use build_from_archetype, whose adapter proves byte parity "
-                "against the legacy renderer, to produce a materializable "
-                "component plan."
-            ),
-        ),
-    )
-
-
 def _normalize_intent(request: AuthoringRequestV1) -> _NormalizedIntent:
     intent = request.intent
     kind = intent.intent_kind
@@ -1588,11 +1516,6 @@ def plan_authoring_request_v1(
     # to learn that this intent is plan/compile-only before spending a compile.
     gaps = sort_by_key(
         normalized.gaps
-        # Same rule as the reference summary above: the gap is derived from the
-        # REAL plan, not from the redacted projection.
-        + _materialization_gaps(
-            request, normalized.integration_spec, normalized.process_roots
-        )
     )
 
     semantic_hash = semantic_fingerprint(_normalized_payload(normalized, request))
@@ -2034,38 +1957,18 @@ def preflight_typed_apply_v1(
     # through would materialize process XML from the component config while the
     # binding attested to the ProcessIR emission plan — a compile hash certifying
     # an artifact that was never created, which is worse than any refusal.
-    blocked = [
-        gap
-        for gap in compile_result.capability_gaps
-        if gap.capability_id == MATERIALIZATION_CAPABILITY
-    ]
-    if blocked:
-        raise AuthoringWorkflowError(
-            AUTHORING_APPLY_VALIDATION_REQUIRED,
-            tuple(
-                _diag(
-                    AUTHORING_APPLY_VALIDATION_REQUIRED,
-                    "error",
-                    message=(
-                        "This intent can be planned and compiled but not applied: "
-                        "no production path materializes a ProcessIR root."
-                    ),
-                    path=gap.path,
-                    subject_kind="component",
-                    subject_id=gap.path.rsplit("/", 1)[-1],
-                    remediation=(
-                        "Use build_from_archetype — its adapter proves byte "
-                        "parity against the legacy renderer — or apply the "
-                        "legacy integration_spec form. A typed recipe intent is "
-                        "NOT an alternative: it compiles a ProcessIR root too and "
-                        "is refused here for the same reason. Plan and compile "
-                        "remain available for this intent."
-                    ),
-                    cause_codes=(gap.reason_code,),
-                )
-                for gap in blocked
-            ),
-        )
+    # #153 (M12.15): the process-materialization refusal is GONE.
+    #
+    # It said "no production path materializes a ProcessIR root", which was true
+    # when it was written and is now false: the canonical chain compiles the root,
+    # binds real ids in topological order, materializes through the neutral
+    # ProcessComponentMaterializer and records both attestations. Keeping the
+    # refusal would refuse the capability this milestone exists to ship.
+    #
+    # Deleted rather than made conditional. A conditional refusal would need a
+    # second predicate for "is this root materializable", and that predicate is
+    # exactly the compiled artifact the plan already describes — a second
+    # authority answering a question the first one already answered.
 
     mismatches = []
     if binding.compile_hash != request.expected_compile_hash:

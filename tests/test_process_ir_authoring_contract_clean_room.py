@@ -399,16 +399,28 @@ def test_the_behavioural_facts_a_caller_needs_are_all_reachable():
     assert "sibling paths: no" in " ".join(ddp["ordering_facts"])
 
 
-def test_the_apply_refusal_is_discoverable_before_authoring_anything():
-    """A caller must learn the boundary BEFORE spending effort on the design."""
+def test_the_apply_capability_is_discoverable_before_authoring_anything():
+    """A caller must learn the boundary BEFORE spending effort on the design.
+
+    #153 (M12.15) inverts what the boundary IS. This test used to assert that a
+    caller could discover the apply REFUSAL up front; the refusal is withdrawn,
+    so it now asserts the same discoverability property about the shipped
+    capability — the point was never the refusal, it was that the surface tells
+    a caller what it can do before they invest in a design.
+    """
     brief = design_brief(authoring_mode="process_ir")
+
     refusals = [
         gap
         for gap in brief["process_ir_capability_gaps"]
         if gap["capability_id"] == "authoring.typed_apply.process_materialization"
     ]
-    assert refusals and refusals[0]["state"] == "unsupported"
-    assert "apply" not in [step["action"] for step in brief["typed_next_steps"]]
+    assert refusals == [], refusals
+
+    # ...and `apply` is now among the advertised next steps, so discoverability
+    # runs in the positive direction. Without this the assertion above would be
+    # satisfied by a brief that mentions materialization nowhere at all.
+    assert "apply" in [step["action"] for step in brief["typed_next_steps"]]
 
 
 # ---------------------------------------------------------------------------

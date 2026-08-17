@@ -89,7 +89,11 @@
           "envelope": {
             "component_key": "watermark_router",
             "name": "Clean Room watermark_router",
-            "action": "create"
+            "action": "create",
+            "depends_on": [
+              "src_conn",
+              "src_op"
+            ]
           },
           "process_ir": {
             "body": {
@@ -178,7 +182,11 @@
           "envelope": {
             "component_key": "watermark_router",
             "name": "Clean Room watermark_router",
-            "action": "create"
+            "action": "create",
+            "depends_on": [
+              "src_conn",
+              "src_op"
+            ]
           },
           "process_ir": {
             "body": {

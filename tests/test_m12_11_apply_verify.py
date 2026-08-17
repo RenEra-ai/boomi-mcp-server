@@ -406,51 +406,65 @@ def test_revision_skew_is_reported_separately_from_component_drift(monkeypatch):
     assert comparison.status == "match"  # the components themselves are unchanged
 
 
-def test_a_direct_process_ir_intent_cannot_be_applied():
-    """Plan and compile, yes. Apply, no — and said out loud.
+def test_a_direct_process_ir_intent_is_no_longer_refused_at_apply():
+    """#153 (M12.15) WITHDRAWS the refusal this test used to assert.
 
-    Process materialization emits XML from the component plan, so applying a
-    ProcessIR intent would create an artifact the compile hash does not describe.
-    A binding that certifies something that was never built is worse than a
-    refusal, so this is refused — with the gap named at PLAN time, before the
-    caller spends a compile.
+    The original said "Apply, no — and said out loud", on the stated grounds that
+    "process materialization emits XML from the component plan, so applying a
+    ProcessIR intent would create an artifact the compile hash does not
+    describe." That premise is now false: the canonical chain materializes the
+    ROOT itself, so the artifact and the binding describe the same thing.
+
+    Inverted rather than deleted. The limit is withdrawn, but the PROPERTY it
+    protected — apply must never certify something it did not build — still
+    matters, so the assertions move to the positive form: no materialization gap
+    is published, and the preflight no longer refuses.
     """
-    from boomi_mcp.authoring.workflow import (
-        MATERIALIZATION_CAPABILITY,
-        compile_authoring_request_v1 as _compile,
-    )
+    from boomi_mcp.authoring.contract import AUTHORING_CAPABILITY_REGISTRY
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1 as _compile
 
     compiled, _ = _compile(process_ir_request(), profile=_PROFILE)
-    gaps = [g for g in compiled.capability_gaps if g.capability_id == MATERIALIZATION_CAPABILITY]
-    assert gaps and gaps[0].state == "unsupported"
 
-    payload = process_ir_request().model_dump(mode="json")
-    payload["expected_capability_revision"] = (
-        compiled.revision_binding.capability_revision
-    )
-    payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+    # The capability is published SUPPORTED, and no gap is raised against it.
+    state, _version, _authority = AUTHORING_CAPABILITY_REGISTRY[
+        "authoring.typed_apply.process_materialization"
+    ]
+    assert state == "supported"
+    assert [
+        g
+        for g in compiled.capability_gaps
+        if g.capability_id == "authoring.typed_apply.process_materialization"
+    ] == []
 
-    with patch(_EXECUTE) as execute:
-        result = build_integration_action(
-            MagicMock(),
-            _PROFILE,
-            "apply",
-            config={"authoring_request": payload, "dry_run": False},
-        )
-        assert execute.call_count == 0
-    assert result["_success"] is False
-    assert result["error_code"] == AUTHORING_APPLY_VALIDATION_REQUIRED
-    assert result["mutation_performed"] is False
+    # ...and the refusal machinery itself is gone, not merely quiet. A dormant
+    # refusal that happens to raise no gap today would re-fire on the next intent
+    # that produced one.
+    import boomi_mcp.authoring.workflow as workflow
+
+    assert not hasattr(workflow, "_materialization_gaps")
+    assert not hasattr(workflow, "MATERIALIZATION_CAPABILITY")
 
 
 def test_the_support_matrix_matches_what_apply_actually_does():
-    """The published matrix and the runtime refusal are the same statement."""
-    from boomi_mcp.authoring.contract import AUTHORING_SUPPORT_MATRIX
+    """The published matrix and the runtime behaviour are the same statement.
 
-    assert AUTHORING_SUPPORT_MATRIX["process_ir"]["apply"] == "unsupported"
-    assert AUTHORING_SUPPORT_MATRIX["process_ir"]["plan"] == "supported"
-    assert AUTHORING_SUPPORT_MATRIX["process_ir"]["compile"] == "supported"
-    assert AUTHORING_SUPPORT_MATRIX["integration_spec"]["apply"] == "supported"
+    #153: every intent kind is now apply-capable, and the matrix must say so —
+    a matrix that still advertised `process_ir: unsupported` would refuse a
+    route the server accepts, which is the same drift in the other direction.
+    """
+    from boomi_mcp.authoring.contract import (
+        AUTHORING_PROCESS_COMPILING_INTENTS,
+        AUTHORING_SUPPORT_MATRIX,
+    )
+
+    for kind in ("process_ir", "recipe", "integration_spec"):
+        assert AUTHORING_SUPPORT_MATRIX[kind]["apply"] == "supported", kind
+        assert AUTHORING_SUPPORT_MATRIX[kind]["plan"] == "supported", kind
+        assert AUTHORING_SUPPORT_MATRIX[kind]["compile"] == "supported", kind
+
+    # The matrix DERIVES from this set; it is empty rather than deleted so the
+    # rule keeps one home. Pinned so a future hand-edit of the matrix fails.
+    assert AUTHORING_PROCESS_COMPILING_INTENTS == ()
 
 
 # ---------------------------------------------------------------------------
@@ -1145,37 +1159,33 @@ def test_mutation_status_is_an_apply_only_field():
     assert applied["mutation_status"] == "none"
 
 
-def test_the_materialization_refusal_keys_on_the_compiled_artifact():
-    """Architect review, P1. The refusal was keyed on `intent_kind == "process_ir"`,
-    which was an inconsistency rather than a policy: a typed RECIPE intent also
-    has its composed ProcessIR roots compiled and fingerprinted while apply builds
-    from the component config the recipe emitted alongside them — the identical
-    "certify one representation, build another" divergence.
+def test_the_materialization_refusal_is_retired_not_reworded():
+    """The #146 architect-review property, recorded as WITHDRAWN by #153.
 
-    Keyed on the artifact, both are refused and `integration_spec` (which
-    produces no roots, so its binding never claims a process artifact) is not.
+    The original pinned that the refusal keyed on the compiled ARTIFACT rather
+    than on ``intent_kind == "process_ir"`` — a real correction at the time,
+    because a typed recipe intent compiles roots too and was being let through.
+
+    #153 removes the refusal entirely, so there is no predicate left to key
+    correctly. What replaces the assertion is the reason the distinction
+    mattered: BOTH process-compiling intents must now be treated the same way,
+    and ``integration_spec`` (which produces no roots) must not have become a
+    special case in the other direction.
     """
-    import inspect
+    import boomi_mcp.authoring.workflow as workflow
+    from boomi_mcp.authoring.contract import AUTHORING_SUPPORT_MATRIX
 
-    from boomi_mcp.authoring.workflow import _materialization_gaps
-    from boomi_mcp.models.integration_models import IntegrationSpecV1
+    # The mechanism is gone — not renamed, not made conditional.
+    assert not hasattr(workflow, "_materialization_gaps")
+    assert not hasattr(workflow, "MATERIALIZATION_CAPABILITY")
 
-    source = inspect.getsource(_materialization_gaps)
-    assert "if not process_roots:" in source
-    assert 'intent_kind != "process_ir"' not in source
-
-    spec = IntegrationSpecV1(name="x", components=[])
-
-    # No compiled root -> no gap, whatever the intent kind.
-    assert _materialization_gaps(appliable_request(), spec, ()) == ()
-
-    # A compiled root -> refused, and the gap names the intent it came from.
-    with_root = _materialization_gaps(
-        process_ir_request(), spec, (("proc", object()),)
+    # ...and the two intents that compile roots are treated identically, which is
+    # the invariant the retired refusal was corrected to preserve.
+    assert (
+        AUTHORING_SUPPORT_MATRIX["process_ir"]
+        == AUTHORING_SUPPORT_MATRIX["recipe"]
+        == AUTHORING_SUPPORT_MATRIX["integration_spec"]
     )
-    assert len(with_root) == 1
-    assert with_root[0].state == "unsupported"
-    assert with_root[0].reason_code == "PROCESS_KIND_REQUIRED"
 
 
 def test_the_published_digest_is_really_sha256_of_the_canonical_bytes():

@@ -310,46 +310,44 @@ def test_the_schema_revision_moves_when_an_inherited_schema_moves(monkeypatch):
     assert before != after
 
 
-def test_the_published_support_matrix_matches_the_runtime_refusal():
-    """QA #431. The predicate was corrected to key on the compiled artifact, but
-    the published matrix kept the old `intent_kind == "process_ir"` conditional
-    and went on advertising `recipe.apply: supported` for a route the server
-    refuses. One rule with two expressions is one rule that drifts."""
-    import inspect
+def test_the_published_support_matrix_matches_what_apply_actually_does():
+    """QA #431, carried forward through #153's capability flip.
 
+    The original defect: the runtime predicate was corrected to key on the
+    compiled artifact while the published matrix kept an older conditional, so
+    the surface advertised `recipe.apply: supported` for a route the server
+    refused. One rule with two expressions is one rule that drifts.
+
+    #153 makes every intent kind appliable, so the ENUMERATION flips rather than
+    the discipline. The enumeration is still written out rather than derived
+    from ``AUTHORING_PROCESS_COMPILING_INTENTS``: deriving it made this guard
+    tautological once before — shrinking that tuple put the bug back on the wire
+    while the suite stayed green.
+    """
     from boomi_mcp.authoring.contract import (
         AUTHORING_PROCESS_COMPILING_INTENTS,
         AUTHORING_SUPPORT_MATRIX,
     )
-    from boomi_mcp.authoring.workflow import _materialization_gaps
-    from boomi_mcp.models.integration_models import IntegrationSpecV1
 
-    # ENUMERATED, not derived from the constant under test. Deriving the
-    # expectation from `AUTHORING_PROCESS_COMPILING_INTENTS` made this guard
-    # tautological: shrinking that tuple to ("process_ir",) put
-    # `recipe.apply: "supported"` back on the wire — the exact bug — while the
-    # suite stayed green. Same discipline as the enumerated export pins.
-    _MUST_BE_REFUSED_AT_APPLY = {"process_ir", "recipe"}
-    _MUST_BE_APPLIABLE = {"integration_spec"}
+    _MUST_BE_REFUSED_AT_APPLY: set = set()
+    _MUST_BE_APPLIABLE = {"integration_spec", "process_ir", "recipe"}
     assert _MUST_BE_REFUSED_AT_APPLY | _MUST_BE_APPLIABLE == set(
         AUTHORING_SUPPORT_MATRIX
     ), "an intent kind was added without deciding whether it can be applied"
+    # The set the matrix derives from must agree with the enumeration above.
     assert set(AUTHORING_PROCESS_COMPILING_INTENTS) == _MUST_BE_REFUSED_AT_APPLY
 
-    spec = IntegrationSpecV1(name="x", components=[])
     for kind, actions in AUTHORING_SUPPORT_MATRIX.items():
-        expected = (
-            "unsupported" if kind in _MUST_BE_REFUSED_AT_APPLY else "supported"
-        )
+        expected = "unsupported" if kind in _MUST_BE_REFUSED_AT_APPLY else "supported"
         assert actions["apply"] == expected, kind
         assert actions["plan"] == "supported", kind
         assert actions["compile"] == "supported", kind
 
-    # The runtime refuses exactly when a process root was compiled — which is
-    # what the named set is claiming about these intent kinds.
-    assert _materialization_gaps(None, spec, ()) == ()
-    source = inspect.getsource(_materialization_gaps)
-    assert "if not process_roots:" in source
+    # The runtime refusal this used to cross-check is RETIRED, not relocated.
+    # Asserting its absence is what stops a dormant copy re-firing later.
+    import boomi_mcp.authoring.workflow as workflow
+
+    assert not hasattr(workflow, "_materialization_gaps")
 
 
 def test_every_selector_the_revision_covers_is_published():

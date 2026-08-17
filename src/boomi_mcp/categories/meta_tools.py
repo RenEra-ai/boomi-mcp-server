@@ -9768,10 +9768,15 @@ def _plan_process_ir_block() -> Dict[str, Any]:
         for entry in entries
         if entry.entry_type == "capability" and entry.canonical_state != "supported"
     ]
+    # #153 (M12.15): published as a GAP only while it IS one. The state is read
+    # from the registry — it always was — but the row used to be appended
+    # unconditionally, so a supported capability would have been advertised in a
+    # list whose every other member is unsupported. The condition is what makes
+    # the list mean what its name says.
     materialization = AUTHORING_CAPABILITY_REGISTRY.get(
         "authoring.typed_apply.process_materialization"
     )
-    if materialization is not None:
+    if materialization is not None and materialization[0] != "supported":
         gaps.append(
             {
                 "capability_id": "authoring.typed_apply.process_materialization",
@@ -10085,31 +10090,15 @@ def plan_integration_design_action(
     # other mode, so nothing an existing caller reads changes shape.
     process_ir_block: Dict[str, Any] = {}
     if process_ir_mode:
-        # Apply is not merely omitted from the sequence — it is REFUSED, and the
-        # refusal is a published capability. Ending the steps at compile without
-        # saying why would look like an oversight; saying it here makes the
-        # boundary discoverable before the caller authors anything.
-        typed_next_steps = [
-            # ...and the compile step must stop describing itself as preparation
-            # for that apply. Dropping the step while leaving "obtain the
-            # compile hash to bind apply to" told the caller, in one response,
-            # both that apply is unsupported and that they should get ready for
-            # it.
-            {
-                **step,
-                "why": (
-                    "Canonically compile and obtain the compile hash and "
-                    "artifact fingerprints. This is the last phase for a direct "
-                    "ProcessIR intent: apply is refused, so the hash is "
-                    "evidence of WHAT was compiled, not a binding to spend. "
-                    "Performs zero remote mutation."
-                ),
-            }
-            if step["action"] == "compile"
-            else step
-            for step in typed_next_steps
-            if step["action"] != "apply"
-        ]
+        # #153 (M12.15): apply is a REAL phase for a direct ProcessIR intent, so
+        # it is no longer stripped from the sequence and compile no longer
+        # describes itself as a dead end. The compile hash is a binding to spend
+        # again, which is exactly what it was always for.
+        #
+        # The filtering that used to happen here is DELETED rather than inverted
+        # to a condition: a conditional that re-added `apply` would need to know
+        # when materialization is supported, which is a fact the capability
+        # registry already owns and the surrounding sequence already reflects.
         process_ir_block = _plan_process_ir_block()
 
     return {

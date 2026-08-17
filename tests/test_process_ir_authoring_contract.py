@@ -271,8 +271,9 @@ def test_the_two_new_capabilities_are_published_as_supported():
     states = {row["capability_id"]: row["state"] for row in manifest["capabilities"]}
     assert states["authoring.process_ir.contract"] == "supported"
     assert states["authoring.process_ir.pre_selection"] == "supported"
-    # ...and the pending owner decision is untouched.
-    assert states["authoring.typed_apply.process_materialization"] == "unsupported"
+    # #153 (M12.15) settled the owner decision this line used to call pending:
+    # direct ProcessIR apply IS supported, and the capability says so.
+    assert states["authoring.typed_apply.process_materialization"] == "supported"
 
 
 def test_there_is_no_fourth_revision():
@@ -419,17 +420,22 @@ def test_direct_planning_returns_bounded_constructs_gaps_and_a_query():
     assert payload["authoring_contract_query"]["schema_name"] == SELECTOR
 
 
-def test_direct_planning_ends_at_compile_and_publishes_the_apply_refusal():
+def test_direct_planning_now_reaches_apply_and_publishes_no_refusal():
+    """#153 (M12.15) inverts this: the sequence no longer stops at compile.
+
+    The materialization capability is supported, so it must not appear in a list
+    named ``process_ir_capability_gaps`` — a supported capability advertised
+    among gaps is a contradiction a caller has to resolve by guessing.
+    """
     payload = meta_tools.plan_integration_design_action(authoring_mode="process_ir")
     actions = [step["action"] for step in payload["typed_next_steps"]]
-    assert "apply" not in actions
-    assert actions[-1] == "compile"
-    refusals = [
+    assert "apply" in actions
+    assert actions[-1] == "apply"
+    assert [
         gap
         for gap in payload["process_ir_capability_gaps"]
         if gap["capability_id"] == "authoring.typed_apply.process_materialization"
-    ]
-    assert refusals and refusals[0]["state"] == "unsupported"
+    ] == []
 
 
 def test_intent_flags_can_never_select_the_mode():
@@ -1119,16 +1125,24 @@ def test_the_default_value_description_matches_what_the_validator_does():
         assert "does not discharge" not in description, name
 
 
-def test_direct_process_ir_next_steps_never_prepare_the_caller_for_apply():
-    """The response may not declare apply unsupported and then coach for it."""
+def test_direct_process_ir_next_steps_are_internally_consistent_about_apply():
+    """The response must not contradict itself about apply — in EITHER direction.
+
+    The original form of this test guarded one direction: a response may not
+    declare apply unsupported and then coach the caller toward it. #153 makes
+    apply supported, so the same consistency property is asserted the other way
+    round — the sequence offers apply, and no step still describes it as refused.
+    A response that advertised the capability while telling the caller it was
+    refused would be exactly as incoherent as the case this originally caught.
+    """
     payload = meta_tools.plan_integration_design_action(authoring_mode="process_ir")
-    for step in payload["typed_next_steps"]:
-        assert step["action"] != "apply"
-        assert "bind apply to" not in step["why"]
-    compile_step = next(
-        s for s in payload["typed_next_steps"] if s["action"] == "compile"
-    )
-    assert "apply is refused" in compile_step["why"]
+    steps = payload["typed_next_steps"]
+
+    assert any(step["action"] == "apply" for step in steps)
+    for step in steps:
+        why = step.get("why") or ""
+        assert "apply is refused" not in why, step["action"]
+        assert "is plan/compile-only" not in why, step["action"]
 
 
 # ---------------------------------------------------------------------------

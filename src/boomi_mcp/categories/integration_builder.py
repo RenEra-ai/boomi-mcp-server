@@ -5868,7 +5868,39 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     steps: List[Dict[str, Any]] = []
     warnings: List[str] = []
 
+    process_units_by_key = {
+        unit.envelope.component_key: unit
+        for unit in (getattr(spec, "processes", ()) or ())
+    }
+
     for key in execution_order:
+        # #153: `execution_order` spans ONE namespace covering components and
+        # canonical process roots, so a key here may name either. A root is
+        # planned from its ENVELOPE — it has no legacy component config to lint,
+        # and its semantics were already validated by the compiler — then the
+        # loop moves on. Without this branch the lookup below raises KeyError for
+        # every spec carrying a process, which is how the component-plan lint
+        # started rejecting a valid intent.
+        unit = process_units_by_key.get(key)
+        if unit is not None:
+            envelope = unit.envelope
+            steps.append(
+                {
+                    "key": key,
+                    "type": "process",
+                    "action": envelope.action,
+                    "name": envelope.name,
+                    "component_id": envelope.component_id,
+                    "depends_on": list(envelope.depends_on),
+                    # The canonical marker. A reader — and the apply loop — can
+                    # tell a ProcessIR root from a legacy process component
+                    # without inspecting config, which is the point: a canonical
+                    # root has no `process_kind` to inspect.
+                    "materialization": "process_ir_v1",
+                }
+            )
+            continue
+
         comp = components_by_key[key]
 
         # Issue #27: reference-only reuse. A component flagged

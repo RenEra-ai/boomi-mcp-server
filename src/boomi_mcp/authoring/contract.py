@@ -164,15 +164,15 @@ AUTHORING_CAPABILITY_REGISTRY: Mapping[str, Tuple[str, str, str]] = MappingProxy
             "1",
             "runtime_schema_registry",
         ),
-        # Published as unsupported rather than omitted, for the same reason as
-        # topology deploy: a caller must be able to learn BEFORE authoring that a
-        # ProcessIR root can be planned and compiled but not built. Nothing on a
-        # production path materializes one — the compiler stops at the emission
-        # plan, and promoting its emitter to a component writer is an ADR-001 §9
-        # byte-parity cutover with its own issue.
+        # #153 (M12.15): SUPPORTED. The cutover this entry was waiting for has
+        # landed — the canonical chain compiles a ProcessIR root, binds real ids
+        # during ordered apply, materializes it through the neutral
+        # ProcessComponentMaterializer, and records a mutation attestation plus a
+        # separate live-readback attestation. Version 2, because the capability's
+        # public promise changed rather than its wording.
         "authoring.typed_apply.process_materialization": (
-            "unsupported",
-            "1",
+            "supported",
+            "2",
             "canonical_compiler",
         ),
     }
@@ -187,7 +187,12 @@ AUTHORING_CAPABILITY_REGISTRY: Mapping[str, Tuple[str, str, str]] = MappingProxy
 #: key on the artifact; this matrix kept the old conditional and went on
 #: advertising ``recipe.apply: supported`` for a route the server refuses. One
 #: rule with two expressions is one rule that drifts.
-AUTHORING_PROCESS_COMPILING_INTENTS: Tuple[str, ...] = ("process_ir", "recipe")
+#: #153 (M12.15): EMPTY. Both process-compiling intents can now be applied, so
+#: the set that marked them apply-unsupported is empty rather than deleted — the
+#: support matrix below DERIVES from it, and removing the name would move the
+#: rule into the matrix as a hand-written literal, which is the drift this named
+#: set was introduced to stop.
+AUTHORING_PROCESS_COMPILING_INTENTS: Tuple[str, ...] = ()
 
 #: Intent kind x action -> supported / unsupported.
 #:
@@ -223,7 +228,6 @@ TOPOLOGY_DEPLOY_REASON_CODE = TOPOLOGY_APPLY_NOT_SUPPORTED
 _REASON_CODES: Mapping[str, str] = MappingProxyType(
     {
         "authoring.system_topology.deploy": TOPOLOGY_APPLY_NOT_SUPPORTED,
-        "authoring.typed_apply.process_materialization": "PROCESS_KIND_REQUIRED",
     }
 )
 
