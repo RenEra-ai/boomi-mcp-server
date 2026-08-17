@@ -239,6 +239,57 @@ stronger, immune to SDK renames, and measured valid: the dry-run path makes ZERO
 **Mutation control:** a planted `create_component` call is missed by the old matcher and caught by the
 new assertion.
 
+### L2 — Stage-2 repo Codex commit-review, evaluation 3 (fix delta) — **CHECKPOINT**
+
+Run directory `/tmp/cdx-review.Uv7Enh`, `STATUS: completed`, teardown `confirmed stopped`,
+`SCOPE: branch diff against 610c98d5… (610c98d) head=dd7583ca… dirty=false`, `last-reviewed-sha dd7583c`.
+
+| # | Source ID | Verbatim summary | Gate / run dir | Orig. label | Blocking class | Defect class | Derived tier + anchor | SHA/delta | Disposition |
+|---|---|---|---|---|---|---|---|---|---|
+| C-03 | L2e3 P1 | "When a broken adapter preserves the node count while losing a capability—for example, rewriting every `set_ddp` node as `set_dpp`, or dropping one node while duplicating another—these per-case counts remain equal … therefore this census does not actually link each authored step to its output and leaves the reachability gate false-green." | L2 / cdx-review.Uv7Enh | **P1** | capability reachability | (an aggregate assertion standing in for a per-item one, the emitter registry + lowering) — **3rd instance** | **Critical** — anchor: reviewer labelled it P1 | fix delta | `fixed` |
+
+**Verified, then fixed with a materially different action.** The per-case total was still an aggregate.
+An order-based link was tried first and **rejected as unsound by measurement**: the adapter flattens
+nested branch legs and decision arms elsewhere in the body, so zipping authored order against IR path
+order pairs `message` with `branch`. The landed fix compares PER-KIND multisets, mapping each authored
+legacy kind through `_KIND_ALIASES` (`models/_process_ir_compat.py:207`) — the adapter's OWN legacy→IR
+rename table, so the correspondence is read from the runtime authority rather than hand-modelled, and
+the table's own contents are asserted so a silently emptied table cannot make every expectation the
+identity. Exact for all 9 specimens. **Mutation controls, all four run:** swap `set_ddp`→`set_dpp`
+FIRES; drop-one/duplicate-another FIRES; plain drop FIRES; identity does NOT fire.
+
+#### CHECKPOINT DECISION — L2, window evaluation 3, cumulative evaluation 3
+
+- **Loop identity:** L2 (Stage-2 repo Codex commit-review), roster entry 2.
+- **Window / cumulative:** 3 / 3. Forced by CLAUDE.md Stage 2 step 9f (a third review carrying
+  validated blocking findings after reconciliation).
+- **Current SHA / dirty state at decision time:** `dd7583c` committed + an uncommitted tests-only fix
+  delta for C-03 (committed immediately below as the next SHA).
+- **Owed validation, discharged BEFORE this decision:** affected suites 1144 passed; full non-KB suite
+  **9819 passed / 17 skipped / 0 failed** on a provably frozen tree; `src/` untouched by the C-03 fix,
+  so no inventory rebaseline owed; manifest exact at 9836.
+- **Per-tier counts:** critical unresolved **0**; standard unresolved **0**. Every finding from all
+  three evaluations is `fixed`; none deferred, none refuted, none carried.
+- **Affected-class breadth:** narrowing — e2 spanned capability reachability + mutation accounting,
+  e3 capability reachability only.
+- **New / resolved / recurring defect classes:** new **0**; resolved **1** (the SDK-method-name guess,
+  C-02); recurring **1** — the aggregate-for-per-item pair, third instance (R-01 → C-01 → C-03).
+- **Trend evidence:** highest unrefuted severity flat (P1 → P1); unresolved count 0 at every
+  reconciliation; finding count per evaluation 0 → 2 → 1; breadth narrowing. The recurring class is
+  the one thing NOT improving on its own terms, and it is the reason this decision is recorded rather
+  than assumed.
+- **Is the recurring class being instance-patched?** No — each round replaced the mechanism rather
+  than patching a case, and the third replacement is the first to link per-item through the runtime's
+  own authority instead of counting: floor → per-path attribution → per-case total → **per-kind
+  multiset via `_KIND_ALIASES`**. It is also the first with a mutation control covering the specific
+  evasions named, which is why the class is treated as closed rather than deferred.
+- **Named finite next correction:** none outstanding.
+- **OUTCOME: `CONTINUE`** — start a new three-evaluation window for L2. Rationale: zero residue of
+  either tier, so `ESCALATE-OPEN` has no grounds (round count alone is never grounds) and no deferral
+  is needed (nothing to defer). `CLOSE-CLEAN` is NOT claimed here because the required gates do not yet
+  cover the current tree: the C-03 fix has not been reviewed, and L3 (§6) and L4 (wave) are still owed.
+  The next evaluation is the delta-scoped re-review of the C-03 fix.
+
 ## Observations recorded, not fixed (out of scope for this slice)
 
 | # | Observation | Why not fixed here |

@@ -74,6 +74,7 @@ from boomi_mcp.compiler.process_ir.semantic_validation.validation_policy import 
     lookup_policy,
     registered_adapters,
 )
+from boomi_mcp.models._process_ir_compat import _KIND_ALIASES  # noqa: E402
 from boomi_mcp.models.process_ir import (  # noqa: E402
     BranchLegStepV1,
     DecisionFalseArmStepV1,
@@ -326,15 +327,37 @@ _CONFIG_LEVEL_IR_KINDS = frozenset(
 )
 
 
-def _count_authored_steps(config):
-    """How many `flow_sequence` steps a legacy config authors, nested included."""
-    total = 0
+def _expected_ir_kind_census(config):
+    """The IR step kinds a legacy config's `flow_sequence` MUST produce, as a count.
+
+    Per KIND, not a total. `_KIND_ALIASES` is the adapter's own legacy->IR rename
+    table (`models/_process_ir_compat.py`), so reading it here is derivation from
+    the runtime authority rather than a second hand-model of the rename — the
+    renames are real (`dataprocess` -> `data_process`, `doccacheload` ->
+    `cache_put`, `doccacheretrieve` -> `document_cache_retrieve`, `doccacheremove`
+    -> `cache_remove`) and a hand-copied table here would be exactly the duplicate
+    authority this slice exists to remove.
+
+    Order cannot be used for this: the adapter flattens nested branch legs and
+    decision arms elsewhere in the body, so zipping authored order against IR path
+    order produces a bogus correspondence (measured: it pairs `message` with
+    `branch`). A per-kind multiset is order-free and still per-item.
+    """
+    census = {}
+    for kind in _authored_flow_sequence_kind_list(config):
+        mapped = _KIND_ALIASES.get(kind, kind)
+        census[mapped] = census.get(mapped, 0) + 1
+    return census
+
+
+def _authored_flow_sequence_kind_list(config):
+    """Every authored `flow_sequence` step kind, in document order, nested included."""
+    found = []
 
     def walk(node):
-        nonlocal total
         if isinstance(node, dict):
             if isinstance(node.get("kind"), str):
-                total += 1
+                found.append(node["kind"])
             for value in node.values():
                 walk(value)
         elif isinstance(node, list):
@@ -342,7 +365,7 @@ def _count_authored_steps(config):
                 walk(value)
 
     walk(config.get("flow_sequence") or [])
-    return total
+    return found
 
 
 def _flow_sequence_kind_attribution():
@@ -392,12 +415,11 @@ def _flow_sequence_kind_attribution():
                 routes.setdefault(kind, set()).update(emitted[path])
             else:
                 unattributed.setdefault(kind, set()).add("%s::%s" % (name, path))
-        census.append((
-            name,
-            _count_authored_steps(config),
-            sum(1 for kind in by_path.values()
-                if kind not in _CONFIG_LEVEL_IR_KINDS),
-        ))
+        actual = {}
+        for kind in by_path.values():
+            if kind not in _CONFIG_LEVEL_IR_KINDS:
+                actual[kind] = actual.get(kind, 0) + 1
+        census.append((name, _expected_ir_kind_census(config), actual))
     return authored, routes, unattributed, census
 
 
@@ -535,11 +557,20 @@ def test_no_emitter_key_is_reachable_only_through_a_deletion_scheduled_route():
     # cannot see a step the adapter DROPS (no IR node exists to be unattributed),
     # and a sibling sharing its emitter key hides the loss from the key sets.
     assert census, "flow_sequence census is empty — the walk found no specimens"
-    dropped = [(name, n, m) for name, n, m in census if n != m]
-    assert not dropped, (
-        "authored flow_sequence steps did not survive adaptation "
-        "(case, authored, ir_steps): %s" % dropped
+    diverged = [
+        (name, expected, actual) for name, expected, actual in census
+        if expected != actual
+    ]
+    assert not diverged, (
+        "authored flow_sequence steps did not survive adaptation intact "
+        "(case, expected-by-kind, actual-by-kind): %s" % diverged
     )
+    # The alias table must actually cover the renames it is being trusted for; a
+    # silently emptied table would make every expectation the identity and hide a
+    # rename regression.
+    assert set(_KIND_ALIASES) >= {
+        "dataprocess", "doccacheload", "doccacheretrieve", "doccacheremove"
+    }, "the adapter's legacy->IR alias table lost entries: %s" % sorted(_KIND_ALIASES)
 
     # EXACT equality, both directions: an allowed kind with no committed specimen
     # fails here rather than passing silently, which is the criterion "a kind added
