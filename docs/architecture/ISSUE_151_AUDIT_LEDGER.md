@@ -484,7 +484,7 @@ mutation.
 
 This ledger was first committed at `docs/architecture/evidence/issue-151/ledger.md` — the wrong
 place. The repo's convention, and what the attestation scanner requires of any evidence archive
-carrying an `index.jsonl`, is `docs/architecture/ISSUE_<N>_AUDIT_LEDGER.md`. Correcting it with
+carrying an `index.jsonl`, is `docs/architecture/ISSUE_151_AUDIT_LEDGER.md` (one per issue). Correcting it with
 `git mv` then tripped a different guard,
 `test_audit_ledger_revisions_are_append_only_and_fully_declared`, which freezes ledger paths once
 committed because a rename hides pre-rename history and a row mutated across it would read as
