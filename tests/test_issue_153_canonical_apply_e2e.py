@@ -1312,7 +1312,11 @@ def test_a_normally_named_component_reports_no_reassignment():
 
     assert result["_success"] is True, result.get("error")
     step = result["results"]["proc"]
-    assert "requested_name" not in step
+    # `requested_name` and `applied_name_verified` are present on EVERY canonical
+    # result by construction (Codex round 6) — the healthy case is that the two
+    # names agree and nothing is flagged, not that the fields are absent.
+    assert step["applied_name_verified"] is True
+    assert step["name"] == step["requested_name"] == "M12.15 Process"
     assert "name_reassigned_by_platform" not in step
     assert not [w for w in (result.get("warnings") or []) if "not the authored" in w]
 
@@ -1390,3 +1394,92 @@ def test_execution_warnings_survive_a_partial_failure():
         "the canonical partial-failure envelope drops execution warnings"
     )
     assert ib is not None
+
+
+# ---------------------------------------------------------------------------
+# Codex Stage-2 review, round 6
+# ---------------------------------------------------------------------------
+
+
+def test_every_canonical_result_carries_the_name_discriminator():
+    """Codex round 6 F1: the field must exist on EVERY exit, including early ones.
+
+    A create that reports success without a `component_id` returns before the
+    readback — a documented path that may already have created the component —
+    and used to expose the requested name with nothing marking it unverified.
+    Initializing at construction makes that unrepresentable rather than
+    remembered.
+    """
+    def _no_id(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True}          # success, no component_id
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    _SUBMITTED.clear()
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _no_id
+        get_xml.side_effect = _live_xml
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(), "dry_run": False},
+        )
+
+    assert result["_success"] is False
+    step = result["partial_results"]["proc"]
+    assert step["applied_name_verified"] is False
+    assert step["requested_name"] == "M12.15 Process"
+
+
+def test_one_constructor_builds_every_partial_failure_envelope():
+    """Codex round 6 F2, asserted structurally.
+
+    Three rounds running, a field was present on one failing exit and missing
+    from the others. The invariant is that `_apply_plan` has exactly ONE place
+    where a partial-failure envelope is built, so a new exit cannot omit a field
+    and a new field is added once.
+    """
+    import ast
+
+    source = (
+        Path(__file__).resolve().parent.parent
+        / "src/boomi_mcp/categories/integration_builder.py"
+    ).read_text()
+    tree = ast.parse(source)
+    apply_plan = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_apply_plan"
+    )
+
+    hand_built = [
+        node.lineno
+        for node in ast.walk(apply_plan)
+        if isinstance(node, ast.Return)
+        and isinstance(node.value, ast.Dict)
+        and any(
+            isinstance(k, ast.Constant) and k.value == "partial_results"
+            for k in node.value.keys
+        )
+    ]
+    assert hand_built == [], (
+        "partial-failure envelope built by hand at line(s) %r — call "
+        "_partial_failure() so every exit carries the same fields" % hand_built
+    )
+
+    # Non-vacuity: the constructor exists and IS used by several exits.
+    calls = [
+        node.lineno
+        for node in ast.walk(apply_plan)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_partial_failure"
+    ]
+    assert len(calls) >= 3, calls

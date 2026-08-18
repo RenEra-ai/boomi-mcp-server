@@ -7593,7 +7593,17 @@ def _execute_canonical_process(
         "status": ("updated" if action == "update" else "created") if succeeded else "failed",
         "component_id": component_id,
         "type": "process",
+        # The REQUESTED name, and said to be unverified FROM CONSTRUCTION.
+        #
+        # Codex round 6: the discriminator was assigned near the end of this
+        # function, so the documented "create succeeded without a component id"
+        # path — which returns earlier, and may already have created the
+        # component — exposed the requested name with nothing marking it. A
+        # field that must be true on every exit is initialized where the object
+        # is built, not added on the path that happened to be reported.
         "name": envelope.name,
+        "requested_name": envelope.name,
+        "applied_name_verified": False,
         "result": exec_result,
         "_success": succeeded,
     }
@@ -7662,21 +7672,18 @@ def _execute_canonical_process(
     # them. The readback is already in hand, so the comparison is free — and it
     # is the only place the truth is available, because the create response does
     # not carry the assigned name.
+    # UPGRADE the construction-time default once the readback confirms a name.
     applied_name = applied_component_name(live_xml) if live_xml else None
-    # ALWAYS present, so a caller branches on a field rather than on absence.
-    result["applied_name_verified"] = applied_name is not None
     if applied_name:
+        result["applied_name_verified"] = True
         result["name"] = applied_name
         if envelope.name and applied_name != envelope.name:
-            result["requested_name"] = envelope.name
             result["name_reassigned_by_platform"] = True
     else:
-        # The readback is best-effort and may time out or return unparseable
-        # XML. Leaving `name` as the REQUESTED value and saying nothing would
-        # present the request as fact on exactly the path where the platform may
-        # have assigned `"X 2"` — the same mutation-accounting defect
-        # QA-153-r7-01 named, reproduced on its failure path (Codex round 5).
-        result["requested_name"] = envelope.name
+        # Readback unavailable: the construction-time default already says the
+        # name is unverified, so there is nothing to weaken here.
+        pass
+
 
     return {"result": result, "component_id": component_id,
             "mutation": mutation, "readback": readback,
@@ -8004,6 +8011,44 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     # Scoped to the LOOP, not to the whole function: everything above this
     # point is preflight, and a spec that fails to parse has provably written
     # nothing. Reporting `possible` there would be alarmist and equally wrong.
+    def _partial_failure(*, error, failed_step, **extra):
+        """THE partial-failure envelope. Every failing exit builds it here.
+
+        Three consecutive review rounds found the same shape: a field present on
+        one exit path and missing from the others — the attestations served only
+        on failure (QA-153-r2-05), the execution warnings only on success (Codex
+        round 5), then only on the CANONICAL failure and not the component one
+        (Codex round 6). Each was fixed at the site that was reported, which is
+        exactly why there was always another site.
+
+        `_apply_plan` has several failing exits and every one of them is a
+        serving boundary, so the envelope is constructed in ONE place and they
+        call it. A new exit gets the complete shape by construction; a new field
+        is added once.
+        """
+        envelope = {
+            "_success": False,
+            "error": error,
+            "failed_step": failed_step,
+            "partial_results": results,
+        }
+        # Attestations and warnings describe mutations that ALREADY happened, so
+        # no failing exit may drop them. Roots applied BEFORE the failure keep
+        # their attestations; unapplied roots record none — that asymmetry is
+        # the record.
+        if process_mutations:
+            envelope["process_mutations"] = [
+                m.model_dump(mode="json") for m in process_mutations
+            ]
+        if process_readbacks:
+            envelope["process_readbacks"] = [
+                r.model_dump(mode="json") for r in process_readbacks
+            ]
+        if apply_warnings:
+            envelope["warnings"] = list(apply_warnings)
+        envelope.update({k: v for k, v in extra.items() if v is not None})
+        return envelope
+
     try:
         for key in execution_order:
             # #153: a canonical ProcessIR root. Materialized through the neutral
@@ -8079,26 +8124,12 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 if outcome.get("readback") is not None:
                     process_readbacks.append(outcome["readback"])
                 if not outcome["result"].get("_success", True):
-                    return {
-                        "_success": False,
-                        "error": outcome.get("error") or f"Failed at step '{key}'",
-                        "error_code": outcome.get("error_code"),
-                        "failed_step": key,
-                        "partial_results": results,
-                        # The failed step's own result, lifted like the component
-                        # arm lifts it, so both participant kinds report a
-                        # failure in one shape (QA-153-r3-02).
-                        "step_result": outcome.get("step_result"),
-                        # Roots applied BEFORE the failure keep their attestations;
-                        # unapplied roots record none. That asymmetry is the record.
-                        "process_mutations": [m.model_dump(mode="json") for m in process_mutations],
-                        "process_readbacks": [r.model_dump(mode="json") for r in process_readbacks],
-                        # Execution warnings describe mutations that ALREADY
-                        # happened, so a later step's failure must not swallow
-                        # them — this return bypasses the final merge (Codex
-                        # round 5).
-                        **({"warnings": list(apply_warnings)} if apply_warnings else {}),
-                    }
+                    return _partial_failure(
+                        error=outcome.get("error") or f"Failed at step '{key}'",
+                        failed_step=key,
+                        error_code=outcome.get("error_code"),
+                        step_result=outcome.get("step_result"),
+                    )
                 continue
 
             comp = _component_for_key(key, components_by_key)
@@ -8125,12 +8156,13 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     id_registry[key] = existing_id
                     continue
                 if conflict_policy == "fail":
-                    return {
-                        "_success": False,
-                        "error": f"Component '{comp.name or comp.key}' already exists and conflict_policy=fail",
-                        "failed_step": key,
-                        "partial_results": results,
-                    }
+                    return _partial_failure(
+                        error=(
+                            f"Component '{comp.name or comp.key}' already "
+                            "exists and conflict_policy=fail"
+                        ),
+                        failed_step=key,
+                    )
                 resolved_config = _apply_clone_suffix(comp, resolved_config)
 
             target_id = comp.component_id or existing_id
@@ -8157,13 +8189,11 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             }
 
             if not exec_result.get("_success", False):
-                return {
-                    "_success": False,
-                    "error": f"Failed at step '{key}'",
-                    "failed_step": key,
-                    "step_result": exec_result,
-                    "partial_results": results,
-                }
+                return _partial_failure(
+                    error=f"Failed at step '{key}'",
+                    failed_step=key,
+                    step_result=exec_result,
+                )
     except _ApplyExecutionError:
         raise
     except Exception as exc:  # noqa: BLE001 — re-raised, never swallowed

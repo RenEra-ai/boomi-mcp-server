@@ -73,6 +73,7 @@ re-run never debits L1.
 | --- | --- | --- | --- | --- |
 | DC-1 | a documented COMPLETENESS claim that the code does not enforce — a docstring asserting "every field", "excluded by construction", "fingerprints behaviour", or "non-vacuity", restated in prose beside an enumeration that is free to fall behind | the authority the claim is about: the model's own `model_fields`, the dataclass's own `fields()`, the runtime dispatch table `PROCESS_FLOW_BUILDERS`, the emitter registration table | S5-01, S5-02, S5-03, S5-04, S5-05, S5-06, S5-07, S5-09, S5-10 (9 — derived from the rows above) | **STRUCTURAL FIX applied** — see below |
 | DC-2 | a consumer that hand-models the PARTICIPANT UNIVERSE of a spec as `spec.components` alone, or reads a participant's backing component without first asking whether it has one | the one participant set `_integration_participants(spec)` — `components` **and** `processes` — which is also the authority `_topological_order` and the dependency graph read | S7-01, QA-153-r1-01, QA-153-r2-01, QA-153-r2-02, QA-153-r2-06, CX1-01, CX1-11, CX1-12 (8 — derived from the rows below) | **STRUCTURAL FIX applied in the r2 batch; its sibling sweep was INCOMPLETE** (it enumerated `integration_builder.py` only) and was extended over `authoring/workflow.py` in the Codex round-1 batch — see below |
+| DC-4 | a field required on EVERY exit of a multi-exit function, added on the exit that was reported | the function's own exit set — `_apply_plan`'s failing returns, `_execute_canonical_process`'s early returns | QA-153-r2-05, CX5-04, CX6-01, CX6-02 (4 — derived from the rows below) | **STRUCTURAL FIX applied in the Codex round-6 batch** — see below |
 | DC-3 | a serialized document searched as TEXT, with every matching string treated as structural | the SCHEMA's own reference-bearing fields — `ComponentRefV1`, identified by its validator in the field metadata | CX1-05, CX1-06, CX1-10 (3 — derived from the rows below) | **STRUCTURAL FIX applied in the Codex round-1 batch** — see below |
 
 ### DC-1 structural fix (mandatory — nine instances, far past the second-instance trigger)
@@ -256,6 +257,8 @@ authority-derived coverage claim.
 | CX5-03 | same round | "Point OBJECT_MISSING consumers to `details.side` … both emitting branches set `field=\"owned_path\"`; the current-versus-desired discriminator is stored in `details.side`. The taxonomy summary therefore directs consumers to a field that cannot identify the failing side, defeating this contract correction." | **P2** | machine-served schemas/contracts | DC-1 — a summary asserting where to look, written without checking what the call sites pass; 2nd instance of CX4-02's pair | Standard — source label P2 | `73e2da8` | `fixed` — the summary names `details.side` (`current`/`desired`) and says explicitly that `field` cannot identify it. Both branches verified at the source. This is the second consecutive round in which a summary I wrote for a code I had just registered was wrong about that code's own call sites; the correction each time came from reading them. |
 | CX5-04 | same round | "Carry reassignment warnings into partial failures … this warning remains only in `apply_warnings`; the subsequent partial-failure returns bypass the final merge into `apply_result`. The caller therefore loses the actionable remediation for a mutation that already occurred." | **P2** | mutation accounting | (an accumulator merged on one exit path of several, the envelope shape) — recurrence of QA-153-r2-05's pair, which was the same defect for the attestations | Standard — source label P2 | `73e2da8` | `fixed` — the canonical partial-failure envelope carries the accumulated execution warnings. Recorded as a recurrence rather than a new class: r2-05 was "attestations returned only on the failure envelope", this is "warnings returned only on the success envelope" — the same failure to treat every exit path as a serving boundary, mirrored. |
 | QA-153-r8-01 | L1 Stage-1 QA round 8, `boomi-qa-tester`, report `agents/reports/2026-08-18-issue-153-m12-15-stage1-r8.md` — adversarial question, answered by INVERTING it | "Exact inequality cannot *miss* a rename … The real exposure is the opposite — if the platform normalizes a name it accepted, the flag fires on a component nobody renamed, and your warning would tell the caller to delete a stale component that doesn't exist." | **advisory** (posed as an answer to my own adversarial question, not filed as a defect) | machine-served schemas/contracts | (a remediation asserting an unverified CAUSE rather than stating the observed FACT) — 1st instance | Standard — no critical anchor; the served text is blocking class, and the exposure is a false instruction rather than a wrong mutation | `73e2da8` + this batch | `fixed` — the warning now states the fact (live name ≠ authored name, and conflict_policy will not match it) and offers the counter-append as the *usual* cause to check, rather than asserting it and prescribing a deletion. Recorded because I asked the wrong question: I worried the check would MISS a rename, and the measurable risk was that it fires correctly on a difference my explanation then mis-attributes. |
+| CX6-01 | L2 Stage-2 Codex commit-review round 6, run dir `cdx-review.44SGLy`, `STATUS: completed`, `SCOPE: branch diff against 73e2da8917c76fd026478478b9172ce526a7d684 (73e2da8) head=9fe3e35efb7a8d92556ea9cc98a7c0b441faa605 dirty=false` | "Mark the no-ID mutation's name as unverified … `build_mutation_attestation` raises and `_execute_canonical_process` returns before this assignment. That documented path may already have created the component, yet `partial_results[key]` still exposes the requested `name` without an `applied_name_verified` discriminator or warning." | **P1** | **mutation accounting** | **DC-4** — 3rd instance | **Critical** — anchor: mutation accounting, and source label P1 | `9fe3e35` | `fixed` — `requested_name` and `applied_name_verified: False` are initialized where the result dict is BUILT, and the readback UPGRADES the flag rather than introducing it. Every early return therefore carries the discriminator by construction. |
+| CX6-02 | same round | "Preserve warnings on every partial-failure exit … execution takes the component failure return rather than this canonical return, bypassing the added warning merge … the failure envelope drops remediation for an already-completed process mutation." | **P2** | mutation accounting | **DC-4** — 4th instance | Standard — source label P2 | `9fe3e35` | `fixed` structurally — see below. |
 
 Dispositions: `fixed` · `finding-refuted` · `severity-refuted` · `not-validated` · `deferred`
 (issue, reason class, placement). A refutation names the disputed claim and the concrete evidence.
@@ -300,6 +303,51 @@ window and attested three of five: the owed regression sweep (scenarios 1–7, a
 policy, and binding staleness. One run (`r5_04`) is recorded **VOID, not failed**, and the
 adversarial probes did not run. Round 4's owed sweep is therefore DISCHARGED; what round 6 carries is
 round 5's own unrun remainder plus everything the round-2 corrections changed.
+
+### DC-4 structural fix (mandatory — four instances across three consecutive rounds)
+
+**The mechanism.** A function has several exits and one of them is a serving boundary that someone
+looked at. A field is added there. The other exits keep shipping without it, and the next review
+round finds one of those — so the fix is applied there too, and the round after finds the next.
+
+| Field | Exit that had it | Exits that did not | Row |
+| --- | --- | --- | --- |
+| the two attestations | the partial-FAILURE envelope | the success envelope and the build record | QA-153-r2-05 |
+| execution warnings | the success envelope | the canonical partial-failure return | CX5-04 |
+| execution warnings | the canonical partial-failure return | the component-failure and conflict-policy returns | CX6-02 |
+| `applied_name_verified` | the normal end of `_execute_canonical_process` | the early return when a create reports success with no component id | CX6-01 |
+
+Four instances, three of them found in three consecutive rounds, each fixed at the site that was
+reported. That is the signature the structural-fix rule names: patching the reported exit does not
+converge, because the defect is the multiplicity of exits, not any one of them.
+
+**The invariant.** `_apply_plan` builds its partial-failure envelope in exactly ONE place —
+`_partial_failure()` — and every failing exit calls it. The envelope always carries
+`partial_results`, and always carries the attestations and accumulated execution warnings when any
+exist, because they describe mutations that already happened. A new exit gets the complete shape by
+construction; a new field is added once.
+
+For `_execute_canonical_process`, whose early returns are genuinely varied, the same principle is
+applied at the other end: a field that must be true on every exit is INITIALIZED where the result
+object is built and upgraded later, rather than assigned near the end. `applied_name_verified`
+starts `False` and the readback promotes it.
+
+**Sibling sweep.** All three of `_apply_plan`'s hand-built partial-failure returns were converted
+(the canonical failure, the `conflict_policy="fail"` refusal, and the ordinary component failure).
+`_execute_canonical_process`'s result dict carries `requested_name` and `applied_name_verified`
+from construction, so its six early returns need no edit and cannot regress.
+
+**Non-vacuity witness.** `test_one_constructor_builds_every_partial_failure_envelope` walks
+`_apply_plan`'s AST and fails on ANY `return` of a dict literal containing `partial_results`, with a
+floor assertion that the constructor is genuinely called at least three times so an empty scan
+cannot pass. `test_every_canonical_result_carries_the_name_discriminator` drives the specific
+early-return path CX6-01 named — a create that succeeds with no component id — through the public
+dispatcher. Both fail on the pre-fix tree.
+
+**Coverage claim, derived from the authority's full case set.** The authority is the function's own
+exit set, read from the AST rather than from a list: the witness enumerates every `Return` node in
+`_apply_plan` and admits none that builds the envelope by hand, so the claim covers all present and
+future exits rather than the three that exist today.
 
 ### DC-3 structural fix (mandatory — three instances, all found in one review round)
 

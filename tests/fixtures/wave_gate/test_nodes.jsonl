@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9874,"minimum_collected":9874,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9876,"minimum_collected":9876,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -9903,3 +9903,5 @@
 {"kind":"test","id":"pytest-009902","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_platform_renamed_component_is_reported_as_renamed","state":"active"}
 {"kind":"test","id":"pytest-009903","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_unverifiable_name_is_marked_unverified_not_asserted","state":"active"}
 {"kind":"test","id":"pytest-009904","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_execution_warnings_survive_a_partial_failure","state":"active"}
+{"kind":"test","id":"pytest-009905","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_every_canonical_result_carries_the_name_discriminator","state":"active"}
+{"kind":"test","id":"pytest-009906","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_one_constructor_builds_every_partial_failure_envelope","state":"active"}
