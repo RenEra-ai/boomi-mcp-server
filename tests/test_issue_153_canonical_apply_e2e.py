@@ -1234,36 +1234,78 @@ def test_a_malformed_extension_path_is_a_json_pointer():
     assert paths and all("[" not in p and "]" not in p for p in paths), paths
 
 
-def test_a_create_by_name_that_finds_nothing_says_so():
-    """QA-153-r6-01: zero candidates does not prove absence.
+def test_a_platform_renamed_component_is_reported_as_renamed():
+    """QA-153-r7-01, which supersedes r6-01 by disproving its premise.
 
-    QA measured a LIVE process resolving to zero candidates after its name had
-    previously been soft-deleted — timing disproved as the cause — so `fail`
-    silently stopped failing and `reuse` silently stopped reusing. The mechanism
-    is in the metadata query and is shared with the component arm; what this
-    slice changed is that a canonical root's POLICY now rests on it.
+    Boomi treats a soft-deleted predecessor's name as taken and appends a
+    counter, so authoring `X` against a deleted `X` creates `"X 2"`. The metadata
+    query and its filter are BOTH correct — nothing named `X` exists. What was
+    wrong was the apply: it recorded the REQUESTED name as though it were the
+    actual one, and compared nothing. Nothing is then ever named `X`, so a later
+    `conflict_policy` lookup finds nothing and re-applies duplicate without end
+    (QA measured `x 3`, `x 4`, `x 5`).
 
-    Refusing every create-by-name would break the ordinary case, so the unproven
-    half is surfaced and the guaranteed form is named.
+    The readback is already fetched, so the comparison costs nothing — and it is
+    the only place the truth exists, because the create response does not carry
+    the assigned name.
     """
-    from boomi_mcp.categories import integration_builder as ib
+    renamed = _LIVE_COMPONENT_XML  # placeholder, replaced below
 
-    def _warnings(policy, resolved):
-        spec = _spec_with_canonical_root()
-        with patch.object(ib, "_resolve_existing_components", return_value=resolved), \
-             patch(_PAGINATE) as paginate:
-            paginate.return_value = []
-            result = build_integration_action(
-                MagicMock(), _PROFILE, "plan",
-                config={"integration_spec": spec, "conflict_policy": policy},
-            )
-        return [w for w in (result.get("warnings") or []) if "cannot prove absence" in w]
+    def _live(_client, component_id, *_a, **_k):
+        if component_id == _PROCESS_ID and "xml" in _SUBMITTED:
+            # The platform hands back a DIFFERENT name than was authored.
+            return {
+                "type": "process",
+                "xml": _SUBMITTED["xml"].replace(
+                    'name="M12.15 Process"', 'name="M12.15 Process 2"', 1
+                ),
+            }
+        return {"type": "connector-settings", "xml": _LIVE_COMPONENT_XML}
 
-    for policy in ("fail", "reuse"):
-        assert _warnings(policy, []), policy
-    # Controls: a policy with nothing to guarantee, and a resolution that DID
-    # find something, both stay quiet.
-    assert not _warnings("clone", [])
-    assert not _warnings(
-        "fail", [{"component_id": "cid-a", "name": "M12.15 Process", "folder_name": "f"}]
-    )
+    created = {"n": 0}
+
+    def _component(*_args, **_kwargs):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    _SUBMITTED.clear()
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _live
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(), "dry_run": False},
+        )
+
+    assert result["_success"] is True, result.get("error")
+    step = result["results"]["proc"]
+    # The ACTUAL name is recorded, not the requested one.
+    assert step["name"] == "M12.15 Process 2"
+    assert step["requested_name"] == "M12.15 Process"
+    assert step["name_reassigned_by_platform"] is True
+    # ...and the caller is told, in terms they can act on.
+    warning = [w for w in (result.get("warnings") or []) if "not the authored" in w]
+    assert warning, result.get("warnings")
+    assert "M12.15 Process 2" in warning[0]
+
+
+def test_a_normally_named_component_reports_no_reassignment():
+    """The control. The r6 version of this guard fired on EVERY first-time
+    create, which QA measured and correctly called noise — a warning nobody can
+    act on trains people to ignore warnings. This one must stay silent on a
+    healthy create."""
+    result = _apply(_bound_payload())
+
+    assert result["_success"] is True, result.get("error")
+    step = result["results"]["proc"]
+    assert "requested_name" not in step
+    assert "name_reassigned_by_platform" not in step
+    assert not [w for w in (result.get("warnings") or []) if "not the authored" in w]

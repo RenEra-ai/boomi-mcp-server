@@ -5984,30 +5984,16 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                         canonical_action = "error_ambiguous_match"
                 elif not candidates and envelope.action == "update":
                     canonical_action = "error_missing_target"
-                elif not candidates and conflict_policy in ("fail", "reuse"):
-                    # ZERO candidates does not prove absence (QA-153-r6-01).
-                    #
-                    # `fail` and `reuse` are guarantees ABOUT AN EXISTING
-                    # component, and both are being decided here on a name
-                    # lookup that can under-report: QA measured a live process
-                    # resolving to zero candidates after its name had previously
-                    # been soft-deleted, with timing disproved as the cause. The
-                    # policy then silently degrades to a plain create — `fail`
-                    # does not fail, `reuse` does not reuse.
-                    #
-                    # The mechanism is in the metadata query and is shared with
-                    # the component arm; what this slice changed is that a
-                    # canonical root's policy now RESTS on it. Refusing every
-                    # create-by-name would break the ordinary case, so the
-                    # unproven half is surfaced instead of assumed — and the
-                    # guaranteed form is named.
-                    warnings.append(
-                        "Process '{0}': conflict_policy={1!r} was decided by NAME "
-                        "lookup, which found no existing component. A name lookup "
-                        "cannot prove absence — pin envelope.component_id for a "
-                        "guaranteed reuse/fail.".format(key, conflict_policy)
-                    )
-
+                # NOTE (QA-153-r6-01 -> r7-01): an earlier version warned here
+                # whenever a create-by-name resolved to zero candidates, on the
+                # theory that the lookup could under-report. QA disproved the
+                # premise — the query and its client-side filter are both
+                # correct — and measured the warning firing on EVERY ordinary
+                # first-time create, where the caller can do nothing about it.
+                # A warning nobody can act on trains people to ignore warnings.
+                # The real defect is post-write and is caught where the evidence
+                # exists: the applied-name comparison in
+                # `_execute_canonical_process`.
             if canonical_action == "create" and canonical_existing_id:
                 if conflict_policy == "reuse":
                     canonical_action = "reuse"
@@ -7462,6 +7448,7 @@ def _execute_canonical_process(
     from ..recipes.materialization import build_symbol_table
     from .components.canonical_process_apply import (
         CanonicalProcessApplyError,
+        applied_component_name,
         applied_folder_name,
         build_mutation_attestation,
         build_readback_attestation,
@@ -7649,13 +7636,43 @@ def _execute_canonical_process(
     # ...and the post-apply readback, recorded SEPARATELY. A failure records
     # digest=None: the mutation stands, and an unavailable baseline must read as
     # unknown rather than as agreement.
+    from ..authoring.revisions import sha256_fingerprint as _sha256_fingerprint
+
+    live_xml = _live_component_xml(boomi_client, component_id)
     readback = build_readback_attestation(
         component_key=key,
         component_id=component_id,
-        digest=_live_component_digest(boomi_client, component_id),
+        digest=(
+            _sha256_fingerprint({"component_xml": live_xml})
+            if live_xml is not None
+            else None
+        ),
     )
+
+    # THE PLATFORM DOES NOT ALWAYS HONOUR THE REQUESTED NAME (QA-153-r7-01).
+    #
+    # Boomi treats a soft-deleted predecessor's name as taken and appends a
+    # counter, so authoring `X` against a deleted `X` creates `"X 2"`. Nothing
+    # then ends up named `X`, so the next apply's name lookup finds nothing and
+    # `conflict_policy` never engages — three `reuse` re-applies produced
+    # `x 3`, `x 4`, `x 5`. Unbounded duplication, reported as success.
+    #
+    # Two things were wrong and both are fixed here: the result recorded the
+    # REQUESTED name as though it were the actual one, and nothing compared
+    # them. The readback is already in hand, so the comparison is free — and it
+    # is the only place the truth is available, because the create response does
+    # not carry the assigned name.
+    applied_name = applied_component_name(live_xml) if live_xml else None
+    if applied_name:
+        result["name"] = applied_name
+    if applied_name and envelope.name and applied_name != envelope.name:
+        result["requested_name"] = envelope.name
+        result["name_reassigned_by_platform"] = True
+
     return {"result": result, "component_id": component_id,
-            "mutation": mutation, "readback": readback}
+            "mutation": mutation, "readback": readback,
+            "applied_name": applied_name,
+            "requested_name": envelope.name}
 
 
 def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -7962,6 +7979,9 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     }
     process_mutations: List[Any] = []
     process_readbacks: List[Any] = []
+    #: Warnings discovered during EXECUTION, not planning. `warnings` in the plan
+    #: is `_build_plan`'s local; these are facts only the apply can know.
+    apply_warnings: List[str] = []
 
     # From here on a component may be WRITTEN, so an exception escaping this
     # loop is the one case where the server cannot say what it did.
@@ -7994,6 +8014,22 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     account_id=config.get("account_id"),
                 )
                 results[key] = outcome["result"]
+                if outcome.get("applied_name") and outcome.get("requested_name") and (
+                    outcome["applied_name"] != outcome["requested_name"]
+                ):
+                    # Actionable and specific, unlike the blanket warning it
+                    # replaced: it fires only when the platform actually assigned
+                    # a different name, and it names both.
+                    apply_warnings.append(
+                        "Process {0!r} was created as {1!r}, not the authored {2!r} — "
+                        "Boomi appends a counter when a soft-deleted component still "
+                        "holds the name. conflict_policy cannot match the authored name "
+                        "on a later apply, so repeated applies keep creating new "
+                        "components; delete the stale component or author a different "
+                        "name.".format(
+                            key, outcome["applied_name"], outcome["requested_name"]
+                        )
+                    )
                 if outcome.get("component_id"):
                     id_registry[key] = outcome["component_id"]
                 if outcome.get("mutation") is not None:
@@ -8143,11 +8179,31 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     # Forward the plan's advisory output (build-basics warnings, connection
     # aliases) onto the apply envelope so a real apply does not silently drop it
     # (Codex review).
-    if planned.get("warnings"):
-        apply_result["warnings"] = planned["warnings"]
+    if planned.get("warnings") or apply_warnings:
+        apply_result["warnings"] = list(planned.get("warnings") or []) + apply_warnings
     if planned.get("connection_aliases"):
         apply_result["connection_aliases"] = planned["connection_aliases"]
     return apply_result
+
+
+def _live_component_xml(boomi_client: Boomi, component_id: str) -> Optional[str]:
+    """The component's live XML, or None. One fetch, several readers.
+
+    `_live_component_digest` hashes it and the canonical arm also needs the
+    NAME off it, and doing that with two GETs would be two different reads of a
+    thing that can change between them.
+    """
+    try:
+        data = component_get_xml(boomi_client, component_id)
+    except Exception:  # noqa: BLE001 — provenance is best-effort, never fatal
+        return None
+    if isinstance(data, dict):
+        xml = data.get("xml")
+    elif isinstance(data, str):
+        xml = data
+    else:
+        xml = None
+    return xml if isinstance(xml, str) and xml else None
 
 
 def _live_component_digest(boomi_client: Boomi, component_id: str) -> Optional[str]:

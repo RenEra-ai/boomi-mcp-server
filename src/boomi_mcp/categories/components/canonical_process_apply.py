@@ -355,6 +355,23 @@ def applied_folder_name(submitted_xml: str) -> Optional[str]:
     return value or None
 
 
+def applied_component_name(component_xml: str) -> Optional[str]:
+    """The ``name`` on the component the platform actually created.
+
+    Read from the LIVE readback, because the platform does not always honour the
+    requested one: Boomi treats a soft-deleted predecessor's name as taken and
+    appends a counter, so authoring ``X`` against a deleted ``X`` silently
+    produces ``"X 2"``.
+    """
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(component_xml)
+    except ET.ParseError:
+        return None
+    return root.attrib.get("name") or None
+
+
 def build_readback_attestation(*, component_key: str, component_id: str, digest):
     """The post-apply live readback, recorded SEPARATELY from the mutation.
 
@@ -372,6 +389,7 @@ __all__ = [
     "CanonicalProcessApplyError",
     "bind_symbols_to_applied_ids",
     "build_mutation_attestation",
+    "applied_component_name",
     "applied_folder_name",
     "build_readback_attestation",
     "materialize_canonical_process_xml",

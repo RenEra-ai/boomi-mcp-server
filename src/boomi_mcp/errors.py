@@ -436,7 +436,12 @@ PROCESS_MATERIALIZATION_INTERNAL_ERROR = "PROCESS_MATERIALIZATION_INTERNAL_ERROR
 # the three the merge engine raises and `_apply_structured_update` forwards
 # unchanged — which the exact-set test then codified as though the catalog were
 # complete (Codex round 3). The set is derived from what the two modules
-# actually emit, not from what one of them happens to name. Codex review round 2 raised that against the
+# actually emit, not from what one of them happens to name.
+#
+# Summaries are SIDE-NEUTRAL where the code is (Codex round 4): `merge_for_update`
+# raises XML_PARSE_FAILED and OBJECT_MISSING for a malformed or absent DESIRED
+# document as well as a live one, with `field` naming which. A summary that
+# blamed the live component would send a consumer to inspect the wrong artifact. Codex review round 2 raised that against the
 # one new member this slice adds; registering only that member would have been
 # worse than leaving it out — it would put an #153-owned code outside #153's
 # three declared prefixes and break the biconditional that keeps each family to
@@ -1739,8 +1744,9 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             category="update_preservation",
             retryable=False,
             summary=(
-                "The live component XML did not parse, so there is no document "
-                "to merge into; nothing was written."
+                "XML on one side of the merge did not parse. `field` names the "
+                "side — the live document or the desired one. Nothing was "
+                "written."
             ),
             owner="#45",
         ),
@@ -1749,8 +1755,9 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             category="update_preservation",
             retryable=False,
             summary=(
-                "The live component carries no object body for the policy to "
-                "preserve, so a merge would silently drop it."
+                "A required object body is absent on one side of the merge; "
+                "`field` names the side. Merging without it would silently drop "
+                "the subtree the policy exists to preserve."
             ),
             owner="#45",
         ),

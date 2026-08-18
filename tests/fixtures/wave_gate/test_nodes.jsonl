@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9871,"minimum_collected":9871,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9872,"minimum_collected":9872,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -9895,7 +9895,9 @@
 {"kind":"test","id":"pytest-009894","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_recipe_extension_normalization_matches_the_legacy_authority","state":"active"}
 {"kind":"test","id":"pytest-009895","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_compiled_plan_fingerprint_uses_the_REQUESTED_conflict_policy","state":"active"}
 {"kind":"test","id":"pytest-009896","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_update_preservation_codes_are_in_the_shared_taxonomy","state":"active"}
-{"kind":"test","id":"pytest-009897","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_create_by_name_that_finds_nothing_says_so","state":"active"}
+{"kind":"test","id":"pytest-009897","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_create_by_name_that_finds_nothing_says_so","state":"tombstone"}
 {"kind":"test","id":"pytest-009898","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_malformed_extension_path_is_a_json_pointer","state":"active"}
 {"kind":"test","id":"pytest-009899","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_ambiguous_UPDATE_never_selects_an_arbitrary_target","state":"active"}
 {"kind":"test","id":"pytest-009900","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_ambiguous_canonical_step_carries_its_candidates","state":"active"}
+{"kind":"test","id":"pytest-009901","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_normally_named_component_reports_no_reassignment","state":"active"}
+{"kind":"test","id":"pytest-009902","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_platform_renamed_component_is_reported_as_renamed","state":"active"}
