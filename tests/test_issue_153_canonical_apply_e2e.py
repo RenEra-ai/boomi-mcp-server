@@ -1585,20 +1585,31 @@ def test_a_write_that_committed_then_failed_still_warns_about_its_name():
 
 
 def test_a_failure_that_provably_wrote_nothing_does_not_warn():
-    """Codex round 10: `failed` is not uniformly post-write.
+    """Codex rounds 10 and 11: `failed` is not uniformly post-write.
 
-    A preservation FETCH failure never reaches the push, so nothing was written
-    — and `_apply_plan` would otherwise say a write may have landed. The
-    discriminator is not a second list of pre-write failures here: it is the
-    taxonomy's own `retryable` flag, which this slice set to True on
-    `UPDATE_PRESERVATION_FETCH_FAILED` precisely because nothing was written,
-    and False on `..._PUSH_FAILED` because a write may have.
+    A preservation FETCH failure returns before `update_component_raw`, so
+    nothing was written — and `_apply_plan` would otherwise say a write may have
+    landed.
+
+    The discriminator is NOT the taxonomy's `retryable` flag, which was the
+    previous attempt and the wrong authority: retryability describes whether a
+    REQUEST can be retried, and four merge failures that provably write nothing
+    are correctly `retryable=False`. It is `write_attempted`, reported by
+    `_apply_structured_update` itself, stamped by position relative to its own
+    push.
+
+    Driven through a real canonical UPDATE with an existing component id
+    (Codex round 11). The first version mocked `create_component` returning an
+    update-preservation code that a production create can never emit, so it
+    never touched `_apply_structured_update` at all.
     """
-    from boomi_mcp.errors import ERROR_TAXONOMY
+    from _m12_11_support import appliable_process_unit
 
-    # The authority says what the code says.
-    assert ERROR_TAXONOMY["UPDATE_PRESERVATION_FETCH_FAILED"].retryable is True
-    assert ERROR_TAXONOMY["UPDATE_PRESERVATION_PUSH_FAILED"].retryable is False
+    unit = appliable_process_unit(component_id="cid-existing")
+    unit = unit.model_copy(
+        update={"envelope": unit.envelope.model_copy(update={"action": "update"})}
+    )
+    payload = _bound_payload(process_ir_request(units=(unit,)))
 
     created = {"n": 0}
 
@@ -1606,35 +1617,132 @@ def test_a_failure_that_provably_wrote_nothing_does_not_warn():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _fetch_failed(_client, _profile, payload_in):
-        _SUBMITTED["xml"] = payload_in["xml"]
-        return {
-            "_success": False,
-            "error_code": "UPDATE_PRESERVATION_FETCH_FAILED",
-            "error": "could not read the live component",
-        }
+    def _get_xml(_client, component_id, *_a, **_k):
+        if component_id == "cid-existing":
+            # The live read fails, so the merge never starts and the push is
+            # never issued — the exact pre-write shape.
+            raise RuntimeError("could not read the live component")
+        return {"type": "connector-settings", "xml": _LIVE_COMPONENT_XML}
 
-    _SUBMITTED.clear()
     with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
-        _CREATE
-    ) as create, patch(_GET_XML) as get_xml:
+        _GET_XML
+    ) as get_xml:
         paginate.return_value = []
         execute.side_effect = _component
-        create.side_effect = _fetch_failed
-        get_xml.side_effect = _live_xml
+        get_xml.side_effect = _get_xml
         result = build_integration_action(
             MagicMock(), _PROFILE, "apply",
-            config={"authoring_request": _bound_payload(), "dry_run": False},
+            config={"authoring_request": payload, "dry_run": False},
         )
 
     assert result["_success"] is False
     step = result["partial_results"]["proc"]
-    # Provably wrote nothing -> `refused`, which is a NON-writing status.
-    assert step["status"] == "refused"
+    # Provably wrote nothing -> `refused`, a NON-writing status, so no warning
+    # tells the caller to reconcile an update that never left the process.
+    assert step["status"] == "refused", step
     assert not [w for w in (result.get("warnings") or []) if "did not confirm" in w]
-    # Account-level accounting is UNAFFECTED and correctly reports `performed`:
-    # the supporting connectors really were created before the process refused.
-    # `refused` is a statement about THIS STEP, not about the apply — conflating
-    # the two is what the first version of this assertion did.
-    assert result.get("mutation_status") == "performed"
-    assert result["partial_results"]["conn"]["status"] == "created"
+
+    # THE DISCRIMINATING CASE. A fetch failure is retryable=True, so the fetch
+    # shape alone cannot tell the two candidate authorities apart — both call it
+    # pre-write. A MERGE failure is where they disagree: nothing was written, and
+    # the code is correctly retryable=False. If this still reported `failed`, the
+    # discriminator would be reading retryability rather than write evidence.
+    from boomi_mcp.errors import ERROR_TAXONOMY
+
+    for code in ("UPDATE_PRESERVATION_XML_PARSE_FAILED",
+                 "UPDATE_PRESERVATION_OBJECT_MISSING",
+                 "UPDATE_PRESERVATION_MERGE_FAILED",
+                 "UPDATE_PRESERVATION_TYPE_MISMATCH"):
+        assert ERROR_TAXONOMY[code].retryable is False, code
+
+    def _live_ok(_client, component_id, *_a, **_k):
+        if component_id == "cid-existing":
+            return {"type": "process", "xml": _LIVE_COMPONENT_XML}
+        return {"type": "connector-settings", "xml": _LIVE_COMPONENT_XML}
+
+    def _merge_fails(*_a, **_k):
+        from boomi_mcp.categories.components.builders.connector_builder import (
+            BuilderValidationError,
+        )
+        raise BuilderValidationError(
+            "type/subType do not align",
+            error_code="UPDATE_PRESERVATION_TYPE_MISMATCH",
+            field="type",
+        )
+
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _GET_XML
+    ) as get_xml, patch(
+        "boomi_mcp.categories.integration_builder.merge_for_update", _merge_fails
+    ):
+        paginate.return_value = []
+        execute.side_effect = _component
+        get_xml.side_effect = _live_ok
+        merged = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(process_ir_request(units=(unit,))),
+                    "dry_run": False},
+        )
+
+    merged_step = merged["partial_results"]["proc"]
+    assert merged_step["status"] == "refused", merged_step
+    assert not [w for w in (merged.get("warnings") or []) if "did not confirm" in w]
+
+
+def test_every_structured_update_exit_reports_whether_it_wrote():
+    """Codex round 11's invariant, asserted over the exits themselves.
+
+    `write_attempted` is the discriminator the canonical arm reads, so an exit
+    that omits it silently falls back to "a write may have landed". Driven
+    through `_apply_structured_update` in each failure mode rather than asserted
+    on the source, because the value has to be RIGHT, not merely present.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+    from boomi_mcp.categories.components.builders._process_preservation import (
+        PROCESS_PRESERVATION_POLICY,
+    )
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        BuilderValidationError,
+    )
+
+    shim = ib._process_update_shim(process_unit().envelope)
+    xml = '<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"/>'
+
+    def _call(**patches):
+        with patch.object(ib, "component_get_xml", patches["get_xml"]), \
+             patch.object(ib, "merge_for_update", patches["merge"]):
+            client = MagicMock()
+            client.component.update_component_raw.side_effect = patches["push"]
+            return ib._apply_structured_update(
+                client, _PROFILE, "cid-existing", shim, xml,
+                PROCESS_PRESERVATION_POLICY,
+            )
+
+    ok_get = lambda *a, **k: {"type": "process", "xml": xml}
+    ok_merge = lambda *a, **k: xml
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("boom")
+
+    def _merge_boom(*_a, **_k):
+        raise BuilderValidationError(
+            "mismatch", error_code="UPDATE_PRESERVATION_TYPE_MISMATCH", field="type"
+        )
+
+    # PRE-write exits: the push was never issued.
+    fetch = _call(get_xml=_boom, merge=ok_merge, push=None)
+    assert fetch["write_attempted"] is False, fetch
+
+    merge = _call(get_xml=ok_get, merge=_merge_boom, push=None)
+    assert merge["write_attempted"] is False, merge
+
+    # POST-write exits: the request left this process.
+    push = _call(get_xml=ok_get, merge=ok_merge, push=_boom)
+    assert push["write_attempted"] is True, push
+
+    success = _call(get_xml=ok_get, merge=ok_merge, push=None)
+    assert success["write_attempted"] is True, success
+
+    # Non-vacuity: the flag really does vary — a check that only ever saw one
+    # value would pass against a constant.
+    assert {fetch["write_attempted"], push["write_attempted"]} == {False, True}

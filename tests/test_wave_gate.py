@@ -1846,6 +1846,10 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "FETCH_FAILED",
     "PUSH_FAILED",
     "OBJECT_MISSING",
+    # A served code that is deliberately NOT in the taxonomy — which is one of
+    # the reasons the round-11 row gives for why write evidence could not be
+    # derived from it. A row explaining that has to be able to name it.
+    "COMPONENT_GET_DEADLINE_EXCEEDED",
     "ERROR_TAXONOMY",
     "PLAN_INVALID",
     "PROCESS_MATERIALIZATION_INTERNAL_ERROR",

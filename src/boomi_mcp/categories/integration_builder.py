@@ -3191,6 +3191,7 @@ def _apply_structured_update(
 ) -> Dict[str, Any]:
     if policy is None:
         return {
+            "write_attempted": False,
             "_success": False,
             "error_code": UPDATE_PRESERVATION_POLICY_UNSUPPORTED,
             "error": (
@@ -3208,9 +3209,14 @@ def _apply_structured_update(
     try:
         current = component_get_xml(boomi_client, target_id)
     except ComponentGetDeadlineExceeded as exc:
-        return component_get_deadline_envelope(exc)
+        # The live GET timed out, so the merge never started and the push was
+        # never issued. Codex round 11 named this one specifically: its code is
+        # not in the error taxonomy at all, which is one more reason write
+        # evidence cannot be derived from the taxonomy.
+        return {**component_get_deadline_envelope(exc), "write_attempted": False}
     except Exception as exc:
         return {
+            "write_attempted": False,
             "_success": False,
             "error_code": UPDATE_PRESERVATION_FETCH_FAILED,
             "error": (
@@ -3229,6 +3235,9 @@ def _apply_structured_update(
     except BuilderValidationError as exc:
         envelope: Dict[str, Any] = {
             "_success": False,
+            # Raised by `merge_for_update`, which runs BEFORE the push below —
+            # so nothing was written, whatever the code's retryability says.
+            "write_attempted": False,
             "error_code": exc.error_code,
             "error": str(exc),
             "field": exc.field,
@@ -3241,6 +3250,7 @@ def _apply_structured_update(
         boomi_client.component.update_component_raw(target_id, merged_xml)
     except Exception as exc:
         return {
+            "write_attempted": True,
             "_success": False,
             # NAMED, like its sibling (QA-153-r4-02). The fetch arm — where
             # nothing has been written — was machine-classifiable while this one,
@@ -3256,6 +3266,7 @@ def _apply_structured_update(
             "exception_type": type(exc).__name__,
         }
     return {
+        "write_attempted": True,
         "_success": True,
         "message": (
             f"Updated component {target_id!r} via read-merge-write "
@@ -7627,17 +7638,23 @@ def _execute_canonical_process(
     # that never got to push, a missing update target. Both are right, which
     # means `status` alone cannot answer "was anything written".
     #
-    # The authority already exists and this slice wrote it: a preservation code
-    # is registered `retryable=True` PRECISELY when nothing was written
-    # (`UPDATE_PRESERVATION_FETCH_FAILED`) and `retryable=False` when a write may
-    # have landed (`..._PUSH_FAILED`). Reading the taxonomy is therefore reading
-    # the same fact the codes were catalogued to express, rather than keeping a
-    # second list of pre-write failures here.
+    # The discriminator comes from the function that ISSUES the write, because
+    # that is the only thing that knows (Codex round 11).
+    #
+    # The previous attempt read the taxonomy's `retryable` flag, on the reasoning
+    # that this slice had set it True exactly where nothing was written. That was
+    # the wrong authority and the reasoning does not hold: retryability describes
+    # whether the same REQUEST can be retried, not whether a write occurred.
+    # `merge_for_update` raising XML_PARSE_FAILED, OBJECT_MISSING, MERGE_FAILED
+    # or TYPE_MISMATCH all return before `update_component_raw` — nothing
+    # written — yet all four are correctly `retryable=False`; and
+    # `COMPONENT_GET_DEADLINE_EXCEEDED` is not in the taxonomy at all.
+    #
+    # `_apply_structured_update` now reports `write_attempted` on every exit,
+    # stamped by position relative to its own push. A create reaches this point
+    # only by having called `create_component`, so the request was issued.
     if not succeeded:
-        from ..errors import ERROR_TAXONOMY
-
-        _spec = ERROR_TAXONOMY.get(str(exec_result.get("error_code") or ""))
-        wrote_nothing = _spec is not None and _spec.retryable
+        wrote_nothing = exec_result.get("write_attempted") is False
     else:
         wrote_nothing = False
     result = _canonical_result(
