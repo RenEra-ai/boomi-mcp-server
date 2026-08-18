@@ -8129,14 +8129,23 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                                 key, outcome["applied_name"], outcome["requested_name"]
                             )
                         )
-                # Only when a write SUCCEEDED but its name could not be
-                # confirmed (Codex round 7). The flag is False by construction on
-                # every result, so gating on it alone fired the "read-back did
-                # not confirm" warning on refusals and rejected writes, where no
-                # readback is attempted and there may be nothing to re-read.
+                # Only when a WRITE succeeded but its name could not be
+                # confirmed.
+                #
+                # The flag is False by construction on every result, so this
+                # condition has been narrowed twice: gating on the flag alone
+                # fired on refusals and rejected writes, where no readback is
+                # attempted (Codex round 7), and adding `_success` was still too
+                # wide because a `reuse` succeeds WITHOUT writing — and its name
+                # was already observed by the exact-name lookup that found it
+                # (Codex round 8). The writing/non-writing split is derived from
+                # `_NON_WRITING_STEP_STATUSES`, which `_mutation_status` already
+                # reads, rather than by naming `created`/`updated` here.
+                _step = outcome.get("result", {})
                 if (
-                    outcome.get("result", {}).get("_success") is True
-                    and outcome.get("result", {}).get("applied_name_verified") is False
+                    _step.get("_success") is True
+                    and str(_step.get("status", "")) not in _NON_WRITING_STEP_STATUSES
+                    and _step.get("applied_name_verified") is False
                 ):
                     apply_warnings.append(
                         "Process {0!r}: the live read-back did not confirm the "

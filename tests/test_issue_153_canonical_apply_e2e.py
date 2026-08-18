@@ -1499,3 +1499,39 @@ def test_one_constructor_builds_every_partial_failure_envelope():
         if _is_constructor_call(node)
     ]
     assert len(calls) >= 3, calls
+
+
+def test_a_reuse_does_not_claim_its_name_went_unconfirmed():
+    """Codex round 8: a `reuse` succeeds WITHOUT writing.
+
+    `applied_name_verified` is False by construction on every result, so the
+    warning condition has been narrowed twice — first off refusals and rejected
+    writes, then off reuse, which performs no write and whose name was already
+    observed by the exact-name lookup that found it. The split is derived from
+    `_NON_WRITING_STEP_STATUSES`, not from a fresh list of write statuses.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    existing = [{"component_id": "cid-existing", "name": "M12.15 Process",
+                 "folder_name": "Home"}]
+    spec = _spec_with_canonical_root()
+    with patch.object(ib, "_resolve_existing_components", return_value=existing), \
+         patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _GET_XML
+    ) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = lambda *a, **k: {"_success": True, "component_id": "cid-1"}
+        get_xml.side_effect = _live_xml
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"integration_spec": spec, "conflict_policy": "reuse",
+                    "dry_run": False},
+        )
+
+    step = (result.get("results") or result.get("partial_results") or {}).get("proc")
+    assert step is not None, result
+    assert step["status"] == "reused"
+    assert not [w for w in (result.get("warnings") or []) if "did not confirm" in w]
+
+    # The split is DERIVED, so `reused` really is in the non-writing set.
+    assert "reused" in ib._NON_WRITING_STEP_STATUSES
