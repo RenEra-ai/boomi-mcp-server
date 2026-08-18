@@ -3187,7 +3187,7 @@ def _apply_structured_update(
             "error_code": "UPDATE_PRESERVATION_FETCH_FAILED",
             "error": (
                 f"Failed to fetch current XML for component {target_id!r}: "
-                f"{exc}"
+                f"{_validation_error_message(exc)}"
             ),
             "field": "component_id",
             "hint": (
@@ -3216,7 +3216,7 @@ def _apply_structured_update(
             "_success": False,
             "error": (
                 f"Failed to push merged XML for component {target_id!r}: "
-                f"{exc}"
+                f"{_validation_error_message(exc)}"
             ),
             "exception_type": type(exc).__name__,
         }
@@ -3352,7 +3352,8 @@ def build_structured_update_xml(
             except Exception as exc:
                 return {
                     "_success": False,
-                    "error": f"Connector type validation failed for '{connector_type}': {exc}",
+                    "error": ("Connector type validation failed for %r: %s"
+                              % (connector_type, _validation_error_message(exc))),
                 }
         if comp.type == "connector-settings":
             builder_instance = get_connector_builder(connector_type or "")
@@ -3797,7 +3798,8 @@ def _execute_component(
             except Exception as exc:
                 return {
                     "_success": False,
-                    "error": f"Connector type validation failed for '{connector_type}': {exc}",
+                    "error": ("Connector type validation failed for %r: %s"
+                              % (connector_type, _validation_error_message(exc))),
                 }
         if comp.action == "create":
             return create_connector(boomi_client, profile, payload)
@@ -4494,7 +4496,8 @@ def _lint_component_names(spec: IntegrationSpecV1) -> Dict[str, Any]:
             except re.error as exc:
                 warnings.append(
                     "naming.component_name_pattern is not a valid regular "
-                    f"expression ({exc}); name-pattern conformance was not "
+                    f"expression ({_validation_error_message(exc)}); "
+                    "name-pattern conformance was not "
                     "checked. Names were not modified."
                 )
         else:
@@ -7221,7 +7224,9 @@ def _component_for_key(key, components_by_key: Dict[str, Any]):
 
 
 def _validation_error_message(exc) -> str:
-    """A pydantic error rendered WITHOUT the values that caused it.
+    """THE way an exception becomes served text. Never `str(exc)` at a call site.
+
+    A pydantic error rendered WITHOUT the values that caused it.
 
     ``str(ValidationError)`` appends ``input_value=`` — pydantic's rendering of
     the offending input. QA-153-r2-08 measured a 16-character prefix of an
@@ -7235,6 +7240,16 @@ def _validation_error_message(exc) -> str:
     Location and reason are kept in full: ``loc`` names WHERE, ``type`` is the
     machine-readable identifier, ``msg`` says what the rule is. None of the three
     carries caller content.
+
+    **Applied to EVERY exception this module serves, not only to the ones known
+    to be pydantic** (QA-153-r3-01). The r2 fix converted the two arms that were
+    obviously validation errors and left a third rendering ``str(exc)`` — an arm
+    written in that same batch, which then called
+    ``_named_error_code_from_validation`` on the very cause type whose ``str()``
+    carries the payload. Deciding per-arm "is this one a pydantic error?" is the
+    hand-model that produced the miss; a non-pydantic exception simply falls
+    through to ``str(exc)`` here, so routing everything through one function
+    costs nothing and removes the decision.
     """
     rows = getattr(exc, "errors", None)
     if not callable(rows):
@@ -7437,17 +7452,35 @@ def _execute_canonical_process(
     component_id = _extract_component_id(exec_result) or (
         target_id if action == "update" else None
     )
+    # `status` is derived from what the PLATFORM confirmed, not from the action
+    # that was attempted (QA-153-r3-02). It read `"updated" if action ==
+    # "update"`, so a step whose update the platform rejected — measured: HTTP
+    # 400 "ComponentId … is invalid" — was still recorded `status: "updated"`.
+    # The account-level `mutation_status` was right, so nobody was misled about
+    # the account; but the per-step record is what `verify` and a human
+    # reconciler read, and it said a write happened that did not.
+    succeeded = bool(exec_result.get("_success", False))
     result = {
-        "status": "updated" if action == "update" else "created",
+        "status": ("updated" if action == "update" else "created") if succeeded else "failed",
         "component_id": component_id,
         "type": "process",
         "name": envelope.name,
         "result": exec_result,
-        "_success": bool(exec_result.get("_success", False)),
+        "_success": succeeded,
     }
-    if not result["_success"]:
-        return {"result": result, "error": f"Failed at step '{key}'",
-                "error_code": None, "component_id": component_id,
+    if not succeeded:
+        # The step's OWN diagnosis travels, exactly as the component arm lifts
+        # it. Hard-setting `error_code: None` buried the real code — measured:
+        # `UPDATE_PRESERVATION_FETCH_FAILED` sitting one level down at
+        # `partial_results[key].result.error_code` — and dropping `step_result`
+        # left the two participant kinds reporting failure in two shapes.
+        step_error = exec_result.get("error") if isinstance(exec_result, dict) else None
+        step_code = exec_result.get("error_code") if isinstance(exec_result, dict) else None
+        return {"result": result,
+                "error": step_error or f"Failed at step '{key}'",
+                "error_code": step_code,
+                "step_result": exec_result,
+                "component_id": component_id,
                 "mutation": None, "readback": None}
 
     # The mutation attestation — over the bytes that were SENT. For an update
@@ -7831,6 +7864,10 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                         "error_code": outcome.get("error_code"),
                         "failed_step": key,
                         "partial_results": results,
+                        # The failed step's own result, lifted like the component
+                        # arm lifts it, so both participant kinds report a
+                        # failure in one shape (QA-153-r3-02).
+                        "step_result": outcome.get("step_result"),
                         # Roots applied BEFORE the failure keep their attestations;
                         # unapplied roots record none. That asymmetry is the record.
                         "process_mutations": [m.model_dump(mode="json") for m in process_mutations],
@@ -8761,7 +8798,7 @@ def build_integration_action(
         # written first, so the envelope says so rather than guessing.
         envelope = {
             "_success": False,
-            "error": f"Integration builder failed: {exc.cause}",
+            "error": f"Integration builder failed: {_validation_error_message(exc.cause)}",
             "exception_type": type(exc.cause).__name__,
             "mutation_status": "possible",
             "hint": (
@@ -8805,7 +8842,7 @@ def build_integration_action(
     except Exception as exc:
         envelope = {
             "_success": False,
-            "error": f"Integration builder failed: {exc}",
+            "error": f"Integration builder failed: {_validation_error_message(exc)}",
             "exception_type": type(exc).__name__,
         }
         _decorate_refusal_route(envelope, normalized_action)

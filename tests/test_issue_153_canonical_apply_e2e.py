@@ -514,11 +514,16 @@ def test_a_validation_refusal_does_not_echo_the_authored_value():
 
     assert result["_success"] is False
     assert canary not in str(result)
-    # 12 characters, not 16: pydantic clipped the measured leak at 15
-    # (`hunter2-Sup3rSe`), so a 16-character probe sits just PAST the window and
-    # passes on the broken tree — the exact "guard that never exercised the
-    # breaking path" shape this slice has hit twice.
+    # The PREFIX assertion is kept as evidence, and it is non-vacuous: QA
+    # measured pydantic rendering a head-position value's first 15 characters,
+    # so 12 is inside the window and 16 would have sat past it.
     assert canary[:12] not in str(result)
+    # ...but the prefix is not the invariant. Pydantic elides the MIDDLE and
+    # keeps BOTH ends, so a tail-position value leaks its last ~24 characters
+    # with no prefix at all — and a prefix sweep scored 0 on the QA-153-r3-01
+    # envelope, which does render `input_value=`. The rendering marker is
+    # position-independent, so that is what the rule is asserted on.
+    assert "input_value=" not in str(result)
     # Non-vacuity: the refusal still says WHAT went wrong and WHERE, so this is
     # a value-free diagnostic rather than an emptied one.
     assert "integration_component_key_duplicate" in str(result)
@@ -635,3 +640,85 @@ def test_an_apply_that_throws_mid_flight_does_not_claim_it_was_retry_safe():
     assert result["mutation_status"] == "possible"
     assert result["mutation_performed"] is True
     assert "cannot confirm" in result["hint"]
+
+
+def test_no_served_envelope_renders_pydantic_input_values():
+    """The structural invariant for QA-153-r3-01 — asserted on BEHAVIOUR.
+
+    The defect class is "a framework's default error rendering serving caller
+    content". It was first fixed at two call sites, and the third — written in
+    that same batch — kept `str(exc)` and shipped. Patching the third site would
+    make three patches and no invariant, so the rule is stated once, over every
+    refusal shape this surface can produce.
+
+    `input_value=` is the marker pydantic itself emits, and it is
+    position-independent: a prefix sweep only catches a value pydantic rendered
+    from the head, and pydantic keeps BOTH ends while eliding the middle.
+    """
+    canary = "ZQXJ-Sup3rSecret-tail-marker-0123456789"
+    shapes = []
+
+    # 1. Component/process key collision, canary at the HEAD (integration_name).
+    head = _duplicate_key_payload()
+    head["intent"]["integration_name"] = canary
+    shapes.append(("compile", {"authoring_request": head}))
+
+    # 2. The same collision with the canary DEEPER, where pydantic elides.
+    deep = _duplicate_key_payload()
+    deep["intent"]["units"][0]["envelope"]["description"] = canary
+    shapes.append(("compile", {"authoring_request": deep}))
+
+    # 3. The legacy root on the apply route — the arm that reaches the blanket
+    #    handlers, which is where the missed third rendering lived.
+    spec = _spec_with_canonical_root()
+    spec["processes"][0]["envelope"]["component_key"] = "conn"
+    spec["processes"][0]["envelope"]["description"] = canary
+    shapes.append(("apply", {"integration_spec": spec, "dry_run": False}))
+
+    # 4. A malformed unit shape, so a schema error (not a rule error) is served.
+    malformed = process_ir_request().model_dump(mode="json")
+    malformed["intent"]["units"][0]["envelope"].pop("name")
+    malformed["intent"]["integration_name"] = canary
+    shapes.append(("plan", {"authoring_request": malformed}))
+
+    offenders = []
+    for action, config in shapes:
+        with patch(_PAGINATE) as paginate:
+            paginate.return_value = []
+            served = str(build_integration_action(MagicMock(), _PROFILE, action, config=config))
+        if "input_value=" in served or canary in served:
+            offenders.append(action)
+
+    assert offenders == [], (
+        "served refusal(s) render caller content: %r — route the message through "
+        "_validation_error_message()" % (offenders,)
+    )
+
+
+def test_every_served_exception_goes_through_the_value_free_renderer():
+    """The source half of the same invariant.
+
+    The behavioural sweep above can only cover refusal shapes a test can
+    actually reach, and QA measured that the missed arm was NOT reachable with
+    caller-authored content in 31 envelopes — it was a latent path with proven
+    serving behaviour. So the rule is also asserted where it cannot depend on
+    reachability: no served message interpolates a raw exception.
+    """
+    import re
+
+    source = (
+        Path(__file__).resolve().parent.parent
+        / "src/boomi_mcp/categories/integration_builder.py"
+    ).read_text()
+
+    raw = re.compile(r"\{exc(?:\.\w+)*\}")
+    offenders = [
+        (number, stripped)
+        for number, line in enumerate(source.splitlines(), start=1)
+        for stripped in (line.strip(),)
+        if raw.search(stripped) and "_validation_error_message" not in stripped
+    ]
+    assert offenders == [], (
+        "raw exception interpolated into a message: %r — use "
+        "_validation_error_message(exc)" % (offenders,)
+    )
