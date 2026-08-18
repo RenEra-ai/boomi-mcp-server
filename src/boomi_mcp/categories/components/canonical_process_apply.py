@@ -25,6 +25,7 @@ knowledge, and would drift from it.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 _REF_PREFIX = "$ref:"
@@ -202,6 +203,7 @@ def materialize_canonical_process_xml(
     plan,
     id_registry: Mapping[str, str],
     symbols,
+    name_override: Optional[str] = None,
 ) -> str:
     """Recompile the plan's root against REAL ids and produce deployable XML.
 
@@ -229,8 +231,18 @@ def materialize_canonical_process_xml(
             component_key=key,
         )
 
+    # The required set is the plan's RECORDED slot inventory (§6 AR1-03) — what
+    # this plan actually binds, derived at compile — not the whole `depends_on`
+    # declaration. A slot key with no applied id is a hard ordering failure;
+    # everything else keeps its placeholder and the artifact guard still refuses
+    # any that survives into emitted bytes.
     bound = bind_symbols_to_applied_ids(
-        symbols, id_registry, key, required_keys=envelope.depends_on
+        symbols,
+        id_registry,
+        key,
+        required_keys={
+            _ref_key(slot.ref) for slot in plan.unresolved_symbol_slots
+        },
     )
     cfg, emission_plan = compile_process_ir_v1(plan.process_ir, bound)
 
@@ -250,7 +262,11 @@ def materialize_canonical_process_xml(
     artifact = emit_process(emission_plan, bound)
     xml = ProcessComponentMaterializer().materialize(
         artifact.shape_xml_parts,
-        name=envelope.name,
+        # `name_override` is the clone overlay (§6 AR1-01): a clone-generated
+        # concrete name is EXCLUDED from covered plan material by design, so it
+        # enters here — at emission — and in the mutation attestation, never in
+        # the plan or its fingerprint.
+        name=name_override or envelope.name,
         execution_profile=plan.execution_profile,
         description=envelope.description,
         folder_name=envelope.folder_name,
@@ -285,18 +301,22 @@ def build_mutation_attestation(
     account_scope_hash: str,
     resolved_folder_id: Optional[str] = None,
     applied_folder_name: Optional[str] = None,
+    submitted_xml_digest: Optional[str] = None,
 ):
     """The apply-time mutation attestation for one root.
 
-    ``submitted_xml`` is digested HERE, from the exact bytes that were sent —
-    for an update that is the MERGED result of read-merge-write, not the desired
-    XML, because the merged bytes are what the platform received.
+    ``submitted_xml_digest`` is raw SHA-256 over the exact UTF-8 bytes that were
+    sent (§6 review AR1-05b — the plan mandates the bytes AND the encoding; the
+    repo's object-wrapping ``sha256_fingerprint`` convention changes the hashed
+    material). For an update those bytes are the MERGED result of
+    read-merge-write, digested immediately before the push and passed in; for a
+    create the caller digests the final XML immediately before the raw create
+    call. The fallback here digests the same bytes for any caller that did not.
 
     A create that reports success without a component id fails closed: an
     attestation naming no result describes a mutation nobody can verify, and
     recording it would be worse than refusing.
     """
-    from ...authoring.revisions import sha256_fingerprint
     from ...models.authoring_workflow import (
         ProcessMutationAttestationV1,
         ResolvedProcessPlacementV1,
@@ -333,7 +353,11 @@ def build_mutation_attestation(
             ),
             folder_id=resolved_folder_id or plan.resolved_folder_id,
         ),
-        submitted_xml_digest=sha256_fingerprint({"component_xml": submitted_xml}),
+        submitted_xml_digest=(
+            submitted_xml_digest
+            or "sha256:"
+            + hashlib.sha256(submitted_xml.encode("utf-8")).hexdigest()
+        ),
     )
 
 

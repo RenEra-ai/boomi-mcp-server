@@ -291,29 +291,62 @@ def test_the_emission_plan_is_immutable_text_not_a_mutable_mapping():
 
 
 def test_slots_are_canonically_ordered_before_the_digest_is_taken():
-    """Permuted slots must yield the SAME plan, not an unconstructible one.
+    """The DERIVED inventory is sorted by slot_id in the constructed plan.
 
-    An earlier draft hashed a ``model_construct``ed provisional plan, which
-    skips validators — so the canonicalizing sort never ran on the hashed bytes
-    and a plan with unsorted slots could not be constructed at all.
+    Reworked for §6 AR1-03: slots are no longer caller-supplied, so ordering is
+    asserted on the builder's own output — the model's field validator sorts,
+    and the fingerprint is taken over the sorted form.
     """
-    slots = (
-        pm.ProcessComponentSymbolSlotV1(slot_id="z", ref="$ref:api_conn"),
-        pm.ProcessComponentSymbolSlotV1(slot_id="a", ref="$ref:db_conn"),
-    )
-    forward = _plan(unresolved_symbol_slots=slots)
-    reversed_ = _plan(unresolved_symbol_slots=tuple(reversed(slots)))
-    assert [s.slot_id for s in forward.unresolved_symbol_slots] == ["a", "z"]
-    assert pm.process_plan_fingerprint(forward) == pm.process_plan_fingerprint(reversed_)
+    plan = _plan()
+    ids = [s.slot_id for s in plan.unresolved_symbol_slots]
+    assert ids == sorted(ids)
+    assert len(ids) == len(set(ids))
 
 
 def test_duplicate_slot_ids_are_refused():
     slots = (
-        pm.ProcessComponentSymbolSlotV1(slot_id="dup", ref="$ref:db_conn"),
-        pm.ProcessComponentSymbolSlotV1(slot_id="dup", ref="$ref:api_conn"),
+        pm.ProcessComponentSymbolSlotV1(
+            slot_id="dup", ref="$ref:db_conn", expected_component_types=("connector-settings",)
+        ),
+        pm.ProcessComponentSymbolSlotV1(
+            slot_id="dup", ref="$ref:api_conn", expected_component_types=("connector-settings",)
+        ),
     )
+    base = _plan()
     with pytest.raises(ValidationError):
-        _plan(unresolved_symbol_slots=slots)
+        pm.ProcessComponentMaterializationPlanV1(
+            **{**base.model_dump(), "unresolved_symbol_slots": slots,
+               "envelope": base.envelope, "process_ir": base.process_ir}
+        )
+
+
+def test_the_builder_populates_the_slot_inventory():
+    """§6 AR1-03 witness: production plans record what late binding must resolve.
+
+    The slot layer was modelled and fingerprinted but never populated — every
+    production plan carried `unresolved_symbol_slots == ()` while its emission
+    plan was full of placeholders. Slots are now DERIVED from the same
+    enumeration the relocatability rule reads, so the inventory cannot disagree
+    with the references the plan actually binds.
+    """
+    plan = _plan()
+    slots = plan.unresolved_symbol_slots
+    assert slots, "a plan with $ref-bearing IR must record a non-empty inventory"
+    refs = sorted({s.ref for s in slots})
+    # The fixture IR references its connections and operations by $ref.
+    assert all(r.startswith("$ref:") for r in refs)
+    for slot in slots:
+        # slot_id is a stable source pointer into the plan's own material.
+        assert slot.slot_id.startswith(("process_ir", "process_extensions")), slot.slot_id
+        # ...and the expected type comes from the compile symbol table (nonempty).
+        assert slot.expected_component_types
+
+
+def test_a_slot_with_no_expected_type_is_refused():
+    """Plan §3: `expected_component_types` is required NONEMPTY — a slot that
+    constrains nothing is an inventory entry late binding cannot check."""
+    with pytest.raises(ValidationError):
+        pm.ProcessComponentSymbolSlotV1(slot_id="s", ref="$ref:x", expected_component_types=())
 
 
 def test_the_digest_is_sha256_of_the_returned_material():

@@ -79,7 +79,7 @@ def test_a_process_ir_plan_validates_and_previews_without_mutating(spy):
     }
     assert "proc" not in {c.key for c in preview.components}
     # The served projection withholds every authored root.
-    assert preview.processes == []
+    assert preview.processes == ()
     # ...but the root is still a DECLARED participant, so a reference to it
     # resolves. Without this the assertion above would be satisfied by a
     # regression that simply dropped the root from the request entirely.
@@ -621,7 +621,7 @@ def test_the_served_plan_never_echoes_an_authored_process_ir_value(spy):
     # that looks at the wrong object.
     assert watermark in json.dumps({"authored": doc})
     assert watermark not in served, "authored ProcessIR leaked into the served plan"
-    assert result.integration_spec_preview.processes == []
+    assert result.integration_spec_preview.processes == ()
 
 
 def test_the_legacy_component_plan_echo_cannot_restore_withheld_roots(spy, monkeypatch):
@@ -670,4 +670,4 @@ def test_the_legacy_component_plan_echo_cannot_restore_withheld_roots(spy, monke
     # Positive control: the sweep can see the watermark when it IS present.
     assert watermark in json.dumps({"authored": authored})
     assert watermark not in served, "the legacy echo restored the withheld roots"
-    assert result.integration_spec_preview.processes == []
+    assert result.integration_spec_preview.processes == ()

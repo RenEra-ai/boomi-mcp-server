@@ -9961,11 +9961,16 @@ def plan_integration_design_action(
             "get_schema_template(schema_name='process_ir_authoring') for the "
             "behavioural rules, then plan and compile."
         )
+        # #153 (§6 review AR1-09): this note used to say "plan and compile
+        # only … never applied", which was true before the canonical apply
+        # cutover and became served guidance contradicting a supported
+        # capability the moment it shipped.
         notes.append(
-            "Plan and compile only. A direct ProcessIR intent is never applied: "
-            "'authoring.typed_apply.process_materialization' is published as an "
-            "unsupported capability, so the workflow ends at "
-            "build_integration(action='compile')."
+            "A direct ProcessIR intent is fully appliable: "
+            "'authoring.typed_apply.process_materialization' is a supported "
+            "capability, so the workflow is plan -> compile -> "
+            "build_integration(action='apply') with a mutation attestation and "
+            "a separate live-readback attestation recorded per applied root."
         )
     else:
         mode = "pre_selection"

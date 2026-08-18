@@ -10,6 +10,7 @@ This module provides a single action router that can:
 from __future__ import annotations
 
 import copy
+import hashlib
 import ipaddress
 import re
 from collections import defaultdict
@@ -3246,6 +3247,12 @@ def _apply_structured_update(
         if exc.details:
             envelope["details"] = exc.details
         return envelope
+    # Digested immediately BEFORE the push (§6 AR1-05c): the attestation must
+    # describe the bytes as they left this process, not a value recomputed after
+    # the platform answered.
+    submitted_xml_digest = "sha256:" + hashlib.sha256(
+        merged_xml.encode("utf-8")
+    ).hexdigest()
     try:
         boomi_client.component.update_component_raw(target_id, merged_xml)
     except Exception as exc:
@@ -3283,6 +3290,7 @@ def _apply_structured_update(
         # differ on every healthy update and digesting the wrong one would attest
         # bytes the platform never received. Additive: no existing caller reads it.
         "submitted_xml": merged_xml,
+        "submitted_xml_digest": submitted_xml_digest,
     }
 
 
@@ -7416,6 +7424,52 @@ def _named_error_code_from_validation(exc) -> Optional[str]:
     return None
 
 
+def _resolve_canonical_placement(boomi_client, envelope):
+    """`folder_name` -> the ONE non-deleted folder id, or a named refusal.
+
+    §6 review AR1-06: the placement plan item was never implemented — the two
+    `PROCESS_MATERIALIZATION_PLACEMENT_*` codes were registered with no
+    reachable producer, `resolved_folder_id` was never populated, and the
+    attested placement carried `folder_id=None`. The plan is explicit: resolve
+    at apply time to an exact, non-deleted, UNIQUE account folder; zero matches
+    and multiple matches are distinct refusals; never the silent first-name-match
+    the legacy folder helper performs.
+
+    Returns ``None`` when the envelope names no folder (account-root placement
+    is legitimate). Refusal happens BEFORE any create/update is issued.
+    """
+    from .components.canonical_process_apply import CanonicalProcessApplyError
+
+    if not envelope.folder_name:
+        return None
+    from .folders import _query_all_folders
+
+    matches = [
+        folder
+        for folder in _query_all_folders(boomi_client, include_deleted=False)
+        if folder.get("name") == envelope.folder_name
+        and not folder.get("deleted")
+    ]
+    key = envelope.component_key
+    if not matches:
+        raise CanonicalProcessApplyError(
+            "process {0!r} names folder {1!r}, which matches no non-deleted "
+            "account folder".format(key, envelope.folder_name),
+            error_code="PROCESS_MATERIALIZATION_PLACEMENT_NOT_FOUND",
+            component_key=key,
+        )
+    if len(matches) > 1:
+        raise CanonicalProcessApplyError(
+            "process {0!r} names folder {1!r}, which matches {2} account "
+            "folders; placement is refused rather than guessed".format(
+                key, envelope.folder_name, len(matches)
+            ),
+            error_code="PROCESS_MATERIALIZATION_PLACEMENT_AMBIGUOUS",
+            component_key=key,
+        )
+    return matches[0].get("id") or None
+
+
 def _execute_canonical_process(
     *,
     boomi_client,
@@ -7426,6 +7480,8 @@ def _execute_canonical_process(
     existing_id: Optional[str],
     id_registry: Dict[str, str],
     account_id: Optional[str] = None,
+    stored_plan=None,
+    compiled_plan_digest: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Materialize and apply ONE canonical ProcessIR root, and attest it.
 
@@ -7468,6 +7524,18 @@ def _execute_canonical_process(
 
     envelope = unit.envelope
     key = envelope.component_key
+    clone_name_override: Optional[str] = None
+
+    def _requested_name():
+        """What we actually asked the platform to create — overlay-aware.
+
+        For a clone the caller's envelope keeps its authored name (the plan and
+        its fingerprint depend on that), and the SUFFIXED name is what the
+        create was issued with — so every requested-vs-applied comparison and
+        every served `requested_name` reads through this, or a deliberate clone
+        would be reported as a platform rename.
+        """
+        return clone_name_override or envelope.name
 
     def _canonical_result(**fields):
         """THE canonical step result. Every exit of this function builds it here.
@@ -7485,8 +7553,8 @@ def _execute_canonical_process(
         """
         result = {
             "type": "process",
-            "name": envelope.name,
-            "requested_name": envelope.name,
+            "name": _requested_name(),
+            "requested_name": _requested_name(),
             "applied_name_verified": False,
         }
         result.update(fields)
@@ -7532,28 +7600,62 @@ def _execute_canonical_process(
         # A clone CREATES; it never targets. `target_id` being truthy was enough
         # to select `update`, so a clone against a live same-name process
         # overwrote the very component the policy exists to leave alone.
+        #
+        # The clone name is an EXECUTION-TIME OVERLAY, not a plan input (§6
+        # review AR1-01, closing the CX2-01 divergence). Renaming the envelope
+        # before plan construction put a clone-generated concrete name into
+        # covered fingerprint material — an explicit plan exclusion — and made
+        # the apply-built plan permanently unequal to the compiled one. The plan
+        # stays exactly what compile certified; only the emitted artifact and
+        # the mutation attestation carry the suffixed name.
         target_id = None
-        envelope = envelope.model_copy(
-            update={"name": _CLONE_SUFFIX_FORMAT.format(envelope.name)}
-        )
+        clone_name_override = _CLONE_SUFFIX_FORMAT.format(envelope.name)
 
     try:
+        # Placement resolves FIRST (§6 AR1-06): the refusal is fully decidable
+        # before anything is compiled or written, and both placement codes get
+        # their producer here. `None` = account-root placement, legitimate.
+        resolved_folder_id = _resolve_canonical_placement(boomi_client, envelope)
         symbols = build_symbol_table(
             list(spec.components),
             process_keys=[u.envelope.component_key for u in (spec.processes or ())],
             connector_metadata=_connector_metadata_from_components(spec.components),
         )
-        plan = build_materialization_plan(
-            envelope=envelope,
-            process_ir=unit.process_ir,
-            symbols=symbols,
-            conflict_policy=conflict_policy,
-            compiler_revision=get_authoring_revisions()["compiler_revision"],
-            emitter_revision=emitter_revision(),
-            materializer_revision=_materializer_revision(),
-        )
+        if stored_plan is not None:
+            # THE COMPILED PLAN IS EXECUTED, never a rebuild (§6 AR1-01).
+            #
+            # Apply used to construct a fresh plan here and verify it against
+            # its own fingerprint — which proves only that the new plan matches
+            # itself. The typed bundle now retains the plan compile fingerprinted
+            # (plan §7: "Verify the STORED plan fingerprint"), and the identity
+            # assertion below binds it to the served artifact digest, so an
+            # apply cannot execute a different plan from the compiled result.
+            plan = stored_plan
+            if compiled_plan_digest and plan.plan_fingerprint != compiled_plan_digest:
+                raise CanonicalProcessApplyError(
+                    "the stored plan for {0!r} does not match the compile "
+                    "binding's plan artifact digest".format(key),
+                    error_code="PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH",
+                    component_key=key,
+                )
+        else:
+            # The LEGACY `integration_spec` root carries no compile binding at
+            # all, so there is no stored plan to consume; building it here is
+            # the only option, and there is no compiled digest to diverge from.
+            plan = build_materialization_plan(
+                envelope=envelope,
+                process_ir=unit.process_ir,
+                symbols=symbols,
+                conflict_policy=conflict_policy,
+                compiler_revision=get_authoring_revisions()["compiler_revision"],
+                emitter_revision=emitter_revision(),
+                materializer_revision=_materializer_revision(),
+            )
         xml = materialize_canonical_process_xml(
-            plan=plan, id_registry=id_registry, symbols=symbols
+            plan=plan,
+            id_registry=id_registry,
+            symbols=symbols,
+            name_override=clone_name_override,
         )
     except CanonicalProcessApplyError as exc:
         return {
@@ -7617,6 +7719,12 @@ def _execute_canonical_process(
             PROCESS_PRESERVATION_POLICY,
         )
     else:
+        # Digested immediately BEFORE the raw create call (§6 AR1-05c, plan §4
+        # recording point 2). The raw create path sends the XML unchanged, so
+        # these are the exact UTF-8 bytes the platform receives.
+        precomputed_digest = "sha256:" + hashlib.sha256(
+            xml.encode("utf-8")
+        ).hexdigest()
         exec_result = create_component(boomi_client, profile, {"xml": xml})
 
     component_id = _extract_component_id(exec_result) or (
@@ -7685,6 +7793,12 @@ def _execute_canonical_process(
     # those are the MERGED bytes; `_apply_structured_update` reports them so the
     # digest describes what the platform received, not what we desired.
     submitted = exec_result.get("submitted_xml") or xml
+    # The digest travels from the point CLOSEST to the wire: the update path
+    # computed it immediately before its push; the create path immediately
+    # before the raw create call above.
+    precomputed = exec_result.get("submitted_xml_digest") or (
+        precomputed_digest if action == "create" else None
+    )
     try:
         mutation = build_mutation_attestation(
             plan=plan,
@@ -7694,6 +7808,10 @@ def _execute_canonical_process(
             submitted_xml=submitted,
             account_scope_hash=account_scope_fingerprint(profile, account_id),
             applied_folder_name=applied_folder_name(submitted),
+            # Create records the requested name AND the resolved id (plan §4);
+            # an update's effective placement comes from the submitted bytes.
+            resolved_folder_id=resolved_folder_id if action == "create" else None,
+            submitted_xml_digest=precomputed,
         )
     except CanonicalProcessApplyError as exc:
         # A create that reported success without an id fails CLOSED: the mutation
@@ -7736,7 +7854,7 @@ def _execute_canonical_process(
     if applied_name:
         result["applied_name_verified"] = True
         result["name"] = applied_name
-        if envelope.name and applied_name != envelope.name:
+        if _requested_name() and applied_name != _requested_name():
             result["name_reassigned_by_platform"] = True
     else:
         # Readback unavailable: the construction-time default already says the
@@ -8058,6 +8176,30 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     #: is `_build_plan`'s local; these are facts only the apply can know.
     apply_warnings: List[str] = []
 
+    # DURABLE partial-mutation evidence (§6 AR1-04): a TYPED CANONICAL apply
+    # allocates its build record BEFORE the first mutation, `in_progress`, and
+    # appends each root's attestations as they land — so a caller that loses the
+    # response can still recover the record of a write that happened, by
+    # build_id. On a later failure the record transitions to `failed_partial`
+    # and the failure envelope carries the id. Scoped exactly as the plan
+    # scopes it: typed canonical apply only; a legacy build keeps its original
+    # all-at-end record with its original keys.
+    durable_build_id: Optional[str] = None
+    if authoring_bundle is not None and process_units_by_key and not dry_run:
+        durable_build_id = str(uuid4())
+        _BUILD_REGISTRY[durable_build_id] = {
+            "status": "in_progress",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "profile": profile,
+            "spec": spec.model_dump(),
+            # Shared reference ON PURPOSE: `results` grows as the loop runs, so
+            # the record always reflects what has actually been applied.
+            "results": results,
+            "execution_order": execution_order,
+            "process_mutations": [],
+            "process_readbacks": [],
+        }
+
     # From here on a component may be WRITTEN, so an exception escaping this
     # loop is the one case where the server cannot say what it did.
     #
@@ -8091,6 +8233,10 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             "failed_step": failed_step,
             "partial_results": results,
         }
+        if durable_build_id is not None:
+            # `failed_partial` (§6 AR1-04): the record survives the response.
+            _BUILD_REGISTRY[durable_build_id]["status"] = "failed_partial"
+            envelope["build_id"] = durable_build_id
         # Attestations and warnings describe mutations that ALREADY happened, so
         # no failing exit may drop them. Roots applied BEFORE the failure keep
         # their attestations; unapplied roots record none — that asymmetry is
@@ -8116,6 +8262,26 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             # because `components_by_key` does not contain process keys (QA-153-r1-01).
             unit = process_units_by_key.get(key)
             if unit is not None:
+                # The TYPED bundle hands over the plan compile certified (§6
+                # AR1-01) and the served artifact digest to assert it against;
+                # the legacy root has neither and the arm builds fresh.
+                _stored_plan = (
+                    (authoring_bundle.materialization_plans or {}).get(key)
+                    if authoring_bundle is not None
+                    else None
+                )
+                _compiled_digest = None
+                if authoring_bundle is not None:
+                    _compiled_digest = next(
+                        (
+                            a.digest
+                            for a in authoring_bundle.compile_result.artifact_fingerprints
+                            if a.component_key == key
+                            and a.artifact_kind
+                            == "process_component_materialization_plan"
+                        ),
+                        None,
+                    )
                 outcome = _execute_canonical_process(
                     boomi_client=boomi_client,
                     profile=profile,
@@ -8124,7 +8290,14 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     conflict_policy=conflict_policy,
                     existing_id=existing_ids.get(key),
                     id_registry=id_registry,
-                    account_id=config.get("account_id"),
+                    # The CONNECTED account, exactly as preflight and verify
+                    # derive it (§6 AR1-05a). `config.get("account_id")` let a
+                    # caller pick the attested scope hash — the one field whose
+                    # whole purpose is to bind the mutation to the account that
+                    # actually received it.
+                    account_id=_client_account_id(boomi_client),
+                    stored_plan=_stored_plan,
+                    compiled_plan_digest=_compiled_digest,
                 )
                 results[key] = outcome["result"]
                 if outcome.get("applied_name") and outcome.get("requested_name") and (
@@ -8206,8 +8379,16 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     id_registry[key] = outcome["component_id"]
                 if outcome.get("mutation") is not None:
                     process_mutations.append(outcome["mutation"])
+                    if durable_build_id is not None:
+                        _BUILD_REGISTRY[durable_build_id][
+                            "process_mutations"
+                        ].append(outcome["mutation"].model_dump(mode="json"))
                 if outcome.get("readback") is not None:
                     process_readbacks.append(outcome["readback"])
+                    if durable_build_id is not None:
+                        _BUILD_REGISTRY[durable_build_id][
+                            "process_readbacks"
+                        ].append(outcome["readback"].model_dump(mode="json"))
                 if not outcome["result"].get("_success", True):
                     return _partial_failure(
                         error=outcome.get("error") or f"Failed at step '{key}'",
@@ -8284,7 +8465,11 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     except Exception as exc:  # noqa: BLE001 — re-raised, never swallowed
         raise _ApplyExecutionError(exc) from exc
 
-    build_id = str(uuid4())
+    # A durable typed-canonical record was allocated BEFORE the first mutation
+    # (§6 AR1-04); success COMPLETES that same record under the same id rather
+    # than minting a second one, so the id a caller saw mid-flight is the id
+    # that verifies. Everything else keeps the original all-at-end behavior.
+    build_id = durable_build_id or str(uuid4())
     # #153 (QA-153-r2-05): the two attestations, serialized ONCE and used for
     # both the record and the envelope.
     #
@@ -8298,13 +8483,17 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     serialized_mutations = [m.model_dump(mode="json") for m in process_mutations]
     serialized_readbacks = [r.model_dump(mode="json") for r in process_readbacks]
 
-    build_record: Dict[str, Any] = {
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "profile": profile,
-        "spec": spec.model_dump(),
-        "results": results,
-        "execution_order": execution_order,
-    }
+    if durable_build_id is not None:
+        build_record: Dict[str, Any] = _BUILD_REGISTRY[durable_build_id]
+        build_record["status"] = "complete"
+    else:
+        build_record = {
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "profile": profile,
+            "spec": spec.model_dump(),
+            "results": results,
+            "execution_order": execution_order,
+        }
     # Recorded only when there is something to record, so a legacy build and a
     # typed build with no canonical roots both keep exactly their original keys.
     if serialized_mutations:
@@ -8752,11 +8941,24 @@ def _reject_invalid_typed_request(exc, action: str) -> Dict[str, Any]:
             {"path": location, "type": str(error.get("type", "invalid"))}
         )
     locations.sort(key=lambda entry: (entry["path"], entry["type"]))
+    # An unknown field on a PROCESS envelope/unit serves its OWN registered
+    # code (§6 review AR1-08; plan §3 names it). Scoped by location, not by
+    # blanket-mapping `extra_forbidden`: an unknown field elsewhere in the
+    # request is an ordinary schema failure and keeps the generic code.
+    unknown_process_field = any(
+        entry["type"] == "extra_forbidden"
+        and (".units." in entry["path"] or ".envelope" in entry["path"])
+        for entry in locations
+    )
     envelope = {
         "_success": False,
         "action": action,
         "mutation_performed": False,
-        "error_code": INVALID_INPUT,
+        "error_code": (
+            "PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD"
+            if unknown_process_field
+            else INVALID_INPUT
+        ),
         "error": (
             f"config.authoring_request failed AuthoringRequestV1 validation at "
             f"{len(locations)} location(s)."

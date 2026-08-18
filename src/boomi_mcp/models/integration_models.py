@@ -2,7 +2,7 @@
 Pydantic models for high-level integration orchestration.
 """
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
@@ -71,8 +71,12 @@ class IntegrationSpecV1(BaseModel):
     name: str = Field(..., description="Integration name")
     mode: Literal["lift_shift", "redesign"] = Field(default="lift_shift")
     components: List[IntegrationComponentSpec] = Field(default_factory=list)
-    processes: List[ProcessAuthoringUnitV1] = Field(
-        default_factory=list,
+    processes: Tuple[ProcessAuthoringUnitV1, ...] = Field(
+        # A TUPLE, per the plan's verbatim field type (§6 review AR1-08). A new
+        # field on this legacy-tolerant model breaks no pre-#153 caller — none
+        # carries `processes` — and pydantic coerces list input, so the wire
+        # shape is unchanged; only in-place mutation becomes unrepresentable.
+        default=(),
         description=(
             "Issue #153 M12.15 — canonical process roots authored as ProcessIR. "
             "Each entry is one ProcessAuthoringUnitV1: exactly one "

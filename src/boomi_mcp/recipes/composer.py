@@ -263,13 +263,21 @@ def _validated_direct_roots(
                 )
             ) from exc
 
-        # An already-parsed root is taken as-is: re-parsing a validated model
-        # would be wasted work, and `_compose_process_roots` dumps it anyway.
-        if isinstance(value, ProcessIRV1):
-            roots[key] = value
-            continue
+        # EVERY supplied value is reparsed, an already-instantiated model
+        # included (§6 review AR1-08, plan §9: "Parse every supplied
+        # direct-root value"). The shortcut this replaces trusted the type
+        # annotation as a contract — and `ProcessIRV1` is strict but NOT
+        # frozen, so a caller could mutate a parsed root after validation and
+        # composition then died on a raw `KeyError("steps")` deep inside
+        # `_compose_process_roots` (the reviewer reproduced exactly that).
+        # Reparsing from the dump re-runs every validator against the object's
+        # CURRENT state, which is the only state that matters.
         try:
-            roots[key] = parse_process_ir_v1(value)
+            roots[key] = parse_process_ir_v1(
+                value.model_dump(mode="json")
+                if isinstance(value, ProcessIRV1)
+                else value
+            )
         except ProcessIRValidationError as exc:
             raise RecipeError(
                 (

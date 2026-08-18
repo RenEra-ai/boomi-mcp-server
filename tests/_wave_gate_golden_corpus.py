@@ -943,6 +943,104 @@ def rich_compile_doc(doc, symbols=None, capabilities=None):
     )
 
 
+def _canonical_envelope_case():
+    """#153 (§6 review AR1-10): the canonical FULL COMPONENT ENVELOPE golden.
+
+    Rendered through the PUBLIC chain — normalize -> build_materialization_plan
+    (which owns compilation) -> late binding -> emit -> neutral materializer —
+    with deterministic ids, so the frozen bytes pin the whole path and not just
+    the emitter. The plan's golden-manifest requirement names exactly this
+    artifact; the semantic-only ProcessIR goldens stay as they are.
+    """
+    def render():
+        from boomi_mcp.authoring.contract import get_authoring_revisions
+        from boomi_mcp.authoring.process_materialization import (
+            build_materialization_plan,
+        )
+        from boomi_mcp.authoring.workflow import (
+            _connector_metadata_from_components,
+            _normalize_intent,
+        )
+        from boomi_mcp.categories.components.canonical_process_apply import (
+            materialize_canonical_process_xml,
+        )
+        from boomi_mcp.categories.integration_builder import _materializer_revision
+        from boomi_mcp.compiler.process_ir.emitter_registry import emitter_revision
+        from boomi_mcp.models.authoring_workflow import (
+            AuthoringRequestV1,
+            ProcessIRAuthoringIntentV1,
+        )
+        from boomi_mcp.models.process_component import (
+            ProcessAuthoringUnitV1,
+            ProcessComponentEnvelopeV1,
+        )
+        from boomi_mcp.models.process_ir import parse_process_ir_v1
+        from boomi_mcp.recipes.materialization import build_symbol_table
+
+        # Inlined rather than imported from a test module: goldens must render
+        # with every test module unimportable, and the corpus is the ONE
+        # permitted exception. Mirrors tests/_m12_11_support's appliable
+        # fixture; the two are pinned together by the goldens themselves — a
+        # drift changes these bytes.
+        conn = {
+            "key": "conn", "type": "connector-settings", "name": "M12.15 conn",
+            "action": "create",
+            "config": {"connector_type": "rest", "component_name": "M12.15 conn",
+                       "base_url": "https://orders.example.invalid", "auth": "NONE"},
+        }
+        op = {
+            "key": "op", "type": "connector-action", "name": "M12.15 op",
+            "action": "create", "depends_on": ["conn"],
+            "config": {"connector_type": "rest", "operation_mode": "execute",
+                       "component_name": "M12.15 op", "connection_ref_key": "conn",
+                       "method": "GET", "path": "/v1/things"},
+        }
+        unit = ProcessAuthoringUnitV1(
+            envelope=ProcessComponentEnvelopeV1(
+                component_key="proc", name="M12.15 Process", action="create",
+                depends_on=("conn", "op"),
+            ),
+            process_ir=parse_process_ir_v1({
+                "version": "1",
+                "body": {"kind": "sequence", "steps": [
+                    {"kind": "source", "connection_ref": "$ref:conn",
+                     "operation_ref": "$ref:op"},
+                    {"kind": "message", "text": "hello"},
+                    {"kind": "return_documents"},
+                ]},
+            }),
+        )
+        request = AuthoringRequestV1(
+            intent=ProcessIRAuthoringIntentV1(
+                integration_name="M12.15 Integration",
+                units=(unit,),
+                components=(conn, op),
+            )
+        )
+        spec = _normalize_intent(request).integration_spec
+        unit = spec.processes[0]
+        symbols = build_symbol_table(
+            list(spec.components),
+            process_keys=[u.envelope.component_key for u in spec.processes],
+            connector_metadata=_connector_metadata_from_components(spec.components),
+        )
+        plan = build_materialization_plan(
+            envelope=unit.envelope,
+            process_ir=unit.process_ir,
+            symbols=symbols,
+            conflict_policy="reuse",
+            compiler_revision=get_authoring_revisions()["compiler_revision"],
+            emitter_revision=emitter_revision(),
+            materializer_revision=_materializer_revision(),
+        )
+        return materialize_canonical_process_xml(
+            plan=plan,
+            id_registry={"conn": "golden-conn-id", "op": "golden-op-id"},
+            symbols=symbols,
+        )
+    return render
+
+
 def _rich_case(fixture_name):
     def render():
         from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
@@ -1396,6 +1494,8 @@ def _build_registry():
         "m11:processproperty_map_function": ("component-xml-v1", _case_m11_processproperty_map_function),
         # F — wrapper subprocess
         "wrapper_subprocess:standalone_parent": ("process-component-v1", _case_processcall_standalone_parent),
+        # G0 — #153 canonical full component envelope, via the PUBLIC chain
+        "canonical_envelope:appliable_rest": ("process-component-v1", _canonical_envelope_case()),
         # G — ProcessIR rich control bodies
         "process_ir_rich:branch_mixed_connectors": ("process-xml-v1", _rich_case("branch_mixed_connectors.json")),
         "process_ir_rich:decision_nested_bare_false_stop": ("process-xml-v1", _rich_case("decision_nested_bare_false_stop.json")),

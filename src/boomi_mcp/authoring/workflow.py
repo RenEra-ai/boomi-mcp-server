@@ -39,7 +39,7 @@ reinterpret a legacy request as something it is not.
 from __future__ import annotations
 
 import re as _re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from ..errors import (
@@ -651,11 +651,37 @@ def _lift_recipe_roots_into_units(components, roots):
         component = authored[0]
         config = component.config or {}
 
-        # `name` must be REAL, not defaulted. The legacy assembler already
-        # refuses a blank process name, so a missing one is a failure either
-        # way; failing here names the recipe and the root instead of surfacing
-        # as a builder error much later.
-        name = component.name or config.get("component_name")
+        # `name` AND `action` must be CALLER-AUTHORED, checked via
+        # `model_fields_set` (§6 review AR1-08; plan §8 verbatim: "inspect
+        # `model_fields_set` rather than accepting the default silently").
+        # The previous version fell back to `config.get("component_name")` —
+        # a key the plan's allowlist does not include — and honoured the
+        # model's `action="create"` default, so a recipe that authored
+        # neither still lifted into a unit whose two REQUIRED envelope fields
+        # nobody wrote.
+        authored_fields = component.model_fields_set
+        if "action" not in authored_fields:
+            raise AuthoringWorkflowError(
+                AUTHORING_COMPILE_BLOCKED,
+                (
+                    _diag(
+                        AUTHORING_COMPILE_BLOCKED,
+                        "error",
+                        message=(
+                            "A composed process root must author its own "
+                            "'action'; the model default is not accepted."
+                        ),
+                        subject_kind="process",
+                        subject_id=component_key,
+                        remediation=(
+                            "Set action='create' or action='update' explicitly "
+                            "on the process component this root belongs to."
+                        ),
+                        cause_codes=(PROCESS_COMPONENT_SCHEMA_INVALID,),
+                    ),
+                ),
+            )
+        name = component.name if "name" in authored_fields else None
         if not name or not str(name).strip():
             raise AuthoringWorkflowError(
                 AUTHORING_COMPILE_BLOCKED,
@@ -681,12 +707,7 @@ def _lift_recipe_roots_into_units(components, roots):
         envelope_kwargs = {
             "component_key": component_key,
             "name": str(name),
-            # The component's own action is honoured, default included. Demanding
-            # an EXPLICIT action here would be a new hard requirement on every
-            # existing recipe, and `IntegrationComponentSpec.action` has carried
-            # `default="create"` since M2 — the acceptance criteria make `action`
-            # required on the DIRECT authoring surface, which is a different
-            # caller.
+            # Caller-authored, verified above via `model_fields_set`.
             "action": component.action,
             "depends_on": tuple(component.depends_on or ()),
         }
@@ -783,7 +804,7 @@ def _withhold_process_roots(spec: IntegrationSpecV1) -> IntegrationSpecV1:
     """
     if not spec.processes:
         return spec
-    return spec.model_copy(update={"processes": []})
+    return spec.model_copy(update={"processes": ()})
 
 
 def build_component_dependencies(
@@ -1228,7 +1249,7 @@ def _validate_processes(
     # decidable from the request, so nothing justifies charging a partial write
     # for the answer.
     for unit in normalized.integration_spec.processes:
-        offenders = envelope_relocatability_offenders(unit.envelope)
+        offenders = envelope_relocatability_offenders(unit.envelope, unit.process_ir)
         if not offenders:
             continue
         errors += len(offenders)
@@ -1481,6 +1502,10 @@ class _PlanInternals:
     symbols: Any
     semantic_hash: str
     plan_hash: str
+    #: #153 §7 (AR1-01): the COMPILED materialization plan per process key —
+    #: populated by compile, retained on the bundle, EXECUTED by apply. `None`
+    #: before compile has run; an empty mapping means no canonical roots.
+    materialization_plans: Optional[Mapping[str, Any]] = None
 
 
 def plan_authoring_request_v1(
@@ -1649,8 +1674,10 @@ def plan_authoring_request_v1(
             + [normalized.integration_spec.model_dump(mode="json")]
         ),
     )
-    # Surfaced at PLAN time, not first discovered at apply: a caller must be able
-    # to learn that this intent is plan/compile-only before spending a compile.
+    # Surfaced at PLAN time, not first discovered at apply: a caller must be
+    # able to learn about any remaining capability gap before spending a
+    # compile. (Since #153 a direct ProcessIR intent is fully appliable; the
+    # gap list is empty unless the registry says otherwise.)
     gaps = sort_by_key(
         normalized.gaps
     )
@@ -1723,35 +1750,24 @@ def plan_authoring_request_v1(
 # ---------------------------------------------------------------------------
 
 
-def _materialization_plan_fingerprint(unit, symbols, conflict_policy):
-    """``(digest, byte_length)`` of one root's relocatable materialization plan.
+def _build_compile_time_plan(unit, symbols, conflict_policy):
+    """Build ONE root's materialization plan at COMPILE time, loudly.
 
-    Built from exactly the inputs apply will use, through the same
-    ``build_materialization_plan`` — never a second implementation of it, which
-    would be a hand-model of the plan whose digest it claims to be.
+    §6 review AR1-01: the previous version fingerprinted the plan and threw the
+    OBJECT away ("Fingerprinted here and NOT stored") — so apply rebuilt a fresh
+    plan whose self-check proved only that it matched itself, and a plan that
+    failed to construct here silently produced a binding with NO plan artifact
+    while apply might still build and execute one. Both halves are closed: the
+    plan is RETAINED (threaded through `_PlanInternals` onto `CompiledBundle`,
+    which apply consumes), and a construction failure is a compile refusal
+    rather than a silent omission — everything this builder can reject is
+    decidable from the request, so nothing justifies deferring the error to a
+    phase that mutates.
 
-    ``conflict_policy`` is the one the REQUEST carries, not a fixed value.
-    Hard-coding ``"reuse"`` here made the served provenance certify a plan the
-    mutation never executed: the policy is covered by the plan material, so a
-    ``clone``/``fail`` apply produced a ``process_mutations[].plan_fingerprint``
-    that could never equal the compile-time ``artifact_fingerprints[].digest``
-    (Codex round 2).
-
-    One divergence remains and is DELIBERATE: when a create collides and the
-    policy is ``clone``, apply materializes a renamed envelope, so its plan
-    genuinely differs from the one compile described. That difference is a fact
-    about what happened, and hiding it would require compile to resolve live
-    collisions — which is exactly what would make the plan account-bound and
-    destroy the relocatability this fingerprint exists to certify. The two
-    fingerprints differing is therefore the correct signal that a clone occurred,
-    not a defect.
-
-    Returns ``None`` when the plan cannot be built at compile time. That is not
-    a silent pass: a plan that cannot be constructed fails LOUDLY at apply with
-    its own named code, and refusing the compile here would turn every such case
-    into a different error at a different phase. What is guaranteed is the
-    positive direction — when a plan IS constructible, its fingerprint is in the
-    binding, so a materializer/emitter/preservation change invalidates it.
+    `conflict_policy` is the request's own (CX2-01). One divergence remains and
+    is deliberate: a clone COLLISION renames the artifact at execution time as
+    an attested overlay; the plan itself — and its fingerprint — stay exactly
+    what compile certified (plan §3, clone-name exclusion).
     """
     from ..categories.integration_builder import _materializer_revision
     from ..compiler.process_ir.emitter_registry import emitter_revision
@@ -1759,7 +1775,7 @@ def _materialization_plan_fingerprint(unit, symbols, conflict_policy):
     from .process_materialization import build_materialization_plan
 
     try:
-        plan = build_materialization_plan(
+        return build_materialization_plan(
             envelope=unit.envelope,
             process_ir=unit.process_ir,
             symbols=symbols,
@@ -1768,9 +1784,28 @@ def _materialization_plan_fingerprint(unit, symbols, conflict_policy):
             emitter_revision=emitter_revision(),
             materializer_revision=_materializer_revision(),
         )
-    except Exception:  # noqa: BLE001 — apply reports this with its own named code
-        return None
-    return plan.plan_fingerprint, len(canonical_plan_material(plan))
+    except Exception as exc:  # noqa: BLE001 — surfaced, never swallowed
+        raise AuthoringWorkflowError(
+            AUTHORING_COMPILE_BLOCKED,
+            (
+                _diag(
+                    AUTHORING_COMPILE_BLOCKED,
+                    "error",
+                    message=(
+                        "The materialization plan for this root could not be "
+                        "constructed, so no binding can certify what apply "
+                        "would build."
+                    ),
+                    subject_kind="process",
+                    subject_id=unit.envelope.component_key,
+                    remediation=(
+                        "Fix the reported condition and recompile; apply is "
+                        "refused until the plan is constructible."
+                    ),
+                    cause_codes=(type(exc).__name__,),
+                ),
+            ),
+        ) from exc
 
 
 def build_artifact_descriptors(
@@ -1795,6 +1830,7 @@ def build_artifact_descriptors(
 
     fingerprints: List[ArtifactFingerprintV1] = []
     cfg_summaries: List[ProcessCfgSummaryV1] = []
+    materialization_plans: Dict[str, Any] = {}
     units_by_key = {
         unit.envelope.component_key: unit
         for unit in (normalized.integration_spec.processes or ())
@@ -1893,19 +1929,21 @@ def build_artifact_descriptors(
         # a fingerprint of the plan rather than a second copy of it.
         unit = units_by_key.get(component_key)
         if unit is not None:
-            plan_fingerprint = _materialization_plan_fingerprint(
+            materialization_plan = _build_compile_time_plan(
                 unit, symbols, conflict_policy
             )
-            if plan_fingerprint is not None:
-                fingerprints.append(
-                    ArtifactFingerprintV1(
-                        component_key=component_key,
-                        component_type="process",
-                        artifact_kind="process_component_materialization_plan",
-                        byte_length=plan_fingerprint[1],
-                        digest=plan_fingerprint[0],
-                    )
+            materialization_plans[component_key] = materialization_plan
+            fingerprints.append(
+                ArtifactFingerprintV1(
+                    component_key=component_key,
+                    component_type="process",
+                    artifact_kind="process_component_materialization_plan",
+                    byte_length=len(
+                        canonical_plan_material(materialization_plan)
+                    ),
+                    digest=materialization_plan.plan_fingerprint,
                 )
+            )
         # Terminals are the CFG's own ``exit_node_ids``, not a re-derivation from
         # edge degree: the compiler already decided which nodes exit, and a
         # second opinion computed here could disagree with the artifact it
@@ -1925,7 +1963,7 @@ def build_artifact_descriptors(
             )
         )
 
-    return sort_by_key(fingerprints), sort_by_key(cfg_summaries)
+    return sort_by_key(fingerprints), sort_by_key(cfg_summaries), materialization_plans
 
 
 def compile_authoring_request_v1(
@@ -1963,9 +2001,12 @@ def compile_authoring_request_v1(
             ),
         )
 
-    fingerprints, cfg_summaries = build_artifact_descriptors(
+    fingerprints, cfg_summaries, materialization_plans = build_artifact_descriptors(
         internals.normalized, internals.symbols, request.intent.conflict_policy
     )
+    # RETAINED on the internals (AR1-01), so the bundle — and therefore apply —
+    # executes the very plans this compile fingerprinted, never a rebuild.
+    internals = replace(internals, materialization_plans=materialization_plans)
 
     normalized_payload = _normalized_payload(internals.normalized, request)
     normalized_digest = sha256_fingerprint(normalized_payload)
@@ -2047,6 +2088,9 @@ class CompiledBundle:
     integration_spec: IntegrationSpecV1
     compile_result: AuthoringCompileResultV1
     request: AuthoringRequestV1
+    #: #153 §7 (AR1-01): the compiled materialization plan per process key.
+    #: Apply EXECUTES these; it never rebuilds. Enforced in __post_init__.
+    materialization_plans: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Refuse a bundle whose spec cannot build what the compile describes.
@@ -2072,7 +2116,13 @@ class CompiledBundle:
         carried = {
             unit.envelope.component_key for unit in self.integration_spec.processes
         }
-        missing = sorted(described - carried)
+        # ...and every described root must carry its COMPILED plan (AR1-01): a
+        # bundle without one would send apply back to rebuilding, which is the
+        # self-certification hole this field exists to close.
+        missing = sorted(
+            (described - carried)
+            | (described - set(self.materialization_plans or {}))
+        )
         if missing:
             raise AuthoringWorkflowError(
                 AUTHORING_COMPILE_BLOCKED,
@@ -2289,6 +2339,7 @@ def preflight_typed_apply_v1(
         integration_spec=internals.normalized.integration_spec,
         compile_result=compile_result,
         request=request,
+        materialization_plans=dict(internals.materialization_plans or {}),
     )
 
 

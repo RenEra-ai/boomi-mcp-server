@@ -58,10 +58,11 @@ from ..models.process_component import ProcessComponentEnvelopeV1
 from ..models.process_ir import ProcessIRV1
 from .revisions import canonical_json_bytes
 
-#: Wire version of the CANONICAL MATERIAL. Bumped by hand only when the
-#: material's SHAPE changes. It is covered by the material itself, so an old plan
-#: and a new plan can never collide even if every other covered value matches.
-PLAN_MATERIAL_WIRE_VERSION = "2"
+#: The material's version IS the plan model's own ``version`` field, per the
+#: design plan's exact canonical object — there is no separate wire version.
+#: (An earlier draft carried both a ``version`` and a ``wire_version`` key; §6
+#: review AR1-07 held the material to the plan's specified shape.)
+PLAN_MATERIAL_WIRE_VERSION = "1"
 
 _REF_PREFIX = "$ref:"
 
@@ -135,7 +136,15 @@ class ProcessComponentSymbolSlotV1(_PlanModel):
     @field_validator("expected_component_types")
     @classmethod
     def _canonical_types(cls, value: Tuple[str, ...]) -> Tuple[str, ...]:
-        return tuple(sorted({t.strip() for t in value if t and t.strip()}))
+        canonical = tuple(sorted({t.strip() for t in value if t and t.strip()}))
+        if not canonical:
+            # Required NONEMPTY (plan §3): a slot that constrains nothing is an
+            # inventory entry late binding cannot check anything against.
+            raise PydanticCustomError(
+                "process_materialization_plan_invalid",
+                "expected_component_types must name at least one component type",
+            )
+        return canonical
 
 
 class ProcessPreservationPolicyV1(_PlanModel):
@@ -186,27 +195,52 @@ def _iter_envelope_refs(envelope: ProcessComponentEnvelopeV1):
         )
 
 
+def iter_plan_component_refs(envelope: ProcessComponentEnvelopeV1, process_ir):
+    """Every component reference the PLAN carries — envelope AND ProcessIR.
+
+    THE single enumeration authority (§6 review, AR1-02/AR1-03). Two consumers
+    need "every reference this plan binds": the relocatability rule, which must
+    refuse a literal account id anywhere in covered material, and the symbol-slot
+    inventory, which records what late binding must resolve. Giving each its own
+    walk would be a second copy of one fact — the DC-3 class — so both chain off
+    this one generator. The IR half is `iter_component_refs`, which yields only
+    `ComponentRefV1`-annotated fields, so what counts as a reference is decided
+    by the schema, never by what a string looks like.
+    """
+    from ..models.process_ir import iter_component_refs
+
+    yield from _iter_envelope_refs(envelope)
+    for path, ref in iter_component_refs(process_ir, "process_ir"):
+        yield path.lstrip("/"), ref
+
+
 def envelope_relocatability_offenders(
     envelope: ProcessComponentEnvelopeV1,
+    process_ir=None,
 ) -> Tuple[str, ...]:
-    """The envelope paths carrying a LITERAL component id instead of ``$ref:KEY``.
+    """Plan paths carrying a LITERAL component id instead of ``$ref:KEY``.
 
-    The single authority for the relocatability rule, because the rule now has
-    two consumers and a hand-copied second opinion is exactly the defect class
-    this slice keeps hitting. :meth:`~ProcessComponentMaterializationPlanV1.
-    _envelope_references_are_relocatable` refuses the plan on it at apply, and
-    ``plan``/``compile`` report it as a diagnostic BEFORE anything is written.
+    The single authority for the relocatability rule — refused by the plan model
+    at apply, and reported by ``plan``/``compile`` before anything is written
+    (QA-153-r2-07).
 
-    That second consumer is QA-153-r2-07: the refusal existed but fired only
-    inside the apply loop, so a caller learned their binding was unusable only
-    after the connector components had already been created — a partial write on
-    a defect that is fully decidable from the request alone.
+    **Covers the ProcessIR as well as the envelope** (§6 review, AR1-02). The
+    first version walked only the envelope's extension bindings, while the
+    canonical material covers ``process_ir`` wholesale — so a validated,
+    self-consistent plan could carry a literal account id in its canonical
+    bytes through any `ComponentRefV1` field of the IR, and the same logical
+    process fingerprinted differently in two accounts. That is the exact
+    violation the fingerprint exists to make unrepresentable, and the plan text
+    mandates the model-level refusal for "materializable ProcessIR or extension
+    references" alike. `process_ir=None` keeps plan-surface callers that only
+    have an envelope working; the plan model always passes both.
     """
-    return tuple(
-        path
-        for path, ref in _iter_envelope_refs(envelope)
-        if not ref.startswith(_REF_PREFIX)
+    refs = (
+        iter_plan_component_refs(envelope, process_ir)
+        if process_ir is not None
+        else _iter_envelope_refs(envelope)
     )
+    return tuple(path for path, ref in refs if not ref.startswith(_REF_PREFIX))
 
 
 class ProcessComponentMaterializationPlanV1(_PlanModel):
@@ -265,7 +299,7 @@ class ProcessComponentMaterializationPlanV1(_PlanModel):
         dropping the bindings from coverage would stop a real override change
         from moving the fingerprint.
         """
-        offenders = envelope_relocatability_offenders(self.envelope)
+        offenders = envelope_relocatability_offenders(self.envelope, self.process_ir)
         if offenders:
             raise PydanticCustomError(
                 "process_materialization_reference_not_relocatable",
@@ -312,15 +346,21 @@ def _dump(value: Any) -> Any:
 
 
 def canonical_plan_material(plan: "ProcessComponentMaterializationPlanV1") -> bytes:
-    """The exact bytes the fingerprint is taken over.
+    """The exact bytes the fingerprint is taken over — the plan's SPECIFIED shape.
 
-    Built by walking :func:`covered_plan_fields`, so the material cannot drift
-    from the model. Returned as bytes rather than a dict so callers compare what
-    was HASHED, not a re-serialization of it.
+    Built by walking :func:`covered_plan_fields`, so COVERAGE cannot drift from
+    the model — and each walked field is then mapped into the design plan's
+    exact canonical object (§6 review AR1-07): ``version`` from the model field,
+    the emission plan as a NESTED object rather than a double-serialized string,
+    and ``policies`` / ``revisions`` as the plan's nested groups rather than
+    flattened keys. Storage stays as it is (the JSON-string fields are the
+    recorded S5-03/S5-05 deviations); only the hashed MATERIAL takes the
+    specified layout. Returned as bytes so callers compare what was HASHED.
     """
     payload: Dict[str, Any] = {
         "kind": "process_component_materialization_plan",
-        "wire_version": PLAN_MATERIAL_WIRE_VERSION,
+        "policies": {},
+        "revisions": {},
     }
     for name in covered_plan_fields():
         value = getattr(plan, name)
@@ -329,6 +369,19 @@ def canonical_plan_material(plan: "ProcessComponentMaterializationPlanV1") -> by
             for excluded in EXCLUDED_ENVELOPE_FIELDS:
                 envelope.pop(excluded, None)
             payload[name] = envelope
+        elif name == "emission_plan_canonical_json":
+            # The stored field is canonical TEXT (S5-05: immutable on a frozen
+            # model); the MATERIAL nests the object itself, per the plan.
+            payload["emission_plan"] = json.loads(value)
+        elif name == "conflict_policy":
+            payload["policies"]["conflict_policy"] = value
+        elif name == "preservation_policy":
+            payload["policies"]["preservation_policy"] = {
+                "policy_id": value.policy_id,
+                "projection": json.loads(value.canonical_policy_json),
+            }
+        elif name in ("compiler_revision", "emitter_revision", "materializer_revision"):
+            payload["revisions"][name] = value
         else:
             payload[name] = _dump(value)
     return canonical_json_bytes(payload)
@@ -374,6 +427,44 @@ def placeholder_backed_symbols(symbols):
     )
 
 
+def derive_symbol_slots(
+    envelope: ProcessComponentEnvelopeV1, process_ir: ProcessIRV1, symbols
+) -> Tuple[ProcessComponentSymbolSlotV1, ...]:
+    """The plan's unresolved-symbol-slot inventory, DERIVED — never authored.
+
+    §6 review AR1-03: the slot layer was modelled, fingerprinted, and never
+    populated — both production callers passed nothing, so every plan recorded
+    ``unresolved_symbol_slots == ()`` while its emission plan was full of
+    placeholders, and late binding had no recorded inventory to check against.
+
+    One slot per reference OCCURRENCE, from the same enumeration the
+    relocatability rule reads (`iter_plan_component_refs`): ``slot_id`` is the
+    stable source pointer, ``ref`` the ``$ref:KEY`` token, and
+    ``expected_component_types`` the symbol table's own type for that key —
+    the compiler's authority, not a re-derivation.
+    """
+    by_ref = {symbol.ref: symbol for symbol in symbols.symbols}
+    slots = []
+    for path, ref in iter_plan_component_refs(envelope, process_ir):
+        if not ref.startswith(_REF_PREFIX):
+            continue  # a literal id is the relocatability validator's finding
+        symbol = by_ref.get(ref)
+        if symbol is None:
+            raise PydanticCustomError(
+                "process_materialization_plan_invalid",
+                "reference {ref} at {path} names no symbol in the compile table",
+                {"ref": ref, "path": path},
+            )
+        slots.append(
+            ProcessComponentSymbolSlotV1(
+                slot_id=path,
+                ref=ref,
+                expected_component_types=(symbol.component_type,),
+            )
+        )
+    return tuple(slots)
+
+
 def build_materialization_plan(
     *,
     envelope: ProcessComponentEnvelopeV1,
@@ -383,14 +474,15 @@ def build_materialization_plan(
     compiler_revision: str,
     emitter_revision: str,
     materializer_revision: str,
-    unresolved_symbol_slots: Tuple[ProcessComponentSymbolSlotV1, ...] = (),
     resolved_folder_id: Optional[str] = None,
 ) -> ProcessComponentMaterializationPlanV1:
     """Compile, derive, and fingerprint ONE root — the only supported constructor.
 
     Owning compilation is what makes the emission plan provably placeholder-backed
     (see the module docstring). The execution profile is derived here for the same
-    reason: a caller-supplied profile could contradict the graph.
+    reason: a caller-supplied profile could contradict the graph — and the symbol
+    SLOTS are derived here for the same reason again: a caller-supplied inventory
+    could disagree with the references the plan actually binds (AR1-03).
     """
     from ..compiler.process_ir.contracts import canonical_emission_plan_json
     from ..compiler.process_ir.execution_profile import (
@@ -405,12 +497,14 @@ def build_materialization_plan(
         envelope=envelope,
         process_ir=process_ir,
         emission_plan_canonical_json=canonical_emission_plan_json(emission_plan),
-        # Sorted BEFORE the digest is taken. The first draft computed the digest
-        # from a `model_construct`ed provisional plan, which skips validators —
-        # so the canonicalizing sort never ran on the hashed bytes and a plan with
-        # unsorted slots was impossible to construct.
+        # DERIVED, and sorted before the digest is taken (the first draft hashed
+        # a `model_construct`ed provisional plan, skipping the canonicalizing
+        # validators entirely).
         unresolved_symbol_slots=tuple(
-            sorted(unresolved_symbol_slots, key=lambda slot: slot.slot_id)
+            sorted(
+                derive_symbol_slots(envelope, process_ir, relocatable_symbols),
+                key=lambda slot: slot.slot_id,
+            )
         ),
         execution_profile=derive_process_execution_profile(cfg, relocatable_symbols),
         conflict_policy=conflict_policy,
@@ -438,7 +532,9 @@ __all__ = [
     "build_materialization_plan",
     "canonical_plan_material",
     "covered_plan_fields",
+    "derive_symbol_slots",
     "envelope_relocatability_offenders",
+    "iter_plan_component_refs",
     "placeholder_backed_symbols",
     "preservation_policy_v1",
     "process_plan_fingerprint",

@@ -266,14 +266,63 @@ def test_materialization_succeeds_with_every_legacy_entry_point_bombed(monkeypat
 
     monkeypatch.setattr(pcm.ProcessComponentMaterializer, "materialize", _spy)
 
-    xml = pcm.ProcessComponentMaterializer().materialize(
-        ("<shape/>",), name="Canonical", execution_profile="scheduled"
+    # THE PUBLIC PATH, not the materializer leaf (§6 review AR1-10): the plan's
+    # legacy-independence criterion is that plan -> compile -> materialize
+    # reaches no legacy entry point. Calling the leaf directly proved only that
+    # the last link is clean; a legacy import anywhere earlier in the chain
+    # would have passed unnoticed.
+    import sys
+    from pathlib import Path as _Path
+
+    _tests = str(_Path(__file__).resolve().parent)
+    if _tests not in sys.path:
+        sys.path.insert(0, _tests)
+    from _m12_11_support import appliable_process_ir_request
+    from boomi_mcp.authoring.process_materialization import (
+        build_materialization_plan,
+    )
+    from boomi_mcp.authoring.workflow import (
+        _connector_metadata_from_components,
+        _normalize_intent,
+    )
+    from boomi_mcp.categories.components.canonical_process_apply import (
+        materialize_canonical_process_xml,
+    )
+    from boomi_mcp.categories.integration_builder import _materializer_revision
+    from boomi_mcp.authoring.contract import get_authoring_revisions
+    from boomi_mcp.compiler.process_ir.emitter_registry import emitter_revision
+    from boomi_mcp.recipes.materialization import build_symbol_table
+
+    request = appliable_process_ir_request()
+    normalized = _normalize_intent(request)
+    spec = normalized.integration_spec
+    unit = spec.processes[0]
+    symbols = build_symbol_table(
+        list(spec.components),
+        process_keys=[u.envelope.component_key for u in spec.processes],
+        connector_metadata=_connector_metadata_from_components(spec.components),
+    )
+    plan = build_materialization_plan(
+        envelope=unit.envelope,
+        process_ir=unit.process_ir,
+        symbols=symbols,
+        conflict_policy="reuse",
+        compiler_revision=get_authoring_revisions()["compiler_revision"],
+        emitter_revision=emitter_revision(),
+        materializer_revision=_materializer_revision(),
+    )
+    xml = materialize_canonical_process_xml(
+        plan=plan,
+        id_registry={"conn": "golden-conn-id", "op": "golden-op-id"},
+        symbols=symbols,
     )
 
     assert calls == [True], "the materializer never ran — the proof would be vacuous"
     assert xml.startswith("<?xml")
     assert 'type="process"' in xml
     assert pcm.DEFAULT_PROCESS_OPTIONS in xml
+    # ...and the chain genuinely bound the real ids on the way through.
+    assert "golden-conn-id" in xml
 
 
 def test_the_bomb_really_fires_when_the_legacy_path_is_used(monkeypatch):

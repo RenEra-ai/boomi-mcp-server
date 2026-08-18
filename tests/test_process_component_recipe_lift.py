@@ -46,6 +46,9 @@ def _roots(*keys):
 def _process(key="proc", **kwargs):
     kwargs.setdefault("type", "process")
     kwargs.setdefault("name", "Recipe Process")
+    # Explicit since §6 AR1-08: the lift inspects `model_fields_set` and
+    # refuses the model default.
+    kwargs.setdefault("action", "create")
     return IntegrationComponentSpec(key=key, **kwargs)
 
 
@@ -196,15 +199,33 @@ def test_a_root_without_a_usable_name_is_refused_here_not_at_apply(name):
     assert "PROCESS_COMPONENT_SCHEMA_INVALID" in causes
 
 
-def test_a_name_carried_only_in_config_is_honoured():
-    """Some recipes set `config.component_name` rather than the top-level name."""
+def test_a_name_carried_only_in_config_is_REFUSED():
+    """INVERTED at §6 AR1-08 — the plan's allowlist does not include the name.
+
+    This test used to assert that `config.component_name` was honoured as the
+    envelope name. The plan is explicit (L550-551): both `name` and `action`
+    must be caller-authored on the component itself, checked via
+    `model_fields_set`, and the config allowlist is exactly `description`,
+    `folder_name`, `process_extensions` — a config-carried name is not on it.
+    Renamed rather than edited in place, because a name asserting "is honoured"
+    on a test that now asserts refusal would be actively misleading.
+    """
     given = [
         IntegrationComponentSpec(
-            key="proc", type="process", config={"component_name": "From Config"}
+            key="proc", type="process", action="create",
+            config={"component_name": "From Config"},
         )
     ]
-    _supporting, units = _lift_recipe_roots_into_units(given, _roots("proc"))
-    assert units[0].envelope.name == "From Config"
+    with pytest.raises(AuthoringWorkflowError) as excinfo:
+        _lift_recipe_roots_into_units(given, _roots("proc"))
+    assert excinfo.value.code == AUTHORING_COMPILE_BLOCKED
+
+    # ...and the missing-action shape is refused the same way.
+    unauthored_action = [
+        IntegrationComponentSpec(key="proc", type="process", name="Named")
+    ]
+    with pytest.raises(AuthoringWorkflowError):
+        _lift_recipe_roots_into_units(unauthored_action, _roots("proc"))
 
 
 def test_no_roots_means_no_units_and_no_components_removed():

@@ -93,7 +93,11 @@ def components(process_kind=None):
     process_config = {"process_kind": process_kind} if process_kind else {}
     return (
         IntegrationComponentSpec(
-            key="proc", type="process", name="M12.11 Process", config=process_config
+            # `action` is EXPLICIT: since §6 AR1-08 the recipe lift requires
+            # both `name` and `action` caller-authored (`model_fields_set`),
+            # never the model default.
+            key="proc", type="process", name="M12.11 Process",
+            action="create", config=process_config
         ),
         component(
             "db_conn", "connector-settings", "M12.11 DB Conn", connector_type="database"

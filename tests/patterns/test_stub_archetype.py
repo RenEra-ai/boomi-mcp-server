@@ -34,7 +34,7 @@ EXPECTED_SPEC_DICT = {
     "name": "demo-integration",
     "mode": "redesign",
     "components": [],
-    "processes": [],
+    "processes": (),
     "goals": [
         "Validate V3 archetype build path without Boomi mutation.",
         "Stub archetype emits no executable Boomi components.",

@@ -401,8 +401,12 @@ def test_connection_id_must_be_an_exact_reference_token():
 
 def test_processes_defaults_to_empty_and_is_additive():
     spec = IntegrationSpecV1(name="Spec")
-    assert spec.processes == []
+    # A TUPLE since §6 AR1-08 (the plan's verbatim field type): list input still
+    # coerces, so the wire is unchanged; in-place mutation is unrepresentable.
+    assert spec.processes == ()
     assert "processes" in spec.model_dump()
+    coerced = IntegrationSpecV1(name="Spec", processes=[])
+    assert coerced.processes == ()
 
 
 def test_a_key_may_not_be_used_by_both_a_component_and_a_process():

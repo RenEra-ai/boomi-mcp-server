@@ -3212,7 +3212,9 @@ if get_schema_template_action:
                 'AuthoringRevisionBindingV1', 'AuthoringBuildProvenanceV1', and
                 'authoring_workflow' (the eight-step sequence and which phases may mutate).
                 An optional '@<version>' suffix pins the schema version, and is accepted ONLY
-                by the eight selectors listed above that this contract owns (all at version '1');
+                by the eight selectors listed above that this contract owns (the request/result/
+                binding/workflow selectors serve version '2' since the #153 apply cutover;
+                the rest remain at '1' — list_capabilities publishes each current version);
                 an unserved version on one of those returns AUTHORING_SCHEMA_VERSION_UNAVAILABLE
                 with the supported list. Every other selector — including 'IntegrationSpecV1',
                 'recipe_contributions' and 'archetype:<name>' — publishes no version and rejects
@@ -3513,9 +3515,11 @@ if plan_integration_design_action:
                 DIRECT ProcessIR brief: mode='process_ir_pre_selection', no archetype reported
                 as a missing input, the supported node vocabulary with a contract entry id per
                 kind, the non-supported capability states verbatim, the filtered
-                process_ir_authoring query to read the rules with, and typed next steps that end
-                at build_integration(action='compile') because a direct ProcessIR intent is
-                plan/compile-only. Supplying it together with an archetype is INVALID_INPUT: the
+                process_ir_authoring query to read the rules with, and typed next steps through
+                build_integration(action='apply') — since #153 a direct ProcessIR intent is
+                fully appliable via the canonical materialization chain, with mutation and
+                live-readback attestations recorded per applied root.
+                Supplying it together with an archetype is INVALID_INPUT: the
                 two answer different questions and are not merged.
         """
         payload = plan_integration_design_action(

@@ -1793,3 +1793,433 @@ def test_nothing_before_the_push_can_write():
         if isinstance(n, ast.Attribute) and n.attr in WRITERS
     ]
     assert "update_component_raw" in found
+
+
+# ---------------------------------------------------------------------------
+# §6 architect review, round 1 (AR1-01 / AR1-02 / AR1-03 / AR1-07)
+# ---------------------------------------------------------------------------
+
+
+def test_a_literal_component_id_in_the_IR_is_not_relocatable():
+    """AR1-02: relocatability covers the WHOLE plan, not just the envelope.
+
+    The reviewer constructed a validated plan whose canonical bytes carried a
+    literal account id through a `ComponentRefV1` field of the IR — the exact
+    violation the fingerprint exists to make unrepresentable. The rule now walks
+    the IR through the same schema-derived enumeration the slot inventory uses.
+    """
+    doc = {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                {
+                    "kind": "source",
+                    # A literal Boomi id — valid generic ProcessIR, but not
+                    # materializable (plan §3: reject at the model).
+                    "connection_ref": "35813b90-1f42-4dcb-98f5-82d8f96be61d",
+                    "operation_ref": "$ref:op",
+                },
+                {"kind": "message", "text": "hello"},
+                {"kind": "return_documents"},
+            ],
+        },
+    }
+    payload = process_ir_request().model_dump(mode="json")
+    payload["intent"]["units"][0]["process_ir"] = doc
+    with patch(_PAGINATE) as paginate:
+        paginate.return_value = []
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "compile", config={"authoring_request": payload}
+        )
+    assert result["_success"] is False
+    assert "PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE" in str(result)
+
+    # Control: the $ref form of the same document compiles.
+    ok = process_ir_request().model_dump(mode="json")
+    with patch(_PAGINATE) as paginate:
+        paginate.return_value = []
+        control = build_integration_action(
+            MagicMock(), _PROFILE, "compile", config={"authoring_request": ok}
+        )
+    assert control["_success"] is True, control.get("error")
+
+
+def test_a_typed_apply_executes_the_stored_compiled_plan():
+    """AR1-01: apply consumes the plan compile certified — never a rebuild.
+
+    Compile fingerprinted the plan and threw the object away, so apply rebuilt
+    one whose self-check proved only that it matched itself. The bundle now
+    retains the keyed plans, `__post_init__` refuses a bundle missing one, and
+    the mutation attestation's `plan_fingerprint` must equal the served compile
+    artifact digest.
+
+    Discriminator: a SPY on the plan builder. A typed apply invokes it exactly
+    once — inside the preflight recompile — and never again in the apply arm.
+    The pre-fix tree calls it twice (preflight + the arm's rebuild).
+    """
+    import boomi_mcp.authoring.process_materialization as pm
+
+    calls = {"n": 0}
+    real = pm.build_materialization_plan
+
+    def _spy(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    payload = _bound_payload()
+    _SUBMITTED.clear()
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml, patch.object(
+        pm, "build_materialization_plan", _spy
+    ):
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _live_xml
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": payload, "dry_run": False},
+        )
+
+    assert result["_success"] is True, result.get("error")
+    assert calls["n"] == 1, (
+        "expected exactly the preflight compile's plan build; %d calls means "
+        "the apply arm rebuilt" % calls["n"]
+    )
+
+    # ...and the executed plan IS the compiled artifact, by digest.
+    mutation = result["process_mutations"][0]
+    with patch(_PAGINATE) as paginate:
+        paginate.return_value = []
+        from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+
+        compiled, _ = compile_authoring_request_v1(
+            process_ir_request(), boomi_client=MagicMock(), profile=_PROFILE
+        )
+    compiled_digest = next(
+        a.digest for a in compiled.artifact_fingerprints
+        if a.artifact_kind == "process_component_materialization_plan"
+    )
+    assert mutation["plan_fingerprint"] == compiled_digest
+
+
+def test_a_clone_attests_the_COMPILED_plan_and_emits_the_suffixed_name():
+    """AR1-01 clone half: the clone name is an execution overlay.
+
+    Renaming the envelope before plan construction put a clone-generated name
+    into covered fingerprint material — an explicit plan exclusion — and made
+    `process_mutations[].plan_fingerprint` permanently unequal to the compiled
+    artifact digest. Now the plan and its fingerprint stay what compile
+    certified; only the emitted XML and the attestation carry the suffix.
+
+    The existing-component resolver is patched for the WHOLE test — binding
+    compile and apply alike — because the legacy lint's evidence feeds the plan
+    hash, and a resolver that answers differently between the two phases makes
+    the binding legitimately stale (measured while writing this test).
+    """
+    from boomi_mcp.categories import integration_builder as ib
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+    from boomi_mcp.models.authoring_workflow import parse_authoring_request_v1
+
+    def _resolve(_client, comp):
+        # Only the PROCESS name collides; components resolve to nothing.
+        if getattr(comp, "type", None) == "process":
+            return [{"component_id": "cid-live", "name": "M12.15 Process",
+                     "folder_name": "Home"}]
+        return []
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    base = process_ir_request().model_dump(mode="json")
+    base["intent"]["conflict_policy"] = "clone"
+
+    _SUBMITTED.clear()
+    with patch.object(ib, "_resolve_existing_components", _resolve),          patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _live_xml
+
+        request = parse_authoring_request_v1(dict(base))
+        compiled, _ = compile_authoring_request_v1(
+            request, boomi_client=MagicMock(), profile=_PROFILE
+        )
+        payload = dict(base)
+        payload["expected_capability_revision"] = (
+            compiled.revision_binding.capability_revision
+        )
+        payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+        compiled_digest = next(
+            a.digest for a in compiled.artifact_fingerprints
+            if a.artifact_kind == "process_component_materialization_plan"
+        )
+
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": payload, "dry_run": False},
+        )
+
+    assert result["_success"] is True, result.get("error")
+    # The EMITTED artifact carries the suffixed name...
+    assert 'name="M12.15 Process-clone"' in _SUBMITTED["xml"]
+    # ...the attestation is action=create and certifies the COMPILED plan...
+    mutation = result["process_mutations"][0]
+    assert mutation["action"] == "create"
+    assert mutation["plan_fingerprint"] == compiled_digest
+    # ...and a deliberate clone is NOT reported as a platform rename.
+    step = result["results"]["proc"]
+    assert step["requested_name"] == "M12.15 Process-clone"
+    assert "name_reassigned_by_platform" not in step
+
+
+def test_folder_placement_resolves_to_exactly_one_live_folder():
+    """AR1-06: the placement plan item, previously unimplemented.
+
+    `PROCESS_MATERIALIZATION_PLACEMENT_NOT_FOUND` and `_AMBIGUOUS` were
+    registered with no reachable producer — the same published-but-unreachable
+    condition this slice's own r1-03 row treats as a defect. Resolution is
+    exact-name, non-deleted, UNIQUE, decided before any write, and the create
+    attestation records the resolved id.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    def _payload_with_folder():
+        unit = process_unit(folder_name="Target Folder")
+        return _bound_payload(process_ir_request(units=(unit,)))
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    def _apply_with_folders(folders):
+        _SUBMITTED.clear()
+        created["n"] = 0
+        with patch("boomi_mcp.categories.folders._query_all_folders",
+                   return_value=folders), \
+             patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+            _CREATE
+        ) as create, patch(_GET_XML) as get_xml:
+            paginate.return_value = []
+            execute.side_effect = _component
+            create.side_effect = _create
+            get_xml.side_effect = _live_xml
+            return build_integration_action(
+                MagicMock(), _PROFILE, "apply",
+                config={"authoring_request": _payload_with_folder(), "dry_run": False},
+            )
+
+    one = [{"id": "folder-1", "name": "Target Folder", "deleted": False}]
+    two = one + [{"id": "folder-2", "name": "Target Folder", "deleted": False}]
+
+    # UNIQUE match: apply proceeds and the create attestation records the id.
+    ok = _apply_with_folders(one)
+    assert ok["_success"] is True, ok.get("error")
+    placement = ok["process_mutations"][0]["resolved_placement"]
+    assert placement["folder_name"] == "Target Folder"
+    assert placement["folder_id"] == "folder-1"
+
+    # ZERO matches: refused by name, BEFORE any write of the process.
+    none = _apply_with_folders([])
+    assert none["_success"] is False
+    assert none["error_code"] == "PROCESS_MATERIALIZATION_PLACEMENT_NOT_FOUND"
+    assert none["partial_results"]["proc"]["status"] == "refused"
+
+    # MULTIPLE matches: refused, never first-match guessed.
+    many = _apply_with_folders(two)
+    assert many["_success"] is False
+    assert many["error_code"] == "PROCESS_MATERIALIZATION_PLACEMENT_AMBIGUOUS"
+
+    # Account-root placement (no folder named) stays legitimate.
+    root = _apply(_bound_payload())
+    assert root["_success"] is True, root.get("error")
+
+
+def test_partial_mutation_evidence_survives_the_lost_response():
+    """AR1-04: the durable `in_progress` -> `failed_partial` record.
+
+    Attestations lived only in the response envelope, so a caller that lost it
+    had no record of a write that happened. A typed canonical apply now
+    allocates its build record BEFORE the first mutation, appends each root's
+    attestations durably as they land, and a later failure transitions the
+    record to `failed_partial` and serves its `build_id`.
+    """
+    from boomi_mcp.categories.integration_builder import _BUILD_REGISTRY
+    from _m12_11_support import appliable_process_unit
+
+    # Two roots; the second one's create is rejected AFTER the first landed.
+    first = appliable_process_unit(key="proc_ok", name="M12.15 OK")
+    second = appliable_process_unit(
+        key="proc_bad", name="M12.15 Bad", depends_on=("conn", "op", "proc_ok")
+    )
+    payload = _bound_payload(process_ir_request(units=(first, second)))
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    calls = {"n": 0}
+
+    def _create(_client, _profile, payload_in):
+        calls["n"] += 1
+        _SUBMITTED["xml"] = payload_in["xml"]
+        if calls["n"] == 1:
+            return {"_success": True, "component_id": "proc-ok-id"}
+        return {"_success": False, "error": "platform 400 on the second root"}
+
+    _SUBMITTED.clear()
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _live_xml
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": payload, "dry_run": False},
+        )
+
+    assert result["_success"] is False
+    build_id = result.get("build_id")
+    assert build_id, "the failure envelope must carry the durable build_id"
+
+    # THE POINT: throw the response away — the registry still has the record.
+    record = _BUILD_REGISTRY[build_id]
+    assert record["status"] == "failed_partial"
+    assert [m["component_key"] for m in record["process_mutations"]] == ["proc_ok"]
+    assert record["process_mutations"][0]["result_component_id"] == "proc-ok-id"
+    # The failed root and unapplied roots have NO successful attestation.
+    assert all(m["component_key"] != "proc_bad" for m in record["process_mutations"])
+
+    # Control: a fully successful apply completes the SAME id it allocated.
+    _SUBMITTED.clear()
+    ok = _apply(_bound_payload())
+    assert ok["_success"] is True, ok.get("error")
+    assert _BUILD_REGISTRY[ok["build_id"]]["status"] == "complete"
+
+
+def test_the_attested_scope_hash_cannot_be_chosen_by_the_caller():
+    """AR1-05(a): the scope hash binds to the CONNECTED account.
+
+    Execution passed `config.get("account_id")` into the attestation while the
+    typed preflight had already derived the real account — so a caller could
+    pick the attested scope. The apply arm now derives it from the client,
+    exactly as preflight and verify do.
+    """
+    def _one_apply(extra_config):
+        created = {"n": 0}
+
+        def _component(*_a, **_k):
+            created["n"] += 1
+            return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+        def _create(_client, _profile, payload_in):
+            _SUBMITTED["xml"] = payload_in["xml"]
+            return {"_success": True, "component_id": _PROCESS_ID}
+
+        _SUBMITTED.clear()
+        with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+            _CREATE
+        ) as create, patch(_GET_XML) as get_xml:
+            paginate.return_value = []
+            execute.side_effect = _component
+            create.side_effect = _create
+            get_xml.side_effect = _live_xml
+            return build_integration_action(
+                MagicMock(), _PROFILE, "apply",
+                config={"authoring_request": _bound_payload(), "dry_run": False,
+                        **extra_config},
+            )
+
+    honest = _one_apply({})
+    influenced = _one_apply({"account_id": "attacker-chosen-scope"})
+    assert honest["_success"] and influenced["_success"]
+    assert (
+        honest["process_mutations"][0]["account_scope_hash"]
+        == influenced["process_mutations"][0]["account_scope_hash"]
+    ), "a caller-supplied account_id changed the attested scope hash"
+
+
+def test_the_submitted_digest_is_raw_sha256_of_the_submitted_bytes():
+    """AR1-05(b)/(c): the exact UTF-8 bytes, hashed as themselves.
+
+    The digest wrapped the XML in a canonical-JSON object before hashing, so it
+    was a hash of DIFFERENT material than the bytes the platform received — the
+    reviewer confirmed the two digests differ. It is now raw SHA-256 over the
+    submitted bytes, computed immediately before the wire call on each path.
+    """
+    import hashlib as _hashlib
+
+    result = _apply(_bound_payload())
+    assert result["_success"] is True, result.get("error")
+    mutation = result["process_mutations"][0]
+    expected = "sha256:" + _hashlib.sha256(
+        _SUBMITTED["xml"].encode("utf-8")
+    ).hexdigest()
+    assert mutation["submitted_xml_digest"] == expected
+
+    # Non-vacuity: the OLD convention over the same bytes is a different value.
+    from boomi_mcp.authoring.revisions import sha256_fingerprint
+
+    assert mutation["submitted_xml_digest"] != sha256_fingerprint(
+        {"component_xml": _SUBMITTED["xml"]}
+    )
+
+
+def test_an_unknown_envelope_field_serves_its_registered_code():
+    """AR1-08 sub-claim 4: `PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD` is reachable.
+
+    The plan registers the code for exactly this refusal; the implementation
+    served every unknown field as generic `INVALID_INPUT`. Scoped by location —
+    unknown fields OUTSIDE the process unit keep the generic code, so this
+    widens what is named, never what is refused.
+    """
+    payload = process_ir_request().model_dump(mode="json")
+    payload["intent"]["units"][0]["envelope"]["not_a_field"] = "x"
+    result = build_integration_action(
+        MagicMock(), _PROFILE, "compile", config={"authoring_request": payload}
+    )
+    assert result["_success"] is False
+    assert result["error_code"] == "PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD"
+    assert any(
+        e["type"] == "extra_forbidden" for e in result["validation_errors"]
+    )
+
+    # Control: an unknown field at the REQUEST level stays generic.
+    other = process_ir_request().model_dump(mode="json")
+    other["not_a_field"] = "x"
+    generic = build_integration_action(
+        MagicMock(), _PROFILE, "compile", config={"authoring_request": other}
+    )
+    assert generic["_success"] is False
+    assert generic["error_code"] == "INVALID_INPUT"

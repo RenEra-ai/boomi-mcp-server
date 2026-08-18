@@ -140,7 +140,11 @@ AUTHORING_SCHEMA_REGISTRY = MappingProxyType(
 #: itself (#144 ships a planner and no apply path at all).
 AUTHORING_CAPABILITY_REGISTRY: Mapping[str, Tuple[str, str, str]] = MappingProxyType(
     {
-        "authoring.process_ir": ("supported", "1", "runtime_schema_registry"),
+        # #153 (§6 review AR1-09): the six authorities whose PUBLIC PROMISE the
+        # apply cutover changed bump to "2", atomically with the capability flip
+        # — plan §8 lists them by name. The topology and recipe entries stay at
+        # "1"; their promises did not move.
+        "authoring.process_ir": ("supported", "2", "runtime_schema_registry"),
         "authoring.system_topology.plan": ("supported", "1", "topology_planner"),
         "authoring.system_topology.deploy": (
             "unsupported",
@@ -148,20 +152,20 @@ AUTHORING_CAPABILITY_REGISTRY: Mapping[str, Tuple[str, str, str]] = MappingProxy
             "topology_planner",
         ),
         "authoring.recipe_contributions": ("supported", "1", "recipe_registry"),
-        "authoring.integration_spec": ("supported", "1", "archetype_registry"),
-        "authoring.compile": ("supported", "1", "canonical_compiler"),
-        "authoring.revision_binding": ("supported", "1", "runtime_schema_registry"),
+        "authoring.integration_spec": ("supported", "2", "archetype_registry"),
+        "authoring.compile": ("supported", "2", "canonical_compiler"),
+        "authoring.revision_binding": ("supported", "2", "runtime_schema_registry"),
         # #146 amendment. Published so a caller can discover, before authoring
         # anything, that the behavioural contract exists and that direct
         # ProcessIR planning is available without an archetype.
         "authoring.process_ir.contract": (
             "supported",
-            "1",
+            "2",
             "runtime_schema_registry",
         ),
         "authoring.process_ir.pre_selection": (
             "supported",
-            "1",
+            "2",
             "runtime_schema_registry",
         ),
         # #153 (M12.15): SUPPORTED. The cutover this entry was waiting for has
