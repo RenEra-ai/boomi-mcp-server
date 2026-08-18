@@ -1746,3 +1746,50 @@ def test_every_structured_update_exit_reports_whether_it_wrote():
     # Non-vacuity: the flag really does vary — a check that only ever saw one
     # value would pass against a constant.
     assert {fetch["write_attempted"], push["write_attempted"]} == {False, True}
+
+
+def test_nothing_before_the_push_can_write():
+    """Pins the assumption `write_attempted`'s positional stamp rests on.
+
+    `_apply_structured_update` stamps its exits by position relative to
+    `update_component_raw`: returns before it say no write was attempted. That is
+    only sound while nothing reachable before the push can write, which QA-153
+    round 11 verified structurally and then flagged — if a preservation helper
+    ever gains a network call, the stamp goes silently wrong and a lost write
+    gets reported as "nothing happened".
+
+    Asserted on the call graph rather than by eye: `merge_for_update` and its
+    helpers may not touch a Boomi client. Cheap, and it fails at the moment the
+    assumption stops being true instead of at the incident.
+    """
+    import ast
+
+    module = (
+        Path(__file__).resolve().parent.parent
+        / "src/boomi_mcp/categories/components/component_update_preservation.py"
+    )
+    tree = ast.parse(module.read_text())
+
+    #: Names that would mean this module reached the network.
+    WRITERS = (
+        "boomi_client", "update_component_raw", "create_component_raw",
+        "component_get_xml", "requests", "urlopen", "httpx", "session",
+    )
+    offenders = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in WRITERS:
+            offenders.append((node.lineno, node.id))
+        if isinstance(node, ast.Attribute) and node.attr in WRITERS:
+            offenders.append((node.lineno, node.attr))
+    assert offenders == [], (
+        "the pre-push merge path reached a client — `write_attempted`'s "
+        "positional stamp is no longer sound: %r" % offenders
+    )
+
+    # Non-vacuity: the probe CAN see these names when they are present.
+    planted = ast.parse("def f(boomi_client):\n    boomi_client.component.update_component_raw(1, 2)\n")
+    found = [
+        n.attr for n in ast.walk(planted)
+        if isinstance(n, ast.Attribute) and n.attr in WRITERS
+    ]
+    assert "update_component_raw" in found
