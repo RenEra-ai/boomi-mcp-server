@@ -50,7 +50,9 @@ from ..errors import (
     AUTHORING_REQUIRED_DECISION_MISSING,
     PROCESS_COMPONENT_SCHEMA_INVALID,
     PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,
+    PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE,
 )
+from .process_materialization import envelope_relocatability_offenders
 from ..models.authoring_workflow import (
     ArtifactFingerprintV1,
     AuthoringCompileResultV1,
@@ -1163,6 +1165,45 @@ def _validate_processes(
                     )
                 )
 
+    # #153 (QA-153-r2-07): relocatability, decided HERE rather than only inside
+    # the apply loop.
+    #
+    # The rule itself is unchanged and is not restated — `envelope_relocatability_
+    # offenders` is the same authority the materialization plan's own validator
+    # consults, so the two cannot drift. What changes is WHEN it fires. Deciding
+    # it only at apply meant a caller learned their extension binding was
+    # unusable after the connector components had already been written, and the
+    # published `PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE` code was
+    # unreachable from `plan` and `compile` entirely. The offending path is fully
+    # decidable from the request, so nothing justifies charging a partial write
+    # for the answer.
+    for unit in normalized.integration_spec.processes:
+        offenders = envelope_relocatability_offenders(unit.envelope)
+        if not offenders:
+            continue
+        errors += len(offenders)
+        for path in offenders:
+            codes.append(PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE)
+            diagnostics.append(
+                _diag(
+                    PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE,
+                    "error",
+                    message=(
+                        "A process extension binding names a literal component "
+                        "id; a materializable root may carry only '$ref:KEY' "
+                        "tokens."
+                    ),
+                    path="/{0}".format(path),
+                    subject_kind="process",
+                    subject_id=unit.envelope.component_key,
+                    remediation=(
+                        "Declare the existing component in the component plan "
+                        "and reference it by logical key with '$ref:KEY'."
+                    ),
+                    cause_codes=(PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE,),
+                )
+            )
+
     summary = ValidationReportSummaryV1(
         is_valid=errors == 0,
         error_count=errors,
@@ -1425,25 +1466,31 @@ def plan_authoring_request_v1(
         # prefix. Surfaced so compile stops issuing a binding whose apply is
         # guaranteed to fail while reporting `is_valid: true` and no warnings.
         #
-        # BLOCKING only when apply is actually reachable. A direct ProcessIR
-        # intent is plan/compile-only by design, and its component plan exists to
-        # resolve `$ref` symbols rather than to be built — so blocking compile on
-        # a materialization lint would make the one capability this issue adds
-        # (compile a ProcessIR, get its artifact fingerprints) unusable unless
-        # the caller also supplied a fully materializable component plan they
-        # never intended to apply. There the finding is real but advisory.
-        blocks_apply = request.intent.intent_kind != "process_ir"
+        # BLOCKING for every intent kind (#153).
+        #
+        # This carried an exemption — `intent_kind != "process_ir"` — justified by
+        # "a direct ProcessIR intent is plan/compile-only by design, so nothing
+        # would be built from it either way". That premise was true when #146
+        # wrote it and is FALSE as of this milestone: a `process_ir` intent is
+        # applied, its component plan IS built, and `_apply_plan` refuses on the
+        # same `error_` prefix this lint reports. So the exemption downgraded a
+        # guaranteed apply failure to a warning for precisely the intent kind
+        # that had just become appliable, and compile would have issued a binding
+        # whose apply could not succeed — the exact failure the error branch
+        # exists to prevent.
+        #
+        # Deleted rather than re-conditioned: the condition that would replace it
+        # is "will this plan be built?", and the answer is now unconditionally
+        # yes. Found by reading the comment against the behaviour this slice
+        # ships, not by a test — nothing failed, because the two tests covering
+        # it both asserted the stale premise.
         unexecutable = tuple(
             _diag(
                 AUTHORING_COMPILE_BLOCKED,
-                "error" if blocks_apply else "warning",
+                "error",
                 message=(
                     "The component-plan lint marked this step unexecutable; "
                     "apply would refuse it."
-                    if blocks_apply
-                    else "The component-plan lint marked this step unexecutable. "
-                    "This intent is plan/compile-only, so nothing would be built "
-                    "from it either way."
                 ),
                 path=f"/components/{step.get('key', '')}",
                 subject_kind="component",
@@ -1457,8 +1504,7 @@ def plan_authoring_request_v1(
             for step in (legacy.get("steps") or ())
             if str(step.get("planned_action", "")).startswith("error_")
         )
-        if blocks_apply:
-            errors = sort_authoring_diagnostics(errors + unexecutable)
+        errors = sort_authoring_diagnostics(errors + unexecutable)
         # The redacted echo REPLACES the caller's spec. This is the single line
         # that stops a plaintext password from riding back out in the preview.
         #
@@ -1479,9 +1525,11 @@ def plan_authoring_request_v1(
             spec_preview = _withhold_process_roots(
                 IntegrationSpecV1(**legacy["integration_spec"])
             )
-        # ACCUMULATED, not reassigned: the advisory unexecutable-step findings
-        # above must survive alongside the planner's own warning strings.
-        legacy_warnings = (() if blocks_apply else unexecutable) + tuple(
+        # The planner's own warning strings. The advisory arm this used to
+        # accumulate is gone with the `process_ir` exemption above: an
+        # unexecutable step is now an ERROR for every intent kind, so there is no
+        # advisory copy of it left to preserve.
+        legacy_warnings = tuple(
             _diag(
                 AUTHORING_COMPILE_BLOCKED,
                 "warning",
@@ -1841,11 +1889,63 @@ class CompiledBundle:
     what makes "apply validates before its first mutation" structural: there is
     no code path from a request to a materializer that does not pass through
     here.
+
+    ``integration_spec`` is the INTERNAL spec — the one apply builds from. It is
+    emphatically not ``compile_result.integration_spec_preview``, and the
+    invariant below is what enforces that rather than trusting the caller to
+    remember it.
     """
 
     integration_spec: IntegrationSpecV1
     compile_result: AuthoringCompileResultV1
     request: AuthoringRequestV1
+
+    def __post_init__(self) -> None:
+        """Refuse a bundle whose spec cannot build what the compile describes.
+
+        QA-153-r2-01: this bundle was constructed from
+        ``compile_result.integration_spec_preview`` — the SERVED projection,
+        which withholds the authored process roots because it is echoed back to
+        the caller. The bundle's spec is also the apply INPUT, so every canonical
+        root was silently deleted on its way to the builder: apply reported
+        ``_success: true``, ``mutation_status: "performed"``, "Applied … with 2
+        steps", and created no process component, with no warning naming the
+        root it dropped. A silent no-op that attests a successful mutation is
+        worse than the loud crash it replaced.
+
+        The check compares against ``process_cfg``, not against the request.
+        ``process_cfg`` is derived from the internal spec by compilation and is
+        SERVED (it is a value-free summary, so it is never withheld), which makes
+        it an authority independent of the projection under test. Any served spec
+        projection therefore fails here for every intent that declares a root,
+        at construction, instead of at the mutation.
+        """
+        described = {summary.component_key for summary in self.compile_result.process_cfg}
+        carried = {
+            unit.envelope.component_key for unit in self.integration_spec.processes
+        }
+        missing = sorted(described - carried)
+        if missing:
+            raise AuthoringWorkflowError(
+                AUTHORING_COMPILE_BLOCKED,
+                tuple(
+                    _diag(
+                        AUTHORING_COMPILE_BLOCKED,
+                        "error",
+                        message=(
+                            "The compiled bundle does not carry a process root "
+                            "its own compile describes; nothing was mutated."
+                        ),
+                        subject_kind="process",
+                        subject_id=key,
+                        remediation=(
+                            "This is a server defect: apply was handed a served "
+                            "spec projection instead of the internal spec."
+                        ),
+                    )
+                    for key in missing
+                ),
+            )
 
 
 def preflight_typed_apply_v1(
@@ -1912,7 +2012,7 @@ def preflight_typed_apply_v1(
         }
     )
     try:
-        compile_result, _internals = compile_authoring_request_v1(
+        compile_result, internals = compile_authoring_request_v1(
             recompute_request,
             boomi_client=boomi_client,
             profile=profile,
@@ -2034,7 +2134,11 @@ def preflight_typed_apply_v1(
         )
 
     return CompiledBundle(
-        integration_spec=compile_result.integration_spec_preview,
+        # The INTERNAL spec, never the preview — see `CompiledBundle.__post_init__`
+        # and QA-153-r2-01. The same distinction the reference summary already
+        # draws at `build_resolved_reference_summary`: redaction and withholding
+        # belong at the serving boundary, not in the data the server acts on.
+        integration_spec=internals.normalized.integration_spec,
         compile_result=compile_result,
         request=request,
     )

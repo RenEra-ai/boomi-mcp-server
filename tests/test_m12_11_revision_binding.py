@@ -45,10 +45,10 @@ def spy(monkeypatch):
     return MutationSpy().install(monkeypatch)
 
 
-#: These tests exercise the BINDING, so their fixture must be an intent apply can
-#: actually materialize. A direct ProcessIR intent is plan/compile-only by design,
-#: so using one here would see every case below refused by the materialization gap
-#: before a single hash was compared — the suite would pass while testing nothing.
+#: These tests exercise the BINDING, so their fixture is a component-only plan:
+#: it keeps every case below about hash comparison rather than about emitting a
+#: process. (Until #153 there was a second, stronger reason — a direct ProcessIR
+#: intent could not be applied at all — and that is no longer true.)
 _appliable_request = appliable_request
 
 

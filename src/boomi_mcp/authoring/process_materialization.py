@@ -186,6 +186,29 @@ def _iter_envelope_refs(envelope: ProcessComponentEnvelopeV1):
         )
 
 
+def envelope_relocatability_offenders(
+    envelope: ProcessComponentEnvelopeV1,
+) -> Tuple[str, ...]:
+    """The envelope paths carrying a LITERAL component id instead of ``$ref:KEY``.
+
+    The single authority for the relocatability rule, because the rule now has
+    two consumers and a hand-copied second opinion is exactly the defect class
+    this slice keeps hitting. :meth:`~ProcessComponentMaterializationPlanV1.
+    _envelope_references_are_relocatable` refuses the plan on it at apply, and
+    ``plan``/``compile`` report it as a diagnostic BEFORE anything is written.
+
+    That second consumer is QA-153-r2-07: the refusal existed but fired only
+    inside the apply loop, so a caller learned their binding was unusable only
+    after the connector components had already been created — a partial write on
+    a defect that is fully decidable from the request alone.
+    """
+    return tuple(
+        path
+        for path, ref in _iter_envelope_refs(envelope)
+        if not ref.startswith(_REF_PREFIX)
+    )
+
+
 class ProcessComponentMaterializationPlanV1(_PlanModel):
     """Everything apply needs to materialize ONE process root, plus its fingerprint.
 
@@ -242,11 +265,7 @@ class ProcessComponentMaterializationPlanV1(_PlanModel):
         dropping the bindings from coverage would stop a real override change
         from moving the fingerprint.
         """
-        offenders = [
-            path
-            for path, ref in _iter_envelope_refs(self.envelope)
-            if not ref.startswith(_REF_PREFIX)
-        ]
+        offenders = envelope_relocatability_offenders(self.envelope)
         if offenders:
             raise PydanticCustomError(
                 "process_materialization_reference_not_relocatable",
@@ -419,6 +438,7 @@ __all__ = [
     "build_materialization_plan",
     "canonical_plan_material",
     "covered_plan_fields",
+    "envelope_relocatability_offenders",
     "placeholder_backed_symbols",
     "preservation_policy_v1",
     "process_plan_fingerprint",

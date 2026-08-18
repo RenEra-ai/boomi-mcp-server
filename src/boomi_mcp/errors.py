@@ -419,6 +419,13 @@ PROCESS_MATERIALIZATION_PLACEMENT_AMBIGUOUS = (
     "PROCESS_MATERIALIZATION_PLACEMENT_AMBIGUOUS"
 )
 PROCESS_MATERIALIZATION_RESULT_ID_MISSING = "PROCESS_MATERIALIZATION_RESULT_ID_MISSING"
+#: A SERVER fault while materializing, distinct from every refusal above.
+#: QA-153-r2-03: the apply arm hard-coded ``PLAN_INVALID`` for any exception, so
+#: an internal ``NameError`` was served as a verdict on the caller's plan — the
+#: caller's only actionable response being to change something that was never
+#: wrong. A code that blames the server is the honest one, and it keeps
+#: ``PLAN_INVALID`` meaning what it says.
+PROCESS_MATERIALIZATION_INTERNAL_ERROR = "PROCESS_MATERIALIZATION_INTERNAL_ERROR"
 
 
 @dataclass(frozen=True)
@@ -1688,6 +1695,16 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             summary=(
                 "A create reported success without a component id, so the "
                 "mutation could not be attested; it fails closed."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_MATERIALIZATION_INTERNAL_ERROR,
+            category="process_materialization",
+            retryable=False,
+            summary=(
+                "Materialization failed for a reason that is not a defect in the "
+                "caller's request; the server, not the plan, is at fault."
             ),
             owner="#153",
         ),

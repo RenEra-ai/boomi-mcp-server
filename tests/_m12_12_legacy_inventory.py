@@ -203,6 +203,18 @@ ROUTE_CLASSIFICATIONS: Tuple[str, ...] = (
     "dormant",
     "typed_non_process",
     "external_transport",
+    # #153 (M12.15). The canonical chain: process XML emitted from an internally
+    # compiled ProcessIR artifact, never from caller-supplied XML and never by
+    # resolving a legacy dialect off a component config.
+    #
+    # Deliberately its own classification rather than folded into an existing
+    # one. It is not `raw_process_capable` (no caller XML reaches it), not
+    # `legacy_structured_process` (it consults no `process_kind`), and not
+    # `typed_non_process` (it emits precisely a process root). Folding it into
+    # any of those would tell #160 to retract the one route that is meant to
+    # SURVIVE the retraction — this is the replacement, not another instance of
+    # what is being replaced.
+    "canonical_process_materialization",
 )
 
 SURFACE_CLASSES: Tuple[str, ...] = (
@@ -2359,6 +2371,22 @@ def authoring_boundaries() -> List[Dict[str, Any]]:
 #: scanner cannot find — and pins the locations that legitimately host several
 #: routes, so a new sharing is a diff rather than a silent reclassification.
 WRITE_ROUTES: Tuple[Dict[str, Any], ...] = (
+    {
+        "route_id": "WRT-canonical-process-materialization",
+        "locations": ("src/boomi_mcp/categories/integration_builder.py::"
+                      "_execute_canonical_process",),
+        "classification": "canonical_process_materialization",
+        "summary": "#153: compiles the authored ProcessIR with placeholder ids, rebinds "
+                   "them to the ids ordered apply has published, recompiles, emits, and "
+                   "wraps the result with the neutral ProcessComponentMaterializer. The "
+                   "caller supplies semantics, never XML.",
+        "owning_issue": "#153",
+        "post_retraction_assertion": "unchanged, and it is what the retraction leaves "
+                                     "behind: a process root reaches the platform only "
+                                     "through a compiled artifact whose plan fingerprint "
+                                     "and apply-time mutation attestation are both "
+                                     "recorded.",
+    },
     {
         "route_id": "WRT-manage-component-dispatch",
         "locations": ("src/boomi_mcp/categories/components/manage_component.py::"

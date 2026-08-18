@@ -172,6 +172,87 @@ def process_ir_request(doc=None, process_kind=None, units=None, **extra):
     )
 
 
+#: An APPLIABLE supporting plan, deliberately REST-only.
+#:
+#: `components()` above carries a database connection the builder's own preflight
+#: marks `error_database_validation`, which since #153 is a compile ERROR for
+#: every intent kind (an unexecutable step means apply would refuse). So a test
+#: whose subject is the canonical apply cannot use that plan — it never reaches
+#: the canonical arm. Defined HERE rather than in the one test file that needed
+#: it first, so there is a single fixture rather than two hand-copies drifting
+#: apart.
+APPLIABLE_CONN = {
+    "key": "conn",
+    "type": "connector-settings",
+    "name": "M12.15 conn",
+    "action": "create",
+    "config": {
+        "connector_type": "rest",
+        "component_name": "M12.15 conn",
+        "base_url": "https://orders.example.invalid",
+        "auth": "NONE",
+    },
+}
+APPLIABLE_OP = {
+    "key": "op",
+    "type": "connector-action",
+    "name": "M12.15 op",
+    "action": "create",
+    "depends_on": ["conn"],
+    "config": {
+        "connector_type": "rest",
+        "operation_mode": "execute",
+        "component_name": "M12.15 op",
+        "connection_ref_key": "conn",
+        "method": "GET",
+        "path": "/v1/things",
+    },
+}
+
+#: source -> message -> return_documents over the two components above.
+APPLIABLE_IR_DOC = {
+    "version": "1",
+    "body": {
+        "kind": "sequence",
+        "steps": [
+            {"kind": "source", "connection_ref": "$ref:conn", "operation_ref": "$ref:op"},
+            {"kind": "message", "text": "hello"},
+            {"kind": "return_documents"},
+        ],
+    },
+}
+
+
+def appliable_process_unit(key="proc", name="M12.15 Process", **envelope_extra):
+    """One authoring unit over the appliable root."""
+    kwargs = {
+        "component_key": key,
+        "name": name,
+        "action": "create",
+        "depends_on": ("conn", "op"),
+    }
+    kwargs.update(envelope_extra)
+    return ProcessAuthoringUnitV1(
+        envelope=ProcessComponentEnvelopeV1(**kwargs),
+        process_ir=parse_process_ir_v1(APPLIABLE_IR_DOC),
+    )
+
+
+def appliable_process_ir_request(units=None, components=None):
+    """A direct ProcessIR request the existing builders CAN plan, compile and apply."""
+    return AuthoringRequestV1(
+        intent=ProcessIRAuthoringIntentV1(
+            integration_name="M12.15 Integration",
+            units=units if units is not None else (appliable_process_unit(),),
+            components=(
+                components
+                if components is not None
+                else (APPLIABLE_CONN, APPLIABLE_OP)
+            ),
+        )
+    )
+
+
 def integration_spec_request(**extra):
     """A typed request wrapping an already-assembled component plan.
 
@@ -199,11 +280,15 @@ def integration_spec_request(**extra):
 def appliable_request(name="M12.11 Applied", **extra):
     """A typed request whose component plan the existing builders CAN materialize.
 
-    A direct ``process_ir`` intent is plan/compile-only by design — process
-    materialization emits XML from the component plan, so applying one would
-    create an artifact the compile hash does not describe. Tests that exercise
-    the apply gate therefore use an ``integration_spec`` intent over components
-    the legacy builders already know how to create.
+    Kept as the fixture for tests whose subject is the apply GATE itself — the
+    binding, the phase order, the refusals — because a component-only plan keeps
+    those tests focused on the gate rather than on materialization.
+
+    The old reason for its existence is gone: a direct ``process_ir`` intent was
+    plan/compile-only by design until #153, which is the capability that
+    milestone ships. Tests whose subject IS the canonical apply live in
+    ``test_issue_153_canonical_apply_e2e.py`` and drive a ``process_ir`` intent
+    end to end.
     """
     return AuthoringRequestV1(
         intent=IntegrationSpecAuthoringIntentV1(

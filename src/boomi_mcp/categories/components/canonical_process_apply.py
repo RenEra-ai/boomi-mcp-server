@@ -53,29 +53,83 @@ def _resolve_ref(ref: str, id_registry: Mapping[str, str], component_key: str) -
     return resolved
 
 
-def bind_symbols_to_applied_ids(symbols, id_registry: Mapping[str, str], component_key: str):
+def _ref_key(ref: str) -> str:
+    """The logical key inside a ``$ref:KEY`` token (or the token itself)."""
+    return ref[len(_REF_PREFIX):] if ref.startswith(_REF_PREFIX) else ref
+
+
+def bind_symbols_to_applied_ids(
+    symbols, id_registry: Mapping[str, str], component_key: str, *, required_keys=()
+):
     """The plan's placeholder symbol table, rebound to REAL applied ids.
 
-    Every symbol whose ``$ref:KEY`` names an applied component takes that
-    component's id. A symbol the registry does not know is a hard failure rather
-    than a passthrough: leaving a placeholder in place would submit XML
-    referencing ``id-db_conn``, which Boomi accepts as an opaque string and which
-    would then be a dangling reference in a component that looks applied.
+    **Which symbols MUST resolve is derived, not assumed.** The first draft
+    demanded an applied id for EVERY symbol in the table, and that made the
+    capability unreachable in two distinct shapes (QA-153-r2-04): the table
+    deliberately carries every canonical root — including the one being created,
+    which by definition has no id yet — and, in a multi-root spec, the sibling
+    roots that ordered apply has not reached. Both failed 100% of the time, on
+    the first call, for reasons that had nothing to do with the reference being
+    bound.
+
+    The authority is the root's DECLARED dependency set. A ``$ref`` the IR uses
+    but ``depends_on`` does not declare is already refused at compile
+    (``INTEGRATION_DEPENDENCY_REQUIRED``), so ``depends_on`` is a superset of
+    what this root can reference — which makes it, and not "every symbol in the
+    table", the correct universe. A declared dependency with no applied id is
+    still a hard failure: topological order guarantees it was applied first, so
+    its absence is a real ordering defect.
+
+    Everything else keeps its placeholder. That is safe because it is CHECKED
+    rather than trusted: :func:`materialize_canonical_process_xml` refuses any
+    emitted artifact in which a placeholder actually survived, so a reference
+    this rule wrongly judged unreachable fails closed at the artifact instead of
+    shipping ``id-db_conn`` into a component that looks applied.
     """
     from ...compiler.process_ir.contracts import SymbolTableV1
 
+    required = set(required_keys)
     rebound = []
     for symbol in symbols.symbols:
-        rebound.append(
-            symbol.model_copy(
-                update={
-                    "component_id": _resolve_ref(symbol.ref, id_registry, component_key)
-                }
+        key = _ref_key(symbol.ref)
+        if key in id_registry:
+            component_id = id_registry[key]
+        elif key in required:
+            # Declared, ordered before this root, and still unapplied.
+            raise CanonicalProcessApplyError(
+                "process {0!r} depends on {1!r}, which has no applied component id"
+                .format(component_key, key),
+                error_code="PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID",
+                component_key=component_key,
             )
-        )
+        else:
+            component_id = symbol.component_id
+        rebound.append(symbol.model_copy(update={"component_id": component_id}))
     return SymbolTableV1(
         symbols=tuple(rebound), idempotency_contracts=symbols.idempotency_contracts
     )
+
+
+def _surviving_placeholders(xml: str, symbols) -> Tuple[str, ...]:
+    """Placeholder ids and ``$ref`` tokens that reached the emitted artifact.
+
+    The fail-closed half of the binding rule above. Scanned for the CONCRETE
+    placeholder each unbound symbol would have contributed
+    (``placeholder_component_id``) rather than by a generic pattern, so the check
+    names the symbol that leaked instead of merely reporting that something did.
+    """
+    from ...recipes.materialization import placeholder_component_id
+
+    found = {
+        placeholder
+        for symbol in symbols.symbols
+        for placeholder in (placeholder_component_id(symbol.ref),)
+        if placeholder in xml
+    }
+    found.update(
+        symbol.ref for symbol in symbols.symbols if symbol.ref and symbol.ref in xml
+    )
+    return tuple(sorted(found))
 
 
 def resolve_extension_connections(
@@ -146,7 +200,9 @@ def materialize_canonical_process_xml(
             component_key=key,
         )
 
-    bound = bind_symbols_to_applied_ids(symbols, id_registry, key)
+    bound = bind_symbols_to_applied_ids(
+        symbols, id_registry, key, required_keys=envelope.depends_on
+    )
     cfg, emission_plan = compile_process_ir_v1(plan.process_ir, bound)
 
     # The profile is RE-DERIVED and compared, never re-decided. Recompiling
@@ -163,7 +219,7 @@ def materialize_canonical_process_xml(
 
     # The BOUND table, so emitted shapes carry real ids rather than placeholders.
     artifact = emit_process(emission_plan, bound)
-    return ProcessComponentMaterializer().materialize(
+    xml = ProcessComponentMaterializer().materialize(
         artifact.shape_xml_parts,
         name=envelope.name,
         execution_profile=plan.execution_profile,
@@ -171,6 +227,23 @@ def materialize_canonical_process_xml(
         folder_name=envelope.folder_name,
         extension_connections=resolve_extension_connections(envelope, id_registry),
     )
+
+    # The binding rule above resolves the DECLARED dependencies and leaves every
+    # other symbol on its placeholder. This is the check that makes that rule
+    # safe rather than optimistic: if a placeholder or a raw `$ref` token
+    # actually reached the artifact, the rule was wrong about what this root
+    # references, and the honest outcome is a refusal — not a component whose
+    # `connectionId` is the string `id-db_conn`, which Boomi stores happily and
+    # which nothing downstream would flag.
+    leaked = _surviving_placeholders(xml, bound)
+    if leaked:
+        raise CanonicalProcessApplyError(
+            "the materialized XML for {0!r} still carries unbound reference(s): "
+            "{1}".format(key, ", ".join(leaked)),
+            error_code="PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID",
+            component_key=key,
+        )
+    return xml
 
 
 def build_mutation_attestation(

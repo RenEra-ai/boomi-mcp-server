@@ -1813,6 +1813,23 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "AUTHORING_CAPABILITY_REGISTRY",
     "AUTHORING_COMPILE_BLOCKED",
     "DEFAULT_PROCESS_OPTIONS",
+    # #153 Stage-1 QA rounds 1-2. Four more ERROR-TAXONOMY codes the finding rows
+    # quote verbatim from what the tool actually served, plus one test name.
+    #
+    # All four are registered members of `boomi_mcp.errors.ERROR_TAXONOMY` and
+    # none is a wave-gate diagnostic — the same distinction the entries above
+    # draw. Quoting the served code is the whole point of a finding row: a row
+    # that says "the wrong code was served" without naming either code is not an
+    # audit record. `PLAN_INVALID` is the bare stem, tokenized out of the
+    # compound span that contrasts it with `PROCESS_MATERIALIZATION_INTERNAL_ERROR`.
+    # The #149 inventory's route table — a durable production constant any later
+    # ledger classifying a component-XML write route would name, not a code.
+    "WRITE_ROUTES",
+    "AUTHORING_LIVE_DEPLOYMENT_DRIFT",
+    "INTEGRATION_COMPONENT_KEY_DUPLICATE",
+    "PLAN_INVALID",
+    "PROCESS_MATERIALIZATION_INTERNAL_ERROR",
+    "PROCESS_MATERIALIZATION_PLAN_INVALID",
 })
 
 

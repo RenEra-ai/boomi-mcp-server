@@ -17,7 +17,11 @@ if _src not in sys.path:
     sys.path.insert(0, _src)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _m12_11_support import appliable_request, process_ir_request  # noqa: E402
+from _m12_11_support import (  # noqa: E402
+    appliable_process_ir_request,
+    appliable_request,
+    process_ir_request,
+)
 from boomi_mcp.authoring.workflow import compile_authoring_request_v1  # noqa: E402
 from boomi_mcp.categories import integration_builder  # noqa: E402
 from boomi_mcp.categories.integration_builder import (  # noqa: E402
@@ -26,6 +30,7 @@ from boomi_mcp.categories.integration_builder import (  # noqa: E402
 )
 from boomi_mcp.errors import (  # noqa: E402
     AUTHORING_APPLY_VALIDATION_REQUIRED,
+    AUTHORING_COMPILE_BLOCKED,
     AUTHORING_LIVE_DEPLOYMENT_DRIFT,
     INVALID_INPUT,
 )
@@ -65,11 +70,14 @@ def _no_live_metadata_queries(monkeypatch):
     monkeypatch.setattr(integration_builder, "paginate_metadata", lambda *a, **k: [])
 
 
-#: A typed apply can only materialize a plan the existing builders can emit. A
-#: direct ProcessIR intent is plan/compile-only by design (see
-#: test_a_direct_process_ir_intent_cannot_be_applied), so the apply fixtures below
-#: use an integration_spec intent — otherwise every apply assertion here would be
-#: unreachable behind the materialization refusal.
+#: The apply fixtures here use an integration_spec intent because these tests'
+#: subject is the apply GATE, not materialization.
+#:
+#: The comment this replaces said a direct ProcessIR intent was "plan/compile-only
+#: by design" and pointed at test_a_direct_process_ir_intent_cannot_be_applied.
+#: Both statements are false since #153: the refusal was deleted (not made
+#: conditional) and that test was renamed when it was inverted. End-to-end
+#: canonical apply coverage lives in test_issue_153_canonical_apply_e2e.py.
 def _bound_payload(profile=_PROFILE):
     # A CLIENT is passed, matching what the tool layer always does. The
     # component-plan lint's result is part of the plan evidence and therefore of
@@ -122,9 +130,11 @@ def test_compile_routes_through_the_dispatcher():
         MagicMock(),
         _PROFILE,
         "compile",
-        config={"authoring_request": process_ir_request().model_dump(mode="json")},
+        config={
+            "authoring_request": appliable_process_ir_request().model_dump(mode="json")
+        },
     )
-    assert result["_success"] is True
+    assert result["_success"] is True, result.get("error")
     assert result["action"] == "compile"
     assert result["mutation_performed"] is False
     assert result["profile"] == _PROFILE
@@ -823,17 +833,50 @@ def test_a_compile_that_cannot_be_applied_does_not_report_itself_valid():
     assert any(cause.startswith("error_") for cause in causes)
 
 
-def test_a_process_ir_compile_is_not_blocked_by_a_lint_it_can_never_apply():
-    """The other half of #416's scope: a ProcessIR intent is plan/compile-only,
-    so its component plan exists to resolve `$ref` symbols rather than be built.
-    Blocking compile there would make the capability this issue adds unusable."""
+def test_a_process_ir_compile_IS_blocked_by_a_lint_its_apply_would_refuse():
+    """INVERTED at #153 — the premise this test asserted no longer holds.
+
+    #416 exempted `process_ir` from the unexecutable-step lint because such an
+    intent was plan/compile-only: nothing would be built from its component
+    plan either way. #153 makes it appliable, its component plan IS built, and
+    `_apply_plan` refuses on the same `error_` prefix — so the exemption meant
+    compile issued a binding whose apply could not succeed.
+
+    Renamed rather than edited in place: a name asserting "not blocked by a lint
+    it can never apply" on a test that now asserts the opposite would be actively
+    misleading. The retired node id is tombstoned in the wave-gate manifest.
+    """
     result = build_integration_action(
         MagicMock(),
         _PROFILE,
         "compile",
         config={"authoring_request": process_ir_request().model_dump(mode="json")},
     )
-    assert result["_success"] is True
+    assert result["_success"] is False
+    assert result["error_code"] == AUTHORING_COMPILE_BLOCKED
+    # Named by the step the lint marked unexecutable, not by the process root.
+    assert [
+        diagnostic["subject_id"]
+        for diagnostic in result["authoring_diagnostics"]
+        if diagnostic["subject_kind"] == "component"
+    ] == ["db_conn"]
+
+
+def test_an_appliable_process_ir_compile_is_NOT_blocked():
+    """The control: the exemption's removal must not refuse every ProcessIR.
+
+    Without this, the test above passes for a tree that simply blocks all
+    `process_ir` compiles — which would be a worse defect than the one removed.
+    """
+    result = build_integration_action(
+        MagicMock(),
+        _PROFILE,
+        "compile",
+        config={
+            "authoring_request": appliable_process_ir_request().model_dump(mode="json")
+        },
+    )
+    assert result["_success"] is True, result.get("error")
     assert result["authoring_result"]["artifact_fingerprints"]
 
 

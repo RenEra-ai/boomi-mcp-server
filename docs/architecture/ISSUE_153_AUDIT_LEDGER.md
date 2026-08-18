@@ -71,7 +71,8 @@ re-run never debits L1.
 
 | Class | Mechanism | Runtime authority | Instances (derived from rows) | Resolution |
 | --- | --- | --- | --- | --- |
-| DC-1 | a documented COMPLETENESS claim that the code does not enforce — a docstring asserting "every field", "excluded by construction", "fingerprints behaviour", or "non-vacuity", restated in prose beside an enumeration that is free to fall behind | the authority the claim is about: the model's own `model_fields`, the dataclass's own `fields()`, the runtime dispatch table `PROCESS_FLOW_BUILDERS`, the emitter registration table | S5-01, S5-02, S5-03, S5-04, S5-05, S5-06, S5-07, S5-09, S5-10 (9 — derived from the rows above) | **STRUCTURAL FIX applied in this batch** — see below |
+| DC-1 | a documented COMPLETENESS claim that the code does not enforce — a docstring asserting "every field", "excluded by construction", "fingerprints behaviour", or "non-vacuity", restated in prose beside an enumeration that is free to fall behind | the authority the claim is about: the model's own `model_fields`, the dataclass's own `fields()`, the runtime dispatch table `PROCESS_FLOW_BUILDERS`, the emitter registration table | S5-01, S5-02, S5-03, S5-04, S5-05, S5-06, S5-07, S5-09, S5-10 (9 — derived from the rows above) | **STRUCTURAL FIX applied** — see below |
+| DC-2 | a consumer that hand-models the PARTICIPANT UNIVERSE of a spec as `spec.components` alone, or reads a participant's backing component without first asking whether it has one | the one participant set `_integration_participants(spec)` — `components` **and** `processes` — which is also the authority `_topological_order` and the dependency graph read | S7-01, QA-153-r1-01, QA-153-r2-01, QA-153-r2-02, QA-153-r2-06 (5 — derived from the rows below) | **STRUCTURAL FIX applied in the r2 batch** — see below |
 
 ### DC-1 structural fix (mandatory — nine instances, far past the second-instance trigger)
 
@@ -112,6 +113,62 @@ carries all 8 `PreservationPolicy` fields and all 11 `OwnedPath` fields (asserte
 `dataclasses.fields`, not a literal count); `_PROCESS_BUILDERS` equals the 3 distinct values of
 `PROCESS_FLOW_BUILDERS` and grows with it.
 
+### DC-2 structural fix (mandatory — five instances; the first two were instance-patched, which is
+### exactly what let the third and fourth ship)
+
+**What the instances had in common.** Before #153 a spec had ONE participant family, so
+`spec.components` and "everything this build owns" were the same set and every consumer could model
+the universe by iterating it. #153 added `spec.processes`. Each consumer that kept the old model
+became a defect, and — decisively — each was fixed AT ITS OWN CALL SITE:
+
+| Instance | Where | How it failed |
+| --- | --- | --- |
+| S7-01 | `_build_plan` + `_apply_plan` component lookups | `KeyError` for any spec carrying a root — found by reading, fixed by guarding those two sites |
+| QA-153-r1-01 | `_apply_plan`'s `existing_ids` comprehension | `KeyError: 'existing_component_id'` — fixed by adding the keys to the canonical step |
+| QA-153-r2-02 | `_build_plan`'s issue-#86 advisory, ~1000 lines from the others | the r1 fix ADDED `planned_action`, which is what activated a third unguarded lookup. The guard had been False by accident, never by design |
+| QA-153-r2-01 | `preflight_typed_apply_v1` | the bundle carried the SERVED projection, whose roots are withheld — the universe was not merely unmodelled but actively emptied |
+| QA-153-r2-06 | `_verify_build` vs `_authoring_build_provenance` | two halves of one verify modelling two different universes, so a healthy build reported drift |
+
+Three guarded call sites, and the fourth read shipped. That is the signature the structural-fix rule
+names: patching instances of a hand-model does not converge, because the next consumer is written by
+someone who never saw the patch.
+
+**The invariants replacing the enumerations.**
+
+| Claim | Was | Now derived from |
+| --- | --- | --- |
+| "this step has a component" | `components_by_key[step["key"]]`, unconditional, at three sites | `_step_component(step, …)` — discriminates on the step's own `materialization` marker, returns `None` for a canonical root, and raises a NAMED `IntegrationDependencyError` (not a bare `KeyError`) for a genuinely absent component |
+| "these are the build's participants" | `for comp in spec.components` in `_verify_build` | `_integration_participants(spec)` — the same generator `_topological_order` and the dependency graph already read |
+| "the bundle's spec can build what its compile describes" | trusted by convention, and violated | `CompiledBundle.__post_init__` compares the spec's root keys against `compile_result.process_cfg`, an authority INDEPENDENT of the projection under test |
+
+The discriminator is deliberately the step's marker and NOT membership in `components_by_key`:
+membership would fail OPEN and silently skip a component step whose key really was missing, turning
+a crash into a wrong answer.
+
+**Sibling sweep.** Every read of `components_by_key` in `integration_builder.py` was enumerated
+(`grep -n 'components_by_key\['`) and converted: lines 5924 and 7820 now call `_component_for_key`,
+line 6958's advisory calls `_step_component`, and the ONE remaining subscript is the accessor's own
+lookup. The sole assignment (the wrapper construction site) is untouched by design. `_verify_build`
+was converted to `_integration_participants`, and `_authoring_build_provenance`'s `results`-based
+walk now agrees with it by construction.
+
+**Non-vacuity witness — and it caught a defect in its own batch.** The invariant is asserted on the
+SOURCE by `test_no_unguarded_component_lookup_survives_in_the_apply_pipeline`, because this
+repository's own record is that prose structural fixes recur and executable ones hold. On first run
+it immediately failed on a bare `verify_components_by_key[participant_key]` introduced by the
+`_verify_build` conversion **in the same batch** — a fourth instance, written by the very change
+meant to end the class, and caught before it left the working tree. Mutation-controlled in both
+directions: reintroducing `comp = components_by_key[key]` at line 7820 reddens it; restoring the
+accessor greens it.
+
+**Coverage claim, derived from the authority's full case set.** `_build_plan` emits exactly two step
+kinds, and the step-kind union is the authority: a component step (`materialization` absent) and a
+canonical root step (`materialization == "process_ir_v1"`). `_step_component` has a case for each,
+and both are exercised — the canonical case by
+`test_a_plan_step_naming_no_component_is_a_named_refusal`, the component case by every apply test in
+the file. `_integration_participants` yields both participant kinds and `_verify_build` now has a
+`declared_type` branch for each.
+
 Second-instance check: run against this table AT ROW-WRITE TIME, and also when a second finding
 lands in the same file/subsystem within a loop (mechanism-family question: "what single authority
 do these hand-model?"). On the second instance the structural fix is mandatory in that batch — or
@@ -149,9 +206,55 @@ authority-derived coverage claim.
 | S3-03 | self/measure — step 3, caught by `test_an_absent_process_ir_still_reports_missing_not_a_shape_error` | `units: Tuple[...] = Field(min_length=1)` made a request carrying exactly one unit with a malformed root report BOTH `missing` (correct) and `too_short` on `units` (wrong): `min_length` counts elements that VALIDATED, so a single failing element reads as an empty list. A caller who forgot one key was told to send a second unit. | n/a (self-found) | machine-served schemas/contracts | (a field-level constraint evaluated against post-validation state, pydantic's `min_length` semantics) — 1st instance | Standard — served diagnostic text is blocking class; no critical anchor | working tree, step 3 | `fixed` — non-emptiness moved into the field validator, which does not run when an element fails, so only the diagnostic naming the real mistake is served |
 | S2-02 | self/measure — step 2, working tree | The eleven per-schema entries inside `SS-SCHEMA-TEMPLATES:walked_surface_digest` ALL moved, including `ProcessIRV1`, `SystemTopologySpecV1` and `validation_report`, which this slice does not touch. | n/a (self-found) | machine-served schemas/contracts | (aggregate revision embedded in every served response, `revision_binding.schema_revision`) — explains the movement; not a hand-model, so no structural-fix trigger | n/a — expected consequence of a derived aggregate | working tree | `finding-refuted` as a defect: the movement is the derived aggregate, not a schema change. Each untouched schema's OWN `schema_hash` is unchanged; only the shared `revision_binding.schema_revision` moved, and it is derived over all owned schemas by design (`authoring/contract.py`). |
 
+| QA-153-r1-01 | L1 Stage-1 QA round 1, `boomi-qa-tester`, report `agents/reports/2026-08-17-issue-153-m12-15-stage1-r1.md`, live against `traininghlibbochkarov-JKIY2X` | Typed apply raised `KeyError: 'existing_component_id'` for every spec carrying process units; the direct-apply capability was unreachable at the public boundary. | **Critical** (source label) | runtime behavior · capability reachability | DC-2 — **2nd instance** | **Critical** — anchor: source label Critical (immutable) | `acdb793` → fixed in `d94273e` | `fixed` — the canonical step carries `existing_component_id`/`planned_action`, and `_apply_plan` runs `_execute_canonical_process` BEFORE the component lookup. Re-verified live in r2: the apply loop now reaches the canonical arm. **Note the instance-patch cost: adding `planned_action` is what activated QA-153-r2-02**, which is the evidence that made DC-2's structural fix mandatory. |
+| QA-153-r1-02 | same run | The S3-01 withholding never took effect on the served response: the legacy component-plan echo is rebuilt from the normalized spec and overwrote the withheld preview ~50 lines later, so planted canaries appeared in every served plan and compile response. | **Critical** (source label) | **secrets/security** | (a redaction applied before a later overwrite reinstates the redacted data, the last write to `spec_preview`) — 1st instance | **Critical** — anchor: secrets/security is critical regardless of label | `acdb793` → fixed in `d94273e` | `fixed` — `_withhold_process_roots` re-applied AFTER the echo, idempotently. Re-verified in r2 by a decisive A/B on one run: as shipped **0** canary hits at plan and compile; with the withholding neutralised to identity, **6** hits at plan and **3** at compile, at r1's exact six paths. |
+| QA-153-r1-03 | same run | `canonical_process_apply.py` was imported by NOTHING in `src/`; the relocatability validator and the published `PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE` code were unreachable from any tool call. | **High** (source label) | capability reachability · machine-served schemas/contracts | (a validator whose only trigger is a code path no served route constructs, the served route set) — 1st instance | **Critical** — anchor: source label High | `acdb793` → partially fixed in `d94273e`, completed in the r2 batch | `fixed` — the module is on the apply path (r1) **and** the rule is now decided at plan/compile before any write, via the single shared authority `envelope_relocatability_offenders` (r2). r2 re-verification found the r1 fix PARTIAL and the residue is carried as QA-153-r2-07 rather than closed here. |
+| QA-153-r1-04 | same run | A duplicate component key was served as a raw pydantic `ValidationError` with no `error_code`, while its two sibling graph rules were served properly — one rule family, two serving behaviours. | **High** (source label) | machine-served schemas/contracts | (a named rule served without its name because it raises through a different arm, `errors.py`'s taxonomy) — 1st instance | **Critical** — anchor: source label High | `acdb793` → fixed in `d94273e` | `fixed` — `_named_error_code_from_validation` maps the pydantic `type` to the served code. Re-verified live in r2: plan and compile both serve `INTEGRATION_COMPONENT_KEY_DUPLICATE`, with a control (renaming the collision compiles clean). |
+| QA-153-r2-01 | L1 Stage-1 QA round 2, `boomi-qa-tester`, report `agents/reports/2026-08-17-issue-153-m12-15-stage1-r2.md`, live against `traininghlibbochkarov-JKIY2X` | "the typed apply silently DROPS every ProcessIR root and reports a successful mutation" — `_success: true`, `mutation_status: "performed"`, "Applied … with 2 steps", zero process components, no warning naming the dropped root. | **Critical** (source label) | runtime behavior · capability reachability · **mutation accounting** | DC-2 — **4th instance** (projection variant) | **Critical** — anchor: mutation accounting; an envelope attesting a mutation that did not occur | `d94273e` | `fixed` — `CompiledBundle` now carries `internals.normalized.integration_spec`, and `__post_init__` refuses any bundle whose spec lacks a root its own `process_cfg` describes. Introduced BY the r1-02 fix, which is recorded rather than smoothed over: the withholding was correct and the plumbing was not, and a silent no-op is strictly worse than the loud crash it replaced. |
+| QA-153-r2-02 | same run | "a second unguarded `components_by_key[...]` raises `KeyError: '<process key>'` for every spec whose roots reach `_build_plan`" — the issue-#86 design-doctrine advisory at `integration_builder.py:6958`; three such reads exist, the slice guarded two. | **Critical** (source label) | runtime behavior · capability reachability | DC-2 — **3rd instance** → structural fix | **Critical** — anchor: source label Critical | `d94273e` | `fixed` **structurally, not at the site** — see the DC-2 structural fix. Also fixes a second, quieter failure QA's finding implies: `_legacy_plan_echo` swallows any `_build_plan` exception, so the KeyError silently DISABLED the duplicate-connection/base-URL/folder/name lints on the typed route while reporting success. Witnessed by `test_the_component_plan_lint_still_runs_for_a_canonical_root`. |
+| QA-153-r2-03 | same run | "`_execute_canonical_process` calls an undefined name — every canonical apply is a `NameError`": `_connector_metadata_from_components` is defined in `authoring/workflow.py` and never imported, and the error is re-served as `PROCESS_MATERIALIZATION_PLAN_INVALID` with an internal symbol name on the wire, after connectors are already written. | **Critical** (source label) | runtime behavior · capability reachability · machine-served schemas/contracts | (a server fault served under a caller-blaming contract code, `errors.py`'s subject-per-prefix split) — 1st instance | **Critical** — anchor: source label Critical | `d94273e` | `fixed` — the function is IMPORTED, not reimplemented (copying its four lines would have removed the crash and reintroduced the hand-model this slice is closing). The generic arm now serves `PROCESS_MATERIALIZATION_INTERNAL_ERROR` for a server fault and consults `_NAMED_VALIDATION_CODES` for a real pydantic refusal, so `PLAN_INVALID` again means what it says. |
+| QA-153-r2-04 | same run | "`bind_symbols_to_applied_ids` demands an applied id for the root being created — single-root apply fails 100% of the time", and with that repaired a multi-root spec fails on the first root because the sibling root's symbol is equally unapplied. | **Critical** (source label) | runtime behavior · capability reachability | (an enumeration — "every symbol in the table" — standing in for a derived requirement set, the root's declared `depends_on`) — 1st instance | **Critical** — anchor: source label Critical | `d94273e` | `fixed` — the binder resolves the root's DECLARED dependencies (already enforced as a superset of what it can reference, since an undeclared `$ref` is refused at compile) and leaves other symbols on their placeholder. Made fail-closed rather than optimistic: `materialize_canonical_process_xml` refuses any artifact in which a placeholder or `$ref` token actually survived, so a reference the rule wrongly judged unreachable stops the apply instead of shipping `id-db_conn` into a component that looks applied. |
+| QA-153-r2-05 | same run | "both attestations are computed and then DISCARDED on the success path" — served only on a partial-failure envelope; absent from `apply_result` and from the build record, so verify has nothing to compare against. | **Critical** (source label) | **mutation accounting** | (an accounting record produced on the failure path only, the apply loop's own accumulator) — 1st instance | **Critical** — anchor: mutation accounting | `d94273e` | `fixed` — serialized once and attached to both the apply envelope and the build record. Additive: the keys are absent (not null) when no canonical root took part, so a legacy build keeps exactly its five original record keys — asserted by `test_a_build_with_no_canonical_root_keeps_its_original_record_shape`. |
+| QA-153-r2-06 | same run | "`verify` never covers a process root — and on the typed path reports FALSE DRIFT for a perfectly healthy build": `_verify_build` walks `spec.components`, `_authoring_build_provenance` walks `results`, so the root is recorded and never observed → `missing` → `AUTHORING_LIVE_DEPLOYMENT_DRIFT`. | **High** (source label) | runtime behavior · machine-served schemas/contracts · capability reachability | DC-2 — **5th instance** | **Critical** — anchor: source label High | `d94273e` (latent, masked by r2-01) | `fixed` — `_verify_build` iterates `_integration_participants(spec)`, so the root is existence-checked AND graph-verified like any other process. Witness round-trips the REAL emitted artifact as the live readback rather than a hand-written stub (a stub would be a second hand-model of the emitter's output, silently deciding what verify sees) and asserts `_success is True` on a healthy build. |
+| QA-153-r2-07 | same run | "the relocatability refusal is still absent at plan/compile, fires only after components are written, and is served under the wrong error code" — the r1-03 residue, in three parts. | **High** (source label) | machine-served schemas/contracts · runtime behavior | shares r1-03's pair — **2nd instance** → resolved by derivation rather than a second guard | **Critical** — anchor: source label High | `d94273e` | `fixed` — (a) `_validate_processes` now decides it, so `plan` REPORTS it (`is_valid: false`, error row at the offending path) and `compile` REFUSES it, before any write; (b) that removes the partial write entirely; (c) the apply arm consults `_NAMED_VALIDATION_CODES`, so the served code is `PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE`. The rule itself is NOT restated — both consumers call the one `envelope_relocatability_offenders`, so a second opinion cannot drift from the first. |
+| QA-153-r2-08 | same run | "refusal envelopes echo caller-authored values and internal plan material, and omit the typed-apply envelope fields" — a 16-character prefix of an authored value measured on the wire via pydantic's `input_value=`, internal plan state in a caller-facing error, and no `action`/`mutation_performed`/`mutation_status` on the blanket-handler arms. | **Medium** (source label) | machine-served schemas/contracts | (a framework's default error rendering serving caller content, ADR-001 §11 value-free results) — 1st instance | **Standard** — no critical anchor; source label Medium. Recorded deliberately: the *class* (secrets) is critical, but the echo is of the caller's own payload back to that same caller, which is a served-contract defect rather than a disclosure to a third party — and it is fixed in this batch either way, so the tier changes nothing operationally | `d94273e` | `fixed` — `_validation_error_message` renders `loc`/`msg`/`type` and drops `input`/`ctx`; `_decorate_refusal_route` gives apply-route refusals the fields the contract tells callers to read. **The first version of the regression test passed on the broken tree**: it asserted the canary's first 16 characters were absent while pydantic had clipped the leak at 15, so the probe sat just past the window. Corrected to 12 and re-controlled. |
+
+| SELF-r2-01 | self/measure — found while correcting the stale prose QA-153-r2-* exposed, by reading `plan_authoring_request_v1`'s comment against the behaviour this slice ships | The component-plan lint's unexecutable-step finding was downgraded from error to warning for `intent_kind == "process_ir"`, justified by "a direct ProcessIR intent is plan/compile-only by design, so nothing would be built from it either way". This slice makes that premise false: the intent IS applied, its component plan IS built, and `_apply_plan` refuses on the same `error_` prefix — so compile issued a binding whose apply could not succeed, for precisely the intent kind that had just become appliable. | n/a (self-found) | runtime behavior | (a conditional whose justifying premise the same slice invalidated, the set of appliable intent kinds) — 1st instance | Standard — no critical anchor; fails at apply rather than silently, and no mutation is mis-accounted | r2 batch | `fixed` — the exemption is DELETED, not re-conditioned (the replacement condition would be "will this plan be built?", now unconditionally yes). **Nothing failed when it was removed except the two tests that asserted the stale premise**, which is the finding: `test_a_process_ir_compile_is_not_blocked_by_a_lint_it_can_never_apply` was inverted and renamed (node tombstoned, replacement registered) and `test_compile_routes_through_the_dispatcher` re-pointed at an appliable fixture. A control — `test_an_appliable_process_ir_compile_is_NOT_blocked` — was added so the inversion cannot be satisfied by a tree that simply blocks every ProcessIR compile. |
+
+| SELF-r2-02 | self/measure — found by re-reading my own QA-153-r2-08(c) fix rather than by a test | Giving apply-route refusals the typed envelope fields made the blanket handlers assert `mutation_status: "none"` — computed from an envelope that carries no `results` at all. For an exception that escapes the apply LOOP that is a guess, and it is the one guess that must never be made: `none` reads as retry-safe, and a retry under `conflict_policy="clone"` duplicates whatever was already written. | n/a (self-found, in this batch) | **mutation accounting** | (an accounting value computed from an envelope that cannot contain the evidence, `_apply_plan`'s own progress) — 1st instance | **Critical** — anchor: mutation accounting | r2 batch | `fixed` — the apply loop raises `_ApplyExecutionError` on any escape and the handler serves `mutation_status: "possible"` with a reconcile-before-retry hint. Scoped to the LOOP, not the whole function: everything above it is preflight, and a spec that fails to parse has provably written nothing, so reporting `possible` there would be alarmist and equally wrong. The first attempt DID wrap the whole call and was caught by `test_an_apply_route_refusal_carries_the_typed_apply_fields` flipping to `mutation_performed: true` on a pure validation refusal. Witness: `test_an_apply_that_throws_mid_flight_does_not_claim_it_was_retry_safe`, controlled against the pre-fix tree. |
+
 Dispositions: `fixed` · `finding-refuted` · `severity-refuted` · `not-validated` · `deferred`
 (issue, reason class, placement). A refutation names the disputed claim and the concrete evidence.
 An original label is never edited — a revision is a new dated row with the original retained.
+
+**Non-blocking correction batch (the ONE batch, folded into this blocking correction per
+`CLAUDE.md` step 8).** Three prose claims asserting "a direct ProcessIR intent is plan/compile-only
+by design" were corrected in `tests/_m12_11_support.py`, `tests/test_m12_11_apply_verify.py` and
+`tests/test_m12_11_revision_binding.py`; one of them cited
+`test_a_direct_process_ir_intent_cannot_be_applied`, a test this slice had already renamed out of
+existence. The batch mutates the tree, so it takes the affected QA and the fix-only review with the
+rest of this correction rather than riding in unvalidated. Reading those claims against the shipped
+behaviour is what surfaced SELF-r2-01, which is a blocking-class defect and not prose at all.
+
+**QA round-2 note — the root cause behind the cluster, and what was done about it.** QA's own
+diagnosis was `grep -rn "_execute_canonical_process" tests/` → **0 hits**. All 71 unit tests over the
+canonical and materialization modules passed by calling the pieces directly with hand-built plans,
+so three deterministic first-call failures (r2-03, r2-04, and r2-02's activation) shipped green.
+That is a testing-strategy defect, not five coding slips, and the correction is
+`tests/test_issue_153_canonical_apply_e2e.py`: every test enters through
+`build_integration_action` — the function the MCP tool layer calls — with only the network boundary
+faked.
+
+Non-vacuity of that file was measured, not asserted: against the pre-fix `src/` (stashed, tests
+unchanged) **13 of 16 behavioural tests fail**. The three that pass are the deliberate controls (the
+additive-record-shape check and the two "the relocatability probe is not simply refusing everything"
+arms). Building that control also exposed **three tests that initially passed on the broken tree for
+the wrong reason** — the r2-02 probe routed through the typed root, where `_legacy_plan_echo`
+swallows the KeyError; the r2-08(a) canary probe measured 16 characters past a 15-character leak; and
+the r2-08(c) probe used a typed payload that `_reject_malformed_authoring_request` decorates before
+the blanket handler is reached. Each was re-aimed at the route QA actually measured. This is the
+second and third time in this slice that a guard passed without exercising the breaking path, and it
+is recorded here as a recurring hazard of this workstream rather than as three separate slips.
 
 **S2-01 / S2-02 measurement note — and the vacuous control that nearly passed.** The rebaseline was
 accepted only after a field-level diff, because a digest that moved for an unexplained reason is how
@@ -214,6 +317,39 @@ and it is recorded as such rather than carrying a justification the code contrad
 disposition whose recorded justification is contradicted by an in-slice measurement is void under
 `CLAUDE.md`; this correction is made before the record is created so no void justification is ever
 committed.
+
+## Reachability-census rebaseline (r2 batch)
+
+The #149 freeze went red on four tests after this batch. Recorded rather than silently
+regenerated, because the reason matters and one part of it was NOT a rebaseline:
+
+- **Four new census rows** — the canonical apply's own write edges
+  (`_execute_canonical_process` -> `create_component` / `_apply_structured_update`, and
+  `_apply_plan` -> `_execute_canonical_process`). These come from the **r1** wiring, not from
+  this batch: the full non-KB suite was never re-run after `d94273e`, so the r1 correction
+  landed without its census rebaseline. Noted as a gap in that batch's validation.
+- **`route_reconciliation.unclassified` gained `_execute_canonical_process`** — NOT a
+  rebaseline. That field is the census refusing an unclassified component-XML sink, and it
+  was right to: the canonical route had no entry in `WRITE_ROUTES`. Fixed by adding
+  `WRT-canonical-process-materialization` under a new classification,
+  `canonical_process_materialization` — deliberately its own value rather than folded into
+  `raw_process_capable` (no caller XML reaches it), `legacy_structured_process` (it consults
+  no `process_kind`) or `typed_non_process` (it emits precisely a process root). Folding it
+  in would have told #160 to retract the one route meant to SURVIVE the retraction.
+- **Five served artifacts moved, all derived-aggregate movement.** Verified field-level
+  before accepting, per the S2-01 discipline and with the positive control that discipline
+  exists for: **0 properties added, 0 removed** across all five; every changed leaf is
+  `capability_revision` (moved by the one new error-taxonomy code) or a digest embedding it.
+  Inside `walked_surface_digest`, **19 of 384** entries moved and **all 19 are explained** —
+  each either moved as a standalone artifact too, or carries `capability_revision` in its own
+  value; **0 unexplained**. Control: 5 artifacts contain `capability_revision`, so the probe
+  can see what it claims to look for.
+
+`--write` rebaselined the fixture; the §11.2–§11.6 markdown tables were regenerated from the
+same JSON in the same change (the two-way check requires it). Freeze suite after: **153
+passed**. Tables were re-anchored on their own subsection HEADINGS rather than on document
+order — three of them share a header row, so an order-based rewrite would silently replace
+the wrong table if §11 were ever reordered.
 
 ## Commit boundaries (distinct from Stage-1.5 — recorded so the two are not confused)
 

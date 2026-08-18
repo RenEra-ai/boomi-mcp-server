@@ -232,6 +232,10 @@ from ..errors import (
     INTEGRATION_DEPENDENCY_REQUIRED,
     INVALID_INPUT,
     LEGACY_ADAPTER_AUTHORITY_CONFLICT,
+    PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH,
+    PROCESS_MATERIALIZATION_INTERNAL_ERROR,
+    PROCESS_MATERIALIZATION_PLAN_INVALID,
+    PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE,
 )
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
@@ -4313,6 +4317,11 @@ def _first_nonblank_str(*values: Any) -> Optional[str]:
 #: lack — modeled error handling). reuse/reference/error_* actions never do.
 _PROCESS_AUTHORING_ACTIONS = frozenset({"create", "create_clone", "update"})
 
+#: The marker `_build_plan` stamps on a step materialized from ``spec.processes``.
+#: Named once because it is the DISCRIMINATOR the whole apply pipeline reads —
+#: see :func:`_step_component` — not just a label a plan reader can see.
+CANONICAL_PROCESS_MATERIALIZATION = "process_ir_v1"
+
 
 def _process_models_error_handling(comp: Any) -> bool:
     """True when a process component models error handling.
@@ -5911,12 +5920,12 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     # tell a ProcessIR root from a legacy process component
                     # without inspecting config, which is the point: a canonical
                     # root has no `process_kind` to inspect.
-                    "materialization": "process_ir_v1",
+                    "materialization": CANONICAL_PROCESS_MATERIALIZATION,
                 }
             )
             continue
 
-        comp = components_by_key[key]
+        comp = _component_for_key(key, components_by_key)
 
         # Issue #27: reference-only reuse. A component flagged
         # config.reference_only=true models an EXISTING component the spec
@@ -6950,12 +6959,22 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # authored process models no error handling, and point at the relevant
     # design_doctrine entries. Routing lives in this response payload, never in a
     # tool description (MCP-conformance).
+    #
+    # The component is resolved through `_step_component`, which returns None for
+    # a canonical ProcessIR root. QA-153-r2-02: this lookup was written when
+    # every process step came from `spec.components`, and the r1 fix that added
+    # `planned_action` to the canonical step is what ACTIVATED it — the guard had
+    # been False by accident, never by design, so every spec whose roots reached
+    # here died with `KeyError: '<process key>'`. A canonical root models its
+    # error handling in the IR, which this legacy config lint cannot read, so the
+    # honest answer is to skip it rather than to guess from an empty config.
     processes_missing_error_handling = [
         step["key"]
         for step in steps
         if step.get("type") == "process"
         and step.get("planned_action") in _PROCESS_AUTHORING_ACTIONS
-        and not _process_models_error_handling(components_by_key[step["key"]])
+        and (comp := _step_component(step, components_by_key)) is not None
+        and not _process_models_error_handling(comp)
     ]
     if processes_missing_error_handling:
         warnings.append(
@@ -7145,16 +7164,96 @@ def _process_update_shim(envelope):
 #: pydantic error `type` -> the served machine code. Only codes this repository
 #: OWNS are mapped: a pydantic builtin like `missing` is not a named contract
 #: code, and inventing one would publish a code no taxonomy declares.
+#: pydantic ``type`` -> the served code. Values are the CONSTANTS from
+#: ``errors.py``, never re-typed strings: three of these were hand-copied
+#: spellings of codes whose authority is the taxonomy, which is the same
+#: hand-model defect class this slice has been closing everywhere else.
 _NAMED_VALIDATION_CODES = {
     "integration_component_key_duplicate": INTEGRATION_COMPONENT_KEY_DUPLICATE,
     "process_materialization_reference_not_relocatable": (
-        "PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE"
+        PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE
     ),
     "process_materialization_fingerprint_mismatch": (
-        "PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH"
+        PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH
     ),
-    "process_materialization_plan_invalid": "PROCESS_MATERIALIZATION_PLAN_INVALID",
+    "process_materialization_plan_invalid": PROCESS_MATERIALIZATION_PLAN_INVALID,
 }
+
+
+def _step_component(step: Dict[str, Any], components_by_key: Dict[str, Any]):
+    """The component backing ONE plan step, or ``None`` when it has none.
+
+    The single supported way to get from a step to its component. A canonical
+    process root is materialized from ``spec.processes`` and therefore has no
+    entry in ``components_by_key`` BY CONSTRUCTION — so a bare
+    ``components_by_key[step["key"]]`` is a latent ``KeyError`` at every site
+    that iterates steps, and this slice found three such sites, guarded two of
+    them by hand, and shipped the third (QA-153-r2-02).
+
+    The discriminator is the step's own ``materialization`` marker, which
+    ``_build_plan`` stamps from the spec — not membership in
+    ``components_by_key``, which would fail OPEN and silently skip a component
+    step whose key really was missing. A genuinely absent component is still an
+    error; it is just a NAMED one now, instead of a bare ``KeyError`` that the
+    outermost handler serves as ``"Integration builder failed: 'proc_main'"``.
+    """
+    if step.get("materialization") == CANONICAL_PROCESS_MATERIALIZATION:
+        return None
+    return _component_for_key(step.get("key"), components_by_key)
+
+
+def _component_for_key(key, components_by_key: Dict[str, Any]):
+    """The component a key names — or a NAMED refusal, never a bare ``KeyError``.
+
+    The one lookup implementation, shared with :func:`_step_component`. Used
+    directly where the canonical branch has already been taken (the apply and
+    plan loops both ``continue`` on a process root before reaching their
+    component arm), so the discriminator has been applied and what remains is
+    the raise.
+    """
+    try:
+        return components_by_key[key]
+    except KeyError:
+        raise IntegrationDependencyError(
+            "plan step {0!r} names no component in this spec".format(key),
+            error_code=INTEGRATION_DEPENDENCY_NOT_FOUND,
+        ) from None
+
+
+def _validation_error_message(exc) -> str:
+    """A pydantic error rendered WITHOUT the values that caused it.
+
+    ``str(ValidationError)`` appends ``input_value=`` — pydantic's rendering of
+    the offending input. QA-153-r2-08 measured a 16-character prefix of an
+    authored value reaching the wire that way (pydantic renders the first field
+    in full and elides deeper ones), and the materialization-plan refusal put
+    internal plan state — ``plan_fingerprint``, ``resolved_folder_id`` — into a
+    caller-facing error the same way. Every other refusal on this surface is
+    value-free; this one was not, and "bounded to the first rendered field" is
+    not a property worth relying on.
+
+    Location and reason are kept in full: ``loc`` names WHERE, ``type`` is the
+    machine-readable identifier, ``msg`` says what the rule is. None of the three
+    carries caller content.
+    """
+    rows = getattr(exc, "errors", None)
+    if not callable(rows):
+        return str(exc)
+    try:
+        errors = rows() or ()
+    except Exception:  # noqa: BLE001 — a diagnostic must not raise
+        return str(exc)
+    if not errors:
+        return str(exc)
+    rendered = [
+        "{0}: {1} [type={2}]".format(
+            ".".join(str(part) for part in row.get("loc", ())) or "(root)",
+            row.get("msg", ""),
+            row.get("type", ""),
+        )
+        for row in errors
+    ]
+    return "{0} validation error(s): {1}".format(len(rendered), "; ".join(rendered))
 
 
 def _named_error_code_from_validation(exc) -> Optional[str]:
@@ -7209,6 +7308,14 @@ def _execute_canonical_process(
     from ..authoring.contract import get_authoring_revisions
     from ..authoring.process_materialization import build_materialization_plan
     from ..authoring.revisions import account_scope_fingerprint
+    # The connector family is read off the component plan by ONE function, and
+    # this is that function — imported, not reimplemented. QA-153-r2-03 found the
+    # name used here and never imported, so every canonical apply was a
+    # `NameError` served as a named plan-invalid refusal. Copying its four lines
+    # over would have removed the crash and reintroduced the hand-model this
+    # slice has been eliminating; `authoring.workflow` already imports this
+    # module lazily, so the reverse lazy import is safe.
+    from ..authoring.workflow import _connector_metadata_from_components
     from ..compiler.process_ir.emitter_registry import emitter_revision
     from ..recipes.materialization import build_symbol_table
     from .components.canonical_process_apply import (
@@ -7250,11 +7357,22 @@ def _execute_canonical_process(
             "readback": None,
         }
     except Exception as exc:  # noqa: BLE001 — a plan defect must not leak internals
+        # A pydantic refusal carries the code the validator raised; anything else
+        # is a SERVER fault and must not be dressed up as one.
+        #
+        # QA-153-r2-03 and r2-07(c): this arm hard-coded the plan-invalid code, so
+        # a `NameError` in this function was served to the caller as
+        # "your materialization plan is invalid" (with an internal symbol name in
+        # the message), and a genuine relocatability refusal was served under the
+        # generic code while `_NAMED_VALIDATION_CODES` held the right one all
+        # along. One map, consulted everywhere a pydantic error is served.
+        named = _named_error_code_from_validation(exc)
         return {
             "result": {"_success": False, "status": "failed", "type": "process",
-                       "name": envelope.name, "error": str(exc)},
-            "error": str(exc),
-            "error_code": "PROCESS_MATERIALIZATION_PLAN_INVALID",
+                       "name": envelope.name,
+                       "error": _validation_error_message(exc)},
+            "error": _validation_error_message(exc),
+            "error_code": named or PROCESS_MATERIALIZATION_INTERNAL_ERROR,
             "component_id": None,
             "mutation": None,
             "readback": None,
@@ -7669,109 +7787,139 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     process_mutations: List[Any] = []
     process_readbacks: List[Any] = []
 
-    for key in execution_order:
-        # #153: a canonical ProcessIR root. Materialized through the neutral
-        # chain — compile with placeholders, rebind to the ids published above,
-        # emit, wrap — then attested twice. Handled BEFORE the component lookup
-        # because `components_by_key` does not contain process keys (QA-153-r1-01).
-        unit = process_units_by_key.get(key)
-        if unit is not None:
-            outcome = _execute_canonical_process(
+    # From here on a component may be WRITTEN, so an exception escaping this
+    # loop is the one case where the server cannot say what it did.
+    #
+    # Every failure this loop anticipates returns its own partial-results
+    # envelope, and `_mutation_status` reads that exactly. An escape carries
+    # no `results` at all, so a status computed from it reads `none` — which
+    # tells the caller the failure is retry-safe. It may not be: under
+    # `conflict_policy="clone"` a retry duplicates whatever did get written.
+    #
+    # Scoped to the LOOP, not to the whole function: everything above this
+    # point is preflight, and a spec that fails to parse has provably written
+    # nothing. Reporting `possible` there would be alarmist and equally wrong.
+    try:
+        for key in execution_order:
+            # #153: a canonical ProcessIR root. Materialized through the neutral
+            # chain — compile with placeholders, rebind to the ids published above,
+            # emit, wrap — then attested twice. Handled BEFORE the component lookup
+            # because `components_by_key` does not contain process keys (QA-153-r1-01).
+            unit = process_units_by_key.get(key)
+            if unit is not None:
+                outcome = _execute_canonical_process(
+                    boomi_client=boomi_client,
+                    profile=profile,
+                    unit=unit,
+                    spec=spec,
+                    conflict_policy=conflict_policy,
+                    existing_id=existing_ids.get(key),
+                    id_registry=id_registry,
+                    account_id=config.get("account_id"),
+                )
+                results[key] = outcome["result"]
+                if outcome.get("component_id"):
+                    id_registry[key] = outcome["component_id"]
+                if outcome.get("mutation") is not None:
+                    process_mutations.append(outcome["mutation"])
+                if outcome.get("readback") is not None:
+                    process_readbacks.append(outcome["readback"])
+                if not outcome["result"].get("_success", True):
+                    return {
+                        "_success": False,
+                        "error": outcome.get("error") or f"Failed at step '{key}'",
+                        "error_code": outcome.get("error_code"),
+                        "failed_step": key,
+                        "partial_results": results,
+                        # Roots applied BEFORE the failure keep their attestations;
+                        # unapplied roots record none. That asymmetry is the record.
+                        "process_mutations": [m.model_dump(mode="json") for m in process_mutations],
+                        "process_readbacks": [r.model_dump(mode="json") for r in process_readbacks],
+                    }
+                continue
+
+            comp = _component_for_key(key, components_by_key)
+            existing_id = existing_ids.get(key)
+            resolved_config = _resolve_dependency_tokens(comp.config, id_registry)
+
+            # Issue #27: a reference-only component always reuses the existing
+            # component, independent of conflict_policy — it describes a
+            # dependency on something that already exists, never a create or
+            # clone. The "fail"/"clone" branches below would otherwise misfire on
+            # a deliberately-reused connection.
+            reference_only = isinstance(comp.config, dict) and bool(
+                comp.config.get("reference_only")
+            )
+
+            if comp.action == "create" and existing_id:
+                if reference_only or conflict_policy == "reuse":
+                    results[key] = {
+                        "status": "reused",
+                        "component_id": existing_id,
+                        "type": comp.type,
+                        "name": comp.name,
+                    }
+                    id_registry[key] = existing_id
+                    continue
+                if conflict_policy == "fail":
+                    return {
+                        "_success": False,
+                        "error": f"Component '{comp.name or comp.key}' already exists and conflict_policy=fail",
+                        "failed_step": key,
+                        "partial_results": results,
+                    }
+                resolved_config = _apply_clone_suffix(comp, resolved_config)
+
+            target_id = comp.component_id or existing_id
+            exec_result = _execute_component(
                 boomi_client=boomi_client,
                 profile=profile,
-                unit=unit,
-                spec=spec,
-                conflict_policy=conflict_policy,
-                existing_id=existing_ids.get(key),
-                id_registry=id_registry,
-                account_id=config.get("account_id"),
+                comp=comp,
+                config=resolved_config,
+                target_id=target_id,
+                components_by_key=components_by_key,
+                literal_indexes=literal_profile_indexes,
             )
-            results[key] = outcome["result"]
-            if outcome.get("component_id"):
-                id_registry[key] = outcome["component_id"]
-            if outcome.get("mutation") is not None:
-                process_mutations.append(outcome["mutation"])
-            if outcome.get("readback") is not None:
-                process_readbacks.append(outcome["readback"])
-            if not outcome["result"].get("_success", True):
-                return {
-                    "_success": False,
-                    "error": outcome.get("error") or f"Failed at step '{key}'",
-                    "error_code": outcome.get("error_code"),
-                    "failed_step": key,
-                    "partial_results": results,
-                    # Roots applied BEFORE the failure keep their attestations;
-                    # unapplied roots record none. That asymmetry is the record.
-                    "process_mutations": [m.model_dump(mode="json") for m in process_mutations],
-                    "process_readbacks": [r.model_dump(mode="json") for r in process_readbacks],
-                }
-            continue
 
-        comp = components_by_key[key]
-        existing_id = existing_ids.get(key)
-        resolved_config = _resolve_dependency_tokens(comp.config, id_registry)
+            component_id = _extract_component_id(exec_result)
+            if component_id:
+                id_registry[key] = component_id
 
-        # Issue #27: a reference-only component always reuses the existing
-        # component, independent of conflict_policy — it describes a
-        # dependency on something that already exists, never a create or
-        # clone. The "fail"/"clone" branches below would otherwise misfire on
-        # a deliberately-reused connection.
-        reference_only = isinstance(comp.config, dict) and bool(
-            comp.config.get("reference_only")
-        )
-
-        if comp.action == "create" and existing_id:
-            if reference_only or conflict_policy == "reuse":
-                results[key] = {
-                    "status": "reused",
-                    "component_id": existing_id,
-                    "type": comp.type,
-                    "name": comp.name,
-                }
-                id_registry[key] = existing_id
-                continue
-            if conflict_policy == "fail":
-                return {
-                    "_success": False,
-                    "error": f"Component '{comp.name or comp.key}' already exists and conflict_policy=fail",
-                    "failed_step": key,
-                    "partial_results": results,
-                }
-            resolved_config = _apply_clone_suffix(comp, resolved_config)
-
-        target_id = comp.component_id or existing_id
-        exec_result = _execute_component(
-            boomi_client=boomi_client,
-            profile=profile,
-            comp=comp,
-            config=resolved_config,
-            target_id=target_id,
-            components_by_key=components_by_key,
-            literal_indexes=literal_profile_indexes,
-        )
-
-        component_id = _extract_component_id(exec_result)
-        if component_id:
-            id_registry[key] = component_id
-
-        results[key] = {
-            "status": "updated" if comp.action == "update" else "created",
-            "component_id": component_id,
-            "type": comp.type,
-            "name": comp.name,
-            "result": exec_result,
-        }
-
-        if not exec_result.get("_success", False):
-            return {
-                "_success": False,
-                "error": f"Failed at step '{key}'",
-                "failed_step": key,
-                "step_result": exec_result,
-                "partial_results": results,
+            results[key] = {
+                "status": "updated" if comp.action == "update" else "created",
+                "component_id": component_id,
+                "type": comp.type,
+                "name": comp.name,
+                "result": exec_result,
             }
 
+            if not exec_result.get("_success", False):
+                return {
+                    "_success": False,
+                    "error": f"Failed at step '{key}'",
+                    "failed_step": key,
+                    "step_result": exec_result,
+                    "partial_results": results,
+                }
+    except _ApplyExecutionError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — re-raised, never swallowed
+        raise _ApplyExecutionError(exc) from exc
+
     build_id = str(uuid4())
+    # #153 (QA-153-r2-05): the two attestations, serialized ONCE and used for
+    # both the record and the envelope.
+    #
+    # They were accumulated in the loop above and then read only by the
+    # partial-FAILURE return, so a successful canonical apply — the case the
+    # record exists for — recorded neither anywhere a caller or a later verify
+    # could reach. The only way to observe a mutation attestation on this
+    # surface was to make a later root fail. For a milestone whose whole claim is
+    # "every mutation is attested", losing the attestation exactly when the
+    # mutation succeeds is the defect, not a gap.
+    serialized_mutations = [m.model_dump(mode="json") for m in process_mutations]
+    serialized_readbacks = [r.model_dump(mode="json") for r in process_readbacks]
+
     build_record: Dict[str, Any] = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "profile": profile,
@@ -7779,6 +7927,12 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         "results": results,
         "execution_order": execution_order,
     }
+    # Recorded only when there is something to record, so a legacy build and a
+    # typed build with no canonical roots both keep exactly their original keys.
+    if serialized_mutations:
+        build_record["process_mutations"] = serialized_mutations
+    if serialized_readbacks:
+        build_record["process_readbacks"] = serialized_readbacks
     # Provenance is recorded ONLY for a typed build, under one optional key. A
     # legacy record keeps exactly its five original keys, so nothing that reads
     # an existing build sees a new shape.
@@ -7795,6 +7949,10 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         "execution_order": execution_order,
         "results": results,
     }
+    if serialized_mutations:
+        apply_result["process_mutations"] = serialized_mutations
+    if serialized_readbacks:
+        apply_result["process_readbacks"] = serialized_readbacks
     if authoring_bundle is not None:
         apply_result["mutation_performed"] = True
         apply_result["authoring_provenance"] = build_record["authoring"][
@@ -7889,11 +8047,32 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
     #: only for typed builds; a legacy build has no apply-time baseline.
     observed_digests: Dict[str, str] = {}
 
-    for comp in spec.components:
-        step = results.get(comp.key)
+    # #153 (QA-153-r2-06): verify covers EVERY participant, from the same
+    # authority the dependency graph and the apply order use.
+    #
+    # It iterated `spec.components` alone, so a canonical process root was never
+    # existence-checked and never graph-verified — the one artifact this
+    # milestone materializes, silently unverified. Worse, the two halves of a
+    # typed verify disagreed about the universe: `_authoring_build_provenance`
+    # walks `results`, which DOES include roots, so a healthy typed build
+    # recorded an apply-time fingerprint for a key this loop never observed,
+    # `compare_live_build_provenance` classified it `missing`, and verify
+    # reported AUTHORING_LIVE_DEPLOYMENT_DRIFT over a build whose process had
+    # been read back clean seconds earlier. Two consumers, two hand-modelled
+    # universes; now one.
+    verify_components_by_key = {component.key: component for component in spec.components}
+    for participant_key, participant_depends_on, participant_kind in (
+        _integration_participants(spec)
+    ):
+        declared_type = (
+            "process"
+            if participant_kind == "process"
+            else _component_for_key(participant_key, verify_components_by_key).type
+        )
+        step = results.get(participant_key)
         component_id = step.get("component_id") if isinstance(step, dict) else None
         if not component_id:
-            verification["components"][comp.key] = {
+            verification["components"][participant_key] = {
                 "verified": False,
                 "reason": "No component_id available in build results",
             }
@@ -7901,14 +8080,14 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
             continue
 
         try:
-            if comp.type == "trading_partner":
+            if declared_type == "trading_partner":
                 # Existence check via the SDK JSON method (SDK 3.0.1). A non-2xx
                 # (e.g. an unknown id) raises ApiError, caught by the handler
                 # below — same as the old JSON transport, which raised on >=400.
                 boomi_client.trading_partner_component.get_trading_partner_component_json(
                     component_id
                 )
-                verification["components"][comp.key] = {"verified": True, "component_id": component_id}
+                verification["components"][participant_key] = {"verified": True, "component_id": component_id}
                 verified_count += 1
             else:
                 # Existence check; the returned dict carries the live component
@@ -7935,10 +8114,10 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
                 if build.get("authoring") is not None and isinstance(process_xml, str):
                     from ..authoring.revisions import sha256_fingerprint
 
-                    observed_digests[comp.key] = sha256_fingerprint(
+                    observed_digests[participant_key] = sha256_fingerprint(
                         {"component_xml": process_xml}
                     )
-                is_process = comp.type == "process" or data_type == "process"
+                is_process = declared_type == "process" or data_type == "process"
                 if is_process:
                     # Always graph-verify a detected process. If its XML could
                     # not be extracted, verify_process_graph reports an empty/
@@ -7956,9 +8135,9 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
                     verified_count += 1
                 else:
                     failed_count += 1
-                verification["components"][comp.key] = record
+                verification["components"][participant_key] = record
         except ComponentGetDeadlineExceeded as exc:
-            verification["components"][comp.key] = {
+            verification["components"][participant_key] = {
                 "verified": False,
                 "component_id": component_id,
                 "error": str(exc),
@@ -7967,19 +8146,19 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
             }
             failed_count += 1
         except Exception as exc:
-            verification["components"][comp.key] = {
+            verification["components"][participant_key] = {
                 "verified": False,
                 "component_id": component_id,
                 "error": str(exc),
             }
             failed_count += 1
 
-        for dep in comp.depends_on:
+        for dep in participant_depends_on:
             dep_result = results.get(dep)
             dep_id = dep_result.get("component_id") if isinstance(dep_result, dict) else None
             if not dep_result or not dep_id:
                 verification["dependency_issues"].append(
-                    f"Component '{comp.key}' depends on '{dep}', but '{dep}' was not resolved to a component_id."
+                    f"Component '{participant_key}' depends on '{dep}', but '{dep}' was not resolved to a component_id."
                 )
 
     result = {
@@ -8478,6 +8657,47 @@ def _decorate_typed_apply(result: Dict[str, Any], cfg: Dict[str, Any]) -> None:
         result.setdefault("error_code", AUTHORING_APPLY_VALIDATION_REQUIRED)
 
 
+class _ApplyExecutionError(Exception):
+    """An exception that escaped the apply loop, so a write may have happened.
+
+    Carried as its own type purely so the handlers below can tell "the apply
+    threw" from "something before the apply threw". The distinction decides
+    whether `mutation_status` may honestly say `none`.
+    """
+
+    def __init__(self, cause: BaseException) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+
+
+def _decorate_refusal_route(envelope: Dict[str, Any], normalized_action: str) -> None:
+    """Give an APPLY-route refusal the fields the apply contract tells callers to read.
+
+    QA-153-r2-08(c): the two blanket handlers served only
+    ``_success``/``error``/``exception_type`` (plus ``error_code`` when named), so
+    an ``apply`` that died in either of them carried no ``action``, no
+    ``mutation_performed`` and no ``mutation_status`` — and this surface's own
+    docstring instructs an agent to "branch on ``mutation_status``, not on one
+    code". A refusal that omits the field the contract names sends the caller
+    back to guessing.
+
+    ``none`` is the honest value here and is not an assumption: both handlers are
+    reached only by an exception that escaped ``_apply_plan``, which returns its
+    own envelope for every failure that occurs after a write has begun (the
+    partial-results shape). :func:`_mutation_status` is the shared reader, so
+    this cannot drift from the success path's accounting.
+    """
+    if normalized_action != "apply":
+        return
+    envelope.setdefault("action", "apply")
+    # `mutation_status` is already set by the apply-escape handler, which knows
+    # something this envelope cannot: that the apply loop itself threw. Only
+    # compute it here when nothing has claimed it.
+    status = envelope.get("mutation_status") or _mutation_status(envelope)
+    envelope["mutation_performed"] = status != "none"
+    envelope["mutation_status"] = status
+
+
 def build_integration_action(
     boomi_client: Boomi,
     profile: str,
@@ -8494,8 +8714,12 @@ def build_integration_action(
     if not isinstance(cfg, dict):
         return {"_success": False, "error": "config must be a JSON object"}
 
+    # Resolved BEFORE the try: the refusal arms below decorate an apply-route
+    # envelope with the typed apply fields, and a name bound inside the try is
+    # unbound in the handler if the very first statement is what raised.
+    normalized_action = str(action or "").strip().lower()
+
     try:
-        normalized_action = action.strip().lower()
         if normalized_action == "plan":
             # The typed path is selected ONLY by an explicit authoring_request.
             # A legacy request is never reinterpreted as a typed one.
@@ -8532,6 +8756,27 @@ def build_integration_action(
             "error": f"Unknown action '{action}'",
             "hint": "Valid actions are: " + ", ".join(_valid_actions()),
         }
+    except _ApplyExecutionError as exc:
+        # The apply loop threw. Nothing here can prove whether a component was
+        # written first, so the envelope says so rather than guessing.
+        envelope = {
+            "_success": False,
+            "error": f"Integration builder failed: {exc.cause}",
+            "exception_type": type(exc.cause).__name__,
+            "mutation_status": "possible",
+            "hint": (
+                "The apply failed part-way through and this server cannot "
+                "confirm whether any component was created. Reconcile the "
+                "account before retrying — a retry under "
+                "conflict_policy='clone' would duplicate anything that did "
+                "get written."
+            ),
+        }
+        named = _named_error_code_from_validation(exc.cause)
+        if named is not None:
+            envelope["error_code"] = named
+        _decorate_refusal_route(envelope, normalized_action)
+        return envelope
     except ValueError as exc:
         # #153 (QA-153-r1-04): a pydantic error carrying one of THIS slice's
         # named codes is served with that code, not as anonymous prose.
@@ -8548,18 +8793,23 @@ def build_integration_action(
         code = _named_error_code_from_validation(exc)
         envelope = {
             "_success": False,
-            "error": f"Validation error: {exc}",
+            # Value-free: `str(exc)` carries pydantic's `input_value=` echo of
+            # the caller's own payload (QA-153-r2-08).
+            "error": f"Validation error: {_validation_error_message(exc)}",
             "exception_type": "ValidationError",
         }
         if code is not None:
             envelope["error_code"] = code
+        _decorate_refusal_route(envelope, normalized_action)
         return envelope
     except Exception as exc:
-        return {
+        envelope = {
             "_success": False,
             "error": f"Integration builder failed: {exc}",
             "exception_type": type(exc).__name__,
         }
+        _decorate_refusal_route(envelope, normalized_action)
+        return envelope
 
 
 __all__ = ["build_integration_action"]
