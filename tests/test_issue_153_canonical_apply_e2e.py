@@ -2625,6 +2625,82 @@ def test_a_folder_named_like_the_account_cannot_fake_a_placement():
     assert identified["results"]["proc"]["placement_verified"] is True
 
 
+def test_an_id_only_readback_is_a_folder_not_the_root():
+    """Codex round 18: folderFullPath/folderName are OPTIONAL response
+    metadata, so a readback can carry only folderId. That id is folder
+    evidence — classifying the location as root while forwarding the id
+    attested one create as simultaneously "in folder <id>" and "at the account
+    root". An id-bearing readback is a folder with an unknown name: compared by
+    id, named by id in the warning, and never called the root.
+    """
+    unit = process_unit(folder_name="Target Folder")
+    folders = [{"id": "folder-1", "name": "Target Folder", "deleted": False}]
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    def _run(readback_for_process):
+        _SUBMITTED.clear()
+        created["n"] = 0
+
+        def _live(_client, component_id, *_a, **_k):
+            if component_id == _PROCESS_ID:
+                return {"type": "process", "xml": readback_for_process()}
+            return {"type": "connector-settings", "xml": _LIVE_COMPONENT_XML}
+
+        with patch("boomi_mcp.categories.folders._query_all_folders",
+                   return_value=folders), \
+             patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+            _CREATE
+        ) as create, patch(_GET_XML) as get_xml:
+            paginate.return_value = []
+            execute.side_effect = _component
+            create.side_effect = _create
+            get_xml.side_effect = _live
+            return build_integration_action(
+                MagicMock(), _PROFILE, "apply",
+                config={"authoring_request": _bound_payload(
+                    process_ir_request(units=(unit,))
+                ), "dry_run": False},
+            )
+
+    # An id-only readback whose id matches the resolution CONFIRMS by identity.
+    matching = _run(lambda: _SUBMITTED["xml"].replace(
+        'name="M12.15 Process"',
+        'name="M12.15 Process" folderId="folder-1"', 1,
+    ).replace(' folderName="Target Folder"', "", 1))
+    assert matching["_success"] is True, matching.get("error")
+    placement = matching["process_mutations"][0]["resolved_placement"]
+    assert placement["folder_id"] == "folder-1"
+    assert matching["results"]["proc"]["placement_verified"] is True
+    assert not [w for w in (matching.get("warnings") or [])
+                if "NOT placed" in w]
+
+    # A DIFFERENT id refuses — and the warning names the id, never the root.
+    different = _run(lambda: _SUBMITTED["xml"].replace(
+        'name="M12.15 Process"',
+        'name="M12.15 Process" folderId="folder-OTHER"', 1,
+    ).replace(' folderName="Target Folder"', "", 1))
+    assert different["_success"] is True, different.get("error")
+    placement = different["process_mutations"][0]["resolved_placement"]
+    assert placement["folder_id"] == "folder-OTHER"
+    assert placement["folder_name"] is None
+    step = different["results"]["proc"]
+    assert step["placement_verified"] is False
+    assert step["observed_folder_id"] == "folder-OTHER"
+    warning = [w for w in (different.get("warnings") or []) if "NOT placed" in w]
+    assert warning, different.get("warnings")
+    assert "folder id 'folder-OTHER'" in warning[0]
+    assert "the account root" not in warning[0]
+
+
 def test_a_failed_readback_never_claims_the_component_is_at_root():
     """Codex round 16 F2: when the post-create readback cannot be fetched or
     parsed, the component's location is UNKNOWN — the warning must say the

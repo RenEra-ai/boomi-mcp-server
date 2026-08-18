@@ -8490,14 +8490,25 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     # location is a fabrication (Codex round 16 F2) — that case
                     # gets the unverified wording instead.
                     if "observed_folder" in _step:
+                        # The location line prefers the observed path, then the
+                        # observed folder id (a pathless id-bearing readback is
+                        # a folder with an unreported name, Codex round 18),
+                        # and calls it the root only when the readback carried
+                        # NO folder evidence at all.
+                        _loc = _step.get("observed_folder")
+                        if _loc is None and _step.get("observed_folder_id"):
+                            _loc = "folder id {0!r}".format(
+                                _step["observed_folder_id"]
+                            )
                         apply_warnings.append(
                             "Process {0!r} requested folder {1!r}, but the live "
-                            "read-back shows it in {2!r} — this platform ignores "
+                            "read-back shows it in {2} — this platform ignores "
                             "folderName on create, so the component was NOT placed "
                             "there. Move it via manage_folders or the UI.".format(
                                 key,
                                 _step.get("requested_folder_name"),
-                                _step.get("observed_folder") or "the account root",
+                                repr(_loc) if _step.get("observed_folder")
+                                else (_loc or "the account root"),
                             )
                         )
                     else:

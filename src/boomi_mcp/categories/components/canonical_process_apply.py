@@ -436,19 +436,34 @@ def observed_folder_identity(component_xml: str) -> Optional[Dict[str, Any]]:
     folder_id = root.attrib.get("folderId") or None
     if full_path:
         segments = [part for part in full_path.rstrip("/").split("/") if part]
-        return {
-            "full_path": full_path,
-            "leaf": segments[-1] if segments else None,
-            "folder_id": folder_id,
-            "is_root": len(segments) <= 1,
-        }
+        if len(segments) > 1:
+            return {"full_path": full_path, "leaf": segments[-1],
+                    "folder_id": folder_id, "is_root": False}
+        # A single-segment full path is the ACCOUNT itself — unless the
+        # readback ALSO names a folder id, which contradicts it (Codex
+        # round 18: path attributes are optional metadata, an id is folder
+        # evidence). The id is the stronger claim: keep it, drop the path,
+        # and let the identity comparison decide.
+        if folder_id:
+            return {"full_path": None, "leaf": None, "folder_id": folder_id,
+                    "is_root": False}
+        return {"full_path": full_path,
+                "leaf": segments[-1] if segments else None,
+                "folder_id": None, "is_root": True}
     name = root.attrib.get("folderName")
     if name:
         return {"full_path": name, "leaf": name, "folder_id": folder_id,
                 "is_root": False}
-    # Parsed, and NO folder attribute at all: the platform reported nothing,
+    if folder_id:
+        # An id with no path metadata is a FOLDER whose name the readback did
+        # not report, never the root (Codex round 18: classifying it as root
+        # while the id propagated attested one create as simultaneously in a
+        # folder and at the root).
+        return {"full_path": None, "leaf": None, "folder_id": folder_id,
+                "is_root": False}
+    # Parsed, and NO folder evidence at all: the platform reported nothing,
     # which on this surface means the account root.
-    return {"full_path": None, "leaf": None, "folder_id": folder_id,
+    return {"full_path": None, "leaf": None, "folder_id": None,
             "is_root": True}
 
 

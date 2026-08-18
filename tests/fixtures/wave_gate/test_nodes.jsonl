@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9981,"minimum_collected":9981,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9982,"minimum_collected":9982,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -10010,3 +10010,4 @@
 {"kind":"test","id":"pytest-010009","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_ignored_placement_is_never_attested_as_applied","state":"active"}
 {"kind":"test","id":"pytest-010010","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_folder_named_like_the_account_cannot_fake_a_placement","state":"active"}
 {"kind":"test","id":"pytest-010011","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_failed_readback_never_claims_the_component_is_at_root","state":"active"}
+{"kind":"test","id":"pytest-010012","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_id_only_readback_is_a_folder_not_the_root","state":"active"}
