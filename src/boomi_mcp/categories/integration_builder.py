@@ -7458,6 +7458,30 @@ def _execute_canonical_process(
     envelope = unit.envelope
     key = envelope.component_key
 
+    def _canonical_result(**fields):
+        """THE canonical step result. Every exit of this function builds it here.
+
+        `requested_name` and `applied_name_verified` must be true of EVERY
+        result, and initializing them at the one construction site near the end
+        left the earlier exits — reuse, `conflict_policy="fail"`, a
+        materialization error, a missing update id — without them (Codex round
+        7). That is DC-4 again, one level down: a field required on every exit,
+        added at the exit that was reported.
+
+        `applied_name_verified` starts False because nothing has been read back
+        yet; the readback upgrades it. A caller can therefore branch on the field
+        on every result this function can produce.
+        """
+        result = {
+            "type": "process",
+            "name": envelope.name,
+            "requested_name": envelope.name,
+            "applied_name_verified": False,
+        }
+        result.update(fields)
+        return result
+
+
     # CONFLICT POLICY IS DECIDED FIRST — before anything is compiled.
     #
     # It used to be decided after materialization, which had two consequences.
@@ -7471,8 +7495,9 @@ def _execute_canonical_process(
         # No mutation happens, so no mutation attestation is recorded — an
         # attestation for a write that never occurred would be a false entry.
         return {
-            "result": {"status": "reused", "component_id": existing_id,
-                       "type": "process", "name": envelope.name, "_success": True},
+            "result": _canonical_result(
+                status="reused", component_id=existing_id, _success=True
+            ),
             "component_id": existing_id,
             "mutation": None,
             "readback": None,
@@ -7483,8 +7508,9 @@ def _execute_canonical_process(
             f"conflict_policy=fail"
         )
         return {
-            "result": {"_success": False, "status": "refused", "type": "process",
-                       "name": envelope.name, "error": message},
+            "result": _canonical_result(
+                _success=False, status="refused", error=message
+            ),
             "error": message,
             "error_code": None,
             "component_id": None,
@@ -7520,8 +7546,9 @@ def _execute_canonical_process(
         )
     except CanonicalProcessApplyError as exc:
         return {
-            "result": {"_success": False, "status": "refused", "type": "process",
-                       "name": envelope.name, "error": str(exc)},
+            "result": _canonical_result(
+                _success=False, status="refused", error=str(exc)
+            ),
             "error": str(exc),
             "error_code": exc.error_code,
             "component_id": None,
@@ -7540,9 +7567,10 @@ def _execute_canonical_process(
         # along. One map, consulted everywhere a pydantic error is served.
         named = _named_error_code_from_validation(exc)
         return {
-            "result": {"_success": False, "status": "refused", "type": "process",
-                       "name": envelope.name,
-                       "error": _validation_error_message(exc)},
+            "result": _canonical_result(
+                _success=False, status="refused",
+                error=_validation_error_message(exc),
+            ),
             "error": _validation_error_message(exc),
             "error_code": named or PROCESS_MATERIALIZATION_INTERNAL_ERROR,
             "component_id": None,
@@ -7555,8 +7583,9 @@ def _execute_canonical_process(
         if not target_id:
             message = f"Missing component_id for update of process '{key}'"
             return {
-                "result": {"_success": False, "status": "failed", "type": "process",
-                           "name": envelope.name, "error": message},
+                "result": _canonical_result(
+                    _success=False, status="failed", error=message
+                ),
                 "error": message,
                 "error_code": "PROCESS_MATERIALIZATION_PLAN_INVALID",
                 "component_id": None, "mutation": None, "readback": None,
@@ -7589,24 +7618,14 @@ def _execute_canonical_process(
     # the account; but the per-step record is what `verify` and a human
     # reconciler read, and it said a write happened that did not.
     succeeded = bool(exec_result.get("_success", False))
-    result = {
-        "status": ("updated" if action == "update" else "created") if succeeded else "failed",
-        "component_id": component_id,
-        "type": "process",
-        # The REQUESTED name, and said to be unverified FROM CONSTRUCTION.
-        #
-        # Codex round 6: the discriminator was assigned near the end of this
-        # function, so the documented "create succeeded without a component id"
-        # path — which returns earlier, and may already have created the
-        # component — exposed the requested name with nothing marking it. A
-        # field that must be true on every exit is initialized where the object
-        # is built, not added on the path that happened to be reported.
-        "name": envelope.name,
-        "requested_name": envelope.name,
-        "applied_name_verified": False,
-        "result": exec_result,
-        "_success": succeeded,
-    }
+    result = _canonical_result(
+        status=(
+            ("updated" if action == "update" else "created") if succeeded else "failed"
+        ),
+        component_id=component_id,
+        result=exec_result,
+        _success=succeeded,
+    )
     if not succeeded:
         # The step's OWN diagnosis travels, exactly as the component arm lifts
         # it. Hard-setting `error_code: None` buried the real code — measured:
@@ -8110,7 +8129,15 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                                 key, outcome["applied_name"], outcome["requested_name"]
                             )
                         )
-                if outcome.get("result", {}).get("applied_name_verified") is False:
+                # Only when a write SUCCEEDED but its name could not be
+                # confirmed (Codex round 7). The flag is False by construction on
+                # every result, so gating on it alone fired the "read-back did
+                # not confirm" warning on refusals and rejected writes, where no
+                # readback is attempted and there may be nothing to re-read.
+                if (
+                    outcome.get("result", {}).get("_success") is True
+                    and outcome.get("result", {}).get("applied_name_verified") is False
+                ):
                     apply_warnings.append(
                         "Process {0!r}: the live read-back did not confirm the "
                         "component's name, so the reported name is the one that "

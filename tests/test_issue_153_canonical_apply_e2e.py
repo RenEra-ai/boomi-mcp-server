@@ -1459,27 +1459,43 @@ def test_one_constructor_builds_every_partial_failure_envelope():
         if isinstance(n, ast.FunctionDef) and n.name == "_apply_plan"
     )
 
-    hand_built = [
-        node.lineno
-        for node in ast.walk(apply_plan)
-        if isinstance(node, ast.Return)
-        and isinstance(node.value, ast.Dict)
-        and any(
-            isinstance(k, ast.Constant) and k.value == "partial_results"
-            for k in node.value.keys
-        )
-    ]
-    assert hand_built == [], (
-        "partial-failure envelope built by hand at line(s) %r — call "
-        "_partial_failure() so every exit carries the same fields" % hand_built
+    # EVERY return inside the mutation loop must call the constructor.
+    #
+    # The first version only rejected dict returns that ALREADY carried
+    # `partial_results` — so a new failure return omitting it, warnings and the
+    # attestations (the exact regression this guard exists for) had no such key
+    # and passed (Codex round 7). The question is asked the other way round now:
+    # what does this return DO, not what does it happen to contain.
+    loop = next(
+        node for node in ast.walk(apply_plan)
+        if isinstance(node, ast.For)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "key"
     )
 
-    # Non-vacuity: the constructor exists and IS used by several exits.
+    def _is_constructor_call(node):
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_partial_failure"
+        )
+
+    offenders = [
+        node.lineno
+        for node in ast.walk(loop)
+        if isinstance(node, ast.Return)
+        and node.value is not None
+        and not _is_constructor_call(node.value)
+    ]
+    assert offenders == [], (
+        "return(s) in the mutation loop bypass _partial_failure() at line(s) %r — "
+        "every failing exit must build the envelope through the one constructor"
+        % offenders
+    )
+
     calls = [
         node.lineno
-        for node in ast.walk(apply_plan)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "_partial_failure"
+        for node in ast.walk(loop)
+        if _is_constructor_call(node)
     ]
     assert len(calls) >= 3, calls
