@@ -1846,6 +1846,9 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "FETCH_FAILED",
     "PUSH_FAILED",
     "OBJECT_MISSING",
+    # Bare stem from prose contrasting the two placement refusals
+    # ("NOT_FOUND/AMBIGUOUS").
+    "NOT_FOUND",
     # A served code that is deliberately NOT in the taxonomy — which is one of
     # the reasons the round-11 row gives for why write evidence could not be
     # derived from it. A row explaining that has to be able to name it.

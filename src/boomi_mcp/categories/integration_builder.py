@@ -7518,6 +7518,7 @@ def _execute_canonical_process(
         CanonicalProcessApplyError,
         applied_component_name,
         applied_folder_name,
+        observed_folder_leaf,
         build_mutation_attestation,
         build_readback_attestation,
         materialize_canonical_process_xml,
@@ -7793,6 +7794,20 @@ def _execute_canonical_process(
     # those are the MERGED bytes; `_apply_structured_update` reports them so the
     # digest describes what the platform received, not what we desired.
     submitted = exec_result.get("submitted_xml") or xml
+    # PLACEMENT IS VERIFIED FROM THE READBACK, exactly as the name is
+    # (QA-153-r12-01, the r10 pattern). The platform ignores `folderName` on
+    # create — measured for every builder and every spelling — so the requested
+    # or submitted placement over-claims. Only a readback-confirmed match may
+    # carry the resolved folder id into the attestation.
+    live_xml_early = _live_component_xml(boomi_client, component_id) if component_id else None
+    observed_placement = (
+        observed_folder_leaf(live_xml_early) if live_xml_early else None
+    )
+    placement_honoured = bool(
+        envelope.folder_name
+        and observed_placement
+        and observed_placement == envelope.folder_name
+    )
     # The digest travels from the point CLOSEST to the wire: the update path
     # computed it immediately before its push; the create path immediately
     # before the raw create call above.
@@ -7810,8 +7825,13 @@ def _execute_canonical_process(
             applied_folder_name=applied_folder_name(submitted),
             # Create records the requested name AND the resolved id (plan §4);
             # an update's effective placement comes from the submitted bytes.
-            resolved_folder_id=resolved_folder_id if action == "create" else None,
+            resolved_folder_id=(
+                resolved_folder_id
+                if action == "create" and placement_honoured
+                else None
+            ),
             submitted_xml_digest=precomputed,
+            observed_placement=observed_placement,
         )
     except CanonicalProcessApplyError as exc:
         # A create that reported success without an id fails CLOSED: the mutation
@@ -7825,7 +7845,7 @@ def _execute_canonical_process(
     # unknown rather than as agreement.
     from ..authoring.revisions import sha256_fingerprint as _sha256_fingerprint
 
-    live_xml = _live_component_xml(boomi_client, component_id)
+    live_xml = live_xml_early
     readback = build_readback_attestation(
         component_key=key,
         component_id=component_id,
@@ -7835,6 +7855,13 @@ def _execute_canonical_process(
             else None
         ),
     )
+
+    # ...and the same honesty for PLACEMENT (QA-153-r12-01).
+    if envelope.folder_name and action == "create":
+        result["requested_folder_name"] = envelope.folder_name
+        result["placement_verified"] = placement_honoured
+        if live_xml_early and not placement_honoured:
+            result["observed_folder"] = observed_placement
 
     # THE PLATFORM DOES NOT ALWAYS HONOUR THE REQUESTED NAME (QA-153-r7-01).
     #
@@ -8414,6 +8441,23 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 # without protecting against either false-positive class it was
                 # narrowed for: `refused` and `reused` are both non-writing.
                 _step = outcome.get("result", {})
+                if _step.get("placement_verified") is False and (
+                    str(_step.get("status", "")) not in _NON_WRITING_STEP_STATUSES
+                ):
+                    # QA-153-r12-01: the platform ignored the placement — say
+                    # so, name where the component actually is, and give the
+                    # remedy. The attestation records only the observed
+                    # placement, so this warning is the caller's one notice.
+                    apply_warnings.append(
+                        "Process {0!r} requested folder {1!r}, but the live "
+                        "read-back shows it in {2!r} — this platform ignores "
+                        "folderName on create, so the component was NOT placed "
+                        "there. Move it via manage_folders or the UI.".format(
+                            key,
+                            _step.get("requested_folder_name"),
+                            _step.get("observed_folder") or "the account root",
+                        )
+                    )
                 if (
                     str(_step.get("status", "")) not in _NON_WRITING_STEP_STATUSES
                     and _step.get("applied_name_verified") is False

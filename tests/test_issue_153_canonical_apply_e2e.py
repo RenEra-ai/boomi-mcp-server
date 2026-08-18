@@ -2439,3 +2439,83 @@ def test_a_malformed_nested_processir_keeps_the_generic_code():
         MagicMock(), _PROFILE, "compile", config={"authoring_request": envelope_bad}
     )
     assert named["error_code"] == "PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD"
+
+
+def test_an_ignored_placement_is_never_attested_as_applied():
+    """QA-153-r12-01: the platform ignores `folderName` on create.
+
+    Measured live for every builder and every spelling — so a create can
+    validate the folder, resolve it, attest `resolved_placement.folder_id`, and
+    still land at the account root. An attestation of a placement that never
+    happened is exactly the mutation-accounting defect this slice exists to
+    forbid. The fix is the r10 pattern: placement is verified from the READBACK,
+    the resolved id is attested only when the platform honoured the request, and
+    an ignored placement gets an actionable warning naming where the component
+    actually is.
+    """
+    unit = process_unit(folder_name="Target Folder")
+    folders = [{"id": "folder-1", "name": "Target Folder", "deleted": False}]
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    def _run(readback_for_process):
+        _SUBMITTED.clear()
+        created["n"] = 0
+
+        def _live(_client, component_id, *_a, **_k):
+            if component_id == _PROCESS_ID:
+                return {"type": "process", "xml": readback_for_process()}
+            return {"type": "connector-settings", "xml": _LIVE_COMPONENT_XML}
+
+        with patch("boomi_mcp.categories.folders._query_all_folders",
+                   return_value=folders), \
+             patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+            _CREATE
+        ) as create, patch(_GET_XML) as get_xml:
+            paginate.return_value = []
+            execute.side_effect = _component
+            create.side_effect = _create
+            get_xml.side_effect = _live
+            return build_integration_action(
+                MagicMock(), _PROFILE, "apply",
+                config={"authoring_request": _bound_payload(
+                    process_ir_request(units=(unit,))
+                ), "dry_run": False},
+            )
+
+    # THE HONOURING PLATFORM: readback carries the folder -> id is attested.
+    honoured = _run(lambda: _SUBMITTED["xml"].replace(
+        'name="M12.15 Process"',
+        'name="M12.15 Process" folderFullPath="Acct/Target Folder"', 1,
+    ))
+    assert honoured["_success"] is True, honoured.get("error")
+    placement = honoured["process_mutations"][0]["resolved_placement"]
+    assert placement["folder_name"] == "Target Folder"
+    assert placement["folder_id"] == "folder-1"
+    assert honoured["results"]["proc"]["placement_verified"] is True
+    assert not [w for w in (honoured.get("warnings") or []) if "NOT placed" in w]
+
+    # THE IGNORING PLATFORM (what QA measured): the component sits at root.
+    ignored = _run(lambda: _SUBMITTED["xml"].replace(
+        'name="M12.15 Process"',
+        'name="M12.15 Process" folderFullPath="Acct"', 1,
+    ).replace(' folderName="Target Folder"', "", 1))
+    assert ignored["_success"] is True, ignored.get("error")
+    placement = ignored["process_mutations"][0]["resolved_placement"]
+    # The observed placement is attested; the resolved id is NOT.
+    assert placement["folder_id"] is None
+    assert placement["folder_name"] != "Target Folder"
+    step = ignored["results"]["proc"]
+    assert step["placement_verified"] is False
+    assert step["requested_folder_name"] == "Target Folder"
+    warning = [w for w in (ignored.get("warnings") or []) if "NOT placed" in w]
+    assert warning, ignored.get("warnings")
+    assert "Target Folder" in warning[0]

@@ -302,6 +302,7 @@ def build_mutation_attestation(
     resolved_folder_id: Optional[str] = None,
     applied_folder_name: Optional[str] = None,
     submitted_xml_digest: Optional[str] = None,
+    observed_placement: Optional[str] = None,
 ):
     """The apply-time mutation attestation for one root.
 
@@ -339,17 +340,16 @@ def build_mutation_attestation(
         # A create never names a target; an update's target IS its result.
         target_component_id=target_component_id if action == "update" else None,
         result_component_id=result_component_id,
-        # The placement ACTUALLY applied, never the one requested (Codex round 1).
-        #
-        # An update goes through read-merge-write under a preservation policy
-        # that does not own the root's folder attributes, so the live folder
-        # survives — while this recorded the envelope's requested `folder_name`
-        # regardless, producing an attestation that names a placement the
-        # mutation did not perform. An attestation whose job is to say what
-        # happened must not report an intent.
+        # The placement ACTUALLY OBSERVED, never the one requested (Codex
+        # round 1; hardened by QA-153-r12-01, which measured the platform
+        # IGNORING `folderName` on create for every builder and spelling — so
+        # even the submitted bytes over-claim). For a create the caller passes
+        # the READBACK's observation and the resolved id only when it matches;
+        # for an update the merged submitted bytes carry the preserved live
+        # placement. `None` means unknown/unplaced, never a guess.
         resolved_placement=ResolvedProcessPlacementV1(
             folder_name=(
-                plan.envelope.folder_name if action == "create" else applied_folder_name
+                observed_placement if action == "create" else applied_folder_name
             ),
             folder_id=resolved_folder_id or plan.resolved_folder_id,
         ),
@@ -396,6 +396,28 @@ def applied_component_name(component_xml: str) -> Optional[str]:
     return root.attrib.get("name") or None
 
 
+def observed_folder_leaf(component_xml: str) -> Optional[str]:
+    """The folder the platform ACTUALLY placed the component in, from readback.
+
+    QA-153-r12-01: the platform ignores ``folderName`` on create — measured for
+    every builder and every spelling on this surface — so an attestation built
+    from the request or the submitted bytes promises a placement that never
+    happened. The readback's ``folderFullPath`` is the only source that reports
+    where the component IS; its leaf is comparable to the requested folder name.
+    ``folderName`` is read as a fallback for platforms that echo it.
+    """
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(component_xml)
+    except ET.ParseError:
+        return None
+    full_path = root.attrib.get("folderFullPath")
+    if full_path:
+        return full_path.rstrip("/").rsplit("/", 1)[-1] or None
+    return root.attrib.get("folderName") or None
+
+
 def build_readback_attestation(*, component_key: str, component_id: str, digest):
     """The post-apply live readback, recorded SEPARATELY from the mutation.
 
@@ -417,5 +439,6 @@ __all__ = [
     "applied_folder_name",
     "build_readback_attestation",
     "materialize_canonical_process_xml",
+    "observed_folder_leaf",
     "resolve_extension_connections",
 ]
