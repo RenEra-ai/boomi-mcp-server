@@ -46,7 +46,15 @@ def test_a_process_ir_compile_produces_artifact_fingerprints(spy):
     result = _compile(process_ir_request())
     assert result.mutation_performed is False
     kinds = {a.artifact_kind for a in result.artifact_fingerprints}
-    assert kinds == {"process_ir_emission_plan", "process_ir_normalized"}
+    # #153: the relocatable MATERIALIZATION PLAN is fingerprinted at compile too,
+    # so the binding covers the materializer/emitter revisions and the
+    # preservation policy. Without it a change to any of those left every
+    # previously-issued binding still verifying (Codex round 1).
+    assert kinds == {
+        "process_ir_emission_plan",
+        "process_ir_normalized",
+        "process_component_materialization_plan",
+    }
     for artifact in result.artifact_fingerprints:
         assert artifact.component_key == "proc"
         assert artifact.digest.startswith("sha256:")
@@ -91,7 +99,15 @@ def test_the_canonical_compiler_is_actually_invoked(spy, monkeypatch):
 
     monkeypatch.setattr(pipeline, "compile_process_ir_v1", _recording)
     _compile(process_ir_request())
-    assert len(seen) == 1
+    # TWO compiles per root since #153, and the second is load-bearing rather
+    # than wasteful: `build_materialization_plan` OWNS its compilation and forces
+    # a placeholder-backed symbol table, which is what makes an account-bound
+    # emission plan unrepresentable (the S5-02 structural fix). Reusing the
+    # emission-plan compile here would hand it a table it did not build — exactly
+    # the "accepted a caller-supplied plan and assumed it was placeholder-backed"
+    # hole that fix closed. The guard this test exists for is unchanged: the
+    # compiler is genuinely invoked, not stubbed.
+    assert len(seen) == 2, seen
 
 
 def test_the_143_gate_cannot_be_bypassed(spy):

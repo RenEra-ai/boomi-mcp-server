@@ -642,6 +642,11 @@ def test_an_apply_that_throws_mid_flight_does_not_claim_it_was_retry_safe():
     assert "cannot confirm" in result["hint"]
 
 
+# ---------------------------------------------------------------------------
+# value-free served errors (QA-153-r3-01, QA-153-r4-01)
+# ---------------------------------------------------------------------------
+
+
 def test_no_served_envelope_renders_pydantic_input_values():
     """The structural invariant for QA-153-r3-01 — asserted on BEHAVIOUR.
 
@@ -658,24 +663,21 @@ def test_no_served_envelope_renders_pydantic_input_values():
     canary = "ZQXJ-Sup3rSecret-tail-marker-0123456789"
     shapes = []
 
-    # 1. Component/process key collision, canary at the HEAD (integration_name).
     head = _duplicate_key_payload()
     head["intent"]["integration_name"] = canary
     shapes.append(("compile", {"authoring_request": head}))
 
-    # 2. The same collision with the canary DEEPER, where pydantic elides.
     deep = _duplicate_key_payload()
     deep["intent"]["units"][0]["envelope"]["description"] = canary
     shapes.append(("compile", {"authoring_request": deep}))
 
-    # 3. The legacy root on the apply route — the arm that reaches the blanket
-    #    handlers, which is where the missed third rendering lived.
+    # The LEGACY root on the apply route — the arm that reaches the blanket
+    # handlers, which is where the missed third rendering lived.
     spec = _spec_with_canonical_root()
     spec["processes"][0]["envelope"]["component_key"] = "conn"
     spec["processes"][0]["envelope"]["description"] = canary
     shapes.append(("apply", {"integration_spec": spec, "dry_run": False}))
 
-    # 4. A malformed unit shape, so a schema error (not a rule error) is served.
     malformed = process_ir_request().model_dump(mode="json")
     malformed["intent"]["units"][0]["envelope"].pop("name")
     malformed["intent"]["integration_name"] = canary
@@ -696,29 +698,295 @@ def test_no_served_envelope_renders_pydantic_input_values():
 
 
 def test_every_served_exception_goes_through_the_value_free_renderer():
-    """The source half of the same invariant.
+    """The source half of the same invariant, asserted on the AST.
 
-    The behavioural sweep above can only cover refusal shapes a test can
-    actually reach, and QA measured that the missed arm was NOT reachable with
-    caller-authored content in 31 envelopes — it was a latent path with proven
+    The behavioural sweep above can only cover refusal shapes a test can reach,
+    and QA measured that the arm this rule was written for was NOT reachable
+    with caller-authored content in 31 envelopes — a latent path with proven
     serving behaviour. So the rule is also asserted where it cannot depend on
-    reachability: no served message interpolates a raw exception.
-    """
-    import re
+    reachability.
 
-    source = (
+    Two earlier versions of this guard were too narrow, both caught by QA. The
+    first matched only ``{exc}`` f-string interpolation, while ``str(exc)`` is
+    the spelling actually used at ~20 sites in the same file; a line-based
+    widening then could not tell a real site from a docstring that merely
+    mentions one. So the question is asked of the SYNTAX TREE.
+
+    Scope is derived, not enumerated: a handler is OPEN when it can receive an
+    exception this module did not raise — bare, or catching ``Exception`` /
+    ``BaseException`` / ``ValueError`` (pydantic's ``ValidationError`` subclasses
+    ``ValueError``, confirmed at runtime). A handler catching a specific type
+    this repo defines renders a message the repo itself wrote, and is out of
+    scope by construction rather than by allowlist.
+    """
+    import ast
+
+    path = (
         Path(__file__).resolve().parent.parent
         / "src/boomi_mcp/categories/integration_builder.py"
-    ).read_text()
-
-    raw = re.compile(r"\{exc(?:\.\w+)*\}")
-    offenders = [
-        (number, stripped)
-        for number, line in enumerate(source.splitlines(), start=1)
-        for stripped in (line.strip(),)
-        if raw.search(stripped) and "_validation_error_message" not in stripped
-    ]
-    assert offenders == [], (
-        "raw exception interpolated into a message: %r — use "
-        "_validation_error_message(exc)" % (offenders,)
     )
+    tree = ast.parse(path.read_text())
+
+    #: Catching any of these can deliver a framework-constructed exception.
+    OPEN = {"Exception", "BaseException", "ValueError"}
+    #: The renderer itself bottoms out in `str(exc)`; that IS the sanctioned path.
+    RENDERER = "_validation_error_message"
+
+    def caught_names(handler):
+        node = handler.type
+        if node is None:
+            return {"BaseException"}
+        parts = node.elts if isinstance(node, ast.Tuple) else [node]
+        return {p.id for p in parts if isinstance(p, ast.Name)}
+
+    def sanctioned_names(handler):
+        """Every `exc` Name that is already an argument of the renderer.
+
+        A sanctioned site can still LOOK like a rendering: a `%`-formatted
+        message whose substituted value is `_validation_error_message(exc)`
+        contains an `exc` Name under a `%` BinOp. Node IDENTITY is used, not the
+        name, because two occurrences are distinct nodes.
+        """
+        safe = set()
+        for node in ast.walk(ast.Module(body=handler.body, type_ignores=[])):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in (RENDERER, "type")
+            ):
+                for inner in ast.walk(node):
+                    if isinstance(inner, ast.Name) and inner.id == handler.name:
+                        safe.add(id(inner))
+        return safe
+
+    def renders(node, name, safe):
+        """Does this node turn `name` into text, outside the renderer?"""
+
+        def raw(candidate):
+            return (
+                isinstance(candidate, ast.Name)
+                and candidate.id == name
+                and id(candidate) not in safe
+            )
+
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "str":
+                return any(raw(arg) for arg in node.args)
+            if isinstance(func, ast.Attribute) and func.attr == "format":
+                return any(raw(arg) for arg in node.args)
+        if isinstance(node, ast.FormattedValue):
+            return raw(node.value)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+            return any(raw(inner) for inner in ast.walk(node.right))
+        return False
+
+    offenders = set()
+    for func in ast.walk(tree):
+        if not isinstance(func, ast.FunctionDef) or func.name == RENDERER:
+            continue
+        for handler in ast.walk(func):
+            if not isinstance(handler, ast.ExceptHandler) or not handler.name:
+                continue
+            if not (caught_names(handler) & OPEN):
+                continue
+            safe = sanctioned_names(handler)
+            for node in ast.walk(ast.Module(body=handler.body, type_ignores=[])):
+                if renders(node, handler.name, safe):
+                    offenders.add((getattr(node, "lineno", 0), func.name))
+
+    assert offenders == set(), (
+        "raw exception rendering(s) in an OPEN except arm — use %s(exc): %r"
+        % (RENDERER, sorted(offenders))
+    )
+
+
+# ---------------------------------------------------------------------------
+# Codex Stage-2 review, round 1
+# ---------------------------------------------------------------------------
+
+
+def test_authored_text_that_looks_like_a_reference_is_not_one():
+    """Codex F6/F10: a text scan stood in for a schema question.
+
+    `$ref:` in a `message` body is caller PROSE. It was walked out of the IR's
+    JSON dump and registered as a component dependency, so authoring a message
+    that mentions a ref token earned `INTEGRATION_DEPENDENCY_REQUIRED` for a
+    dependency the document does not have.
+    """
+    from boomi_mcp.models.process_ir import ProcessIRV1, iter_component_refs
+
+    doc = {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                {"kind": "source", "connection_ref": "$ref:conn", "operation_ref": "$ref:op"},
+                {"kind": "message", "text": "sends $ref:ghost then reads id-conn"},
+                {"kind": "return_documents"},
+            ],
+        },
+    }
+    refs = [ref for _path, ref in iter_component_refs(ProcessIRV1(**doc))]
+    assert sorted(refs) == ["$ref:conn", "$ref:op"]
+
+    payload = process_ir_request().model_dump(mode="json")
+    payload["intent"]["units"][0]["process_ir"] = doc
+    with patch(_PAGINATE) as paginate:
+        paginate.return_value = []
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "compile", config={"authoring_request": payload}
+        )
+    assert result["_success"] is True, result.get("error")
+
+
+def test_a_root_that_references_itself_is_refused_before_any_write():
+    """Codex F6: an unbindable self-reference used to be excused at planning.
+
+    A root's own id does not exist until it is created, so the reference can
+    never bind — and discovering that at materialization means discovering it
+    after the dependencies have been written.
+
+    Authored through the envelope's extension binding, because `process_call` is
+    not an admissible step in this body shape; the reference still lands in a
+    `ComponentRefV1` field, which is what the rule is about.
+    """
+    from boomi_mcp.categories.integration_builder import (
+        _check_process_root_dependencies,
+    )
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+
+    def _unit_binding(connection_id):
+        return process_unit(
+            process_extensions=ProcessExtensionBindingsV1(
+                connections=(
+                    ProcessConnectionOverrideV1(
+                        connection_id=connection_id,
+                        connector_type="rest",
+                        fields=(ProcessOverrideFieldV1(id="url", label="x"),),
+                    ),
+                )
+            )
+        )
+
+    self_ref = _unit_binding("$ref:proc")
+    payload = process_ir_request(units=(self_ref,)).model_dump(mode="json")
+    with patch(_PAGINATE) as paginate:
+        paginate.return_value = []
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "compile", config={"authoring_request": payload}
+        )
+    assert result["_success"] is False
+    # Refused at COMPILE, so nothing is written either way. The specific guard is
+    # asserted directly below, because the legacy component-plan lint also
+    # refuses this shape and would otherwise mask it.
+    assert "INTEGRATION_DEPENDENCY_REQUIRED" in str(result)
+
+    spec = IntegrationSpecV1(
+        name="self-ref", components=[APPLIABLE_CONN, APPLIABLE_OP], processes=[self_ref]
+    )
+    error = _check_process_root_dependencies(spec)
+    assert error is not None
+    assert "references itself" in str(error)
+
+    # Control: the same envelope naming a REAL dependency is accepted, so the
+    # guard is not simply rejecting every extension binding.
+    assert _check_process_root_dependencies(
+        IntegrationSpecV1(
+            name="ok",
+            components=[APPLIABLE_CONN, APPLIABLE_OP],
+            processes=[_unit_binding("$ref:conn")],
+        )
+    ) is None
+
+
+def test_a_pre_write_refusal_does_not_report_a_possible_mutation():
+    """Codex F4: `failed` counted as a writing attempt, so a refusal read as one.
+
+    A canonical root rejected while compiling or materializing has issued no
+    create and no update — but `_mutation_status` treated any non-`reused` step
+    as writing, so the caller was told to reconcile an account nothing touched.
+    """
+    from boomi_mcp.categories.integration_builder import _mutation_status
+
+    refused = {"results": {"proc": {"status": "refused", "component_id": None}}}
+    assert _mutation_status(refused) == "none"
+
+    # The control: a step that DID attempt a write still reads as uncertain.
+    attempted = {"results": {"proc": {"status": "failed", "component_id": None}}}
+    assert _mutation_status(attempted) == "possible"
+
+
+def test_the_compile_binding_covers_the_materialization_plan():
+    """Codex F3: a binding that cannot notice the artifact changing.
+
+    The materializer revision, emitter revision and preservation policy all feed
+    the materialization plan. None reached the compile hash, so changing any of
+    them left every previously-issued binding still verifying.
+    """
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+
+    request = process_ir_request()
+    with patch(_PAGINATE) as paginate:
+        paginate.return_value = []
+        before, _ = compile_authoring_request_v1(
+            request, boomi_client=MagicMock(), profile=_PROFILE
+        )
+        kinds = {a.artifact_kind for a in before.artifact_fingerprints}
+        assert "process_component_materialization_plan" in kinds
+
+        # Move the MATERIALIZER revision only. Nothing about the IR or the
+        # emission plan changes; the binding must still move.
+        with patch(
+            "boomi_mcp.categories.integration_builder._materializer_revision",
+            return_value="materializer-moved",
+        ):
+            after, _ = compile_authoring_request_v1(
+                request, boomi_client=MagicMock(), profile=_PROFILE
+            )
+
+    assert (
+        before.revision_binding.compile_hash != after.revision_binding.compile_hash
+    ), "a materializer change left the compile binding unchanged"
+
+
+def test_a_malformed_process_extension_block_is_refused_not_emptied():
+    """Codex F9: malformed recipe bindings were silently converted to empty.
+
+    The strict typed models never saw the bad data, so apply emitted a process
+    WITHOUT the environment overrides the caller asked for — a successful-looking
+    build of the wrong component.
+    """
+    from boomi_mcp.authoring.workflow import (
+        AuthoringWorkflowError,
+        _extension_bindings_from_config,
+    )
+
+    assert _extension_bindings_from_config(None).connections == ()
+
+    for bad in ("not-an-object", 42, ["connections"]):
+        with pytest.raises(AuthoringWorkflowError):
+            _extension_bindings_from_config(bad)
+
+    with pytest.raises(AuthoringWorkflowError):
+        _extension_bindings_from_config({"connections": ["not-an-object"]})
+
+    with pytest.raises(AuthoringWorkflowError):
+        _extension_bindings_from_config(
+            {"connections": [{"connection_id": "$ref:conn", "fields": ["bad"]}]}
+        )
+
+
+def test_the_dependency_summary_describes_both_participant_kinds():
+    """Codex F11: process edges were absent from the served summary.
+
+    The unified execution graph enforces a root's declared edges; the summary
+    described none of them, because it walked `spec.components` only and was
+    then fed a projection with the roots withheld.
+    """
+    result = _plan_or_compile("plan", process_ir_request())
+    edges = result["authoring_result"]["component_dependencies"]
+    process_edges = sorted(
+        e["depends_on"] for e in edges if e["component_key"] == "proc"
+    )
+    assert process_edges == ["conn", "op"], edges

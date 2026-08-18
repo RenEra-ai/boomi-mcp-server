@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9857,"minimum_collected":9857,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9863,"minimum_collected":9863,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -9885,3 +9885,9 @@
 {"kind":"test","id":"pytest-009884","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_apply_that_throws_mid_flight_does_not_claim_it_was_retry_safe","state":"active"}
 {"kind":"test","id":"pytest-009885","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_no_served_envelope_renders_pydantic_input_values","state":"active"}
 {"kind":"test","id":"pytest-009886","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_every_served_exception_goes_through_the_value_free_renderer","state":"active"}
+{"kind":"test","id":"pytest-009887","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_authored_text_that_looks_like_a_reference_is_not_one","state":"active"}
+{"kind":"test","id":"pytest-009888","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_root_that_references_itself_is_refused_before_any_write","state":"active"}
+{"kind":"test","id":"pytest-009889","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_pre_write_refusal_does_not_report_a_possible_mutation","state":"active"}
+{"kind":"test","id":"pytest-009890","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_compile_binding_covers_the_materialization_plan","state":"active"}
+{"kind":"test","id":"pytest-009891","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_malformed_process_extension_block_is_refused_not_emptied","state":"active"}
+{"kind":"test","id":"pytest-009892","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_dependency_summary_describes_both_participant_kinds","state":"active"}

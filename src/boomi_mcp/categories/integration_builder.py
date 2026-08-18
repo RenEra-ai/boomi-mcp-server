@@ -927,35 +927,54 @@ def _check_process_root_dependencies(spec: IntegrationSpecV1):
     :class:`IntegrationDependencyError`.
     """
     from ..authoring.process_materialization import _iter_envelope_refs
+    from ..models.process_ir import iter_component_refs
 
     _REF = "$ref:"
     for unit in getattr(spec, "processes", ()) or ():
         envelope = unit.envelope
         declared = set(envelope.depends_on or ())
         referenced = set()
-        # References the IR itself carries, read from the authored document so
-        # this needs no compile — plan time must not require one.
-        body = unit.process_ir.model_dump(mode="json")
-
-        def _walk(node):
-            if isinstance(node, dict):
-                for value in node.values():
-                    _walk(value)
-            elif isinstance(node, list):
-                for value in node:
-                    _walk(value)
-            elif isinstance(node, str) and node.startswith(_REF):
-                key = node[len(_REF):].strip()
+        # References the IR itself carries, read from the TYPED MODEL so what
+        # counts as a reference is decided by the schema rather than by what a
+        # string looks like.
+        #
+        # This walked `model_dump(mode="json")` and treated every string starting
+        # with `$ref:` as a dependency — so authored `message` text, script
+        # bodies, static values and templates all registered as component
+        # references, and a caller who wrote `$ref:x` in a message was refused
+        # with INTEGRATION_DEPENDENCY_REQUIRED for a dependency the IR does not
+        # have (Codex round 1). `iter_component_refs` yields only values held by
+        # `ComponentRefV1`-annotated fields, which is the same authority the
+        # compiler resolves against.
+        for _path, ref in iter_component_refs(unit.process_ir):
+            if ref.startswith(_REF):
+                key = ref[len(_REF):].strip()
                 if key:
                     referenced.add(key)
-
-        _walk(body)
         # ...plus the envelope's own extension bindings.
         for _path, ref in _iter_envelope_refs(envelope):
             if ref.startswith(_REF):
                 key = ref[len(_REF):].strip()
                 if key:
                     referenced.add(key)
+
+        # A root that references ITSELF is refused here, not silently excused.
+        #
+        # `- {envelope.component_key}` used to drop the self-reference from
+        # `missing`, on the reasoning that `depends_on` forbids self-dependency
+        # so it could not be declared. But that made the request PASS planning
+        # with a reference nothing can ever bind: the root's id does not exist
+        # until it is created, so the binder leaves the placeholder and the
+        # artifact guard refuses it — after the earlier dependencies have already
+        # been written (Codex round 1). Deciding it at preflight costs nothing
+        # and writes nothing.
+        if envelope.component_key in referenced:
+            return IntegrationDependencyError(
+                "Process '{0}' references itself; a root's own component id does "
+                "not exist until it is created, so the reference can never be "
+                "bound".format(envelope.component_key),
+                error_code=INTEGRATION_DEPENDENCY_REQUIRED,
+            )
 
         missing = sorted(referenced - declared - {envelope.component_key})
         if missing:
@@ -3090,6 +3109,12 @@ def _resolve_dependency_tokens(value: Any, id_registry: Dict[str, str]) -> Any:
     return value
 
 
+#: The clone suffix, named once. `_apply_clone_suffix` (components) and the
+#: canonical process arm both format a cloned name through this, so the two
+#: participant kinds cannot drift into two different clone conventions.
+_CLONE_SUFFIX_FORMAT = "{0}-clone"
+
+
 def _apply_clone_suffix(comp: IntegrationComponentSpec, config: Dict[str, Any]) -> Dict[str, Any]:
     suffix = "-clone"
     cloned = dict(config)
@@ -3214,6 +3239,13 @@ def _apply_structured_update(
     except Exception as exc:
         return {
             "_success": False,
+            # NAMED, like its sibling (QA-153-r4-02). The fetch arm — where
+            # nothing has been written — was machine-classifiable while this one,
+            # where a write may already have landed, was not: exactly backwards
+            # relative to the stakes. `_execute_canonical_process` lifts this code
+            # onto the partial-failure envelope, so without it that lift had
+            # nothing to lift on the arm that matters most.
+            "error_code": "UPDATE_PRESERVATION_PUSH_FAILED",
             "error": (
                 f"Failed to push merged XML for component {target_id!r}: "
                 f"{_validation_error_message(exc)}"
@@ -5876,7 +5908,9 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         # itself is unchanged, so nothing that read `error` before breaks.
         return {"_success": False, "error": str(exc), "error_code": exc.error_code}
     except ValueError as exc:
-        return {"_success": False, "error": str(exc)}
+        # `ValidationError` subclasses `ValueError`, so this arm can and does
+        # receive pydantic errors (QA-153-r4-01). Value-free like every other.
+        return {"_success": False, "error": _validation_error_message(exc)}
 
     components_by_key = {comp.key: comp for comp in spec.components}
     # Issue #95 M7.5: resolve field indexes for any literal existing-profile UUID
@@ -5902,6 +5936,39 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         unit = process_units_by_key.get(key)
         if unit is not None:
             envelope = unit.envelope
+            # Canonical roots get the SAME collision planning as component steps
+            # (Codex round 1). This branch resolved nothing and hardwired
+            # `existing_component_id` to the envelope's own field, so a root
+            # naming no `component_id` was invisible to conflict_policy: an
+            # update-by-name could only fail after its dependencies had mutated,
+            # and a create ignored `reuse`/`fail`/`clone` against a live process
+            # of the same name and simply created another one.
+            canonical_existing_id = envelope.component_id
+            canonical_action = envelope.action
+            if not canonical_existing_id and envelope.name:
+                from ..authoring.workflow import _ParticipantView
+
+                candidates = _resolve_existing_components(
+                    boomi_client,
+                    _ParticipantView(
+                        key=key, name=envelope.name, component_id=None
+                    ),
+                )
+                if len(candidates) == 1:
+                    canonical_existing_id = candidates[0].get("component_id")
+                elif len(candidates) > 1 and envelope.action == "update":
+                    canonical_action = "error_ambiguous_match"
+                elif not candidates and envelope.action == "update":
+                    canonical_action = "error_missing_target"
+
+            if canonical_action == "create" and canonical_existing_id:
+                if conflict_policy == "reuse":
+                    canonical_action = "reuse"
+                elif conflict_policy == "clone":
+                    canonical_action = "create_clone"
+                else:
+                    canonical_action = "error_if_exists"
+
             steps.append(
                 {
                     "key": key,
@@ -5917,8 +5984,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     # the whole direct-apply capability was unreachable. The
                     # comprehension is shared by both step kinds, so the step
                     # shapes have to agree.
-                    "existing_component_id": envelope.component_id,
-                    "planned_action": envelope.action,
+                    "existing_component_id": canonical_existing_id,
+                    "planned_action": canonical_action,
                     # The canonical marker. A reader — and the apply loop — can
                     # tell a ProcessIR root from a legacy process component
                     # without inspecting config, which is the point: a canonical
@@ -7335,6 +7402,7 @@ def _execute_canonical_process(
     from ..recipes.materialization import build_symbol_table
     from .components.canonical_process_apply import (
         CanonicalProcessApplyError,
+        applied_folder_name,
         build_mutation_attestation,
         build_readback_attestation,
         materialize_canonical_process_xml,
@@ -7342,6 +7410,48 @@ def _execute_canonical_process(
 
     envelope = unit.envelope
     key = envelope.component_key
+
+    # CONFLICT POLICY IS DECIDED FIRST — before anything is compiled.
+    #
+    # It used to be decided after materialization, which had two consequences.
+    # A `reuse` that was never going to write still paid for a full compile and
+    # emit; and a `clone`, whose whole point is to create a DIFFERENTLY NAMED
+    # component, could only be expressed by renaming an artifact the plan had
+    # already fingerprinted under the original name. Deciding here means the
+    # plan describes what will actually be built (Codex round 1).
+    target_id = envelope.component_id or existing_id
+    if envelope.action == "create" and existing_id and conflict_policy == "reuse":
+        # No mutation happens, so no mutation attestation is recorded — an
+        # attestation for a write that never occurred would be a false entry.
+        return {
+            "result": {"status": "reused", "component_id": existing_id,
+                       "type": "process", "name": envelope.name, "_success": True},
+            "component_id": existing_id,
+            "mutation": None,
+            "readback": None,
+        }
+    if envelope.action == "create" and existing_id and conflict_policy == "fail":
+        message = (
+            f"Component '{envelope.name or key}' already exists and "
+            f"conflict_policy=fail"
+        )
+        return {
+            "result": {"_success": False, "status": "refused", "type": "process",
+                       "name": envelope.name, "error": message},
+            "error": message,
+            "error_code": None,
+            "component_id": None,
+            "mutation": None,
+            "readback": None,
+        }
+    if envelope.action == "create" and existing_id and conflict_policy == "clone":
+        # A clone CREATES; it never targets. `target_id` being truthy was enough
+        # to select `update`, so a clone against a live same-name process
+        # overwrote the very component the policy exists to leave alone.
+        target_id = None
+        envelope = envelope.model_copy(
+            update={"name": _CLONE_SUFFIX_FORMAT.format(envelope.name)}
+        )
 
     try:
         symbols = build_symbol_table(
@@ -7363,7 +7473,7 @@ def _execute_canonical_process(
         )
     except CanonicalProcessApplyError as exc:
         return {
-            "result": {"_success": False, "status": "failed", "type": "process",
+            "result": {"_success": False, "status": "refused", "type": "process",
                        "name": envelope.name, "error": str(exc)},
             "error": str(exc),
             "error_code": exc.error_code,
@@ -7383,39 +7493,11 @@ def _execute_canonical_process(
         # along. One map, consulted everywhere a pydantic error is served.
         named = _named_error_code_from_validation(exc)
         return {
-            "result": {"_success": False, "status": "failed", "type": "process",
+            "result": {"_success": False, "status": "refused", "type": "process",
                        "name": envelope.name,
                        "error": _validation_error_message(exc)},
             "error": _validation_error_message(exc),
             "error_code": named or PROCESS_MATERIALIZATION_INTERNAL_ERROR,
-            "component_id": None,
-            "mutation": None,
-            "readback": None,
-        }
-
-    # Reuse follows the SAME rule the component arm follows: an `action="create"`
-    # that resolves to an existing component reuses under `conflict_policy="reuse"`.
-    # No mutation happens, so no mutation attestation is recorded — an attestation
-    # for a write that never occurred would be a false entry in the record.
-    target_id = envelope.component_id or existing_id
-    if envelope.action == "create" and existing_id and conflict_policy == "reuse":
-        return {
-            "result": {"status": "reused", "component_id": existing_id,
-                       "type": "process", "name": envelope.name, "_success": True},
-            "component_id": existing_id,
-            "mutation": None,
-            "readback": None,
-        }
-    if envelope.action == "create" and existing_id and conflict_policy == "fail":
-        message = (
-            f"Component '{envelope.name or key}' already exists and "
-            f"conflict_policy=fail"
-        )
-        return {
-            "result": {"_success": False, "status": "failed", "type": "process",
-                       "name": envelope.name, "error": message},
-            "error": message,
-            "error_code": None,
             "component_id": None,
             "mutation": None,
             "readback": None,
@@ -7495,6 +7577,7 @@ def _execute_canonical_process(
             result_component_id=component_id,
             submitted_xml=submitted,
             account_scope_hash=account_scope_fingerprint(profile, account_id),
+            applied_folder_name=applied_folder_name(submitted),
         )
     except CanonicalProcessApplyError as exc:
         # A create that reported success without an id fails CLOSED: the mutation
@@ -7975,7 +8058,9 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     # an existing build sees a new shape.
     if authoring_bundle is not None:
         build_record["authoring"] = _authoring_build_provenance(
-            boomi_client, authoring_bundle, results
+            boomi_client, authoring_bundle, results,
+            process_mutations=process_mutations,
+            process_readbacks=process_readbacks,
         )
     _BUILD_REGISTRY[build_id] = build_record
 
@@ -8031,7 +8116,8 @@ def _live_component_digest(boomi_client: Boomi, component_id: str) -> Optional[s
 
 
 def _authoring_build_provenance(
-    boomi_client: Boomi, bundle, results: Dict[str, Any]
+    boomi_client: Boomi, bundle, results: Dict[str, Any],
+    process_mutations=(), process_readbacks=(),
 ) -> Dict[str, Any]:
     """Record what a typed apply produced, for verify to compare against later."""
     from ..models.authoring_workflow import AuthoringBuildProvenanceV1
@@ -8041,6 +8127,14 @@ def _authoring_build_provenance(
         revision_binding=compile_result.revision_binding,
         artifact_fingerprints=compile_result.artifact_fingerprints,
         resolved_references=compile_result.resolved_references,
+        # The attestations belong IN the provenance model, which declares fields
+        # for them (Codex round 1). Recording them only at the build-record root
+        # left `authoring.provenance` carrying the model defaults, so a
+        # successful apply returned non-empty top-level arrays beside
+        # contradictory empty ones — and `verify`, which reads the nested model,
+        # saw only the empty pair.
+        process_mutations=tuple(process_mutations),
+        process_readbacks=tuple(process_readbacks),
     )
 
     # EVERY build-owned component is recorded, including ones whose read-back
@@ -8186,7 +8280,7 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
             verification["components"][participant_key] = {
                 "verified": False,
                 "component_id": component_id,
-                "error": str(exc),
+                "error": _validation_error_message(exc),
             }
             failed_count += 1
 
@@ -8573,7 +8667,14 @@ def _compile_authoring(
 #: The one step status that carries a component id WITHOUT having written
 #: anything: `conflict_policy="reuse"` (or a reference-only component) binds an
 #: existing component. `created` and `updated` both mutate.
-_NON_WRITING_STEP_STATUSES = frozenset({"reused"})
+#: Step statuses that record NO attempted write. `refused` joins `reused` here
+#: (Codex round 1): a canonical root rejected while compiling or materializing
+#: has issued no create and no update, but `failed` counts as a writing attempt,
+#: so a process-only request refused pre-write reported
+#: `mutation_status="possible"` and told the caller to reconcile an account it
+#: had not touched. `failed` still means "a write was attempted and did not
+#: succeed", which is genuinely unknown and correctly reads as `possible`.
+_NON_WRITING_STEP_STATUSES = frozenset({"reused", "refused"})
 
 
 def _components_were_written(result: Dict[str, Any]) -> bool:

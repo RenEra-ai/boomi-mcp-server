@@ -113,22 +113,51 @@ def bind_symbols_to_applied_ids(
 def _surviving_placeholders(xml: str, symbols) -> Tuple[str, ...]:
     """Placeholder ids and ``$ref`` tokens that reached the emitted artifact.
 
-    The fail-closed half of the binding rule above. Scanned for the CONCRETE
-    placeholder each unbound symbol would have contributed
-    (``placeholder_component_id``) rather than by a generic pattern, so the check
-    names the symbol that leaked instead of merely reporting that something did.
+    The fail-closed half of the binding rule above.
+
+    **Matched as a WHOLE attribute value, never as a substring** (Codex round 1).
+    The first version searched the serialized document for ``id-<key>`` anywhere,
+    so a process whose component key is ``db`` and whose ``message`` text
+    mentions ``id-db`` was refused — after its dependencies had already been
+    created — even though every structural reference had rebound correctly. A
+    structural reference IS the entire value of an attribute
+    (``connectionId="id-db"``); authored prose containing the same token is not.
+    Exact attribute-value equality separates the two without enumerating which
+    attributes carry references, which would be a hand-model of the emitter.
+
+    Only symbols left UNBOUND can leak: one that took a real id no longer has a
+    placeholder in the table to find.
     """
+    import xml.etree.ElementTree as ET
+
     from ...recipes.materialization import placeholder_component_id
 
-    found = {
-        placeholder
-        for symbol in symbols.symbols
-        for placeholder in (placeholder_component_id(symbol.ref),)
-        if placeholder in xml
-    }
-    found.update(
-        symbol.ref for symbol in symbols.symbols if symbol.ref and symbol.ref in xml
-    )
+    suspect = {}
+    for symbol in symbols.symbols:
+        # `component_id` still equal to the placeholder means this symbol was
+        # left unbound by the declared-dependency rule.
+        placeholder = placeholder_component_id(symbol.ref)
+        if symbol.component_id == placeholder:
+            suspect[placeholder] = placeholder
+        if symbol.ref:
+            suspect[symbol.ref] = symbol.ref
+
+    if not suspect:
+        return ()
+
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        # Unparseable emitted XML is its own failure and is caught downstream;
+        # this guard refuses to guess from raw text rather than fall back to the
+        # substring scan it exists to replace.
+        return ()
+
+    found = set()
+    for element in root.iter():
+        for value in element.attrib.values():
+            if value in suspect:
+                found.add(value)
     return tuple(sorted(found))
 
 
@@ -255,6 +284,7 @@ def build_mutation_attestation(
     submitted_xml: str,
     account_scope_hash: str,
     resolved_folder_id: Optional[str] = None,
+    applied_folder_name: Optional[str] = None,
 ):
     """The apply-time mutation attestation for one root.
 
@@ -289,12 +319,40 @@ def build_mutation_attestation(
         # A create never names a target; an update's target IS its result.
         target_component_id=target_component_id if action == "update" else None,
         result_component_id=result_component_id,
+        # The placement ACTUALLY applied, never the one requested (Codex round 1).
+        #
+        # An update goes through read-merge-write under a preservation policy
+        # that does not own the root's folder attributes, so the live folder
+        # survives — while this recorded the envelope's requested `folder_name`
+        # regardless, producing an attestation that names a placement the
+        # mutation did not perform. An attestation whose job is to say what
+        # happened must not report an intent.
         resolved_placement=ResolvedProcessPlacementV1(
-            folder_name=plan.envelope.folder_name,
+            folder_name=(
+                plan.envelope.folder_name if action == "create" else applied_folder_name
+            ),
             folder_id=resolved_folder_id or plan.resolved_folder_id,
         ),
         submitted_xml_digest=sha256_fingerprint({"component_xml": submitted_xml}),
     )
+
+
+def applied_folder_name(submitted_xml: str) -> Optional[str]:
+    """The ``folderName`` on the bytes that were actually SENT, or ``None``.
+
+    Read from the submitted document rather than from the envelope, because for
+    an update those bytes are the read-merge-write RESULT: preservation does not
+    own the root's folder attributes, so what the platform received is the LIVE
+    folder, not the requested one.
+    """
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(submitted_xml)
+    except ET.ParseError:
+        return None
+    value = root.attrib.get("folderName")
+    return value or None
 
 
 def build_readback_attestation(*, component_key: str, component_id: str, digest):
@@ -314,6 +372,7 @@ __all__ = [
     "CanonicalProcessApplyError",
     "bind_symbols_to_applied_ids",
     "build_mutation_attestation",
+    "applied_folder_name",
     "build_readback_attestation",
     "materialize_canonical_process_xml",
     "resolve_extension_connections",

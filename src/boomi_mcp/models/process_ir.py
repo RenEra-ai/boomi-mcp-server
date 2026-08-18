@@ -232,6 +232,60 @@ ComponentRefV1 = Annotated[
 ]
 
 
+def _is_component_ref_field(field_info) -> bool:
+    """Is this field a :data:`ComponentRefV1`? Asked of the ANNOTATION, not the name.
+
+    The discriminator is the validator's own identity in the field's metadata.
+    A name list (``*_ref``) would be a hand-model of the same fact and would go
+    stale the moment a reference field is named anything else.
+    """
+    return any(
+        isinstance(meta, AfterValidator) and meta.func is _validate_component_ref
+        for meta in getattr(field_info, "metadata", ()) or ()
+    )
+
+
+def iter_component_refs(node: Any, path: str = ""):
+    """Every COMPONENT REFERENCE in a ProcessIR document, as ``(path, ref)``.
+
+    Walks the typed model and yields only values held by
+    :data:`ComponentRefV1`-annotated fields — so what counts as a reference is
+    decided by the schema, not by what a string happens to look like.
+
+    **Why this exists.** Three separate consumers were scanning a serialized IR
+    (or its emitted XML) for strings starting with ``$ref:``/``id-`` and treating
+    every hit as structural. That is a text search standing in for a schema
+    question, and it is wrong in both directions: authored ``message`` text,
+    script bodies, static values and templates are ordinary caller content that
+    can legitimately contain either token, and a caller who writes ``$ref:x`` in
+    a message got ``INTEGRATION_DEPENDENCY_REQUIRED`` for a dependency the IR
+    does not have. Codex review round 1 found all three.
+
+    Yields nothing for a non-model node, so it is safe to call on any subtree.
+    """
+    if isinstance(node, BaseModel):
+        for name, field_info in type(node).model_fields.items():
+            value = getattr(node, name, None)
+            child = "{0}/{1}".format(path, name)
+            if _is_component_ref_field(field_info):
+                # A ref field holds a string, or a collection of them; both are
+                # handled so a future `Tuple[ComponentRefV1, ...]` needs no edit.
+                if isinstance(value, str):
+                    yield child, value
+                elif isinstance(value, (list, tuple)):
+                    for index, item in enumerate(value):
+                        if isinstance(item, str):
+                            yield "{0}/{1}".format(child, index), item
+                continue
+            yield from iter_component_refs(value, child)
+    elif isinstance(node, (list, tuple)):
+        for index, item in enumerate(node):
+            yield from iter_component_refs(item, "{0}/{1}".format(path, index))
+    elif isinstance(node, Mapping):
+        for key, item in node.items():
+            yield from iter_component_refs(item, "{0}/{1}".format(path, key))
+
+
 def _validate_contract_ref(value: str) -> str:
     """#142: idempotency-contract reference — ``$ref:KEY`` token ONLY.
 

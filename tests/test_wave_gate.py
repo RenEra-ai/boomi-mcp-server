@@ -1828,6 +1828,12 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "AUTHORING_LIVE_DEPLOYMENT_DRIFT",
     "INTEGRATION_COMPONENT_KEY_DUPLICATE",
     "INTEGRATION_DEPENDENCY_REQUIRED",
+    # #144's topology taxonomy and this slice's second preservation code — both
+    # registered in `boomi_mcp.errors.ERROR_TAXONOMY`, neither a wave-gate
+    # diagnostic. A finding row that says "the wrong code was served" has to be
+    # able to name the code.
+    "TOPOLOGY_REFERENCE_NOT_FOUND",
+    "UPDATE_PRESERVATION_PUSH_FAILED",
     "PLAN_INVALID",
     "PROCESS_MATERIALIZATION_INTERNAL_ERROR",
     "PROCESS_MATERIALIZATION_PLAN_INVALID",

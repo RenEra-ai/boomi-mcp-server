@@ -52,7 +52,10 @@ from ..errors import (
     PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,
     PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE,
 )
-from .process_materialization import envelope_relocatability_offenders
+from .process_materialization import (
+    canonical_plan_material,
+    envelope_relocatability_offenders,
+)
 from ..models.authoring_workflow import (
     ArtifactFingerprintV1,
     AuthoringCompileResultV1,
@@ -510,20 +513,76 @@ def _extension_bindings_from_config(raw):
         ProcessOverrideFieldV1,
     )
 
-    if not isinstance(raw, Mapping):
+    # A malformed shape is REFUSED, never silently emptied (Codex round 1).
+    #
+    # This returned empty bindings for a non-Mapping block, iterated nothing for
+    # a missing or misspelled `connections` key, and skipped non-Mapping
+    # connection/field entries — so the strict typed models never saw the
+    # malformed data at all, and canonical apply emitted a process WITHOUT the
+    # environment overrides the caller asked for, where the legacy renderer would
+    # have refused. Silently dropping a requested override is worse than refusing
+    # it: the build looks successful and the process is wrong.
+    if raw is None:
         return ProcessExtensionBindingsV1()
+    if not isinstance(raw, Mapping):
+        raise AuthoringWorkflowError(
+            AUTHORING_COMPILE_BLOCKED,
+            (
+                _diag(
+                    AUTHORING_COMPILE_BLOCKED,
+                    "error",
+                    message=(
+                        "Process extension bindings must be an object; this "
+                        "value cannot be interpreted and would otherwise be "
+                        "dropped silently."
+                    ),
+                    path="/process_extensions",
+                    subject_kind="process",
+                    remediation=(
+                        "Supply process_extensions as an object with a "
+                        "'connections' list, or omit it entirely."
+                    ),
+                ),
+            ),
+        )
+
+    def _malformed(path: str, what: str):
+        return AuthoringWorkflowError(
+            AUTHORING_COMPILE_BLOCKED,
+            (
+                _diag(
+                    AUTHORING_COMPILE_BLOCKED,
+                    "error",
+                    message=(
+                        "A process extension {0} must be an object; this entry "
+                        "cannot be interpreted and would otherwise be dropped "
+                        "silently.".format(what)
+                    ),
+                    path=path,
+                    subject_kind="process",
+                    remediation="Correct the malformed entry, or remove it.",
+                ),
+            ),
+        )
 
     def _clean(value):
         return value.strip() if isinstance(value, str) else value
 
     connections = []
-    for entry in raw.get("connections") or ():
+    for index, entry in enumerate(raw.get("connections") or ()):
         if not isinstance(entry, Mapping):
-            continue
+            raise _malformed(
+                "/process_extensions/connections/{0}".format(index), "connection"
+            )
         fields = []
-        for field in entry.get("fields") or ():
+        for field_index, field in enumerate(entry.get("fields") or ()):
             if not isinstance(field, Mapping):
-                continue
+                raise _malformed(
+                    "/process_extensions/connections/{0}/fields/{1}".format(
+                        index, field_index
+                    ),
+                    "field",
+                )
             kwargs = {
                 "id": _clean(field.get("id")),
                 # `label` is NOT cleaned — the legacy renderer emits its exact
@@ -755,11 +814,27 @@ def _withhold_process_roots(spec: IntegrationSpecV1) -> IntegrationSpecV1:
 def build_component_dependencies(
     spec: IntegrationSpecV1,
 ) -> Tuple[ComponentDependencyEdgeV1, ...]:
-    """ComponentPlan materialization edges — not CFG edges, not topology relations."""
+    """ComponentPlan materialization edges — not CFG edges, not topology relations.
+
+    Covers BOTH participant families (Codex round 1). It walked `spec.components`
+    alone, so a process root declaring four supporting components contributed
+    zero edges and the served summary described an empty dependency graph for a
+    plan whose execution order enforces all four. The edge summary is value-free
+    — keys only — so it is unaffected by the root withholding that protects the
+    authored ProcessIR bodies, and it must be built from the internal spec
+    BEFORE that withholding rather than from the projection afterwards.
+    """
     edges = [
         ComponentDependencyEdgeV1(component_key=component.key, depends_on=dependency)
         for component in spec.components
         for dependency in (component.depends_on or ())
+    ]
+    edges += [
+        ComponentDependencyEdgeV1(
+            component_key=unit.envelope.component_key, depends_on=dependency
+        )
+        for unit in (getattr(spec, "processes", ()) or ())
+        for dependency in (unit.envelope.depends_on or ())
     ]
     return sort_by_key(edges)
 
@@ -1227,11 +1302,20 @@ def _validate_topology(
         )
         from ..compiler.system_topology.pipeline import validate_system_topology
 
+        # BOTH participant families (Codex round 1). Recipe process components
+        # are lifted out of `components` and into `processes` by this slice, so
+        # projecting only `components` regressed a topology relation naming a
+        # composed process root from a valid symbol to TOPOLOGY_REFERENCE_NOT_FOUND.
         symbols = tuple(
             ComponentPlanSymbolV1(
                 component_key=component.key, component_type=component.type
             )
             for component in normalized.integration_spec.components
+        ) + tuple(
+            ComponentPlanSymbolV1(
+                component_key=unit.envelope.component_key, component_type="process"
+            )
+            for unit in (normalized.integration_spec.processes or ())
         )
         context = TopologyResolutionContextV1(
             profile=profile, component_plan_symbols=symbols
@@ -1637,7 +1721,11 @@ def plan_authoring_request_v1(
         integration_spec_preview=spec_preview,
         pipeline_stages=build_pipeline_stages(spec_preview),
         process_cfg=(),
-        component_dependencies=build_component_dependencies(spec_preview),
+        # The INTERNAL spec: the preview withholds the roots entirely, so a
+        # summary built from it can only ever describe the components half.
+        component_dependencies=build_component_dependencies(
+            normalized.integration_spec
+        ),
         topology_relations=build_topology_relations(request.topology_spec),
         resolved_references=references,
         validation_report=validation,
@@ -1658,6 +1746,40 @@ def plan_authoring_request_v1(
 # ---------------------------------------------------------------------------
 # phase 2 — read-only canonical compile
 # ---------------------------------------------------------------------------
+
+
+def _materialization_plan_fingerprint(unit, symbols):
+    """``(digest, byte_length)`` of one root's relocatable materialization plan.
+
+    Built from exactly the inputs apply will use, through the same
+    ``build_materialization_plan`` — never a second implementation of it, which
+    would be a hand-model of the plan whose digest it claims to be.
+
+    Returns ``None`` when the plan cannot be built at compile time. That is not
+    a silent pass: a plan that cannot be constructed fails LOUDLY at apply with
+    its own named code, and refusing the compile here would turn every such case
+    into a different error at a different phase. What is guaranteed is the
+    positive direction — when a plan IS constructible, its fingerprint is in the
+    binding, so a materializer/emitter/preservation change invalidates it.
+    """
+    from ..categories.integration_builder import _materializer_revision
+    from ..compiler.process_ir.emitter_registry import emitter_revision
+    from .contract import get_authoring_revisions
+    from .process_materialization import build_materialization_plan
+
+    try:
+        plan = build_materialization_plan(
+            envelope=unit.envelope,
+            process_ir=unit.process_ir,
+            symbols=symbols,
+            conflict_policy="reuse",
+            compiler_revision=get_authoring_revisions()["compiler_revision"],
+            emitter_revision=emitter_revision(),
+            materializer_revision=_materializer_revision(),
+        )
+    except Exception:  # noqa: BLE001 — apply reports this with its own named code
+        return None
+    return plan.plan_fingerprint, len(canonical_plan_material(plan))
 
 
 def build_artifact_descriptors(
@@ -1682,6 +1804,10 @@ def build_artifact_descriptors(
 
     fingerprints: List[ArtifactFingerprintV1] = []
     cfg_summaries: List[ProcessCfgSummaryV1] = []
+    units_by_key = {
+        unit.envelope.component_key: unit
+        for unit in (normalized.integration_spec.processes or ())
+    }
 
     for component_key, ir in normalized.process_roots:
         try:
@@ -1758,6 +1884,35 @@ def build_artifact_descriptors(
                 digest=ir_digest,
             )
         )
+
+        # ...and the RELOCATABLE MATERIALIZATION PLAN, so the compile binding
+        # covers it (Codex round 1).
+        #
+        # The plan was first constructed inside apply, and these descriptors
+        # carried only the normalized IR and the emission plan — so the caller's
+        # compile hash did not cover the materializer revision, the emitter
+        # revision, or the preservation policy. Change any of those and every
+        # previously-issued binding still verified: preflight accepted it, apply
+        # built a NEW plan, and the plan self-validated against its own
+        # fingerprint. A binding that cannot notice the artifact changing is not
+        # a staleness check.
+        #
+        # Fingerprinted here and NOT stored: the plan is rebuilt at apply from
+        # the same inputs, and what has to match is the digest. That keeps this
+        # a fingerprint of the plan rather than a second copy of it.
+        unit = units_by_key.get(component_key)
+        if unit is not None:
+            plan_fingerprint = _materialization_plan_fingerprint(unit, symbols)
+            if plan_fingerprint is not None:
+                fingerprints.append(
+                    ArtifactFingerprintV1(
+                        component_key=component_key,
+                        component_type="process",
+                        artifact_kind="process_component_materialization_plan",
+                        byte_length=plan_fingerprint[1],
+                        digest=plan_fingerprint[0],
+                    )
+                )
         # Terminals are the CFG's own ``exit_node_ids``, not a re-derivation from
         # edge degree: the compiler already decided which nodes exit, and a
         # second opinion computed here could disagree with the artifact it
