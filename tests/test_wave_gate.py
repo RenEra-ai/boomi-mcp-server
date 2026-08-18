@@ -1850,6 +1850,12 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     # the reasons the round-11 row gives for why write evidence could not be
     # derived from it. A row explaining that has to be able to name it.
     "COMPONENT_GET_DEADLINE_EXCEEDED",
+    # The bare stems, tokenized out of prose that lists the four merge failures
+    # which write nothing yet are correctly retryable=False — the evidence for
+    # why retryability could not answer "was anything written".
+    "XML_PARSE_FAILED",
+    "MERGE_FAILED",
+    "TYPE_MISMATCH",
     "ERROR_TAXONOMY",
     "PLAN_INVALID",
     "PROCESS_MATERIALIZATION_INTERNAL_ERROR",
