@@ -7814,8 +7814,22 @@ def _execute_canonical_process(
         if placement_identity and not placement_identity["is_root"]
         else None
     )
-    if placement_identity is None or placement_identity["is_root"]:
+    # (refined below: an honoured explicit-root request restores its leaf, so
+    # the attestation names the folder the caller asked for and got)
+    if placement_identity is None:
         placement_honoured = False
+    elif placement_identity["is_root"]:
+        # The account root is itself a folder row, so a caller may NAME it and
+        # resolution accepts its id (Codex round 20). The retained root id is
+        # compared BEFORE suppression: a match means the platform honoured an
+        # explicitly requested root placement, and refusing to verify it would
+        # serve a false refusal. Suppression applies only to a root the caller
+        # did not ask for.
+        placement_honoured = bool(
+            placement_identity["folder_id"]
+            and resolved_folder_id
+            and placement_identity["folder_id"] == resolved_folder_id
+        )
     elif placement_identity["folder_id"] and resolved_folder_id:
         # The readback's own folderId is the strongest comparison basis: it is
         # an IDENTITY, immune to two folders sharing a leaf name.
@@ -7825,6 +7839,13 @@ def _execute_canonical_process(
             envelope.folder_name
             and placement_identity["leaf"] == envelope.folder_name
         )
+    if placement_honoured and placement_identity["is_root"]:
+        # An HONOURED explicit-root placement is a folder placement like any
+        # other — the attestation carries the name the platform reported and
+        # the id that confirmed it. The root/id pairing ban (round 18) is
+        # about an id beside an EMPTY folder name; both fields are present
+        # and consistent here.
+        observed_placement = placement_identity["leaf"]
     # The digest travels from the point CLOSEST to the wire: the update path
     # computed it immediately before its push; the create path immediately
     # before the raw create call above.

@@ -2817,6 +2817,64 @@ def test_the_placement_classifier_agrees_with_every_live_capture():
     assert roots, "corpus lost its live root capture"
 
 
+def test_an_explicitly_requested_root_folder_confirms_by_its_own_id():
+    """Codex round 20: the account root is itself a folder row, so a caller may
+    name it in `folder_name` and resolution accepts its id. The platform then
+    honours the request — the readback is the root WITH that same id — and
+    refusing to verify it (the round-19 suppression applied unconditionally)
+    served a false refusal and a false warning for an honoured placement. The
+    retained root id is compared BEFORE suppression: a match confirms and
+    attests name+id like any folder; suppression applies only to a root the
+    caller did not ask for.
+    """
+    unit = process_unit(folder_name="Acct")
+    folders = [{"id": "folder-root", "name": "Acct", "deleted": False,
+                "full_path": "Acct", "parent_id": ""}]
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    # The live root shape, with the ROOT's own id echoing the resolution.
+    def _live(_client, component_id, *_a, **_k):
+        if component_id == _PROCESS_ID:
+            return {"type": "process", "xml": _SUBMITTED["xml"].replace(
+                'name="M12.15 Process"',
+                'name="M12.15 Process" folderFullPath="Acct"'
+                ' folderId="folder-root"', 1,
+            ).replace(' folderName="Acct"', "", 1)}
+        return {"type": "connector-settings", "xml": _LIVE_COMPONENT_XML}
+
+    with patch("boomi_mcp.categories.folders._query_all_folders",
+               return_value=folders), \
+         patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _live
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(
+                process_ir_request(units=(unit,))
+            ), "dry_run": False},
+        )
+
+    assert result["_success"] is True, result.get("error")
+    assert result["results"]["proc"]["placement_verified"] is True
+    placement = result["process_mutations"][0]["resolved_placement"]
+    assert placement["folder_id"] == "folder-root"
+    assert placement["folder_name"] == "Acct"
+    assert not [w for w in (result.get("warnings") or []) if "NOT placed" in w]
+
+
 def test_a_failed_readback_never_claims_the_component_is_at_root():
     """Codex round 16 F2: when the post-create readback cannot be fetched or
     parsed, the component's location is UNKNOWN — the warning must say the
