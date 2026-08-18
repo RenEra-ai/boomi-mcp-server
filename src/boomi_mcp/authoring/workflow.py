@@ -493,38 +493,39 @@ def _normalize_recipe_intent(intent) -> _NormalizedIntent:
 
 
 def _extension_bindings_from_config(raw):
-    """Legacy ``config["process_extensions"]`` -> typed bindings.
+    """Legacy recipe extension config -> the typed ``ProcessExtensionBindingsV1``.
 
     The NORMALIZATION BOUNDARY between the legacy reader's tolerance and the
-    typed models' strictness. The legacy reader strips a padded
-    ``connection_id``/``id``/``xpath``; the typed models refuse padding outright,
-    because on the direct authoring surface silently canonicalizing a caller's
-    reference is how a ``$ref`` ends up pointing somewhere they did not mean.
-    Doing the strip HERE keeps both true: every input the legacy path accepts
-    still normalizes to the identical bytes, and nothing accepts padding twice.
+    typed models' strictness — and it DELEGATES the tolerance question rather
+    than answering it.
 
-    Shape errors are left to the typed models rather than re-diagnosed here — a
-    second copy of the legacy reader's twelve refusals is exactly the
-    hand-remodelling this milestone exists to remove.
+    ``extension_bindings_from_legacy_config`` is the authority on which shapes
+    are acceptable, and it already normalizes them: it strips a padded
+    ``connection_id``/``id``/``xpath``, leaves ``label`` byte-exact because the
+    renderer emits it verbatim, and refuses twelve distinct malformed shapes with
+    ``PROCESS_EXTENSIONS_INVALID``.
+
+    An earlier version of this function hand-wrote a SUBSET of those refusals,
+    and Codex round 2 found both halves of what that costs: it rejected
+    ``process_extensions=[]``, which the legacy reader accepts as an explicit
+    no-op, and it accepted ``{"connection": [...]}`` / ``{"connections": null}``
+    / ``{"connections": {}}``, which the legacy reader refuses — so a misspelled
+    key still silently dropped every requested environment override and deployed
+    a successful-looking process without them. A hand-copy of an authority is
+    wrong in both directions at once; asking the authority is not.
     """
+    from ..categories.components.process_component_materializer import (
+        extension_bindings_from_legacy_config,
+    )
     from ..models.process_component import (
         ProcessConnectionOverrideV1,
         ProcessExtensionBindingsV1,
         ProcessOverrideFieldV1,
     )
 
-    # A malformed shape is REFUSED, never silently emptied (Codex round 1).
-    #
-    # This returned empty bindings for a non-Mapping block, iterated nothing for
-    # a missing or misspelled `connections` key, and skipped non-Mapping
-    # connection/field entries — so the strict typed models never saw the
-    # malformed data at all, and canonical apply emitted a process WITHOUT the
-    # environment overrides the caller asked for, where the legacy renderer would
-    # have refused. Silently dropping a requested override is worse than refusing
-    # it: the build looks successful and the process is wrong.
-    if raw is None:
-        return ProcessExtensionBindingsV1()
-    if not isinstance(raw, Mapping):
+    try:
+        normalized = extension_bindings_from_legacy_config({"process_extensions": raw})
+    except Exception as exc:  # noqa: BLE001 — re-raised as an authoring diagnostic
         raise AuthoringWorkflowError(
             AUTHORING_COMPILE_BLOCKED,
             (
@@ -532,74 +533,35 @@ def _extension_bindings_from_config(raw):
                     AUTHORING_COMPILE_BLOCKED,
                     "error",
                     message=(
-                        "Process extension bindings must be an object; this "
-                        "value cannot be interpreted and would otherwise be "
-                        "dropped silently."
+                        "The process extension bindings are malformed and would "
+                        "otherwise be dropped silently."
                     ),
-                    path="/process_extensions",
+                    path="/{0}".format(
+                        str(getattr(exc, "field", "") or "process_extensions")
+                        .replace(".", "/")
+                    ),
                     subject_kind="process",
                     remediation=(
-                        "Supply process_extensions as an object with a "
-                        "'connections' list, or omit it entirely."
+                        'Shape: {"connections": [{"connection_id": "...", '
+                        '"fields": [{"id": "...", "label": "..."}]}]}.'
                     ),
+                    cause_codes=(str(getattr(exc, "error_code", "") or ""),),
                 ),
             ),
-        )
-
-    def _malformed(path: str, what: str):
-        return AuthoringWorkflowError(
-            AUTHORING_COMPILE_BLOCKED,
-            (
-                _diag(
-                    AUTHORING_COMPILE_BLOCKED,
-                    "error",
-                    message=(
-                        "A process extension {0} must be an object; this entry "
-                        "cannot be interpreted and would otherwise be dropped "
-                        "silently.".format(what)
-                    ),
-                    path=path,
-                    subject_kind="process",
-                    remediation="Correct the malformed entry, or remove it.",
-                ),
-            ),
-        )
-
-    def _clean(value):
-        return value.strip() if isinstance(value, str) else value
+        ) from None
 
     connections = []
-    for index, entry in enumerate(raw.get("connections") or ()):
-        if not isinstance(entry, Mapping):
-            raise _malformed(
-                "/process_extensions/connections/{0}".format(index), "connection"
+    for entry in normalized:
+        fields = tuple(
+            ProcessOverrideFieldV1(
+                **{k: v for k, v in field.items() if k in ("id", "label", "xpath")}
             )
-        fields = []
-        for field_index, field in enumerate(entry.get("fields") or ()):
-            if not isinstance(field, Mapping):
-                raise _malformed(
-                    "/process_extensions/connections/{0}/fields/{1}".format(
-                        index, field_index
-                    ),
-                    "field",
-                )
-            kwargs = {
-                "id": _clean(field.get("id")),
-                # `label` is NOT cleaned — the legacy renderer emits its exact
-                # bytes, so stripping it here would move emitted XML.
-                "label": field.get("label"),
-            }
-            if field.get("xpath") is not None:
-                kwargs["xpath"] = _clean(field.get("xpath"))
-            fields.append(ProcessOverrideFieldV1(**kwargs))
-        connection_kwargs = {
-            "connection_id": _clean(entry.get("connection_id")),
-            "fields": tuple(fields),
-        }
-        connector_type = _clean(entry.get("connector_type"))
-        if connector_type:
-            connection_kwargs["connector_type"] = connector_type
-        connections.append(ProcessConnectionOverrideV1(**connection_kwargs))
+            for field in entry.get("fields") or ()
+        )
+        kwargs = {"connection_id": entry["connection_id"], "fields": fields}
+        if entry.get("connector_type"):
+            kwargs["connector_type"] = entry["connector_type"]
+        connections.append(ProcessConnectionOverrideV1(**kwargs))
     return ProcessExtensionBindingsV1(connections=tuple(connections))
 
 
@@ -1748,12 +1710,28 @@ def plan_authoring_request_v1(
 # ---------------------------------------------------------------------------
 
 
-def _materialization_plan_fingerprint(unit, symbols):
+def _materialization_plan_fingerprint(unit, symbols, conflict_policy):
     """``(digest, byte_length)`` of one root's relocatable materialization plan.
 
     Built from exactly the inputs apply will use, through the same
     ``build_materialization_plan`` — never a second implementation of it, which
     would be a hand-model of the plan whose digest it claims to be.
+
+    ``conflict_policy`` is the one the REQUEST carries, not a fixed value.
+    Hard-coding ``"reuse"`` here made the served provenance certify a plan the
+    mutation never executed: the policy is covered by the plan material, so a
+    ``clone``/``fail`` apply produced a ``process_mutations[].plan_fingerprint``
+    that could never equal the compile-time ``artifact_fingerprints[].digest``
+    (Codex round 2).
+
+    One divergence remains and is DELIBERATE: when a create collides and the
+    policy is ``clone``, apply materializes a renamed envelope, so its plan
+    genuinely differs from the one compile described. That difference is a fact
+    about what happened, and hiding it would require compile to resolve live
+    collisions — which is exactly what would make the plan account-bound and
+    destroy the relocatability this fingerprint exists to certify. The two
+    fingerprints differing is therefore the correct signal that a clone occurred,
+    not a defect.
 
     Returns ``None`` when the plan cannot be built at compile time. That is not
     a silent pass: a plan that cannot be constructed fails LOUDLY at apply with
@@ -1772,7 +1750,7 @@ def _materialization_plan_fingerprint(unit, symbols):
             envelope=unit.envelope,
             process_ir=unit.process_ir,
             symbols=symbols,
-            conflict_policy="reuse",
+            conflict_policy=conflict_policy,
             compiler_revision=get_authoring_revisions()["compiler_revision"],
             emitter_revision=emitter_revision(),
             materializer_revision=_materializer_revision(),
@@ -1783,7 +1761,7 @@ def _materialization_plan_fingerprint(unit, symbols):
 
 
 def build_artifact_descriptors(
-    normalized: _NormalizedIntent, symbols: Any
+    normalized: _NormalizedIntent, symbols: Any, conflict_policy: str = "reuse"
 ) -> Tuple[Tuple[ArtifactFingerprintV1, ...], Tuple[ProcessCfgSummaryV1, ...]]:
     """Compile every authored process and fingerprint what came out.
 
@@ -1902,7 +1880,9 @@ def build_artifact_descriptors(
         # a fingerprint of the plan rather than a second copy of it.
         unit = units_by_key.get(component_key)
         if unit is not None:
-            plan_fingerprint = _materialization_plan_fingerprint(unit, symbols)
+            plan_fingerprint = _materialization_plan_fingerprint(
+                unit, symbols, conflict_policy
+            )
             if plan_fingerprint is not None:
                 fingerprints.append(
                     ArtifactFingerprintV1(
@@ -1971,7 +1951,7 @@ def compile_authoring_request_v1(
         )
 
     fingerprints, cfg_summaries = build_artifact_descriptors(
-        internals.normalized, internals.symbols
+        internals.normalized, internals.symbols, request.intent.conflict_policy
     )
 
     normalized_payload = _normalized_payload(internals.normalized, request)

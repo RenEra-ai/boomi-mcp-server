@@ -990,3 +990,141 @@ def test_the_dependency_summary_describes_both_participant_kinds():
         e["depends_on"] for e in edges if e["component_key"] == "proc"
     )
     assert process_edges == ["conn", "op"], edges
+
+
+# ---------------------------------------------------------------------------
+# Codex Stage-2 review, round 2
+# ---------------------------------------------------------------------------
+
+
+def test_the_compiled_plan_fingerprint_uses_the_REQUESTED_conflict_policy():
+    """Codex round 2 F1: compile fingerprinted a plan apply never executed.
+
+    `conflict_policy` is covered by the plan material, and compile hard-coded
+    `"reuse"` — so for a `clone` or `fail` apply the served
+    `artifact_fingerprints[].digest` could never equal the
+    `process_mutations[].plan_fingerprint` the mutation recorded.
+    """
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+
+    def _digest(policy):
+        request = process_ir_request().model_copy(deep=True)
+        intent = request.intent.model_copy(update={"conflict_policy": policy})
+        request = request.model_copy(update={"intent": intent})
+        with patch(_PAGINATE) as paginate:
+            paginate.return_value = []
+            result, _ = compile_authoring_request_v1(
+                request, boomi_client=MagicMock(), profile=_PROFILE
+            )
+        return next(
+            a.digest
+            for a in result.artifact_fingerprints
+            if a.artifact_kind == "process_component_materialization_plan"
+        )
+
+    # The policy is covered, so the digest must MOVE with it — which is exactly
+    # why hard-coding one value made compile describe the wrong plan.
+    assert _digest("reuse") != _digest("clone")
+    assert _digest("reuse") != _digest("fail")
+    # ...and it is stable for a fixed policy, so the difference above is the
+    # policy and not nondeterminism.
+    assert _digest("clone") == _digest("clone")
+
+
+def test_an_ambiguous_create_does_not_silently_duplicate():
+    """Codex round 2 F2: ambiguity was handled for updates only.
+
+    A create-by-name matching two live processes left the step as a plain
+    create with no existing id, so `reuse`, `fail` and `clone` all performed an
+    ordinary unsuffixed create — every collision policy violated at once.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    two = [{"component_id": "cid-a"}, {"component_id": "cid-b"}]
+    spec = _spec_with_canonical_root()
+
+    def _plan(policy):
+        with patch.object(ib, "_resolve_existing_components", return_value=two), \
+             patch(_PAGINATE) as paginate:
+            paginate.return_value = []
+            result = build_integration_action(
+                MagicMock(), _PROFILE, "plan",
+                config={"integration_spec": spec, "conflict_policy": policy},
+            )
+        return next(s for s in result["steps"] if s["key"] == "proc")
+
+    # `clone` can proceed — it creates something new either way.
+    assert _plan("clone")["planned_action"] == "create_clone"
+    # The others cannot pick a target and must refuse rather than duplicate.
+    for policy in ("reuse", "fail"):
+        assert _plan(policy)["planned_action"] == "error_ambiguous_match", policy
+
+
+def test_recipe_extension_normalization_matches_the_legacy_authority():
+    """Codex round 2 F3/F4: a hand-copy of an authority is wrong BOTH ways.
+
+    The previous version rejected `[]`, which the legacy reader accepts as an
+    explicit no-op, and accepted a misspelled `connections` key, which the legacy
+    reader refuses — so a caller's environment overrides were silently dropped
+    and the process deployed without them. Both are gone because the question is
+    now asked of `extension_bindings_from_legacy_config` itself.
+    """
+    from boomi_mcp.authoring.workflow import (
+        AuthoringWorkflowError,
+        _extension_bindings_from_config,
+    )
+
+    # Legacy-accepted no-ops stay no-ops.
+    for benign in (None, {}, [], {"connections": []}):
+        assert _extension_bindings_from_config(benign).connections == ()
+
+    # Legacy-refused shapes are refused — including the three F3 named, which
+    # the hand-written version coalesced to empty bindings.
+    for bad in (
+        "not-an-object",
+        42,
+        {"connection": [{"connection_id": "$ref:conn"}]},
+        {"connections": None},
+        {"connections": {}},
+        {"connections": ["not-an-object"]},
+        {"connections": [{"connection_id": "$ref:conn", "fields": ["bad"]}]},
+        {"connections": [{"connection_id": "  ", "fields": [{"id": "u", "label": "l"}]}]},
+    ):
+        with pytest.raises(AuthoringWorkflowError):
+            _extension_bindings_from_config(bad)
+
+    # ...and a well-formed block still normalizes.
+    good = _extension_bindings_from_config(
+        {"connections": [{"connection_id": " $ref:conn ", "fields": [{"id": " u ", "label": "L"}]}]}
+    )
+    assert good.connections[0].connection_id == "$ref:conn"
+    assert good.connections[0].fields[0].id == "u"
+    # `label` is NOT stripped — the renderer emits its exact bytes.
+    assert good.connections[0].fields[0].label == "L"
+
+
+def test_the_update_preservation_codes_are_in_the_shared_taxonomy():
+    """Codex round 2 F5: a served stable code consumers could not classify.
+
+    Registered under **#45**, which introduced the family — not under #153,
+    which would have put an #153-owned code outside its three declared prefixes
+    and broken the one-introducer-per-family biconditional. Registering the whole
+    family rather than only the new member is what actually closes the gap.
+    """
+    from boomi_mcp.errors import ERROR_TAXONOMY
+
+    family = {
+        code: spec for code, spec in ERROR_TAXONOMY.items()
+        if code.startswith("UPDATE_PRESERVATION_")
+    }
+    assert set(family) == {
+        "UPDATE_PRESERVATION_POLICY_UNSUPPORTED",
+        "UPDATE_PRESERVATION_TYPE_MISMATCH",
+        "UPDATE_PRESERVATION_FETCH_FAILED",
+        "UPDATE_PRESERVATION_PUSH_FAILED",
+    }
+    assert {spec.owner for spec in family.values()} == {"#45"}
+    # The stakes asymmetry is declared, not incidental: a fetch failure wrote
+    # nothing and is retry-safe; a push failure may already have landed.
+    assert family["UPDATE_PRESERVATION_FETCH_FAILED"].retryable is True
+    assert family["UPDATE_PRESERVATION_PUSH_FAILED"].retryable is False

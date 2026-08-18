@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9863,"minimum_collected":9863,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9867,"minimum_collected":9867,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -9891,3 +9891,7 @@
 {"kind":"test","id":"pytest-009890","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_compile_binding_covers_the_materialization_plan","state":"active"}
 {"kind":"test","id":"pytest-009891","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_malformed_process_extension_block_is_refused_not_emptied","state":"active"}
 {"kind":"test","id":"pytest-009892","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_dependency_summary_describes_both_participant_kinds","state":"active"}
+{"kind":"test","id":"pytest-009893","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_ambiguous_create_does_not_silently_duplicate","state":"active"}
+{"kind":"test","id":"pytest-009894","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_recipe_extension_normalization_matches_the_legacy_authority","state":"active"}
+{"kind":"test","id":"pytest-009895","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_compiled_plan_fingerprint_uses_the_REQUESTED_conflict_policy","state":"active"}
+{"kind":"test","id":"pytest-009896","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_update_preservation_codes_are_in_the_shared_taxonomy","state":"active"}

@@ -236,6 +236,9 @@ from ..errors import (
     PROCESS_MATERIALIZATION_INTERNAL_ERROR,
     PROCESS_MATERIALIZATION_PLAN_INVALID,
     PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE,
+    UPDATE_PRESERVATION_FETCH_FAILED,
+    UPDATE_PRESERVATION_POLICY_UNSUPPORTED,
+    UPDATE_PRESERVATION_PUSH_FAILED,
 )
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
@@ -3189,7 +3192,7 @@ def _apply_structured_update(
     if policy is None:
         return {
             "_success": False,
-            "error_code": "UPDATE_PRESERVATION_POLICY_UNSUPPORTED",
+            "error_code": UPDATE_PRESERVATION_POLICY_UNSUPPORTED,
             "error": (
                 f"No preservation policy registered for builder route "
                 f"{comp.type!r}. Structured updates require a policy so "
@@ -3209,7 +3212,7 @@ def _apply_structured_update(
     except Exception as exc:
         return {
             "_success": False,
-            "error_code": "UPDATE_PRESERVATION_FETCH_FAILED",
+            "error_code": UPDATE_PRESERVATION_FETCH_FAILED,
             "error": (
                 f"Failed to fetch current XML for component {target_id!r}: "
                 f"{_validation_error_message(exc)}"
@@ -3245,7 +3248,7 @@ def _apply_structured_update(
             # relative to the stakes. `_execute_canonical_process` lifts this code
             # onto the partial-failure envelope, so without it that lift had
             # nothing to lift on the arm that matters most.
-            "error_code": "UPDATE_PRESERVATION_PUSH_FAILED",
+            "error_code": UPDATE_PRESERVATION_PUSH_FAILED,
             "error": (
                 f"Failed to push merged XML for component {target_id!r}: "
                 f"{_validation_error_message(exc)}"
@@ -3397,7 +3400,7 @@ def build_structured_update_xml(
         if builder_instance is None:
             return {
                 "_success": False,
-                "error_code": "UPDATE_PRESERVATION_POLICY_UNSUPPORTED",
+                "error_code": UPDATE_PRESERVATION_POLICY_UNSUPPORTED,
                 "error": (
                     f"No structured builder registered for connector "
                     f"type {connector_type!r}"
@@ -3634,7 +3637,7 @@ def build_structured_update_xml(
 
     return {
         "_success": False,
-        "error_code": "UPDATE_PRESERVATION_POLICY_UNSUPPORTED",
+        "error_code": UPDATE_PRESERVATION_POLICY_UNSUPPORTED,
         "error": (
             f"No structured update builder registered for component type "
             f"{comp.type!r}."
@@ -3886,7 +3889,7 @@ def _execute_component(
             # structured update did not happen.
             return {
                 "_success": False,
-                "error_code": "UPDATE_PRESERVATION_POLICY_UNSUPPORTED",
+                "error_code": UPDATE_PRESERVATION_POLICY_UNSUPPORTED,
                 "error": (
                     f"No structured builder registered for connector "
                     f"type {connector_type!r}"
@@ -5956,8 +5959,21 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 )
                 if len(candidates) == 1:
                     canonical_existing_id = candidates[0].get("component_id")
-                elif len(candidates) > 1 and envelope.action == "update":
-                    canonical_action = "error_ambiguous_match"
+                elif len(candidates) > 1:
+                    # AMBIGUITY IS A COLLISION, whatever the action (Codex round
+                    # 2). This handled ambiguity for updates only, so a
+                    # create-by-name that matched two live processes left
+                    # `canonical_action="create"` with no existing id — and apply
+                    # then performed a plain unsuffixed create under `reuse`,
+                    # `fail` AND `clone` alike, violating all three. The
+                    # component arm's rule, mirrored: `clone` can proceed safely
+                    # because it creates something new either way; the others
+                    # cannot pick a target and must refuse.
+                    if conflict_policy == "clone":
+                        canonical_action = "create_clone"
+                        canonical_existing_id = candidates[0].get("component_id")
+                    else:
+                        canonical_action = "error_ambiguous_match"
                 elif not candidates and envelope.action == "update":
                     canonical_action = "error_missing_target"
 
@@ -6548,7 +6564,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     else "error_unsupported_structured_update"
                 )
                 validation_error = {
-                    "error_code": "UPDATE_PRESERVATION_POLICY_UNSUPPORTED",
+                    "error_code": UPDATE_PRESERVATION_POLICY_UNSUPPORTED,
                     "error": (
                         f"No structured builder registered for connector "
                         f"type {ct!r}"

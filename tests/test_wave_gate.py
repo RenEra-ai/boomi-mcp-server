@@ -1834,6 +1834,15 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     # able to name the code.
     "TOPOLOGY_REFERENCE_NOT_FOUND",
     "UPDATE_PRESERVATION_PUSH_FAILED",
+    "UPDATE_PRESERVATION_FETCH_FAILED",
+    # The family PREFIX, and the two bare stems, tokenized out of prose that
+    # contrasts the pair ("`FETCH_FAILED` is declared retryable; `PUSH_FAILED`
+    # deliberately is not"). Plus the taxonomy's own name, which a row naming
+    # where a code was registered has to be able to write.
+    "UPDATE_PRESERVATION_",
+    "FETCH_FAILED",
+    "PUSH_FAILED",
+    "ERROR_TAXONOMY",
     "PLAN_INVALID",
     "PROCESS_MATERIALIZATION_INTERNAL_ERROR",
     "PROCESS_MATERIALIZATION_PLAN_INVALID",

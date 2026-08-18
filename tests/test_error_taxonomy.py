@@ -85,6 +85,14 @@ def test_exactly_the_intended_codes_advertise_a_retry():
         # unlike every other code here, which describes a caller mistake or a
         # permanent platform limit.
         "AUTHORING_SCHEMA_SOURCE_UNAVAILABLE",
+        # The live XML could not be READ, so the merge never started and nothing
+        # was written. That is the one preservation failure where a retry is
+        # genuinely safe, and the served envelope already advertises
+        # `retryable: True` on it — registering the family (#153, from Codex
+        # review round 2) is what brought the declaration into the catalog.
+        # Its sibling PUSH_FAILED is deliberately NOT here: the merged document
+        # was submitted, so a write may already have landed.
+        "UPDATE_PRESERVATION_FETCH_FAILED",
     }, sorted(retryable)
 
 

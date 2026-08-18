@@ -237,6 +237,11 @@ authority-derived coverage claim.
 | CX1-10 | same round | "Restrict dependency discovery to typed reference fields … This recursive walk classifies every string beginning with `$ref:` as a component dependency, including literal message text, script bodies, static values, and templates." | **P2** | runtime behavior | **DC-3** — **2nd instance** → structural fix | Standard — in a blocking class, no critical anchor, source label P2 | `98f58e5` | `fixed` structurally — see the DC-3 block below. |
 | CX1-11 | same round | "Include process edges in the dependency summary … A process depending on four supporting components therefore returns an empty dependency summary even though the unified execution graph enforces all four edges." | **P2** | machine-served schemas/contracts | DC-2 — **7th instance** | Standard — source label P2 | `98f58e5` | `fixed` — `build_component_dependencies` walks both participant families, and is fed the INTERNAL spec. The edge summary is value-free (keys only), so the root withholding that protects authored bodies does not apply to it. |
 | CX1-12 | same round | "Keep lifted recipe roots in topology validation … A recipe request whose topology relation references its composed process root therefore regresses from a valid process symbol to `TOPOLOGY_REFERENCE_NOT_FOUND`." | **P2** | runtime behavior · capability reachability | DC-2 — **8th instance** | Standard — source label P2 | `98f58e5` | `fixed` — `_validate_topology` projects symbols from both families. **This and CX1-11 are the evidence that the DC-2 sibling sweep was INCOMPLETE**: it enumerated `integration_builder.py` and stopped there, while the class spans every consumer of a spec's participant set, including three in `authoring/workflow.py`. Recorded rather than quietly folded in — an incomplete sweep is how a structural fix becomes another instance patch. |
+| CX2-01 | L2 Stage-2 Codex commit-review round 2, run dir `cdx-review.RcEkZs`, `STATUS: completed`, `SCOPE: branch diff against 98f58e56fcde5846789ae7e6b31d2d43cae574e9 (98f58e5) head=517f31d32acadb2f13c117224aa5e22c10b487ed dirty=false` | "Use the bound policy for plan fingerprints … compile fingerprints a plan built as `\"reuse\"`, while `_execute_canonical_process` builds and attests one using the requested policy … so the newly served provenance certifies a different plan than the mutation executed." | **P1** | **mutation accounting** · machine-served schemas/contracts | (a fingerprint computed under a value the caller did not request, the request's own `conflict_policy`) — 1st instance; introduced BY the CX1-03 fix | **Critical** — anchor: mutation accounting | `517f31d` | `fixed` — the compile-time fingerprint uses `request.intent.conflict_policy`. One divergence is retained DELIBERATELY and documented: when a create collides under `clone`, apply materializes a renamed envelope, so its plan genuinely differs from the compiled one. Making them equal would require compile to resolve live collisions, which is precisely what would make the plan account-bound and destroy the relocatability the fingerprint exists to certify — so the difference is the correct signal that a clone occurred, not a defect. |
+| CX2-02 | same round | "Handle multiple process matches on create … Apply consequently performs an ordinary unsuffixed create under `reuse`, `fail`, and `clone`, violating all three collision policies and allowing an unintended duplicate instead of refusing or cloning safely." | **P1** | runtime behavior · data loss | DC-2's family (a collision case the component arm handles and the canonical arm did not) — introduced BY the CX1-01 fix, which added resolution but only branched ambiguity for updates | **Critical** — anchor: source label P1 | `517f31d` | `fixed` — ambiguity is treated as a collision whatever the action: `clone` proceeds as `create_clone` (it creates something new either way), `reuse` and `fail` refuse with `error_ambiguous_match`. Mirrors the component arm's rule rather than inventing a second one. |
+| CX2-03 | same round | "Reject malformed connections containers … For a present block such as `{\"connection\": [...]}`, `{\"connections\": null}`, or `{\"connections\": {}}`, this coalesces the malformed value to an empty iterable and returns empty bindings … recipe normalization still silently drops requested environment overrides." | **P1** | runtime behavior · machine-served schemas/contracts | **DC-1's family** — a hand-copied SUBSET of an authority's refusals, authority `extension_bindings_from_legacy_config`; introduced BY the CX1-09 fix | **Critical** — anchor: source label P1 | `517f31d` | `fixed` structurally — the normalizer no longer answers the tolerance question, it DELEGATES it. See below. |
+| CX2-04 | same round | "Preserve the legacy empty-list no-op … The legacy `extension_bindings_from_legacy_config` explicitly accepts an empty list as a no-op, and this boundary promises to preserve every legacy-accepted input, so existing equivalent recipe configuration now fails instead of emitting empty overrides." | **P2** | runtime behavior | same instance as CX2-03 — the OTHER direction of the same hand-copy | Standard — in a blocking class, no critical anchor, source label P2 | `517f31d` | `fixed` by the same delegation. Recorded as its own row because it is the evidence that a hand-copy of an authority is wrong in BOTH directions at once: the same 38 lines rejected what the authority accepts AND accepted what it rejects. |
+| CX2-05 | same round | "Register the new preservation error code … callers now receive `UPDATE_PRESERVATION_PUSH_FAILED`, but this patch defines it only as a local string and never adds it to the shared `boomi_mcp.errors.ERROR_TAXONOMY`." | **P2** | machine-served schemas/contracts | (a served stable code absent from the taxonomy consumers classify by, `ERROR_TAXONOMY`) — 1st instance | Standard — source label P2 | `517f31d` | `fixed`, but NOT as prescribed — recorded because the remedy differs from the request. Registering only the new member would have put an #153-owned code outside #153's three declared prefixes and broken the one-introducer-per-family biconditional `test_issue_153_owns_its_three_families_as_a_biconditional` enforces. The whole `UPDATE_PRESERVATION_*` family (4 codes) is registered instead, under **#45**, the issue `git log -S` identifies as introducing it — which closes the real gap (the family was never discoverable) rather than half of it. `FETCH_FAILED` is declared `retryable=True` in the named retryable set with its reason; `PUSH_FAILED` deliberately is not, because the merged document was submitted and a write may already have landed. |
 
 Dispositions: `fixed` · `finding-refuted` · `severity-refuted` · `not-validated` · `deferred`
 (issue, reason class, placement). A refutation names the disputed claim and the concrete evidence.
@@ -255,10 +260,32 @@ reproducing afterwards. **No phantom finding was filed, and none is carried here
 This is the THIRD instance of a hazard this repository's own memory already names, and the second
 time in this slice: `WORKTREE_DIRTY` twice against `scripts/wave_gate.py` (row S10-02), and now once
 against live QA. The earlier mechanism — "launch only from a verified-clean tree" — was necessary but
-not sufficient, because it governs the LAUNCH and this failure happened mid-run. The rule that
-actually covers it: **while any gate is in flight, the tree is frozen; the next mutation waits for
-the gate to report.** What r4 still owes is therefore a re-run of the shared-apply regression sweep
-(scenarios 1, 5, 6) on a settled committed SHA — carried forward, not waived.
+not sufficient, because it governs the LAUNCH and this failure happened mid-run.
+
+**It then happened a FOURTH time, in round 5, after I had written the rule down and told QA the tree
+would stay frozen.** That is the whole point of the structural-fix rule applied to process: a written
+rule I had just authored did not survive its first contact with a Codex round landing mid-QA. Stating
+it again would be the fourth instance patch.
+
+**The mechanism, and it is not mine.** QA built
+`.claude/agent-memory/boomi-qa-tester/harness/tree-freeze-guard.py`, which does not check git at all
+— it hashes the BYTES of every loaded `boomi_mcp`/`server` module and compares PRE-import,
+POST-import and at-exit. PRE vs POST proves no edit raced the import (the exact link round 5 could
+not close for its `r5_04` run); POST vs EXIT proves stability during the scenario. It is
+control-verified in both directions, exits `3` so a batch runner can distinguish "tree moved" from
+"product failed", and it correctly does NOT fire on this codebase's pervasive lazy imports — the
+module set legitimately grows mid-scenario, so the invariant is the narrower "files already read have
+not changed underneath us". From round 6 on, every scenario runs inside it and every finding carries
+a stamp; a moved stamp makes the finding VOID rather than failed.
+
+That converts the failure from "the operator must remember" into "the measurement refuses to lie",
+which is the only form of this fix that has held anywhere else in this slice.
+
+**What was salvaged, and what it cost.** Round 5 bounded its runs by timestamp against the edit
+window and attested three of five: the owed regression sweep (scenarios 1–7, all PASS), conflict
+policy, and binding staleness. One run (`r5_04`) is recorded **VOID, not failed**, and the
+adversarial probes did not run. Round 4's owed sweep is therefore DISCHARGED; what round 6 carries is
+round 5's own unrun remainder plus everything the round-2 corrections changed.
 
 ### DC-3 structural fix (mandatory — three instances, all found in one review round)
 

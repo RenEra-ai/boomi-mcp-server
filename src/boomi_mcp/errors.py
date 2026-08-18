@@ -428,6 +428,24 @@ PROCESS_MATERIALIZATION_RESULT_ID_MISSING = "PROCESS_MATERIALIZATION_RESULT_ID_M
 PROCESS_MATERIALIZATION_INTERNAL_ERROR = "PROCESS_MATERIALIZATION_INTERNAL_ERROR"
 
 
+# --- Component update preservation (issue #45) ---------------------------------
+# Registered by #153, OWNED by #45. The family has been served since #45's
+# read-merge-write landed and was never in the taxonomy, so a caller could not
+# discover or classify any of it. Codex review round 2 raised that against the
+# one new member this slice adds; registering only that member would have been
+# worse than leaving it out — it would put an #153-owned code outside #153's
+# three declared prefixes and break the biconditional that keeps each family to
+# one introducer. The honest fix is to register the whole family under the issue
+# that actually introduced it.
+UPDATE_PRESERVATION_POLICY_UNSUPPORTED = "UPDATE_PRESERVATION_POLICY_UNSUPPORTED"
+UPDATE_PRESERVATION_TYPE_MISMATCH = "UPDATE_PRESERVATION_TYPE_MISMATCH"
+UPDATE_PRESERVATION_FETCH_FAILED = "UPDATE_PRESERVATION_FETCH_FAILED"
+#: #153: the push arm's counterpart to FETCH_FAILED. Its absence meant the
+#: LOW-stakes arm (nothing written) was machine-classifiable while the
+#: HIGH-stakes one (a write may have landed) was not.
+UPDATE_PRESERVATION_PUSH_FAILED = "UPDATE_PRESERVATION_PUSH_FAILED"
+
+
 @dataclass(frozen=True)
 class ErrorCodeSpec:
     """Catalog entry for one stable error code."""
@@ -1697,6 +1715,47 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "mutation could not be attested; it fails closed."
             ),
             owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=UPDATE_PRESERVATION_POLICY_UNSUPPORTED,
+            category="update_preservation",
+            retryable=False,
+            summary=(
+                "The component type has no registered preservation policy, so a "
+                "read-merge-write update is refused rather than guessed."
+            ),
+            owner="#45",
+        ),
+        ErrorCodeSpec(
+            code=UPDATE_PRESERVATION_TYPE_MISMATCH,
+            category="update_preservation",
+            retryable=False,
+            summary=(
+                "The live component's type/subType does not match the submitted "
+                "document, so merging them would rewrite a different component."
+            ),
+            owner="#45",
+        ),
+        ErrorCodeSpec(
+            code=UPDATE_PRESERVATION_FETCH_FAILED,
+            category="update_preservation",
+            retryable=True,
+            summary=(
+                "The live XML could not be read, so there is nothing to merge "
+                "into; nothing was written."
+            ),
+            owner="#45",
+        ),
+        ErrorCodeSpec(
+            code=UPDATE_PRESERVATION_PUSH_FAILED,
+            category="update_preservation",
+            retryable=False,
+            summary=(
+                "The merged document was rejected on submission. Unlike a fetch "
+                "failure, a write may already have landed — reconcile before "
+                "retrying."
+            ),
+            owner="#45",
         ),
         ErrorCodeSpec(
             code=PROCESS_MATERIALIZATION_INTERNAL_ERROR,
