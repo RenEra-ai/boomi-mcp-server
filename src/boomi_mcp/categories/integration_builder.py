@@ -8198,7 +8198,18 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     )
 
     resolved_placements: Dict[str, Optional[str]] = {}
+    _planned_actions = {
+        step["key"]: str(step.get("planned_action", ""))
+        for step in planned["steps"]
+    }
     for _pkey, _unit in process_units_by_key.items():
+        if _planned_actions.get(_pkey) == "reuse":
+            # A reuse WRITES NOTHING and uses no folder id (Codex round 14):
+            # validating its placement anyway meant a moved or deleted folder —
+            # or a missing folder-list permission — rejected an otherwise valid
+            # idempotent re-apply.
+            resolved_placements[_pkey] = None
+            continue
         try:
             resolved_placements[_pkey] = _resolve_canonical_placement(
                 boomi_client, _unit.envelope
@@ -8985,6 +8996,16 @@ def _reject_invalid_typed_request(exc, action: str) -> Dict[str, Any]:
     # request is an ordinary schema failure and keeps the generic code.
     unknown_process_field = any(
         entry["type"] == "extra_forbidden"
+        # The code is registered for the process COMPONENT models — envelope,
+        # unit, extension bindings — never for ProcessIR schema failures, whose
+        # paths also sit under `.units.`/`.processes.` (Codex round 14; the
+        # exclusion covers the typed `.units.` shape as well as the
+        # `.processes.` one the reviewer named). Anchored to the UNIT's own
+        # `process_ir` field, not a bare substring: the typed intent's
+        # discriminator tag is itself literally `process_ir`, so a substring
+        # test excluded every typed-intent path including genuine envelope
+        # failures — measured while writing the witness.
+        and not re.search(r"\.(units|processes)\.\d+\.process_ir\.", entry["path"])
         and (
             ".units." in entry["path"]
             or ".envelope" in entry["path"]

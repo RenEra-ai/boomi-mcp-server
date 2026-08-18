@@ -2348,3 +2348,94 @@ def test_reparsing_a_mutated_root_does_not_render_its_values():
     assert raised, "a mutated root must be refused, not composed"
     leaked = [w for w in caught if "hunter2" in str(w.message)]
     assert leaked == [], "the serializer warning rendered the mutated value"
+
+
+def test_a_reused_root_is_not_blocked_by_a_moved_folder():
+    """Codex round 14: a reuse writes nothing and uses no folder id.
+
+    The pre-loop placement pass validated every canonical root's folder, so a
+    moved or deleted folder rejected an otherwise valid idempotent re-apply
+    whose plan was `reuse` — a step that never materializes.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    def _resolve(_client, comp):
+        if getattr(comp, "type", None) == "process":
+            return [{"component_id": "cid-live", "name": "M12.15 Process",
+                     "folder_name": "Old"}]
+        return []
+
+    unit = process_unit(folder_name="Folder That Moved")
+    payload = None
+    with patch.object(ib, "_resolve_existing_components", _resolve), \
+         patch("boomi_mcp.categories.folders._query_all_folders", return_value=[]), \
+         patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _GET_XML
+    ) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = lambda *a, **k: {"_success": True, "component_id": "cid-x"}
+        get_xml.side_effect = _live_xml
+        payload = _bound_payload(process_ir_request(units=(unit,)))
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": payload, "dry_run": False},
+        )
+
+    assert result["_success"] is True, result.get("error")
+    assert result["results"]["proc"]["status"] == "reused"
+
+    # Control: the same vanished folder still refuses a root that would CREATE.
+    with patch("boomi_mcp.categories.folders._query_all_folders", return_value=[]), \
+         patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _GET_XML
+    ) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = lambda *a, **k: {"_success": True, "component_id": "cid-x"}
+        get_xml.side_effect = _live_xml
+        refused = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(process_ir_request(units=(unit,))),
+                    "dry_run": False},
+        )
+    assert refused["_success"] is False
+    assert refused["error_code"] == "PROCESS_MATERIALIZATION_PLACEMENT_NOT_FOUND"
+
+
+def test_a_malformed_nested_processir_keeps_the_generic_code():
+    """Codex round 14: ProcessIR schema failures are not envelope failures.
+
+    An extra field INSIDE the nested ProcessIR sits under `.units.`/`.processes.`
+    too, so the location predicate wrongly served the component-schema code for
+    an IR document defect. `.process_ir.` paths are excluded on both intent
+    shapes.
+    """
+    # The INTEGRATION_SPEC intent shape, which is where the defect lives: the
+    # typed process_ir intent parses its IR through the canonical parser and
+    # never reaches this predicate with an IR path (measured — the pre-fix
+    # control only reddens on this shape).
+    unit_doc = process_unit().model_dump(mode="json")
+    unit_doc["process_ir"]["body"]["not_a_field"] = "x"
+    payload = {
+        "contract_version": "2",
+        "intent": {
+            "intent_kind": "integration_spec",
+            "integration_spec": {
+                "name": "X",
+                "components": [APPLIABLE_CONN, APPLIABLE_OP],
+                "processes": [unit_doc],
+            },
+        },
+    }
+    result = build_integration_action(
+        MagicMock(), _PROFILE, "compile", config={"authoring_request": payload}
+    )
+    assert result["_success"] is False
+    assert result["error_code"] != "PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD"
+
+    # ...while a genuine envelope unknown-field keeps the registered code.
+    envelope_bad = process_ir_request().model_dump(mode="json")
+    envelope_bad["intent"]["units"][0]["envelope"]["not_a_field"] = "x"
+    named = build_integration_action(
+        MagicMock(), _PROFILE, "compile", config={"authoring_request": envelope_bad}
+    )
+    assert named["error_code"] == "PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD"
