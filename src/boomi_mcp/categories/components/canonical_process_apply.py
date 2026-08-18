@@ -303,6 +303,7 @@ def build_mutation_attestation(
     applied_folder_name: Optional[str] = None,
     submitted_xml_digest: Optional[str] = None,
     observed_placement: Optional[str] = None,
+    observed_folder_id: Optional[str] = None,
 ):
     """The apply-time mutation attestation for one root.
 
@@ -351,7 +352,16 @@ def build_mutation_attestation(
             folder_name=(
                 observed_placement if action == "create" else applied_folder_name
             ),
-            folder_id=resolved_folder_id or plan.resolved_folder_id,
+            # A create's folder id is the honoured resolution or, failing that,
+            # the READBACK's own folderId (Codex round 17: an identity the
+            # readback reported is knowledge — discarding it made the actual
+            # placement indistinguishable from the requested same-named
+            # folder). The requested resolution is never attested unhonoured.
+            folder_id=(
+                (resolved_folder_id or observed_folder_id)
+                if action == "create"
+                else resolved_folder_id or plan.resolved_folder_id
+            ),
         ),
         submitted_xml_digest=(
             submitted_xml_digest

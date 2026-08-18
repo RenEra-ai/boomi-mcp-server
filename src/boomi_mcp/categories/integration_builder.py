@@ -7849,6 +7849,9 @@ def _execute_canonical_process(
             ),
             submitted_xml_digest=precomputed,
             observed_placement=observed_placement,
+            observed_folder_id=(
+                placement_identity["folder_id"] if placement_identity else None
+            ),
         )
     except CanonicalProcessApplyError as exc:
         # A create that reported success without an id fails CLOSED: the mutation
@@ -7883,7 +7886,16 @@ def _execute_canonical_process(
         # claiming "the account root" for it would be a fabrication (Codex
         # round 16 F2). `None` under the key means a parsed root.
         if placement_identity is not None and not placement_honoured:
-            result["observed_folder"] = observed_placement
+            # The FULL path, so a mismatch is distinguishable from the
+            # requested folder even when the leaves collide (Codex round 17);
+            # the readback's own folderId rides along when it reported one.
+            result["observed_folder"] = (
+                placement_identity["full_path"]
+                if not placement_identity["is_root"]
+                else None
+            )
+            if placement_identity["folder_id"]:
+                result["observed_folder_id"] = placement_identity["folder_id"]
 
     # THE PLATFORM DOES NOT ALWAYS HONOUR THE REQUESTED NAME (QA-153-r7-01).
     #
@@ -8491,10 +8503,11 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     else:
                         apply_warnings.append(
                             "Process {0!r} requested folder {1!r}, but the live "
-                            "read-back could not be parsed, so its placement is "
-                            "UNVERIFIED — this platform ignores folderName on "
-                            "create, so do not assume it landed there. Re-read "
-                            "the component before relying on it.".format(
+                            "read-back could not be read (unavailable or "
+                            "unparseable), so its placement is UNVERIFIED — "
+                            "this platform ignores folderName on create, so do "
+                            "not assume it landed there. Re-read the component "
+                            "before relying on it.".format(
                                 key,
                                 _step.get("requested_folder_name"),
                             )

@@ -2602,6 +2602,19 @@ def test_a_folder_named_like_the_account_cannot_fake_a_placement():
     ))
     assert imposter["_success"] is True, imposter.get("error")
     assert imposter["results"]["proc"]["placement_verified"] is False
+    # Codex round 17 F1: the KNOWN identity is carried, not discarded — the
+    # attestation records the readback's own folderId (never the requested
+    # resolution), and the step + warning name the full observed path, so the
+    # actual placement is distinguishable from the requested same-named folder.
+    placement = imposter["process_mutations"][0]["resolved_placement"]
+    assert placement["folder_id"] == "folder-OTHER"
+    assert placement["folder_name"] == "Acct"
+    step = imposter["results"]["proc"]
+    assert step["observed_folder"] == "Root/Acct"
+    assert step["observed_folder_id"] == "folder-OTHER"
+    warning = [w for w in (imposter.get("warnings") or []) if "NOT placed" in w]
+    assert warning, imposter.get("warnings")
+    assert "Root/Acct" in warning[0]
     # ...and the SAME folderId confirms through the identity branch.
     identified = _run(lambda: _SUBMITTED["xml"].replace(
         'name="M12.15 Process"',
@@ -2666,5 +2679,8 @@ def test_a_failed_readback_never_claims_the_component_is_at_root():
     unverified = [w for w in warnings if "placement is UNVERIFIED" in w]
     assert unverified, warnings
     assert "Target Folder" in unverified[0]
+    # Codex round 17 F2: this path never parsed anything — the fetch itself
+    # failed — so the warning must not diagnose a parse failure.
+    assert "could not be parsed" not in unverified[0]
     assert not [w for w in warnings if "NOT placed" in w]
     assert not [w for w in warnings if "read-back shows it in" in w]
