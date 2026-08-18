@@ -7584,7 +7584,8 @@ def _execute_canonical_process(
             message = f"Missing component_id for update of process '{key}'"
             return {
                 "result": _canonical_result(
-                    _success=False, status="failed", error=message
+                    # Decided before any create or update call is issued.
+                    _success=False, status="refused", error=message
                 ),
                 "error": message,
                 "error_code": "PROCESS_MATERIALIZATION_PLAN_INVALID",
@@ -7618,9 +7619,31 @@ def _execute_canonical_process(
     # the account; but the per-step record is what `verify` and a human
     # reconciler read, and it said a write happened that did not.
     succeeded = bool(exec_result.get("_success", False))
+    # A failure that PROVABLY wrote nothing is `refused`, not `failed`.
+    #
+    # QA-153-r10-01 widened the name warning onto `failed` because a
+    # commit-then-fail may have landed a write; Codex round 10 then found that
+    # `failed` also covers failures that provably precede any write — a fetch
+    # that never got to push, a missing update target. Both are right, which
+    # means `status` alone cannot answer "was anything written".
+    #
+    # The authority already exists and this slice wrote it: a preservation code
+    # is registered `retryable=True` PRECISELY when nothing was written
+    # (`UPDATE_PRESERVATION_FETCH_FAILED`) and `retryable=False` when a write may
+    # have landed (`..._PUSH_FAILED`). Reading the taxonomy is therefore reading
+    # the same fact the codes were catalogued to express, rather than keeping a
+    # second list of pre-write failures here.
+    if not succeeded:
+        from ..errors import ERROR_TAXONOMY
+
+        _spec = ERROR_TAXONOMY.get(str(exec_result.get("error_code") or ""))
+        wrote_nothing = _spec is not None and _spec.retryable
+    else:
+        wrote_nothing = False
     result = _canonical_result(
         status=(
-            ("updated" if action == "update" else "created") if succeeded else "failed"
+            ("updated" if action == "update" else "created") if succeeded
+            else ("refused" if wrote_nothing else "failed")
         ),
         component_id=component_id,
         result=exec_result,

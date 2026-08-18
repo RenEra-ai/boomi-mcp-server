@@ -1546,30 +1546,95 @@ def test_a_write_that_committed_then_failed_still_warns_about_its_name():
     update whose push landed — which is precisely where an unconfirmed name
     matters most.
 
-    `failed` is a WRITING status, so dropping the `_success` clause covers it
-    without re-widening onto `refused` or `reused`, the two classes the earlier
-    narrowings were for. Those controls are asserted here so the widening cannot
-    silently undo them.
+    Driven through `build_integration_action` (Codex round 10). The first
+    version of this test reimplemented the predicate locally, so restoring the
+    `_success` clause — or deleting the production warning outright — would have
+    left it green. It protected nothing. Fifth time in this slice a guard I wrote
+    tested a copy of the rule instead of the rule.
     """
-    from boomi_mcp.categories import integration_builder as ib
+    created = {"n": 0}
 
-    def _warns(status, verified):
-        step = {"status": status, "applied_name_verified": verified,
-                "_success": status not in ("failed", "refused")}
-        writing = str(step["status"]) not in ib._NON_WRITING_STEP_STATUSES
-        return writing and step["applied_name_verified"] is False
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    # The case that was missed: a write that committed and then failed.
-    assert _warns("failed", False) is True
-    # ...and a write that succeeded with an unconfirmed name, as before.
-    assert _warns("created", False) is True
-    assert _warns("updated", False) is True
-    # The two false-positive classes stay excluded.
-    assert _warns("reused", False) is False
-    assert _warns("refused", False) is False
-    # A confirmed name never warns, whatever the status.
-    for status in ("created", "updated", "failed", "reused", "refused"):
-        assert _warns(status, True) is False, status
+    def _commit_then_fail(_client, _profile, payload_in):
+        # The write LANDED — the platform has the component — and the response
+        # did not come back. This is the case that must warn.
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": False, "error": "connection reset after commit"}
 
-    # The split is DERIVED, not restated here.
-    assert ib._NON_WRITING_STEP_STATUSES == frozenset({"reused", "refused"})
+    _SUBMITTED.clear()
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _commit_then_fail
+        get_xml.side_effect = _live_xml
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(), "dry_run": False},
+        )
+
+    assert result["_success"] is False
+    step = result["partial_results"]["proc"]
+    assert step["status"] == "failed"
+    assert step["applied_name_verified"] is False
+    assert [w for w in (result.get("warnings") or []) if "did not confirm" in w], result
+
+
+def test_a_failure_that_provably_wrote_nothing_does_not_warn():
+    """Codex round 10: `failed` is not uniformly post-write.
+
+    A preservation FETCH failure never reaches the push, so nothing was written
+    — and `_apply_plan` would otherwise say a write may have landed. The
+    discriminator is not a second list of pre-write failures here: it is the
+    taxonomy's own `retryable` flag, which this slice set to True on
+    `UPDATE_PRESERVATION_FETCH_FAILED` precisely because nothing was written,
+    and False on `..._PUSH_FAILED` because a write may have.
+    """
+    from boomi_mcp.errors import ERROR_TAXONOMY
+
+    # The authority says what the code says.
+    assert ERROR_TAXONOMY["UPDATE_PRESERVATION_FETCH_FAILED"].retryable is True
+    assert ERROR_TAXONOMY["UPDATE_PRESERVATION_PUSH_FAILED"].retryable is False
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _fetch_failed(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {
+            "_success": False,
+            "error_code": "UPDATE_PRESERVATION_FETCH_FAILED",
+            "error": "could not read the live component",
+        }
+
+    _SUBMITTED.clear()
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _fetch_failed
+        get_xml.side_effect = _live_xml
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(), "dry_run": False},
+        )
+
+    assert result["_success"] is False
+    step = result["partial_results"]["proc"]
+    # Provably wrote nothing -> `refused`, which is a NON-writing status.
+    assert step["status"] == "refused"
+    assert not [w for w in (result.get("warnings") or []) if "did not confirm" in w]
+    # Account-level accounting is UNAFFECTED and correctly reports `performed`:
+    # the supporting connectors really were created before the process refused.
+    # `refused` is a statement about THIS STEP, not about the apply — conflating
+    # the two is what the first version of this assertion did.
+    assert result.get("mutation_status") == "performed"
+    assert result["partial_results"]["conn"]["status"] == "created"
