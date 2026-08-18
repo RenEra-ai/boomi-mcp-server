@@ -2046,16 +2046,20 @@ def test_folder_placement_resolves_to_exactly_one_live_folder():
     assert placement["folder_name"] == "Target Folder"
     assert placement["folder_id"] == "folder-1"
 
-    # ZERO matches: refused by name, BEFORE any write of the process.
+    # ZERO matches: refused BEFORE the mutation loop even starts (Codex round
+    # 13) — placement is fully pre-decidable, so not even the root's
+    # DEPENDENCIES are written. Empty partial_results is the proof.
     none = _apply_with_folders([])
     assert none["_success"] is False
     assert none["error_code"] == "PROCESS_MATERIALIZATION_PLACEMENT_NOT_FOUND"
-    assert none["partial_results"]["proc"]["status"] == "refused"
+    assert none["failed_step"] == "proc"
+    assert none["partial_results"] == {}
 
-    # MULTIPLE matches: refused, never first-match guessed.
+    # MULTIPLE matches: refused, never first-match guessed — same pre-loop stop.
     many = _apply_with_folders(two)
     assert many["_success"] is False
     assert many["error_code"] == "PROCESS_MATERIALIZATION_PLACEMENT_AMBIGUOUS"
+    assert many["partial_results"] == {}
 
     # Account-root placement (no folder named) stays legitimate.
     root = _apply(_bound_payload())
@@ -2223,3 +2227,124 @@ def test_an_unknown_envelope_field_serves_its_registered_code():
     )
     assert generic["_success"] is False
     assert generic["error_code"] == "INVALID_INPUT"
+
+
+def test_a_healthy_clone_does_not_warn_about_a_platform_rename():
+    """Codex round 13: the outer `requested_name` must be overlay-aware too.
+
+    The step-level fields read through `_requested_name()`, but the arm's outer
+    return still reported `envelope.name` — and the loop's rename warning
+    compares THAT against the live name, so every healthy clone warned that the
+    platform had renamed it.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    def _resolve(_client, comp):
+        if getattr(comp, "type", None) == "process":
+            return [{"component_id": "cid-live", "name": "M12.15 Process",
+                     "folder_name": "Home"}]
+        return []
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    base = process_ir_request().model_dump(mode="json")
+    base["intent"]["conflict_policy"] = "clone"
+
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+    from boomi_mcp.models.authoring_workflow import parse_authoring_request_v1
+
+    _SUBMITTED.clear()
+    with patch.object(ib, "_resolve_existing_components", _resolve), \
+         patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _live_xml
+        request = parse_authoring_request_v1(dict(base))
+        compiled, _ = compile_authoring_request_v1(
+            request, boomi_client=MagicMock(), profile=_PROFILE
+        )
+        payload = dict(base)
+        payload["expected_capability_revision"] = (
+            compiled.revision_binding.capability_revision
+        )
+        payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": payload, "dry_run": False},
+        )
+
+    assert result["_success"] is True, result.get("error")
+    # A DELIBERATE clone is not a platform rename and not an unconfirmed name.
+    assert not [
+        w for w in (result.get("warnings") or [])
+        if "not the authored" in w or "did not confirm" in w
+    ], result.get("warnings")
+
+
+def test_an_unknown_field_on_a_spec_nested_unit_serves_the_registered_code():
+    """Codex round 13: the location predicate covers `.processes.` paths too."""
+    spec_payload = {
+        "contract_version": "2",
+        "intent": {
+            "intent_kind": "integration_spec",
+            "integration_spec": {
+                "name": "X",
+                "components": [APPLIABLE_CONN, APPLIABLE_OP],
+                "processes": [
+                    {**process_unit().model_dump(mode="json"), "not_a_field": "x"}
+                ],
+            },
+        },
+    }
+    result = build_integration_action(
+        MagicMock(), _PROFILE, "compile", config={"authoring_request": spec_payload}
+    )
+    assert result["_success"] is False
+    assert result["error_code"] == "PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD"
+
+
+def test_reparsing_a_mutated_root_does_not_render_its_values():
+    """Codex round 13: the reparse dump must not WARN the secret onto stderr.
+
+    Dumping a mutated model makes pydantic emit a serializer warning that
+    renders `input_value` — so the exact case the reparse exists for wrote the
+    caller's authored content to stderr before the value-free parser ran.
+    """
+    import warnings as _warnings
+
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+    from boomi_mcp.recipes.composer import _validated_direct_roots
+    from boomi_mcp.recipes.errors import RecipeError
+
+    root = parse_process_ir_v1({
+        "version": "1",
+        "body": {"kind": "sequence", "steps": [
+            {"kind": "source", "connection_ref": "$ref:conn", "operation_ref": "$ref:op"},
+            {"kind": "message", "text": "hello"},
+            {"kind": "return_documents"},
+        ]},
+    })
+    object.__setattr__(root, "body", {"password": "hunter2-S3cret"})
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        try:
+            _validated_direct_roots({"proc": root})
+            raised = False
+        except RecipeError:
+            raised = True
+
+    assert raised, "a mutated root must be refused, not composed"
+    leaked = [w for w in caught if "hunter2" in str(w.message)]
+    assert leaked == [], "the serializer warning rendered the mutated value"

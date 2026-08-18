@@ -7482,6 +7482,7 @@ def _execute_canonical_process(
     account_id: Optional[str] = None,
     stored_plan=None,
     compiled_plan_digest: Optional[str] = None,
+    resolved_folder_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Materialize and apply ONE canonical ProcessIR root, and attest it.
 
@@ -7612,10 +7613,9 @@ def _execute_canonical_process(
         clone_name_override = _CLONE_SUFFIX_FORMAT.format(envelope.name)
 
     try:
-        # Placement resolves FIRST (§6 AR1-06): the refusal is fully decidable
-        # before anything is compiled or written, and both placement codes get
-        # their producer here. `None` = account-root placement, legitimate.
-        resolved_folder_id = _resolve_canonical_placement(boomi_client, envelope)
+        # Placement was resolved by the CALLER before the mutation loop began
+        # (§6 AR1-06 + Codex round 13) — resolving here was after the root's
+        # dependencies had already been written. `None` = account root.
         symbols = build_symbol_table(
             list(spec.components),
             process_keys=[u.envelope.component_key for u in (spec.processes or ())],
@@ -7865,7 +7865,10 @@ def _execute_canonical_process(
     return {"result": result, "component_id": component_id,
             "mutation": mutation, "readback": readback,
             "applied_name": applied_name,
-            "requested_name": envelope.name}
+            # Overlay-aware (Codex round 13): the loop's rename warning compares
+            # this against the live name, and `envelope.name` here made every
+            # HEALTHY clone warn that the platform had renamed it.
+            "requested_name": _requested_name()}
 
 
 def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -8184,6 +8187,40 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     # and the failure envelope carries the id. Scoped exactly as the plan
     # scopes it: typed canonical apply only; a legacy build keeps its original
     # all-at-end record with its original keys.
+    # PLACEMENT RESOLVES FOR EVERY ROOT BEFORE THE LOOP (Codex round 13).
+    #
+    # Resolving inside the canonical arm was still too late: topological order
+    # writes a root's DEPENDENCIES first, so a fully pre-decidable placement
+    # refusal landed after the connectors had been created. Nothing here has
+    # mutated yet, so a bad folder name refuses the whole apply pre-write.
+    from .components.canonical_process_apply import (
+        CanonicalProcessApplyError as _PlacementRefusal,
+    )
+
+    resolved_placements: Dict[str, Optional[str]] = {}
+    for _pkey, _unit in process_units_by_key.items():
+        try:
+            resolved_placements[_pkey] = _resolve_canonical_placement(
+                boomi_client, _unit.envelope
+            )
+        except _PlacementRefusal as _placement_exc:
+            # A repo-raised refusal whose message is our own text — rendering it
+            # is safe by construction. Anything ELSE (a transport failure inside
+            # the folder query) deliberately propagates to the dispatcher's
+            # blanket handlers: nothing has been written yet, so they honestly
+            # report `mutation_status: "none"`.
+            return {
+                "_success": False,
+                "error": str(_placement_exc),
+                "error_code": _placement_exc.error_code,
+                "failed_step": _pkey,
+                "partial_results": {},
+                "hint": (
+                    "Placement is decided before any component is written; "
+                    "nothing was created."
+                ),
+            }
+
     durable_build_id: Optional[str] = None
     if authoring_bundle is not None and process_units_by_key and not dry_run:
         durable_build_id = str(uuid4())
@@ -8298,6 +8335,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     account_id=_client_account_id(boomi_client),
                     stored_plan=_stored_plan,
                     compiled_plan_digest=_compiled_digest,
+                    resolved_folder_id=resolved_placements.get(key),
                 )
                 results[key] = outcome["result"]
                 if outcome.get("applied_name") and outcome.get("requested_name") and (
@@ -8947,7 +8985,13 @@ def _reject_invalid_typed_request(exc, action: str) -> Dict[str, Any]:
     # request is an ordinary schema failure and keeps the generic code.
     unknown_process_field = any(
         entry["type"] == "extra_forbidden"
-        and (".units." in entry["path"] or ".envelope" in entry["path"])
+        and (
+            ".units." in entry["path"]
+            or ".envelope" in entry["path"]
+            # An integration_spec intent nests its units under `.processes.`
+            # (Codex round 13) — same models, same registered code.
+            or ".processes." in entry["path"]
+        )
         for entry in locations
     )
     envelope = {

@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9923,"minimum_collected":9923,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9976,"minimum_collected":9976,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -9952,3 +9952,56 @@
 {"kind":"test","id":"pytest-009951","node_id":"tests/test_process_materialization_plan.py::test_the_plan_refuses_a_fingerprint_that_is_not_its_own","state":"active"}
 {"kind":"test","id":"pytest-009952","node_id":"tests/test_process_materialization_plan.py::test_the_preservation_projection_carries_every_runtime_field","state":"active"}
 {"kind":"test","id":"pytest-009953","node_id":"tests/test_process_materialization_plan.py::test_two_accounts_authoring_the_same_process_produce_identical_bytes","state":"active"}
+{"kind":"test","id":"pytest-009954","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_healthy_clone_does_not_warn_about_a_platform_rename","state":"active"}
+{"kind":"test","id":"pytest-009955","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_unknown_field_on_a_spec_nested_unit_serves_the_registered_code","state":"active"}
+{"kind":"test","id":"pytest-009956","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_reparsing_a_mutated_root_does_not_render_its_values","state":"active"}
+{"kind":"test","id":"pytest-009957","node_id":"tests/test_process_component_models.py::test_a_connection_override_must_declare_at_least_one_field","state":"active"}
+{"kind":"test","id":"pytest-009958","node_id":"tests/test_process_component_models.py::test_a_key_may_not_be_used_by_both_a_component_and_a_process","state":"active"}
+{"kind":"test","id":"pytest-009959","node_id":"tests/test_process_component_models.py::test_a_process_key_may_not_be_declared_twice","state":"active"}
+{"kind":"test","id":"pytest-009960","node_id":"tests/test_process_component_models.py::test_a_spec_carrying_processes_survives_a_model_dump_round_trip","state":"active"}
+{"kind":"test","id":"pytest-009961","node_id":"tests/test_process_component_models.py::test_a_unit_pairs_exactly_one_envelope_with_exactly_one_root","state":"active"}
+{"kind":"test","id":"pytest-009962","node_id":"tests/test_process_component_models.py::test_action_is_a_closed_two_value_union","state":"active"}
+{"kind":"test","id":"pytest-009963","node_id":"tests/test_process_component_models.py::test_blank_process_name_is_refused[   ]","state":"active"}
+{"kind":"test","id":"pytest-009964","node_id":"tests/test_process_component_models.py::test_blank_process_name_is_refused[\\t]","state":"active"}
+{"kind":"test","id":"pytest-009965","node_id":"tests/test_process_component_models.py::test_blank_process_name_is_refused[]","state":"active"}
+{"kind":"test","id":"pytest-009966","node_id":"tests/test_process_component_models.py::test_connection_and_field_order_are_preserved_not_sorted","state":"active"}
+{"kind":"test","id":"pytest-009967","node_id":"tests/test_process_component_models.py::test_connection_id_must_be_an_exact_reference_token","state":"active"}
+{"kind":"test","id":"pytest-009968","node_id":"tests/test_process_component_models.py::test_connector_type_is_case_folded_and_that_is_byte_safe","state":"active"}
+{"kind":"test","id":"pytest-009969","node_id":"tests/test_process_component_models.py::test_depends_on_is_canonicalized_to_sorted_order","state":"active"}
+{"kind":"test","id":"pytest-009970","node_id":"tests/test_process_component_models.py::test_duplicate_field_ids_are_preserved_because_the_renderer_preserves_them","state":"active"}
+{"kind":"test","id":"pytest-009971","node_id":"tests/test_process_component_models.py::test_empty_bindings_are_a_valid_no_op","state":"active"}
+{"kind":"test","id":"pytest-009972","node_id":"tests/test_process_component_models.py::test_every_new_model_rejects_unknown_fields[<lambda>0]","state":"active"}
+{"kind":"test","id":"pytest-009973","node_id":"tests/test_process_component_models.py::test_every_new_model_rejects_unknown_fields[<lambda>1]","state":"active"}
+{"kind":"test","id":"pytest-009974","node_id":"tests/test_process_component_models.py::test_every_new_model_rejects_unknown_fields[<lambda>2]","state":"active"}
+{"kind":"test","id":"pytest-009975","node_id":"tests/test_process_component_models.py::test_every_new_model_rejects_unknown_fields[<lambda>3]","state":"active"}
+{"kind":"test","id":"pytest-009976","node_id":"tests/test_process_component_models.py::test_every_new_model_rejects_unknown_fields[<lambda>4]","state":"active"}
+{"kind":"test","id":"pytest-009977","node_id":"tests/test_process_component_models.py::test_field_id_is_canonicalized_but_label_is_deliberately_not","state":"active"}
+{"kind":"test","id":"pytest-009978","node_id":"tests/test_process_component_models.py::test_models_are_frozen","state":"active"}
+{"kind":"test","id":"pytest-009979","node_id":"tests/test_process_component_models.py::test_name_and_action_are_required_with_no_default","state":"active"}
+{"kind":"test","id":"pytest-009980","node_id":"tests/test_process_component_models.py::test_optional_structural_strings_accept_none_and_clean_values","state":"active"}
+{"kind":"test","id":"pytest-009981","node_id":"tests/test_process_component_models.py::test_optional_structural_strings_reject_blank_or_padded[ padded-component_id]","state":"active"}
+{"kind":"test","id":"pytest-009982","node_id":"tests/test_process_component_models.py::test_optional_structural_strings_reject_blank_or_padded[ padded-folder_name]","state":"active"}
+{"kind":"test","id":"pytest-009983","node_id":"tests/test_process_component_models.py::test_optional_structural_strings_reject_blank_or_padded[-component_id]","state":"active"}
+{"kind":"test","id":"pytest-009984","node_id":"tests/test_process_component_models.py::test_optional_structural_strings_reject_blank_or_padded[-folder_name]","state":"active"}
+{"kind":"test","id":"pytest-009985","node_id":"tests/test_process_component_models.py::test_optional_structural_strings_reject_blank_or_padded[padded -component_id]","state":"active"}
+{"kind":"test","id":"pytest-009986","node_id":"tests/test_process_component_models.py::test_optional_structural_strings_reject_blank_or_padded[padded -folder_name]","state":"active"}
+{"kind":"test","id":"pytest-009987","node_id":"tests/test_process_component_models.py::test_processes_defaults_to_empty_and_is_additive","state":"active"}
+{"kind":"test","id":"pytest-009988","node_id":"tests/test_process_component_models.py::test_repr_suppresses_authored_values_but_keeps_discriminants","state":"active"}
+{"kind":"test","id":"pytest-009989","node_id":"tests/test_process_component_models.py::test_self_and_duplicate_dependencies_are_refused","state":"active"}
+{"kind":"test","id":"pytest-009990","node_id":"tests/test_process_component_models.py::test_the_namespace_check_does_not_strictify_the_legacy_component_surface","state":"active"}
+{"kind":"test","id":"pytest-009991","node_id":"tests/test_process_component_models.py::test_the_outer_frozen_model_does_not_deep_freeze_the_nested_ir","state":"active"}
+{"kind":"test","id":"pytest-009992","node_id":"tests/test_process_component_models.py::test_there_is_no_public_folder_id_field","state":"active"}
+{"kind":"test","id":"pytest-009993","node_id":"tests/test_process_component_models.py::test_xpath_is_required_only_for_an_explicitly_database_override","state":"active"}
+{"kind":"test","id":"pytest-009994","node_id":"tests/test_process_component_recipe_lift.py::test_a_name_carried_only_in_config_is_REFUSED","state":"active"}
+{"kind":"test","id":"pytest-009995","node_id":"tests/test_process_component_recipe_lift.py::test_a_reference_only_component_cannot_satisfy_a_root","state":"active"}
+{"kind":"test","id":"pytest-009996","node_id":"tests/test_process_component_recipe_lift.py::test_a_reference_only_process_is_not_an_envelope","state":"active"}
+{"kind":"test","id":"pytest-009997","node_id":"tests/test_process_component_recipe_lift.py::test_a_root_without_a_usable_name_is_refused_here_not_at_apply[   ]","state":"active"}
+{"kind":"test","id":"pytest-009998","node_id":"tests/test_process_component_recipe_lift.py::test_a_root_without_a_usable_name_is_refused_here_not_at_apply[None]","state":"active"}
+{"kind":"test","id":"pytest-009999","node_id":"tests/test_process_component_recipe_lift.py::test_a_root_without_a_usable_name_is_refused_here_not_at_apply[]","state":"active"}
+{"kind":"test","id":"pytest-010000","node_id":"tests/test_process_component_recipe_lift.py::test_cardinality_other_than_exactly_one_is_refused[given0-no component at all]","state":"active"}
+{"kind":"test","id":"pytest-010001","node_id":"tests/test_process_component_recipe_lift.py::test_cardinality_other_than_exactly_one_is_refused[given1-two authored components]","state":"active"}
+{"kind":"test","id":"pytest-010002","node_id":"tests/test_process_component_recipe_lift.py::test_envelope_config_keys_are_promoted_from_an_allowlist","state":"active"}
+{"kind":"test","id":"pytest-010003","node_id":"tests/test_process_component_recipe_lift.py::test_no_roots_means_no_units_and_no_components_removed","state":"active"}
+{"kind":"test","id":"pytest-010004","node_id":"tests/test_process_component_recipe_lift.py::test_several_roots_each_pair_with_their_own_component","state":"active"}
+{"kind":"test","id":"pytest-010005","node_id":"tests/test_process_component_recipe_lift.py::test_the_root_and_its_component_become_one_unit","state":"active"}
+{"kind":"test","id":"pytest-010006","node_id":"tests/test_process_component_recipe_lift.py::test_typed_extension_bindings_are_built_from_legacy_config","state":"active"}

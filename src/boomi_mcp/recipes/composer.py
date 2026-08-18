@@ -274,7 +274,12 @@ def _validated_direct_roots(
         # CURRENT state, which is the only state that matters.
         try:
             roots[key] = parse_process_ir_v1(
-                value.model_dump(mode="json")
+                # `warnings=False` is load-bearing (Codex round 13): dumping a
+                # MUTATED model — the exact case this reparse exists for — makes
+                # pydantic emit a serializer warning that renders `input_value`,
+                # writing the caller's authored content (a secret included) to
+                # stderr before the value-free parser ever runs.
+                value.model_dump(mode="json", warnings=False)
                 if isinstance(value, ProcessIRV1)
                 else value
             )
