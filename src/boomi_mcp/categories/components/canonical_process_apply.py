@@ -439,17 +439,17 @@ def observed_folder_identity(component_xml: str) -> Optional[Dict[str, Any]]:
         if len(segments) > 1:
             return {"full_path": full_path, "leaf": segments[-1],
                     "folder_id": folder_id, "is_root": False}
-        # A single-segment full path is the ACCOUNT itself — unless the
-        # readback ALSO names a folder id, which contradicts it (Codex
-        # round 18: path attributes are optional metadata, an id is folder
-        # evidence). The id is the stronger claim: keep it, drop the path,
-        # and let the identity comparison decide.
-        if folder_id:
-            return {"full_path": None, "leaf": None, "folder_id": folder_id,
-                    "is_root": False}
+        # A single-segment full path is the ACCOUNT itself, and that holds
+        # even when the readback also names a folder id: Boomi's root IS a
+        # folder with an id of its own — live-captured in
+        # tests/fixtures/live_xml/m11/processproperty_minimal.xml, whose
+        # rooted component carries the account-name path, the account-name
+        # folderName AND a folderId (Codex round 19, correcting round 18's
+        # tie-break). The id is retained as knowledge but the classification
+        # is root, and callers never propagate a root's id as a placement.
         return {"full_path": full_path,
                 "leaf": segments[-1] if segments else None,
-                "folder_id": None, "is_root": True}
+                "folder_id": folder_id, "is_root": True}
     name = root.attrib.get("folderName")
     if name:
         return {"full_path": name, "leaf": name, "folder_id": folder_id,

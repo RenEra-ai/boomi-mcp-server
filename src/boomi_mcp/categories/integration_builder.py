@@ -7849,8 +7849,14 @@ def _execute_canonical_process(
             ),
             submitted_xml_digest=precomputed,
             observed_placement=observed_placement,
+            # A root identity's folder id is the ROOT's own id (live shape,
+            # Codex round 19) — it is never a placement, so it never reaches
+            # the attestation; pairing it with the root classification is the
+            # round-18 contradiction from the other direction.
             observed_folder_id=(
-                placement_identity["folder_id"] if placement_identity else None
+                placement_identity["folder_id"]
+                if placement_identity and not placement_identity["is_root"]
+                else None
             ),
         )
     except CanonicalProcessApplyError as exc:
@@ -7894,7 +7900,9 @@ def _execute_canonical_process(
                 if not placement_identity["is_root"]
                 else None
             )
-            if placement_identity["folder_id"]:
+            if placement_identity["folder_id"] and not placement_identity[
+                "is_root"
+            ]:
                 result["observed_folder_id"] = placement_identity["folder_id"]
 
     # THE PLATFORM DOES NOT ALWAYS HONOUR THE REQUESTED NAME (QA-153-r7-01).

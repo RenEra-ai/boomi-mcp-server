@@ -2701,6 +2701,122 @@ def test_an_id_only_readback_is_a_folder_not_the_root():
     assert "the account root" not in warning[0]
 
 
+def test_the_roots_own_folder_id_does_not_make_it_a_folder():
+    """Codex round 19, against live capture: Boomi's account root IS a folder —
+    `tests/fixtures/live_xml/m11/processproperty_minimal.xml` shows a rooted
+    component's readback carrying folderFullPath="Renera" (single segment),
+    folderName="Renera" AND folderId. The round-18 tie-break let that id flip
+    the classification to non-root, so a rooted create would be attested with
+    the root's folderId and warned about as an unknown folder id. The
+    single-segment path stays authoritative: root, id never propagated as a
+    placement.
+    """
+    unit = process_unit(folder_name="Target Folder")
+    folders = [{"id": "folder-1", "name": "Target Folder", "deleted": False}]
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    # The LIVE root shape, all three attributes exactly as the platform serves
+    # them for a rooted component.
+    def _live(_client, component_id, *_a, **_k):
+        if component_id == _PROCESS_ID:
+            return {"type": "process", "xml": _SUBMITTED["xml"].replace(
+                'name="M12.15 Process"',
+                'name="M12.15 Process" folderFullPath="Acct"'
+                ' folderId="Rjo4NjMyNjEx"', 1,
+            ).replace(' folderName="Target Folder"', ' folderName="Acct"', 1)}
+        return {"type": "connector-settings", "xml": _LIVE_COMPONENT_XML}
+
+    with patch("boomi_mcp.categories.folders._query_all_folders",
+               return_value=folders), \
+         patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _live
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(
+                process_ir_request(units=(unit,))
+            ), "dry_run": False},
+        )
+
+    assert result["_success"] is True, result.get("error")
+    step = result["results"]["proc"]
+    assert step["placement_verified"] is False
+    # The root's own id is NOT a placement: never on the step...
+    assert "observed_folder_id" not in step
+    # ...never in the attestation...
+    placement = result["process_mutations"][0]["resolved_placement"]
+    assert placement["folder_id"] is None
+    assert placement["folder_name"] is None
+    # ...and the warning calls it the root, not an unknown folder id.
+    warning = [w for w in (result.get("warnings") or []) if "NOT placed" in w]
+    assert warning, result.get("warnings")
+    assert "the account root" in warning[0]
+    assert "folder id" not in warning[0]
+
+
+def test_the_placement_classifier_agrees_with_every_live_capture():
+    """The identity classifier, graded against the WHOLE live-capture corpus.
+
+    Codex rounds 16-19 each found one more readback shape the classifier
+    mis-read, and round 19's was refutable from a fixture already in the repo.
+    This witness closes that loop structurally: every live capture under
+    tests/fixtures/live_xml/ that carries folder attributes must classify to
+    exactly what the platform said — a single-segment full path is the account
+    root (id retained, never a placement), a multi-segment path is that folder
+    with the capture's own folderId. A future shape the platform serves lands
+    here as a fixture, not as a review round.
+    """
+    import pathlib
+    import xml.etree.ElementTree as ET
+    from boomi_mcp.categories.components.canonical_process_apply import (
+        observed_folder_identity,
+    )
+
+    corpus = sorted(pathlib.Path("tests/fixtures/live_xml").rglob("*.xml"))
+    graded = 0
+    for fixture in corpus:
+        xml_text = fixture.read_text()
+        try:
+            attrs = ET.fromstring(xml_text).attrib
+        except ET.ParseError:
+            continue
+        full_path = attrs.get("folderFullPath")
+        if not full_path:
+            continue
+        graded += 1
+        identity = observed_folder_identity(xml_text)
+        assert identity is not None, fixture
+        segments = [part for part in full_path.rstrip("/").split("/") if part]
+        if len(segments) <= 1:
+            assert identity["is_root"] is True, (fixture, identity)
+            assert identity["folder_id"] == (attrs.get("folderId") or None), (
+                fixture, identity)
+        else:
+            assert identity["is_root"] is False, (fixture, identity)
+            assert identity["leaf"] == segments[-1], (fixture, identity)
+            assert identity["full_path"] == full_path, (fixture, identity)
+            assert identity["folder_id"] == (attrs.get("folderId") or None), (
+                fixture, identity)
+    # Non-vacuity: the corpus must actually exercise BOTH classifications.
+    assert graded >= 10, graded
+    roots = [f for f in corpus
+             if 'folderFullPath="Renera"' in f.read_text()]
+    assert roots, "corpus lost its live root capture"
+
+
 def test_a_failed_readback_never_claims_the_component_is_at_root():
     """Codex round 16 F2: when the post-create readback cannot be fetched or
     parsed, the component's location is UNKNOWN — the warning must say the
