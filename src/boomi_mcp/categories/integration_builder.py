@@ -7518,7 +7518,7 @@ def _execute_canonical_process(
         CanonicalProcessApplyError,
         applied_component_name,
         applied_folder_name,
-        observed_folder_leaf,
+        observed_folder_identity,
         build_mutation_attestation,
         build_readback_attestation,
         materialize_canonical_process_xml,
@@ -7800,14 +7800,31 @@ def _execute_canonical_process(
     # or submitted placement over-claims. Only a readback-confirmed match may
     # carry the resolved folder id into the attestation.
     live_xml_early = _live_component_xml(boomi_client, component_id) if component_id else None
+    placement_identity = (
+        observed_folder_identity(live_xml_early) if live_xml_early else None
+    )
+    # A parsed root readback is a KNOWN location (`is_root`), not a folder — the
+    # account-root full path is a single segment equal to the account name, so
+    # reducing it to a leaf both attested the account name as a placement and
+    # let a requested folder that happened to equal the account name confirm
+    # falsely (Codex round 16 F1). `None` here therefore means UNKNOWN or root,
+    # and the attestation's folder_name stays empty for both.
     observed_placement = (
-        observed_folder_leaf(live_xml_early) if live_xml_early else None
+        placement_identity["leaf"]
+        if placement_identity and not placement_identity["is_root"]
+        else None
     )
-    placement_honoured = bool(
-        envelope.folder_name
-        and observed_placement
-        and observed_placement == envelope.folder_name
-    )
+    if placement_identity is None or placement_identity["is_root"]:
+        placement_honoured = False
+    elif placement_identity["folder_id"] and resolved_folder_id:
+        # The readback's own folderId is the strongest comparison basis: it is
+        # an IDENTITY, immune to two folders sharing a leaf name.
+        placement_honoured = placement_identity["folder_id"] == resolved_folder_id
+    else:
+        placement_honoured = bool(
+            envelope.folder_name
+            and placement_identity["leaf"] == envelope.folder_name
+        )
     # The digest travels from the point CLOSEST to the wire: the update path
     # computed it immediately before its push; the create path immediately
     # before the raw create call above.
@@ -7860,7 +7877,12 @@ def _execute_canonical_process(
     if envelope.folder_name and action == "create":
         result["requested_folder_name"] = envelope.folder_name
         result["placement_verified"] = placement_honoured
-        if live_xml_early and not placement_honoured:
+        # `observed_folder` is set ONLY from a PARSED readback — its presence is
+        # what licenses the ignored-placement warning to name a location. A
+        # failed readback leaves the key absent: the location is UNKNOWN, and
+        # claiming "the account root" for it would be a fabrication (Codex
+        # round 16 F2). `None` under the key means a parsed root.
+        if placement_identity is not None and not placement_honoured:
             result["observed_folder"] = observed_placement
 
     # THE PLATFORM DOES NOT ALWAYS HONOUR THE REQUESTED NAME (QA-153-r7-01).
@@ -8448,16 +8470,35 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     # so, name where the component actually is, and give the
                     # remedy. The attestation records only the observed
                     # placement, so this warning is the caller's one notice.
-                    apply_warnings.append(
-                        "Process {0!r} requested folder {1!r}, but the live "
-                        "read-back shows it in {2!r} — this platform ignores "
-                        "folderName on create, so the component was NOT placed "
-                        "there. Move it via manage_folders or the UI.".format(
-                            key,
-                            _step.get("requested_folder_name"),
-                            _step.get("observed_folder") or "the account root",
+                    #
+                    # ...but only a PARSED readback knows where the component
+                    # is. `observed_folder` is present exactly then (`None`
+                    # under it = a parsed root); a failed readback leaves it
+                    # absent, and asserting "the account root" for an unknown
+                    # location is a fabrication (Codex round 16 F2) — that case
+                    # gets the unverified wording instead.
+                    if "observed_folder" in _step:
+                        apply_warnings.append(
+                            "Process {0!r} requested folder {1!r}, but the live "
+                            "read-back shows it in {2!r} — this platform ignores "
+                            "folderName on create, so the component was NOT placed "
+                            "there. Move it via manage_folders or the UI.".format(
+                                key,
+                                _step.get("requested_folder_name"),
+                                _step.get("observed_folder") or "the account root",
+                            )
                         )
-                    )
+                    else:
+                        apply_warnings.append(
+                            "Process {0!r} requested folder {1!r}, but the live "
+                            "read-back could not be parsed, so its placement is "
+                            "UNVERIFIED — this platform ignores folderName on "
+                            "create, so do not assume it landed there. Re-read "
+                            "the component before relying on it.".format(
+                                key,
+                                _step.get("requested_folder_name"),
+                            )
+                        )
                 if (
                     str(_step.get("status", "")) not in _NON_WRITING_STEP_STATUSES
                     and _step.get("applied_name_verified") is False

@@ -396,15 +396,25 @@ def applied_component_name(component_xml: str) -> Optional[str]:
     return root.attrib.get("name") or None
 
 
-def observed_folder_leaf(component_xml: str) -> Optional[str]:
-    """The folder the platform ACTUALLY placed the component in, from readback.
+def observed_folder_identity(component_xml: str) -> Optional[Dict[str, Any]]:
+    """WHERE the platform actually placed the component, as an identity.
 
-    QA-153-r12-01: the platform ignores ``folderName`` on create — measured for
-    every builder and every spelling on this surface — so an attestation built
-    from the request or the submitted bytes promises a placement that never
-    happened. The readback's ``folderFullPath`` is the only source that reports
-    where the component IS; its leaf is comparable to the requested folder name.
-    ``folderName`` is read as a fallback for platforms that echo it.
+    QA-153-r12-01: the platform ignores ``folderName`` on create, so an
+    attestation built from the request or the submitted bytes promises a
+    placement that never happened — only the readback reports where the
+    component IS.
+
+    Returns ``None`` when the XML is unreadable (location UNKNOWN — the caller
+    must not claim anything, Codex round 16 F2), else a dict:
+
+    - ``full_path`` / ``leaf`` — from ``folderFullPath`` (``folderName`` as a
+      fallback for platforms that echo it);
+    - ``folder_id`` — the readback's own ``folderId``, when present, which is
+      the STRONGEST comparison basis;
+    - ``is_root`` — a single-segment full path is the ACCOUNT itself, not a
+      folder (Codex round 16 F1: reducing it to a leaf attested the account
+      name as a placement, and a requested folder that happened to equal the
+      account name would have false-positively confirmed).
     """
     import xml.etree.ElementTree as ET
 
@@ -412,10 +422,24 @@ def observed_folder_leaf(component_xml: str) -> Optional[str]:
         root = ET.fromstring(component_xml)
     except ET.ParseError:
         return None
-    full_path = root.attrib.get("folderFullPath")
+    full_path = root.attrib.get("folderFullPath") or ""
+    folder_id = root.attrib.get("folderId") or None
     if full_path:
-        return full_path.rstrip("/").rsplit("/", 1)[-1] or None
-    return root.attrib.get("folderName") or None
+        segments = [part for part in full_path.rstrip("/").split("/") if part]
+        return {
+            "full_path": full_path,
+            "leaf": segments[-1] if segments else None,
+            "folder_id": folder_id,
+            "is_root": len(segments) <= 1,
+        }
+    name = root.attrib.get("folderName")
+    if name:
+        return {"full_path": name, "leaf": name, "folder_id": folder_id,
+                "is_root": False}
+    # Parsed, and NO folder attribute at all: the platform reported nothing,
+    # which on this surface means the account root.
+    return {"full_path": None, "leaf": None, "folder_id": folder_id,
+            "is_root": True}
 
 
 def build_readback_attestation(*, component_key: str, component_id: str, digest):
@@ -439,6 +463,6 @@ __all__ = [
     "applied_folder_name",
     "build_readback_attestation",
     "materialize_canonical_process_xml",
-    "observed_folder_leaf",
+    "observed_folder_identity",
     "resolve_extension_connections",
 ]

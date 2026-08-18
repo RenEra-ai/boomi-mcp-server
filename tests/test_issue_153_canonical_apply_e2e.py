@@ -2504,6 +2504,10 @@ def test_an_ignored_placement_is_never_attested_as_applied():
     assert not [w for w in (honoured.get("warnings") or []) if "NOT placed" in w]
 
     # THE IGNORING PLATFORM (what QA measured): the component sits at root.
+    # The root readback's folderFullPath is a SINGLE segment — the account
+    # name, not a folder — so the attestation must carry NO folder_name at all
+    # (Codex round 16 F1: the leaf reduction attested the account name as a
+    # placement that never happened).
     ignored = _run(lambda: _SUBMITTED["xml"].replace(
         'name="M12.15 Process"',
         'name="M12.15 Process" folderFullPath="Acct"', 1,
@@ -2512,10 +2516,155 @@ def test_an_ignored_placement_is_never_attested_as_applied():
     placement = ignored["process_mutations"][0]["resolved_placement"]
     # The observed placement is attested; the resolved id is NOT.
     assert placement["folder_id"] is None
-    assert placement["folder_name"] != "Target Folder"
+    assert placement["folder_name"] is None
     step = ignored["results"]["proc"]
     assert step["placement_verified"] is False
     assert step["requested_folder_name"] == "Target Folder"
     warning = [w for w in (ignored.get("warnings") or []) if "NOT placed" in w]
     assert warning, ignored.get("warnings")
     assert "Target Folder" in warning[0]
+    assert "the account root" in warning[0]
+
+
+def test_a_folder_named_like_the_account_cannot_fake_a_placement():
+    """Codex round 16 F1, the trap case: request a folder whose NAME equals the
+    account name. The root readback's single-segment folderFullPath IS the
+    account name, so a leaf-name comparison confirms a placement the platform
+    never performed — folder IDENTITY (root-vs-folder, and the readback's own
+    folderId when present) is what may confirm, never leaf-name equality.
+    """
+    unit = process_unit(folder_name="Acct")
+    folders = [{"id": "folder-acct", "name": "Acct", "deleted": False}]
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    def _run(readback_for_process):
+        _SUBMITTED.clear()
+        created["n"] = 0
+
+        def _live(_client, component_id, *_a, **_k):
+            if component_id == _PROCESS_ID:
+                return {"type": "process", "xml": readback_for_process()}
+            return {"type": "connector-settings", "xml": _LIVE_COMPONENT_XML}
+
+        with patch("boomi_mcp.categories.folders._query_all_folders",
+                   return_value=folders),              patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+            _CREATE
+        ) as create, patch(_GET_XML) as get_xml:
+            paginate.return_value = []
+            execute.side_effect = _component
+            create.side_effect = _create
+            get_xml.side_effect = _live
+            return build_integration_action(
+                MagicMock(), _PROFILE, "apply",
+                config={"authoring_request": _bound_payload(
+                    process_ir_request(units=(unit,))
+                ), "dry_run": False},
+            )
+
+    # The trap: root readback, full path == the requested folder's name.
+    trapped = _run(lambda: _SUBMITTED["xml"].replace(
+        'name="M12.15 Process"',
+        'name="M12.15 Process" folderFullPath="Acct"', 1,
+    ).replace(' folderName="Acct"', "", 1))
+    assert trapped["_success"] is True, trapped.get("error")
+    placement = trapped["process_mutations"][0]["resolved_placement"]
+    assert placement["folder_id"] is None
+    assert placement["folder_name"] is None
+    assert trapped["results"]["proc"]["placement_verified"] is False
+    assert [w for w in (trapped.get("warnings") or []) if "NOT placed" in w]
+
+    # The control: a genuine two-segment placement in that folder confirms.
+    genuine = _run(lambda: _SUBMITTED["xml"].replace(
+        'name="M12.15 Process"',
+        'name="M12.15 Process" folderFullPath="Root/Acct"', 1,
+    ))
+    assert genuine["_success"] is True, genuine.get("error")
+    placement = genuine["process_mutations"][0]["resolved_placement"]
+    assert placement["folder_name"] == "Acct"
+    assert placement["folder_id"] == "folder-acct"
+    assert genuine["results"]["proc"]["placement_verified"] is True
+
+    # The identity check outranks the leaf: a readback whose own folderId names
+    # a DIFFERENT folder does not confirm, even with the leaf name matching.
+    imposter = _run(lambda: _SUBMITTED["xml"].replace(
+        'name="M12.15 Process"',
+        'name="M12.15 Process" folderFullPath="Root/Acct"'
+        ' folderId="folder-OTHER"', 1,
+    ))
+    assert imposter["_success"] is True, imposter.get("error")
+    assert imposter["results"]["proc"]["placement_verified"] is False
+    # ...and the SAME folderId confirms through the identity branch.
+    identified = _run(lambda: _SUBMITTED["xml"].replace(
+        'name="M12.15 Process"',
+        'name="M12.15 Process" folderFullPath="Root/Acct"'
+        ' folderId="folder-acct"', 1,
+    ))
+    assert identified["_success"] is True, identified.get("error")
+    assert identified["results"]["proc"]["placement_verified"] is True
+
+
+def test_a_failed_readback_never_claims_the_component_is_at_root():
+    """Codex round 16 F2: when the post-create readback cannot be fetched or
+    parsed, the component's location is UNKNOWN — the warning must say the
+    placement is unverified, never assert the component "shows in the account
+    root". The parsed-mismatch wording is reserved for a readback that was
+    actually read.
+    """
+    unit = process_unit(folder_name="Target Folder")
+    folders = [{"id": "folder-1", "name": "Target Folder", "deleted": False}]
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    def _live(_client, component_id, *_a, **_k):
+        if component_id == _PROCESS_ID:
+            raise RuntimeError("readback unavailable")
+        return {"type": "connector-settings", "xml": _LIVE_COMPONENT_XML}
+
+    with patch("boomi_mcp.categories.folders._query_all_folders",
+               return_value=folders),          patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _live
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(
+                process_ir_request(units=(unit,))
+            ), "dry_run": False},
+        )
+
+    assert result["_success"] is True, result.get("error")
+    step = result["results"]["proc"]
+    assert step["placement_verified"] is False
+    # An unread location is UNKNOWN: no observed_folder claim on the step...
+    assert "observed_folder" not in step
+    # ...no folder_name in the attestation...
+    placement = result["process_mutations"][0]["resolved_placement"]
+    assert placement["folder_id"] is None
+    assert placement["folder_name"] is None
+    # ...and the warning says UNVERIFIED instead of asserting a location.
+    warnings = result.get("warnings") or []
+    unverified = [w for w in warnings if "placement is UNVERIFIED" in w]
+    assert unverified, warnings
+    assert "Target Folder" in unverified[0]
+    assert not [w for w in warnings if "NOT placed" in w]
+    assert not [w for w in warnings if "read-back shows it in" in w]
