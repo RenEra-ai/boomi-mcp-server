@@ -1,0 +1,16 @@
+Approvals are unavailable in this read-only review session, so nothing you request will be
+granted and no further tool call will succeed. Do not ask for approval, do not propose a plan,
+and do not wait.
+
+Emit the FULL implementation-versus-plan review NOW, as plain text, from what you have already
+read. Judge the implementation against the architect design plan that was supplied with the
+original prompt: whether it builds what the plan specified, in the structure the plan specified,
+honouring the constraints the plan set — not whether the code is good in general.
+
+Cite file:line for every concrete finding. If you were unable to read enough of the diff to
+judge a plan item, say so explicitly for that item rather than omitting it.
+
+END your reply with a verdict on its OWN FINAL LINE: exactly
+VERDICT: NO ISSUES
+or
+VERDICT: ISSUES FOUND

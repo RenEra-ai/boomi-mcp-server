@@ -1856,6 +1856,13 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "XML_PARSE_FAILED",
     "MERGE_FAILED",
     "TYPE_MISMATCH",
+    # Codes the §6 architect-review rows name: two published PLACEMENT codes the
+    # review found unreachable (that unreachability IS the finding, so the row
+    # has to name them), the schema code an unknown field should serve, and the
+    # generic code it serves instead.
+    "PROCESS_MATERIALIZATION_PLACEMENT_NOT_FOUND",
+    "PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD",
+    "INVALID_INPUT",
     "ERROR_TAXONOMY",
     "PLAN_INVALID",
     "PROCESS_MATERIALIZATION_INTERNAL_ERROR",
