@@ -1117,14 +1117,153 @@ def test_the_update_preservation_codes_are_in_the_shared_taxonomy():
         code: spec for code, spec in ERROR_TAXONOMY.items()
         if code.startswith("UPDATE_PRESERVATION_")
     }
-    assert set(family) == {
-        "UPDATE_PRESERVATION_POLICY_UNSUPPORTED",
-        "UPDATE_PRESERVATION_TYPE_MISMATCH",
-        "UPDATE_PRESERVATION_FETCH_FAILED",
-        "UPDATE_PRESERVATION_PUSH_FAILED",
-    }
+    # DERIVED from what the two emitting modules actually serve, not hand-listed
+    # — the hand-listed version pinned an incomplete catalog as complete, which
+    # is the same defect the registration was meant to fix (Codex round 3).
+    import re
+
+    emitted = set()
+    for module in (
+        "src/boomi_mcp/categories/integration_builder.py",
+        "src/boomi_mcp/categories/components/component_update_preservation.py",
+    ):
+        text = (Path(__file__).resolve().parent.parent / module).read_text()
+        emitted.update(re.findall(r"UPDATE_PRESERVATION_[A-Z_]+", text))
+    assert len(emitted) >= 7, sorted(emitted)
+    assert set(family) == emitted, sorted(set(family) ^ emitted)
     assert {spec.owner for spec in family.values()} == {"#45"}
     # The stakes asymmetry is declared, not incidental: a fetch failure wrote
     # nothing and is retry-safe; a push failure may already have landed.
     assert family["UPDATE_PRESERVATION_FETCH_FAILED"].retryable is True
     assert family["UPDATE_PRESERVATION_PUSH_FAILED"].retryable is False
+
+
+# ---------------------------------------------------------------------------
+# Codex Stage-2 review, round 3
+# ---------------------------------------------------------------------------
+
+
+def test_an_ambiguous_UPDATE_never_selects_an_arbitrary_target():
+    """Codex round 3 F1: `clone` is a CREATE-only escape.
+
+    The round-2 mirror applied it to both actions, so an `action="update"` with
+    two same-name matches took `candidates[0]` as its target — and
+    `_execute_canonical_process` reads the ACTION, not `planned_action`, so it
+    would have updated an arbitrary one of them. Same data-loss shape as the
+    clone-overwrite defect, one round later.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    two = [
+        {"component_id": "cid-a", "name": "M12.15 Process", "folder_name": "f"},
+        {"component_id": "cid-b", "name": "M12.15 Process", "folder_name": "f"},
+    ]
+
+    def _plan(action, policy):
+        spec = _spec_with_canonical_root()
+        spec["processes"][0]["envelope"]["action"] = action
+        with patch.object(ib, "_resolve_existing_components", return_value=two), \
+             patch(_PAGINATE) as paginate:
+            paginate.return_value = []
+            result = build_integration_action(
+                MagicMock(), _PROFILE, "plan",
+                config={"integration_spec": spec, "conflict_policy": policy},
+            )
+        return next(s for s in result["steps"] if s["key"] == "proc")
+
+    # An ambiguous UPDATE has no safe target under ANY policy.
+    for policy in ("reuse", "fail", "clone"):
+        step = _plan("update", policy)
+        assert step["planned_action"] == "error_ambiguous_match", policy
+        assert step["existing_component_id"] is None, policy
+
+    # A CREATE can still sidestep ambiguity under clone — it writes something new.
+    assert _plan("create", "clone")["planned_action"] == "create_clone"
+
+
+def test_an_ambiguous_canonical_step_carries_its_candidates():
+    """Codex round 3 F2: the plan omitted the ids needed to disambiguate.
+
+    Apply's fail-fast message defaults the missing list to `[]` and then reports
+    that ZERO components matched — on the one step whose problem is that several
+    did.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    two = [
+        {"component_id": "cid-a", "name": "M12.15 Process", "folder_name": "Home"},
+        {"component_id": "cid-b", "name": "M12.15 Process", "folder_name": "Other"},
+    ]
+    spec = _spec_with_canonical_root()
+    with patch.object(ib, "_resolve_existing_components", return_value=two), \
+         patch(_PAGINATE) as paginate:
+        paginate.return_value = []
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "plan",
+            config={"integration_spec": spec, "conflict_policy": "fail"},
+        )
+
+    step = next(s for s in result["steps"] if s["key"] == "proc")
+    assert [c["component_id"] for c in step["candidates"]] == ["cid-a", "cid-b"]
+    # The same sanitized shape component steps carry — no extra live metadata.
+    assert set(step["candidates"][0]) == {"component_id", "name", "folder_name"}
+
+
+def test_a_malformed_extension_path_is_a_json_pointer():
+    """Codex round 3 F3: bracket notation survived into a served `path`.
+
+    The builder reports `connections[0].fields[0]`; replacing only dots emitted
+    `/process_extensions/connections[0]/fields[0]`, so a consumer following the
+    pointer looked for a key literally named `connections[0]`.
+    """
+    from boomi_mcp.authoring.workflow import (
+        AuthoringWorkflowError,
+        _extension_bindings_from_config,
+        _json_pointer,
+    )
+
+    assert _json_pointer("process_extensions.connections[0].fields[0]") == (
+        "/process_extensions/connections/0/fields/0"
+    )
+
+    with pytest.raises(AuthoringWorkflowError) as excinfo:
+        _extension_bindings_from_config(
+            {"connections": [{"connection_id": "$ref:conn", "fields": [{"id": ""}]}]}
+        )
+    paths = [d.path for d in excinfo.value.diagnostics]
+    assert paths and all("[" not in p and "]" not in p for p in paths), paths
+
+
+def test_a_create_by_name_that_finds_nothing_says_so():
+    """QA-153-r6-01: zero candidates does not prove absence.
+
+    QA measured a LIVE process resolving to zero candidates after its name had
+    previously been soft-deleted — timing disproved as the cause — so `fail`
+    silently stopped failing and `reuse` silently stopped reusing. The mechanism
+    is in the metadata query and is shared with the component arm; what this
+    slice changed is that a canonical root's POLICY now rests on it.
+
+    Refusing every create-by-name would break the ordinary case, so the unproven
+    half is surfaced and the guaranteed form is named.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    def _warnings(policy, resolved):
+        spec = _spec_with_canonical_root()
+        with patch.object(ib, "_resolve_existing_components", return_value=resolved), \
+             patch(_PAGINATE) as paginate:
+            paginate.return_value = []
+            result = build_integration_action(
+                MagicMock(), _PROFILE, "plan",
+                config={"integration_spec": spec, "conflict_policy": policy},
+            )
+        return [w for w in (result.get("warnings") or []) if "cannot prove absence" in w]
+
+    for policy in ("fail", "reuse"):
+        assert _warnings(policy, []), policy
+    # Controls: a policy with nothing to guarantee, and a resolution that DID
+    # find something, both stay quiet.
+    assert not _warnings("clone", [])
+    assert not _warnings(
+        "fail", [{"component_id": "cid-a", "name": "M12.15 Process", "folder_name": "f"}]
+    )

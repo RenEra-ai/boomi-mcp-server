@@ -5948,15 +5948,16 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             # of the same name and simply created another one.
             canonical_existing_id = envelope.component_id
             canonical_action = envelope.action
+            candidates: List[Dict[str, Any]] = []
             if not canonical_existing_id and envelope.name:
                 from ..authoring.workflow import _ParticipantView
 
-                candidates = _resolve_existing_components(
+                candidates = list(_resolve_existing_components(
                     boomi_client,
                     _ParticipantView(
                         key=key, name=envelope.name, component_id=None
                     ),
-                )
+                ))
                 if len(candidates) == 1:
                     canonical_existing_id = candidates[0].get("component_id")
                 elif len(candidates) > 1:
@@ -5965,17 +5966,47 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     # create-by-name that matched two live processes left
                     # `canonical_action="create"` with no existing id — and apply
                     # then performed a plain unsuffixed create under `reuse`,
-                    # `fail` AND `clone` alike, violating all three. The
-                    # component arm's rule, mirrored: `clone` can proceed safely
-                    # because it creates something new either way; the others
-                    # cannot pick a target and must refuse.
-                    if conflict_policy == "clone":
+                    # `fail` AND `clone` alike, violating all three.
+                    #
+                    # But `clone` is a CREATE-only escape (Codex round 3). The
+                    # first version of this mirror applied it to both actions, so
+                    # an `action="update"` with two same-name matches took
+                    # `candidates[0]` as its target — and `_execute_canonical_
+                    # process` reads the ACTION, not `planned_action`, so it
+                    # updated an arbitrary one of them. An ambiguous update has
+                    # no safe target by definition and stays unresolvable; only a
+                    # create can sidestep ambiguity, because it writes something
+                    # new either way.
+                    if conflict_policy == "clone" and envelope.action == "create":
                         canonical_action = "create_clone"
                         canonical_existing_id = candidates[0].get("component_id")
                     else:
                         canonical_action = "error_ambiguous_match"
                 elif not candidates and envelope.action == "update":
                     canonical_action = "error_missing_target"
+                elif not candidates and conflict_policy in ("fail", "reuse"):
+                    # ZERO candidates does not prove absence (QA-153-r6-01).
+                    #
+                    # `fail` and `reuse` are guarantees ABOUT AN EXISTING
+                    # component, and both are being decided here on a name
+                    # lookup that can under-report: QA measured a live process
+                    # resolving to zero candidates after its name had previously
+                    # been soft-deleted, with timing disproved as the cause. The
+                    # policy then silently degrades to a plain create — `fail`
+                    # does not fail, `reuse` does not reuse.
+                    #
+                    # The mechanism is in the metadata query and is shared with
+                    # the component arm; what this slice changed is that a
+                    # canonical root's policy now RESTS on it. Refusing every
+                    # create-by-name would break the ordinary case, so the
+                    # unproven half is surfaced instead of assumed — and the
+                    # guaranteed form is named.
+                    warnings.append(
+                        "Process '{0}': conflict_policy={1!r} was decided by NAME "
+                        "lookup, which found no existing component. A name lookup "
+                        "cannot prove absence — pin envelope.component_id for a "
+                        "guaranteed reuse/fail.".format(key, conflict_policy)
+                    )
 
             if canonical_action == "create" and canonical_existing_id:
                 if conflict_policy == "reuse":
@@ -6009,6 +6040,19 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     "materialization": CANONICAL_PROCESS_MATERIALIZATION,
                 }
             )
+            if candidates:
+                # The same sanitized shape component steps carry (Codex round 3).
+                # Without it, apply's fail-fast message defaults the list to `[]`
+                # and reports that ZERO components matched — on the one step
+                # whose whole problem is that several did.
+                steps[-1]["candidates"] = [
+                    {
+                        "component_id": c.get("component_id"),
+                        "name": c.get("name"),
+                        "folder_name": c.get("folder_name"),
+                    }
+                    for c in candidates
+                ]
             continue
 
         comp = _component_for_key(key, components_by_key)

@@ -242,6 +242,11 @@ authority-derived coverage claim.
 | CX2-03 | same round | "Reject malformed connections containers … For a present block such as `{\"connection\": [...]}`, `{\"connections\": null}`, or `{\"connections\": {}}`, this coalesces the malformed value to an empty iterable and returns empty bindings … recipe normalization still silently drops requested environment overrides." | **P1** | runtime behavior · machine-served schemas/contracts | **DC-1's family** — a hand-copied SUBSET of an authority's refusals, authority `extension_bindings_from_legacy_config`; introduced BY the CX1-09 fix | **Critical** — anchor: source label P1 | `517f31d` | `fixed` structurally — the normalizer no longer answers the tolerance question, it DELEGATES it. See below. |
 | CX2-04 | same round | "Preserve the legacy empty-list no-op … The legacy `extension_bindings_from_legacy_config` explicitly accepts an empty list as a no-op, and this boundary promises to preserve every legacy-accepted input, so existing equivalent recipe configuration now fails instead of emitting empty overrides." | **P2** | runtime behavior | same instance as CX2-03 — the OTHER direction of the same hand-copy | Standard — in a blocking class, no critical anchor, source label P2 | `517f31d` | `fixed` by the same delegation. Recorded as its own row because it is the evidence that a hand-copy of an authority is wrong in BOTH directions at once: the same 38 lines rejected what the authority accepts AND accepted what it rejects. |
 | CX2-05 | same round | "Register the new preservation error code … callers now receive `UPDATE_PRESERVATION_PUSH_FAILED`, but this patch defines it only as a local string and never adds it to the shared `boomi_mcp.errors.ERROR_TAXONOMY`." | **P2** | machine-served schemas/contracts | (a served stable code absent from the taxonomy consumers classify by, `ERROR_TAXONOMY`) — 1st instance | Standard — source label P2 | `517f31d` | `fixed`, but NOT as prescribed — recorded because the remedy differs from the request. Registering only the new member would have put an #153-owned code outside #153's three declared prefixes and broken the one-introducer-per-family biconditional `test_issue_153_owns_its_three_families_as_a_biconditional` enforces. The whole `UPDATE_PRESERVATION_*` family (4 codes) is registered instead, under **#45**, the issue `git log -S` identifies as introducing it — which closes the real gap (the family was never discoverable) rather than half of it. `FETCH_FAILED` is declared `retryable=True` in the named retryable set with its reason; `PUSH_FAILED` deliberately is not, because the merged document was submitted and a write may already have landed. |
+| QA-153-r6-01 | L1 Stage-1 QA round 6, `boomi-qa-tester`, report `agents/reports/2026-08-18-issue-153-m12-15-stage1-r6.md`, freeze stamp `6fa44c4102cb/clean/9cd84129b28b` identical at entry and exit of all 20 scenarios | "`conflict_policy` silently degrades to CREATE for any name that was previously soft-deleted." A live process resolves to ZERO candidates after its name has been deleted and recreated, so the policy block never runs: `fail` does not fail and `reuse` does not reuse. | **High** (source label) | **mutation accounting** · runtime behavior | (a guarantee about an existing component decided by a lookup that cannot prove absence, the metadata query) — 1st instance | **Critical** — anchor: source label High | `6fa44c4` | `fixed` **as far as this slice can soundly fix it, and the remainder is stated rather than implied.** QA disproved timing as the cause (0/2/5/10 s; a fresh name resolves in ~3.9 s and `fail` refuses every time) — the discriminator is deletion history. The mechanism lives in the metadata query and is SHARED with the component arm; what this slice changed is that a canonical root's policy now rests on it. Refusing every create-by-name would break the ordinary case, so a create-by-name under `fail`/`reuse` that resolves to zero now carries a served warning naming the limit and the guaranteed alternative (`envelope.component_id`, which skips resolution entirely — QA confirmed GET-by-id is unaffected). Carried to QA r7 as a live question: is the recreated component returned by the query at all, and with what `current_version`/`deleted`? That determines whether a `show_all=True` + local-dedupe fix in `paginate_metadata` is correct, which would be the real repair and belongs where the mechanism is. |
+| CX3-01 | L2 Stage-2 Codex commit-review round 3, run dir `cdx-review.tqN8HE`, `STATUS: completed`, `SCOPE: branch diff against 517f31d32acadb2f13c117224aa5e22c10b487ed (517f31d) head=6fa44c4102cb17c9fcc852f9bf5d7e4c5a5e9d66 dirty=false` | "Keep ambiguous updates from selecting an arbitrary target … `_execute_canonical_process` ignores `planned_action`, sees the update action plus that ID, and updates the first match, silently rewriting an arbitrary process." | **P1** | runtime behavior · **data loss** | shares CX1-02's pair (a policy branch applied without checking the action it is valid for, `conflict_policy`'s create-only semantics) — **2nd instance** | **Critical** — anchor: data loss, and source label P1 | `6fa44c4` | `fixed` — `create_clone` is restricted to `action == "create"`; an ambiguous update stays `error_ambiguous_match` with no existing id. Introduced BY the CX2-02 fix: mirroring the component arm's rule, I mirrored the OUTCOME (`clone` proceeds) without its GUARD (`clone` proceeds *on the create path*). Recorded as the second instance of the same pair because it is: both are a clone decision made from a truthy value rather than from the action. |
+| CX3-02 | same round | "Include matched candidates in canonical ambiguity steps … the plan omits the IDs needed to disambiguate, and apply's fail-fast message reports that zero components matched because it defaults the missing list to `[]`." | **P2** | machine-served schemas/contracts | DC-2's family (a canonical step omitting a field its component sibling carries) | Standard — source label P2 | `6fa44c4` | `fixed` — the canonical step carries the same sanitized `candidates` shape (`component_id`/`name`/`folder_name`) component steps carry. No extra live metadata is fetched: the list is already in hand from the resolution the previous round added. |
+| CX3-03 | same round | "Convert indexed extension fields into JSON pointers … replacing only dots emits `/process_extensions/connections[0]/fields[0]` … Consumers following the diagnostic path therefore look for nonexistent keys such as `connections[0]`." | **P2** | machine-served schemas/contracts | (a format conversion that handled one separator of two, the builder's bracket notation) — 1st instance; introduced BY the CX2-03 delegation | Standard — source label P2 | `6fa44c4` | `fixed` — `_json_pointer` splits on dots AND brackets, so `connections[0].fields[0]` becomes `/connections/0/fields/0`. Witness asserts no bracket survives in any served diagnostic path. |
+| CX3-04 | same round | "Register the entire preservation error family … The merge engine also serves `UPDATE_PRESERVATION_XML_PARSE_FAILED`, `UPDATE_PRESERVATION_OBJECT_MISSING`, and `UPDATE_PRESERVATION_MERGE_FAILED` … while the new exact-set test codifies the incomplete catalog." | **P2** | machine-served schemas/contracts | **DC-1** — a hand-listed set asserted as complete, authority: what the emitting modules actually serve; introduced BY the CX2-05 fix | Standard — source label P2 | `6fa44c4` | `fixed` — all **seven** emitted members registered under #45. The sharper half of this finding is the second sentence: my own witness hand-listed four codes and asserted the set was exact, so it PINNED the incomplete catalog as correct. The test now DERIVES the expected set by scanning what `integration_builder` and `component_update_preservation` emit, and asserts a floor of 7 so an empty scan cannot pass vacuously. |
 
 Dispositions: `fixed` · `finding-refuted` · `severity-refuted` · `not-validated` · `deferred`
 (issue, reason class, placement). A refutation names the disputed claim and the concrete evidence.
@@ -502,6 +507,46 @@ the wrong table if §11 were ever reordered.
 | Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |
 | --- | --- | --- | --- | --- |
 | L1 Stage-1 QA | 3 / 3 | `8d54f1a`, clean | **`CONTINUE`** | See the rationale block below. |
+
+### L2 checkpoint at evaluation 3 — `CONTINUE`
+
+Recorded after round 3's owed validation and before the next mutation.
+
+**Per-tier counts and breadth.** Round 3 returned 4 findings: **1 Critical** (CX3-01, data-loss
+anchor and source label P1) and **3 Standard** (P2). Breadth: 2 blocking classes, against round 1's 6.
+
+**Trend vector — none worsening, several materially better:**
+
+| Dimension | L2 r1 | L2 r2 | L2 r3 |
+| --- | --- | --- | --- |
+| Findings | 12 | 5 | **4** |
+| P1 / critical-tier | 9 | 3 | **1** |
+| Blocking classes touched | 6 | 4 | **2** |
+| Findings the PREVIOUS round's fix introduced | — | 3 of 5 | **3 of 4** |
+
+That last row is the one worth reading honestly. The absolute count is falling fast, but the
+*proportion* introduced by the immediately-preceding correction is not — three of round 3's four are
+defects in round 2's fixes, exactly as three of round 2's five were defects in round 1's. This is a
+correction loop finding its own residue, and it is converging (9 P1 → 3 → 1) rather than oscillating.
+The residue is also getting narrower each time: round 1 found capability-level breakage, round 3
+found a missing guard clause, a missing field, a separator, and an incomplete list.
+
+**New / resolved / recurring defect classes.** One recurrence: CX3-01 is the second instance of
+CX1-02's pair (a clone decision made from a truthy value rather than from the action), and CX3-04 is
+another DC-1 instance — notably one where MY OWN witness pinned an incomplete set as exact, which is
+DC-1 committed inside a fix for something else. No class is being instance-patched: CX3-04's fix
+derives the set from the emitting modules rather than extending the hand-list.
+
+**Ruling out the other outcomes.** `CLOSE-CLEAN` is unavailable — one critical-tier finding is
+unresolved at decision time, and L3 has never run. `DEFER-STANDARD-AND-PROCEED`/`-AND-CLOSE` require
+zero critical residue in the loop; CX3-01 is data-loss tier and may not be deferred.
+`ESCALATE-OPEN` needs validation unavailable, severity unresolvable, or no credible next action —
+none holds: every round collected cleanly with archived evidence, both tiers derive from explicit
+anchors, and the next actions are small and named.
+
+**Named finite next correction.** The five fixes in this batch (CX3-01 through CX3-04 plus
+QA-153-r6-01's surfaced limit), then round 4 scoped to that delta, QA r7, and the two gates that have
+never run.
 
 ### L1 checkpoint at evaluation 3 — `CONTINUE`
 

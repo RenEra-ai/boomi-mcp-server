@@ -1840,6 +1840,9 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     # deliberately is not"). Plus the taxonomy's own name, which a row naming
     # where a code was registered has to be able to write.
     "UPDATE_PRESERVATION_",
+    "UPDATE_PRESERVATION_XML_PARSE_FAILED",
+    "UPDATE_PRESERVATION_OBJECT_MISSING",
+    "UPDATE_PRESERVATION_MERGE_FAILED",
     "FETCH_FAILED",
     "PUSH_FAILED",
     "ERROR_TAXONOMY",

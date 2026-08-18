@@ -431,13 +431,21 @@ PROCESS_MATERIALIZATION_INTERNAL_ERROR = "PROCESS_MATERIALIZATION_INTERNAL_ERROR
 # --- Component update preservation (issue #45) ---------------------------------
 # Registered by #153, OWNED by #45. The family has been served since #45's
 # read-merge-write landed and was never in the taxonomy, so a caller could not
-# discover or classify any of it. Codex review round 2 raised that against the
+# discover or classify any of it. ALL SEVEN emitted members are here: the first
+# pass registered only the four `integration_builder` serves directly and left
+# the three the merge engine raises and `_apply_structured_update` forwards
+# unchanged — which the exact-set test then codified as though the catalog were
+# complete (Codex round 3). The set is derived from what the two modules
+# actually emit, not from what one of them happens to name. Codex review round 2 raised that against the
 # one new member this slice adds; registering only that member would have been
 # worse than leaving it out — it would put an #153-owned code outside #153's
 # three declared prefixes and break the biconditional that keeps each family to
 # one introducer. The honest fix is to register the whole family under the issue
 # that actually introduced it.
 UPDATE_PRESERVATION_POLICY_UNSUPPORTED = "UPDATE_PRESERVATION_POLICY_UNSUPPORTED"
+UPDATE_PRESERVATION_XML_PARSE_FAILED = "UPDATE_PRESERVATION_XML_PARSE_FAILED"
+UPDATE_PRESERVATION_OBJECT_MISSING = "UPDATE_PRESERVATION_OBJECT_MISSING"
+UPDATE_PRESERVATION_MERGE_FAILED = "UPDATE_PRESERVATION_MERGE_FAILED"
 UPDATE_PRESERVATION_TYPE_MISMATCH = "UPDATE_PRESERVATION_TYPE_MISMATCH"
 UPDATE_PRESERVATION_FETCH_FAILED = "UPDATE_PRESERVATION_FETCH_FAILED"
 #: #153: the push arm's counterpart to FETCH_FAILED. Its absence meant the
@@ -1723,6 +1731,36 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             summary=(
                 "The component type has no registered preservation policy, so a "
                 "read-merge-write update is refused rather than guessed."
+            ),
+            owner="#45",
+        ),
+        ErrorCodeSpec(
+            code=UPDATE_PRESERVATION_XML_PARSE_FAILED,
+            category="update_preservation",
+            retryable=False,
+            summary=(
+                "The live component XML did not parse, so there is no document "
+                "to merge into; nothing was written."
+            ),
+            owner="#45",
+        ),
+        ErrorCodeSpec(
+            code=UPDATE_PRESERVATION_OBJECT_MISSING,
+            category="update_preservation",
+            retryable=False,
+            summary=(
+                "The live component carries no object body for the policy to "
+                "preserve, so a merge would silently drop it."
+            ),
+            owner="#45",
+        ),
+        ErrorCodeSpec(
+            code=UPDATE_PRESERVATION_MERGE_FAILED,
+            category="update_preservation",
+            retryable=False,
+            summary=(
+                "Read-merge-write could not produce a document that preserves "
+                "the policy's owned paths; nothing was written."
             ),
             owner="#45",
         ),

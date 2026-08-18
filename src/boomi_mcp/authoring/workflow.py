@@ -38,6 +38,7 @@ reinterpret a legacy request as something it is not.
 
 from __future__ import annotations
 
+import re as _re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -492,6 +493,19 @@ def _normalize_recipe_intent(intent) -> _NormalizedIntent:
     )
 
 
+def _json_pointer(dotted: str) -> str:
+    """``a.b[0].c[1]`` -> ``/a/b/0/c/1``.
+
+    The builder layer reports a location in bracket notation; a served
+    diagnostic `path` is a JSON pointer. Converting only the dots left
+    `/process_extensions/connections[0]/fields[0]`, so a consumer following the
+    path looked for a key literally named `connections[0]` (Codex round 3).
+    """
+    return "/" + "/".join(
+        part for part in _re.split(r"[.\[\]]+", str(dotted)) if part
+    )
+
+
 def _extension_bindings_from_config(raw):
     """Legacy recipe extension config -> the typed ``ProcessExtensionBindingsV1``.
 
@@ -536,9 +550,8 @@ def _extension_bindings_from_config(raw):
                         "The process extension bindings are malformed and would "
                         "otherwise be dropped silently."
                     ),
-                    path="/{0}".format(
-                        str(getattr(exc, "field", "") or "process_extensions")
-                        .replace(".", "/")
+                    path=_json_pointer(
+                        getattr(exc, "field", "") or "process_extensions"
                     ),
                     subject_kind="process",
                     remediation=(
