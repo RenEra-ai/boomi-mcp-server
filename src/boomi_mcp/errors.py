@@ -1755,9 +1755,11 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             category="update_preservation",
             retryable=False,
             summary=(
-                "A required object body is absent on one side of the merge; "
-                "`field` names the side. Merging without it would silently drop "
-                "the subtree the policy exists to preserve."
+                "A required object body is absent on one side of the merge. "
+                "Both emitting branches set `field=\"owned_path\"`, so the side "
+                "is in `details.side` (`current` or `desired`) — not in `field`. "
+                "Merging without it would silently drop the subtree the policy "
+                "exists to preserve."
             ),
             owner="#45",
         ),

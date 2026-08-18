@@ -7663,11 +7663,20 @@ def _execute_canonical_process(
     # is the only place the truth is available, because the create response does
     # not carry the assigned name.
     applied_name = applied_component_name(live_xml) if live_xml else None
+    # ALWAYS present, so a caller branches on a field rather than on absence.
+    result["applied_name_verified"] = applied_name is not None
     if applied_name:
         result["name"] = applied_name
-    if applied_name and envelope.name and applied_name != envelope.name:
+        if envelope.name and applied_name != envelope.name:
+            result["requested_name"] = envelope.name
+            result["name_reassigned_by_platform"] = True
+    else:
+        # The readback is best-effort and may time out or return unparseable
+        # XML. Leaving `name` as the REQUESTED value and saying nothing would
+        # present the request as fact on exactly the path where the platform may
+        # have assigned `"X 2"` — the same mutation-accounting defect
+        # QA-153-r7-01 named, reproduced on its failure path (Codex round 5).
         result["requested_name"] = envelope.name
-        result["name_reassigned_by_platform"] = True
 
     return {"result": result, "component_id": component_id,
             "mutation": mutation, "readback": readback,
@@ -8020,15 +8029,48 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     # Actionable and specific, unlike the blanket warning it
                     # replaced: it fires only when the platform actually assigned
                     # a different name, and it names both.
-                    apply_warnings.append(
-                        "Process {0!r} was created as {1!r}, not the authored {2!r} — "
-                        "Boomi appends a counter when a soft-deleted component still "
-                        "holds the name. conflict_policy cannot match the authored name "
-                        "on a later apply, so repeated applies keep creating new "
-                        "components; delete the stale component or author a different "
-                        "name.".format(
-                            key, outcome["applied_name"], outcome["requested_name"]
+                    # ACTION-AWARE (Codex round 5). The create explanation —
+                    # "repeated applies keep creating new components" — is false
+                    # for an update, which keeps targeting its id; saying it
+                    # anyway would misreport both the mutation type and the fix.
+                    if str(outcome["result"].get("status")) == "created":
+                        # States the FACT, then the likely cause — it does not
+                        # assert the cause (QA-153-r8, adversarial Q2).
+                        #
+                        # Exact inequality cannot MISS a rename; the exposure is
+                        # the opposite. If the platform ever normalizes a name it
+                        # accepted (whitespace, case, unicode form), this fires on
+                        # a component nobody renamed — and the first draft then
+                        # told the caller to delete a stale component that does
+                        # not exist. A remediation asserted on an unverified cause
+                        # is worse than none.
+                        apply_warnings.append(
+                            "Process {0!r} is live as {1!r}, not the authored {2!r}. "
+                            "conflict_policy matches on the authored name, so a "
+                            "later apply will not find this component and will "
+                            "create another. The usual cause is a soft-deleted "
+                            "component still holding the name, which Boomi "
+                            "disambiguates with a counter — check for one before "
+                            "re-applying, and author the live name if it is "
+                            "correct.".format(
+                                key, outcome["applied_name"], outcome["requested_name"]
+                            )
                         )
+                    else:
+                        apply_warnings.append(
+                            "Process {0!r} is live as {1!r}, not the authored {2!r}. "
+                            "The update targeted the correct component and the name "
+                            "was not changed; author the live name if you want the "
+                            "two to agree.".format(
+                                key, outcome["applied_name"], outcome["requested_name"]
+                            )
+                        )
+                if outcome.get("result", {}).get("applied_name_verified") is False:
+                    apply_warnings.append(
+                        "Process {0!r}: the live read-back did not confirm the "
+                        "component's name, so the reported name is the one that "
+                        "was REQUESTED, not one this server observed. Re-read the "
+                        "component before relying on it.".format(key)
                     )
                 if outcome.get("component_id"):
                     id_registry[key] = outcome["component_id"]
@@ -8051,6 +8093,11 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                         # unapplied roots record none. That asymmetry is the record.
                         "process_mutations": [m.model_dump(mode="json") for m in process_mutations],
                         "process_readbacks": [r.model_dump(mode="json") for r in process_readbacks],
+                        # Execution warnings describe mutations that ALREADY
+                        # happened, so a later step's failure must not swallow
+                        # them — this return bypasses the final merge (Codex
+                        # round 5).
+                        **({"warnings": list(apply_warnings)} if apply_warnings else {}),
                     }
                 continue
 

@@ -1295,6 +1295,12 @@ def test_a_platform_renamed_component_is_reported_as_renamed():
     warning = [w for w in (result.get("warnings") or []) if "not the authored" in w]
     assert warning, result.get("warnings")
     assert "M12.15 Process 2" in warning[0]
+    # It states the FACT and offers the likely cause; it must not ASSERT one.
+    # QA-153-r8 Q2: exact inequality cannot miss a rename, but a platform that
+    # normalizes an accepted name would fire this on a component nobody renamed
+    # — and telling that caller to delete a stale component invents one.
+    assert "usual cause" in warning[0]
+    assert "delete the stale component" not in warning[0]
 
 
 def test_a_normally_named_component_reports_no_reassignment():
@@ -1309,3 +1315,78 @@ def test_a_normally_named_component_reports_no_reassignment():
     assert "requested_name" not in step
     assert "name_reassigned_by_platform" not in step
     assert not [w for w in (result.get("warnings") or []) if "not the authored" in w]
+
+
+# ---------------------------------------------------------------------------
+# Codex Stage-2 review, round 5
+# ---------------------------------------------------------------------------
+
+
+def test_an_unverifiable_name_is_marked_unverified_not_asserted():
+    """Codex round 5 F1: the round-4 fix covered the happy path only.
+
+    When the post-write readback times out or returns unparseable XML,
+    `applied_name` is None — and the result went on presenting `envelope.name`
+    as though it were fact, on exactly the path where the platform may have
+    assigned `"X 2"`. That is QA-153-r7-01 reproduced on its failure path.
+    """
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    def _readback_fails(_client, component_id, *_a, **_k):
+        if component_id == _PROCESS_ID:
+            raise RuntimeError("read-back timed out")
+        return {"type": "connector-settings", "xml": _LIVE_COMPONENT_XML}
+
+    _SUBMITTED.clear()
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _readback_fails
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(), "dry_run": False},
+        )
+
+    assert result["_success"] is True, result.get("error")
+    step = result["results"]["proc"]
+    assert step["applied_name_verified"] is False
+    assert step["requested_name"] == "M12.15 Process"
+    assert [w for w in (result.get("warnings") or []) if "did not confirm" in w]
+
+    # The control: a healthy readback marks the name VERIFIED, so the flag is
+    # not simply always-false.
+    healthy = _apply(_bound_payload())
+    assert healthy["results"]["proc"]["applied_name_verified"] is True
+
+
+def test_execution_warnings_survive_a_partial_failure():
+    """Codex round 5 F4: the partial-failure return bypassed the warning merge.
+
+    An execution warning describes a mutation that ALREADY happened. A later
+    step failing must not swallow the remediation for an earlier one.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "src/boomi_mcp/categories/integration_builder.py"
+    ).read_text()
+    # The partial-failure envelope and the success envelope must BOTH carry the
+    # accumulated execution warnings.
+    partial = src.index('"partial_results": results,')
+    window = src[partial:partial + 1400]
+    assert "apply_warnings" in window, (
+        "the canonical partial-failure envelope drops execution warnings"
+    )
+    assert ib is not None
