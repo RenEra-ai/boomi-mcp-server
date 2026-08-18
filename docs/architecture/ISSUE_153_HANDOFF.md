@@ -1,91 +1,90 @@
 # Issue #153 (M12.15) — resume handoff
 
-Written before a context compaction. Everything needed to continue is here or in
+Authoritative resume record. Everything needed to continue is here or in
 `docs/architecture/ISSUE_153_AUDIT_LEDGER.md` (the durable audit record).
 
 ## State
 
-- Branch `codex/issue-153`, **HEAD `d94273e`**, worktree clean, **17 commits** since baseline.
+- Branch `codex/issue-153`, **HEAD `0003bf1`**, worktree clean, **38 commits** since baseline.
 - Step-0 baseline: `9f19aad5b280d58c02ef5cd840ff150d0193c1dd` (== `origin/dev`).
-- **NOT pushed. Issue #153 still OPEN.** Do not push or close until the gates below pass.
-- Driver: `/codex-issue 153`, main-thread mode (no `.claude/workflows`), so `CLAUDE.md`'s
-  own workflow is the lifecycle.
+- **NOT pushed. Issue #153 OPEN, and it must stay open** — see the determination below.
+- Full non-KB suite: **10026 passed / 17 skipped**. Wave-gate scanners: 326 passed.
+  #149 reachability freeze: green, census rebaselined, canonical route classified.
 
-## Implementation: all 10 planned steps landed
+## The determination: INCOMPLETE
 
-Six new modules + wiring:
-- `models/process_component.py` — `ProcessComponentEnvelopeV1`, `ProcessAuthoringUnitV1`
-- `authoring/process_materialization.py` — relocatable plan + fingerprint
-- `compiler/process_ir/execution_profile.py` — compiler-derived scheduled/listener
-- `categories/components/process_component_materializer.py` — neutral envelope writer
-- `categories/components/canonical_process_apply.py` — late binding + 2 attestations
-- `categories/components/builders/_process_preservation.py` — ONE shared policy
+The §6 architect implementation review (L3) ran for the first time at `1df67f1` and returned
+`ISSUES FOUND` with **ten findings, five Critical-tier** — recorded as rows `AR1-01` … `AR1-10`.
 
-Wire change (breaking, no alias): `process_ir` intent now carries `units: [{envelope, process_ir}]`;
-`AUTHORING_CONTRACT_VERSION = "2"`; `authoring.typed_apply.process_materialization` = `supported`.
+`CLAUDE.md`'s bar is zero unresolved critical findings. There are five, and none may be deferred:
+three sit in mutation accounting, one in capability reachability. **So the slice terminates
+INCOMPLETE and the issue stays open.**
 
-## Gates
+Why this gate found what twelve clean-trending commit-review rounds did not: it asks a different
+question — *does the implementation build what the PLAN specified?* Four of the ten are plan items
+never implemented at all. No code-quality review surfaces those, because the code that exists is
+correct; it is the code that does not exist that is the finding.
+
+## What IS established and does not need redoing
 
 | Gate | Status |
 |---|---|
-| §3 Codex architect plan | **PASSED, attested** (`.codex/plans/issue-153.md` + `.attest.json`) |
-| Composite wave gate (L4) | **PASSED at `acdb793`** — 9980 passed, 60 goldens byte-exact, `plan fingerprint checked:2 case(s)`, EXIT=0. Evidence archived at `docs/architecture/evidence/issue-153/wave-gate/`. **Must be RE-RUN at final SHA.** |
-| Stage-1 live QA (L1) | r1 found 4 findings (2 Critical) — **all fixed in `d94273e`**. **r2 fix-delta was RUNNING at compaction time** (agent may have died with the session — verify, re-dispatch if no r2 report). |
-| Stage-2 repo Codex review (L2) | **NOT RUN** |
-| §6 architect implementation review (L3) | **NOT RUN** |
+| §3 Codex architect plan | PASSED, attested (`.codex/plans/issue-153.md` + `.attest.json`) |
+| L1 Stage-1 live QA | **CLOSED CLEAN at round 11** — zero findings, nothing owed. 12 findings across r1–r10, all fixed. Verified the headline capability unaided at the public boundary. |
+| L2 Stage-2 Codex commit-review | **CLOSED CLEAN at rounds 9 and 12.** 28 findings across 12 rounds, all fixed. |
+| L3 §6 architect review | **ISSUES FOUND — 10 open.** Archived at `evidence/issue-153/architect-reviews/cdx-gate-review.tD0IwO`. |
+| L4 composite wave gate | **NOT re-run at the final SHA** (last passed at `acdb793`, long superseded). |
 
-## QA round 1 findings — all fixed, all need r2 live re-verification
-
-Report: `agents/reports/2026-08-17-issue-153-m12-15-stage1-r1.md` (`agents/` is gitignored).
-`INDEX.md` never got r1's line — the r1 agent died at "Now let me write the report" (auth expiry).
-
-1. **QA-153-r1-01 (Critical)** — typed apply raised `KeyError: 'existing_component_id'` for every
-   spec with process units; capability unreachable. Fixed: canonical step carries
-   `existing_component_id`/`planned_action`, and `_apply_plan` gained `_execute_canonical_process`
-   BEFORE the `components_by_key[key]` lookup.
-2. **QA-153-r1-02 (Critical, secrets)** — the S3-01 "fix" never took effect: the legacy
-   component-plan echo overwrote the withheld preview ~50 lines later. Fixed via
-   `_withhold_process_roots`, re-applied AFTER the echo. Regression test
-   `test_the_legacy_component_plan_echo_cannot_restore_withheld_roots` FORCES the echo
-   (verified: fails pre-fix, passes post-fix).
-3. **QA-153-r1-03 (High)** — `canonical_process_apply.py` imported by NOTHING in `src/`; the
-   relocatability validator was unreachable. Fixed by the same wiring as r1-01.
-4. **QA-153-r1-04 (High)** — duplicate-key served as raw `ValidationError`. Fixed:
-   `_named_error_code_from_validation` maps pydantic `type` -> served `error_code`.
-   Measured: plan and compile now serve `INTEGRATION_COMPONENT_KEY_DUPLICATE`.
+The capability itself works and is live-verified: `plan → compile → apply` creates a real process
+component; readback carries zero `id-<key>` placeholders and real Boomi ids; multi-root late
+binding emits the child's real id in `<processcall processId=…>`; both attestations are served and
+recorded; update-preservation digests the MERGED bytes; `conflict_policy="clone"` creates a
+suffixed component and leaves the original byte-identical.
 
 ## Next actions, in order
 
-1. Check for `agents/reports/2026-08-17-issue-153-m12-15-stage1-r2.md`. If absent, re-dispatch
-   `boomi-qa-tester` for the r2 fix-delta (prompt shape: operational header + the four findings +
-   the live scenarios that were BLOCKED in r1: create / readback-no-placeholders /
-   update-preservation / verify / multi-root / both attestations / cleanup).
-2. Fix anything r2 raises; re-run affected QA.
-3. **Stage 1.5**: the QA-validated tree is already committed — record it in the ledger.
-4. **Stage-2 Codex commit-review** per `CLAUDE.md` §5b–5e (detached, polled across Bash calls,
-   ALWAYS collected via `commit-review-collect.mjs`; never read findings from `wait`).
-   `--base 9f19aad5b280d58c02ef5cd840ff150d0193c1dd` for round 1.
-5. **§6 architect review** — gate-bound session, `--gate review`, plan `cat`'d in VERBATIM.
-6. Re-run the wave gate at the FINAL sha from a verified-clean tree.
-7. Ledger: final-tree validation table + close. Then `/codex-issue` finish = FF-push to `dev`
-   + close issue, NO PR (per repo convention).
+1. **Fix the five Critical `AR1-*` rows.** Suggested order by tractability:
+   - **AR1-02** (relocatability misses the IR) — smallest. `iter_component_refs` in
+     `models/process_ir.py` already enumerates every `ComponentRefV1` in an IR, so extend
+     `envelope_relocatability_offenders` to walk the IR too. The reviewer built the violating case.
+   - **AR1-05** (attestation inputs) — three sub-items; (a) execution passes
+     `config.get("account_id")` instead of the account typed preflight derived, which lets a caller
+     influence the attested scope hash.
+   - **AR1-01** (compiled-plan identity) — assert the apply-built plan's fingerprint equals the
+     compile artifact digest, with the recorded clone divergence as the sole exception.
+   - **AR1-04** (durable partial evidence) — pre-mutation `in_progress` build record and a
+     `failed_partial` transition, so a lost response does not lose the record of a write.
+   - **AR1-06** (folder placement) — a whole plan item; `PROCESS_MATERIALIZATION_PLACEMENT_*` are
+     registered and unreachable.
+2. **AR1-09** is the highest-value Standard: served guidance in `meta_tools.py` and `server.py`
+   still says direct ProcessIR is never applied and ends at compile, contradicting the shipped
+   capability. Served contract text is a blocking class.
+3. Each correction gets affected QA + a delta-scoped Codex review, then **re-run §6**.
+4. **Re-run the wave gate at the FINAL sha, from a verified-clean tree.**
+5. Ledger final-tree validation table, then finish = FF-push to `dev` + close, **NO PR**.
 
 ## Hard-won gotchas (do not rediscover)
 
-- **Never edit the tree while `wave_gate.py` runs** — it diffs `git status` before/after and
-  returns `WORKTREE_DIRTY`. Happened TWICE. Launch only from a verified-clean tree.
-- **A guard that doesn't exercise the breaking path passes for the wrong reason.** Two instances
-  this slice: the preservation witness (refuted by adversarial review) and my first r1-02 probe
-  (the legacy echo never runs without a live client, so the mutant "passed" too).
-- The evidence archive must be **git-tracked** and covered by `SHA256SUMS`, or
-  `test_audit_ledger_attestations_have_durable_matching_evidence` fails.
+- **While ANY gate is in flight, the tree is frozen.** I broke this four times; each time a Codex
+  round landed mid-QA and I edited. The rule that actually holds is **serialize the gates** — never
+  dispatch QA while a review is running or while any finding is unapplied. QA's
+  `.claude/agent-memory/boomi-qa-tester/harness/tree-freeze-guard.py` hashes the bytes of every
+  loaded module and exits 3 on a violation; run every scenario inside it.
+- **Never edit the tree while `wave_gate.py` runs** — it diffs `git status` and returns
+  `WORKTREE_DIRTY`.
+- **A guard that re-states the rule instead of exercising it protects nothing.** Six instances this
+  slice. Drive the production entry point; mutation-control in both directions.
+- **A "derived" fix is only as good as the authority chosen.** `retryable` was the wrong authority
+  for "did we write" — retryability is about the request, not the write. Ask the component that
+  performs the action.
 - Ledger prose must not contain diagnostic-shaped tokens unless allowlisted in
-  `tests/test_wave_gate.py::_LEDGER_NON_DIAGNOSTIC_TOKENS`.
-- Renaming a required test node needs a **tombstone** in `tests/fixtures/wave_gate/test_nodes.jsonl`.
-- Editing a `RECIPE_LAYER_MODULES` member moves served digests -> rebaseline
-  `tests/_m12_12_legacy_inventory.py --write` AND regenerate the §11 markdown tables in
-  `docs/architecture/M12_COMPATIBILITY_INVENTORY.md` (two-way check).
+  `tests/test_wave_gate.py::_LEDGER_NON_DIAGNOSTIC_TOKENS`; finding rows must form ONE contiguous
+  table (no blank line between rows).
+- A gate-review archive needs `prompts/` and an index row whose `status` comes from
+  `attestation.json`'s `turn.status`, not a top-level `status`.
+- Editing a `RECIPE_LAYER_MODULES` member moves served digests → rebaseline
+  `tests/_m12_12_legacy_inventory.py --write <fixture>` AND regenerate the §11 tables in
+  `M12_COMPATIBILITY_INVENTORY.md`, anchored on their subsection headings (three share a header row).
 - Suite: `PYTHONPATH=src PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 BOOMI_LOCAL=true .venv/bin/python -m pytest tests --ignore=tests/kb -q`
-  (~13 min, no xdist). Emitter symbol requirement wants `connector-action`, NOT
-  `connector-operation`.
+  (~13 min).
 - renera account expires **2026-08-28**.
