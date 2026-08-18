@@ -1535,3 +1535,41 @@ def test_a_reuse_does_not_claim_its_name_went_unconfirmed():
 
     # The split is DERIVED, so `reused` really is in the non-writing set.
     assert "reused" in ib._NON_WRITING_STEP_STATUSES
+
+
+def test_a_write_that_committed_then_failed_still_warns_about_its_name():
+    """QA-153-r10-01 — the answer to my own adversarial question.
+
+    Having narrowed this condition twice off false positives, I asked whether it
+    had become too narrow. It had, in exactly one direction: `_success is True`
+    excluded commit-then-fail — a create whose component provably exists, or an
+    update whose push landed — which is precisely where an unconfirmed name
+    matters most.
+
+    `failed` is a WRITING status, so dropping the `_success` clause covers it
+    without re-widening onto `refused` or `reused`, the two classes the earlier
+    narrowings were for. Those controls are asserted here so the widening cannot
+    silently undo them.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    def _warns(status, verified):
+        step = {"status": status, "applied_name_verified": verified,
+                "_success": status not in ("failed", "refused")}
+        writing = str(step["status"]) not in ib._NON_WRITING_STEP_STATUSES
+        return writing and step["applied_name_verified"] is False
+
+    # The case that was missed: a write that committed and then failed.
+    assert _warns("failed", False) is True
+    # ...and a write that succeeded with an unconfirmed name, as before.
+    assert _warns("created", False) is True
+    assert _warns("updated", False) is True
+    # The two false-positive classes stay excluded.
+    assert _warns("reused", False) is False
+    assert _warns("refused", False) is False
+    # A confirmed name never warns, whatever the status.
+    for status in ("created", "updated", "failed", "reused", "refused"):
+        assert _warns(status, True) is False, status
+
+    # The split is DERIVED, not restated here.
+    assert ib._NON_WRITING_STEP_STATUSES == frozenset({"reused", "refused"})

@@ -8141,10 +8141,19 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 # (Codex round 8). The writing/non-writing split is derived from
                 # `_NON_WRITING_STEP_STATUSES`, which `_mutation_status` already
                 # reads, rather than by naming `created`/`updated` here.
+                #
+                # ...and then WIDENED once, off `_success` (QA-153-r10-01). A
+                # step that committed and then failed to report — a create whose
+                # component provably exists, an update whose push landed — is
+                # `status="failed"`, which is a WRITING status, so the two
+                # remaining clauses already select exactly "a write may have
+                # landed and its name is unconfirmed". Requiring `_success` on
+                # top of that excluded the case where the warning matters most,
+                # without protecting against either false-positive class it was
+                # narrowed for: `refused` and `reused` are both non-writing.
                 _step = outcome.get("result", {})
                 if (
-                    _step.get("_success") is True
-                    and str(_step.get("status", "")) not in _NON_WRITING_STEP_STATUSES
+                    str(_step.get("status", "")) not in _NON_WRITING_STEP_STATUSES
                     and _step.get("applied_name_verified") is False
                 ):
                     apply_warnings.append(
