@@ -2179,6 +2179,8 @@ def test_a_lowered_source_severity_always_names_its_refutation():
       that deliberately writes "not severity-refuted" passes this check. The
       four rows this guard exists to catch had NO refutation language at all,
       which is the accidental case and the one it still catches.
+    * The label and tier columns must each be named by EXACTLY ONE header cell;
+      an ambiguous header refuses rather than guesses.
     * COVERAGE compares the exact set of row IDs the column map classified as
       source-critical against the set an independent, column-free scan finds —
       so a parse that drops one row fails, not just one that drops all of them.
@@ -2211,10 +2213,22 @@ def test_a_lowered_source_severity_always_names_its_refutation():
         lowered = [c.lower() for c in cells]
         if not lowered or lowered[0] != "id":
             return None
-        label = next((i for i, c in enumerate(lowered) if "label" in c), None)
-        tier = next((i for i, c in enumerate(lowered)
-                     if c.startswith("tier") or "derived tier" in c), None)
-        return (label, tier) if label is not None and tier is not None else None
+        labels = [i for i, c in enumerate(lowered) if "label" in c]
+        tiers = [i for i, c in enumerate(lowered)
+                 if c.startswith("tier") or "derived tier" in c]
+        # EXACTLY ONE of each, or the header is ambiguous and this rule refuses
+        # to guess (Codex round 41: coverage by row reachability cannot tell a
+        # shifted or mis-picked label column from the right one, and the only
+        # place that ambiguity can arise is here). Asserting on the header keeps
+        # the check on an authority — the table's own declaration — rather than
+        # on another pass over row prose, which is what produced three rounds of
+        # false positives.
+        assert len(labels) <= 1 and len(tiers) <= 1, (
+            "ambiguous finding-table header: %d label-ish and %d tier-ish "
+            "columns in %r — the columns this rule reads cannot be identified"
+            % (len(labels), len(tiers), cells)
+        )
+        return (labels[0], tiers[0]) if labels and tiers else None
 
     def _accepts(tier):
         return bool(marker.search(tier))
