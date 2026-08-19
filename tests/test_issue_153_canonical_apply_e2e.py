@@ -4333,7 +4333,14 @@ def test_the_dry_emit_binds_symbols_the_ir_never_names():
 
     # ...and the dry emit binds it from the DECLARED dependencies, so the
     # request stays appliable.
-    _dry_emit_canonical_plan(plan, symbols)
+    _dry_emit_canonical_plan(plan, symbols, {"proc": ("conn", "op")})
+
+    # ...INCLUDING when the root declares only the operation and the OPERATION
+    # declares the connection (Codex round 31): ordered apply walks that edge
+    # too, so the closure must be transitive or a valid request is refused.
+    _dry_emit_canonical_plan(
+        plan, symbols, {"proc": ("op",), "op": ("conn",)}
+    )
 
 
 def test_an_undeclared_derived_dependency_refuses_before_the_first_write():
@@ -4394,8 +4401,16 @@ def test_an_undeclared_derived_dependency_refuses_before_the_first_write():
 
     # The connection is derived and UNDECLARED: nothing guarantees it precedes
     # this root, so the preview must refuse rather than assume.
+    # Nothing declares the connection ANYWHERE in the graph, so nothing
+    # guarantees it precedes this root.
     with pytest.raises(CanonicalProcessApplyError):
-        _dry_emit_canonical_plan(_plan(("op",)), symbols)
+        _dry_emit_canonical_plan(_plan(("op",)), symbols, {"proc": ("op",)})
 
-    # THE CONTROL: declared, so ordered apply guarantees it — and it passes.
-    _dry_emit_canonical_plan(_plan(("conn", "op")), symbols)
+    # THE CONTROLS: declared directly, and declared transitively by the
+    # operation — ordered apply guarantees it either way.
+    _dry_emit_canonical_plan(
+        _plan(("conn", "op")), symbols, {"proc": ("conn", "op")}
+    )
+    _dry_emit_canonical_plan(
+        _plan(("op",)), symbols, {"proc": ("op",), "op": ("conn",)}
+    )

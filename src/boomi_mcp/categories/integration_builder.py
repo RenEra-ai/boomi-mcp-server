@@ -7595,7 +7595,25 @@ def _build_canonical_plan(*, spec, unit, conflict_policy: str):
     )
 
 
-def _dry_emit_canonical_plan(plan, symbols) -> None:
+def _guaranteed_ancestors(key: str, depends_on_by_key) -> set:
+    """Every key ordered apply is guaranteed to write BEFORE ``key``.
+
+    The transitive closure of `depends_on`, which is the same relation
+    `_topological_order` walks — so this cannot disagree with the order the
+    apply actually uses. Cycles are refused before any of this runs, but the
+    walk carries its own seen-set anyway rather than trusting that from here.
+    """
+    seen, stack = set(), list(depends_on_by_key.get(key, ()) or ())
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        stack.extend(depends_on_by_key.get(current, ()) or ())
+    return seen
+
+
+def _dry_emit_canonical_plan(plan, symbols, depends_on_by_key) -> None:
     """Emit the plan with stand-in ids and throw the bytes away.
 
     QA-153-r15-02. The pre-write pass COMPILED the plan; the apply turn
@@ -7632,18 +7650,25 @@ def _dry_emit_canonical_plan(plan, symbols) -> None:
     # a comment, even in a filename — would have made that guard read as
     # violated by documentation. Measured: it did, twice.)
     # Stand-ins for exactly what ORDERED APPLY GUARANTEES will exist by the
-    # time this root runs: the keys it declares in `depends_on`, plus the ones
-    # its own recorded slots name. Codex round 30: an all-symbol registry made
-    # the dry emit bind things the real one would not — a reused connector
-    # action whose connection the component never declares can be ordered
-    # AFTER the process, and the preview passed while the real materialization
-    # failed once earlier creates had already landed. Binding the declared
-    # closure keeps the preview faithful in both directions: it accepts what
-    # apply will accept, and it refuses the ordering defect BEFORE the first
-    # write instead of during it.
-    declared = set(plan.envelope.depends_on or ())
-    declared.update(_ref_key(slot.ref) for slot in plan.unresolved_symbol_slots)
-    dry_ids = {key: "dry-run-" + key for key in declared}
+    # time this root runs: its declared dependencies, TRANSITIVELY, plus the
+    # keys its own recorded slots name.
+    #
+    # Two rounds shaped this. Codex round 29: a registry built from the slots
+    # alone left a derived connection unbound, refusing valid requests. Round
+    # 30: an all-symbol registry bound things the real apply would not, hiding
+    # an ordering defect until after the first writes. The ancestor closure is
+    # the honest middle — `_topological_order` applies a root's dependencies,
+    # and THEIR dependencies, before the root, so every ancestor is guaranteed
+    # to hold an id by then and nothing else is. Round 31: the closure must be
+    # transitive, because a root may declare only the operation while the
+    # operation declares the connection.
+    dry_ids = {
+        key: "dry-run-" + key
+        for key in _guaranteed_ancestors(
+            plan.envelope.component_key, depends_on_by_key
+        )
+        | {_ref_key(slot.ref) for slot in plan.unresolved_symbol_slots}
+    }
     materialize_canonical_process_xml(
         plan=plan, id_registry=dry_ids, symbols=symbols
     )
@@ -8546,6 +8571,16 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         envelope_relocatability_offenders as _relocatability_offenders,
     )
 
+    # The dependency relation ordered apply walks, keyed by component key —
+    # components AND canonical roots, because both participate in one order.
+    _depends_on_by_key: Dict[str, Tuple[str, ...]] = {
+        comp.key: tuple(comp.depends_on or ()) for comp in spec.components
+    }
+    for _u in (getattr(spec, "processes", ()) or ()):
+        _depends_on_by_key[_u.envelope.component_key] = tuple(
+            _u.envelope.depends_on or ()
+        )
+
     resolved_placements: Dict[str, Optional[str]] = {}
     # Plans built pre-write for the RAW route, cached so the execution turn
     # consumes them rather than compiling again (§6 AR3-02). This is a MOVE of
@@ -8631,6 +8666,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             _dry_emit_canonical_plan(
                 _pre_plan,
                 _build_canonical_symbols(spec=spec),
+                _depends_on_by_key,
             )
         except Exception as _plan_exc:  # noqa: BLE001 — classified below
                 _code, _path = _canonical_plan_failure(_plan_exc)
