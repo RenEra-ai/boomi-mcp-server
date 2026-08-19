@@ -2154,59 +2154,70 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
 def test_a_lowered_source_severity_always_names_its_refutation():
     """A source-critical label may only be lowered by a NAMED refutation.
 
-    The ledger's own rule: a raw source label is immutable, and a
-    source-critical finding (P0/P1/Critical/High) becomes Standard only via a
-    documented severity-specific technical refutation. #153 recorded four rows
-    that lowered a P1 or High to Standard with grounds but without naming the
-    mechanism, and three review rounds found them one at a time.
+    The ledger rule: a raw source label is immutable, and a source-critical
+    finding (P0/P1/Critical/High) becomes Standard only via a documented
+    severity-specific technical refutation.
 
-    Five corrections to the first version of this guard, each measured:
+    Nine corrections across four review rounds went into this guard, and the
+    shape of every one was the same: it hand-modelled the document instead of
+    reading it. It now derives what it needs:
 
-    * Rows come from `_finding_rows`, the shared parser, not from a hand-split
-      on delimiter COUNT — the count excluded #152's eight-delimiter tables
-      entirely, which is the same wider-scope-than-the-property defect the
-      append-only test exists to catch.
-    * Labels match with or without Markdown emphasis: the policy is about the
-      SOURCE LABEL, not its formatting.
-    * The refutation must be an AFFIRMATIVE marker. A bare `refut` substring
-      accepted a tier cell that says "no severity refutation was recorded",
-      which states the opposite of what it was read as.
-    * The full revision CHAIN is followed (`Xb → Xa → X`), so a later revision
-      that adds or withdraws the refutation decides, not the first one found.
-    * Non-vacuity is asserted PER IN-FLIGHT LEDGER, never as a global floor: an
-      unconditional floor fails the moment no ledger is in flight — which is
-      exactly what closing #153 does — and that would block the next slice for
-      having no offending row.
+    * COLUMNS come from each table's own HEADER row, not from fixed offsets.
+      #153 has nine columns and #152 seven, so an offset that found the label in
+      one found the blocking class in the other and scanned none of its rows.
+    * Rows split on UNESCAPED pipes only — an escaped `\\|` inside a summary
+      (the S3-04 row has one) shifted every column after it.
+    * A refutation is recognized by an AFFIRMATIVE marker the ledger actually
+      uses, never by filtering negations: "severity refutation is missing" and
+      "not refuted" both contain the fragment and deny the mechanism.
+    * COVERAGE is compared against an independently derived count, so a parse
+      that silently drops every row fails instead of passing with nothing
+      scanned. Zero is legal when a ledger genuinely has no source-critical
+      row; zero when another derivation says otherwise is not.
     """
     import re as _re
 
     ledgers = sorted((_ROOT / "docs" / "architecture").glob("ISSUE_*_AUDIT_LEDGER.md"))
     assert ledgers, "no ledgers found — this check would be vacuous"
 
-    # `**P1**`, `P1`, `Critical (source label)` — emphasis is formatting, and the
-    # rule is about the label. Bounded by word edges so `HIGHLIGHT` is not `High`.
     critical_label = _re.compile(r"\b(P0|P1|Critical|High)\b", _re.I)
-    # An AFFIRMATIVE marker, not a fragment: `severity-refuted`, or prose that
-    # says a refutation IS recorded/documented/named.
-    # A refutation in ANY spelling the ledger uses — `severity-refuted`,
-    # "documented severity refutation", "retiered on the same documented
-    # refutation" — paired with the denial test below. Requiring one fixed
-    # phrasing rejected rows that plainly name the mechanism (measured on
-    # AR3-05), which trains people to reword rather than to record.
-    affirmative = _re.compile(r"refut", _re.I)
-    # ...and an explicit DENIAL never counts, however affirmative its words look:
-    # "no severity refutation was recorded" contains the marker and states the
-    # opposite of it.
-    denial = _re.compile(r"\b(no|without|lacking|absent|missing)\b[^.]{0,60}refut", _re.I)
+    # The two positive markers this repo's ledgers use. Not a negation filter:
+    # a denial cannot satisfy either, because neither can be written by accident.
+    affirmative = _re.compile(
+        r"\*{0,2}severity[-\s]refuted\*{0,2}|documented\s+severity[-\s]\w*\s*refutation",
+        _re.I,
+    )
+    tier_claim = _re.compile(r"\**\s*(Critical|Standard|severity[-\s]refuted)", _re.I)
 
-    def _cells(line):
-        """A row's cells, without the empties Markdown leaves at either end."""
-        parts = [c.strip() for c in line.split("|")]
+    def _split(line):
+        """Cells of a Markdown row, honouring escaped pipes."""
+        parts = _re.split(r"(?<!\\)\|", line)
+        parts = [part.replace("\\|", "|").strip() for part in parts]
         while parts and not parts[0]:
             parts.pop(0)
         while parts and not parts[-1]:
             parts.pop()
         return parts
+
+    def _column_map(text):
+        """Header-derived positions for the columns this rule reads.
+
+        Returned per HEADER, because one ledger may carry several finding
+        tables and #152 repeats its header for each round.
+        """
+        maps = []
+        for line in text.splitlines():
+            if not line.startswith("| ") or "|" not in line[2:]:
+                continue
+            cells = [c.lower() for c in _split(line)]
+            if "id" not in cells[:1]:
+                continue
+            label = next((i for i, c in enumerate(cells) if "label" in c), None)
+            tier = next((i for i, c in enumerate(cells) if c.startswith("tier")
+                         or "derived tier" in c), None)
+            if label is not None and tier is not None:
+                maps.append((label, tier, len(cells)))
+        return maps
 
     offenders = []
     for path in ledgers:
@@ -2215,67 +2226,66 @@ def test_a_lowered_source_severity_always_names_its_refutation():
             continue  # a closed slice's record is frozen; this rule binds work in flight
 
         rows = _finding_rows(text)
-        # The declared supersession chain, so a row's EFFECTIVE tier is the last
-        # revision's, not the first one that happens to exist.
+        column_maps = _column_map(text)
+        assert column_maps, (
+            "%s: no finding-table header found — the column positions this rule "
+            "reads cannot be derived, so it must fail rather than scan nothing"
+            % path.name
+        )
+
         block = _re.search(r"\*\*Supersession map\*\*(.+?)(?:\n\n|\n\*|\Z)", text, _re.S)
         supersedes = dict(_re.findall(r"`([^`]+?) → ([^`]+?)`", block.group(1))) if block else {}
         revisions = {}
         for newer, older in supersedes.items():
             revisions.setdefault(older, []).append(newer)
 
+        def _cells_for(line):
+            """The (label, tier) pair, using the header map whose width matches."""
+            cells = _split(line)
+            for label_at, tier_at, width in column_maps:
+                if len(cells) == width:
+                    return cells[label_at], cells[tier_at]
+            return None, None
+
         def _effective_tier(row_id, seen=None):
-            """The tier cell that governs, after following the revision chain."""
             seen = seen or set()
             for newer in revisions.get(row_id, ()):
                 if newer in seen or newer not in rows:
                     continue
                 seen.add(newer)
                 deeper = _effective_tier(newer, seen)
-                # A revision that does NOT restate the tier does not govern it:
-                # most revisions correct a disposition and say so explicitly
-                # ("n/a — the original tier governs"). Reading that as the
-                # effective tier flagged every correctly-Critical row that
-                # happened to have a revision (measured).
-                # A revision governs the tier only if it MAKES a tier claim.
-                # Most revisions correct a disposition and say so — "n/a — the
-                # original tier governs", "— (Critical tier inherited)" — and
-                # reading those as the effective tier flagged every correctly
-                # Critical row that happened to carry a revision (measured).
-                if deeper and _re.match(
-                    r"\**\s*(Critical|Standard|severity[-\s]refuted)", deeper, _re.I
-                ):
+                # A revision governs the tier only if it MAKES a tier claim;
+                # most correct a disposition and defer explicitly.
+                if deeper and tier_claim.match(deeper):
                     return deeper
             line = rows.get(row_id)
-            if line is None:
-                return None
-            cells = _cells(line)
-            # The tier is the cell before the SHA and the disposition; counted
-            # from the END so a ledger with extra leading columns still lines
-            # up. The trailing empty cell a Markdown row leaves behind is
-            # dropped first — counting it put this on the SHA and flagged every
-            # correctly-Critical row (measured).
-            return cells[-3] if len(cells) >= 3 else None
+            return _cells_for(line)[1] if line else None
 
         scanned = 0
         for row_id, line in rows.items():
-            cells = _cells(line)
-            if len(cells) < 6:
-                continue
-            label = cells[3]
-            if not critical_label.search(label):
+            label, _ = _cells_for(line)
+            if label is None or not critical_label.search(label):
                 continue
             scanned += 1
             tier = _effective_tier(row_id) or ""
             if _re.match(r"\**Critical\**\s*(—|-|$)", tier, _re.I):
                 continue
-            if affirmative.search(tier) and not denial.search(tier):
+            if affirmative.search(tier):
                 continue
             offenders.append((path.name, row_id, label[:24]))
 
-        # PER-LEDGER non-vacuity: an in-flight ledger that records no
-        # source-critical finding at all is legitimate (a new slice starts that
-        # way), so this states what was scanned rather than demanding a floor.
-        assert scanned >= 0
+        # COVERAGE, derived a second way: count the rows whose LINE carries a
+        # critical-shaped label anywhere, which needs no column map at all. The
+        # scan must reach the same order of magnitude; zero scanned while the
+        # independent count is non-zero means the parse dropped everything.
+        independent = sum(
+            1 for line in rows.values() if critical_label.search(line)
+        )
+        assert not (independent and scanned == 0), (
+            "%s: %d rows carry a critical-shaped label but the column-derived "
+            "scan examined none — the parse dropped every row"
+            % (path.name, independent)
+        )
 
     assert offenders == [], (
         "source-critical findings lowered without naming a refutation: %r" % offenders
