@@ -1821,6 +1821,11 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "BODY_CAPABILITIES_V1",
     "LISTENER_CONNECTOR_TYPES",
     "VALIDATION_PHASE_ORDER",
+    # The entry-role authority #153 declared beside the invariant that enforces
+    # it — a row recording "the probe and the compiler now read one declaration"
+    # has to be able to name that declaration.
+    "ENTRY_CALL_ROLE",
+    "ENTRY_ROLE_RESTRICTIONS",
     "EXCLUDED_PLAN_FIELDS",
     "PROCESS_PRESERVATION_POLICY",
     "AUTHORING_CAPABILITY_REGISTRY",

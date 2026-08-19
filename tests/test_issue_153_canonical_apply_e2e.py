@@ -4082,14 +4082,43 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
     # report "scheduled", and so does a connector row in the non-listener role —
     # so a discriminant carrying the wrong role is scheduled for the WRONG reason
     # and probes nothing, while looking identical in the output. That is not a
-    # hypothetical: pointing `_listener_role()` at the other role left every
-    # assertion above green. The role the discriminants carry must therefore be
-    # the one the derivation actually classifies as listener, asserted directly.
+    # hypothetical: pointing the discriminants at the other role left every
+    # assertion above green when this check was absent.
+    #
+    # The role is now ASKED OF THE RULE rather than read off declaration order
+    # (L2 round 45), so the check is that the rule's answer really is the
+    # listener-yielding role — with the classifier passed in the same shape the
+    # oracle passes it, so this cannot pass against a different question.
     from boomi_mcp.authoring.contract import _listener_role
 
-    assert (
-        oracle["cases"]["connector-%s-%s" % (_listener_role(), family)] == "listener"
-    ), _listener_role()
+    def _classify_role(role):
+        return oracle["cases"].get("connector-%s-%s" % (role, family))
+
+    chosen = _listener_role(_classify_role, sorted(ep.LISTENER_CONNECTOR_TYPES))
+    assert oracle["cases"]["connector-%s-%s" % (chosen, family)] == "listener", chosen
+
+    # ...and it must still be the right role when the schema's declaration order
+    # is REVERSED, which is the only condition under which asking the rule and
+    # reading the first option differ. Without this the fix is untested: `source`
+    # happens to be declared first, so a version that reads declaration order
+    # gives the same answer on today's schema.
+    reversed_first = tuple(reversed(connector_roles))[0]
+    assert reversed_first != chosen, connector_roles
+
+    def _classify_reversed(role):
+        return oracle["cases"].get("connector-%s-%s" % (role, family))
+
+    from unittest.mock import patch as _patch
+
+    with _patch(
+        "boomi_mcp.authoring.contract._literal_options",
+        side_effect=lambda model, field: tuple(reversed(connector_roles))
+        if field == "role"
+        else _literal_options(model, field),
+    ):
+        assert _listener_role(
+            _classify_reversed, sorted(ep.LISTENER_CONNECTOR_TYPES)
+        ) == chosen, "the listener role is being read off declaration order"
 
     # ...and EVERY entry kind the schema admits is exercised, derived from the
     # schema on both sides so the check cannot pass by agreeing with itself
@@ -4116,16 +4145,35 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
     # `entry|downstream` — meant the kind most likely to become listener-eligible
     # was probed with a role it can never carry. Both sides derive from the
     # schema, so the check cannot pass by agreeing with the oracle's own copy.
+    # ...and probed with the roles that are legal AT THE ENTRY POSITION, which is
+    # narrower than what the field admits (L2 round 45): `_classify` installs the
+    # probed node as the entry, and `check_cfg_invariants` rejects a
+    # `connector_call` entry in any role but `entry`. Probing the illegal one
+    # made the served revision rotate for a shape production cannot produce.
+    # Asserted in BOTH directions — every legal role present, every illegal one
+    # absent — because "all declared roles present" was the previous version of
+    # this assertion and it is exactly what round 45 found wrong.
     from boomi_mcp.authoring.contract import _literal_options
+    from boomi_mcp.compiler.process_ir.invariants import ENTRY_ROLE_RESTRICTIONS
+
+    def _connector_call_member():
+        return next(m for m in _cfg_semantic_members()
+                    if m.model_fields["semantic_kind"].default == "connector_call")
 
     for member in _cfg_semantic_members():
         kind = member.model_fields["semantic_kind"].default
         if kind == "connector":
             continue
-        for role in _literal_options(member, "role"):
-            assert "entry-kind-%s-role-%s" % (kind, role) in oracle["cases"], (
-                kind, role, sorted(oracle["cases"]),
-            )
+        # The expectation comes from `ENTRY_ROLE_RESTRICTIONS` — the AUTHORITY —
+        # not from `_entry_roles`, the consumer being checked. Deriving it from
+        # the consumer made this assertion agree with itself: a mutant that
+        # ignored the restriction entirely widened both sides and passed.
+        declared = _literal_options(member, "role")
+        allowed = ENTRY_ROLE_RESTRICTIONS.get(kind)
+        legal = set(declared if allowed is None else allowed)
+        for role in declared:
+            key = "entry-kind-%s-role-%s" % (kind, role)
+            assert (key in oracle["cases"]) == (role in legal), (kind, role, legal)
 
     # 1. A BEHAVIOUR mutant — the reviewer's own: a derivation that classifies
     #    every graph as scheduled. This is the case the vocabulary projection
@@ -4188,13 +4236,20 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
 
         return _rule
 
-    for valid_role in ("entry", "downstream"):
+    # BOTH DIRECTIONS, and they differ — which is the whole content of round 45.
+    # A regression on the role that CAN be the entry must move the revision; one
+    # confined to the role that cannot must NOT, because rotating a caller's
+    # binding for a graph the compiler rejects is a cost with no behaviour behind
+    # it. Round 44's version of this control asserted `downstream` moved it too,
+    # which is what round 45 found wrong.
+    entry_legal = set(ENTRY_ROLE_RESTRICTIONS["connector_call"])
+    for role in _literal_options(_connector_call_member(), "role"):
         try:
-            ep.derive_process_execution_profile = _valid_role_listener(valid_role)
-            moved = _compiler_revision()
+            ep.derive_process_execution_profile = _valid_role_listener(role)
+            probed = _compiler_revision()
         finally:
             ep.derive_process_execution_profile = original_derive
-        assert moved != baseline, valid_role
+        assert (probed != baseline) == (role in entry_legal), (role, entry_legal)
         assert _compiler_revision() == baseline
 
     # 4. The family table is still covered — the property the first fix had.
@@ -4789,3 +4844,78 @@ def test_every_reader_of_the_named_code_map_resolves_a_bare_custom_error():
     stranger = PydanticCustomError("no_such_registered_type", "unknown")
     assert _named_error_code_from_validation(stranger) is None
     assert _cause_codes_for(stranger) == ("PydanticCustomError",)
+
+
+def test_the_entry_role_restriction_is_pinned_to_the_invariant_that_enforces_it():
+    """L2 round 45: the probe built a `connector_call` entry the compiler rejects.
+
+    `ENTRY_ROLE_RESTRICTIONS` now says which roles may sit at the entry, and the
+    oracle reads it — so it is a second statement of a rule `check_cfg_invariants`
+    already enforces, and the two must be pinned to each other or they will
+    drift, which is the class this slice exists to close.
+
+    Pinned BOTH ways: the restricted role is one the invariant accepts, and every
+    OTHER declared role is one it rejects. A one-directional check would pass for
+    a restriction that simply listed every role, so the final assertion refuses
+    that too.
+
+    The graph is a REAL compiled CFG with its entry node's role swapped, not a
+    hand-assembled one. Hand-building a valid `SemanticCfgV1` means restating the
+    node and edge models' required fields — a hand-model larger than the one this
+    test is pinning, and the first attempt at it silently swallowed its own
+    construction errors and reported the legal role as rejected.
+    """
+    from boomi_mcp.compiler.process_ir import compile_process_ir_v1
+    from boomi_mcp.compiler.process_ir.contracts import ConnectorCallSemanticV1
+    from boomi_mcp.compiler.process_ir.invariants import (
+        ENTRY_CALL_ROLE,
+        ENTRY_ROLE_RESTRICTIONS,
+        check_cfg_invariants,
+    )
+    from boomi_mcp.authoring.contract import _literal_options
+    unit = process_unit()
+    request = process_ir_request(units=(unit,))
+    with patch(_PAGINATE) as paginate:
+        paginate.return_value = []
+        compiled = compile_authoring_request_v1(
+            request, boomi_client=MagicMock(), profile=_PROFILE
+        )
+    # The compile's OWN symbol table, not one rebuilt here: a second table could
+    # resolve an operation differently and the CFG would then describe a compile
+    # nobody ran.
+    cfg, _plan = compile_process_ir_v1(unit.process_ir, compiled[1].symbols)
+
+    entry = next(n for n in cfg.nodes if n.node_id == cfg.entry_node_id)
+    # This fixture's entry lowers to a `connector`, so the entry SEMANTIC — and
+    # only it — is replaced with a connector call. Everything else about the
+    # graph stays exactly as the compiler produced it, which is what keeps this
+    # from becoming the hand-built CFG the docstring rejects.
+    assert entry.semantic.semantic_kind in ("connector", "connector_call"), entry.semantic
+
+    def _accepted(role):
+        swapped = entry.model_copy(
+            update={"semantic": ConnectorCallSemanticV1(
+                role=role, operation_ref=entry.semantic.operation_ref
+            )}
+        )
+        candidate = cfg.model_copy(
+            update={"nodes": tuple(
+                swapped if n.node_id == entry.node_id else n for n in cfg.nodes
+            )}
+        )
+        try:
+            check_cfg_invariants(candidate)
+            return True
+        except Exception:
+            return False
+
+    declared = _literal_options(ConnectorCallSemanticV1, "role")
+    allowed = ENTRY_ROLE_RESTRICTIONS["connector_call"]
+    assert set(allowed) <= set(declared), (allowed, declared)
+    assert ENTRY_CALL_ROLE in allowed
+    for role in declared:
+        assert _accepted(role) == (role in allowed), (
+            "the entry-role restriction and the invariant disagree about %r" % role
+        )
+    # ...and the restriction is not vacuously everything.
+    assert set(allowed) != set(declared), (allowed, declared)

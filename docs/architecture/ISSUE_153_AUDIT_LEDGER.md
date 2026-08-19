@@ -408,6 +408,8 @@ authority-derived coverage claim.
 | QA-153-r17-01 | L1 Stage-1 QA round 17, `boomi-qa-tester` (resumed session), report `agents/reports/2026-08-19-issue-153-m12-15-stage1-r17.md`, live against `traininghlibbochkarov-JKIY2X`, all four dispatched items PASS | “Your recorded `capability_revision` is wrong. `compiler_revision` `ad4ee828…cf67` is right, but the served `capability_revision` at `fc8183f2` is `sha256:a7302952…e4ac9037`, not `2da52ca1…0409`. Attributed by construction: reverting ONLY `workflow.py` to its `b6fc6e42` content restores `2da52ca1…0409` with `compiler_revision` unchanged — so the r17 fix itself moved it. Anything pinned to `2da52ca1…` is now stale. Worth a look at why a private helper moves a caller-visible pin; if the manifest hashes module source, comment edits will move it too.” | **Low** (source label) | machine-served schemas/contracts | (record accuracy) — a measured value written into the durable record at a moment other than the one it describes; not a code-level pair | Standard — the recorded VALUE was wrong in a durable record, which is the audit-record equivalent of a served contract; source label Low | PENDING-SHA | `fixed` for the first half, **`finding-refuted` for the second, on measured evidence.** The wrong value is corrected above and the final pair is now recorded in the closing validation table, measured at the closing tree instead of mid-batch. On the mechanism: the manifest DOES fold in a source digest, and it is deliberate, documented, and bounded. `capability_revision` hashes the manifest, which carries the recipe registry snapshot, whose `source_version` is `source_revision(RECIPE_LAYER_MODULES)` — and `boomi_mcp.authoring.workflow` is the FIRST declared member of that tuple, with its reason recorded at the declaration (#146: the MCP authoring surface invokes the engine directly, so it is in the execution path and must move the digest). Measured across the two trees, exactly three manifest keys moved and ten did not; `recipe_registry` is the one that carries this. So yes — a comment edit in a layer member moves it, by design, and `test_the_downstream_compiler_is_not_in_the_layer_digest` is the boundary keeping that from widening into a package hash. In a deployed image `image_build_revision` overrides the source digest entirely, so the “rebuilt-but-identical deployment reports drift against itself” failure the `compiler_revision` docstring warns about does not arise here — and `compiler_revision` itself, which makes that promise, did not move. |
 | QA-153-r17-02 | same round | “`_cause_codes_for` has no fallback for a bare `PydanticCustomError` (no `.errors()`), so a bare error with a registered type still serves `["PydanticCustomError"]` — the apply-route sibling added exactly that fallback for r15-02, so the map's two readers disagree again (the r14-01 shape). I could not reach it: the plausible route (unknown-key `process_extensions` `$ref:`) is refused upstream by the component-plan lint with `INTEGRATION_DEPENDENCY_REQUIRED`, known-key control compiling cleanly.” | **Low** (source label) | machine-served schemas/contracts | **same pair as QA-153-r14-01** — one map with several readers, a rule added to one of them. r14-01 was the location rule; r15-02 added the bare form to the apply route; this is that same divergence appearing a third time. **Structural fix, not another copy.** | Standard — in a blocking class, no critical anchor; source label Low. QA records it as unreachable today and not a regression | PENDING-SHA | `fixed` by moving the rule INTO the shared resolver: `_named_error_code_from_validation` now resolves both the validation-context form and the bare `PydanticCustomError`, and the apply route's private copy is DELETED rather than mirrored — a third reader with its own lookup is the defect, not the fix. **The witness asserts every reader agrees**, not that the resolver works: it drives all three (resolver, apply route, compile wrapper) on one bare error, so a fix that added a fourth private copy would pass a resolver-only test and fail this one. Controls both directions: an unregistered bare error is still named by nobody, and two mutants die (resolver loses the bare form; resolver names anything bare). QA's own unreachability evidence is retained — the plausible route is refused upstream by the component-plan lint — so this fix closes a divergence, not an observed caller-visible defect. |
 | CX44-01 | L2 Stage-2 Codex commit-review round 44, run dir `cdx-review.kzQjn6`, `STATUS: completed`, `SCOPE: branch diff against b6fc6e424a022e41b0bbcd93aecb1e89f5362cfd (b6fc6e4) head=42c6e1bd2dd37bea4177c18722ce42a27371ae63 dirty=false` | “Exercise connector calls with their valid entry role … `ConnectorCallSemanticV1.role` admits `entry|downstream`, but this probe constructs it with `role="source"`. Consequently, a regression that returns `listener` for a valid `semantic_kind == "connector_call", role == "entry"` changes materialized process options while leaving both connector-call oracle rows scheduled and `_compiler_revision()` byte-identical. Construct this probe with the member's valid fields so stale revision bindings are rejected.” | **P2** | machine-served schemas/contracts | **DC-1** — same pair as AR4-01/CX43-01, now at FIELD level: round 43 derived the KIND set from the schema and then hand-picked one `role` value to stamp on every kind. **Third instance in three consecutive rounds on one artifact**, each a smaller hand-copy inside the previous fix | Standard — in a blocking class, no critical anchor; source label P2 | PENDING-SHA | `fixed` by deriving the FIELD vocabulary too: `_literal_options(member, "role")` reads each union member's own `Literal` options, so every kind is probed with the roles its schema admits and no other. The reviewer's regression now moves the revision for BOTH admitted roles (`entry` and `downstream`), measured. **Round 43's control is WITHDRAWN, not kept alongside**: it keyed on `(connector_call, role="source")`, which this finding shows the schema cannot construct — a control asserting the revision moves for an impossible node claims coverage that does not exist, which is worse than no control. Its removal is why the round-43 witness went red when this fix landed, and that redness is the evidence the withdrawal was necessary rather than convenient. Two mutants die: guessing `source` again, and reading the role vocabulary as empty. **Recorded stopping test, applied rather than assumed:** three consecutive rounds on one oracle would justify stopping under the rounds-34-42 rule ONLY if the failure mode had inverted — if the guard had begun failing the gate on valid work. It has not: every round so far has been the guard UNDER-reporting, where iterating is cheap and each fix is free, and each fix has moved the derivation one level closer to the schema rather than adding another special case. The rule says continue here. |
+| CX45-01 | L2 Stage-2 Codex commit-review round 45, run dir `cdx-review.eYTTtJ`, `STATUS: completed`, `SCOPE: branch diff against 42c6e1bd2dd37bea4177c18722ce42a27371ae63 (42c6e1b) head=a740705a622370562c6d95ffaaf70d097c09e30c dirty=false` | “Derive the listener role from the executed rule … When `ConnectorSemanticV1`'s equivalent `Literal` declaration is reordered (for example, `target` before `source`), this returns `target` even though `derive_process_execution_profile` still tests `role == "source"`. The entry-id, unresolved-operation, and non-listener-family cases then all stop at the role check, so removing the operation/family guards leaves `_compiler_revision()` unchanged. Infer the eligible role from observed derivation behavior or a shared semantic authority rather than declaration order.” | **P2** | machine-served schemas/contracts | **DC-1** — same pair as AR4-01/CX43-01/CX44-01: the sibling sweep replaced a typed role with `options[0]`, which is derived from the schema but not from anything that MEANS the rule's answer. Declaration order carries no semantics | Standard — in a blocking class, no critical anchor; source label P2 | PENDING-SHA | `fixed` by asking the rule: `_listener_role(classify, families)` calls the derivation for each admitted role and returns the one that yields `listener`, falling back to the first declared option only in a state where no role does (and the witness fails there). **The control is the reorder itself** — the witness patches the role vocabulary into reverse order and asserts the same role is still chosen, which is the only condition under which asking the rule and reading `options[0]` differ; without it the fix is untested, because `source` happens to be declared first. That control was ADDED after the first mutation run showed `if False:` (reverting to declaration order) passing unchanged. |
+| CX45-02 | same round | “Exclude downstream calls from entry-node probes … `_classify` always installs the probed node as `cfg.entry_node_id`, but for `ConnectorCallSemanticV1` this loop also emits `role="downstream"`. `check_cfg_invariants` rejects that graph because only the control-flow entry may carry the `entry` call role, and production profile derivation receives compile-checked CFGs. A change affecting only this unreachable downstream-entry shape therefore rotates the served `compiler_revision` and invalidates bindings without changing supported behavior; restrict this member's entry probe to `entry`.” | **P2** | machine-served schemas/contracts | **DC-1**, and the first time in this slice that the oracle's failure mode INVERTED: rounds 43-45a were the guard under-reporting; this one imposes a cost on callers — a rotated revision invalidates every outstanding binding, for a shape production cannot produce | Standard — in a blocking class, no critical anchor; source label P2 | PENDING-SHA | `fixed` by REMOVING the over-reach rather than narrowing it again, which is what the recorded rounds-34-42 stopping rule prescribes once a guard starts costing others. The legality question is answered by the compiler: `ENTRY_ROLE_RESTRICTIONS` is declared in `invariants.py` beside the rule that enforces it, `ENTRY_CALL_ROLE` replaces the literal the invariant used inline, and the probe reads the restriction — one declaration, two readers, which is the structural answer rather than a second hand-model of “which roles may be the entry”. **Pinned bidirectionally** by a test that swaps a REAL compiled CFG's entry semantic and asserts the invariant accepts exactly the restricted roles and rejects every other declared one (a one-directional check would pass for a restriction listing everything). The graph is real because the first attempt hand-built a `SemanticCfgV1`, silently swallowed its own construction errors, and reported the LEGAL role as rejected. **Round 44's control is inverted, not deleted**: the `entry` regression must move the revision and the `downstream` one must not — the two directions now differ, which is this finding's entire content. Three mutants die (restriction widened to every role, restriction naming the wrong role, restriction ignored); the fourth candidate — redefining `ENTRY_CALL_ROLE` itself — moves both readers together by design, and was measured to be caught by two other tests rather than assumed to be. |
 
 **Supersession map** — `AR3-07a → AR3-07` · `AR3-05a → AR3-05` · `CX30-01a → CX30-01` · `CX31-02a → CX31-02` · `QA-153-r15-02a → QA-153-r15-02` · `CX29-02a → CX29-02` · `AR2-02a → AR2-02` · `QA-153-r2-07a → QA-153-r2-07` · `QA-153-r6-01a → QA-153-r6-01` · `CX5-04a → CX5-04` · `CX6-01a → CX6-01` · `CX7-02a → CX7-02` · `CX8-01a → CX8-01` · `AR1-01a → AR1-01` · `AR1-02a → AR1-02` · `AR1-03a → AR1-03` · `AR1-04a → AR1-04` · `AR1-05a → AR1-05` · `AR1-06a → AR1-06` · `AR1-07a → AR1-07` · `AR1-08a → AR1-08` · `AR1-09a → AR1-09` · `AR1-10a → AR1-10`
 
@@ -853,6 +855,7 @@ the wrong table if §11 were ever reordered.
 | Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |
 | --- | --- | --- | --- | --- |
 | L1 Stage-1 QA | 3 / 3 | `8d54f1a`, clean | **`CONTINUE`** | See the rationale block below. |
+| L2 Stage-2 Codex review | 3 / 45 | `a740705a`, clean | **`CONTINUE`** | See the evaluation-45 block below. |
 
 ### L2 checkpoint at evaluation 3 — `CONTINUE`
 
@@ -1322,6 +1325,73 @@ output. The witness now asserts that the role those rows carry is the one the de
 classifies as `listener`, which is the property the docstring was asserting in prose. Both mutants
 die. This is the fourth time in this slice that a mutation control has caught a claim the test could
 not support, and every one of them was in a claim I had just written.
+
+
+### L2 checkpoint at evaluation 45 — `CONTINUE`
+
+Recorded after round 45's owed validation (both corrections applied, mutation-controlled, suite green)
+and before the next mutation. Window 3 of 3; cumulative evaluation 45.
+
+**Per-tier counts and breadth.** Round 45 returned **2 Standard** findings (P2, both
+machine-served schemas/contracts), **0 Critical**. Both are in ONE artifact —
+`_execution_profile_behaviour_oracle` — as were rounds 43 and 44.
+
+**Trend vector across the window:**
+
+| Dimension | L2 r43 | L2 r44 | L2 r45 |
+| --- | --- | --- | --- |
+| Findings | 1 | 1 | 2 |
+| Critical tier | 0 | 0 | 0 |
+| Blocking classes touched | 1 | 1 | 1 |
+| Artifacts touched | 1 | 1 | 1 |
+| Hand-picked vocabularies remaining in that artifact | kinds, roles, entry legality, listener role | roles (connector rows), entry legality, listener role | **none** |
+
+**Why `CONTINUE` and not deferral or closure.** The raw finding count rose (1 → 2), which is the one
+dimension that worsened, so the case has to be made on the others rather than asserted. It is the
+last row that carries it: each round removed one whole level of hand-picked vocabulary from the same
+artifact rather than patching the instance reported, and after round 45 there is nothing left in that
+artifact deriving from anything but an authority — the kind set from the CFG union, each member's
+role vocabulary from its own `Literal`, entry legality from `ENTRY_ROLE_RESTRICTIONS` beside the
+invariant that enforces it, and the listener role from the derivation's own observed answer. The only
+remaining literals are stand-in strings (`"$ref:op"`, `"database"`), which are values rather than
+vocabularies and cannot fall behind anything. This is the structural-fix rule working as written, not
+a class being instance-patched three times: the second-instance trigger fired at CX43-01 and each
+subsequent fix replaced an enumeration with an invariant.
+
+**The one dimension that genuinely changed character.** CX45-02 is the first finding in this window
+where the guard's failure mode INVERTED — from under-reporting to imposing a cost on callers, since a
+rotated `compiler_revision` invalidates every outstanding binding and it was rotating for a graph the
+compiler rejects. The rounds-34-42 stopping rule addresses exactly this, and it was applied: the
+over-reach was REMOVED (the illegal probe row is gone) rather than narrowed, and the legality question
+was handed to the compiler instead of being re-modelled. That is why this checkpoint continues rather
+than escalating — the inversion was closed in the same batch it appeared, by subtraction.
+
+**Named finite next correction.** There is none pending in this artifact, which is the point:
+round 46 is the owed delta review of round 45's own correction, not a planned fix. If round 46
+returns another finding in this same artifact, the recorded decision is to stop deriving further and
+take a deviation with a follow-up issue — a fourth consecutive round on one oracle would mean the
+instrument, not the enumeration, is the problem.
+
+**A criterion this window should have been applying and was not (owner challenge, recorded here
+because it changes the next decision).** The trend analysis above weighs severity, count, breadth and
+defect class — all of which are properties of the FINDING. None of them asks what the finding
+protects. Asked now, of this artifact: `derive_process_execution_profile` can return `listener`, and
+`LISTENER` is unreachable in production today — lowering refuses a listener entry outright
+(`PROCESS_IR_CAPABILITY_UNSUPPORTED`), which the module's own docstring states and #158 is the issue
+that lifts it. So rounds 44 and 45a widened the fingerprint over a classification no caller can
+currently reach, at a real and recurring cost: each rotation of `compiler_revision` invalidates every
+outstanding binding, forces a census rebaseline, and costs a full-suite run. CX45-02 was worth its
+round on its own terms — it REMOVED a cost rather than adding coverage — but the coverage-widening
+half of 44 and 45a was not, and no rule in this ledger would have said so.
+
+The criterion, stated so it binds the remaining rounds: **a finding earns a fix when the behaviour it
+protects is reachable by a caller, or when it removes a cost the current code imposes.** A finding
+that only sharpens detection of a regression in an unreachable path is recorded and left — it is not
+refuted, because it is correct; it is `deferred` with reason class `out-of-scope-by-design`, because
+the path it guards is closed by an unrelated refusal that #158 owns. Applied from round 46 onward.
+
+**No deferrals.** Zero critical residue, zero unresolved standard residue; every finding in this
+window is `fixed` with its mutation controls recorded on its row.
 
 ## Deferrals
 

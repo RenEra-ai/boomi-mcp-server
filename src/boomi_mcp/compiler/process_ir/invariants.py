@@ -66,6 +66,22 @@ from .diagnostics import raise_compile_error
 from .error_handling import catch_region_node_ids, derive_error_regions
 
 _SEMANTIC_PHASE = "semantic_lowering"
+
+#: The connector-call role that the CONTROL-FLOW ENTRY node must carry, and the
+#: only one it may carry (#140; the rule is enforced below and restated in its
+#: comment). Named rather than spelled inline because it is consulted from
+#: outside this module: the served compiler revision fingerprints the execution-
+#: profile derivation over probe graphs, and a probe built from the raw `Literal`
+#: vocabulary constructs a `downstream` entry — a graph this invariant rejects,
+#: so a change confined to that unreachable shape would rotate a caller's
+#: binding for no behavioural reason (L2 round 45). One declaration, two readers.
+ENTRY_CALL_ROLE = "entry"
+
+#: Per semantic kind, the roles a node may carry AT THE ENTRY POSITION when the
+#: kind declares a role at all. A kind absent from this mapping is unrestricted —
+#: `connector` may be the entry in either role, and the derivation's own source/
+#: target test is what distinguishes them.
+ENTRY_ROLE_RESTRICTIONS = {"connector_call": (ENTRY_CALL_ROLE,)}
 _PLAN_PHASE = "emission_planning"
 
 # Semantic kinds whose successors are control edges rather than a single
@@ -410,7 +426,7 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
         node for node in nodes if node.semantic.semantic_kind == "connector_call"
     ]
     if calls:
-        entries = [node for node in calls if node.semantic.role == "entry"]
+        entries = [node for node in calls if node.semantic.role == ENTRY_CALL_ROLE]
         entry_node = by_id[cfg.entry_node_id]
         entry_is_call = entry_node.semantic.semantic_kind == "connector_call"
         expected = 1 if entry_is_call else 0
@@ -1382,6 +1398,8 @@ def check_emission_plan_invariants(
 
 
 __all__: List[str] = [
+    "ENTRY_CALL_ROLE",
+    "ENTRY_ROLE_RESTRICTIONS",
     "check_cfg_invariants",
     "check_emission_plan_invariants",
 ]

@@ -933,6 +933,32 @@ def _cfg_semantic_members():
     return typing.get_args(union)
 
 
+def _entry_roles(member) -> Tuple[str, ...]:
+    """The roles this member may carry AT THE ENTRY POSITION.
+
+    The probe below always installs its node as the CFG entry, so a role the
+    compiler forbids there describes a graph production can never hand the
+    derivation. Probing it anyway meant a change confined to that unreachable
+    shape rotated the served `compiler_revision` and invalidated every caller's
+    binding without any supported behaviour having changed (L2 round 45) — the
+    first time this oracle's failure mode moved from under-reporting to
+    imposing a cost on callers.
+
+    The restriction is read from `ENTRY_ROLE_RESTRICTIONS`, declared beside the
+    invariant that enforces it, so the probe and the compiler cannot disagree
+    about which shapes exist. A kind that declares no restriction is probed with
+    every role it admits.
+    """
+    declared = _literal_options(member, "role")
+    if not declared:
+        return ()
+    kind = member.model_fields["semantic_kind"].default
+    allowed = _import("invariants").ENTRY_ROLE_RESTRICTIONS.get(kind)
+    if allowed is None:
+        return declared
+    return tuple(role for role in declared if role in allowed)
+
+
 def _connector_member():
     """The CFG union's `connector` member — found by its discriminator, not by
     position in the union nor by importing its class name."""
@@ -942,16 +968,27 @@ def _connector_member():
     raise LookupError("the CFG semantic union declares no `connector` member")
 
 
-def _listener_role() -> str:
-    """The `connector` role the derivation can classify as a listener.
+def _listener_role(classify, families) -> str:
+    """The `connector` role the derivation ACTUALLY classifies as a listener.
 
-    Read from the rule's own source of truth rather than typed: the rule tests
-    `role == "source"`, and `ConnectorSemanticV1` declares `source` first. Taking
-    the first admitted option keeps the discriminant rows aligned with the schema
-    if that vocabulary is ever reordered or renamed — the case that would
-    otherwise turn three discriminants into three inert rows.
+    Asked of the rule, not read off the schema (L2 round 45). The previous
+    version took `ConnectorSemanticV1`'s first declared `Literal`, which is
+    `source` today and correct today — but declaration order carries no meaning,
+    and reordering that vocabulary would have returned `target` while the rule
+    still tested `source`. The three discriminant rows below would then all have
+    stopped at the role check, so removing the operation or family guard would
+    have left the served revision unchanged: three inert rows that still look
+    like coverage.
+
+    Falls back to the first declared option only if no role yields `listener` at
+    all — a state in which the discriminants cannot discriminate anyway, and one
+    the accompanying witness fails on.
     """
     options = _literal_options(_connector_member(), "role")
+    if families:
+        for role in options:
+            if classify(role) == _import("execution_profile").LISTENER:
+                return role
     return options[0] if options else "source"
 
 
@@ -1050,7 +1087,7 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
         # `(connector_call, entry)` node would have left both of its rows
         # scheduled and the revision unmoved. Guessing a field's vocabulary
         # instead of reading it is the same defect as guessing the kind set.
-        for role in _literal_options(member, "role") or (None,):
+        for role in _entry_roles(member) or (None,):
             semantic = {"semantic_kind": kind, "operation_ref": "$ref:op"}
             suffix = "-listener-shaped"
             if role is not None:
@@ -1060,21 +1097,29 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
                 SimpleNamespace(node_id="entry", semantic=SimpleNamespace(**semantic)),
                 [_symbol("$ref:op", families[0])] if families else [],
             )
+    listener_role = _listener_role(
+        lambda role: _classify(
+            _connector(role, "$ref:op"), [_symbol("$ref:op", families[0])]
+        )
+        if families
+        else None,
+        families,
+    )
     cases.update({
-        # The listener-eligible role, taken from the schema rather than typed:
-        # these three discriminants are only discriminating if the role they
-        # carry is the one the rule can say "listener" for.
+        # The listener-eligible role, ASKED OF THE RULE rather than read off the
+        # schema: these three discriminants are only discriminating if the role
+        # they carry is the one the rule can actually say "listener" for.
         "entry-id-names-no-node": _classify(
-            _connector(_listener_role(), "$ref:op"),
+            _connector(listener_role, "$ref:op"),
             [_symbol("$ref:op", families[0] if families else "http")],
             entry_id="somewhere-else",
         ),
         "operation-unresolved": _classify(
-            _connector(_listener_role(), "$ref:missing"),
+            _connector(listener_role, "$ref:missing"),
             [_symbol("$ref:op", families[0] if families else "http")],
         ),
         "non-listener-family": _classify(
-            _connector(_listener_role(), "$ref:op"),
+            _connector(listener_role, "$ref:op"),
             [_symbol("$ref:op", "database")],
         ),
     })
