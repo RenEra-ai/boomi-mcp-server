@@ -5861,6 +5861,10 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
         # `last-reviewed-sha` was written and the next round re-reviews the SAME
         # delta rather than inheriting a shrunken scope.
         "commit-reviews/cdx-review.FElIYS": "failed",
+        # #153 L2 round 36: STUCK — 100 events, then 15+ minutes of silence.
+        # Aborted and collected `failed`; no `last-reviewed-sha` was written, so
+        # the retry re-reviews the same delta.
+        "commit-reviews/cdx-review.qwXEHm": "failed",
         # refused start — never an evaluation; carries only start.json+refusal.json
         "architect-reviews/cdx-gate-review.TnpZpj": "refused",
     }
