@@ -1016,6 +1016,53 @@ finalization code whose declared retryability matches its envelope). Next: the
 delta-scoped round 25 over it, then the §6 architect gate re-run on the current
 tree, then the composite wave gate, then closure.
 
+### L2 checkpoint at evaluation 32 — `CONTINUE`
+
+Recorded after round 32's owed validation (its single finding was refuted with
+evidence and the tree is unchanged by it) and BEFORE any further mutation.
+
+**The gap first, because it recurred.** The checkpoints owed at cumulative
+evaluations 27 and 30 were not written in flight either, for the same reason the
+first six were not: the loop was running fix→validate→fix and the decision record
+was not part of that rhythm. That is now recorded twice in this ledger, which is
+itself the finding — a rule I keep agreeing with and not performing. It is not
+reconstructed here; only the checkpoint due NOW is written.
+
+**Per-tier counts and breadth.** Rounds 29-32 returned 2, 2, 2 and 1 findings.
+Round 32's single finding is REFUTED with evidence (CX32-01), so the current
+residue in this loop is **zero unresolved findings of any tier**.
+
+**Trend vector:**
+
+| Dimension | L2 r29 | r30 | r31 | r32 |
+| --- | --- | --- | --- | --- |
+| Findings | 2 | 2 | 2 | **1 (refuted)** |
+| Critical-tier | 1 | 0 | 1 | **0** |
+| Unresolved at decision time | 0 | 0 | 0 | **0** |
+| Distinct defect classes | 2 | 2 | 2 | **1** |
+
+**New / resolved / recurring defect classes.** One class dominated this window
+and is now closed: the dry-emit registry, corrected three times — too narrow
+(r29), too wide (r30), wrong closure (r31) — before landing on the transitive
+ancestor set, which is the relation ordered apply itself walks. The other,
+"which base is a manifest append-only relative to", recurred three times and is
+closed by a REFUTATION rather than a fourth edit: the answer is the base the
+branch lands on, and rebuilding against whichever base was in front of me is
+what made it recur.
+
+**Ruling out the other outcomes.** `CLOSE-CLEAN` is unavailable: L2 has no
+residue, but the §6 gate has not re-run against this tree and the wave gate is
+not current, so "every required gate covers the current tree" is false.
+`DEFER-STANDARD-AND-PROCEED`/`-AND-CLOSE` have nothing to defer — the residue is
+empty. `ESCALATE-OPEN` needs validation unavailable, severity unresolvable, or
+no credible next action; none holds. Round count alone is never grounds to
+escalate, and the last four rounds each ended with a fixed or refuted finding
+and a green suite.
+
+**Named finite next correction.** One delta-scoped round over the refutation's
+own docs commit, then the §6 architect gate (evaluation 4) against this tree,
+then the composite wave gate, then closure.
+
 ## Deferrals
 
 Pointer-only — reason class, placement, and lineage live on the finding row and in the filed issue.
