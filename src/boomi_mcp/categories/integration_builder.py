@@ -7124,7 +7124,13 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
 
         steps.append(step)
 
-    if not spec.components:
+    # A CANONICAL PROCESS ROOT IS AN EXECUTABLE STEP (§6 AR3-06). This read
+    # `spec.components` alone, which was the whole participant universe before
+    # #153 added `processes` — so a spec that authors one process and no legacy
+    # components was told its plan had nothing to execute while the plan below
+    # was busy building a step for it. Same participant-universe question DC-2
+    # covers, on the warning surface.
+    if not spec.components and not getattr(spec, "processes", ()):
         warnings.append("No components were provided; plan contains zero executable steps.")
     if config.get("source_description") and not config.get("integration_spec"):
         warnings.append("Spec was derived from source_description. Review normalized output before apply.")
@@ -7286,6 +7292,7 @@ def _materializer_revision() -> str:
     """
     import hashlib
 
+    from ..authoring.process_materialization import preservation_policy_v1
     from ..authoring.revisions import canonical_json_bytes
     from .components.process_component_materializer import (
         DEFAULT_PROCESS_OPTIONS,
@@ -7313,6 +7320,14 @@ def _materializer_revision() -> str:
                     },
                 )
             ),
+            # The UPDATE-PRESERVATION AUTHORITY this materializer emits under
+            # (§6 AR3-10). The policy decides what an update keeps, which is
+            # materialization behaviour — and it was the one mandated item the
+            # revision did not cover, so a policy change left the revision
+            # still. Taken as the projection's OWN canonical text so it cannot
+            # become another hand-model of the runtime policy (the S5-03
+            # defect).
+            "preservation_policy": preservation_policy_v1().canonical_policy_json,
         }
     )
     return "sha256:" + hashlib.sha256(material).hexdigest()
@@ -7537,6 +7552,56 @@ def _resolve_canonical_placement(boomi_client, envelope):
     return matches[0].get("id") or None
 
 
+def _build_canonical_plan(*, spec, unit, conflict_policy: str):
+    """Build ONE canonical root's materialization plan from the request alone.
+
+    The single place the RAW route's plan is constructed (§6 AR3-02). It is
+    called twice by design — once in the pre-write pass, which is what makes a
+    request-decidable failure refuse before any dependency is created, and never
+    again for the same root, because the pre-write result is cached and handed
+    to the execution turn. The typed route does not call it at all: it arrives
+    with a compile-certified stored plan.
+    """
+    from ..authoring.contract import get_authoring_revisions
+    from ..authoring.process_materialization import build_materialization_plan
+    from ..authoring.workflow import _connector_metadata_from_components
+    from ..compiler.process_ir.emitter_registry import emitter_revision
+    from ..recipes.materialization import build_symbol_table
+
+    symbols = build_symbol_table(
+        list(spec.components),
+        process_keys=[u.envelope.component_key for u in (spec.processes or ())],
+        connector_metadata=_connector_metadata_from_components(spec.components),
+    )
+    return build_materialization_plan(
+        envelope=unit.envelope,
+        process_ir=unit.process_ir,
+        symbols=symbols,
+        conflict_policy=conflict_policy,
+        compiler_revision=get_authoring_revisions()["compiler_revision"],
+        emitter_revision=emitter_revision(),
+        materializer_revision=_materializer_revision(),
+    )
+
+
+def _canonical_plan_failure(exc) -> Tuple[str, Optional[str]]:
+    """The served code and path for a pre-write plan-build failure.
+
+    The COMPILER'S OWN diagnostic travels when it has one (§6 AR3-02): a step
+    referencing a component of the wrong type is a request defect with a
+    registered code and a path, and serving
+    `PROCESS_MATERIALIZATION_INTERNAL_ERROR` for it both hid the cause and
+    spent that code's meaning — it names a genuine server fault.
+    """
+    diagnostics = getattr(exc, "diagnostics", None) or ()
+    for diagnostic in diagnostics:
+        code = getattr(diagnostic, "code", None)
+        if code:
+            return str(code), getattr(diagnostic, "path", None) or None
+    named = _named_error_code_from_validation(exc)
+    return named or PROCESS_MATERIALIZATION_INTERNAL_ERROR, None
+
+
 def _execute_canonical_process(
     *,
     boomi_client,
@@ -7550,6 +7615,8 @@ def _execute_canonical_process(
     stored_plan=None,
     compiled_plan_digest: Optional[str] = None,
     resolved_folder_id: Optional[str] = None,
+    on_write_confirmed=None,
+    precompiled_plan=None,
 ) -> Dict[str, Any]:
     """Materialize and apply ONE canonical ProcessIR root, and attest it.
 
@@ -7706,18 +7773,17 @@ def _execute_canonical_process(
                     error_code="PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH",
                     component_key=key,
                 )
+        elif precompiled_plan is not None:
+            # The LEGACY `integration_spec` root carries no compile binding, but
+            # its plan was built in the pre-write pass (§6 AR3-02) — so every
+            # request-decidable failure already refused before the first write,
+            # and this turn consumes that plan rather than compiling again.
+            plan = precompiled_plan
         else:
-            # The LEGACY `integration_spec` root carries no compile binding at
-            # all, so there is no stored plan to consume; building it here is
-            # the only option, and there is no compiled digest to diverge from.
-            plan = build_materialization_plan(
-                envelope=envelope,
-                process_ir=unit.process_ir,
-                symbols=symbols,
-                conflict_policy=conflict_policy,
-                compiler_revision=get_authoring_revisions()["compiler_revision"],
-                emitter_revision=emitter_revision(),
-                materializer_revision=_materializer_revision(),
+            # No stored plan and no pre-built one: the caller reached this
+            # function directly. Building here is the only option.
+            plan = _build_canonical_plan(
+                spec=spec, unit=unit, conflict_policy=conflict_policy
             )
         xml = materialize_canonical_process_xml(
             plan=plan,
@@ -7760,6 +7826,9 @@ def _execute_canonical_process(
         }
 
     action = "update" if (envelope.action == "update" or target_id) else "create"
+    # Bound on the create branch only; the update path reports its own digest on
+    # `exec_result`. Initialized here so every reader below is unconditional.
+    precomputed_digest: Optional[str] = None
     if action == "update":
         if not target_id:
             message = f"Missing component_id for update of process '{key}'"
@@ -7798,6 +7867,28 @@ def _execute_canonical_process(
     component_id = _extract_component_id(exec_result) or (
         target_id if action == "update" else None
     )
+    # THE WRITE IS RECORDED DURABLY THE INSTANT THE PLATFORM CONFIRMS IT
+    # (§6 AR3-03). Everything that follows — the readback, the placement
+    # identity, the attestation construction — happens AFTER the component
+    # exists, and an exception in any of it used to leave the durable row with
+    # no trace of a mutation that had already landed. This note is deliberately
+    # not an attestation: it records only what is known at this instant (the
+    # key, the platform's own id, the digest of the bytes that were sent), and
+    # the full attestation replaces nothing — it is appended alongside when it
+    # is built. Recording less, earlier, is the point.
+    if on_write_confirmed is not None and component_id and exec_result.get(
+        "_success", False
+    ):
+        on_write_confirmed({
+            "component_key": key,
+            "action": action,
+            "result_component_id": component_id,
+            "submitted_xml_digest": (
+                exec_result.get("submitted_xml_digest")
+                or precomputed_digest
+            ),
+            "attestation_pending": True,
+        })
     # `status` is derived from what the PLATFORM confirmed, not from the action
     # that was attempted (QA-153-r3-02). It read `"updated" if action ==
     # "update"`, so a step whose update the platform rejected — measured: HTTP
@@ -8380,6 +8471,18 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     )
 
     resolved_placements: Dict[str, Optional[str]] = {}
+    # Plans built pre-write for the RAW route, cached so the execution turn
+    # consumes them rather than compiling again (§6 AR3-02). This is a MOVE of
+    # the compile, not a duplication: the typed route already arrives with a
+    # stored plan and is untouched.
+    precompiled_plans: Dict[str, Any] = {}
+
+    def _stored_plan_for(key: str):
+        """The compile-certified plan for a root, or None on the raw route."""
+        if authoring_bundle is None:
+            return None
+        return (authoring_bundle.materialization_plans or {}).get(key)
+
     _planned_actions = {
         step["key"]: str(step.get("planned_action", ""))
         for step in planned["steps"]
@@ -8421,6 +8524,44 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     "written; nothing was created."
                 ),
             }
+        # (b) EVERY OTHER REQUEST-DECIDABLE PLAN FAILURE (§6 AR3-02). The
+        # relocatability check above closed one question; the compiler decides
+        # many more — a step referencing a component of the wrong type, an
+        # unrepresentable graph — and on the RAW route none of them was asked
+        # until the root's execution turn, which topological order runs after
+        # its dependencies have been written. Building the plan here answers
+        # them all from the request alone, and the built plan is CACHED so the
+        # execution turn consumes it instead of compiling a second time.
+        #
+        # The typed route is untouched: it arrives with a compile-certified
+        # stored plan, and rebuilding it here would defeat the identity
+        # assertion that binds the applied plan to the compiled artifact.
+        #
+        # HONEST BOUNDARY: `materialize_canonical_process_xml` recompiles with
+        # the ACTUAL id registry at apply time, so late-binding failures that
+        # depend on published ids still surface in the loop. This closes the
+        # request-decidable ones, which is what the rule is about.
+        if _stored_plan_for(_pkey) is None:
+            try:
+                precompiled_plans[_pkey] = _build_canonical_plan(
+                    spec=spec,
+                    unit=_unit,
+                    conflict_policy=conflict_policy,
+                )
+            except Exception as _plan_exc:  # noqa: BLE001 — classified below
+                _code, _path = _canonical_plan_failure(_plan_exc)
+                return {
+                    "_success": False,
+                    "error": _validation_error_message(_plan_exc),
+                    "error_code": _code,
+                    "failed_step": _pkey,
+                    "partial_results": {},
+                    "hint": (
+                        "The plan is decided before any component is written; "
+                        "nothing was created."
+                        + (f" Offending path: {_path}." if _path else "")
+                    ),
+                }
         # SIBLING SWEEP (§6 AR2-02), recorded rather than re-implemented: the
         # OTHER pre-decidable canonical refusal — `action="update"` with no
         # resolvable target — is already decided before this pass runs. The raw
@@ -8551,6 +8692,22 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                         ),
                         None,
                     )
+                def _note_write(note, _key=key):
+                    """Durably record a confirmed write BEFORE it is attested.
+
+                    §6 AR3-03: the attestation is appended after the step
+                    function returns, so an exception raised between the
+                    platform's confirmation and that return left the durable
+                    record with no trace of a component that exists. This note
+                    lands the instant the write is confirmed.
+                    """
+                    if durable_build_id is None:
+                        return
+                    record = _BUILD_REGISTRY.get(durable_build_id)
+                    if record is None:
+                        return
+                    record.setdefault("process_writes", []).append(note)
+
                 outcome = _execute_canonical_process(
                     boomi_client=boomi_client,
                     profile=profile,
@@ -8568,6 +8725,8 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     stored_plan=_stored_plan,
                     compiled_plan_digest=_compiled_digest,
                     resolved_folder_id=resolved_placements.get(key),
+                    on_write_confirmed=_note_write,
+                    precompiled_plan=precompiled_plans.get(key),
                 )
                 results[key] = outcome["result"]
                 if outcome.get("applied_name") and outcome.get("requested_name") and (
@@ -9799,6 +9958,13 @@ def _apply_escape_evidence(
         evidence["process_readbacks"] = serialized_readbacks
     if apply_warnings:
         evidence["warnings"] = list(apply_warnings)
+    # Confirmed-but-unattested writes travel too (§6 AR3-03): if a step threw
+    # after the platform confirmed its write, this is the only record that the
+    # component exists, and the caller needs it to reconcile.
+    if durable_build_id is not None:
+        record = _BUILD_REGISTRY.get(durable_build_id) or {}
+        if record.get("process_writes"):
+            evidence["process_writes"] = list(record["process_writes"])
     return evidence
 
 

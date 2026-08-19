@@ -70,7 +70,21 @@ class IntegrationSpecV1(BaseModel):
     )
     name: str = Field(..., description="Integration name")
     mode: Literal["lift_shift", "redesign"] = Field(default="lift_shift")
-    components: List[IntegrationComponentSpec] = Field(default_factory=list)
+    components: List[IntegrationComponentSpec] = Field(
+        default_factory=list,
+        description=(
+            "Supporting components — connections, operations, profiles, maps — "
+            "and reference-only entries for processes that already exist. A "
+            "LIST, deliberately: this is the legacy mutable authoring surface "
+            "that build_integration edits in place. Canonical ProcessIR roots "
+            "belong in 'processes' instead; this collection and that one share "
+            "ONE key namespace, so a key used by a component and by a process "
+            "envelope is a duplicate, and all four depends_on directions "
+            "(component->component, component->process, process->component, "
+            "process->process) enter one topological order with one cycle "
+            "check."
+        ),
+    )
     processes: Tuple[ProcessAuthoringUnitV1, ...] = Field(
         # A TUPLE, per the plan's verbatim field type (§6 review AR1-08). A new
         # field on this legacy-tolerant model breaks no pre-#153 caller — none
@@ -84,11 +98,12 @@ class IntegrationSpecV1(BaseModel):
             "are compiled by the canonical chain and materialized by the neutral "
             "ProcessComponentMaterializer — they resolve NO legacy process_kind. "
             "'components' remains the home of supporting components and of "
-            "reference-only existing processes. Both tuples share ONE key "
-            "namespace: a key used by a component and by a process envelope is a "
-            "duplicate, and all four depends_on directions (component->component, "
-            "component->process, process->component, process->process) enter one "
-            "topological order with one cycle check. "
+            "reference-only existing processes. 'components' and 'processes' "
+            "share ONE key namespace: a key used by a component and by a "
+            "process envelope is a duplicate, and all four depends_on "
+            "directions (component->component, component->process, "
+            "process->component, process->process) enter one topological order "
+            "with one cycle check. "
             "A TUPLE, per the plan's field type: pydantic coerces list input, "
             "so the wire shape is an ordinary JSON array and no caller sends "
             "anything different — but unlike this model's legacy List "

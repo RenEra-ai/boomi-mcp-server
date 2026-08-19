@@ -191,8 +191,55 @@ def test_a_literal_component_reference_is_refused():
 
 def test_a_slot_ref_must_be_logical_too():
     with pytest.raises(ValidationError):
-        pm.ProcessComponentSymbolSlotV1(slot_id="s1", ref="REAL-COMPONENT-ID")
-    assert pm.ProcessComponentSymbolSlotV1(slot_id="s1", ref="$ref:db_conn").ref
+        pm.ProcessComponentSymbolSlotV1(
+            slot_id="s1", ref="REAL-COMPONENT-ID",
+            expected_component_types=("connector-settings",),
+        )
+    assert pm.ProcessComponentSymbolSlotV1(
+        slot_id="s1", ref="$ref:db_conn",
+        expected_component_types=("connector-settings",),
+    ).ref
+
+
+def test_a_slot_refuses_every_shape_its_authority_refuses():
+    """§6 AR3-08: the slot's `ref` was a plain `str`.
+
+    The exactness rule lived in `ComponentRefV1` and this model carried only a
+    prose claim of being stricter — so `$ref:bad key` and `$ref:x ` (trailing
+    space) were accepted into a plan, and `expected_component_types` defaulted
+    to empty although the plan requires it. The authority is now imported, and
+    the literal-id refusal layers on top of it rather than standing in for it.
+    """
+    types = ("connector-settings",)
+    for bad_ref in ("$ref:bad key", "$ref:x ", "$ref: x", "$ref:"):
+        with pytest.raises(ValidationError):
+            pm.ProcessComponentSymbolSlotV1(
+                slot_id="s1", ref=bad_ref, expected_component_types=types
+            )
+    # ...and the required field is required, not defaulted past its validator.
+    with pytest.raises(ValidationError):
+        pm.ProcessComponentSymbolSlotV1(slot_id="s1", ref="$ref:x")
+    # The control: the shape the authority accepts still validates.
+    assert pm.ProcessComponentSymbolSlotV1(
+        slot_id="s1", ref="$ref:x", expected_component_types=types
+    ).ref == "$ref:x"
+
+
+def test_a_plan_revision_must_be_a_digest():
+    """§6 AR3-09: the three revision fields were plain `str`.
+
+    Every producer already emits a digest, so an empty or malformed revision
+    reached a self-consistent plan only because nothing checked. The digest
+    authority is imported rather than respelled — a second copy of the pattern
+    would be the hand-model class this slice has been closing.
+    """
+    good = "sha256:" + "a" * 64
+    for field in ("compiler_revision", "emitter_revision", "materializer_revision"):
+        for bad in ("", "r", "sha256:" + "A" * 64, "sha256:abc"):
+            with pytest.raises(ValidationError):
+                _plan(**{field: bad})
+    # The control: real digest-shaped revisions still build a plan.
+    assert _plan(compiler_revision=good).compiler_revision == good
 
 
 # ---------------------------------------------------------------------------

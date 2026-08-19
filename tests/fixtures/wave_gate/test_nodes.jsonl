@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10005,"minimum_collected":10005,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10015,"minimum_collected":10015,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -10034,3 +10034,13 @@
 {"kind":"test","id":"pytest-010033","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_retry_safe_typed_failure_still_carries_a_machine_code","state":"active"}
 {"kind":"test","id":"pytest-010034","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_both_readers_of_the_named_code_map_apply_the_location_rule","state":"active"}
 {"kind":"test","id":"pytest-010035","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_update_says_so_when_its_requested_folder_is_not_applied","state":"active"}
+{"kind":"test","id":"pytest-010036","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_confirmed_write_is_durable_before_it_is_attested","state":"active"}
+{"kind":"test","id":"pytest-010037","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_integration_spec_arm_also_reparses_its_units","state":"active"}
+{"kind":"test","id":"pytest-010038","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_bad_reference_type_refuses_before_any_dependency_is_written","state":"active"}
+{"kind":"test","id":"pytest-010039","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_pre_write_plan_is_consumed_not_rebuilt","state":"active"}
+{"kind":"test","id":"pytest-010040","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_process_only_plan_is_not_called_empty","state":"active"}
+{"kind":"test","id":"pytest-010041","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_compiler_revision_covers_the_execution_profile_derivation","state":"active"}
+{"kind":"test","id":"pytest-010042","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_materializer_revision_covers_the_preservation_policy","state":"active"}
+{"kind":"test","id":"pytest-010043","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_served_workflow_contract_names_what_this_slice_added","state":"active"}
+{"kind":"test","id":"pytest-010044","node_id":"tests/test_process_materialization_plan.py::test_a_slot_refuses_every_shape_its_authority_refuses","state":"active"}
+{"kind":"test","id":"pytest-010045","node_id":"tests/test_process_materialization_plan.py::test_a_plan_revision_must_be_a_digest","state":"active"}

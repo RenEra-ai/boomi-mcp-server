@@ -1189,7 +1189,9 @@ def test_the_compile_binding_covers_the_materialization_plan():
         # emission plan changes; the binding must still move.
         with patch(
             "boomi_mcp.categories.integration_builder._materializer_revision",
-            return_value="materializer-moved",
+            # Digest-shaped, because the plan model types every revision as a
+            # digest (§6 AR3-09) — the point is only that it MOVED.
+            return_value="sha256:" + "b" * 64,
         ):
             after, _ = compile_authoring_request_v1(
                 request, boomi_client=MagicMock(), profile=_PROFILE
@@ -3766,3 +3768,369 @@ def test_an_update_says_so_when_its_requested_folder_is_not_applied():
     # ...and it names the UPDATE mechanism, not the create one.
     assert "update preservation" in warning[0], warning[0]
     assert "ignores folderName on create" not in warning[0], warning[0]
+
+
+def test_a_confirmed_write_is_durable_before_it_is_attested():
+    """§6 AR3-03: the durable record lost a component that provably exists.
+
+    The mutation attestation is appended by the apply loop AFTER the step
+    function returns. Everything between the platform's confirmation and that
+    return — the readback, the placement identity, the attestation construction
+    itself — happens with the component already created, so an exception in any
+    of it left the durable row `failed_partial` with an EMPTY attestation list
+    and no trace of the write. The note now lands the instant the platform
+    confirms, carrying what is known then: the key, the platform's own id, and
+    the digest of the bytes that were sent. It is deliberately not an
+    attestation — recording less, earlier, is the point.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+    from boomi_mcp.categories.components import canonical_process_apply as cpa
+
+    ib._BUILD_REGISTRY.clear()
+
+    def _component(*_a, **_k):
+        return {"_success": True, "component_id": "dep-1"}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("attestation construction failed after the write")
+
+    _SUBMITTED.clear()
+    with patch(_PAGINATE, return_value=[]), patch(
+        _EXECUTE, side_effect=_component
+    ), patch(_CREATE, side_effect=_create), patch(
+        _GET_XML, side_effect=_live_xml
+    ), patch.object(cpa, "build_mutation_attestation", side_effect=_boom):
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(), "dry_run": False},
+        )
+
+    assert result["_success"] is False
+    assert result["mutation_status"] == "possible"
+    build_id = result.get("build_id")
+    assert build_id, result
+    # The attestation genuinely never got built...
+    assert not result.get("process_mutations")
+    # ...and the write is recorded anyway, durably and on the envelope.
+    writes = ib._BUILD_REGISTRY[build_id].get("process_writes")
+    assert writes, ib._BUILD_REGISTRY[build_id]
+    assert writes[0]["result_component_id"] == _PROCESS_ID
+    assert writes[0]["component_key"] == "proc"
+    assert writes[0]["submitted_xml_digest"].startswith("sha256:")
+    assert result.get("process_writes") == writes
+
+
+def test_the_integration_spec_arm_also_reparses_its_units():
+    """§6 AR3-01: the AR2-01 sweep covered one mechanism, not one question.
+
+    It asked "which dumps render caller values?" and fixed those. It never
+    asked "which arms hand the compiler a caller-owned nested IR?" — and this
+    one did: the spec was returned verbatim, so a caller mutating a unit's IR
+    after building the request got a raw pydantic ValidationError out of the
+    semantic validator's snapshot, carrying the mutated value.
+    """
+    import warnings as _warnings
+
+    from boomi_mcp.authoring.workflow import (
+        AuthoringWorkflowError, plan_authoring_request_v1,
+    )
+    from boomi_mcp.models.authoring_workflow import (
+        AuthoringRequestV1, IntegrationSpecAuthoringIntentV1,
+    )
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+
+    unit = process_unit()
+    spec = IntegrationSpecV1(
+        name="M12.15 Integration",
+        components=[APPLIABLE_CONN, APPLIABLE_OP],
+        processes=(unit,),
+    )
+    request = AuthoringRequestV1(
+        intent=IntegrationSpecAuthoringIntentV1(integration_spec=spec)
+    )
+    # Mutate the model the CALLER still holds, after the request is built.
+    object.__setattr__(request.intent.integration_spec.processes[0].process_ir,
+                       "body", {"password": "hunter2-S3cret-AR3SPEC"})
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        with patch(_PAGINATE, return_value=[]):
+            try:
+                result = plan_authoring_request_v1(
+                    request, boomi_client=MagicMock(), profile=_PROFILE
+                )
+                served, raised = repr(result), None
+            except Exception as exc:
+                served, raised = repr(exc), exc
+
+    assert [w for w in caught if "hunter2" in str(w.message)] == []
+    assert "hunter2" not in served, "the served refusal rendered the mutated value"
+    if raised is not None:
+        assert isinstance(raised, AuthoringWorkflowError), type(raised).__name__
+
+
+def test_a_bad_reference_type_refuses_before_any_dependency_is_written():
+    """§6 AR3-02: relocatability was pre-decided; the rest of the plan was not.
+
+    The AR2-02 pass closed ONE request-decidable question. The compiler decides
+    many more — here a step referencing a component of the wrong type — and on
+    the raw route none of them was asked until the root's execution turn, which
+    topological order runs after its dependencies exist. A probe measured both
+    supporting components written, then the process failing with the generic
+    internal-error code. The plan is now built in the pre-write pass and CACHED,
+    so the refusal comes first and the compiler's own code and path travel.
+    """
+    unit = process_unit()
+    ir = unit.process_ir.model_dump(mode="json")
+    bearing = [st for st in ir["body"]["steps"] if "operation_ref" in st]
+    assert bearing, ir["body"]["steps"]
+    # Point the OPERATION reference at the connection component: a real key, the
+    # wrong type — decidable from the request, nothing to do with the platform.
+    bearing[0]["operation_ref"] = "$ref:conn"
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    swapped = unit.model_copy(update={"process_ir": parse_process_ir_v1(ir)})
+    spec = {
+        "name": "M12.15 Integration",
+        "components": [APPLIABLE_CONN, APPLIABLE_OP],
+        "processes": [swapped.model_dump(mode="json")],
+    }
+
+    writes = {"n": 0}
+
+    def _component(*_a, **_k):
+        writes["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % writes["n"]}
+
+    with patch(_PAGINATE, return_value=[]), patch(
+        _EXECUTE, side_effect=_component
+    ), patch(_CREATE) as create, patch(_GET_XML, side_effect=_live_xml):
+        create.side_effect = AssertionError("no process may be created")
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"integration_spec": spec, "dry_run": False},
+        )
+
+    assert result["_success"] is False, result
+    # The whole point: nothing was written for an answer the request settles.
+    assert writes["n"] == 0, "dependencies were created before the refusal"
+    assert result["partial_results"] == {}
+    from boomi_mcp.categories.integration_builder import _mutation_status
+    assert _mutation_status(result) == "none"
+    # ...and the COMPILER's own code travels, not the generic server-fault one.
+    assert result["error_code"] != "PROCESS_MATERIALIZATION_INTERNAL_ERROR", result
+    assert result["error_code"].startswith("PROCESS_IR_"), result["error_code"]
+
+
+def test_the_pre_write_plan_is_consumed_not_rebuilt():
+    """§6 AR3-02, the cost half: moving the compile must not duplicate it.
+
+    The pre-write pass builds the raw route's plan so a request-decidable
+    failure refuses before any write. If the execution turn then rebuilt it,
+    every apply would pay twice. The built plan is cached and consumed.
+    """
+    import boomi_mcp.authoring.process_materialization as pm
+
+    calls = {"n": 0}
+    real = pm.build_materialization_plan
+
+    def _spy(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    spec = {
+        "name": "M12.15 Integration",
+        "components": [APPLIABLE_CONN, APPLIABLE_OP],
+        "processes": [process_unit().model_dump(mode="json")],
+    }
+
+    def _component(*_a, **_k):
+        return {"_success": True, "component_id": "dep-1"}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    _SUBMITTED.clear()
+    with patch(_PAGINATE, return_value=[]), patch(
+        _EXECUTE, side_effect=_component
+    ), patch(_CREATE, side_effect=_create), patch(
+        _GET_XML, side_effect=_live_xml
+    ), patch.object(pm, "build_materialization_plan", _spy):
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"integration_spec": spec, "dry_run": False},
+        )
+
+    assert result["_success"] is True, result.get("error")
+    assert calls["n"] == 1, (
+        "the raw route built its plan %d times; the pre-write build must be "
+        "consumed by the execution turn, not repeated" % calls["n"]
+    )
+
+
+def test_a_process_only_plan_is_not_called_empty():
+    """§6 AR3-06: a canonical root IS an executable step.
+
+    The emptiness warning read `spec.components` alone — the whole participant
+    universe before #153 added `processes` — so a spec authoring a process and
+    no supporting components was told its plan had zero executable steps while
+    the planner was busy building a step for it. Same participant-universe
+    question DC-2 covers, on the warning surface.
+
+    Reaching it takes care: a ProcessIR sequence must start with a connector
+    source, so a component-free root is only representable when its references
+    are LITERAL ids — which the dependency check does not refuse (it checks
+    `$ref:` declarations) and `plan` reports rather than refuses. The first
+    draft of this witness used `$ref` and was refused earlier, making it
+    vacuous.
+    """
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    unit = process_unit(depends_on=())
+    ir = unit.process_ir.model_dump(mode="json")
+    for step in ir["body"]["steps"]:
+        if "connection_ref" in step:
+            step["connection_ref"] = "35813b90-1f42-4dcb-98f5-82d8f96be61d"
+            step["operation_ref"] = "45813b90-1f42-4dcb-98f5-82d8f96be61e"
+    literal = unit.model_copy(update={"process_ir": parse_process_ir_v1(ir)})
+    spec = {
+        "name": "M12.15 Integration",
+        "components": [],
+        "processes": [literal.model_dump(mode="json")],
+    }
+    with patch(_PAGINATE, return_value=[]), patch(_GET_XML, side_effect=_live_xml):
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "plan", config={"integration_spec": spec}
+        )
+
+    assert result["_success"] is True, result.get("error")
+    assert [w for w in (result.get("warnings") or [])
+            if "literal component id" in w], result.get("warnings")
+    # The step exists, so the plan is NOT empty.
+    assert [w for w in (result.get("warnings") or [])
+            if "zero executable steps" in w] == [], result.get("warnings")
+
+    # THE CONTROL: a spec with neither components nor processes IS empty, and
+    # still says so.
+    with patch(_PAGINATE, return_value=[]), patch(_GET_XML, side_effect=_live_xml):
+        bare = build_integration_action(
+            MagicMock(), _PROFILE, "plan",
+            config={"integration_spec": {"name": "Empty", "components": []}},
+        )
+    assert [w for w in (bare.get("warnings") or [])
+            if "zero executable steps" in w], bare.get("warnings")
+
+
+def test_the_compiler_revision_covers_the_execution_profile_derivation():
+    """§6 AR3-07: the served revision omitted a compiler behaviour it manifests.
+
+    `compiler_revision` is what a caller binds to, and it is deliberately a
+    manifest of published contracts rather than a source hash. The
+    execution-profile derivation — which decides whether a process is scheduled
+    or listener — was not in it, so replacing that derivation left the revision
+    unchanged and a stale binding kept validating.
+
+    The projection reads the family set through `execution_profile`, NOT
+    through `contracts`: the derivation imports it by value, so a projection of
+    the `contracts` name would be pinned to a binding the derivation no longer
+    consults — and this witness would pass without covering anything.
+    """
+    import boomi_mcp.compiler.process_ir.execution_profile as ep
+    from boomi_mcp.authoring.contract import _compiler_revision
+
+    baseline = _compiler_revision()
+
+    original = ep.LISTENER_CONNECTOR_TYPES
+    try:
+        ep.LISTENER_CONNECTOR_TYPES = frozenset(set(original) | {"zzz-probe"})
+        widened = _compiler_revision()
+    finally:
+        ep.LISTENER_CONNECTOR_TYPES = original
+
+    assert widened != baseline, (
+        "adding a listener connector family left the served compiler revision "
+        "unchanged — the derivation is not covered"
+    )
+    # ...and restoring the authority restores the revision, so the movement is
+    # the derivation's, not an artifact of calling twice.
+    assert _compiler_revision() == baseline
+
+
+def test_the_materializer_revision_covers_the_preservation_policy():
+    """§6 AR3-10: the materializer revision omitted the preservation authority.
+
+    It hashes the option sets and the XML layouts this materializer emits, and
+    the plan mandates the preservation policy alongside them — the policy
+    decides what an update keeps, which is materialization behaviour by any
+    reading. Taken as the projection's own canonical text so it cannot become
+    another hand-model of the runtime policy.
+    """
+    import dataclasses
+
+    import boomi_mcp.categories.components.builders._process_preservation as pres
+    from boomi_mcp.categories.integration_builder import _materializer_revision
+
+    baseline = _materializer_revision()
+    original = pres.PROCESS_PRESERVATION_POLICY
+    try:
+        # A MATERIALLY different policy — not `mode="replace"`, which is the
+        # default and would be an inert mutant.
+        pres.PROCESS_PRESERVATION_POLICY = dataclasses.replace(
+            original, owned_root_attrs=tuple(original.owned_root_attrs) + ("zzz",)
+        )
+        moved = _materializer_revision()
+    finally:
+        pres.PROCESS_PRESERVATION_POLICY = original
+
+    assert moved != baseline, (
+        "changing the preservation authority left the materializer revision "
+        "unchanged — the policy is not covered"
+    )
+    assert _materializer_revision() == baseline
+
+
+def test_the_served_workflow_contract_names_what_this_slice_added():
+    """§6 AR3-05: the served contract described a pipeline the server outgrew.
+
+    `authoring_workflow_contract()` is machine-facing — it is what an agent
+    reads to learn the phases and the vocabulary — and it carried no mention of
+    canonical process units, the relocatable plan they compile to, the late
+    binding that turns its placeholders into real ids, or the two separate
+    attestations an apply returns. Every one of those is a promise this slice
+    made and serves.
+
+    The expected terms are derived from the served MODELS, not hand-typed, so
+    renaming an attestation model fails this rather than leaving stale prose.
+    """
+    from boomi_mcp.authoring.contract import authoring_workflow_contract
+    from boomi_mcp.models.authoring_workflow import (
+        ProcessLiveReadbackAttestationV1, ProcessMutationAttestationV1,
+    )
+
+    contract = authoring_workflow_contract()
+    terminology = contract["terminology"]
+
+    for key in ("process_units", "materialization_plan", "late_binding",
+                "mutation_attestation", "readback_attestation"):
+        assert key in terminology, sorted(terminology)
+        assert terminology[key].strip(), key
+
+    # The attestation entries name their own models, so a rename cannot leave
+    # the served vocabulary describing something that no longer exists.
+    assert ProcessMutationAttestationV1.__name__ in terminology[
+        "mutation_attestation"
+    ]
+    assert ProcessLiveReadbackAttestationV1.__name__ in terminology[
+        "readback_attestation"
+    ]
+
+    # ...and the phases themselves say what compile and apply now do.
+    phases = {p["step"]: p["purpose"] for p in contract["phases"]}
+    assert "relocatable" in phases[6]
+    assert "placeholder" in phases[6]
+    assert "bound" in phases[7].lower() and "attestation" in phases[7]

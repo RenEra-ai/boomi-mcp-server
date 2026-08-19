@@ -262,13 +262,23 @@ def test_no_new_response_field_is_called_flow(responses):
 
 
 def test_the_workflow_schema_publishes_the_four_names():
+    """#146's four names are still published — and the set is allowed to GROW.
+
+    The original assertion was equality on exactly four keys, which made a
+    served vocabulary that legitimately grew read as a regression: #153 added
+    five terms (process units, the relocatable materialization plan, late
+    binding, and the two separate attestations) that the workflow this contract
+    describes now genuinely has. Subset, not equality, keeps what this test was
+    protecting — that none of the four was quietly dropped or left blank — while
+    letting the contract describe what the server actually does.
+    """
     terminology = _get_authoring_schema_by_name("authoring_workflow")["terminology"]
-    assert set(terminology) == {
+    assert {
         "pipeline_stages",
         "process_cfg",
         "component_dependencies",
         "topology_relations",
-    }
+    } <= set(terminology), sorted(terminology)
     for description in terminology.values():
         assert description
 

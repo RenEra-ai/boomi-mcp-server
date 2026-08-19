@@ -413,6 +413,22 @@ def _normalize_intent(request: AuthoringRequestV1) -> _NormalizedIntent:
 
     if kind == "integration_spec":
         spec = intent.integration_spec
+        # THIS ARM REPARSES ITS UNITS TOO (§6 AR3-01). The AR2-01 sweep covered
+        # the mechanism "a warning-enabled dump of a caller-reachable model" and
+        # fixed the direct arm's intake; it never asked the other question — WHICH
+        # ARMS hand a caller-owned nested IR to the compiler. This one does: the
+        # spec is returned verbatim, so a caller who mutates a unit's IR after
+        # building the request gets a raw pydantic ValidationError out of the
+        # semantic validator's snapshot, carrying the mutated value. Reparsing
+        # here makes the object server-owned, exactly as at the direct arm.
+        #
+        # REPARSE ONLY, never sort: the caller authored this spec and the
+        # semantic-hash payload dumps it wholesale, so reordering would move the
+        # hash for any multi-root spec authored out of key order.
+        if spec.processes:
+            spec = spec.model_copy(update={
+                "processes": tuple(_reparsed_unit(unit) for unit in spec.processes)
+            })
         gaps = tuple(
             CapabilityGapV1(
                 capability_id=(

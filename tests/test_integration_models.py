@@ -135,6 +135,45 @@ def test_no_served_description_contradicts_its_own_field_container():
     _LIST_CLAIM = re.compile(r"\ba list\b", re.I)
     _INPLACE_CLAIM = re.compile(r"edit(?:s|ed)? (?:it )?in place", re.I)
 
+    # WIDENED (§6 AR3-04). The first version asked only whether a TUPLE field
+    # described ITSELF correctly — so it passed while the `processes`
+    # description called `components` a tuple, and while `components` carried no
+    # description at all. Two more properties, both derived from the models:
+    # a field that is cross-referenced by another field's description must
+    # describe itself, and no description may claim a container the referenced
+    # field does not have.
+    _CONTAINER_WORD = {tuple: "tuple", list: "list"}
+
+    def _container(model, field_name):
+        field = model.model_fields.get(field_name)
+        if field is None:
+            return None
+        return _CONTAINER_WORD.get(typing.get_origin(field.annotation))
+
+    for model in (IntegrationSpecV1, IntegrationComponentSpec):
+        described = {
+            name: (field.description or "")
+            for name, field in model.model_fields.items()
+        }
+        for name, description in described.items():
+            for other in described:
+                if other == name or f"'{other}'" not in description:
+                    continue
+                # (a) A field named by another field's prose must describe
+                # itself — a caller sent to it finds nothing there otherwise.
+                assert described[other], (
+                    model.__name__, name, "references undescribed field", other,
+                )
+                # (b) ...and a plural claim covering both must match BOTH
+                # containers, which is exactly what "Both tuples" got wrong.
+                own, theirs = _container(model, name), _container(model, other)
+                if own and theirs and own != theirs:
+                    assert f"Both {own}s" not in description, (
+                        model.__name__, name,
+                        "claims both fields are %ss, but %s is a %s"
+                        % (own, other, theirs),
+                    )
+
     checked = 0
     for model in (IntegrationSpecV1, IntegrationComponentSpec):
         for name, field in model.model_fields.items():

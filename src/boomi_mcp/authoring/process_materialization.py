@@ -51,11 +51,14 @@ import hashlib
 import json
 from typing import Any, Dict, Literal, Mapping, Optional, Tuple
 
-from pydantic import (BaseModel, ConfigDict, ValidationError, field_validator,
+from pydantic import (BaseModel, ConfigDict, Field, ValidationError,
+                      field_validator,
                       model_validator)
 from pydantic_core import PydanticCustomError
 
+from ..models.authoring_workflow import DigestString
 from ..models.process_component import ProcessComponentEnvelopeV1
+from ..models.process_ir import ComponentRefV1
 from ..models.process_ir import ProcessIRV1
 from .revisions import canonical_json_bytes
 
@@ -104,8 +107,29 @@ class ProcessComponentSymbolSlotV1(_PlanModel):
     """One logical reference the plan must bind to a real component id at apply."""
 
     slot_id: str
-    ref: str
-    expected_component_types: Tuple[str, ...] = ()
+    # The REFERENCE AUTHORITY, imported rather than respelled (§6 AR3-08). `str`
+    # let `$ref:bad key` and `$ref:x ` (trailing space) into a slot, because the
+    # exactness rule lived only in `ComponentRefV1` and this model carried a
+    # hand-copy of the idea in prose. `_check_ref_is_logical` below now layers
+    # the genuinely stricter literal-id refusal ON TOP of the authority instead
+    # of standing in for it.
+    ref: ComponentRefV1
+    # REQUIRED per the plan; the default is kept only for construction
+    # ergonomics and is VALIDATED, so it cannot be the one shape the field
+    # validator never sees.
+    expected_component_types: Tuple[str, ...] = Field(
+        default=(), validate_default=True
+    )
+
+    @field_validator("expected_component_types")
+    @classmethod
+    def _expected_types_present(cls, value: Tuple[str, ...]) -> Tuple[str, ...]:
+        if not value:
+            raise PydanticCustomError(
+                "process_materialization_plan_invalid",
+                "expected_component_types is required on a symbol slot",
+            )
+        return value
 
     @field_validator("slot_id")
     @classmethod
@@ -265,9 +289,13 @@ class ProcessComponentMaterializationPlanV1(_PlanModel):
     execution_profile: Literal["scheduled", "listener"]
     conflict_policy: Literal["reuse", "clone", "fail"]
     preservation_policy: ProcessPreservationPolicyV1
-    compiler_revision: str
-    emitter_revision: str
-    materializer_revision: str
+    # The DIGEST AUTHORITY, imported rather than respelled (§6 AR3-09): plain
+    # `str` accepted an empty or malformed revision on a self-consistent plan,
+    # while every producer already emits a digest. A second copy of the digest
+    # spelling would be the same hand-model class this slice has been closing.
+    compiler_revision: DigestString
+    emitter_revision: DigestString
+    materializer_revision: DigestString
     resolved_folder_id: Optional[str] = None
     plan_fingerprint: str
 

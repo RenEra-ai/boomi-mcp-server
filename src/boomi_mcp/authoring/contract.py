@@ -565,7 +565,11 @@ def authoring_workflow_contract() -> Dict[str, Any]:
                 "purpose": (
                     "Canonical compilation: normalized intent, deterministic "
                     "artifact fingerprints, and the compile hash. Returns no "
-                    "build_id, because no build exists."
+                    "build_id, because no build exists. A request carrying "
+                    "canonical PROCESS UNITS also compiles each one to a "
+                    "relocatable materialization plan — account-independent, "
+                    "carrying placeholder ids for every component reference — "
+                    "and fingerprints it alongside the other artifacts."
                 ),
                 "mutates_boomi": False,
             },
@@ -575,7 +579,14 @@ def authoring_workflow_contract() -> Dict[str, Any]:
                 "purpose": (
                     "The FIRST phase permitted to mutate. A typed apply must "
                     "carry expected_capability_revision and expected_compile_hash; "
-                    "the server recomputes and compares both before its first write."
+                    "the server recomputes and compares both before its first write. "
+                    "A canonical process unit is applied from the plan compiled "
+                    "at step 6 — never a rebuild — with its placeholder ids bound "
+                    "LATE, to the component ids published earlier in the same "
+                    "apply. Each such write returns two SEPARATE attestations: a "
+                    "mutation attestation over the exact bytes submitted, and a "
+                    "live read-back attestation over what the platform then "
+                    "served."
                 ),
                 "mutates_boomi": True,
             },
@@ -596,6 +607,35 @@ def authoring_workflow_contract() -> Dict[str, Any]:
             "process_cfg": "The compiler's semantic control-flow graph.",
             "component_dependencies": "ComponentPlan materialization edges.",
             "topology_relations": "SystemTopologySpecV1 relations.",
+            # #153 M12.15 (§6 AR3-05). The served workflow contract described a
+            # pipeline that no longer matched what the server does: canonical
+            # process units, the relocatable plan they compile to, the late
+            # binding that turns its placeholders into real ids, and the two
+            # separate attestations an apply returns were all absent from it.
+            # The names are the served models' own, not hand-typed prose.
+            "process_units": (
+                "IntegrationSpecV1.processes — canonical ProcessIR roots, each "
+                "one ProcessComponentEnvelopeV1 plus one ProcessIRV1."
+            ),
+            "materialization_plan": (
+                "The relocatable, account-independent compile artifact for one "
+                "process unit; its fingerprint is what apply executes against."
+            ),
+            "late_binding": (
+                "Placeholder component ids in that plan are replaced with real "
+                "ids at apply time, from components written earlier in the same "
+                "apply — the plan itself is never string-patched."
+            ),
+            "mutation_attestation": (
+                "ProcessMutationAttestationV1 — what was SUBMITTED: the action, "
+                "the resulting component id, a digest of the exact bytes sent, "
+                "and the placement actually observed."
+            ),
+            "readback_attestation": (
+                "ProcessLiveReadbackAttestationV1 — what the platform SERVED "
+                "back afterwards, recorded separately so an unavailable "
+                "read-back reads as unknown rather than as agreement."
+            ),
         },
     }
 
@@ -835,6 +875,29 @@ def _compiler_revision() -> str:
             ],
         ),
         ("process_property_scope", _process_property_scope_payload),
+        (
+            # The EXECUTION-PROFILE derivation (§6 AR3-07). The served revision
+            # is a manifest of the compiler behaviours a caller binds to, and
+            # this one was missing: replacing the derivation left the revision
+            # unchanged, so a caller could hold a binding across a change in
+            # how a process is classified. Read through `execution_profile` —
+            # NOT through `contracts` — because the derivation imports the set
+            # by value, so a projection of the contracts name would be pinned
+            # to a binding the derivation no longer consults, and the
+            # non-vacuity witness would pass without covering anything.
+            "execution_profile_contract",
+            lambda: {
+                "profiles": sorted(
+                    {
+                        _import("execution_profile").SCHEDULED,
+                        _import("execution_profile").LISTENER,
+                    }
+                ),
+                "listener_connector_types": sorted(
+                    _import("execution_profile").LISTENER_CONNECTOR_TYPES
+                ),
+            },
+        ),
         (
             "compiler_diagnostic_specs",
             lambda: [
