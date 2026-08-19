@@ -5725,6 +5725,11 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
     expected_not_completed = {
         # failed run, replaced by cdx-review.Kkf8n6 over the same scope
         "commit-reviews/cdx-review.kXfU2v": "failed",
+        # #153 L2 round 26: STUCK — 58 events, then 18 minutes of total silence.
+        # Aborted with `interrupt` and collected `failed`, so no
+        # `last-reviewed-sha` was written and the next round re-reviews the SAME
+        # delta rather than inheriting a shrunken scope.
+        "commit-reviews/cdx-review.FElIYS": "failed",
         # refused start — never an evaluation; carries only start.json+refusal.json
         "architect-reviews/cdx-gate-review.TnpZpj": "refused",
     }
