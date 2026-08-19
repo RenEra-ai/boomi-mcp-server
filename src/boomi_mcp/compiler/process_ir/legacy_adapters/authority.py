@@ -250,7 +250,11 @@ def _core_from_authored_pipeline(pipeline: Any) -> Any:
 
     try:
         lowered = SyncPipelineBuilder.lower_config(
-            {"process_kind": SyncPipelineBuilder.PROCESS_KIND, "pipeline": pipeline.model_dump()}
+            # `warnings=False` per the §6 AR2-01 sweep: `pipeline` is the
+            # AUTHORED view, i.e. caller-supplied, so a dump that trips a
+            # serializer warning renders the caller's content into stderr.
+            {"process_kind": SyncPipelineBuilder.PROCESS_KIND,
+             "pipeline": pipeline.model_dump(warnings=False)}
         )
     except BuilderValidationError:
         return _UNREPRESENTABLE_CORE

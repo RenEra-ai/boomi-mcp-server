@@ -266,63 +266,78 @@ def test_materialization_succeeds_with_every_legacy_entry_point_bombed(monkeypat
 
     monkeypatch.setattr(pcm.ProcessComponentMaterializer, "materialize", _spy)
 
-    # THE PUBLIC PATH, not the materializer leaf (§6 review AR1-10): the plan's
-    # legacy-independence criterion is that plan -> compile -> materialize
-    # reaches no legacy entry point. Calling the leaf directly proved only that
-    # the last link is clean; a legacy import anywhere earlier in the chain
-    # would have passed unnoticed.
+    # THE PUBLIC ORCHESTRATION, not a hand-assembly of its pieces (§6 AR2-10).
+    #
+    # The previous version called `_normalize_intent`, `build_materialization_plan`
+    # and `materialize_canonical_process_xml` in sequence itself. That proves the
+    # PIECES are legacy-free while leaving the thing the plan actually names —
+    # public compile -> apply — unexercised: a regression making the
+    # orchestration resolve a legacy builder would keep this test green, because
+    # the test never asks the orchestration to do anything. Driving
+    # `compile_authoring_request_v1` -> `build_integration_action` closes that.
     import sys
     from pathlib import Path as _Path
+    from unittest.mock import MagicMock, patch
 
     _tests = str(_Path(__file__).resolve().parent)
     if _tests not in sys.path:
         sys.path.insert(0, _tests)
     from _m12_11_support import appliable_process_ir_request
-    from boomi_mcp.authoring.process_materialization import (
-        build_materialization_plan,
-    )
-    from boomi_mcp.authoring.workflow import (
-        _connector_metadata_from_components,
-        _normalize_intent,
-    )
-    from boomi_mcp.categories.components.canonical_process_apply import (
-        materialize_canonical_process_xml,
-    )
-    from boomi_mcp.categories.integration_builder import _materializer_revision
-    from boomi_mcp.authoring.contract import get_authoring_revisions
-    from boomi_mcp.compiler.process_ir.emitter_registry import emitter_revision
-    from boomi_mcp.recipes.materialization import build_symbol_table
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+    from boomi_mcp.categories.integration_builder import build_integration_action
 
     request = appliable_process_ir_request()
-    normalized = _normalize_intent(request)
-    spec = normalized.integration_spec
-    unit = spec.processes[0]
-    symbols = build_symbol_table(
-        list(spec.components),
-        process_keys=[u.envelope.component_key for u in spec.processes],
-        connector_metadata=_connector_metadata_from_components(spec.components),
-    )
-    plan = build_materialization_plan(
-        envelope=unit.envelope,
-        process_ir=unit.process_ir,
-        symbols=symbols,
-        conflict_policy="reuse",
-        compiler_revision=get_authoring_revisions()["compiler_revision"],
-        emitter_revision=emitter_revision(),
-        materializer_revision=_materializer_revision(),
-    )
-    xml = materialize_canonical_process_xml(
-        plan=plan,
-        id_registry={"conn": "golden-conn-id", "op": "golden-op-id"},
-        symbols=symbols,
-    )
+    client = MagicMock()
+    submitted = {}
+    created = {"n": 0}
 
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "dep-%d" % created["n"]}
+
+    def _create(_client, _profile, body):
+        submitted["xml"] = body["xml"]
+        return {"_success": True, "component_id": "proc-id"}
+
+    def _live(_client, component_id, *_a, **_k):
+        if component_id == "proc-id" and "xml" in submitted:
+            return {"type": "process", "xml": submitted["xml"]}
+        return {"type": "connector-settings",
+                "xml": '<bns:Component xmlns:bns="x" type="connector-settings"/>'}
+
+    # COMPILE INSIDE the patch context, not before it: `paginate_metadata`
+    # against an unpatched MagicMock never terminates (the mock's truthy
+    # page token makes the loop unbounded, and memory grows until the process
+    # dies) — measured while writing this test, and the same trap that left a
+    # multi-GB runaway probe behind during the review that raised this finding.
+    _P = "boomi_mcp.categories.integration_builder."
+    with patch(_P + "paginate_metadata", return_value=[]), \
+         patch(_P + "_execute_component", side_effect=_component), \
+         patch(_P + "create_component", side_effect=_create), \
+         patch(_P + "component_get_xml", side_effect=_live):
+        compiled, _internals = compile_authoring_request_v1(
+            request, boomi_client=client, profile="qa_profile"
+        )
+        payload = request.model_dump(mode="json")
+        payload["expected_capability_revision"] = (
+            compiled.revision_binding.capability_revision
+        )
+        payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+        result = build_integration_action(
+            client, "qa_profile", "apply",
+            config={"authoring_request": payload, "dry_run": False},
+        )
+
+    assert result["_success"] is True, result.get("error")
     assert calls == [True], "the materializer never ran — the proof would be vacuous"
+    xml = submitted["xml"]
     assert xml.startswith("<?xml")
     assert 'type="process"' in xml
     assert pcm.DEFAULT_PROCESS_OPTIONS in xml
-    # ...and the chain genuinely bound the real ids on the way through.
-    assert "golden-conn-id" in xml
+    # ...and the public chain genuinely bound REAL ids on the way through: no
+    # `id-<key>` placeholder may survive into the submitted bytes.
+    assert "dep-1" in xml or "dep-2" in xml, xml[:400]
+    assert "id-conn" not in xml and "id-op" not in xml
 
 
 def test_the_bomb_really_fires_when_the_legacy_path_is_used(monkeypatch):

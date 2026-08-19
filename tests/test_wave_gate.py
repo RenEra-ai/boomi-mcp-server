@@ -1865,6 +1865,10 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     # generic code it serves instead.
     "PROCESS_MATERIALIZATION_PLACEMENT_NOT_FOUND",
     "PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD",
+    # #153 §6 AR2-07 records that these registered product codes had no reachable
+    # producer through the served wrapper. Naming them is the point of the row.
+    "PROCESS_COMPONENT_SCHEMA_INVALID",
+    "PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE",
     "INVALID_INPUT",
     "ERROR_TAXONOMY",
     "PLAN_INVALID",
@@ -2141,6 +2145,80 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
 
     assert checked, (
         "no ledger exercised the revision path — the assertions above would be vacuous"
+    )
+
+
+def test_no_audit_ledger_disposition_claims_more_than_a_witness():
+    """A disposition may not assert COMPLETENESS without naming its evidence.
+
+    #153's §6 evaluation-2 verification round measured five `fixed` rows whose
+    claims were broader than what their tests actually assert: "removes the
+    partial write entirely" (true of one route, not both), "drives that same
+    public chain" (drove the pieces, hand-assembled), "the exact canonical
+    object" (had an extra wire level). Each read as authoritative until a
+    reviewer re-derived it from the code — the audit record's whole job is to
+    be checkable without that.
+
+    The rule is deliberately NARROW, because the failure mode is: a disposition
+    that makes an absolute claim — entirely, every exit, by construction, all
+    routes — must also name the evidence for it (a test, a witness, a measured
+    probe, a control). Ordinary dispositions are untouched; only the superlative
+    ones owe proof. Retrofitting every historical row was rejected as churn that
+    would bury the signal.
+    """
+    import re as _re
+
+    ledgers = sorted((_ROOT / "docs" / "architecture").glob("ISSUE_*_AUDIT_LEDGER.md"))
+    assert ledgers, "no ledgers found — this check would be vacuous"
+
+    claim = _re.compile(
+        r"\b(entirely|completely|every (?:one|site|case|exit|field|route)"
+        r"|all (?:sites|cases|routes|exits)|cannot (?:drift|recur|happen)"
+        r"|never again|by construction)\b",
+        _re.I,
+    )
+    # The evidence side is deliberately generous: naming a test in ANY spelling
+    # ("the regression test named there", `test_x`), an assertion, a witness, a
+    # measurement, a probe or a control all count. The rule is about claims made
+    # with NO evidence at all, not about a house style for citing it — a narrow
+    # pattern flagged two #165 rows that plainly cite their evidence, which is
+    # the false-positive shape that trains people to weaken the guard.
+    evidence = _re.compile(
+        r"\btests?\b|witness|measured|probe|control|assert", _re.I
+    )
+
+    offenders = []
+    checked = 0
+    for path in ledgers:
+        text = path.read_text(encoding="utf-8")
+        # SCOPED TO WORK STILL IN FLIGHT, derived from the file rather than
+        # hand-listed: a ledger whose final-tree section still carries its
+        # "filled at close" placeholder belongs to a slice that has not closed,
+        # and its dispositions are the ones this rule can still improve.
+        # Retro-editing a closed slice's frozen record to satisfy a rule that
+        # postdates it is churn, not accuracy — #165's two hits were both rows
+        # that plainly cite their evidence in other words.
+        if "filled at close" not in text:
+            continue
+        for line in text.splitlines():
+            if not line.startswith("| ") or line.count("|") < 9:
+                continue
+            disposition = line.rsplit("|", 2)[-2]
+            if "`fixed`" not in disposition:
+                continue
+            checked += 1
+            found = claim.search(disposition)
+            row_id = line.split("|")[1].strip()
+            # A row whose claim has been CORRECTED by a revision row is not an
+            # offender: the ledger is append-only, so the correction is the
+            # `<id>a` row, not an edit of the original.
+            if found and not evidence.search(disposition) and (
+                "| %sa |" % row_id not in text
+            ):
+                offenders.append((path.name, row_id, found.group(0)))
+    assert checked >= 50, "too few dispositions scanned — the guard is vacuous"
+    assert offenders == [], (
+        "dispositions asserting completeness with no named evidence: %r" % offenders
     )
 
 
@@ -2540,7 +2618,11 @@ def _finding_rows(text):
 #: (the parser, the orphan-revision check, and #173's fixture test), which is the
 #: unpinned-hand-copy mechanism this repository's structural-fix rule names: a
 #: widened parser would leave the fixture asserting a stale shape.
-_FINDING_ID_RE = r"(?:INH-)?[A-Z][A-Za-z0-9]*-?\d*-\d+[a-z]?"
+# The `(?:-r\d+)?` segment covers the QA round shape (`QA-153-r2-07`): those are
+# real finding ids, and without it the revision/supersession machinery skipped
+# every one of them — so a QA row's revision could never be declared (#153 §6
+# evaluation-2 ledger pass, where six disposition revisions included two QA rows).
+_FINDING_ID_RE = r"(?:INH-)?[A-Z][A-Za-z0-9]*-?\d*(?:-r\d+)?-\d+[a-z]?"
 #: The same shape with a MANDATORY trailing letter: a revision id. Derived by
 #: dropping the optional-suffix marker, and asserted rather than sliced blind —
 #: positional slicing would silently change meaning if the shape ever gained a

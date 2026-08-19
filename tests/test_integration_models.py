@@ -113,3 +113,44 @@ def test_component_envelope_ignores_unknown_fields_but_preserves_config():
     assert unknown not in comp.model_dump()
     # The free-form config dict passes through verbatim (never schema-validated).
     assert comp.config == case["input"]["config"]
+
+
+def test_no_served_description_contradicts_its_own_field_container():
+    """§6 AR2-09: served prose said "A LIST, not a tuple" of a tuple field.
+
+    Third instance of the same pair in this slice, and the correction batch that
+    flipped the type is what introduced it — so the fix is executable rather
+    than another prose patch. The rule is DERIVED from each field's own
+    annotation: a field pydantic reports as a tuple may not describe itself as a
+    list, and an immutable collection may not claim it is edited in place.
+    Adding a new field, or flipping one's container, is checked automatically.
+    """
+    import re
+    import typing
+
+    from boomi_mcp.models.integration_models import (
+        IntegrationComponentSpec, IntegrationSpecV1,
+    )
+
+    _LIST_CLAIM = re.compile(r"\ba list\b", re.I)
+    _INPLACE_CLAIM = re.compile(r"edit(?:s|ed)? (?:it )?in place", re.I)
+
+    checked = 0
+    for model in (IntegrationSpecV1, IntegrationComponentSpec):
+        for name, field in model.model_fields.items():
+            description = field.description or ""
+            if not description:
+                continue
+            origin = typing.get_origin(field.annotation)
+            if origin is not tuple:
+                continue
+            checked += 1
+            assert not _LIST_CLAIM.search(description), (
+                model.__name__, name, "tuple field described as a list",
+            )
+            assert not _INPLACE_CLAIM.search(description), (
+                model.__name__, name, "immutable field claims in-place editing",
+            )
+    # Non-vacuity: at least one tuple field with a description must exist, or
+    # this guard is checking nothing at all.
+    assert checked >= 1, "no described tuple field found — the guard is vacuous"

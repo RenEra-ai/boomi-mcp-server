@@ -304,6 +304,7 @@ def build_mutation_attestation(
     submitted_xml_digest: Optional[str] = None,
     observed_placement: Optional[str] = None,
     observed_folder_id: Optional[str] = None,
+    applied_folder_id: Optional[str] = None,
 ):
     """The apply-time mutation attestation for one root.
 
@@ -360,7 +361,13 @@ def build_mutation_attestation(
             folder_id=(
                 (resolved_folder_id or observed_folder_id)
                 if action == "create"
-                else resolved_folder_id or plan.resolved_folder_id
+                # An UPDATE's id comes from the same authority as its name: the
+                # merged bytes the platform received (§6 AR2-04). The previous
+                # expression fell back to the plan's REQUESTED resolution, which
+                # for an update describes an intent, not what was applied — so
+                # it is replaced, not augmented. `None` stays honest for a root
+                # whose merged bytes carry no folder id.
+                else applied_folder_id
             ),
         ),
         submitted_xml_digest=(
@@ -371,22 +378,34 @@ def build_mutation_attestation(
     )
 
 
-def applied_folder_name(submitted_xml: str) -> Optional[str]:
-    """The ``folderName`` on the bytes that were actually SENT, or ``None``.
+def applied_placement(submitted_xml: str) -> Dict[str, Optional[str]]:
+    """BOTH placement facts on the bytes that were actually SENT.
 
     Read from the submitted document rather than from the envelope, because for
     an update those bytes are the read-merge-write RESULT: preservation does not
     own the root's folder attributes, so what the platform received is the LIVE
     folder, not the requested one.
+
+    Name and id come from ONE read (§6 AR2-04). Extracting only the name meant
+    an update attested a folder by name with ``folder_id: null`` while the very
+    bytes it was reading carried the id — a placement recorded as less than what
+    the platform received. Two separate readers could also disagree; one cannot.
     """
     import xml.etree.ElementTree as ET
 
     try:
         root = ET.fromstring(submitted_xml)
     except ET.ParseError:
-        return None
-    value = root.attrib.get("folderName")
-    return value or None
+        return {"folder_name": None, "folder_id": None}
+    return {
+        "folder_name": root.attrib.get("folderName") or None,
+        "folder_id": root.attrib.get("folderId") or None,
+    }
+
+
+def applied_folder_name(submitted_xml: str) -> Optional[str]:
+    """The ``folderName`` half of :func:`applied_placement`."""
+    return applied_placement(submitted_xml)["folder_name"]
 
 
 def applied_component_name(component_xml: str) -> Optional[str]:
@@ -486,6 +505,7 @@ __all__ = [
     "build_mutation_attestation",
     "applied_component_name",
     "applied_folder_name",
+    "applied_placement",
     "build_readback_attestation",
     "materialize_canonical_process_xml",
     "observed_folder_identity",

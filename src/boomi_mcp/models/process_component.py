@@ -212,12 +212,18 @@ class ProcessComponentEnvelopeV1(_ProcessComponentModel):
         # The legacy assembler already refuses a blank process name
         # (PROCESS_XML_VALIDATION_FAILED); refusing it here means the caller
         # learns at authoring time instead of mid-apply.
-        if not value.strip():
-            raise PydanticCustomError(
-                "process_component_value_invalid",
-                "process component name must not be blank",
-            )
-        return value
+        #
+        # ...and padding is refused on the same footing as every other
+        # structural string in this module (§6 AR2-06). It previously accepted
+        # `"  N  "` verbatim, which is worse than either alternative: the name
+        # is fingerprint-covered AND emitted into the component XML, so two
+        # spellings the plan defines as ONE canonical envelope minted different
+        # plan fingerprints and different submitted bytes. Rejecting rather
+        # than silently trimming is the recorded deviation from the plan's
+        # "trim once" letter — see the ledger row: it is the module's
+        # established idiom, fail-closed, and every accepted value therefore
+        # already equals its trimmed form.
+        return _require_unpadded(value, "process component name")
 
     @field_validator("component_id", "folder_name")
     @classmethod

@@ -51,7 +51,8 @@ import hashlib
 import json
 from typing import Any, Dict, Literal, Mapping, Optional, Tuple
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import (BaseModel, ConfigDict, ValidationError, field_validator,
+                      model_validator)
 from pydantic_core import PydanticCustomError
 
 from ..models.process_component import ProcessComponentEnvelopeV1
@@ -301,13 +302,7 @@ class ProcessComponentMaterializationPlanV1(_PlanModel):
         """
         offenders = envelope_relocatability_offenders(self.envelope, self.process_ir)
         if offenders:
-            raise PydanticCustomError(
-                "process_materialization_reference_not_relocatable",
-                "literal component id(s) at {paths}; a materializable plan may "
-                "carry only '$ref:KEY' tokens — reference an existing component "
-                "by logical key in the component plan instead",
-                {"paths": ", ".join(offenders)},
-            )
+            raise _not_relocatable_custom_error(offenders)
         return self
 
     @model_validator(mode="after")
@@ -376,9 +371,15 @@ def canonical_plan_material(plan: "ProcessComponentMaterializationPlanV1") -> by
         elif name == "conflict_policy":
             payload["policies"]["conflict_policy"] = value
         elif name == "preservation_policy":
+            # The plan's canonical object places the FULL normalized projection
+            # directly at `policies.preservation_policy` (§3 L252-255). The
+            # first pass wrapped it in a `projection` key — a wire level the
+            # spec does not have and neither recorded storage deviation
+            # justifies (§6 AR2-05). `policy_id` rides alongside the projected
+            # fields as a sibling.
             payload["policies"]["preservation_policy"] = {
                 "policy_id": value.policy_id,
-                "projection": json.loads(value.canonical_policy_json),
+                **json.loads(value.canonical_policy_json),
             }
         elif name in ("compiler_revision", "emitter_revision", "materializer_revision"):
             payload["revisions"][name] = value
@@ -465,6 +466,33 @@ def derive_symbol_slots(
     return tuple(slots)
 
 
+def _not_relocatable_custom_error(offenders) -> PydanticCustomError:
+    """The ONE refusal for a non-relocatable reference (§6 AR2-02).
+
+    Two callers raise it — the model validator, which needs a bare
+    ``PydanticCustomError`` for pydantic to wrap, and the pre-compile check in
+    :func:`build_materialization_plan`, which needs a real ``ValidationError``
+    so the apply arm's named-code map recognizes it. Both get the same type
+    string and the same words from here rather than each spelling its own.
+    """
+    return PydanticCustomError(
+        "process_materialization_reference_not_relocatable",
+        "literal component id(s) at {paths}; a materializable plan may "
+        "carry only '$ref:KEY' tokens — reference an existing component "
+        "by logical key in the component plan instead",
+        {"paths": ", ".join(offenders)},
+    )
+
+
+def _not_relocatable_error(offenders) -> ValidationError:
+    """The same refusal as a `ValidationError`, for the pre-compile check."""
+    return ValidationError.from_exception_data(
+        "ProcessComponentMaterializationPlanV1",
+        [{"type": _not_relocatable_custom_error(offenders),
+          "loc": ("process_ir",), "input": None}],
+    )
+
+
 def build_materialization_plan(
     *,
     envelope: ProcessComponentEnvelopeV1,
@@ -489,6 +517,17 @@ def build_materialization_plan(
         derive_process_execution_profile,
     )
     from ..compiler.process_ir.pipeline import compile_process_ir_v1
+
+    # RELOCATABILITY IS DECIDED BEFORE COMPILATION (§6 AR2-02). The model
+    # validator below already refuses a literal component id, but it runs only
+    # once the plan object is CONSTRUCTED — after `compile_process_ir_v1`, which
+    # for a literal reference inside the IR dies first with a compile error and
+    # is served as an internal error rather than the named, documented code. The
+    # predicate is the same one the validator calls: one authority, two call
+    # sites, so a second opinion cannot drift from the first.
+    offenders = envelope_relocatability_offenders(envelope, process_ir)
+    if offenders:
+        raise _not_relocatable_error(offenders)
 
     relocatable_symbols = placeholder_backed_symbols(symbols)
     cfg, emission_plan = compile_process_ir_v1(process_ir, relocatable_symbols)

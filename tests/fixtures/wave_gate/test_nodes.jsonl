@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9985,"minimum_collected":9985,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9998,"minimum_collected":9998,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -10014,3 +10014,16 @@
 {"kind":"test","id":"pytest-010013","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_roots_own_folder_id_does_not_make_it_a_folder","state":"active"}
 {"kind":"test","id":"pytest-010014","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_placement_classifier_agrees_with_every_live_capture","state":"active"}
 {"kind":"test","id":"pytest-010015","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_explicitly_requested_root_folder_confirms_by_its_own_id","state":"active"}
+{"kind":"test","id":"pytest-010016","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_raw_route_refuses_a_literal_reference_before_writing_anything","state":"active"}
+{"kind":"test","id":"pytest-010017","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_literal_reference_inside_the_ir_serves_the_named_code","state":"active"}
+{"kind":"test","id":"pytest-010018","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_update_without_a_target_is_already_decided_before_the_loop","state":"active"}
+{"kind":"test","id":"pytest-010019","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_thrown_apply_serves_the_record_of_what_it_did_write","state":"active"}
+{"kind":"test","id":"pytest-010020","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_throw_after_every_write_never_reports_no_mutation","state":"active"}
+{"kind":"test","id":"pytest-010021","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_update_attests_the_folder_id_the_platform_received","state":"active"}
+{"kind":"test","id":"pytest-010022","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_typed_arm_never_renders_a_mutated_units_values","state":"active"}
+{"kind":"test","id":"pytest-010023","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_every_registered_process_component_code_has_a_reachable_producer","state":"active"}
+{"kind":"test","id":"pytest-010024","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_direct_root_refusal_keeps_every_cause_and_its_path","state":"active"}
+{"kind":"test","id":"pytest-010025","node_id":"tests/test_process_materialization_plan.py::test_the_hashed_policy_object_is_the_shape_the_plan_specifies","state":"active"}
+{"kind":"test","id":"pytest-010026","node_id":"tests/test_process_component_models.py::test_every_structural_string_refuses_padding_on_the_same_footing","state":"active"}
+{"kind":"test","id":"pytest-010027","node_id":"tests/test_integration_models.py::test_no_served_description_contradicts_its_own_field_container","state":"active"}
+{"kind":"test","id":"pytest-010028","node_id":"tests/test_wave_gate.py::test_no_audit_ledger_disposition_claims_more_than_a_witness","state":"active"}

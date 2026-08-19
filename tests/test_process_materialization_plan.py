@@ -72,6 +72,33 @@ def _plan(doc=None, envelope=None, resolver=None, **overrides):
     return pm.build_materialization_plan(**kwargs)
 
 
+def test_the_hashed_policy_object_is_the_shape_the_plan_specifies():
+    """§6 AR2-05: the projection had one wire level the specification lacks.
+
+    The plan's canonical object places the FULL normalized preservation
+    projection directly at `policies.preservation_policy`. The first pass
+    wrapped it under a `projection` key, so the hashed material carried a level
+    no recorded storage deviation justified — and the prose beside the assembly
+    claimed it matched. The key set is pinned against the runtime policy's own
+    fields, so this cannot be satisfied by a partial projection either.
+    """
+    import dataclasses
+    import json as _json
+    from boomi_mcp.categories.components.builders._process_preservation import (
+        PROCESS_PRESERVATION_POLICY,
+    )
+
+    material = _json.loads(pm.canonical_plan_material(_plan()))
+    policy = material["policies"]["preservation_policy"]
+
+    assert "projection" not in policy, policy
+    assert policy["policy_id"]
+    # Every runtime field of the authority reaches the material as a SIBLING of
+    # policy_id — derived from the dataclass, never hand-listed.
+    runtime_fields = {f.name for f in dataclasses.fields(PROCESS_PRESERVATION_POLICY)}
+    assert runtime_fields <= set(policy), runtime_fields - set(policy)
+
+
 # ---------------------------------------------------------------------------
 # Relocatability — the promise the whole design rests on
 # ---------------------------------------------------------------------------

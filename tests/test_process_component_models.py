@@ -466,3 +466,39 @@ def test_a_spec_carrying_processes_survives_a_model_dump_round_trip():
     from_json = IntegrationSpecV1(**spec.model_dump(mode="json"))
     assert len(from_json.processes) == 1
     assert from_json.processes[0].envelope.depends_on == ("conn",)
+
+
+def test_every_structural_string_refuses_padding_on_the_same_footing():
+    """§6 AR2-06: `name` accepted padding while its siblings refused it.
+
+    The name is fingerprint-covered AND emitted into the component XML, so
+    `"  N  "` and `"N"` — one canonical envelope by the plan's definition —
+    minted different plan fingerprints and different submitted bytes. The
+    module's rule is fail-closed rejection, and the fields are enumerated from
+    the model itself rather than hand-listed, so a new structural string cannot
+    quietly opt out.
+    """
+    import pydantic
+    import pytest as _pytest
+
+    from boomi_mcp.models.process_component import ProcessComponentEnvelopeV1
+
+    def _envelope(**over):
+        kwargs = {"component_key": "proc", "name": "N", "action": "create"}
+        kwargs.update(over)
+        return ProcessComponentEnvelopeV1(**kwargs)
+
+    # The control: unpadded values construct.
+    assert _envelope().name == "N"
+
+    for field, padded in (
+        ("name", "  N  "),
+        ("component_key", "  proc  "),
+        ("folder_name", "  F  "),
+        ("component_id", "  cid  "),
+    ):
+        with _pytest.raises(pydantic.ValidationError) as caught:
+            _envelope(**{field: padded})
+        assert "whitespace" in str(caught.value) or "blank" in str(caught.value), (
+            field, caught.value,
+        )

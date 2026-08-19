@@ -89,10 +89,12 @@ class IntegrationSpecV1(BaseModel):
             "duplicate, and all four depends_on directions (component->component, "
             "component->process, process->component, process->process) enter one "
             "topological order with one cycle check. "
-            "A LIST, not a tuple, deliberately: IntegrationSpecV1 is the legacy "
-            "mutable authoring surface that build_integration edits in place, and "
-            "every sibling collection here is a List. Immutability lives where it "
-            "belongs — on the frozen ProcessAuthoringUnitV1 elements."
+            "A TUPLE, per the plan's field type: pydantic coerces list input, "
+            "so the wire shape is an ordinary JSON array and no caller sends "
+            "anything different — but unlike this model's legacy List "
+            "siblings, mutating the collection itself is unrepresentable. "
+            "Per-element immutability lives on the frozen "
+            "ProcessAuthoringUnitV1 entries."
         ),
     )
     goals: List[str] = Field(default_factory=list)

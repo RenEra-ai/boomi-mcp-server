@@ -13,7 +13,7 @@ precisely the failure mode that matters.
 
 The fix is to re-validate a dump at entry and use only that snapshot:
 
-    snapshot = ProcessIRV1.model_validate(ir.model_dump())
+    snapshot = ProcessIRV1.model_validate(ir.model_dump(warnings=False))
 
 Every later phase reads ``prepared.ir``, never the caller's object. Lowering also
 happens exactly once here, so validation and the emission that follows it are
@@ -141,7 +141,14 @@ def prepare_validation_context(
     module docstring on why preparation defects must not become report entries.
     """
     # Re-validate a dump rather than trusting the caller's (mutable) model.
-    snapshot = ProcessIRV1.model_validate(ir.model_dump())
+    #
+    # `warnings=False` is load-bearing (§6 AR2-01, the same reason the composer
+    # and the authoring intake give): this is a public compiler entry, so `ir`
+    # may be a model the caller still holds and has mutated — and dumping a
+    # mutated model makes pydantic render the caller's authored content, a
+    # secret included, into a serializer warning before this value-free
+    # re-validation ever runs.
+    snapshot = ProcessIRV1.model_validate(ir.model_dump(warnings=False))
     cfg = lower_process_ir_to_cfg(snapshot)
 
     return PreparedProcessValidationV1(

@@ -284,19 +284,36 @@ def _validated_direct_roots(
                 else value
             )
         except ProcessIRValidationError as exc:
+            # ONE DIAGNOSTIC PER CAUSE, each keeping its PATH (§6 AR2-08).
+            # Collapsing the authority's diagnostics into a single aggregate
+            # carried the codes but dropped every location, so a caller was
+            # told what was wrong and not where — and the plan requires both.
+            # The paths are the authority's own; nothing is re-derived here.
+            causes = tuple(exc.diagnostics or ())
             raise RecipeError(
-                (
+                tuple(
                     recipe_diagnostic(
                         RECIPE_CONSTRAINT_FAILED,
                         phase="composition",
                         target=f"direct_process:{key}",
+                        path=getattr(diagnostic, "path", "") or "",
                         # The ProcessIR authority's own codes travel value-free,
                         # exactly as the recipe layer carries every other
                         # canonical diagnostic.
-                        cause_codes=tuple(
-                            getattr(diagnostic, "code", "") or ""
-                            for diagnostic in (exc.diagnostics or ())
+                        cause_codes=(
+                            (getattr(diagnostic, "code", "") or "",)
+                            if getattr(diagnostic, "code", "")
+                            else ()
                         ),
+                    )
+                    for diagnostic in causes
+                )
+                # A refusal with no itemized cause still reports the refusal.
+                or (
+                    recipe_diagnostic(
+                        RECIPE_CONSTRAINT_FAILED,
+                        phase="composition",
+                        target=f"direct_process:{key}",
                     ),
                 )
             ) from None

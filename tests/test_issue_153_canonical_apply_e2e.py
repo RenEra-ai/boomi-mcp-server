@@ -642,6 +642,256 @@ def test_an_apply_that_throws_mid_flight_does_not_claim_it_was_retry_safe():
     assert "cannot confirm" in result["hint"]
 
 
+def test_the_raw_route_refuses_a_literal_reference_before_writing_anything():
+    """§6 AR2-02: the raw `integration_spec` route had no compile step.
+
+    So the relocatability answer — fully decidable from the request — was
+    reached only inside the process root's execution turn, which topological
+    order runs AFTER its dependencies have been created. A measured probe
+    recorded two supporting-component writes before the refusal, and a literal
+    reference inside the IR did not even serve the named code: it died inside
+    compilation and surfaced as an internal error.
+
+    The predicate is the same `envelope_relocatability_offenders` the typed
+    route and the plan model already use — consulted at a third site, never
+    restated.
+    """
+    literal = "35813b90-1f42-4dcb-98f5-82d8f96be61d"
+    unit = process_unit(process_extensions=ProcessExtensionBindingsV1(
+        connections=(ProcessConnectionOverrideV1(
+            connection_id=literal, connector_type="rest",
+            fields=(ProcessOverrideFieldV1(id="url", label="x"),),
+        ),)
+    ))
+    spec = {
+        "name": "M12.15 Integration",
+        "components": [APPLIABLE_CONN, APPLIABLE_OP],
+        "processes": [unit.model_dump(mode="json")],
+    }
+
+    writes = {"n": 0}
+
+    def _component(*_a, **_k):
+        writes["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % writes["n"]}
+
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = AssertionError("no process may be created")
+        get_xml.side_effect = _live_xml
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"integration_spec": spec, "dry_run": False},
+        )
+
+    assert result["_success"] is False
+    assert result["error_code"] == PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE
+    # The whole point: NOTHING was written for an answer we always had.
+    assert writes["n"] == 0, "dependencies were created before the refusal"
+    assert result["partial_results"] == {}
+    from boomi_mcp.categories.integration_builder import _mutation_status
+    assert _mutation_status(result) == "none"
+
+
+def test_a_literal_reference_inside_the_ir_serves_the_named_code():
+    """§6 AR2-02, the second half: an IR literal died inside compilation.
+
+    The model validator that raises the named code runs only once the plan is
+    CONSTRUCTED — after `compile_process_ir_v1`, which fails first on a literal
+    reference and was served as an internal error. Deciding relocatability
+    before compilation gives both reference locations the one documented code.
+    """
+    from boomi_mcp.authoring.process_materialization import (
+        build_materialization_plan,
+    )
+    from boomi_mcp.categories.integration_builder import (
+        _named_error_code_from_validation,
+    )
+
+    literal_unit = process_unit()
+    ir = literal_unit.process_ir.model_dump(mode="json")
+    # A literal Boomi id where a `$ref:KEY` belongs, inside the IR itself.
+    steps = ir["body"]["steps"]
+    bearing = [st for st in steps if "connection_ref" in st]
+    assert bearing, steps
+    bearing[0]["connection_ref"] = "35813b90-1f42-4dcb-98f5-82d8f96be61d"
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    with pytest.raises(Exception) as caught:
+        build_materialization_plan(
+            envelope=literal_unit.envelope,
+            process_ir=parse_process_ir_v1(ir),
+            symbols={},
+            conflict_policy="reuse",
+            compiler_revision="r", emitter_revision="r",
+            materializer_revision="r",
+        )
+    assert _named_error_code_from_validation(caught.value) == (
+        PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE
+    ), caught.value
+
+
+def test_an_update_without_a_target_is_already_decided_before_the_loop():
+    """§6 AR2-02 SIBLING SWEEP, witnessed rather than asserted.
+
+    The sweep asks: which other canonical refusals are fully request-decidable
+    yet decided inside the mutation loop? Only relocatability was. The other
+    candidate — `action="update"` with no resolvable target — is already
+    refused before anything runs: the raw route's plan resolution reports
+    `error_missing_target` and executes nothing. The in-loop arm that also
+    refuses it is defensive depth, not the deciding site, so a third copy in
+    the preflight would be an unreachable guard. This pins that measurement, so
+    the sweep's claim is checkable rather than a note.
+    """
+    unit = process_unit(action="update")
+    spec = {
+        "name": "M12.15 Integration",
+        "components": [APPLIABLE_CONN, APPLIABLE_OP],
+        "processes": [unit.model_dump(mode="json")],
+    }
+    writes = {"n": 0}
+
+    def _component(*_a, **_k):
+        writes["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % writes["n"]}
+
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml:
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = AssertionError("no process may be created")
+        get_xml.side_effect = _live_xml
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"integration_spec": spec, "dry_run": False},
+        )
+
+    assert result["_success"] is False
+    assert writes["n"] == 0, "dependencies were created before the refusal"
+    assert [s["planned_action"] for s in result["unresolvable_steps"]] == [
+        "error_missing_target"
+    ]
+    from boomi_mcp.categories.integration_builder import _mutation_status
+    assert _mutation_status(result) == "none"
+
+
+def test_a_thrown_apply_serves_the_record_of_what_it_did_write():
+    """§6 AR2-03: an exception exit must carry the evidence, not just the doubt.
+
+    `_partial_failure` gives a RETURNED failure its build id, its partial
+    results and its attestations. An exception that escaped the loop got none of
+    them — so the one exit where a caller most needs the durable record served
+    the least, and the durable row stayed `in_progress` for good. The status
+    stays `possible` (that IS the honest reading); what changes is that the
+    caller can now name the record it must reconcile.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    unit = process_unit()
+    second = process_unit(key="proc_two", name="M12.15 Second")
+    ib._BUILD_REGISTRY.clear()
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    calls = {"n": 0}
+    real = ib._execute_canonical_process
+
+    def _canonical(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("connection reset between roots")
+        return real(**kwargs)
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml, patch.object(
+        ib, "_execute_canonical_process", side_effect=_canonical
+    ):
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _live_xml
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(
+                process_ir_request(units=(unit, second))
+            ), "dry_run": False},
+        )
+
+    assert result["_success"] is False
+    # The honest status is unchanged — this is not a downgrade of the doubt.
+    assert result["mutation_status"] == "possible"
+    # ...but the evidence is now served: the id, the partials, the attestation
+    # of the root that DID land.
+    build_id = result.get("build_id")
+    assert build_id, result
+    assert result.get("partial_results"), result
+    assert result.get("process_mutations"), result
+    # ...and the durable row is TERMINAL, not stuck mid-flight forever.
+    row = ib._BUILD_REGISTRY[build_id]
+    assert row["status"] == "failed_partial", row["status"]
+    assert row.get("process_mutations")
+
+
+def test_a_throw_after_every_write_never_reports_no_mutation():
+    """§6 AR2-03, the worse half: the post-loop region was outside the guard.
+
+    Every statement after the loop runs once all writes have LANDED. A raw
+    escape there reached the blanket handler, which serves
+    `mutation_status="none"` — mutations performed, caller told none, and a
+    retry under `conflict_policy="clone"` duplicates every one of them. The
+    pre-loop preflight deliberately stays outside the guard: it decides before
+    anything can be written and must keep saying `none`.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    ib._BUILD_REGISTRY.clear()
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("registry write failed after every mutation landed")
+
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml, patch.object(
+        ib, "_authoring_build_provenance", side_effect=_boom
+    ):
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _live_xml
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(), "dry_run": False},
+        )
+
+    assert result["_success"] is False
+    # The whole point: writes happened, so "none" is a lie the caller acts on.
+    assert result["mutation_status"] == "possible", result
+    assert result.get("build_id"), result
+    assert ib._BUILD_REGISTRY[result["build_id"]]["status"] == "failed_partial"
+
+
 # ---------------------------------------------------------------------------
 # value-free served errors (QA-153-r3-01, QA-153-r4-01)
 # ---------------------------------------------------------------------------
@@ -1101,6 +1351,80 @@ def test_recipe_extension_normalization_matches_the_legacy_authority():
     assert good.connections[0].fields[0].id == "u"
     # `label` is NOT stripped — the renderer emits its exact bytes.
     assert good.connections[0].fields[0].label == "L"
+
+
+def test_an_update_attests_the_folder_id_the_platform_received():
+    """§6 AR2-04: the update attested a folder by NAME with a null id.
+
+    Preservation echoes the live root's attributes into the merged bytes, so
+    those bytes carry `folderId` alongside `folderName` — the id was in hand and
+    discarded, and the attestation recorded less than what the platform
+    received. Both facts now come from ONE read of the merged bytes, so they
+    cannot describe different reads; the create branch is untouched (its
+    authority is the readback, not the request).
+    """
+    import boomi_mcp.authoring.process_materialization as pm
+    from boomi_mcp.categories.components.canonical_process_apply import (
+        applied_placement, build_mutation_attestation,
+    )
+
+    # A REAL plan, captured from the public chain rather than hand-built, so
+    # the attestation under test is the one production constructs.
+    captured = {}
+    real = pm.build_materialization_plan
+
+    def _capture(*args, **kwargs):
+        plan_obj = real(*args, **kwargs)
+        captured.setdefault("plan", plan_obj)
+        return plan_obj
+
+    def _component(*_a, **_k):
+        return {"_success": True, "component_id": "cid-x"}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml, patch.object(
+        pm, "build_materialization_plan", _capture
+    ):
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _live_xml
+        build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(), "dry_run": False},
+        )
+    plan = captured["plan"]
+    merged = '<bns:Component xmlns:bns="x" folderName="F" folderId="fid"/>'
+    place = applied_placement(merged)
+    attestation = build_mutation_attestation(
+        plan=plan, action="update", target_component_id="tid",
+        result_component_id="tid", submitted_xml=merged,
+        account_scope_hash="sha256:" + "b" * 64,
+        applied_folder_name=place["folder_name"],
+        applied_folder_id=place["folder_id"],
+    )
+    resolved = attestation.resolved_placement
+    assert resolved.folder_name == "F"
+    assert resolved.folder_id == "fid"
+
+    # The control: merged bytes with no folder attributes attest neither —
+    # account-root placement stays absent rather than guessed.
+    bare = '<bns:Component xmlns:bns="x"/>'
+    place = applied_placement(bare)
+    attestation = build_mutation_attestation(
+        plan=plan, action="update", target_component_id="tid",
+        result_component_id="tid", submitted_xml=bare,
+        account_scope_hash="sha256:" + "b" * 64,
+        applied_folder_name=place["folder_name"],
+        applied_folder_id=place["folder_id"],
+    )
+    assert attestation.resolved_placement.folder_name is None
+    assert attestation.resolved_placement.folder_id is None
 
 
 def test_the_update_preservation_codes_are_in_the_shared_taxonomy():
@@ -2314,6 +2638,47 @@ def test_an_unknown_field_on_a_spec_nested_unit_serves_the_registered_code():
     assert result["error_code"] == "PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD"
 
 
+def test_the_typed_arm_never_renders_a_mutated_units_values():
+    """§6 AR2-01: the composer arm was fixed; the DIRECT arm was not.
+
+    `ProcessAuthoringUnitV1` is frozen, but the `ProcessIRV1` it holds is not,
+    so an in-process caller can hand over a parsed unit and mutate its body
+    afterwards. Normalization put that same object into the spec, and the
+    semantic validator's snapshot then dumped it with warnings enabled —
+    rendering the caller's authored content, secret included, into a pydantic
+    warning, followed by a raw ValidationError carrying it again. Same class as
+    the composer defect, on the arm the composer fix did not cover.
+    """
+    import warnings as _warnings
+
+    from boomi_mcp.authoring.workflow import plan_authoring_request_v1
+
+    request = process_ir_request(units=(process_unit(),))
+    # Mutate the model the CALLER still holds, after the request is built.
+    object.__setattr__(request.intent.units[0].process_ir, "body",
+                       {"password": "hunter2-S3cret-AR2"})
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        try:
+            result = plan_authoring_request_v1(
+                request, boomi_client=MagicMock(), profile=_PROFILE
+            )
+            served = repr(result)
+            raised = None
+        except Exception as exc:  # the refusal channel is what matters here
+            served = repr(exc)
+            raised = exc
+
+    leaked = [w for w in caught if "hunter2" in str(w.message)]
+    assert leaked == [], "the serializer warning rendered the mutated value"
+    assert "hunter2" not in served, "the served refusal rendered the mutated value"
+    # ...and the refusal is the TYPED channel, not a raw pydantic escape.
+    if raised is not None:
+        from boomi_mcp.authoring.workflow import AuthoringWorkflowError
+        assert isinstance(raised, AuthoringWorkflowError), type(raised).__name__
+
+
 def test_reparsing_a_mutated_root_does_not_render_its_values():
     """Codex round 13: the reparse dump must not WARN the secret onto stderr.
 
@@ -2934,3 +3299,86 @@ def test_a_failed_readback_never_claims_the_component_is_at_root():
     assert "could not be parsed" not in unverified[0]
     assert not [w for w in warnings if "NOT placed" in w]
     assert not [w for w in warnings if "read-back shows it in" in w]
+
+
+def test_every_registered_process_component_code_has_a_reachable_producer():
+    """§6 AR2-07, the structural half: registered ≠ reachable.
+
+    This slice registered five `PROCESS_COMPONENT_SCHEMA_*` /
+    `PROCESS_COMPONENT_REFERENCE_*` contracts and served exactly one of them:
+    the wrapper special-cased unknown fields and collapsed everything else to
+    the generic input code, so four documented codes could never be observed by
+    the callers they document. That is the same pair as the placement codes
+    registered with no producer (QA-153-r1-03/AR1-06), which is why the answer
+    here is an invariant rather than another individual mapping.
+
+    The code set is DERIVED from the taxonomy, not hand-listed, so registering
+    a sixth code without a producer fails this test rather than shipping.
+    """
+    from boomi_mcp.categories.integration_builder import _NAMED_VALIDATION_CODES
+    from boomi_mcp import errors as _errors
+
+    registered = {
+        name: getattr(_errors, name)
+        for name in dir(_errors)
+        if name.startswith("PROCESS_COMPONENT_")
+        and isinstance(getattr(_errors, name), str)
+    }
+    assert registered, "no PROCESS_COMPONENT_* codes found — guard is vacuous"
+
+    # A code is REACHABLE when the served wrapper can emit it: either the
+    # shared pydantic map produces it, or the wrapper names it directly.
+    served = set(_NAMED_VALIDATION_CODES.values())
+    import inspect
+    from boomi_mcp.categories import integration_builder as _ib
+
+    wrapper_source = inspect.getsource(_ib._reject_invalid_typed_request)
+
+    unreachable = sorted(
+        code for name, code in registered.items()
+        if code not in served and code not in wrapper_source
+    )
+    assert unreachable == [], (
+        "registered with no reachable producer at the served boundary: "
+        f"{unreachable}"
+    )
+
+
+def test_a_direct_root_refusal_keeps_every_cause_and_its_path():
+    """§6 AR2-08: the preflight carried cause codes and dropped every path.
+
+    One aggregate diagnostic told a caller WHAT was wrong and never WHERE — and
+    a multi-fault root collapsed to a single entry. The plan requires both the
+    ProcessIR cause codes and their paths to survive the translation; they are
+    the authority's own, so nothing is re-derived here.
+    """
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+    from boomi_mcp.recipes.composer import _validated_direct_roots
+    from boomi_mcp.recipes.errors import RecipeError
+
+    root = parse_process_ir_v1({
+        "version": "1",
+        "body": {"kind": "sequence", "steps": [
+            {"kind": "source", "connection_ref": "$ref:conn",
+             "operation_ref": "$ref:op"},
+            {"kind": "message", "text": "hello"},
+            {"kind": "return_documents"},
+        ]},
+    })
+    # A shape the parser refuses, reached through the same mutation route the
+    # reparse exists for.
+    object.__setattr__(root, "body", {"kind": "sequence", "steps": []})
+
+    with pytest.raises(RecipeError) as caught:
+        _validated_direct_roots({"proc": root})
+
+    diagnostics = caught.value.diagnostics
+    assert diagnostics, caught.value
+    # Every itemized cause keeps its own path AND its own code — no aggregate.
+    assert all(d.target == "direct_process:proc" for d in diagnostics)
+    assert any(d.path for d in diagnostics), [
+        (d.code, d.path, d.cause_codes) for d in diagnostics
+    ]
+    assert all(len(d.cause_codes) <= 1 for d in diagnostics), [
+        d.cause_codes for d in diagnostics
+    ]

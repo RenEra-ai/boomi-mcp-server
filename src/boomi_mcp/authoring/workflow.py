@@ -356,6 +356,57 @@ def _connector_metadata_from_components(
     return metadata
 
 
+def _reparsed_unit(unit):
+    """A unit whose nested ProcessIR is SERVER-OWNED, not the caller's object.
+
+    §6 AR2-01. `ProcessAuthoringUnitV1` is frozen, but the `ProcessIRV1` it
+    holds is not: an in-process caller can hand over a parsed unit and mutate
+    its body afterwards. Everything downstream then dumps that mutated model —
+    the semantic validator's snapshot, the compile reparse, the semantic-hash
+    payload — and pydantic renders the caller's authored content, secrets
+    included, into a serializer warning on the way. Reparsing here means those
+    dumps operate on an object this server validated.
+
+    `warnings=False` is load-bearing for the same reason the composer arm gives:
+    the dump that FEEDS the reparse is itself a dump of the mutated model.
+    """
+    from ..models.process_ir import (
+        ProcessIRValidationError, parse_process_ir_v1,
+    )
+
+    try:
+        reparsed = parse_process_ir_v1(
+            unit.process_ir.model_dump(mode="json", warnings=False)
+        )
+    except ProcessIRValidationError as exc:
+        # Translated into this module's own refusal channel rather than let out
+        # raw: a caller of `plan`/`compile` branches on `AuthoringWorkflowError`
+        # and its diagnostics, and an unmodelled escape from an intake helper is
+        # a second error contract for the same surface. The message is the
+        # parser's value-free text; the mutated content never travels.
+        raise AuthoringWorkflowError(
+            AUTHORING_COMPILE_BLOCKED,
+            (
+                _diag(
+                    AUTHORING_COMPILE_BLOCKED,
+                    "error",
+                    message=(
+                        "A process root failed canonical re-parse at intake."
+                    ),
+                    subject_kind="process",
+                    subject_id=unit.envelope.component_key,
+                    remediation=(
+                        "Author the root as a valid ProcessIR document; the "
+                        "server re-parses every caller-supplied root before "
+                        "compiling it."
+                    ),
+                    cause_codes=(PROCESS_COMPONENT_SCHEMA_INVALID,),
+                ),
+            ),
+        ) from exc
+    return unit.model_copy(update={"process_ir": reparsed})
+
+
 def _normalize_intent(request: AuthoringRequestV1) -> _NormalizedIntent:
     intent = request.intent
     kind = intent.intent_kind
@@ -388,15 +439,25 @@ def _normalize_intent(request: AuthoringRequestV1) -> _NormalizedIntent:
         )
 
     if kind == "process_ir":
+        # (helper defined at module scope; see `_reparsed_unit`)
         # The units go into the spec SORTED by key. `_NormalizedIntent.process_roots`
         # sorts its own projection too, but the spec is what the semantic-hash
         # payload dumps wholesale, so canonicalizing once here is what actually
         # makes the fingerprint independent of the order the caller listed them.
+        # ...and each unit's nested IR is REPARSED before it enters the spec
+        # (§6 AR2-01). A frozen outer model does not make the nested
+        # `ProcessIRV1` immutable, so an in-process caller can hand over a
+        # parsed unit and then mutate its body — and every downstream dump then
+        # renders the caller's authored content, secrets included, into a
+        # pydantic serializer warning. The composer arm already reparses for
+        # exactly this reason; this is the same fix on the direct arm, so the
+        # objects the compiler and validator dump are server-owned.
         spec = IntegrationSpecV1(
             name=intent.integration_name,
             components=list(intent.components),
             processes=sorted(
-                intent.units, key=lambda unit: unit.envelope.component_key
+                (_reparsed_unit(unit) for unit in intent.units),
+                key=lambda unit: unit.envelope.component_key,
             ),
         )
         return _NormalizedIntent(
@@ -1840,7 +1901,12 @@ def build_artifact_descriptors(
         try:
             # Re-parse from the dump for the same reason the validator does: the
             # object may have been built by something other than a strict parse.
-            reparsed = parse_process_ir_v1(ir.model_dump(mode="json"))
+            # `warnings=False` for the AR2-01 reason: dumping a model that may
+            # have been mutated renders the caller's values into a serializer
+            # warning before the value-free parser runs.
+            reparsed = parse_process_ir_v1(
+                ir.model_dump(mode="json", warnings=False)
+            )
             cfg, plan = compile_process_ir_v1(reparsed, symbols)
         except ProcessIRCompileError as exc:
             raise AuthoringWorkflowError(

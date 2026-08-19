@@ -240,6 +240,9 @@ from ..errors import (
     UPDATE_PRESERVATION_FETCH_FAILED,
     UPDATE_PRESERVATION_POLICY_UNSUPPORTED,
     UPDATE_PRESERVATION_PUSH_FAILED,
+    PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,
+    PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT,
+    PROCESS_COMPONENT_SCHEMA_INVALID,
 )
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
@@ -5922,6 +5925,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             "error_code": _root_dep_error.error_code,
         }
 
+
     try:
         execution_order = _topological_order(spec)
     except IntegrationDependencyError as exc:
@@ -5946,6 +5950,25 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         unit.envelope.component_key: unit
         for unit in (getattr(spec, "processes", ()) or ())
     }
+    # `plan` REPORTS non-relocatable references (§6 AR2-02) — it does not refuse
+    # them, because this surface's contract is to report (QA-153-r2-07(a)). The
+    # typed route decides this at compile and serves it in the validation
+    # report; the raw `integration_spec` route has no compile step, so without
+    # this its preview said nothing and only the apply disagreed. Third call
+    # site of the ONE predicate; the rule is consulted, never restated.
+    from ..authoring.process_materialization import (
+        envelope_relocatability_offenders as _relocatability_offenders,
+    )
+
+    for _pkey, _punit in process_units_by_key.items():
+        _offenders = _relocatability_offenders(_punit.envelope, _punit.process_ir)
+        if _offenders:
+            warnings.append(
+                "Process {0!r} carries literal component id(s) at {1}; a "
+                "materializable request may reference an existing component "
+                "only by logical '$ref:KEY'. Apply refuses this before writing "
+                "anything.".format(_pkey, ", ".join(_offenders))
+            )
 
     for key in execution_order:
         # #153: `execution_order` spans ONE namespace covering components and
@@ -7312,6 +7335,20 @@ _NAMED_VALIDATION_CODES = {
         PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH
     ),
     "process_materialization_plan_invalid": PROCESS_MATERIALIZATION_PLAN_INVALID,
+    # The process COMPONENT models' own custom types (§6 AR2-07). These three
+    # codes were registered by this issue and had no reachable producer through
+    # the served wrapper: every schema failure but an unknown field collapsed to
+    # the generic input code, so a documented contract could never be observed.
+    # Registered code with no producer is the same pair as QA-153-r1-03/AR1-06.
+    "process_component_value_invalid": PROCESS_COMPONENT_SCHEMA_INVALID,
+    "process_component_cardinality_invalid": (
+        PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY
+    ),
+    "process_component_self_dependency": PROCESS_COMPONENT_SCHEMA_INVALID,
+    "process_component_duplicate_dependency": PROCESS_COMPONENT_SCHEMA_INVALID,
+    "process_ir_reference_invalid_format": (
+        PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT
+    ),
 }
 
 
@@ -7517,7 +7554,7 @@ def _execute_canonical_process(
     from .components.canonical_process_apply import (
         CanonicalProcessApplyError,
         applied_component_name,
-        applied_folder_name,
+        applied_placement,
         observed_folder_identity,
         build_mutation_attestation,
         build_readback_attestation,
@@ -7849,6 +7886,7 @@ def _execute_canonical_process(
     # The digest travels from the point CLOSEST to the wire: the update path
     # computed it immediately before its push; the create path immediately
     # before the raw create call above.
+    _applied_placement = applied_placement(submitted)
     precomputed = exec_result.get("submitted_xml_digest") or (
         precomputed_digest if action == "create" else None
     )
@@ -7860,7 +7898,10 @@ def _execute_canonical_process(
             result_component_id=component_id,
             submitted_xml=submitted,
             account_scope_hash=account_scope_fingerprint(profile, account_id),
-            applied_folder_name=applied_folder_name(submitted),
+            # ONE read of the submitted bytes for BOTH placement facts, so the
+            # attested name and id can never describe different reads (AR2-04).
+            applied_folder_name=_applied_placement["folder_name"],
+            applied_folder_id=_applied_placement["folder_id"],
             # Create records the requested name AND the resolved id (plan §4);
             # an update's effective placement comes from the submitted bytes.
             resolved_folder_id=(
@@ -8287,12 +8328,58 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         CanonicalProcessApplyError as _PlacementRefusal,
     )
 
+    #
+    # ...AND EVERY OTHER FULLY PRE-DECIDABLE REFUSAL (§6 AR2-02). The rule the
+    # placement pass established generalizes: a refusal whose answer is fixed by
+    # the REQUEST — not by anything the platform says — belongs before the first
+    # write, or it charges the caller a partial mutation for an answer we always
+    # had. This pass is the enumeration of those refusals, in one place, for
+    # every route; the raw `integration_spec` route in particular has no compile
+    # step to catch them earlier.
+    from ..authoring.process_materialization import (
+        envelope_relocatability_offenders as _relocatability_offenders,
+    )
+
     resolved_placements: Dict[str, Optional[str]] = {}
     _planned_actions = {
         step["key"]: str(step.get("planned_action", ""))
         for step in planned["steps"]
     }
     for _pkey, _unit in process_units_by_key.items():
+        # (a) A literal component id makes the plan non-relocatable. The typed
+        # route already refuses this at compile; the raw route reached the
+        # materializer, which failed INSIDE compilation and served an internal
+        # error — after the root's dependencies had been written. Same one
+        # predicate both places, never a restatement.
+        _offenders = _relocatability_offenders(_unit.envelope, _unit.process_ir)
+        if _offenders:
+            return {
+                "_success": False,
+                "error": (
+                    "process {0!r} carries literal component id(s) at {1}; a "
+                    "materializable request may reference an existing component "
+                    "only by logical '$ref:KEY'".format(
+                        _pkey, ", ".join(_offenders)
+                    )
+                ),
+                "error_code": (
+                    "PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE"
+                ),
+                "failed_step": _pkey,
+                "partial_results": {},
+                "hint": (
+                    "Reference decisions are made before any component is "
+                    "written; nothing was created."
+                ),
+            }
+        # SIBLING SWEEP (§6 AR2-02), recorded rather than re-implemented: the
+        # OTHER pre-decidable canonical refusal — `action="update"` with no
+        # resolvable target — is already decided before this pass runs. The raw
+        # route's plan resolution refuses it as `error_missing_target` ("No
+        # operations were executed"), and the typed route blocks it at compile;
+        # measured both ways. The in-loop arm that also refuses it is therefore
+        # defensive depth, not the deciding site, and adding a third copy here
+        # would be an unreachable guard.
         if _planned_actions.get(_pkey) == "reuse":
             # A reuse WRITES NOTHING and uses no folder id (Codex round 14):
             # validating its placement anyway meant a moved or deleted folder —
@@ -8650,12 +8737,71 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     except _ApplyExecutionError:
         raise
     except Exception as exc:  # noqa: BLE001 — re-raised, never swallowed
-        raise _ApplyExecutionError(exc) from exc
+        raise _ApplyExecutionError(
+            exc, evidence=_apply_escape_evidence(
+                durable_build_id=durable_build_id,
+                results=results,
+                process_mutations=process_mutations,
+                process_readbacks=process_readbacks,
+                apply_warnings=apply_warnings,
+            )
+        ) from exc
 
-    # A durable typed-canonical record was allocated BEFORE the first mutation
-    # (§6 AR1-04); success COMPLETES that same record under the same id rather
-    # than minting a second one, so the id a caller saw mid-flight is the id
-    # that verifies. Everything else keeps the original all-at-end behavior.
+    # POST-LOOP FINALIZATION IS GUARDED TOO (§6 AR2-03). Every statement below
+    # this point runs AFTER every write has landed, so an exception here is the
+    # worst case on this surface: the blanket handler would serve
+    # `mutation_status: "none"` — mutations performed, caller told none — and
+    # invite a retry that duplicates under `conflict_policy="clone"`. The guard
+    # is deliberately NOT extended over the PRE-loop preflight, which decides
+    # before anything can be written and must keep saying `none`.
+    try:
+        return _finalize_apply_success(
+            spec=spec,
+            profile=profile,
+            boomi_client=boomi_client,
+            durable_build_id=durable_build_id,
+            authoring_bundle=authoring_bundle,
+            results=results,
+            execution_order=execution_order,
+            process_mutations=process_mutations,
+            process_readbacks=process_readbacks,
+            apply_warnings=apply_warnings,
+            planned=planned,
+        )
+    except _ApplyExecutionError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — re-raised, never swallowed
+        raise _ApplyExecutionError(
+            exc, evidence=_apply_escape_evidence(
+                durable_build_id=durable_build_id,
+                results=results,
+                process_mutations=process_mutations,
+                process_readbacks=process_readbacks,
+                apply_warnings=apply_warnings,
+            )
+        ) from exc
+
+
+def _finalize_apply_success(
+    *,
+    spec,
+    profile: str,
+    boomi_client,
+    durable_build_id: Optional[str],
+    authoring_bundle,
+    results: Dict[str, Any],
+    execution_order: List[str],
+    process_mutations: List[Any],
+    process_readbacks: List[Any],
+    apply_warnings: List[str],
+    planned: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Record the successful apply and build its envelope. Extracted for AR2-03.
+
+    It is a function purely so the post-write region has a guard boundary of its
+    own: everything in here runs after the last mutation, where a raw escape
+    would be reported as no mutation at all.
+    """
     build_id = durable_build_id or str(uuid4())
     # #153 (QA-153-r2-05): the two attestations, serialized ONCE and used for
     # both the record and the envelope.
@@ -9113,6 +9259,20 @@ def _authoring_error_envelope(exc, action: str) -> Dict[str, Any]:
     }
 
 
+def _named_code_from_error_types(types) -> Optional[str]:
+    """The first mapped named code among a validation's error types, or None.
+
+    Deterministic on a multi-error validation: `locations` is already sorted by
+    (path, type), so the winner is the earliest offending location rather than
+    whichever error pydantic happened to list first.
+    """
+    for error_type in types:
+        code = _NAMED_VALIDATION_CODES.get(error_type)
+        if code is not None:
+            return code
+    return None
+
+
 def _reject_invalid_typed_request(exc, action: str) -> Dict[str, Any]:
     """A schema failure reported VALUE-FREE.
 
@@ -9157,10 +9317,21 @@ def _reject_invalid_typed_request(exc, action: str) -> Dict[str, Any]:
         "_success": False,
         "action": action,
         "mutation_performed": False,
+        # The unknown-field case keeps its own location-scoped rule; everything
+        # else now CONSULTS the shared map (§6 AR2-07). Previously every other
+        # schema failure collapsed to the generic input code, so three codes
+        # this issue registered — blank/padded values, bad cardinality,
+        # malformed references — had no reachable producer at the served
+        # boundary and could never be observed by the callers they document.
+        # One map, consulted everywhere a pydantic error is served, exactly as
+        # this module's own rule states.
         "error_code": (
             "PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD"
             if unknown_process_field
-            else INVALID_INPUT
+            else _named_code_from_error_types(
+                entry["type"] for entry in locations
+            )
+            or INVALID_INPUT
         ),
         "error": (
             f"config.authoring_request failed AuthoringRequestV1 validation at "
@@ -9478,6 +9649,51 @@ def _decorate_typed_apply(result: Dict[str, Any], cfg: Dict[str, Any]) -> None:
         result.setdefault("error_code", AUTHORING_APPLY_VALIDATION_REQUIRED)
 
 
+def _apply_escape_evidence(
+    *,
+    durable_build_id: Optional[str],
+    results: Dict[str, Any],
+    process_mutations: List[Any],
+    process_readbacks: List[Any],
+    apply_warnings: List[str],
+) -> Dict[str, Any]:
+    """Finalize the durable record and package what a thrown apply DID do.
+
+    §6 AR2-03. `_partial_failure` already gives a RETURNED failure its build id,
+    its partial results and its attestations; an exception exit had none of it,
+    so the one path where the caller most needs the record served the least. The
+    durable row is transitioned here — `failed_partial` is the same terminal
+    state the returned path uses — because this is the last point that knows the
+    id; the outer handler only sees the exception.
+
+    This is the exception-exit half of the DC-4 rule: the constructors made every
+    RETURN exit carry the field, and raise exits were simply never in that case
+    set.
+    """
+    serialized_mutations = [m.model_dump(mode="json") for m in process_mutations]
+    serialized_readbacks = [r.model_dump(mode="json") for r in process_readbacks]
+    if durable_build_id is not None:
+        record = _BUILD_REGISTRY.get(durable_build_id)
+        if record is not None:
+            record["status"] = "failed_partial"
+            if serialized_mutations:
+                record["process_mutations"] = serialized_mutations
+            if serialized_readbacks:
+                record["process_readbacks"] = serialized_readbacks
+    evidence: Dict[str, Any] = {}
+    if durable_build_id is not None:
+        evidence["build_id"] = durable_build_id
+    if results:
+        evidence["partial_results"] = results
+    if serialized_mutations:
+        evidence["process_mutations"] = serialized_mutations
+    if serialized_readbacks:
+        evidence["process_readbacks"] = serialized_readbacks
+    if apply_warnings:
+        evidence["warnings"] = list(apply_warnings)
+    return evidence
+
+
 class _ApplyExecutionError(Exception):
     """An exception that escaped the apply loop, so a write may have happened.
 
@@ -9486,9 +9702,17 @@ class _ApplyExecutionError(Exception):
     whether `mutation_status` may honestly say `none`.
     """
 
-    def __init__(self, cause: BaseException) -> None:
+    def __init__(self, cause: BaseException, *,
+                 evidence: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(str(cause))
         self.cause = cause
+        # §6 AR2-03: the evidence of what DID happen before the throw — the
+        # durable build id, the partial results, and the attestations already
+        # accumulated. Without it the served envelope said "a write may have
+        # happened" while withholding the record that says which, and the
+        # durable row stayed `in_progress` forever. `None` means the throw
+        # happened where no mutation could have.
+        self.evidence: Dict[str, Any] = evidence or {}
 
 
 def _decorate_refusal_route(envelope: Dict[str, Any], normalized_action: str) -> None:
@@ -9593,6 +9817,13 @@ def build_integration_action(
                 "get written."
             ),
         }
+        # ...and it serves what DID happen (§6 AR2-03). `mutation_status`
+        # stays `possible` — that is the honest reading of an exception exit
+        # and is plan-sanctioned — but withholding the build id, the partial
+        # results and the attestations left the caller reconciling by hand
+        # against a record they could not name. Everything here was accumulated
+        # before the throw; nothing is inferred.
+        envelope.update(exc.evidence)
         named = _named_error_code_from_validation(exc.cause)
         if named is not None:
             envelope["error_code"] = named
