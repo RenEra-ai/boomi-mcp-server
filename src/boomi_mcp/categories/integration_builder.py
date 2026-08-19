@@ -7631,10 +7631,19 @@ def _dry_emit_canonical_plan(plan, symbols) -> None:
     # exactly that by scanning this file. Naming the token in prose — even in
     # a comment, even in a filename — would have made that guard read as
     # violated by documentation. Measured: it did, twice.)
-    dry_ids = {
-        _ref_key(symbol.ref): "dry-run-" + _ref_key(symbol.ref)
-        for symbol in symbols.symbols
-    }
+    # Stand-ins for exactly what ORDERED APPLY GUARANTEES will exist by the
+    # time this root runs: the keys it declares in `depends_on`, plus the ones
+    # its own recorded slots name. Codex round 30: an all-symbol registry made
+    # the dry emit bind things the real one would not — a reused connector
+    # action whose connection the component never declares can be ordered
+    # AFTER the process, and the preview passed while the real materialization
+    # failed once earlier creates had already landed. Binding the declared
+    # closure keeps the preview faithful in both directions: it accepts what
+    # apply will accept, and it refuses the ordering defect BEFORE the first
+    # write instead of during it.
+    declared = set(plan.envelope.depends_on or ())
+    declared.update(_ref_key(slot.ref) for slot in plan.unresolved_symbol_slots)
+    dry_ids = {key: "dry-run-" + key for key in declared}
     materialize_canonical_process_xml(
         plan=plan, id_registry=dry_ids, symbols=symbols
     )

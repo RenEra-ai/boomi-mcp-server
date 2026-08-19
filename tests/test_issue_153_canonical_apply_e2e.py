@@ -4305,6 +4305,13 @@ def test_the_dry_emit_binds_symbols_the_ir_never_names():
     plan = build_materialization_plan(
         envelope=ProcessComponentEnvelopeV1(
             component_key="proc", name="P", action="create",
+            # DECLARED, as a valid request must: ordered apply creates these
+            # first, which is what makes binding them in the dry run faithful
+            # rather than optimistic (Codex round 30). The first version of
+            # this witness declared nothing, so it asserted that the dry emit
+            # binds symbols apply would NOT have — a premise that hid the
+            # ordering defect round 30 found.
+            depends_on=("conn", "op"),
         ),
         process_ir=parse_process_ir_v1({
             "version": "1",
@@ -4319,9 +4326,76 @@ def test_the_dry_emit_binds_symbols_the_ir_never_names():
         materializer_revision="sha256:" + "c" * 64,
     )
 
-    # The premise: the connection is NOT a recorded slot.
+    # The premise: the connection is NOT a recorded slot — the IR never names
+    # it, so a registry built from the slots alone would leave it unbound.
     slot_refs = {slot.ref for slot in plan.unresolved_symbol_slots}
     assert slot_refs == {"$ref:op"}, slot_refs
 
-    # ...and the dry emit binds it anyway, so the request stays appliable.
+    # ...and the dry emit binds it from the DECLARED dependencies, so the
+    # request stays appliable.
     _dry_emit_canonical_plan(plan, symbols)
+
+
+def test_an_undeclared_derived_dependency_refuses_before_the_first_write():
+    """Codex round 30: the all-symbol dry registry MASKED an ordering defect.
+
+    A connector action's connection is derived from the operation symbol, so a
+    root can reference the operation while declaring neither — and topological
+    order may then place the process before the connection. Binding every
+    symbol in the dry run made that request preview cleanly and fail during the
+    real materialization, after earlier independent creates had already landed.
+    Binding only the DECLARED closure makes the preview faithful in both
+    directions: it accepts what apply accepts, and it refuses this before the
+    first write.
+    """
+    from boomi_mcp.authoring.process_materialization import (
+        build_materialization_plan,
+    )
+    from boomi_mcp.categories.components.canonical_process_apply import (
+        CanonicalProcessApplyError,
+    )
+    from boomi_mcp.categories.integration_builder import _dry_emit_canonical_plan
+    from boomi_mcp.compiler.process_ir.contracts import (
+        ComponentSymbolV1, SymbolTableV1,
+    )
+    from boomi_mcp.models.process_component import ProcessComponentEnvelopeV1
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    symbols = SymbolTableV1(symbols=(
+        ComponentSymbolV1(
+            ref="$ref:conn", component_id="id-conn",
+            component_type="connector-settings", connector_type="rest",
+        ),
+        ComponentSymbolV1(
+            ref="$ref:op", component_id="id-op",
+            component_type="connector-action", connector_type="rest",
+            action_type="GET", connection_ref="$ref:conn",
+        ),
+    ))
+    ir = parse_process_ir_v1({
+        "version": "1",
+        "body": {"kind": "sequence", "steps": [
+            {"kind": "connector_call", "operation_ref": "$ref:op"},
+            {"kind": "return_documents"},
+        ]},
+    })
+
+    def _plan(depends_on):
+        return build_materialization_plan(
+            envelope=ProcessComponentEnvelopeV1(
+                component_key="proc", name="P", action="create",
+                depends_on=depends_on,
+            ),
+            process_ir=ir, symbols=symbols, conflict_policy="reuse",
+            compiler_revision="sha256:" + "a" * 64,
+            emitter_revision="sha256:" + "b" * 64,
+            materializer_revision="sha256:" + "c" * 64,
+        )
+
+    # The connection is derived and UNDECLARED: nothing guarantees it precedes
+    # this root, so the preview must refuse rather than assume.
+    with pytest.raises(CanonicalProcessApplyError):
+        _dry_emit_canonical_plan(_plan(("op",)), symbols)
+
+    # THE CONTROL: declared, so ordered apply guarantees it — and it passes.
+    _dry_emit_canonical_plan(_plan(("conn", "op")), symbols)
