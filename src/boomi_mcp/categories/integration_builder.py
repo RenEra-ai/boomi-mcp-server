@@ -5961,15 +5961,16 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         envelope_relocatability_offenders as _relocatability_offenders,
     )
 
-    for _pkey, _punit in process_units_by_key.items():
-        _offenders = _relocatability_offenders(_punit.envelope, _punit.process_ir)
-        if _offenders:
-            warnings.append(
-                "Process {0!r} carries literal component id(s) at {1}; a "
-                "materializable request may reference an existing component "
-                "only by logical '$ref:KEY'. Apply refuses this before writing "
-                "anything.".format(_pkey, ", ".join(_offenders))
-            )
+    # ...deferred until the planned actions are known (Codex round 23): a root
+    # the apply will REUSE never compiles its authored body, so warning that
+    # "apply refuses this before writing anything" would publish a refusal that
+    # will not happen. The warning is generated from the same planned-action
+    # decision the apply's pre-decidable pass uses, so plan and apply cannot
+    # disagree about which roots the rule applies to.
+    _relocatability_offenders_by_key = {
+        _pkey: _relocatability_offenders(_punit.envelope, _punit.process_ir)
+        for _pkey, _punit in process_units_by_key.items()
+    }
 
     for key in execution_order:
         # #153: `execution_order` spans ONE namespace covering components and
@@ -6069,6 +6070,19 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     "materialization": CANONICAL_PROCESS_MATERIALIZATION,
                 }
             )
+            # The relocatability WARNING, emitted only for a root the apply
+            # will actually compile (Codex round 23). A `reuse` returns before
+            # the authored body is compiled, so warning that apply will refuse
+            # it publishes a refusal that never happens — the same
+            # planned-action decision gates both.
+            _offenders = _relocatability_offenders_by_key.get(key) or ()
+            if _offenders and canonical_action != "reuse":
+                warnings.append(
+                    "Process {0!r} carries literal component id(s) at {1}; a "
+                    "materializable request may reference an existing component "
+                    "only by logical '$ref:KEY'. Apply refuses this before "
+                    "writing anything.".format(key, ", ".join(_offenders))
+                )
             if candidates:
                 # The same sanitized shape component steps carry (Codex round 3).
                 # Without it, apply's fail-fast message defaults the list to `[]`
@@ -9877,6 +9891,21 @@ def build_integration_action(
                 "The apply failed, but no step attempted a write: every root "
                 "was reused. Nothing was created, so a retry is safe."
             )
+            # ...and it carries the SAME code every other no-write typed
+            # failure carries (Codex round 23). `_decorate_typed_apply` applies
+            # that rule on the returned paths; this escape reaches
+            # `_decorate_refusal_route` instead, which does not — so a
+            # retry-safe failure arrived with no machine code at all. The rule
+            # is one line and its constant is the same one, rather than a
+            # second policy for the same fact.
+            envelope.setdefault("error_code", AUTHORING_APPLY_VALIDATION_REQUIRED)
+            # ...and it carries the SAME code every other no-write typed
+            # failure carries (Codex round 23). `_decorate_typed_apply` applies
+            # that rule on the returned paths; this escape reaches
+            # `_decorate_refusal_route` instead, which does not — so a
+            # retry-safe failure arrived with no machine code at all. The rule
+            # is one line and its constant is the same one, rather than a
+            # second policy for the same fact.
         named = _named_error_code_from_validation(exc.cause)
         if named is not None:
             envelope["error_code"] = named

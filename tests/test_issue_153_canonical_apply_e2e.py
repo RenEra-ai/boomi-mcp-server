@@ -3544,3 +3544,105 @@ def test_a_reference_inside_the_ir_keeps_the_ir_taxonomy():
     assert _named_code_from_locations([envelope_path]) == (
         PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT
     )
+
+
+def test_plan_does_not_warn_about_a_refusal_that_will_not_happen():
+    """Codex round 23: plan and apply must agree about which roots the rule hits.
+
+    The round-22 fix made apply SKIP relocatability for a root it will reuse —
+    a reuse never compiles the authored body — but plan kept warning that
+    "apply refuses this before writing anything". A preview that predicts a
+    refusal the apply will not perform is worse than silence. Both are now
+    generated from the same planned-action decision.
+    """
+    literal = "35813b90-1f42-4dcb-98f5-82d8f96be61d"
+    unit = process_unit(process_extensions=ProcessExtensionBindingsV1(
+        connections=(ProcessConnectionOverrideV1(
+            connection_id=literal, connector_type="rest",
+            fields=(ProcessOverrideFieldV1(id="url", label="x"),),
+        ),)
+    ))
+    spec = {
+        "name": "M12.15 Integration",
+        "components": [APPLIABLE_CONN, APPLIABLE_OP],
+        "processes": [unit.model_dump(mode="json")],
+    }
+    existing = [{"component_id": "existing-proc", "name": unit.envelope.name,
+                 "type": "process"}]
+
+    def _plan(paginate_rows, **config_extra):
+        with patch(_PAGINATE, return_value=paginate_rows), patch(
+            _EXECUTE
+        ) as execute, patch(_GET_XML) as get_xml:
+            execute.side_effect = AssertionError("plan writes nothing")
+            get_xml.side_effect = _live_xml
+            config = {"integration_spec": spec}
+            config.update(config_extra)
+            return build_integration_action(
+                MagicMock(), _PROFILE, "plan", config=config
+            )
+
+    # A root that will be REUSED: no refusal is coming, so no warning.
+    reused = _plan(existing, conflict_policy="reuse")
+    assert reused["_success"] is True, reused.get("error")
+    assert not [w for w in (reused.get("warnings") or [])
+                if "literal component id" in w], reused.get("warnings")
+
+    # THE CONTROL: the same root with nothing to reuse WILL be refused, and
+    # plan says so.
+    creating = _plan([])
+    assert creating["_success"] is True, creating.get("error")
+    assert [w for w in (creating.get("warnings") or [])
+            if "literal component id" in w], creating.get("warnings")
+
+
+def test_a_retry_safe_typed_failure_still_carries_a_machine_code():
+    """Codex round 23: the no-write escape served no `error_code` at all.
+
+    Every other no-write typed failure carries the validation-required code —
+    `_decorate_typed_apply` applies that rule on the returned paths. The escape
+    reaches `_decorate_refusal_route` instead, so the one failure a caller can
+    safely retry arrived unclassifiable.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+    from boomi_mcp.errors import AUTHORING_APPLY_VALIDATION_REQUIRED
+
+    ib._BUILD_REGISTRY.clear()
+    unit = process_unit()
+    existing = [
+        {"component_id": "existing-proc", "name": unit.envelope.name,
+         "type": "process"},
+        {"component_id": "existing-conn", "name": APPLIABLE_CONN["name"],
+         "type": "connector-settings"},
+        {"component_id": "existing-op", "name": APPLIABLE_OP["name"],
+         "type": "connector-action"},
+    ]
+
+    def _component(*_a, **_k):
+        return {"_success": True, "component_id": "cid-x"}
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("finalizer failed after a no-write apply")
+
+    with patch(_PAGINATE, return_value=existing), patch(
+        _EXECUTE, side_effect=_component
+    ), patch(_CREATE) as create, patch(_GET_XML) as get_xml, patch.object(
+        ib, "_authoring_build_provenance", side_effect=_boom
+    ):
+        create.side_effect = AssertionError("a reuse must not create")
+        get_xml.side_effect = _live_xml
+        request = process_ir_request(units=(unit,))
+        request = request.model_copy(update={
+            "intent": request.intent.model_copy(
+                update={"conflict_policy": "reuse"}
+            )
+        })
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(request),
+                    "dry_run": False},
+        )
+
+    assert result["_success"] is False
+    assert result["mutation_status"] == "none"
+    assert result["error_code"] == AUTHORING_APPLY_VALIDATION_REQUIRED, result

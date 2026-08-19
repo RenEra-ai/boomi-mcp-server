@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10001,"minimum_collected":10001,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10003,"minimum_collected":10003,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -10030,3 +10030,5 @@
 {"kind":"test","id":"pytest-010029","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_all_reuse_apply_that_fails_late_never_says_reconcile","state":"active"}
 {"kind":"test","id":"pytest-010030","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_reused_root_is_not_refused_for_a_body_it_never_compiles","state":"active"}
 {"kind":"test","id":"pytest-010031","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_reference_inside_the_ir_keeps_the_ir_taxonomy","state":"active"}
+{"kind":"test","id":"pytest-010032","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_plan_does_not_warn_about_a_refusal_that_will_not_happen","state":"active"}
+{"kind":"test","id":"pytest-010033","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_retry_safe_typed_failure_still_carries_a_machine_code","state":"active"}
