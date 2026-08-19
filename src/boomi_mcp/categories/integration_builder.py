@@ -7615,9 +7615,25 @@ def _dry_emit_canonical_plan(plan, symbols) -> None:
         _ref_key, materialize_canonical_process_xml,
     )
 
+    # A stand-in id for EVERY symbol in the table, not just the recorded slots
+    # (Codex round 29). A first-class connector step records only its
+    # `operation_ref` in the IR — its connection is DERIVED from the operation
+    # symbol and therefore never appears as a slot — so a registry built from
+    # the slots alone left that connection on its placeholder and the binder
+    # refused a request the real apply handles correctly. The dry run is not
+    # the place to check binding completeness (topological order and the real
+    # registry decide that at apply); it exists to exercise compile and emit,
+    # and a full stand-in registry is what lets it do only that.
+    #
+    # (The step KIND is deliberately not spelled here, and neither is the name
+    # of the test module that checks it: this module owns no connector-call
+    # logic, and a source-text guard from the #140 component-plan tests states
+    # exactly that by scanning this file. Naming the token in prose — even in
+    # a comment, even in a filename — would have made that guard read as
+    # violated by documentation. Measured: it did, twice.)
     dry_ids = {
-        _ref_key(slot.ref): "dry-run-" + _ref_key(slot.ref)
-        for slot in plan.unresolved_symbol_slots
+        _ref_key(symbol.ref): "dry-run-" + _ref_key(symbol.ref)
+        for symbol in symbols.symbols
     }
     materialize_canonical_process_xml(
         plan=plan, id_registry=dry_ids, symbols=symbols

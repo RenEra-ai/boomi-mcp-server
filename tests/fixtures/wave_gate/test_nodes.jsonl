@@ -10046,4 +10046,4 @@
 {"kind":"test","id":"pytest-010045","node_id":"tests/test_process_materialization_plan.py::test_a_plan_revision_must_be_a_digest","state":"active"}
 {"kind":"test","id":"pytest-010046","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_raw_route_also_records_a_confirmed_write","state":"active"}
 {"kind":"test","id":"pytest-010047","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_reference_of_the_wrong_kind_is_refused_before_any_write","state":"active"}
-{"kind":"test","id":"pytest-010048","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_slots_expected_types_come_from_its_role","state":"active"}
+{"kind":"test","id":"pytest-010048","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_dry_emit_binds_symbols_the_ir_never_names","state":"active"}

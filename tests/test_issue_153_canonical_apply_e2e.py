@@ -4264,3 +4264,64 @@ def test_a_reference_of_the_wrong_kind_is_refused_before_any_write():
             config={"integration_spec": good, "dry_run": False},
         )
     assert applied["_success"] is True, applied.get("error")
+
+
+def test_the_dry_emit_binds_symbols_the_ir_never_names():
+    """Codex round 29: the dry registry was built from the recorded slots.
+
+    A first-class `connector_call` records only its `operation_ref` in the IR —
+    its connection is DERIVED from the operation symbol and therefore never
+    appears in `unresolved_symbol_slots`. A stand-in registry built from the
+    slots alone left that connection on its placeholder, so the pre-write dry
+    emit refused a request the real apply handles correctly: every valid
+    connector_call process would have become unappliable. Every symbol in the
+    table gets a stand-in instead.
+
+    The e2e fixtures use `source`/`send` steps, which name both refs — which is
+    exactly why the first version of the dry emit passed its own tests and
+    would have broken this shape.
+    """
+    from boomi_mcp.authoring.process_materialization import (
+        build_materialization_plan,
+    )
+    from boomi_mcp.categories.integration_builder import _dry_emit_canonical_plan
+    from boomi_mcp.compiler.process_ir.contracts import (
+        ComponentSymbolV1, SymbolTableV1,
+    )
+    from boomi_mcp.models.process_component import ProcessComponentEnvelopeV1
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    symbols = SymbolTableV1(symbols=(
+        ComponentSymbolV1(
+            ref="$ref:conn", component_id="id-conn",
+            component_type="connector-settings", connector_type="rest",
+        ),
+        ComponentSymbolV1(
+            ref="$ref:op", component_id="id-op",
+            component_type="connector-action", connector_type="rest",
+            action_type="GET", connection_ref="$ref:conn",
+        ),
+    ))
+    plan = build_materialization_plan(
+        envelope=ProcessComponentEnvelopeV1(
+            component_key="proc", name="P", action="create",
+        ),
+        process_ir=parse_process_ir_v1({
+            "version": "1",
+            "body": {"kind": "sequence", "steps": [
+                {"kind": "connector_call", "operation_ref": "$ref:op"},
+                {"kind": "return_documents"},
+            ]},
+        }),
+        symbols=symbols, conflict_policy="reuse",
+        compiler_revision="sha256:" + "a" * 64,
+        emitter_revision="sha256:" + "b" * 64,
+        materializer_revision="sha256:" + "c" * 64,
+    )
+
+    # The premise: the connection is NOT a recorded slot.
+    slot_refs = {slot.ref for slot in plan.unresolved_symbol_slots}
+    assert slot_refs == {"$ref:op"}, slot_refs
+
+    # ...and the dry emit binds it anyway, so the request stays appliable.
+    _dry_emit_canonical_plan(plan, symbols)
