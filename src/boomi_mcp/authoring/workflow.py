@@ -1402,7 +1402,7 @@ def _validate_topology(
                 message="Topology validation could not run for this intent.",
                 subject_kind="topology",
                 remediation="Remove topology_spec or correct it, then re-plan.",
-                cause_codes=(type(exc).__name__,),
+                cause_codes=_cause_codes_for(exc),
             ),
         )
 
@@ -1879,10 +1879,34 @@ def _build_compile_time_plan(unit, symbols, conflict_policy):
                         "Fix the reported condition and recompile; apply is "
                         "refused until the plan is constructible."
                     ),
-                    cause_codes=(type(exc).__name__,),
+                    cause_codes=_cause_codes_for(exc),
                 ),
             ),
         ) from exc
+
+
+def _cause_codes_for(exc) -> Tuple[str, ...]:
+    """The cause codes a blocked-compile diagnostic should report for `exc`.
+
+    QA round 16 (QA-153-r16-01): both sites below reported `type(exc).__name__`,
+    which for a pydantic failure is the literal string `ValidationError` — so
+    every registered code a model raises collapsed into one uninformative token
+    on the served envelope. `PROCESS_MATERIALIZATION_PLAN_INVALID` and
+    `PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH` are both declared codes with
+    no reachable producer through this wrapper; relocatability escaped only
+    because it happens to have a dedicated pre-check ahead of the model.
+
+    So the code is ASKED of the validation rather than inferred from the Python
+    class: `_named_error_code_from_validation` reads the errors' own registered
+    types through `_NAMED_VALIDATION_CODES`, which is the authority for that
+    mapping. It returns None for anything unrecognised, so the type name remains
+    the answer for every failure that was not already named — this widens what
+    is reported, never what is refused.
+    """
+    from ..categories.integration_builder import _named_error_code_from_validation
+
+    named = _named_error_code_from_validation(exc)
+    return (named,) if named else (type(exc).__name__,)
 
 
 def build_artifact_descriptors(

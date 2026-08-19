@@ -4068,6 +4068,25 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
     assert len(per_family) == len(ep.LISTENER_CONNECTOR_TYPES), sorted(per_family)
     assert all(oracle["cases"][k] == "listener" for k in per_family)
 
+    # ...and EVERY entry kind the schema admits is exercised, derived from the
+    # schema on both sides so the check cannot pass by agreeing with itself
+    # (L2 round 43: the case set stood one `message` node in for "any
+    # non-connector entry", which made the whole connector_call family
+    # invisible). `connector` is the one kind absent from these rows — it is
+    # covered per family, per role, above.
+    from boomi_mcp.authoring.contract import _cfg_semantic_members
+
+    schema_kinds = {
+        member.model_fields["semantic_kind"].default
+        for member in _cfg_semantic_members()
+    }
+    assert len(schema_kinds) > 10, sorted(schema_kinds)
+    exercised = {k[len("entry-kind-"):].removesuffix("-listener-shaped")
+                 for k in oracle["cases"] if k.startswith("entry-kind-")}
+    assert exercised == schema_kinds - {"connector"}, sorted(
+        schema_kinds - {"connector"} ^ exercised
+    )
+
     # 1. A BEHAVIOUR mutant — the reviewer's own: a derivation that classifies
     #    every graph as scheduled. This is the case the vocabulary projection
     #    could not see.
@@ -4098,7 +4117,36 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
         "a behaviour-preserving wrapper moved the served revision"
     )
 
-    # 3. The family table is still covered — the property the first fix had.
+    # 3. The REVIEWER'S OWN mutant from L2 round 43: a derivation that starts
+    #    classifying listener-family `connector_call` entries. Every case the
+    #    first version exercised is preserved by it, so it is exactly the change
+    #    a kind-blind case set could not see.
+    def _connector_calls_are_listeners(cfg, symbols):
+        entry = ep._entry_node(cfg)
+        if entry is None:
+            return ep.SCHEDULED
+        semantic = entry.semantic
+        if getattr(semantic, "semantic_kind", None) not in ("connector", "connector_call"):
+            return ep.SCHEDULED
+        if getattr(semantic, "role", None) != "source":
+            return ep.SCHEDULED
+        family = ep._operation_connector_family(
+            symbols, getattr(semantic, "operation_ref", "")
+        )
+        return ep.LISTENER if family and family in ep.LISTENER_CONNECTOR_TYPES else ep.SCHEDULED
+
+    try:
+        ep.derive_process_execution_profile = _connector_calls_are_listeners
+        connector_calls = _compiler_revision()
+    finally:
+        ep.derive_process_execution_profile = original_derive
+    assert connector_calls != baseline, (
+        "a derivation that reclassifies listener-family connector calls left the "
+        "served revision unchanged — the case set is blind to that entry kind"
+    )
+    assert _compiler_revision() == baseline
+
+    # 4. The family table is still covered — the property the first fix had.
     original_families = ep.LISTENER_CONNECTOR_TYPES
     try:
         ep.LISTENER_CONNECTOR_TYPES = frozenset(set(original_families) | {"zzz-probe"})
@@ -4577,3 +4625,76 @@ def test_a_successful_apply_serves_no_write_notes_and_would_serve_an_uncovered_o
     assert "process_writes" not in _finalize([covered])
     served = _finalize([covered, uncovered])["process_writes"]
     assert served == [uncovered]
+
+
+def _plan_for_named_code_probe():
+    """A real materialization plan, taken from a real compile.
+
+    Built through `compile_authoring_request_v1` rather than assembled here: a
+    plan I hand-build could disagree with what production produces, and the
+    point of this probe is what a CALLER's refusal looks like.
+    """
+    with patch(_PAGINATE) as paginate:
+        paginate.return_value = []
+        compiled = compile_authoring_request_v1(
+            process_ir_request(), boomi_client=MagicMock(), profile=_PROFILE
+        )
+    from boomi_mcp.authoring.process_materialization import (
+        ProcessComponentMaterializationPlanV1 as _Plan,
+    )
+
+    internals = compiled[1]
+    plans = [
+        value
+        for value in (internals.materialization_plans or {}).values()
+        if isinstance(value, _Plan)
+    ]
+    assert plans, "the compile produced no materialization plan to probe"
+    return plans[0]
+
+
+def test_a_plan_model_refusal_reaches_the_caller_with_its_own_code():
+    """QA round 16 (QA-153-r16-01): the named code never left the building.
+
+    Both plan-model refusals — the pre-existing fingerprint mismatch and the
+    slot-inventory disagreement added this round — are registered codes, and the
+    compile wrapper reported `cause_codes: ["ValidationError"]` for both: the
+    Python class name, not the code. Relocatability escaped only because it has
+    a dedicated pre-check ahead of the model, which is why the gap survived a
+    surface that looked well covered.
+
+    Asserted for BOTH validators, because one passing would prove only that the
+    resolver runs, not that it reads the validation's own registered types.
+    """
+    from boomi_mcp.authoring.workflow import _cause_codes_for
+    from boomi_mcp.errors import (
+        PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH,
+        PROCESS_MATERIALIZATION_PLAN_INVALID,
+    )
+    from pydantic import ValidationError as _VE
+
+    def _refusal(build):
+        with pytest.raises(_VE) as excinfo:
+            build()
+        return _cause_codes_for(excinfo.value)
+
+    from boomi_mcp.authoring.process_materialization import (
+        ProcessComponentMaterializationPlanV1 as _Plan,
+    )
+
+    real = _plan_for_named_code_probe()
+    material = real.model_dump(mode="python")
+
+    # 1. the slot-inventory refusal
+    slots_dropped = dict(material, unresolved_symbol_slots=())
+    assert _refusal(lambda: _Plan(**slots_dropped)) == (
+        PROCESS_MATERIALIZATION_PLAN_INVALID,
+    )
+    # 2. the fingerprint refusal
+    bad_fp = dict(material, plan_fingerprint="sha256:" + "0" * 64)
+    assert _refusal(lambda: _Plan(**bad_fp)) == (
+        PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH,
+    )
+    # 3. ...and an unrecognised failure still reports the type name, so this
+    #    widened what is NAMED without changing any pre-existing envelope.
+    assert _cause_codes_for(RuntimeError("nothing registered")) == ("RuntimeError",)

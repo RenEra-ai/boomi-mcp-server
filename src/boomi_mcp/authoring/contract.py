@@ -919,6 +919,20 @@ def _import(module: str):
     return importlib.import_module(f"..compiler.process_ir.{module}", __package__)
 
 
+def _cfg_semantic_members():
+    """The CFG semantic union's own member models.
+
+    `CfgSemanticV1` is `Annotated[Union[...], Field(discriminator=...)]`, so the
+    members are read off the annotation rather than re-listed — a re-listing is
+    the hand-copy the oracle above exists to stop making.
+    """
+    import typing
+
+    annotated = _import("contracts").CfgSemanticV1
+    union = typing.get_args(annotated)[0]
+    return typing.get_args(union)
+
+
 def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
     """The execution-profile derivation, projected as BEHAVIOUR (§6 AR4-01).
 
@@ -967,13 +981,42 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
     def _symbol(ref, connector_type):
         return SimpleNamespace(ref=ref, connector_type=connector_type)
 
+    # EVERY entry-node kind the CFG schema admits, read from the schema (L2
+    # round 43). The first version stood one hand-picked `message` node in for
+    # "any non-connector entry", which is the same hand-enumeration defect this
+    # oracle was written to fix, one level down: `SemanticCfgV1` already admits
+    # `connector_call`, so a derivation that began classifying listener-family
+    # connector calls would leave every exercised case — and therefore the served
+    # revision — byte-identical. The kinds come from the discriminated union's
+    # own members, so a kind added to the schema joins the case set on its own.
+    kinds = sorted(
+        member.model_fields["semantic_kind"].default
+        for member in _cfg_semantic_members()
+    )
     cases = {
         "entry-absent": _classify(None),
-        "entry-not-a-connector": _classify(
+    }
+    for kind in kinds:
+        if kind == "connector":
+            continue  # covered in both roles, per family, below
+        cases["entry-kind-" + kind] = _classify(
             SimpleNamespace(
-                node_id="entry", semantic=SimpleNamespace(semantic_kind="message")
+                node_id="entry", semantic=SimpleNamespace(semantic_kind=kind)
             )
-        ),
+        )
+        # ...and the same kind carrying the fields the connector arm reads, so a
+        # rule that started honouring role/operation on a NON-connector kind is
+        # visible too. A kind-blind case set would miss exactly that change.
+        cases["entry-kind-" + kind + "-listener-shaped"] = _classify(
+            SimpleNamespace(
+                node_id="entry",
+                semantic=SimpleNamespace(
+                    semantic_kind=kind, role="source", operation_ref="$ref:op"
+                ),
+            ),
+            [_symbol("$ref:op", families[0])] if families else [],
+        )
+    cases.update({
         "entry-id-names-no-node": _classify(
             _connector("source", "$ref:op"),
             [_symbol("$ref:op", families[0] if families else "http")],
@@ -986,7 +1029,7 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
         "source-non-listener-family": _classify(
             _connector("source", "$ref:op"), [_symbol("$ref:op", "database")]
         ),
-    }
+    })
     for family in families:
         symbols = [_symbol("$ref:op", family)]
         cases["source-" + family] = _classify(_connector("source", "$ref:op"), symbols)
