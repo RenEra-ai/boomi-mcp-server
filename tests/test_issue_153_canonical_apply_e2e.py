@@ -3654,3 +3654,115 @@ def test_a_retry_safe_typed_failure_still_carries_a_machine_code():
     # client and a human reading the same response drew opposite conclusions.
     assert ERROR_TAXONOMY[result["error_code"]].retryable is True
     assert "retry is safe" in result["hint"]
+
+
+def test_both_readers_of_the_named_code_map_apply_the_location_rule():
+    """QA-153-r14-01: one map, two readers, the rule added to one of them.
+
+    Codex round 22 reserved the process-COMPONENT reference code for the
+    component's own paths, using a location classifier — and that rule went
+    into the typed-request reader only. The other reader of the same map serves
+    the raw `integration_spec` route and the apply-escape handler, so those two
+    kept serving the component code for a reference inside a unit's IR while
+    the prose beside it named the ProcessIR type. Measured live by QA against a
+    baseline sandbox: both locations collapsed to the component code.
+
+    Asserted on BOTH readers with the same inputs, which is the property that
+    was missing — not on a third copy of the classifier.
+    """
+    from pydantic_core import PydanticCustomError, ValidationError as _VE
+
+    from boomi_mcp.categories.integration_builder import (
+        _named_code_from_locations, _named_error_code_from_validation,
+    )
+    from boomi_mcp.errors import (
+        PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT,
+        PROCESS_IR_REFERENCE_INVALID_FORMAT,
+    )
+
+    def _error_at(loc):
+        return _VE.from_exception_data("Req", [{
+            "type": PydanticCustomError(
+                "process_ir_reference_invalid_format", "bad ref"
+            ),
+            "loc": loc,
+            "input": None,
+        }])
+
+    ir_loc = ("intent", "units", 0, "process_ir", "body", "steps", 0,
+              "connection_ref")
+    env_loc = ("intent", "units", 0, "envelope", "process_extensions",
+               "connections", 0, "connection_id")
+
+    for loc, expected in (
+        (ir_loc, PROCESS_IR_REFERENCE_INVALID_FORMAT),
+        (env_loc, PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT),
+    ):
+        rows = [{"path": ".".join(str(part) for part in loc),
+                 "type": "process_ir_reference_invalid_format"}]
+        # The typed-request reader...
+        assert _named_code_from_locations(rows) == expected, loc
+        # ...and the exception reader, which is what regressed.
+        assert _named_error_code_from_validation(_error_at(loc)) == expected, loc
+
+
+def test_an_update_says_so_when_its_requested_folder_is_not_applied():
+    """QA-153-r14-02: validated, then silently discarded — on the update path.
+
+    An update's `folder_name` is fully validated (an unresolvable one refuses
+    the update outright), and then update preservation keeps the component
+    where it lives. The envelope said nothing at all: no requested folder, no
+    verification flag, no warning — the exact shape QA-153-r12-01 found on the
+    create path. The attestation was already honest after AR2-04; this is the
+    envelope catching up, and the warning names the UPDATE mechanism, because
+    "this platform ignores folderName on create" is false for an update (a raw
+    component update does honour a folder id on this account).
+    """
+    unit = process_unit(action="update", component_id="existing-proc",
+                        folder_name="Target Folder")
+    folders = [{"id": "folder-1", "name": "Target Folder", "deleted": False}]
+    # The live component sits SOMEWHERE ELSE, and update preservation keeps it
+    # there: the readback after the update still reports the live folder.
+    elsewhere = ('<bns:Component xmlns:bns="x" type="process" '
+                 'folderFullPath="Root/Elsewhere" folderName="Elsewhere" '
+                 'folderId="folder-elsewhere"/>')
+
+    def _component(*_a, **_k):
+        return {"_success": True, "component_id": "cid-x"}
+
+    def _live_xml_for(_client, component_id, *_a, **_k):
+        if component_id == "existing-proc":
+            return {"type": "process", "xml": elsewhere}
+        return {"type": "connector-settings", "xml": _LIVE_COMPONENT_XML}
+
+    def _update(_client, _profile, _target, _comp, xml, _policy):
+        return {"_success": True, "component_id": "existing-proc",
+                "submitted_xml": xml}
+
+    with patch("boomi_mcp.categories.folders._query_all_folders",
+               return_value=folders), \
+         patch(_PAGINATE, return_value=[]), patch(
+        _EXECUTE, side_effect=_component
+    ), patch(_GET_XML, side_effect=_live_xml_for), patch(
+        "boomi_mcp.categories.integration_builder._apply_structured_update",
+        side_effect=_update,
+    ):
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(
+                process_ir_request(units=(unit,))
+            ), "dry_run": False},
+        )
+
+    assert result["_success"] is True, result.get("error")
+    step = result["results"]["proc"]
+    # The envelope now SAYS what happened to the request.
+    assert step["requested_folder_name"] == "Target Folder"
+    assert step["placement_verified"] is False
+    assert step["observed_folder"] == "Root/Elsewhere"
+    warning = [w for w in (result.get("warnings") or [])
+               if "requested folder" in w]
+    assert warning, result.get("warnings")
+    # ...and it names the UPDATE mechanism, not the create one.
+    assert "update preservation" in warning[0], warning[0]
+    assert "ignores folderName on create" not in warning[0], warning[0]

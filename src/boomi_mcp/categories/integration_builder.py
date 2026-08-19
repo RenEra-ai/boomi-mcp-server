@@ -7470,11 +7470,25 @@ def _named_error_code_from_validation(exc) -> Optional[str]:
         rows = errors()
     except Exception:  # noqa: BLE001 — a diagnostic must not raise
         return None
-    for row in rows or ():
-        code = _NAMED_VALIDATION_CODES.get(str(row.get("type", "")))
-        if code is not None:
-            return code
-    return None
+    # ONE resolver for the shared map, not two (QA-153-r14-01). The location
+    # rule that reserves the component reference code for the component's own
+    # paths was added to the typed-request reader and NOT to this one — which
+    # the raw `integration_spec` route and the apply-escape handler both use —
+    # so those two served the component code for a reference inside a unit's
+    # IR while the prose beside it still named the ProcessIR type. Building the
+    # same `{path, type}` rows and delegating means a rule added to the map's
+    # semantics reaches every reader by construction.
+    locations = sorted(
+        (
+            {
+                "path": ".".join(str(part) for part in (row.get("loc") or ())),
+                "type": str(row.get("type", "invalid")),
+            }
+            for row in rows or ()
+        ),
+        key=lambda entry: (entry["path"], entry["type"]),
+    )
+    return _named_code_from_locations(locations)
 
 
 def _resolve_canonical_placement(boomi_client, envelope):
@@ -7961,7 +7975,16 @@ def _execute_canonical_process(
     )
 
     # ...and the same honesty for PLACEMENT (QA-153-r12-01).
-    if envelope.folder_name and action == "create":
+    # The placement markers are served for an UPDATE too (QA-153-r14-01's
+    # sibling, QA-153-r14-02). An update's requested `folder_name` is fully
+    # validated — an unresolvable one REFUSES the update outright — and then
+    # discarded, because update preservation deliberately keeps the component
+    # where it lives rather than relocating it. Serving nothing at all made
+    # that the r12-01 shape on the update path: validated, silently dropped,
+    # and the caller told neither that it was ignored nor where the component
+    # actually is. The attestation is already honest (it records the merged
+    # bytes' own placement); this is the envelope catching up.
+    if envelope.folder_name and action in ("create", "update"):
         result["requested_folder_name"] = envelope.folder_name
         result["placement_verified"] = placement_honoured
         # `observed_folder` is set ONLY from a PARSED readback — its presence is
@@ -8626,6 +8649,31 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     # absent, and asserting "the account root" for an unknown
                     # location is a fabrication (Codex round 16 F2) — that case
                     # gets the unverified wording instead.
+                    # An UPDATE and a CREATE fail this differently and the
+                    # remedy differs too (QA-153-r14-02): a create's folder was
+                    # ignored by the platform, while an update's was discarded
+                    # by update preservation, which deliberately keeps the
+                    # component where it lives. Saying "this platform ignores
+                    # folderName on create" for an update would be false —
+                    # measured: a raw component update DOES honour a folder id
+                    # on this account.
+                    _updated = str(_step.get("status", "")) == "updated"
+                    # Two phrasings on purpose. `_mechanism` names only WHY the
+                    # request could not take effect and asserts nothing about
+                    # the outcome — it is the one the UNVERIFIED branch may use,
+                    # where the location was never read (Codex round 16 F2).
+                    # `_cause` adds the outcome and belongs only to the branch
+                    # that parsed a readback and therefore knows it.
+                    _mechanism = (
+                        "update preservation keeps the component where it "
+                        "already lives, so a requested folder is not applied"
+                        if _updated
+                        else "this platform ignores folderName on create"
+                    )
+                    _cause = _mechanism + (
+                        "" if _updated
+                        else ", so the component was NOT placed there"
+                    )
                     if "observed_folder" in _step:
                         # The location line prefers the observed path, then the
                         # observed folder id (a pathless id-bearing readback is
@@ -8639,25 +8687,25 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                             )
                         apply_warnings.append(
                             "Process {0!r} requested folder {1!r}, but the live "
-                            "read-back shows it in {2} — this platform ignores "
-                            "folderName on create, so the component was NOT placed "
-                            "there. Move it via manage_folders or the UI.".format(
+                            "read-back shows it in {2} — {3}. Move it via "
+                            "manage_folders or the UI.".format(
                                 key,
                                 _step.get("requested_folder_name"),
                                 repr(_loc) if _step.get("observed_folder")
                                 else (_loc or "the account root"),
+                                _cause,
                             )
                         )
                     else:
                         apply_warnings.append(
                             "Process {0!r} requested folder {1!r}, but the live "
                             "read-back could not be read (unavailable or "
-                            "unparseable), so its placement is UNVERIFIED — "
-                            "this platform ignores folderName on create, so do "
-                            "not assume it landed there. Re-read the component "
-                            "before relying on it.".format(
+                            "unparseable), so its placement is UNVERIFIED — {2}, "
+                            "so do not assume it landed there. Re-read the "
+                            "component before relying on it.".format(
                                 key,
                                 _step.get("requested_folder_name"),
+                                _mechanism,
                             )
                         )
                 if (
