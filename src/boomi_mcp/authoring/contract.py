@@ -933,6 +933,23 @@ def _cfg_semantic_members():
     return typing.get_args(union)
 
 
+def _literal_options(model, field_name: str) -> Tuple[str, ...]:
+    """The `Literal` values a model's field admits, or `()` if it has no such field.
+
+    Read off the annotation so a probe uses the member's OWN vocabulary. The
+    alternative — one hand-picked value applied to every member — is what put
+    `role="source"` on a `connector_call` node, whose schema admits only
+    `entry|downstream` (L2 round 44).
+    """
+    import typing
+
+    field = model.model_fields.get(field_name)
+    if field is None:
+        return ()
+    options = typing.get_args(field.annotation)
+    return tuple(str(option) for option in options if isinstance(option, str))
+
+
 def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
     """The execution-profile derivation, projected as BEHAVIOUR (§6 AR4-01).
 
@@ -989,14 +1006,11 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
     # connector calls would leave every exercised case — and therefore the served
     # revision — byte-identical. The kinds come from the discriminated union's
     # own members, so a kind added to the schema joins the case set on its own.
-    kinds = sorted(
-        member.model_fields["semantic_kind"].default
-        for member in _cfg_semantic_members()
-    )
     cases = {
         "entry-absent": _classify(None),
     }
-    for kind in kinds:
+    for member in _cfg_semantic_members():
+        kind = member.model_fields["semantic_kind"].default
         if kind == "connector":
             continue  # covered in both roles, per family, below
         cases["entry-kind-" + kind] = _classify(
@@ -1005,17 +1019,25 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
             )
         )
         # ...and the same kind carrying the fields the connector arm reads, so a
-        # rule that started honouring role/operation on a NON-connector kind is
-        # visible too. A kind-blind case set would miss exactly that change.
-        cases["entry-kind-" + kind + "-listener-shaped"] = _classify(
-            SimpleNamespace(
-                node_id="entry",
-                semantic=SimpleNamespace(
-                    semantic_kind=kind, role="source", operation_ref="$ref:op"
-                ),
-            ),
-            [_symbol("$ref:op", families[0])] if families else [],
-        )
+        # rule that started honouring role/operation on ANOTHER kind is visible
+        # too. The roles come from THIS member's own declaration (L2 round 44):
+        # the previous version stamped `role="source"` on every kind, and
+        # `ConnectorCallSemanticV1.role` admits `entry|downstream` — so the one
+        # kind most likely to become listener-eligible was probed with a role its
+        # schema rejects, and a regression classifying a valid
+        # `(connector_call, entry)` node would have left both of its rows
+        # scheduled and the revision unmoved. Guessing a field's vocabulary
+        # instead of reading it is the same defect as guessing the kind set.
+        for role in _literal_options(member, "role") or (None,):
+            semantic = {"semantic_kind": kind, "operation_ref": "$ref:op"}
+            suffix = "-listener-shaped"
+            if role is not None:
+                semantic["role"] = role
+                suffix = "-role-" + role
+            cases["entry-kind-" + kind + suffix] = _classify(
+                SimpleNamespace(node_id="entry", semantic=SimpleNamespace(**semantic)),
+                [_symbol("$ref:op", families[0])] if families else [],
+            )
     cases.update({
         "entry-id-names-no-node": _classify(
             _connector("source", "$ref:op"),

@@ -4081,11 +4081,28 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
         for member in _cfg_semantic_members()
     }
     assert len(schema_kinds) > 10, sorted(schema_kinds)
-    exercised = {k[len("entry-kind-"):].removesuffix("-listener-shaped")
-                 for k in oracle["cases"] if k.startswith("entry-kind-")}
+    exercised = {k[len("entry-kind-"):].split("-role-")[0].removesuffix(
+        "-listener-shaped") for k in oracle["cases"] if k.startswith("entry-kind-")}
     assert exercised == schema_kinds - {"connector"}, sorted(
-        schema_kinds - {"connector"} ^ exercised
+        (schema_kinds - {"connector"}) ^ exercised
     )
+
+    # ...and every kind that declares a ROLE is probed with each role its OWN
+    # schema admits (L2 round 44). The previous version stamped `role="source"`
+    # on all of them, which for `connector_call` — whose schema admits only
+    # `entry|downstream` — meant the kind most likely to become listener-eligible
+    # was probed with a role it can never carry. Both sides derive from the
+    # schema, so the check cannot pass by agreeing with the oracle's own copy.
+    from boomi_mcp.authoring.contract import _literal_options
+
+    for member in _cfg_semantic_members():
+        kind = member.model_fields["semantic_kind"].default
+        if kind == "connector":
+            continue
+        for role in _literal_options(member, "role"):
+            assert "entry-kind-%s-role-%s" % (kind, role) in oracle["cases"], (
+                kind, role, sorted(oracle["cases"]),
+            )
 
     # 1. A BEHAVIOUR mutant — the reviewer's own: a derivation that classifies
     #    every graph as scheduled. This is the case the vocabulary projection
@@ -4117,34 +4134,45 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
         "a behaviour-preserving wrapper moved the served revision"
     )
 
-    # 3. The REVIEWER'S OWN mutant from L2 round 43: a derivation that starts
-    #    classifying listener-family `connector_call` entries. Every case the
-    #    first version exercised is preserved by it, so it is exactly the change
-    #    a kind-blind case set could not see.
-    def _connector_calls_are_listeners(cfg, symbols):
-        entry = ep._entry_node(cfg)
-        if entry is None:
-            return ep.SCHEDULED
-        semantic = entry.semantic
-        if getattr(semantic, "semantic_kind", None) not in ("connector", "connector_call"):
-            return ep.SCHEDULED
-        if getattr(semantic, "role", None) != "source":
-            return ep.SCHEDULED
-        family = ep._operation_connector_family(
-            symbols, getattr(semantic, "operation_ref", "")
-        )
-        return ep.LISTENER if family and family in ep.LISTENER_CONNECTOR_TYPES else ep.SCHEDULED
+    # 3. THE REGRESSION THE SCHEMA CAN ACTUALLY PRODUCE: a derivation that
+    #    starts classifying listener-family `connector_call` entries.
+    #
+    #    L2 round 43 raised this and its mutant keyed on `role == "source"`,
+    #    which round 44 then showed `ConnectorCallSemanticV1` does not admit —
+    #    its roles are `entry|downstream`. That mutant is WITHDRAWN rather than
+    #    kept beside this one: a control asserting the revision moves for a node
+    #    the schema cannot construct would be claiming coverage of an impossible
+    #    case, which is worse than no control. Both admitted roles are asserted —
+    #    `entry` is the one a listener would plausibly become, and `downstream`
+    #    proves the coverage is not one lucky value.
+    def _valid_role_listener(valid_role):
+        def _rule(cfg, symbols):
+            entry = ep._entry_node(cfg)
+            if entry is None:
+                return ep.SCHEDULED
+            semantic = entry.semantic
+            if (
+                getattr(semantic, "semantic_kind", None) == "connector_call"
+                and getattr(semantic, "role", None) == valid_role
+            ):
+                family = ep._operation_connector_family(
+                    symbols, getattr(semantic, "operation_ref", "")
+                )
+                if family and family in ep.LISTENER_CONNECTOR_TYPES:
+                    return ep.LISTENER
+                return ep.SCHEDULED
+            return original_derive(cfg, symbols)
 
-    try:
-        ep.derive_process_execution_profile = _connector_calls_are_listeners
-        connector_calls = _compiler_revision()
-    finally:
-        ep.derive_process_execution_profile = original_derive
-    assert connector_calls != baseline, (
-        "a derivation that reclassifies listener-family connector calls left the "
-        "served revision unchanged — the case set is blind to that entry kind"
-    )
-    assert _compiler_revision() == baseline
+        return _rule
+
+    for valid_role in ("entry", "downstream"):
+        try:
+            ep.derive_process_execution_profile = _valid_role_listener(valid_role)
+            moved = _compiler_revision()
+        finally:
+            ep.derive_process_execution_profile = original_derive
+        assert moved != baseline, valid_role
+        assert _compiler_revision() == baseline
 
     # 4. The family table is still covered — the property the first fix had.
     original_families = ep.LISTENER_CONNECTOR_TYPES
