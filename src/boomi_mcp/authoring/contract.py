@@ -886,17 +886,7 @@ def _compiler_revision() -> str:
             # to a binding the derivation no longer consults, and the
             # non-vacuity witness would pass without covering anything.
             "execution_profile_contract",
-            lambda: {
-                "profiles": sorted(
-                    {
-                        _import("execution_profile").SCHEDULED,
-                        _import("execution_profile").LISTENER,
-                    }
-                ),
-                "listener_connector_types": sorted(
-                    _import("execution_profile").LISTENER_CONNECTOR_TYPES
-                ),
-            },
+            _execution_profile_behaviour_oracle,
         ),
         (
             "compiler_diagnostic_specs",
@@ -927,6 +917,91 @@ def _import(module: str):
     import importlib
 
     return importlib.import_module(f"..compiler.process_ir.{module}", __package__)
+
+
+def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
+    """The execution-profile derivation, projected as BEHAVIOUR (§6 AR4-01).
+
+    The first attempt projected the derivation's vocabulary — the two profile
+    labels and the listener family set. That moves when the family table moves,
+    which is what its witness measured, but it is not what a caller binds to: the
+    §6 gate replaced `derive_process_execution_profile` with an always-scheduled
+    implementation and the served revision did not change by a byte. A caller
+    holding that revision would have kept validating across a change in how every
+    process is classified.
+
+    So the projection CALLS the rule instead of describing it. The case set is
+    derived from the same authority the rule reads — one case per listener
+    connector family, so adding or retiring a family still moves the revision —
+    plus the fixed discriminants that separate this rule from a constant: no
+    entry node, a non-connector entry, a connector acting as a target, a source
+    whose family is not a listener family, an operation reference that resolves
+    to no symbol, and a family that needs case-folding to match.
+
+    The stand-ins are plain attribute holders rather than the compiler's models
+    on purpose: the rule reads its inputs by attribute, the projection must be
+    cheap and hermetic (it runs whenever a revision is served), and building
+    validated CFGs here would bind the served revision to model construction
+    rather than to the classification rule this entry exists to cover.
+    """
+    from types import SimpleNamespace
+
+    module = _import("execution_profile")
+    derive = module.derive_process_execution_profile
+    families = sorted(module.LISTENER_CONNECTOR_TYPES)
+
+    def _classify(node, symbols=(), entry_id="entry"):
+        cfg = SimpleNamespace(
+            entry_node_id=entry_id, nodes=() if node is None else (node,)
+        )
+        return derive(cfg, SimpleNamespace(symbols=tuple(symbols)))
+
+    def _connector(role, operation_ref):
+        return SimpleNamespace(
+            node_id="entry",
+            semantic=SimpleNamespace(
+                semantic_kind="connector", role=role, operation_ref=operation_ref
+            ),
+        )
+
+    def _symbol(ref, connector_type):
+        return SimpleNamespace(ref=ref, connector_type=connector_type)
+
+    cases = {
+        "entry-absent": _classify(None),
+        "entry-not-a-connector": _classify(
+            SimpleNamespace(
+                node_id="entry", semantic=SimpleNamespace(semantic_kind="message")
+            )
+        ),
+        "entry-id-names-no-node": _classify(
+            _connector("source", "$ref:op"),
+            [_symbol("$ref:op", families[0] if families else "http")],
+            entry_id="somewhere-else",
+        ),
+        "source-operation-unresolved": _classify(
+            _connector("source", "$ref:missing"),
+            [_symbol("$ref:op", families[0] if families else "http")],
+        ),
+        "source-non-listener-family": _classify(
+            _connector("source", "$ref:op"), [_symbol("$ref:op", "database")]
+        ),
+    }
+    for family in families:
+        symbols = [_symbol("$ref:op", family)]
+        cases["source-" + family] = _classify(_connector("source", "$ref:op"), symbols)
+        # The SAME family under the target role — the discriminant that makes the
+        # role test part of the covered behaviour rather than an untested branch.
+        cases["target-" + family] = _classify(_connector("target", "$ref:op"), symbols)
+        # ...and the same family spelled the way the rule has to normalize it.
+        cases["source-unnormalized-" + family] = _classify(
+            _connector("source", "$ref:op"),
+            [_symbol("$ref:op", "  " + family.upper() + "  ")],
+        )
+    return {
+        "profiles": sorted({module.SCHEDULED, module.LISTENER}),
+        "cases": dict(sorted(cases.items())),
+    }
 
 
 def _process_property_scope_payload() -> Dict[str, Any]:

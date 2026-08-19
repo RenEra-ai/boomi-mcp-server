@@ -7966,22 +7966,35 @@ def _execute_canonical_process(
     component_id = _extract_component_id(exec_result) or (
         target_id if action == "update" else None
     )
+    # WHETHER THE PLATFORM CONFIRMED THE WRITE — read ONCE, here, and used by
+    # both the note below and `status` further down. It was read twice, and the
+    # two readings disagreed: the note additionally required a component id
+    # (§6 evaluation 4), so a create the platform confirmed WITHOUT returning an
+    # id — the one case where a reconciler most needs a pointer — was the single
+    # case that got no note. That is the second instance of the QA-153-r15-01
+    # pair (a write record whose firing condition is hand-enumerated rather than
+    # derived), so it is fixed at the condition, not at the site.
+    succeeded = bool(exec_result.get("_success", False))
+
     # THE WRITE IS RECORDED DURABLY THE INSTANT THE PLATFORM CONFIRMS IT
     # (§6 AR3-03). Everything that follows — the readback, the placement
     # identity, the attestation construction — happens AFTER the component
     # exists, and an exception in any of it used to leave the durable row with
     # no trace of a mutation that had already landed. This note is deliberately
-    # not an attestation: it records only what is known at this instant (the
-    # key, the platform's own id, the digest of the bytes that were sent), and
-    # the full attestation replaces nothing — it is appended alongside when it
-    # is built. Recording less, earlier, is the point.
-    if on_write_confirmed is not None and component_id and exec_result.get(
-        "_success", False
-    ):
+    # not an attestation: it records only what is known at this instant, and the
+    # full attestation replaces nothing — it is appended alongside when it is
+    # built. Recording less, earlier, is the point.
+    #
+    # An unidentified write is recorded AS unidentified rather than dropped: the
+    # digest of the submitted bytes and the platform's own reported name are
+    # what let a human find the orphan, and `result_component_id_missing` tells
+    # a machine reader that "no id" is a measurement and not an omission.
+    if on_write_confirmed is not None and succeeded:
         on_write_confirmed({
             "component_key": key,
             "action": action,
-            "result_component_id": component_id,
+            "result_component_id": component_id or None,
+            "result_component_id_missing": not component_id,
             "submitted_xml_digest": (
                 exec_result.get("submitted_xml_digest")
                 or precomputed_digest
@@ -7995,7 +8008,8 @@ def _execute_canonical_process(
     # The account-level `mutation_status` was right, so nobody was misled about
     # the account; but the per-step record is what `verify` and a human
     # reconciler read, and it said a write happened that did not.
-    succeeded = bool(exec_result.get("_success", False))
+    # (`succeeded` is computed once, above the write note — one reading, so the
+    # note and the status cannot disagree about whether the platform confirmed.)
     # A failure that PROVABLY wrote nothing is `refused`, not `failed`.
     #
     # QA-153-r10-01 widened the name warning onto `failed` because a
@@ -9133,6 +9147,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             execution_order=execution_order,
             process_mutations=process_mutations,
             process_readbacks=process_readbacks,
+            process_writes=process_writes,
             apply_warnings=apply_warnings,
             planned=planned,
         )
@@ -9164,6 +9179,7 @@ def _finalize_apply_success(
     execution_order: List[str],
     process_mutations: List[Any],
     process_readbacks: List[Any],
+    process_writes: List[Dict[str, Any]],
     apply_warnings: List[str],
     planned: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -9226,6 +9242,23 @@ def _finalize_apply_success(
         apply_result["process_mutations"] = serialized_mutations
     if serialized_readbacks:
         apply_result["process_readbacks"] = serialized_readbacks
+    # THE THIRD EXIT (§6 evaluation 4, sibling sweep). The two failing exits
+    # carry the confirmed-write notes; this one carried none, on the reasoning
+    # that a step reaching here was attested — a step returns `_success: True`
+    # only after `build_mutation_attestation` returned, and an attestation
+    # requires a non-empty result id. That reasoning is sound TODAY and is
+    # exactly the kind of hand-held claim this slice keeps finding rotten, so it
+    # is DERIVED instead of asserted: what is served is the notes no attestation
+    # covers. Normally that set is empty and the envelope is byte-identical to
+    # before; if the control flow ever changes so that it is not, the caller
+    # learns about the write instead of the claim quietly becoming false.
+    _attested_keys = {m.get("component_key") for m in serialized_mutations}
+    _unattested_writes = [
+        note for note in process_writes
+        if note.get("component_key") not in _attested_keys
+    ]
+    if _unattested_writes:
+        apply_result["process_writes"] = _unattested_writes
     if authoring_bundle is not None:
         apply_result["mutation_performed"] = True
         apply_result["authoring_provenance"] = build_record["authoring"][

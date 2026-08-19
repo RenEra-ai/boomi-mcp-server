@@ -1742,6 +1742,27 @@ def test_every_diagnostic_code_the_gate_can_raise_is_documented():
 #: appear in quoted gate output (`BOOTSTRAP` is a log line, not a failure code). Kept
 #: explicit and asserted disjoint from `DIAGNOSTIC_CODES` below, so this list can never
 #: be used to silence a code that really exists.
+def _error_taxonomy_codes():
+    """Every registered APPLICATION error code, read from its own authority.
+
+    A finding row's whole job is to name the code the tool served, so a ledger
+    legitimately contains codes from `boomi_mcp.errors.ERROR_TAXONOMY` — a
+    different family from the WAVE-GATE diagnostics this scanner governs. Those
+    were hand-copied into the allowlist below, one entry per slice, twenty of
+    them across #144, #146, #149 and #153, each with a comment restating that the
+    code is "a real, registered code in ERROR_TAXONOMY". Every one of those
+    entries was a hand-copy of a fact whose authority is one import away, and the
+    twenty-first came due when a §6 finding row quoted
+    `PROCESS_MATERIALIZATION_RESULT_ID_MISSING` verbatim.
+
+    So the membership is asked, not remembered. A code retired from the taxonomy
+    stops being allowlisted on its own, which the hand-list could never do.
+    """
+    import importlib
+
+    return frozenset(importlib.import_module("boomi_mcp.errors").ERROR_TAXONOMY)
+
+
 _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "BLIND",
     "BOOTSTRAP",
@@ -1784,65 +1805,34 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     # and the rows have to say so. Unlike ledger stems, this set does NOT grow one
     # per slice — these are durable identifiers any later ledger touching the same
     # area would name.
-    "ARCHETYPE_BUILD_FAILED",
     "CAPABILITY_PROCESS_IR_V1",
     "DELETION_ROUTES",
-    "DUPLICATE_PATTERN_NAME",
     "M12_COMPATIBILITY_INVENTORY",
     "PROCESS_FLOW_BUILDERS",
     "PROCESS_KIND",
     "RECIPE_LAYER_MODULES",
     "RESERVED_DIALECTS",
-    # #153 (M12.15). Three module constants and one ERROR-TAXONOMY code the
-    # ledger names when recording the relocatable plan fingerprint.
-    #
-    # `PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE` is a real, registered
-    # code in `boomi_mcp.errors.ERROR_TAXONOMY` — it is simply not a WAVE-GATE
-    # diagnostic, which is the only family this scanner governs. Listing it keeps
-    # the two taxonomies distinct instead of letting a legitimate error code look
-    # like a gate code the gate cannot emit.
+    # #153 (M12.15) module constants the ledger names when recording the
+    # relocatable plan fingerprint and the extraction. The last three are the
+    # COMPILER contract tables the AR4-01 rows name when recording which
+    # authority the served revision binds — a row that says "the projection read
+    # the family table instead of the rule" has to be able to name the table.
     "EXCLUDED_ENVELOPE_FIELDS",
+    "BODY_CAPABILITIES_V1",
+    "LISTENER_CONNECTOR_TYPES",
+    "VALIDATION_PHASE_ORDER",
     "EXCLUDED_PLAN_FIELDS",
-    "PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE",
     "PROCESS_PRESERVATION_POLICY",
-    # #153 steps 6-9. Two more production constants and one ERROR-TAXONOMY code
-    # the ledger names when recording the extraction and the capability flip.
-    # `AUTHORING_COMPILE_BLOCKED` is a registered member of
-    # `boomi_mcp.errors.ERROR_TAXONOMY` (owned by #146) — again, a real code from
-    # a DIFFERENT taxonomy than the one this scanner governs.
     "AUTHORING_CAPABILITY_REGISTRY",
-    "AUTHORING_COMPILE_BLOCKED",
     "DEFAULT_PROCESS_OPTIONS",
-    # #153 Stage-1 QA rounds 1-2. Four more ERROR-TAXONOMY codes the finding rows
-    # quote verbatim from what the tool actually served, plus one test name.
-    #
-    # All four are registered members of `boomi_mcp.errors.ERROR_TAXONOMY` and
-    # none is a wave-gate diagnostic — the same distinction the entries above
-    # draw. Quoting the served code is the whole point of a finding row: a row
-    # that says "the wrong code was served" without naming either code is not an
-    # audit record. `PLAN_INVALID` is the bare stem, tokenized out of the
-    # compound span that contrasts it with `PROCESS_MATERIALIZATION_INTERNAL_ERROR`.
     # The #149 inventory's route table — a durable production constant any later
     # ledger classifying a component-XML write route would name, not a code.
     "WRITE_ROUTES",
-    "AUTHORING_LIVE_DEPLOYMENT_DRIFT",
-    "INTEGRATION_COMPONENT_KEY_DUPLICATE",
-    "INTEGRATION_DEPENDENCY_REQUIRED",
-    # #144's topology taxonomy and this slice's second preservation code — both
-    # registered in `boomi_mcp.errors.ERROR_TAXONOMY`, neither a wave-gate
-    # diagnostic. A finding row that says "the wrong code was served" has to be
-    # able to name the code.
-    "TOPOLOGY_REFERENCE_NOT_FOUND",
-    "UPDATE_PRESERVATION_PUSH_FAILED",
-    "UPDATE_PRESERVATION_FETCH_FAILED",
     # The family PREFIX, and the two bare stems, tokenized out of prose that
     # contrasts the pair ("`FETCH_FAILED` is declared retryable; `PUSH_FAILED`
     # deliberately is not"). Plus the taxonomy's own name, which a row naming
     # where a code was registered has to be able to write.
     "UPDATE_PRESERVATION_",
-    "UPDATE_PRESERVATION_XML_PARSE_FAILED",
-    "UPDATE_PRESERVATION_OBJECT_MISSING",
-    "UPDATE_PRESERVATION_MERGE_FAILED",
     "FETCH_FAILED",
     "PUSH_FAILED",
     "OBJECT_MISSING",
@@ -1863,20 +1853,12 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     # review found unreachable (that unreachability IS the finding, so the row
     # has to name them), the schema code an unknown field should serve, and the
     # generic code it serves instead.
-    "PROCESS_MATERIALIZATION_PLACEMENT_NOT_FOUND",
-    "PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD",
     # #153 §6 AR2-07 records that these registered product codes had no reachable
     # producer through the served wrapper. Naming them is the point of the row.
-    "PROCESS_COMPONENT_SCHEMA_INVALID",
-    "PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE",
-    "INVALID_INPUT",
     "ERROR_TAXONOMY",
     "PLAN_INVALID",
-    "PROCESS_MATERIALIZATION_INTERNAL_ERROR",
-    "PROCESS_MATERIALIZATION_PLAN_INVALID",
     # Registered by #153 at Codex round 24; that row's whole subject is WHICH
     # code a finalizer failure serves, so it has to name it.
-    "PROCESS_MATERIALIZATION_FINALIZATION_FAILED",
 })
 
 
@@ -2506,7 +2488,7 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
             # or ordinary prose would flood this.
             if "_" in tok and sum(c.isupper() for c in tok) >= 4:
                 out.add(tok)
-        return out - _LEDGER_NON_DIAGNOSTIC_TOKENS
+        return out - _LEDGER_NON_DIAGNOSTIC_TOKENS - _error_taxonomy_codes()
 
     # The two forms are scanned SEPARATELY, not merged, so each can be asserted on
     # its own. Merging them made the fenced-coverage assertion vacuous: the codes it
@@ -2542,10 +2524,22 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
     def named_codes(text):
         return inline_codes(text) | fenced_codes(text)
 
-    # The allowlist may never hide a real code.
+    # Neither the allowlist nor the derived taxonomy may hide a real gate code.
+    # The taxonomy half is the load-bearing one now that membership is derived: a
+    # gate diagnostic and an application error code sharing a spelling would make
+    # the two families indistinguishable, and this scanner would stop governing
+    # the shared name. Asserted, not assumed.
     assert _LEDGER_NON_DIAGNOSTIC_TOKENS & gate.DIAGNOSTIC_CODES == set(), sorted(
         _LEDGER_NON_DIAGNOSTIC_TOKENS & gate.DIAGNOSTIC_CODES
     )
+    _taxonomy = _error_taxonomy_codes()
+    assert _taxonomy & gate.DIAGNOSTIC_CODES == set(), sorted(
+        _taxonomy & gate.DIAGNOSTIC_CODES
+    )
+    # ...and the derivation is not vacuously empty, which would silently turn the
+    # allowlist back into whatever the hand-list still happens to contain.
+    assert len(_taxonomy) > 100, len(_taxonomy)
+    assert "PROCESS_MATERIALIZATION_RESULT_ID_MISSING" in _taxonomy
 
     # Ledger filenames are allowed by DERIVATION from the files on disk, never by
     # hand-listing. Ledgers cite each other — #152's close note names #171's — so a
@@ -2738,7 +2732,9 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
     # scans — deriving the same set twice is the duplication this rule forbids.
     for path in all_ledgers:
         text = path.read_text(encoding="utf-8")
-        unknown_here = named_codes(text) - gate.DIAGNOSTIC_CODES - derived_stems
+        unknown_here = (
+            named_codes(text) - gate.DIAGNOSTIC_CODES - derived_stems - _taxonomy
+        )
         assert unknown_here == set(), (
             "{0} names diagnostic codes the gate cannot emit: {1}".format(
                 path.name, sorted(unknown_here)

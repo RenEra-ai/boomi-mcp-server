@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 _src = str(Path(__file__).resolve().parent.parent / "src")
 if _src not in sys.path:
@@ -26,7 +27,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from boomi_mcp.authoring.contract import get_authoring_revisions  # noqa: E402
 from boomi_mcp.authoring.process_materialization import (  # noqa: E402
+    ProcessComponentMaterializationPlanV1,
     build_materialization_plan,
+    process_plan_fingerprint,
 )
 from boomi_mcp.categories.components import canonical_process_apply as cpa  # noqa: E402
 from boomi_mcp.compiler.process_ir.emitter_registry import (  # noqa: E402
@@ -347,3 +350,89 @@ def test_the_mutation_and_readback_records_are_separate_objects():
     assert type(mutation) is not type(readback)
     assert not hasattr(readback, "submitted_xml_digest")
     assert not hasattr(mutation, "digest")
+
+
+def _rebuilt_with_slots(plan, slots):
+    """The reviewer's exact construction: a plan rebuilt with a different slot
+    inventory AND its own correctly recomputed fingerprint, so a refusal cannot
+    be the fingerprint check firing by accident."""
+    probe = plan.model_copy(
+        update={"unresolved_symbol_slots": tuple(sorted(slots, key=lambda s: s.slot_id))}
+    )
+    payload = probe.model_dump(mode="python")
+    payload["plan_fingerprint"] = process_plan_fingerprint(probe)[0]
+    with pytest.raises(ValidationError) as excinfo:
+        ProcessComponentMaterializationPlanV1(**payload)
+    return str(excinfo.value)
+
+
+def test_a_plan_whose_slot_inventory_disagrees_with_its_references_is_refused():
+    """§6 evaluation 4: every other plan validator checked the slots against
+    themselves.
+
+    The reviewer rebuilt a real multi-slot plan with ZERO slots and its own
+    correctly recomputed fingerprint, and it validated cleanly — ordering,
+    uniqueness and fingerprint all agree with an inventory that inventories
+    nothing, and apply then trusts it to decide what late binding must resolve.
+
+    Both directions are asserted, because a guard that only rejected an empty
+    inventory would be satisfied by any non-empty one: a DROPPED slot and an
+    INVENTED slot are each refused, and the message names which is which.
+    """
+    plan = _plan()
+    slots = list(plan.unresolved_symbol_slots)
+    assert len(slots) >= 2, slots
+
+    dropped = _rebuilt_with_slots(plan, slots[:-1])
+    assert "symbol slots disagree" in dropped, dropped
+    assert "unreferenced: none" in dropped, dropped
+    assert slots[-1].slot_id in dropped, dropped
+
+    invented = slots + [slots[0].model_copy(update={"slot_id": "steps/999/nowhere"})]
+    extra = _rebuilt_with_slots(plan, invented)
+    assert "unreferenced: steps/999/nowhere" in extra, extra
+    assert "uninventoried: none" in extra, extra
+
+    assert "symbol slots disagree" in _rebuilt_with_slots(plan, [])
+
+
+def test_the_slot_disagreement_refusal_is_not_the_relocatability_refusal():
+    """The control the previous test needs to mean anything.
+
+    Both refusals come from the same model with the same error type, so the
+    previous test would be satisfied by a guard that had simply captured the
+    relocatability case. It has not: a literal component id is filtered out of
+    BOTH sides of the slot comparison — the recorded inventory and the derived
+    one skip it identically — so the two rules cannot collide, and a literal-id
+    plan still reports relocatability.
+
+    That independence is a MEASUREMENT, not an ordering argument. The first
+    draft of this docstring claimed the relocatability validator wins because it
+    is defined first; moving the new validator above it was then measured to
+    change nothing at all, because the collision it describes does not exist.
+    """
+    literal = ProcessComponentEnvelopeV1(
+        component_key="root",
+        name="Canonical Root",
+        action="create",
+        depends_on=tuple(_REGISTRY),
+        process_extensions=ProcessExtensionBindingsV1(
+            connections=(
+                ProcessConnectionOverrideV1(
+                    connection_id="12345678-1234-1234-1234-123456789abc",
+                    connector_type="database",
+                    fields=(
+                        ProcessOverrideFieldV1(
+                            id="username", label="Username",
+                            xpath="DatabaseConnectionSettings/@username",
+                        ),
+                    ),
+                ),
+            )
+        ),
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        _plan(envelope=literal)
+    rendered = str(excinfo.value)
+    assert "symbol slots disagree" not in rendered, rendered
+    assert "relocatable" in rendered, rendered

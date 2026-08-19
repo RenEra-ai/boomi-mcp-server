@@ -285,6 +285,12 @@ class ProcessComponentMaterializationPlanV1(_PlanModel):
     #: stored fingerprint from the plan's own material after validation, which
     #: defeats the tamper-evidence the stored digest exists to provide.
     emission_plan_canonical_json: str
+    #: The default is KEPT (§6 evaluation 4 asked whether it should be). It used
+    #: to mean "nobody passed slots", which is what let an empty inventory look
+    #: valid; with `_slots_agree_with_the_references_they_inventory` below it can
+    #: only mean what it says — a plan whose material contains no symbolic
+    #: reference. Making the field required would refuse that plan for no reason
+    #: while closing nothing the validator does not already close.
     unresolved_symbol_slots: Tuple[ProcessComponentSymbolSlotV1, ...] = ()
     execution_profile: Literal["scheduled", "listener"]
     conflict_policy: Literal["reuse", "clone", "fail"]
@@ -331,6 +337,50 @@ class ProcessComponentMaterializationPlanV1(_PlanModel):
         offenders = envelope_relocatability_offenders(self.envelope, self.process_ir)
         if offenders:
             raise _not_relocatable_custom_error(offenders)
+        return self
+
+    @model_validator(mode="after")
+    def _slots_agree_with_the_references_they_inventory(
+        self,
+    ) -> "ProcessComponentMaterializationPlanV1":
+        """The slot inventory must BE the plan's reference set, not resemble it.
+
+        §6 evaluation 4: the field defaults to empty and every other validator
+        checks the slots against themselves — ordering, uniqueness, and a
+        fingerprint recomputed over the slots as recorded. Measured: a plan
+        rebuilt with zero slots and its own correctly recomputed fingerprint
+        validated cleanly, and apply then trusts that inventory to decide what
+        late binding must resolve. Production derives the slots correctly, so
+        this is a missing guard rather than a live defect — but "the producer
+        gets it right" is precisely the claim a model exists to stop having to
+        make.
+
+        The comparison walks the SAME enumeration `derive_symbol_slots` does
+        and filters literal ids the same way, so the two cannot drift into
+        disagreeing about what a reference is. That shared filter is also what
+        keeps a literal id out of this refusal entirely — both sides skip it, so
+        it can only ever be the relocatability rule's finding, independently of
+        which validator runs first (measured: reordering the two changes
+        nothing).
+        """
+        expected = {
+            (path, ref)
+            for path, ref in iter_plan_component_refs(self.envelope, self.process_ir)
+            if ref.startswith(_REF_PREFIX)
+        }
+        recorded = {(slot.slot_id, str(slot.ref)) for slot in self.unresolved_symbol_slots}
+        if recorded != expected:
+            missing = sorted(path for path, _ref in expected - recorded)
+            extra = sorted(path for path, _ref in recorded - expected)
+            raise PydanticCustomError(
+                "process_materialization_plan_invalid",
+                "symbol slots disagree with the plan's references "
+                "(uninventoried: {missing}; unreferenced: {extra})",
+                {
+                    "missing": ", ".join(missing) or "none",
+                    "extra": ", ".join(extra) or "none",
+                },
+            )
         return self
 
     @model_validator(mode="after")

@@ -19,6 +19,7 @@ not do.
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -4027,37 +4028,84 @@ def test_a_process_only_plan_is_not_called_empty():
 
 
 def test_the_compiler_revision_covers_the_execution_profile_derivation():
-    """§6 AR3-07: the served revision omitted a compiler behaviour it manifests.
+    """§6 AR3-07, and then AR4-01 when the first fix proved insufficient.
 
     `compiler_revision` is what a caller binds to, and it is deliberately a
     manifest of published contracts rather than a source hash. The
     execution-profile derivation — which decides whether a process is scheduled
-    or listener — was not in it, so replacing that derivation left the revision
-    unchanged and a stale binding kept validating.
+    or listener — was absent from it, so a stale binding kept validating across a
+    change to that rule.
 
-    The projection reads the family set through `execution_profile`, NOT
-    through `contracts`: the derivation imports it by value, so a projection of
-    the `contracts` name would be pinned to a binding the derivation no longer
-    consults — and this witness would pass without covering anything.
+    The first fix projected the derivation's VOCABULARY: the two profile labels
+    and the listener family set. This test's first version widened the family set
+    and asserted the revision moved, which it did — and proved nothing about the
+    rule, because the family table is exactly what a vocabulary projection reads.
+    The §6 gate then measured the case that mattered: replacing
+    `derive_process_execution_profile` with an always-scheduled implementation
+    left the served revision byte-identical.
+
+    So the projection now CALLS the rule over a derived case set, and this test
+    asserts the property the earlier one only appeared to: a change in
+    CLASSIFICATION moves the revision, and a change that classifies identically
+    does not.
     """
     import boomi_mcp.compiler.process_ir.execution_profile as ep
-    from boomi_mcp.authoring.contract import _compiler_revision
+    from boomi_mcp.authoring.contract import (
+        _compiler_revision,
+        _execution_profile_behaviour_oracle,
+    )
 
     baseline = _compiler_revision()
+    oracle = _execution_profile_behaviour_oracle()
 
-    original = ep.LISTENER_CONNECTOR_TYPES
+    # NON-DEGENERACY, before either mutation. A case set that classified
+    # everything the same way, or that lost its per-family rows, would move under
+    # the mutant below for the wrong reason.
+    assert oracle != "unavailable" and oracle["cases"], oracle
+    assert set(oracle["cases"].values()) == {"scheduled", "listener"}, oracle
+    per_family = {k for k in oracle["cases"] if k.startswith("source-") and
+                  k[len("source-"):] in ep.LISTENER_CONNECTOR_TYPES}
+    assert len(per_family) == len(ep.LISTENER_CONNECTOR_TYPES), sorted(per_family)
+    assert all(oracle["cases"][k] == "listener" for k in per_family)
+
+    # 1. A BEHAVIOUR mutant — the reviewer's own: a derivation that classifies
+    #    every graph as scheduled. This is the case the vocabulary projection
+    #    could not see.
+    original_derive = ep.derive_process_execution_profile
     try:
-        ep.LISTENER_CONNECTOR_TYPES = frozenset(set(original) | {"zzz-probe"})
+        ep.derive_process_execution_profile = lambda cfg, symbols: ep.SCHEDULED
+        always_scheduled = _compiler_revision()
+    finally:
+        ep.derive_process_execution_profile = original_derive
+    assert always_scheduled != baseline, (
+        "replacing the derivation with an always-scheduled rule left the served "
+        "compiler revision unchanged — the revision covers the vocabulary, not "
+        "the behaviour"
+    )
+    assert _compiler_revision() == baseline
+
+    # 2. An EQUIVALENCE wrapper — same classifications, different code. The
+    #    revision must NOT move, or it is hashing identity rather than behaviour
+    #    and every unrelated refactor would break a caller's binding.
+    try:
+        ep.derive_process_execution_profile = (
+            lambda cfg, symbols: original_derive(cfg, symbols)
+        )
+        wrapped = _compiler_revision()
+    finally:
+        ep.derive_process_execution_profile = original_derive
+    assert wrapped == baseline, (
+        "a behaviour-preserving wrapper moved the served revision"
+    )
+
+    # 3. The family table is still covered — the property the first fix had.
+    original_families = ep.LISTENER_CONNECTOR_TYPES
+    try:
+        ep.LISTENER_CONNECTOR_TYPES = frozenset(set(original_families) | {"zzz-probe"})
         widened = _compiler_revision()
     finally:
-        ep.LISTENER_CONNECTOR_TYPES = original
-
-    assert widened != baseline, (
-        "adding a listener connector family left the served compiler revision "
-        "unchanged — the derivation is not covered"
-    )
-    # ...and restoring the authority restores the revision, so the movement is
-    # the derivation's, not an artifact of calling twice.
+        ep.LISTENER_CONNECTOR_TYPES = original_families
+    assert widened != baseline
     assert _compiler_revision() == baseline
 
 
@@ -4414,3 +4462,118 @@ def test_an_undeclared_derived_dependency_refuses_before_the_first_write():
     _dry_emit_canonical_plan(
         _plan(("op",)), symbols, {"proc": ("op",), "op": ("conn",)}
     )
+
+
+def test_a_confirmed_write_with_no_id_is_recorded_as_unidentified():
+    """§6 evaluation 4: the note's condition was hand-enumerated.
+
+    It additionally required a component id, so a create the platform CONFIRMED
+    without returning one — the single case where a reconciler most needs a
+    pointer — was the only case that produced no note at all. Second instance of
+    the QA-153-r15-01 pair, so the fix is at the condition: the note fires on
+    what the platform confirmed, read once, and an unidentified write is
+    recorded AS unidentified.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    ib._BUILD_REGISTRY.clear()
+
+    def _component(*_a, **_k):
+        return {"_success": True, "component_id": "dep-1"}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        # Exactly what a componentId-less 200 yields.
+        return {"_success": True, "component_id": ""}
+
+    _SUBMITTED.clear()
+    with patch(_PAGINATE, return_value=[]), patch(
+        _EXECUTE, side_effect=_component
+    ), patch(_CREATE, side_effect=_create), patch(_GET_XML, side_effect=_live_xml):
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(), "dry_run": False},
+        )
+
+    assert result["_success"] is False, result
+    writes = result.get("process_writes")
+    assert writes, result
+    note = writes[0]
+    assert note["component_key"] == "proc"
+    assert note["result_component_id"] is None
+    assert note["result_component_id_missing"] is True
+    assert note["submitted_xml_digest"].startswith("sha256:")
+    # ...and it is durable, not only served.
+    build_id = result.get("build_id")
+    assert build_id and ib._BUILD_REGISTRY[build_id].get("process_writes") == writes
+
+
+def test_no_write_note_is_recorded_for_a_step_that_never_wrote():
+    """The OTHER direction, and it has to reach the write site to mean anything.
+
+    Firing on "the platform confirmed" is only correct if a step that REACHED
+    the platform and was refused produces nothing. The first attempt at this
+    control used a folder refusal, which never enters the write site at all —
+    so it passed against a mutant that fired the note unconditionally, and was
+    worth exactly nothing. This one drives the create to a refusal
+    (`write_attempted: False`, the discriminator the write issuer stamps) and
+    asserts silence there.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    ib._BUILD_REGISTRY.clear()
+
+    def _refused(_client, _profile, _payload):
+        return {"_success": False, "write_attempted": False,
+                "error": "refused before the push", "error_code": "REFUSED"}
+
+    result = _apply(_bound_payload(), create_result=_refused)
+
+    assert result["_success"] is False
+    assert not result.get("process_writes"), result.get("process_writes")
+    # ...and the step really did reach the write site and get refused there.
+    proc = (result.get("partial_results") or {}).get("proc") or {}
+    assert proc.get("status") == "refused", proc
+
+
+def test_a_successful_apply_serves_no_write_notes_and_would_serve_an_uncovered_one():
+    """The third exit, both directions.
+
+    A successful apply attests every write, so the derived subset is empty and
+    the envelope does not grow a field — that is the drift control. The other
+    direction is what makes the derivation worth having: hand the finalizer a
+    note no attestation covers and it is served, so the "reaching here means
+    attested" claim can never quietly stop being true.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    ib._BUILD_REGISTRY.clear()
+    applied = _apply(_bound_payload())
+    assert applied["_success"] is True, applied
+    assert applied.get("process_mutations"), applied
+    # Covered: nothing extra is served.
+    assert "process_writes" not in applied
+
+    attested_key = applied["process_mutations"][0]["component_key"]
+    covered = {"component_key": attested_key, "action": "create",
+               "result_component_id": "x", "attestation_pending": True}
+    uncovered = {"component_key": "a-key-no-attestation-covers",
+                 "action": "create", "result_component_id": None,
+                 "result_component_id_missing": True,
+                 "attestation_pending": True}
+
+    def _finalize(writes):
+        return ib._finalize_apply_success(
+            spec=SimpleNamespace(name="s", model_dump=lambda: {}),
+            profile=_PROFILE, boomi_client=MagicMock(), durable_build_id=None,
+            authoring_bundle=None, results={}, execution_order=[],
+            process_mutations=[
+                SimpleNamespace(model_dump=lambda **_k: {"component_key": attested_key})
+            ],
+            process_readbacks=[], process_writes=writes,
+            apply_warnings=[], planned={},
+        )
+
+    assert "process_writes" not in _finalize([covered])
+    served = _finalize([covered, uncovered])["process_writes"]
+    assert served == [uncovered]
