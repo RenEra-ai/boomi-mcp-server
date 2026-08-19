@@ -2280,32 +2280,24 @@ def test_a_lowered_source_severity_always_names_its_refutation():
                 continue
             offenders.append((path.name, row_id, parsed[row_id][0][:24]))
 
-        # COVERAGE by ID SET, derived without the column map: a row whose FIRST
-        # cell after the id looks like a source label. Compared exactly, so one
-        # dropped row fails as loudly as all of them.
-        independent = set()
-        for row_id, line in known_rows.items():
-            for cell in _split(line):
-                # A LABEL CELL, not a mention: emphasis and any parenthetical
-                # annotation are stripped, and what remains must BE the label.
-                # `**High** (source label; QA marked the anchor explicitly)` is
-                # a label; `**Critical** — same anchor` is a TIER cell and must
-                # not count, which is why this is an equality and not a prefix
-                # (measured: a prefix match pulled in every tier cell).
-                bare = _re.sub(r"[*_`]", "", cell)
-                # ONLY the source-label annotation grammar is stripped — a
-                # parenthetical that starts "source label" (Codex round 39).
-                # Stripping EVERY parenthetical turned an unrelated cell like
-                # `High (runtime impact)` into a label and would have failed the
-                # required gate on a valid ledger.
-                bare = _re.sub(r"\(\s*source label[^)]*\)", "", bare, flags=_re.I).strip()
-                if bare and critical_label.fullmatch(bare):
-                    independent.add(row_id)
-                    break
-        missed = sorted(independent - scanned)
-        assert not missed, (
-            "%s: rows carry a bare source-critical label that the column-derived "
-            "scan did not classify: %r" % (path.name, missed)
+        # COVERAGE WITHOUT ANY TEXT HEURISTIC (Codex round 40). The point of
+        # this check is to catch a PARSE regression in the column walk above,
+        # and the question that answers it needs no label matching at all: did
+        # the walk classify every finding row this ledger has? `_finding_rows`
+        # identifies rows by their ID cell, independently of the header map, so
+        # a row it knows and the walk did not reach is a dropped row.
+        #
+        # Three earlier versions asked instead "did the walk find every
+        # critical-looking cell?", and each was a string heuristic that a
+        # reviewer defeated with one more phrasing — `High (runtime impact)`,
+        # `High (source label mismatch)`. Those were false POSITIVES that would
+        # have failed the required gate on valid prose. This version cannot
+        # produce one: it compares row identities, which the ledger assigns.
+        unreached = sorted(set(known_rows) - set(parsed))
+        assert not unreached, (
+            "%s: the column-derived walk did not reach %d finding row(s) that "
+            "the shared parser knows: %r — the parse dropped them"
+            % (path.name, len(unreached), unreached[:8])
         )
 
     assert offenders == [], (
