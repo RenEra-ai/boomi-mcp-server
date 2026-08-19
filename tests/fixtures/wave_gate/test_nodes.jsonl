@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10019,"minimum_collected":10019,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10020,"minimum_collected":10020,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -10047,3 +10047,4 @@
 {"kind":"test","id":"pytest-010046","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_reference_of_the_wrong_kind_is_refused_before_any_write","state":"active"}
 {"kind":"test","id":"pytest-010047","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_dry_emit_binds_symbols_the_ir_never_names","state":"active"}
 {"kind":"test","id":"pytest-010048","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_undeclared_derived_dependency_refuses_before_the_first_write","state":"active"}
+{"kind":"test","id":"pytest-010049","node_id":"tests/test_wave_gate.py::test_a_lowered_source_severity_always_names_its_refutation","state":"active"}

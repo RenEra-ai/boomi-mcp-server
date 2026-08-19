@@ -2151,6 +2151,58 @@ def test_audit_ledger_revisions_are_append_only_and_fully_declared():
     )
 
 
+def test_a_lowered_source_severity_always_names_its_refutation():
+    """A source-critical label may only be lowered by a NAMED refutation.
+
+    The ledger's own rule: a raw source label is immutable, and a
+    source-critical finding (P0/P1/Critical/High) becomes Standard only via a
+    documented severity-specific technical refutation. #153 recorded four rows
+    that lowered a P1 or High to Standard with grounds but without naming the
+    mechanism, and three review rounds found them one at a time — the third
+    only because the first fix swept one instance and left its siblings.
+
+    Derived, not enumerated: every row whose SOURCE label is critical-shaped and
+    whose DERIVED tier is not Critical must say `refut` somewhere in that tier
+    cell, or carry a revision row that does. Scoped to ledgers still in flight,
+    for the same reason as the disposition guard below.
+    """
+    import re as _re
+
+    ledgers = sorted((_ROOT / "docs" / "architecture").glob("ISSUE_*_AUDIT_LEDGER.md"))
+    assert ledgers, "no ledgers found — this check would be vacuous"
+
+    critical_label = _re.compile(r"\*\*(P0|P1|Critical|High)\*\*", _re.I)
+    offenders = []
+    checked = 0
+    for path in ledgers:
+        text = path.read_text(encoding="utf-8")
+        if "filled at close" not in text:
+            continue
+        for line in text.splitlines():
+            if not line.startswith("| ") or line.count("|") < 9:
+                continue
+            cells = [c.strip() for c in line.split("|")]
+            row_id, label, tier = cells[1], cells[4], cells[7]
+            if not critical_label.search(label):
+                continue
+            checked += 1
+            if tier.startswith("**Critical**"):
+                continue
+            if "refut" in tier.lower():
+                continue
+            # A revision row may carry the refutation the original omitted.
+            revision = "| %sa |" % row_id
+            if revision in text:
+                start = text.index(revision)
+                if "refut" in text[start:text.index("\n", start)].lower():
+                    continue
+            offenders.append((path.name, row_id, label))
+    assert checked >= 20, "too few source-critical rows scanned — guard is vacuous"
+    assert offenders == [], (
+        "source-critical findings lowered without naming a refutation: %r" % offenders
+    )
+
+
 def test_no_audit_ledger_disposition_claims_more_than_a_witness():
     """A disposition may not assert COMPLETENESS without naming its evidence.
 
