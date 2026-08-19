@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":9998,"minimum_collected":9998,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10001,"minimum_collected":10001,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -10027,3 +10027,6 @@
 {"kind":"test","id":"pytest-010026","node_id":"tests/test_process_component_models.py::test_every_structural_string_refuses_padding_on_the_same_footing","state":"active"}
 {"kind":"test","id":"pytest-010027","node_id":"tests/test_integration_models.py::test_no_served_description_contradicts_its_own_field_container","state":"active"}
 {"kind":"test","id":"pytest-010028","node_id":"tests/test_wave_gate.py::test_no_audit_ledger_disposition_claims_more_than_a_witness","state":"active"}
+{"kind":"test","id":"pytest-010029","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_all_reuse_apply_that_fails_late_never_says_reconcile","state":"active"}
+{"kind":"test","id":"pytest-010030","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_reused_root_is_not_refused_for_a_body_it_never_compiles","state":"active"}
+{"kind":"test","id":"pytest-010031","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_reference_inside_the_ir_keeps_the_ir_taxonomy","state":"active"}

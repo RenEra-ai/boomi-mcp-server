@@ -3382,3 +3382,165 @@ def test_a_direct_root_refusal_keeps_every_cause_and_its_path():
     assert all(len(d.cause_codes) <= 1 for d in diagnostics), [
         d.cause_codes for d in diagnostics
     ]
+
+
+def test_an_all_reuse_apply_that_fails_late_never_says_reconcile():
+    """Codex round 22: deriving "did we write" from an assumption, again.
+
+    An apply whose every root is a `reuse` writes nothing. When the post-loop
+    finalization raised, the new guard wrapped it and reported
+    `mutation_status="possible"` with a `failed_partial` durable row — telling
+    the caller to reconcile an account this run never touched. The discriminator
+    is the one `_mutation_status` already reads, and it is consulted only where
+    the record can answer: after the loop, where every step has recorded its own
+    status.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+
+    ib._BUILD_REGISTRY.clear()
+    unit = process_unit()
+    # EVERY root must match an existing component, or the supporting
+    # components still create and the apply is not all-reuse at all — which is
+    # what the first draft of this witness measured, and why it reported
+    # `possible` correctly for the wrong reason.
+    existing = [
+        {"component_id": "existing-proc", "name": unit.envelope.name,
+         "type": "process"},
+        {"component_id": "existing-conn", "name": APPLIABLE_CONN["name"],
+         "type": "connector-settings"},
+        {"component_id": "existing-op", "name": APPLIABLE_OP["name"],
+         "type": "connector-action"},
+    ]
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("registry write failed after a no-write apply")
+
+    def _component(*_a, **_k):
+        return {"_success": True, "component_id": "cid-x"}
+
+    def _boom2(*_a, **_k):
+        raise RuntimeError("registry write failed after a no-write apply")
+
+    with patch(_PAGINATE, return_value=existing), patch(
+        _EXECUTE, side_effect=_component
+    ), patch(_CREATE) as create, patch(_GET_XML) as get_xml, patch.object(
+        ib, "_authoring_build_provenance", side_effect=_boom2
+    ):
+        create.side_effect = AssertionError("a reuse must not create")
+        get_xml.side_effect = _live_xml
+        # The policy travels INSIDE the typed request — passing it as a legacy
+        # config root alongside `authoring_request` is refused up front, which
+        # is how the first draft of this witness passed without ever reaching
+        # the apply.
+        request = process_ir_request(units=(unit,))
+        request = request.model_copy(update={
+            "intent": request.intent.model_copy(
+                update={"conflict_policy": "reuse"}
+            )
+        })
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _bound_payload(request),
+                    "dry_run": False},
+        )
+
+    assert result["_success"] is False, result
+    # Nothing was written, so nothing is uncertain.
+    assert result["mutation_status"] == "none", result
+    assert "reconcile" not in result.get("hint", "").lower(), result.get("hint")
+    build_id = result.get("build_id")
+    if build_id:
+        assert ib._BUILD_REGISTRY[build_id]["status"] != "failed_partial"
+
+
+def test_a_reused_root_is_not_refused_for_a_body_it_never_compiles():
+    """Codex round 22: the pre-decidable pass validated an unused input.
+
+    A `reuse` returns before the authored body is compiled or materialized, so
+    a literal reference inside that body decides nothing — refusing on it
+    rejected a valid idempotent no-write re-apply. Round 14 learned exactly this
+    for the placement check and fixed it there alone; the skip is now made once
+    for the whole pass, which is what stops the next check repeating it.
+    """
+    literal = "35813b90-1f42-4dcb-98f5-82d8f96be61d"
+    unit = process_unit(process_extensions=ProcessExtensionBindingsV1(
+        connections=(ProcessConnectionOverrideV1(
+            connection_id=literal, connector_type="rest",
+            fields=(ProcessOverrideFieldV1(id="url", label="x"),),
+        ),)
+    ))
+    spec = {
+        "name": "M12.15 Integration",
+        "components": [APPLIABLE_CONN, APPLIABLE_OP],
+        "processes": [unit.model_dump(mode="json")],
+    }
+    existing = [{"component_id": "existing-proc", "name": unit.envelope.name,
+                 "type": "process"}]
+
+    def _component(*_a, **_k):
+        return {"_success": True, "component_id": "cid-x"}
+
+    with patch(_PAGINATE, return_value=existing), patch(
+        _EXECUTE, side_effect=_component
+    ), patch(_CREATE) as create, patch(_GET_XML) as get_xml:
+        create.side_effect = AssertionError("a reuse must not create")
+        get_xml.side_effect = _live_xml
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"integration_spec": spec, "conflict_policy": "reuse",
+                    "dry_run": False},
+        )
+
+    assert result["_success"] is True, result.get("error")
+    assert result["results"]["proc"]["status"] == "reused", result["results"]
+
+    # THE CONTROL: the same literal reference on a root that would CREATE is
+    # still refused before anything is written.
+    with patch(_PAGINATE, return_value=[]), patch(
+        _EXECUTE, side_effect=_component
+    ), patch(_CREATE) as create, patch(_GET_XML) as get_xml:
+        create.side_effect = AssertionError("a refused root must not create")
+        get_xml.side_effect = _live_xml
+        refused = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"integration_spec": spec, "dry_run": False},
+        )
+    assert refused["_success"] is False
+    assert refused["error_code"] == PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE
+
+
+def test_a_reference_inside_the_ir_keeps_the_ir_taxonomy():
+    """Codex round 22: one error type, two schemas, one wrong answer.
+
+    `process_ir_reference_invalid_format` is the ProcessIR authority's own type
+    with its own registered code. Mapping it globally to the process-COMPONENT
+    code served the wrong taxonomy for a reference inside a unit's IR. Location
+    decides, using the same classifier the unknown-field rule consults — a
+    second copy of that path test is precisely how two overlapping schemas get
+    judged two ways.
+    """
+    from boomi_mcp.categories.integration_builder import (
+        _is_process_component_path, _named_code_from_locations,
+    )
+    from boomi_mcp.errors import (
+        PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT,
+        PROCESS_IR_REFERENCE_INVALID_FORMAT,
+    )
+
+    ir_path = {
+        "path": "intent.units.0.process_ir.body.steps.0.connection_ref",
+        "type": "process_ir_reference_invalid_format",
+    }
+    envelope_path = {
+        "path": "intent.units.0.envelope.process_extensions.connections.0."
+                "connection_id",
+        "type": "process_ir_reference_invalid_format",
+    }
+    assert _is_process_component_path(ir_path["path"]) is False
+    assert _is_process_component_path(envelope_path["path"]) is True
+    assert _named_code_from_locations([ir_path]) == (
+        PROCESS_IR_REFERENCE_INVALID_FORMAT
+    )
+    assert _named_code_from_locations([envelope_path]) == (
+        PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT
+    )

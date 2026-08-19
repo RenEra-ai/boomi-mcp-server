@@ -243,6 +243,7 @@ from ..errors import (
     PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,
     PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT,
     PROCESS_COMPONENT_SCHEMA_INVALID,
+    PROCESS_IR_REFERENCE_INVALID_FORMAT,
 )
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
@@ -8346,6 +8347,16 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         for step in planned["steps"]
     }
     for _pkey, _unit in process_units_by_key.items():
+        # A NON-WRITING PLANNED ACTION IS SKIPPED FOR THE WHOLE PASS, once, at
+        # the top (Codex round 22). Every check below decides whether a WRITE
+        # may proceed, and a `reuse` writes nothing and consumes none of the
+        # inputs they validate — it returns before the authored body is even
+        # compiled. Round 14 already learned this for the placement check and
+        # fixed it there alone; putting the skip per-check is what let the next
+        # check repeat it, so the decision is made once for the pass.
+        if _planned_actions.get(_pkey) == "reuse":
+            resolved_placements[_pkey] = None
+            continue
         # (a) A literal component id makes the plan non-relocatable. The typed
         # route already refuses this at compile; the raw route reached the
         # materializer, which failed INSIDE compilation and served an internal
@@ -8380,13 +8391,8 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         # measured both ways. The in-loop arm that also refuses it is therefore
         # defensive depth, not the deciding site, and adding a third copy here
         # would be an unreachable guard.
-        if _planned_actions.get(_pkey) == "reuse":
-            # A reuse WRITES NOTHING and uses no folder id (Codex round 14):
-            # validating its placement anyway meant a moved or deleted folder —
-            # or a missing folder-list permission — rejected an otherwise valid
-            # idempotent re-apply.
-            resolved_placements[_pkey] = None
-            continue
+        # (The reuse skip that used to sit here — Codex round 14, for the
+        # placement check alone — is now the pass-level skip above.)
         try:
             resolved_placements[_pkey] = _resolve_canonical_placement(
                 boomi_client, _unit.envelope
@@ -8744,6 +8750,8 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 process_mutations=process_mutations,
                 process_readbacks=process_readbacks,
                 apply_warnings=apply_warnings,
+                # Mid-loop: a step may have been writing when this threw.
+                results_complete=False,
             )
         ) from exc
 
@@ -8778,6 +8786,8 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 process_mutations=process_mutations,
                 process_readbacks=process_readbacks,
                 apply_warnings=apply_warnings,
+                # Post-loop: every step recorded its own status.
+                results_complete=True,
             )
         ) from exc
 
@@ -9259,17 +9269,53 @@ def _authoring_error_envelope(exc, action: str) -> Dict[str, Any]:
     }
 
 
-def _named_code_from_error_types(types) -> Optional[str]:
-    """The first mapped named code among a validation's error types, or None.
+def _is_process_component_path(path: str) -> bool:
+    """Is this validation path the process COMPONENT's own field, not its IR?
+
+    The one location rule, consulted by every code that must be reserved for
+    envelope/extension references rather than ProcessIR ones. It exists because
+    the two schemas' paths overlap: a unit's IR sits under the same
+    `.units.<n>.`/`.processes.<n>.` prefix as its envelope, and the typed
+    intent's discriminator tag is itself literally `process_ir` — a bare
+    substring test excluded every typed-intent path, measured while writing the
+    round-14 witness. Anchored on the UNIT's own `process_ir` field.
+    """
+    if re.search(r"\.(units|processes)\.\d+\.process_ir\.", path):
+        return False
+    return (
+        ".units." in path
+        or ".envelope" in path
+        # An integration_spec intent nests its units under `.processes.`
+        # (Codex round 13) — same models, same registered codes.
+        or ".processes." in path
+    )
+
+
+def _named_code_from_locations(locations) -> Optional[str]:
+    """The first mapped named code among a validation's errors, or None.
 
     Deterministic on a multi-error validation: `locations` is already sorted by
     (path, type), so the winner is the earliest offending location rather than
     whichever error pydantic happened to list first.
+
+    LOCATION decides where two schemas share an error type (Codex round 22).
+    `process_ir_reference_invalid_format` is the ProcessIR authority's own type
+    with its own registered code; mapping it globally to the process-component
+    code served the wrong taxonomy for a reference inside a unit's IR. The
+    component code is therefore RESERVED for the component's own paths, using
+    the same classifier the unknown-field rule consults.
     """
-    for error_type in types:
-        code = _NAMED_VALIDATION_CODES.get(error_type)
-        if code is not None:
-            return code
+    for entry in locations:
+        code = _NAMED_VALIDATION_CODES.get(entry["type"])
+        if code is None:
+            continue
+        if (
+            code == PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT
+            and not _is_process_component_path(entry["path"])
+        ):
+            # An IR-located reference keeps the IR authority's own code.
+            return PROCESS_IR_REFERENCE_INVALID_FORMAT
+        return code
     return None
 
 
@@ -9294,23 +9340,10 @@ def _reject_invalid_typed_request(exc, action: str) -> Dict[str, Any]:
     # request is an ordinary schema failure and keeps the generic code.
     unknown_process_field = any(
         entry["type"] == "extra_forbidden"
-        # The code is registered for the process COMPONENT models — envelope,
-        # unit, extension bindings — never for ProcessIR schema failures, whose
-        # paths also sit under `.units.`/`.processes.` (Codex round 14; the
-        # exclusion covers the typed `.units.` shape as well as the
-        # `.processes.` one the reviewer named). Anchored to the UNIT's own
-        # `process_ir` field, not a bare substring: the typed intent's
-        # discriminator tag is itself literally `process_ir`, so a substring
-        # test excluded every typed-intent path including genuine envelope
-        # failures — measured while writing the witness.
-        and not re.search(r"\.(units|processes)\.\d+\.process_ir\.", entry["path"])
-        and (
-            ".units." in entry["path"]
-            or ".envelope" in entry["path"]
-            # An integration_spec intent nests its units under `.processes.`
-            # (Codex round 13) — same models, same registered code.
-            or ".processes." in entry["path"]
-        )
+        # ONE location classifier, shared with the reserved-code rule below —
+        # the path test used to live here alone, and a second copy of it is
+        # exactly how two schemas' overlapping paths get judged two ways.
+        and _is_process_component_path(entry["path"])
         for entry in locations
     )
     envelope = {
@@ -9328,10 +9361,7 @@ def _reject_invalid_typed_request(exc, action: str) -> Dict[str, Any]:
         "error_code": (
             "PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD"
             if unknown_process_field
-            else _named_code_from_error_types(
-                entry["type"] for entry in locations
-            )
-            or INVALID_INPUT
+            else _named_code_from_locations(locations) or INVALID_INPUT
         ),
         "error": (
             f"config.authoring_request failed AuthoringRequestV1 validation at "
@@ -9656,6 +9686,7 @@ def _apply_escape_evidence(
     process_mutations: List[Any],
     process_readbacks: List[Any],
     apply_warnings: List[str],
+    results_complete: bool,
 ) -> Dict[str, Any]:
     """Finalize the durable record and package what a thrown apply DID do.
 
@@ -9672,15 +9703,29 @@ def _apply_escape_evidence(
     """
     serialized_mutations = [m.model_dump(mode="json") for m in process_mutations]
     serialized_readbacks = [r.model_dump(mode="json") for r in process_readbacks]
+    # WHETHER A WRITE WAS ATTEMPTED IS DERIVED — but ONLY where the record can
+    # answer it (Codex round 22, and the mid-flight witness that caught the
+    # first draft of this). `results[key]` is assigned after a step's write
+    # RETURNS, so a throw from inside the write leaves no row: mid-loop, an
+    # empty `results` means "unknown", never "nothing happened". After the loop
+    # every step has recorded its own status, so the set is complete and
+    # `_mutation_status` — the one reader the success path uses — is exact.
+    # An all-reuse apply whose FINALIZER raises is the case that matters: it
+    # wrote nothing, and telling the caller to reconcile would be false.
+    wrote = (
+        _mutation_status({"results": results}) != "none"
+        if results_complete
+        else True
+    )
     if durable_build_id is not None:
         record = _BUILD_REGISTRY.get(durable_build_id)
         if record is not None:
-            record["status"] = "failed_partial"
+            record["status"] = "failed_partial" if wrote else "failed"
             if serialized_mutations:
                 record["process_mutations"] = serialized_mutations
             if serialized_readbacks:
                 record["process_readbacks"] = serialized_readbacks
-    evidence: Dict[str, Any] = {}
+    evidence: Dict[str, Any] = {"mutation_status": "possible" if wrote else "none"}
     if durable_build_id is not None:
         evidence["build_id"] = durable_build_id
     if results:
@@ -9824,6 +9869,14 @@ def build_integration_action(
         # against a record they could not name. Everything here was accumulated
         # before the throw; nothing is inferred.
         envelope.update(exc.evidence)
+        if envelope.get("mutation_status") == "none":
+            # The escape carried evidence that NO step attempted a write (an
+            # all-reuse apply whose finalizer raised, Codex round 22). The
+            # reconcile hint would be false there — this run touched nothing.
+            envelope["hint"] = (
+                "The apply failed, but no step attempted a write: every root "
+                "was reused. Nothing was created, so a retry is safe."
+            )
         named = _named_error_code_from_validation(exc.cause)
         if named is not None:
             envelope["error_code"] = named
