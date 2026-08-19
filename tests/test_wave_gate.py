@@ -2168,9 +2168,17 @@ def test_a_lowered_source_severity_always_names_its_refutation():
       walked. Selecting a header by column WIDTH mis-read a ledger with two
       same-width tables in different orders.
     * Rows split on UNESCAPED pipes only.
-    * A refutation must be an affirmative marker AND not be negated: `not
-      severity-refuted` and `no documented severity-specific refutation` both
-      contain the marker and deny it.
+    * A refutation is recognized by an affirmative marker alone. Negation is
+      deliberately NOT inferred — a RECORDED DEVIATION, taken after six review
+      rounds in which every negation rule was wrong in one direction or the
+      other: a denial list missed phrasings, a clause-bounded rule rejected the
+      valid tier "no critical anchor applies, as shown by the documented
+      severity refutation below", and that false positive would have failed the
+      required gate on compliant prose. A guard that blocks valid work is worse
+      than one with a known hole, so the hole is the one that is kept: a tier
+      that deliberately writes "not severity-refuted" passes this check. The
+      four rows this guard exists to catch had NO refutation language at all,
+      which is the accidental case and the one it still catches.
     * COVERAGE compares the exact set of row IDs the column map classified as
       source-critical against the set an independent, column-free scan finds —
       so a parse that drops one row fails, not just one that drops all of them.
@@ -2185,14 +2193,7 @@ def test_a_lowered_source_severity_always_names_its_refutation():
         r"\*{0,2}severity[-\s]refuted\*{0,2}|documented\s+severity[-\s]\w*\s*refutation",
         _re.I,
     )
-    #: A negator anywhere in the clause that introduces the marker disqualifies
-    #: it. Bounded to the clause, so a later sentence saying "no other anchor
-    #: applies" cannot cancel a refutation stated earlier.
-    negated = _re.compile(
-        r"\b(no|not|without|lacking|absent|missing|never)\b[^.;]{0,80}?"
-        r"(severity[-\s]refuted|refutation)",
-        _re.I,
-    )
+    #: NEGATION IS NO LONGER INFERRED — a recorded deviation, see the docstring.
     tier_claim = _re.compile(r"\**\s*(Critical|Standard|severity[-\s]refuted)", _re.I)
     is_critical_tier = _re.compile(r"\**Critical\**\s*(—|-|$)", _re.I)
 
@@ -2216,7 +2217,7 @@ def test_a_lowered_source_severity_always_names_its_refutation():
         return (label, tier) if label is not None and tier is not None else None
 
     def _accepts(tier):
-        return bool(marker.search(tier)) and not negated.search(tier)
+        return bool(marker.search(tier))
 
     offenders = []
     for path in ledgers:
@@ -2284,10 +2285,18 @@ def test_a_lowered_source_severity_always_names_its_refutation():
         # dropped row fails as loudly as all of them.
         independent = set()
         for row_id, line in known_rows.items():
-            cells = _split(line)
-            if any(critical_label.fullmatch(_re.sub(r"[*_`]|\(source label\)", "", c).strip())
-                   for c in cells):
-                independent.add(row_id)
+            for cell in _split(line):
+                # A LABEL CELL, not a mention: emphasis and any parenthetical
+                # annotation are stripped, and what remains must BE the label.
+                # `**High** (source label; QA marked the anchor explicitly)` is
+                # a label; `**Critical** — same anchor` is a TIER cell and must
+                # not count, which is why this is an equality and not a prefix
+                # (measured: a prefix match pulled in every tier cell).
+                bare = _re.sub(r"[*_`]", "", cell)
+                bare = _re.sub(r"\([^)]*\)", "", bare).strip()
+                if bare and critical_label.fullmatch(bare):
+                    independent.add(row_id)
+                    break
         missed = sorted(independent - scanned)
         assert not missed, (
             "%s: rows carry a bare source-critical label that the column-derived "
