@@ -4134,3 +4134,133 @@ def test_the_served_workflow_contract_names_what_this_slice_added():
     assert "relocatable" in phases[6]
     assert "placeholder" in phases[6]
     assert "bound" in phases[7].lower() and "attestation" in phases[7]
+
+
+def test_the_raw_route_also_records_a_confirmed_write():
+    """QA-153-r15-01: the write note was gated on the durable build record.
+
+    That record is minted for TYPED builds only — deliberately, so a legacy
+    build keeps its original five-key shape — and gating the note on it meant
+    the raw `integration_spec` route, which creates process components just as
+    well, left an escaped component in no served field and no record at all.
+    QA measured two such components live: real, readback-verified, and named
+    nowhere in the envelope the caller gets back.
+    """
+    from boomi_mcp.categories.components import canonical_process_apply as cpa
+
+    spec = {
+        "name": "M12.15 Integration",
+        "components": [APPLIABLE_CONN, APPLIABLE_OP],
+        "processes": [process_unit().model_dump(mode="json")],
+    }
+
+    def _component(*_a, **_k):
+        return {"_success": True, "component_id": "dep-1"}
+
+    def _create(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("attestation construction failed after the write")
+
+    _SUBMITTED.clear()
+    with patch(_PAGINATE, return_value=[]), patch(
+        _EXECUTE, side_effect=_component
+    ), patch(_CREATE, side_effect=_create), patch(
+        _GET_XML, side_effect=_live_xml
+    ), patch.object(cpa, "build_mutation_attestation", side_effect=_boom):
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"integration_spec": spec, "dry_run": False},
+        )
+
+    assert result["_success"] is False
+    # No durable record on this route by design...
+    assert not result.get("build_id")
+    # ...and the write is reported anyway, which is the whole point: this is
+    # the only place the caller learns the component exists.
+    writes = result.get("process_writes")
+    assert writes, result
+    assert writes[0]["result_component_id"] == _PROCESS_ID
+    assert writes[0]["component_key"] == "proc"
+
+
+def test_a_reference_of_the_wrong_kind_is_refused_before_any_write():
+    """QA-153-r15-02: the slot's expected types were derived circularly.
+
+    `expected_component_types` recorded whatever the key resolved to, so it
+    could never disagree with anything — and the MIRROR swap (a
+    `connection_ref` naming the operation) passed the pre-write pass, wrote
+    both dependencies, and failed at bind time under the generic
+    materialization internal error, which AR3-02 had set out to retire. The
+    types now come from the reference's ROLE, using the compiler module that
+    already owns them, and the check fires inside the plan build — which is
+    inside the pre-write pass.
+    """
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    def _swapped(field, value):
+        unit = process_unit()
+        ir = unit.process_ir.model_dump(mode="json")
+        for step in ir["body"]["steps"]:
+            if field in step:
+                step[field] = value
+        return unit.model_copy(update={"process_ir": parse_process_ir_v1(ir)})
+
+    for field, value in (("connection_ref", "$ref:op"),
+                         ("operation_ref", "$ref:conn")):
+        spec = {
+            "name": "M12.15 Integration",
+            "components": [APPLIABLE_CONN, APPLIABLE_OP],
+            "processes": [_swapped(field, value).model_dump(mode="json")],
+        }
+        writes = {"n": 0}
+
+        def _component(*_a, **_k):
+            writes["n"] += 1
+            return {"_success": True, "component_id": "cid-%d" % writes["n"]}
+
+        with patch(_PAGINATE, return_value=[]), patch(
+            _EXECUTE, side_effect=_component
+        ), patch(_CREATE) as create, patch(_GET_XML, side_effect=_live_xml):
+            create.side_effect = AssertionError("no process may be created")
+            result = build_integration_action(
+                MagicMock(), _PROFILE, "apply",
+                config={"integration_spec": spec, "dry_run": False},
+            )
+
+        assert result["_success"] is False, (field, result)
+        assert writes["n"] == 0, (
+            "%s: dependencies were created before the refusal" % field
+        )
+        assert result["partial_results"] == {}
+        assert result["error_code"] != "PROCESS_MATERIALIZATION_INTERNAL_ERROR", (
+            field, result["error_code"],
+        )
+
+    # THE CONTROL: the correctly-typed pair still applies.
+    good = {
+        "name": "M12.15 Integration",
+        "components": [APPLIABLE_CONN, APPLIABLE_OP],
+        "processes": [process_unit().model_dump(mode="json")],
+    }
+
+    def _ok(*_a, **_k):
+        return {"_success": True, "component_id": "dep-1"}
+
+    def _create_ok(_client, _profile, payload_in):
+        _SUBMITTED["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": _PROCESS_ID}
+
+    _SUBMITTED.clear()
+    with patch(_PAGINATE, return_value=[]), patch(
+        _EXECUTE, side_effect=_ok
+    ), patch(_CREATE, side_effect=_create_ok), patch(
+        _GET_XML, side_effect=_live_xml
+    ):
+        applied = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"integration_spec": good, "dry_run": False},
+        )
+    assert applied["_success"] is True, applied.get("error")

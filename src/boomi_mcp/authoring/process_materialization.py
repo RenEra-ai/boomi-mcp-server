@@ -468,9 +468,25 @@ def derive_symbol_slots(
 
     One slot per reference OCCURRENCE, from the same enumeration the
     relocatability rule reads (`iter_plan_component_refs`): ``slot_id`` is the
-    stable source pointer, ``ref`` the ``$ref:KEY`` token, and
-    ``expected_component_types`` the symbol table's own type for that key —
-    the compiler's authority, not a re-derivation.
+    stable source pointer and ``ref`` the ``$ref:KEY`` token.
+
+    ``expected_component_types`` records the symbol table's own type for that
+    key — the compiler's authority, not a re-derivation.
+
+    QA-153-r15-02 observed that this makes the field non-discriminating: it
+    records whatever the key resolved to, so it can never disagree with
+    anything. A ROLE rule was drafted here — a `connection_ref` must name a
+    connection, an `operation_ref` an operation — and WITHDRAWN on measurement:
+    the compiler applies that constraint only to `connector_call` nodes, while
+    `source`/`send` steps legitimately carry other operation spellings (the
+    `_m12_11_support` fixture's `connector-operation` compiles by design, and
+    the drafted rule refused it). A plan-layer copy of a rule the compiler
+    scopes differently is a hand-model that refuses valid requests — the defect
+    class this slice exists to close, not an instance of the fix.
+
+    The wrong-kind refusal is enforced where it already lives, by running the
+    emitter: the apply's pre-write pass emits the plan DRY, so an emitter
+    refusal is decided before any dependency is written.
     """
     by_ref = {symbol.ref: symbol for symbol in symbols.symbols}
     slots = []

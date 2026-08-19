@@ -7552,6 +7552,23 @@ def _resolve_canonical_placement(boomi_client, envelope):
     return matches[0].get("id") or None
 
 
+def _build_canonical_symbols(*, spec):
+    """The compile symbol table for one spec. ONE construction, three callers.
+
+    The step function, the pre-write plan build and the pre-write dry emit all
+    need it, and three copies of the same three arguments is how the two halves
+    of a pair drift apart.
+    """
+    from ..authoring.workflow import _connector_metadata_from_components
+    from ..recipes.materialization import build_symbol_table
+
+    return build_symbol_table(
+        list(spec.components),
+        process_keys=[u.envelope.component_key for u in (spec.processes or ())],
+        connector_metadata=_connector_metadata_from_components(spec.components),
+    )
+
+
 def _build_canonical_plan(*, spec, unit, conflict_policy: str):
     """Build ONE canonical root's materialization plan from the request alone.
 
@@ -7564,15 +7581,9 @@ def _build_canonical_plan(*, spec, unit, conflict_policy: str):
     """
     from ..authoring.contract import get_authoring_revisions
     from ..authoring.process_materialization import build_materialization_plan
-    from ..authoring.workflow import _connector_metadata_from_components
     from ..compiler.process_ir.emitter_registry import emitter_revision
-    from ..recipes.materialization import build_symbol_table
 
-    symbols = build_symbol_table(
-        list(spec.components),
-        process_keys=[u.envelope.component_key for u in (spec.processes or ())],
-        connector_metadata=_connector_metadata_from_components(spec.components),
-    )
+    symbols = _build_canonical_symbols(spec=spec)
     return build_materialization_plan(
         envelope=unit.envelope,
         process_ir=unit.process_ir,
@@ -7581,6 +7592,35 @@ def _build_canonical_plan(*, spec, unit, conflict_policy: str):
         compiler_revision=get_authoring_revisions()["compiler_revision"],
         emitter_revision=emitter_revision(),
         materializer_revision=_materializer_revision(),
+    )
+
+
+def _dry_emit_canonical_plan(plan, symbols) -> None:
+    """Emit the plan with stand-in ids and throw the bytes away.
+
+    QA-153-r15-02. The pre-write pass COMPILED the plan; the apply turn
+    compiles AND EMITS, and several request-decidable refusals live in the
+    emitter rather than the compiler — a connector call whose reference names a
+    component of the wrong kind is caught by the emitter's symbol requirement,
+    not by compilation. So a swapped pair passed the pre-write pass, wrote both
+    dependencies, and failed at emit.
+
+    A dry emit closes that without duplicating a rule: it runs the SAME
+    function the apply turn runs, with deterministic stand-in ids in place of
+    the applied ones. The ids are irrelevant to every check being exercised —
+    the plan is placeholder-backed by construction — so what passes here passes
+    there for the same reasons.
+    """
+    from .components.canonical_process_apply import (
+        _ref_key, materialize_canonical_process_xml,
+    )
+
+    dry_ids = {
+        _ref_key(slot.ref): "dry-run-" + _ref_key(slot.ref)
+        for slot in plan.unresolved_symbol_slots
+    }
+    materialize_canonical_process_xml(
+        plan=plan, id_registry=dry_ids, symbols=symbols
     )
 
 
@@ -7599,7 +7639,16 @@ def _canonical_plan_failure(exc) -> Tuple[str, Optional[str]]:
         if code:
             return str(code), getattr(diagnostic, "path", None) or None
     named = _named_error_code_from_validation(exc)
-    return named or PROCESS_MATERIALIZATION_INTERNAL_ERROR, None
+    if named:
+        return named, None
+    # A BARE `PydanticCustomError` — raised by a plan-model rule outside a
+    # pydantic validation context, so it carries no `.errors()` for the map
+    # above to read (QA-153-r15-02). Its `type` is the same string the map is
+    # keyed on, so the one map still decides; only the way in differs.
+    bare = _NAMED_VALIDATION_CODES.get(str(getattr(exc, "type", "")))
+    if bare:
+        return bare, None
+    return PROCESS_MATERIALIZATION_INTERNAL_ERROR, None
 
 
 def _execute_canonical_process(
@@ -8439,6 +8488,8 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     #: Warnings discovered during EXECUTION, not planning. `warnings` in the plan
     #: is `_build_plan`'s local; these are facts only the apply can know.
     apply_warnings: List[str] = []
+    # Confirmed-but-not-yet-attested writes, on EVERY route (QA-153-r15-01).
+    process_writes: List[Dict[str, Any]] = []
 
     # DURABLE partial-mutation evidence (§6 AR1-04): a TYPED CANONICAL apply
     # allocates its build record BEFORE the first mutation, `in_progress`, and
@@ -8541,14 +8592,22 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         # the ACTUAL id registry at apply time, so late-binding failures that
         # depend on published ids still surface in the loop. This closes the
         # request-decidable ones, which is what the rule is about.
-        if _stored_plan_for(_pkey) is None:
-            try:
-                precompiled_plans[_pkey] = _build_canonical_plan(
+        try:
+            _pre_plan = _stored_plan_for(_pkey)
+            if _pre_plan is None:
+                _pre_plan = precompiled_plans[_pkey] = _build_canonical_plan(
                     spec=spec,
                     unit=_unit,
                     conflict_policy=conflict_policy,
                 )
-            except Exception as _plan_exc:  # noqa: BLE001 — classified below
+            # ...and EMIT it dry (QA-153-r15-02): several request-decidable
+            # refusals live in the emitter, not the compiler, so compiling
+            # alone left them to fire at apply — after the dependencies.
+            _dry_emit_canonical_plan(
+                _pre_plan,
+                _build_canonical_symbols(spec=spec),
+            )
+        except Exception as _plan_exc:  # noqa: BLE001 — classified below
                 _code, _path = _canonical_plan_failure(_plan_exc)
                 return {
                     "_success": False,
@@ -8651,6 +8710,12 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         # no failing exit may drop them. Roots applied BEFORE the failure keep
         # their attestations; unapplied roots record none — that asymmetry is
         # the record.
+        # Confirmed-but-unattested writes, on the RETURNED failure path as well
+        # as the escape path (QA-153-r15-01). Same reason both carry the
+        # attestations: a field present on one exit and absent from the others
+        # is the shape three review rounds already found here.
+        if process_writes:
+            envelope["process_writes"] = list(process_writes)
         if process_mutations:
             envelope["process_mutations"] = [
                 m.model_dump(mode="json") for m in process_mutations
@@ -8693,14 +8758,25 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                         None,
                     )
                 def _note_write(note, _key=key):
-                    """Durably record a confirmed write BEFORE it is attested.
+                    """Record a confirmed write BEFORE it is attested.
 
                     §6 AR3-03: the attestation is appended after the step
                     function returns, so an exception raised between the
-                    platform's confirmation and that return left the durable
-                    record with no trace of a component that exists. This note
-                    lands the instant the write is confirmed.
+                    platform's confirmation and that return left no trace of a
+                    component that exists. This note lands the instant the
+                    write is confirmed.
+
+                    It is kept in a LOCAL list first, and only then mirrored
+                    into the durable record (QA-153-r15-01). The durable record
+                    is minted for typed builds only — deliberately, so a legacy
+                    build keeps its original shape — and gating the note on it
+                    meant the raw route, which can create process components
+                    just as well, left an escaped component in no served field
+                    and no record at all. The envelope is what a caller
+                    reconciling an account reads, and it is now written on both
+                    routes.
                     """
+                    process_writes.append(note)
                     if durable_build_id is None:
                         return
                     record = _BUILD_REGISTRY.get(durable_build_id)
@@ -8972,6 +9048,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 process_mutations=process_mutations,
                 process_readbacks=process_readbacks,
                 apply_warnings=apply_warnings,
+                process_writes=process_writes,
                 # Mid-loop: a step may have been writing when this threw.
                 results_complete=False,
             )
@@ -9008,6 +9085,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 process_mutations=process_mutations,
                 process_readbacks=process_readbacks,
                 apply_warnings=apply_warnings,
+                process_writes=process_writes,
                 # Post-loop: every step recorded its own status.
                 results_complete=True,
             )
@@ -9909,6 +9987,7 @@ def _apply_escape_evidence(
     process_readbacks: List[Any],
     apply_warnings: List[str],
     results_complete: bool,
+    process_writes: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """Finalize the durable record and package what a thrown apply DID do.
 
@@ -9960,11 +10039,11 @@ def _apply_escape_evidence(
         evidence["warnings"] = list(apply_warnings)
     # Confirmed-but-unattested writes travel too (§6 AR3-03): if a step threw
     # after the platform confirmed its write, this is the only record that the
-    # component exists, and the caller needs it to reconcile.
-    if durable_build_id is not None:
-        record = _BUILD_REGISTRY.get(durable_build_id) or {}
-        if record.get("process_writes"):
-            evidence["process_writes"] = list(record["process_writes"])
+    # component exists, and the caller needs it to reconcile. Taken from the
+    # per-apply list rather than the durable record, so the RAW route — which
+    # mints no durable record — reports them as well (QA-153-r15-01).
+    if process_writes:
+        evidence["process_writes"] = list(process_writes)
     return evidence
 
 

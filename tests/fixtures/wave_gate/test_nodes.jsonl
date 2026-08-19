@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10015,"minimum_collected":10015,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10018,"minimum_collected":10018,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -10044,3 +10044,6 @@
 {"kind":"test","id":"pytest-010043","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_served_workflow_contract_names_what_this_slice_added","state":"active"}
 {"kind":"test","id":"pytest-010044","node_id":"tests/test_process_materialization_plan.py::test_a_slot_refuses_every_shape_its_authority_refuses","state":"active"}
 {"kind":"test","id":"pytest-010045","node_id":"tests/test_process_materialization_plan.py::test_a_plan_revision_must_be_a_digest","state":"active"}
+{"kind":"test","id":"pytest-010046","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_raw_route_also_records_a_confirmed_write","state":"active"}
+{"kind":"test","id":"pytest-010047","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_reference_of_the_wrong_kind_is_refused_before_any_write","state":"active"}
+{"kind":"test","id":"pytest-010048","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_slots_expected_types_come_from_its_role","state":"active"}

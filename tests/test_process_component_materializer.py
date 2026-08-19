@@ -329,7 +329,15 @@ def test_materialization_succeeds_with_every_legacy_entry_point_bombed(monkeypat
         )
 
     assert result["_success"] is True, result.get("error")
-    assert calls == [True], "the materializer never ran — the proof would be vacuous"
+    # TWICE, and the count is pinned rather than loosened: the apply's
+    # pre-write pass emits every canonical plan DRY before the first write
+    # (QA-153-r15-02), then the execution turn emits it for real. Both runs go
+    # through this materializer, which is exactly what makes the dry pass a
+    # faithful preview — and both must clear the legacy bombs.
+    assert calls == [True, True], (
+        "expected one dry pre-write emit plus one real emit; got %d — the "
+        "proof is vacuous if the materializer never ran" % len(calls)
+    )
     xml = submitted["xml"]
     assert xml.startswith("<?xml")
     assert 'type="process"' in xml
