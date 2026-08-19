@@ -2293,7 +2293,12 @@ def test_a_lowered_source_severity_always_names_its_refutation():
                 # not count, which is why this is an equality and not a prefix
                 # (measured: a prefix match pulled in every tier cell).
                 bare = _re.sub(r"[*_`]", "", cell)
-                bare = _re.sub(r"\([^)]*\)", "", bare).strip()
+                # ONLY the source-label annotation grammar is stripped — a
+                # parenthetical that starts "source label" (Codex round 39).
+                # Stripping EVERY parenthetical turned an unrelated cell like
+                # `High (runtime impact)` into a label and would have failed the
+                # required gate on a valid ledger.
+                bare = _re.sub(r"\(\s*source label[^)]*\)", "", bare, flags=_re.I).strip()
                 if bare and critical_label.fullmatch(bare):
                     independent.add(row_id)
                     break
