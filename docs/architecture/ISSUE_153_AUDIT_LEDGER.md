@@ -355,6 +355,7 @@ batches as a side effect. The affected SHA per batch:
 | `AR2-01` … `AR2-10`, and the six DC-5 disposition revisions | `6ef9cdd` |
 | `CX22-01`, `CX22-02`, `CX22-03` | `915cae6` |
 | `QA-153-r14-01`, `QA-153-r14-02` | `ac3c195` |
+| `CX27-01` | `0e82f13` |
 
 Every other row in this ledger records its SHA in the row itself, as it should;
 only a row that must name the commit containing it hits this, and the
