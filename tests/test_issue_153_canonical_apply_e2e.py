@@ -4919,3 +4919,223 @@ def test_the_entry_role_restriction_is_pinned_to_the_invariant_that_enforces_it(
         )
     # ...and the restriction is not vacuously everything.
     assert set(allowed) != set(declared), (allowed, declared)
+
+
+# --------------------------------------------------------------------------
+# §6 AR5-01 — the served revision must bind MULTI-SYMBOL lookup behaviour
+# --------------------------------------------------------------------------
+
+def _family_lookup_mutants(ep):
+    """Variants of `_operation_connector_family` that are byte-identical to the
+    real one on every 0- or 1-symbol table.
+
+    That equivalence is the whole finding: the oracle passed at most one symbol
+    per case, so each of these left the served `compiler_revision` unchanged
+    while changing what a real request materializes. They are defined here in
+    one place because both the kill test and the "the oracle could not see them"
+    non-vacuity control need exactly the same set.
+    """
+    listener = ep.LISTENER_CONNECTOR_TYPES
+
+    def _fold(value):
+        return value.strip().lower() if isinstance(value, str) else None
+
+    def first0_refchecked(symbols, ref):
+        rows = tuple(symbols.symbols or ())
+        if rows and rows[0].ref == ref:
+            return _fold(rows[0].connector_type)
+        return None
+
+    def first0_refblind(symbols, ref):
+        rows = tuple(symbols.symbols or ())
+        return _fold(rows[0].connector_type) if rows else None
+
+    def single_symbol_only(symbols, ref):
+        rows = tuple(symbols.symbols or ())
+        if len(rows) > 1:
+            return None
+        return next((_fold(r.connector_type) for r in rows if r.ref == ref), None)
+
+    def wrong_loop_var(symbols, ref):
+        rows = tuple(symbols.symbols or ())
+        for row in rows:
+            if row.ref == ref:
+                return _fold(rows[0].connector_type)
+        return None
+
+    def listener_anywhere(symbols, ref):
+        rows = tuple(symbols.symbols or ())
+        if not any(r.ref == ref for r in rows):
+            return None
+        for row in rows:
+            folded = _fold(row.connector_type)
+            if folded in listener:
+                return folded
+        return next((_fold(r.connector_type) for r in rows if r.ref == ref), None)
+
+    return {
+        "first0-refchecked": first0_refchecked,
+        "first0-refblind": first0_refblind,
+        "single-symbol-only": single_symbol_only,
+        "wrong-loop-var": wrong_loop_var,
+        "listener-anywhere": listener_anywhere,
+    }
+
+
+def test_the_served_revision_binds_multi_symbol_family_lookup():
+    """§6 AR5-01: every probe passed at most ONE symbol; the rule searches a table.
+
+    The reviewer found the blind spot and then read it in the harmless direction
+    — real=listener flipping to scheduled, which needs a graph lowering refuses.
+    Three independent verifications took the other direction and all three built
+    a request that COMPILES today and is materialized WRONG: a correctly-
+    scheduled process stamped with listener `<process>` bytes. It needs no
+    listener entry at all, only a listener-family symbol somewhere in the table
+    — and `build_symbol_table` puts every component of the spec in one table —
+    plus a lookup that answers from the wrong row. The apply-time re-derive
+    cannot catch it, because it calls the same function.
+
+    Asserted on `_compiler_revision()`, the SERVED value, not on the oracle
+    helper: what a caller binds to is the revision.
+    """
+    import boomi_mcp.compiler.process_ir.execution_profile as ep
+    from boomi_mcp.authoring.contract import _compiler_revision
+
+    baseline = _compiler_revision()
+    original = ep._operation_connector_family
+    mutants = _family_lookup_mutants(ep)
+
+    survived = []
+    try:
+        for name, mutant in mutants.items():
+            ep._operation_connector_family = mutant
+            if _compiler_revision() == baseline:
+                survived.append(name)
+    finally:
+        ep._operation_connector_family = original
+    assert survived == [], (
+        "the served revision is blind to these lookup regressions: %s" % survived
+    )
+    assert _compiler_revision() == baseline
+
+    # CONTROL 1 — EQUIVALENCE. A semantically identical, order-independent
+    # reimplementation must leave the revision byte-identical, or the new rows
+    # are pinning an implementation shape rather than behaviour and every
+    # unrelated refactor would break a caller's binding.
+    def _by_index(symbols, ref):
+        index = {
+            row.ref: row.connector_type for row in (symbols.symbols or ())
+        }
+        value = index.get(ref)
+        return value.strip().lower() if isinstance(value, str) else None
+
+    try:
+        ep._operation_connector_family = _by_index
+        assert _compiler_revision() == baseline, (
+            "an equivalent lookup moved the served revision"
+        )
+    finally:
+        ep._operation_connector_family = original
+
+    # CONTROL 2 — the mutants really are invisible to a ONE-SYMBOL case set, so
+    # "the shipped oracle could not see them" is measured rather than asserted.
+    #
+    # FOUR of the five, not all five. `first0-refblind` ignores the reference
+    # entirely, so it already differs on a one-symbol table whose symbol does
+    # not match — which is exactly why the shipped case set already caught it,
+    # and the kill above asserts that detection is RETAINED rather than newly
+    # gained. Writing this control over all five was the first draft, and it
+    # failed on that mutant: the claim was broader than the fact. Scoped here to
+    # the four whose invisibility is the finding.
+    class _Row:
+        def __init__(self, ref, connector_type):
+            self.ref = ref
+            self.connector_type = connector_type
+
+    class _Table:
+        def __init__(self, rows):
+            self.symbols = tuple(rows)
+
+    single = [_Table(()), _Table((_Row("$ref:op", "database"),)),
+              _Table((_Row("$ref:op", sorted(ep.LISTENER_CONNECTOR_TYPES)[0]),)),
+              _Table((_Row("$ref:other", "database"),))]
+    invisible = {k: v for k, v in mutants.items() if k != "first0-refblind"}
+    assert len(invisible) == 4, sorted(invisible)
+    for name, mutant in invisible.items():
+        for table in single:
+            for ref in ("$ref:op", "$ref:missing"):
+                assert mutant(table, ref) == original(table, ref), (name, ref)
+    # ...and the excluded one is excluded for a MEASURED reason, not by taste:
+    # it differs from the real function on a one-symbol table.
+    mismatch = [
+        (tuple((r.ref, r.connector_type) for r in t.symbols), ref)
+        for t in single
+        for ref in ("$ref:op", "$ref:missing")
+        if mutants["first0-refblind"](t, ref) != original(t, ref)
+    ]
+    assert mismatch, "first0-refblind is invisible to single-symbol tables after all"
+
+
+def test_the_profile_case_set_keeps_both_arities_and_both_directions():
+    """The structural guard, so a future row cannot re-open AR5-01 silently.
+
+    Padding two rows fixes today's case set; it does not stop the next edit from
+    reverting to a one-symbol-only probe set, which is how this defect arrived.
+    So the property is asserted over the case set itself, derived from the rows
+    that actually reach the lookup rather than from a list written here:
+
+      * both arities stay represented — at least one single-symbol probe and at
+        least one multi-symbol probe;
+      * BOTH expected directions carry a multi-symbol table — a row whose value
+        is `scheduled` and a row whose value is `listener` — because a mutant
+        that flips only one direction is invisible to a case set that only
+        exercises the other;
+      * in every multi-symbol table the referenced symbol is not alone, and at
+        least one decoy carries the opposite family class from the row's own
+        answer, since a decoy of the same class discriminates nothing.
+    """
+    import boomi_mcp.compiler.process_ir.execution_profile as ep
+    from boomi_mcp.authoring import contract as ct
+
+    seen = []
+    original = ep._operation_connector_family
+
+    def _recording(symbols, ref):
+        rows = tuple(symbols.symbols or ())
+        seen.append((tuple((r.ref, r.connector_type) for r in rows), ref))
+        return original(symbols, ref)
+
+    try:
+        ep._operation_connector_family = _recording
+        oracle = ct._execution_profile_behaviour_oracle()
+    finally:
+        ep._operation_connector_family = original
+
+    assert seen, "no probe reached the family lookup at all"
+    arities = {len(rows) for rows, _ref in seen}
+    assert any(a == 1 for a in arities), sorted(arities)
+    assert any(a > 1 for a in arities), sorted(arities)
+
+    listener_families = {f.strip().lower() for f in ep.LISTENER_CONNECTOR_TYPES}
+
+    def _is_listener(value):
+        return isinstance(value, str) and value.strip().lower() in listener_families
+
+    multi = [(rows, ref) for rows, ref in seen if len(rows) > 1]
+    directions = set()
+    for rows, ref in multi:
+        referenced = next((t for r, t in rows if r == ref), None)
+        answer = "listener" if _is_listener(referenced) else "scheduled"
+        decoys = [t for r, t in rows if r != ref]
+        assert decoys, (rows, ref)
+        # ...and at least one decoy is of the opposite class from the answer.
+        assert any(_is_listener(t) != _is_listener(referenced) for t in decoys), (
+            "a multi-symbol probe carries only same-class decoys, which "
+            "discriminate nothing: %r" % (rows,)
+        )
+        directions.add(answer)
+    assert directions == {"listener", "scheduled"}, sorted(directions)
+
+    # ...and the rows' VALUES are what the directions above claim, so this guard
+    # cannot pass over a case set whose answers have silently changed.
+    assert oracle["cases"]["non-listener-family"] == "scheduled"

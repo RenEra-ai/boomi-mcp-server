@@ -1118,9 +1118,34 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
             _connector(listener_role, "$ref:missing"),
             [_symbol("$ref:op", families[0] if families else "http")],
         ),
+        # THE ONLY ROW THAT CAN PIN THE scheduled -> listener DIRECTION, and the
+        # only reason it can is the decoys (§6 AR5-01). The entry's reference
+        # resolves here and the answer is `scheduled`, so a lookup that answers
+        # from the WRONG ROW — a `symbols[0]` refactor, a wrong loop variable, or
+        # "any listener family anywhere in the table" — flips this row and only
+        # this row. Every other row passes at most one symbol, which is why the
+        # whole case set was byte-identical under three such mutants.
+        #
+        # Real tables are never one symbol: `build_symbol_table` projects every
+        # component of the spec into one table sorted by `$ref:KEY`, so a
+        # listener-family operation used anywhere in a request that COMPILES
+        # sits in the same table as the entry's operation, at a caller-chosen
+        # index. That is the reachable damage — a correctly-scheduled process
+        # stamped with listener `<process>` bytes — and the apply-time re-derive
+        # cannot catch it because it calls the same function.
+        #
+        # The decoy refs match nothing, so this row's VALUE is unchanged and the
+        # served revision does NOT rotate: detection is added at zero cost to
+        # every outstanding caller binding. Decoys sit on BOTH sides of the
+        # referenced symbol so neither "take the first" nor "take the last"
+        # passes.
         "non-listener-family": _classify(
             _connector(listener_role, "$ref:op"),
-            [_symbol("$ref:op", "database")],
+            [
+                _symbol("$ref:a-decoy", families[0] if families else "http"),
+                _symbol("$ref:op", "database"),
+                _symbol("$ref:z-decoy", families[0] if families else "http"),
+            ],
         ),
     })
     # The `connector` rows, per family and per role. The ROLES come from
@@ -1137,10 +1162,18 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
             cases["connector-%s-%s" % (role, family)] = _classify(
                 _connector(role, "$ref:op"), symbols
             )
-            # ...and the same family spelled the way the rule has to normalize it.
+            # ...and the same family spelled the way the rule has to normalize
+            # it. This twin carries the multi-symbol table for the OTHER
+            # direction (listener -> scheduled): a lookup that stops at the
+            # first symbol, or refuses a table of more than one, answers
+            # `scheduled` here. Its plain sibling above stays single-symbol on
+            # purpose, so both arities remain represented in the case set.
             cases["connector-%s-unnormalized-%s" % (role, family)] = _classify(
                 _connector(role, "$ref:op"),
-                [_symbol("$ref:op", "  " + family.upper() + "  ")],
+                [
+                    _symbol("$ref:a-decoy", "database"),
+                    _symbol("$ref:op", "  " + family.upper() + "  "),
+                ],
             )
     return {
         "profiles": sorted({module.SCHEDULED, module.LISTENER}),
