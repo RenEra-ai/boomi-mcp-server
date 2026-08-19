@@ -381,6 +381,7 @@ batches as a side effect. The affected SHA per batch:
 | `CX29-01`, `CX29-02` | `d0cd4a8` |
 | `CX30-01`, `CX30-02` | `b236e0e` |
 | `CX31-01`, `CX31-02` | `bcd19dd` |
+| `CX32-01` (refutation, no code change) | `06394bf` |
 
 Every other row in this ledger records its SHA in the row itself, as it should;
 only a row that must name the commit containing it hits this, and the
