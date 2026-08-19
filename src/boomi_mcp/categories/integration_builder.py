@@ -7479,12 +7479,25 @@ def _named_error_code_from_validation(exc) -> Optional[str]:
     what is refused.
     """
     errors = getattr(exc, "errors", None)
-    if not callable(errors):
-        return None
-    try:
-        rows = errors()
-    except Exception:  # noqa: BLE001 — a diagnostic must not raise
-        return None
+    rows = None
+    if callable(errors):
+        try:
+            rows = errors()
+        except Exception:  # noqa: BLE001 — a diagnostic must not raise
+            rows = None
+    if rows is None:
+        # A BARE `PydanticCustomError` — raised by a plan-model rule OUTSIDE a
+        # validation context, so it carries no `.errors()` for the walk below.
+        # Its `type` is the same string the map is keyed on, so the one map
+        # still decides; only the way in differs.
+        #
+        # QA-153-r17-02: this lived in the apply route alone (added there for
+        # QA-153-r15-02), so the map had two readers that disagreed about the
+        # bare form — the same shape QA-153-r14-01 found when the location rule
+        # was added to one reader and not the other. It belongs in the shared
+        # resolver, which is what makes "one map, consulted everywhere" true by
+        # construction rather than by everyone remembering.
+        return _NAMED_VALIDATION_CODES.get(str(getattr(exc, "type", "")))
     # ONE resolver for the shared map, not two (QA-153-r14-01). The location
     # rule that reserves the component reference code for the component's own
     # paths was added to the typed-request reader and NOT to this one — which
@@ -7688,16 +7701,12 @@ def _canonical_plan_failure(exc) -> Tuple[str, Optional[str]]:
         code = getattr(diagnostic, "code", None)
         if code:
             return str(code), getattr(diagnostic, "path", None) or None
+    # Both the validation-context form and the BARE `PydanticCustomError` form
+    # are resolved by the one resolver now (QA-153-r17-02); the second lookup
+    # that used to sit here was this route's private copy of that rule.
     named = _named_error_code_from_validation(exc)
     if named:
         return named, None
-    # A BARE `PydanticCustomError` — raised by a plan-model rule outside a
-    # pydantic validation context, so it carries no `.errors()` for the map
-    # above to read (QA-153-r15-02). Its `type` is the same string the map is
-    # keyed on, so the one map still decides; only the way in differs.
-    bare = _NAMED_VALIDATION_CODES.get(str(getattr(exc, "type", "")))
-    if bare:
-        return bare, None
     return PROCESS_MATERIALIZATION_INTERNAL_ERROR, None
 
 

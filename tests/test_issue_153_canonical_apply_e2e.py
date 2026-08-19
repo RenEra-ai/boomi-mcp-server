@@ -4698,3 +4698,43 @@ def test_a_plan_model_refusal_reaches_the_caller_with_its_own_code():
     # 3. ...and an unrecognised failure still reports the type name, so this
     #    widened what is NAMED without changing any pre-existing envelope.
     assert _cause_codes_for(RuntimeError("nothing registered")) == ("RuntimeError",)
+
+
+def test_every_reader_of_the_named_code_map_resolves_a_bare_custom_error():
+    """QA-153-r17-02: the map had two readers and they disagreed again.
+
+    A plan-model rule raising `PydanticCustomError` OUTSIDE a validation context
+    carries no `.errors()`, so the map's normal walk finds nothing. The apply
+    route grew a private lookup for that form (QA-153-r15-02); the compile
+    wrapper added this round did not — which is the same divergence QA-153-r14-01
+    found when the location rule was added to one reader and not the other.
+
+    The rule now lives in the shared resolver, so this asserts every reader
+    agrees rather than asserting the resolver works: a fix that added a third
+    private copy would pass a resolver-only test and fail this one.
+    """
+    from pydantic_core import PydanticCustomError
+
+    from boomi_mcp.authoring.workflow import _cause_codes_for
+    from boomi_mcp.categories.integration_builder import (
+        _named_error_code_from_validation,
+        _canonical_plan_failure,
+    )
+    from boomi_mcp.errors import PROCESS_MATERIALIZATION_PLAN_INVALID
+
+    bare = PydanticCustomError(
+        "process_materialization_plan_invalid", "raised outside a validation"
+    )
+
+    # reader 1 — the shared resolver itself
+    assert _named_error_code_from_validation(bare) == PROCESS_MATERIALIZATION_PLAN_INVALID
+    # reader 2 — the apply route
+    assert _canonical_plan_failure(bare)[0] == PROCESS_MATERIALIZATION_PLAN_INVALID
+    # reader 3 — the compile wrapper
+    assert _cause_codes_for(bare) == (PROCESS_MATERIALIZATION_PLAN_INVALID,)
+
+    # ...and an UNREGISTERED bare error is still not named by any of them, so
+    # this widened what is resolved and not what is claimed.
+    stranger = PydanticCustomError("no_such_registered_type", "unknown")
+    assert _named_error_code_from_validation(stranger) is None
+    assert _cause_codes_for(stranger) == ("PydanticCustomError",)
