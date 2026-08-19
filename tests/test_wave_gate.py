@@ -2158,22 +2158,22 @@ def test_a_lowered_source_severity_always_names_its_refutation():
     finding (P0/P1/Critical/High) becomes Standard only via a documented
     severity-specific technical refutation.
 
-    Nine corrections across four review rounds went into this guard, and the
-    shape of every one was the same: it hand-modelled the document instead of
-    reading it. It now derives what it needs:
+    Twelve corrections across five review rounds went into this guard, and every
+    one had the same shape — it modelled the document instead of reading it. The
+    version that holds reads the table IN DOCUMENT ORDER, carrying the header
+    that is actually in force, and compares its coverage by row ID rather than
+    by a count:
 
-    * COLUMNS come from each table's own HEADER row, not from fixed offsets.
-      #153 has nine columns and #152 seven, so an offset that found the label in
-      one found the blocking class in the other and scanned none of its rows.
-    * Rows split on UNESCAPED pipes only — an escaped `\\|` inside a summary
-      (the S3-04 row has one) shifted every column after it.
-    * A refutation is recognized by an AFFIRMATIVE marker the ledger actually
-      uses, never by filtering negations: "severity refutation is missing" and
-      "not refuted" both contain the fragment and deny the mechanism.
-    * COVERAGE is compared against an independently derived count, so a parse
-      that silently drops every row fails instead of passing with nothing
-      scanned. Zero is legal when a ledger genuinely has no source-critical
-      row; zero when another derivation says otherwise is not.
+    * COLUMNS come from the header currently in force, tracked as the file is
+      walked. Selecting a header by column WIDTH mis-read a ledger with two
+      same-width tables in different orders.
+    * Rows split on UNESCAPED pipes only.
+    * A refutation must be an affirmative marker AND not be negated: `not
+      severity-refuted` and `no documented severity-specific refutation` both
+      contain the marker and deny it.
+    * COVERAGE compares the exact set of row IDs the column map classified as
+      source-critical against the set an independent, column-free scan finds —
+      so a parse that drops one row fails, not just one that drops all of them.
     """
     import re as _re
 
@@ -2181,16 +2181,22 @@ def test_a_lowered_source_severity_always_names_its_refutation():
     assert ledgers, "no ledgers found — this check would be vacuous"
 
     critical_label = _re.compile(r"\b(P0|P1|Critical|High)\b", _re.I)
-    # The two positive markers this repo's ledgers use. Not a negation filter:
-    # a denial cannot satisfy either, because neither can be written by accident.
-    affirmative = _re.compile(
+    marker = _re.compile(
         r"\*{0,2}severity[-\s]refuted\*{0,2}|documented\s+severity[-\s]\w*\s*refutation",
         _re.I,
     )
+    #: A negator anywhere in the clause that introduces the marker disqualifies
+    #: it. Bounded to the clause, so a later sentence saying "no other anchor
+    #: applies" cannot cancel a refutation stated earlier.
+    negated = _re.compile(
+        r"\b(no|not|without|lacking|absent|missing|never)\b[^.;]{0,80}?"
+        r"(severity[-\s]refuted|refutation)",
+        _re.I,
+    )
     tier_claim = _re.compile(r"\**\s*(Critical|Standard|severity[-\s]refuted)", _re.I)
+    is_critical_tier = _re.compile(r"\**Critical\**\s*(—|-|$)", _re.I)
 
     def _split(line):
-        """Cells of a Markdown row, honouring escaped pipes."""
         parts = _re.split(r"(?<!\\)\|", line)
         parts = [part.replace("\\|", "|").strip() for part in parts]
         while parts and not parts[0]:
@@ -2199,25 +2205,18 @@ def test_a_lowered_source_severity_always_names_its_refutation():
             parts.pop()
         return parts
 
-    def _column_map(text):
-        """Header-derived positions for the columns this rule reads.
+    def _header_map(cells):
+        """(label, tier) positions if this row is a finding-table header."""
+        lowered = [c.lower() for c in cells]
+        if not lowered or lowered[0] != "id":
+            return None
+        label = next((i for i, c in enumerate(lowered) if "label" in c), None)
+        tier = next((i for i, c in enumerate(lowered)
+                     if c.startswith("tier") or "derived tier" in c), None)
+        return (label, tier) if label is not None and tier is not None else None
 
-        Returned per HEADER, because one ledger may carry several finding
-        tables and #152 repeats its header for each round.
-        """
-        maps = []
-        for line in text.splitlines():
-            if not line.startswith("| ") or "|" not in line[2:]:
-                continue
-            cells = [c.lower() for c in _split(line)]
-            if "id" not in cells[:1]:
-                continue
-            label = next((i for i, c in enumerate(cells) if "label" in c), None)
-            tier = next((i for i, c in enumerate(cells) if c.startswith("tier")
-                         or "derived tier" in c), None)
-            if label is not None and tier is not None:
-                maps.append((label, tier, len(cells)))
-        return maps
+    def _accepts(tier):
+        return bool(marker.search(tier)) and not negated.search(tier)
 
     offenders = []
     for path in ledgers:
@@ -2225,66 +2224,74 @@ def test_a_lowered_source_severity_always_names_its_refutation():
         if "filled at close" not in text:
             continue  # a closed slice's record is frozen; this rule binds work in flight
 
-        rows = _finding_rows(text)
-        column_maps = _column_map(text)
-        assert column_maps, (
-            "%s: no finding-table header found — the column positions this rule "
-            "reads cannot be derived, so it must fail rather than scan nothing"
-            % path.name
-        )
-
+        known_rows = _finding_rows(text)
         block = _re.search(r"\*\*Supersession map\*\*(.+?)(?:\n\n|\n\*|\Z)", text, _re.S)
         supersedes = dict(_re.findall(r"`([^`]+?) → ([^`]+?)`", block.group(1))) if block else {}
         revisions = {}
         for newer, older in supersedes.items():
             revisions.setdefault(older, []).append(newer)
 
-        def _cells_for(line):
-            """The (label, tier) pair, using the header map whose width matches."""
+        # ONE walk, in document order, carrying the header in force.
+        parsed = {}
+        active = None
+        headers_seen = 0
+        for line in text.splitlines():
+            if not line.startswith("| "):
+                active = None if line.strip() == "" else active
+                continue
             cells = _split(line)
-            for label_at, tier_at, width in column_maps:
-                if len(cells) == width:
-                    return cells[label_at], cells[tier_at]
-            return None, None
+            header = _header_map(cells)
+            if header is not None:
+                active, headers_seen = header, headers_seen + 1
+                continue
+            if active is None:
+                continue
+            label_at, tier_at = active
+            if max(label_at, tier_at) >= len(cells):
+                continue
+            row_id = cells[0].strip("*").strip()
+            if row_id in known_rows:
+                parsed[row_id] = (cells[label_at], cells[tier_at])
+        assert headers_seen, (
+            "%s: no finding-table header found — the columns this rule reads "
+            "cannot be derived, so it fails rather than scanning nothing" % path.name
+        )
 
         def _effective_tier(row_id, seen=None):
             seen = seen or set()
             for newer in revisions.get(row_id, ()):
-                if newer in seen or newer not in rows:
+                if newer in seen or newer not in parsed:
                     continue
                 seen.add(newer)
                 deeper = _effective_tier(newer, seen)
-                # A revision governs the tier only if it MAKES a tier claim;
-                # most correct a disposition and defer explicitly.
                 if deeper and tier_claim.match(deeper):
                     return deeper
-            line = rows.get(row_id)
-            return _cells_for(line)[1] if line else None
+            entry = parsed.get(row_id)
+            return entry[1] if entry else None
 
-        scanned = 0
-        for row_id, line in rows.items():
-            label, _ = _cells_for(line)
-            if label is None or not critical_label.search(label):
-                continue
-            scanned += 1
+        scanned = {rid for rid, (label, _) in parsed.items()
+                   if critical_label.search(label)}
+        for row_id in sorted(scanned):
             tier = _effective_tier(row_id) or ""
-            if _re.match(r"\**Critical\**\s*(—|-|$)", tier, _re.I):
+            if is_critical_tier.match(tier):
                 continue
-            if affirmative.search(tier):
+            if _accepts(tier):
                 continue
-            offenders.append((path.name, row_id, label[:24]))
+            offenders.append((path.name, row_id, parsed[row_id][0][:24]))
 
-        # COVERAGE, derived a second way: count the rows whose LINE carries a
-        # critical-shaped label anywhere, which needs no column map at all. The
-        # scan must reach the same order of magnitude; zero scanned while the
-        # independent count is non-zero means the parse dropped everything.
-        independent = sum(
-            1 for line in rows.values() if critical_label.search(line)
-        )
-        assert not (independent and scanned == 0), (
-            "%s: %d rows carry a critical-shaped label but the column-derived "
-            "scan examined none — the parse dropped every row"
-            % (path.name, independent)
+        # COVERAGE by ID SET, derived without the column map: a row whose FIRST
+        # cell after the id looks like a source label. Compared exactly, so one
+        # dropped row fails as loudly as all of them.
+        independent = set()
+        for row_id, line in known_rows.items():
+            cells = _split(line)
+            if any(critical_label.fullmatch(_re.sub(r"[*_`]|\(source label\)", "", c).strip())
+                   for c in cells):
+                independent.add(row_id)
+        missed = sorted(independent - scanned)
+        assert not missed, (
+            "%s: rows carry a bare source-critical label that the column-derived "
+            "scan did not classify: %r" % (path.name, missed)
         )
 
     assert offenders == [], (
