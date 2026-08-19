@@ -1303,6 +1303,26 @@ by locating each table within its own `## 11.x` section AND by header identity, 
 of every block printed before and after. Recorded because the failure mode is silent — a
 regeneration that overwrites the wrong table still produces a document that parses.
 
+**The CX44-01 sibling sweep, and one claim it caught me making.** The structural-fix rule
+requires enumerating and fixing every sibling instance of the mechanism, so after CX44-01 the oracle
+was re-read for any REMAINING hand-typed field literal. Three were left: the per-family connector
+rows spelled `"source"`/`"target"` directly, and the three fixed discriminants spelled `"source"`.
+Those spellings were correct — but a literal beside a schema that declares it is the same defect
+whether or not today's spelling happens to be right, which is the whole point of the class. All of
+them now read `ConnectorSemanticV1`'s own role options, and the per-family rows cover every admitted
+role rather than the two that were typed.
+
+Writing that fix, I claimed in `_listener_role()`'s docstring that taking the schema's first option
+"keeps the discriminant rows aligned … the case that would otherwise turn three discriminants into
+three inert rows." The mutation control disagreed: pointing `_listener_role()` at the OTHER role left
+every assertion in the witness green. The claim was true and the witness could not see it — the three
+discriminants all report `scheduled`, and so does a connector row in the non-listener role, so a
+discriminant carrying the wrong role is scheduled for the wrong reason while looking identical in the
+output. The witness now asserts that the role those rows carry is the one the derivation actually
+classifies as `listener`, which is the property the docstring was asserting in prose. Both mutants
+die. This is the fourth time in this slice that a mutation control has caught a claim the test could
+not support, and every one of them was in a claim I had just written.
+
 ## Deferrals
 
 Pointer-only — reason class, placement, and lineage live on the finding row and in the filed issue.

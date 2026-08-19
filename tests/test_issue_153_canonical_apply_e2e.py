@@ -4063,10 +4063,33 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
     # the mutant below for the wrong reason.
     assert oracle != "unavailable" and oracle["cases"], oracle
     assert set(oracle["cases"].values()) == {"scheduled", "listener"}, oracle
-    per_family = {k for k in oracle["cases"] if k.startswith("source-") and
-                  k[len("source-"):] in ep.LISTENER_CONNECTOR_TYPES}
-    assert len(per_family) == len(ep.LISTENER_CONNECTOR_TYPES), sorted(per_family)
-    assert all(oracle["cases"][k] == "listener" for k in per_family)
+    from boomi_mcp.authoring.contract import _connector_member, _literal_options
+
+    connector_roles = _literal_options(_connector_member(), "role")
+    assert len(connector_roles) >= 2, connector_roles
+    for role in connector_roles:
+        rows = {k for k in oracle["cases"]
+                if k.startswith("connector-%s-" % role)
+                and k[len("connector-%s-" % role):] in ep.LISTENER_CONNECTOR_TYPES}
+        assert len(rows) == len(ep.LISTENER_CONNECTOR_TYPES), (role, sorted(rows))
+    # ...and the two roles disagree, or the role test is not covered at all.
+    listener_role, other_role = connector_roles[0], connector_roles[1]
+    family = sorted(ep.LISTENER_CONNECTOR_TYPES)[0]
+    assert oracle["cases"]["connector-%s-%s" % (listener_role, family)] == "listener"
+    assert oracle["cases"]["connector-%s-%s" % (other_role, family)] == "scheduled"
+
+    # THE THREE DISCRIMINANTS MUST BE SCHEDULED FOR THEIR OWN REASON. They all
+    # report "scheduled", and so does a connector row in the non-listener role —
+    # so a discriminant carrying the wrong role is scheduled for the WRONG reason
+    # and probes nothing, while looking identical in the output. That is not a
+    # hypothetical: pointing `_listener_role()` at the other role left every
+    # assertion above green. The role the discriminants carry must therefore be
+    # the one the derivation actually classifies as listener, asserted directly.
+    from boomi_mcp.authoring.contract import _listener_role
+
+    assert (
+        oracle["cases"]["connector-%s-%s" % (_listener_role(), family)] == "listener"
+    ), _listener_role()
 
     # ...and EVERY entry kind the schema admits is exercised, derived from the
     # schema on both sides so the check cannot pass by agreeing with itself

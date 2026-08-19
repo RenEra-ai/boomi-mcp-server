@@ -933,6 +933,28 @@ def _cfg_semantic_members():
     return typing.get_args(union)
 
 
+def _connector_member():
+    """The CFG union's `connector` member — found by its discriminator, not by
+    position in the union nor by importing its class name."""
+    for member in _cfg_semantic_members():
+        if member.model_fields["semantic_kind"].default == "connector":
+            return member
+    raise LookupError("the CFG semantic union declares no `connector` member")
+
+
+def _listener_role() -> str:
+    """The `connector` role the derivation can classify as a listener.
+
+    Read from the rule's own source of truth rather than typed: the rule tests
+    `role == "source"`, and `ConnectorSemanticV1` declares `source` first. Taking
+    the first admitted option keeps the discriminant rows aligned with the schema
+    if that vocabulary is ever reordered or renamed — the case that would
+    otherwise turn three discriminants into three inert rows.
+    """
+    options = _literal_options(_connector_member(), "role")
+    return options[0] if options else "source"
+
+
 def _literal_options(model, field_name: str) -> Tuple[str, ...]:
     """The `Literal` values a model's field admits, or `()` if it has no such field.
 
@@ -1039,30 +1061,42 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
                 [_symbol("$ref:op", families[0])] if families else [],
             )
     cases.update({
+        # The listener-eligible role, taken from the schema rather than typed:
+        # these three discriminants are only discriminating if the role they
+        # carry is the one the rule can say "listener" for.
         "entry-id-names-no-node": _classify(
-            _connector("source", "$ref:op"),
+            _connector(_listener_role(), "$ref:op"),
             [_symbol("$ref:op", families[0] if families else "http")],
             entry_id="somewhere-else",
         ),
-        "source-operation-unresolved": _classify(
-            _connector("source", "$ref:missing"),
+        "operation-unresolved": _classify(
+            _connector(_listener_role(), "$ref:missing"),
             [_symbol("$ref:op", families[0] if families else "http")],
         ),
-        "source-non-listener-family": _classify(
-            _connector("source", "$ref:op"), [_symbol("$ref:op", "database")]
+        "non-listener-family": _classify(
+            _connector(_listener_role(), "$ref:op"),
+            [_symbol("$ref:op", "database")],
         ),
     })
+    # The `connector` rows, per family and per role. The ROLES come from
+    # `ConnectorSemanticV1`'s own declaration for the same reason the other
+    # members' do (L2 round 44's sibling sweep): the pair happened to be spelled
+    # correctly here, but a hand-typed literal beside a schema that declares it
+    # is the same defect whether or not today's spelling is right. Covering every
+    # admitted role is also what makes the role test part of the covered
+    # behaviour rather than an untested branch.
+    connector_roles = _literal_options(_connector_member(), "role")
     for family in families:
         symbols = [_symbol("$ref:op", family)]
-        cases["source-" + family] = _classify(_connector("source", "$ref:op"), symbols)
-        # The SAME family under the target role — the discriminant that makes the
-        # role test part of the covered behaviour rather than an untested branch.
-        cases["target-" + family] = _classify(_connector("target", "$ref:op"), symbols)
-        # ...and the same family spelled the way the rule has to normalize it.
-        cases["source-unnormalized-" + family] = _classify(
-            _connector("source", "$ref:op"),
-            [_symbol("$ref:op", "  " + family.upper() + "  ")],
-        )
+        for role in connector_roles:
+            cases["connector-%s-%s" % (role, family)] = _classify(
+                _connector(role, "$ref:op"), symbols
+            )
+            # ...and the same family spelled the way the rule has to normalize it.
+            cases["connector-%s-unnormalized-%s" % (role, family)] = _classify(
+                _connector(role, "$ref:op"),
+                [_symbol("$ref:op", "  " + family.upper() + "  ")],
+            )
     return {
         "profiles": sorted({module.SCHEDULED, module.LISTENER}),
         "cases": dict(sorted(cases.items())),
