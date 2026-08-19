@@ -93,6 +93,14 @@ def test_exactly_the_intended_codes_advertise_a_retry():
         # Its sibling PUSH_FAILED is deliberately NOT here: the merged document
         # was submitted, so a write may already have landed.
         "UPDATE_PRESERVATION_FETCH_FAILED",
+        # The apply's post-write FINALIZATION failed on a run whose every root
+        # was reused (#153, Codex round 24). The retry is safe on the same
+        # evidence the envelope serves: the steps' own statuses prove no write
+        # was attempted, which is why this code is reachable only on the
+        # no-write escape. The mid-write escape deliberately carries no code —
+        # there the outcome is unknown, and advertising a retry would be the
+        # exact defect this code was registered to remove.
+        "PROCESS_MATERIALIZATION_FINALIZATION_FAILED",
     }, sorted(retryable)
 
 
@@ -745,4 +753,11 @@ def test_issue_153_codes_carry_distinct_registered_categories():
     }, sorted(categories)
     for code, spec in owned.items():
         assert spec.summary.strip(), code
-        assert spec.retryable is False, code
+    # #153's codes are non-retryable with ONE registered exception: a post-write
+    # finalization failure on a run that mutated nothing (Codex round 24).
+    # Asserted as the exact retryable SET rather than by relaxing the per-code
+    # rule, so a second retryable code cannot slip in under it — the family's
+    # default is still "do not retry", and the exception has to be named.
+    assert {code for code, spec in owned.items() if spec.retryable} == {
+        "PROCESS_MATERIALIZATION_FINALIZATION_FAILED"
+    }, sorted(code for code, spec in owned.items() if spec.retryable)

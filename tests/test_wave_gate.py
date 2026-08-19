@@ -1874,6 +1874,9 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "PLAN_INVALID",
     "PROCESS_MATERIALIZATION_INTERNAL_ERROR",
     "PROCESS_MATERIALIZATION_PLAN_INVALID",
+    # Registered by #153 at Codex round 24; that row's whole subject is WHICH
+    # code a finalizer failure serves, so it has to name it.
+    "PROCESS_MATERIALIZATION_FINALIZATION_FAILED",
 })
 
 

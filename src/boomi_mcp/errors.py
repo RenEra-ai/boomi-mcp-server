@@ -426,6 +426,13 @@ PROCESS_MATERIALIZATION_RESULT_ID_MISSING = "PROCESS_MATERIALIZATION_RESULT_ID_M
 #: wrong. A code that blames the server is the honest one, and it keeps
 #: ``PLAN_INVALID`` meaning what it says.
 PROCESS_MATERIALIZATION_INTERNAL_ERROR = "PROCESS_MATERIALIZATION_INTERNAL_ERROR"
+#: The apply's POST-WRITE finalization failed — recording the build, computing
+#: provenance, assembling the envelope. Distinct from the internal error above,
+#: which is about materializing a plan: by the time this fires the mutation
+#: decision is already made, and `mutation_status` reports it (Codex round 24).
+PROCESS_MATERIALIZATION_FINALIZATION_FAILED = (
+    "PROCESS_MATERIALIZATION_FINALIZATION_FAILED"
+)
 
 
 # --- Component update preservation (issue #45) ---------------------------------
@@ -1811,6 +1818,22 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             summary=(
                 "Materialization failed for a reason that is not a defect in the "
                 "caller's request; the server, not the plan, is at fault."
+            ),
+            owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_MATERIALIZATION_FINALIZATION_FAILED,
+            category="process_materialization",
+            # Served ONLY on the no-write path, where the steps' own statuses
+            # prove nothing was mutated — so the retry this code advertises is
+            # safe by the same evidence the envelope reports. The mid-write
+            # escape carries no code, exactly as before, because there the
+            # honest answer is that the outcome is unknown.
+            retryable=True,
+            summary=(
+                "The apply's post-write finalization failed after a run that "
+                "mutated nothing; every root was reused, so nothing was "
+                "created and the request may be retried."
             ),
             owner="#153",
         ),

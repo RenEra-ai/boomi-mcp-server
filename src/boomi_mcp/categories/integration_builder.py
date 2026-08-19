@@ -244,6 +244,7 @@ from ..errors import (
     PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT,
     PROCESS_COMPONENT_SCHEMA_INVALID,
     PROCESS_IR_REFERENCE_INVALID_FORMAT,
+    PROCESS_MATERIALIZATION_FINALIZATION_FAILED,
 )
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
@@ -9891,14 +9892,18 @@ def build_integration_action(
                 "The apply failed, but no step attempted a write: every root "
                 "was reused. Nothing was created, so a retry is safe."
             )
-            # ...and it carries the SAME code every other no-write typed
-            # failure carries (Codex round 23). `_decorate_typed_apply` applies
-            # that rule on the returned paths; this escape reaches
-            # `_decorate_refusal_route` instead, which does not — so a
-            # retry-safe failure arrived with no machine code at all. The rule
-            # is one line and its constant is the same one, rather than a
-            # second policy for the same fact.
-            envelope.setdefault("error_code", AUTHORING_APPLY_VALIDATION_REQUIRED)
+            # ...and it carries a machine code, because a retry-safe failure
+            # that clients cannot classify is not much better than none
+            # (Codex round 23). The code is this issue's own FINALIZATION
+            # failure, not the validation-required code borrowed in the first
+            # draft: that one is registered as a missing or unreproducible
+            # compile binding AND as non-retryable, so serving it beside a
+            # hint that says retrying is safe told code-based clients the
+            # opposite of the prose (Codex round 24). A named cause code, when
+            # the exception carries one, still wins — it is applied below.
+            envelope.setdefault(
+                "error_code", PROCESS_MATERIALIZATION_FINALIZATION_FAILED
+            )
             # ...and it carries the SAME code every other no-write typed
             # failure carries (Codex round 23). `_decorate_typed_apply` applies
             # that rule on the returned paths; this escape reaches

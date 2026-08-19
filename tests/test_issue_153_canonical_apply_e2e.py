@@ -3605,7 +3605,9 @@ def test_a_retry_safe_typed_failure_still_carries_a_machine_code():
     safely retry arrived unclassifiable.
     """
     from boomi_mcp.categories import integration_builder as ib
-    from boomi_mcp.errors import AUTHORING_APPLY_VALIDATION_REQUIRED
+    from boomi_mcp.errors import (
+        ERROR_TAXONOMY, PROCESS_MATERIALIZATION_FINALIZATION_FAILED,
+    )
 
     ib._BUILD_REGISTRY.clear()
     unit = process_unit()
@@ -3645,4 +3647,10 @@ def test_a_retry_safe_typed_failure_still_carries_a_machine_code():
 
     assert result["_success"] is False
     assert result["mutation_status"] == "none"
-    assert result["error_code"] == AUTHORING_APPLY_VALIDATION_REQUIRED, result
+    assert result["error_code"] == PROCESS_MATERIALIZATION_FINALIZATION_FAILED, result
+    # ...and the code's REGISTERED semantics must agree with the envelope's
+    # prose (Codex round 24): the first draft served a code registered as
+    # non-retryable beside a hint saying a retry is safe, so a code-based
+    # client and a human reading the same response drew opposite conclusions.
+    assert ERROR_TAXONOMY[result["error_code"]].retryable is True
+    assert "retry is safe" in result["hint"]

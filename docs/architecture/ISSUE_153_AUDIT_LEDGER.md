@@ -326,6 +326,7 @@ authority-derived coverage claim.
 | CX22-03 | same round | "Keep nested ProcessIR errors in the IR taxonomy … Pydantic emits `process_ir_reference_invalid_format`, but this global mapping now serves the process-component reference code. The ProcessIR authority maps that same type to its own reference code, so callers receive the wrong machine code; use the error location to reserve the component code for envelope/extension references." | **P2** | machine-served schemas/contracts | (a mapping keyed on a type two schemas share, decided without the location that distinguishes them) — introduced BY the AR2-07 fix; same shape as CX13-04/CX14-02's location predicate, now on the code side rather than the unknown-field side | Standard — in a blocking class, no critical anchor; source label P2 | PENDING-SHA | `fixed` — the component code is RESERVED for the component's own paths and an IR-located reference keeps the IR authority's code, decided by `_is_process_component_path`, which is now the ONE location classifier: the unknown-field rule consults the same function instead of carrying its own copy of the path test. That extraction is the point — two copies of a location rule are how two overlapping schemas get judged two ways, which is the defect this row records. Witness asserts both directions of the classifier and both served codes. |
 | CX23-01 | L2 Stage-2 Codex commit-review round 23, run dir `cdx-review.7i57sC`, `STATUS: completed`, `SCOPE: branch diff against 08d92413b6f4642f379fd0b1e7cc598a8941ea74 (08d9241) head=915cae64e0266fa5ba03ff9232d658d34f6f729f dirty=false` | "Suppress stale relocatability warnings for reuse … `_build_plan` still warns that a literal reference means "Apply refuses this before writing anything." This new early return instead skips validation and allows the apply to succeed, so plan and dry-run now publish a false refusal warning. Generate or filter that warning using the same planned-action decision." | **P2** | machine-served schemas/contracts | (two surfaces deciding the same question from different inputs — the preview from the request alone, the apply from the planned action) — introduced BY the CX22-02 fix, which changed one side of a rule the other side predicts | Standard — in a blocking class, no critical anchor; source label P2 | `915cae6` | `fixed` — the warning is emitted from inside the step-building loop, after `canonical_action` is decided, and suppressed for a root the apply will reuse. Plan and apply now read the SAME decision rather than two computations of it, which is what makes them unable to disagree. Witness asserts silence for a reusable root and the warning for the identical root with nothing to reuse; measured RED with the gate removed. |
 | CX23-02 | same round | "Emit an error code for no-write finalizer failures … the response now correctly reports `mutation_status="none"`, but this arm only replaces the hint. `_decorate_refusal_route` does not supply the code that `_decorate_typed_apply` adds to every other no-write failure, so the resulting retry-safe typed failure has no `error_code` and code-based clients cannot classify it." | **P2** | machine-served schemas/contracts | **DC-4** — a field required on every exit, absent on the exit that was newly reached; the CX22-01 fix created a no-write ESCAPE, a shape `_decorate_typed_apply`'s rule had never had to cover | Standard — in a blocking class, no critical anchor; source label P2 | `915cae6` | `fixed` — the escape sets the same validation-required constant `_decorate_typed_apply` sets for every other no-write typed failure, so the one failure a caller may safely retry is classifiable. The constant is shared, not a second policy for the same fact. Witness asserts the code on an all-reuse apply whose finalizer raised; measured RED with the line removed. |
+| CX24-01 | L2 Stage-2 Codex commit-review round 24, run dir `cdx-review.uymbJ0`, `STATUS: completed`, `SCOPE: branch diff against 915cae64e0266fa5ba03ff9232d658d34f6f729f (915cae6) head=bade0e718b0ef857ca9a5a08016b7f6338478602 dirty=false` | "Use a finalizer-failure code for finalizer crashes … The registered taxonomy defines that code as a missing or unreproducible compile binding and marks it non-retryable, while this response explicitly says retrying is safe; code-based clients will therefore apply the wrong remediation to a server-side finalizer fault. Preserve named cause codes and use an internal/finalization failure code for unnamed exceptions instead." | **P2** | machine-served schemas/contracts | (a served code chosen by convenience rather than from its registered spec, so the machine-readable half of a response contradicts its prose; authority: the code's own `ERROR_TAXONOMY` entry) — 1st instance; introduced BY the CX23-02 fix, which borrowed the nearest existing constant | Standard — in a blocking class, no critical anchor; source label P2 | `bade0e7` | `fixed` — a code is REGISTERED for what actually happened: `PROCESS_MATERIALIZATION_FINALIZATION_FAILED`, category `process_materialization`, owner #153, and `retryable: True` — the first #153 code that advertises a retry, which is legitimate here on the same evidence the envelope serves (the steps' own statuses prove no write was attempted, and the code is reachable only on that no-write escape). The mid-write escape still carries no code, because there the outcome is genuinely unknown and advertising a retry would be the very defect this row records. Named cause codes still win, applied after. The family test is tightened rather than relaxed: #153's codes remain non-retryable except for this one named member, asserted as an exact set so a second cannot slip in. Witness pins the agreement itself — the served code's REGISTERED `retryable` must match the envelope's retry-safe prose — which is the check whose absence let a contradictory pair ship. |
 
 **Supersession map** — `QA-153-r2-07a → QA-153-r2-07` · `QA-153-r6-01a → QA-153-r6-01` · `CX5-04a → CX5-04` · `CX6-01a → CX6-01` · `CX7-02a → CX7-02` · `CX8-01a → CX8-01` · `AR1-01a → AR1-01` · `AR1-02a → AR1-02` · `AR1-03a → AR1-03` · `AR1-04a → AR1-04` · `AR1-05a → AR1-05` · `AR1-06a → AR1-06` · `AR1-07a → AR1-07` · `AR1-08a → AR1-08` · `AR1-09a → AR1-09` · `AR1-10a → AR1-10`
 
@@ -900,6 +901,55 @@ action was named and finite.
 current tree (done: evaluation 2, ten findings, rows `AR2-01` … `AR2-10`), fix
 its validated findings in the batches recorded above, then the delta-scoped L2
 rounds those corrections owe, then the wave gate.
+
+### L2 checkpoint at evaluation 24 (window 3 of the post-evaluation-21 window) — `CONTINUE`
+
+Recorded after round 24's owed validation and BEFORE the next mutation.
+
+**Per-tier counts and breadth.** Round 24 returned ONE finding, source label P2,
+derived Standard, one blocking class (machine-served contracts). Zero critical
+residue in this loop.
+
+**Trend vector — nothing worsening, several materially better:**
+
+| Dimension | L2 r21 | r22 | r23 | r24 |
+| --- | --- | --- | --- | --- |
+| Findings | 0 | 3 | 2 | **1** |
+| Critical-tier | 0 | 1 | 0 | **0** |
+| Blocking classes touched | 0 | 3 | 1 | **1** |
+| Findings the PREVIOUS batch introduced | — | 2 of 3 | 2 of 2 | **1 of 1** |
+
+The last row is the honest one and it is why this is `CONTINUE` rather than
+`CLOSE-CLEAN`: rounds 22-24 are a correction loop finding its own residue. It IS
+converging — 3 → 2 → 1, critical → none, breadth 3 → 1 → 1 — and each successive
+finding is narrower than the last: round 22 found a mutation-accounting error,
+round 23 two contract omissions, round 24 a single code whose registered
+`retryable` contradicted its own envelope's prose. None is a defect in the
+capability; all four are defects in the seams the §6 corrections opened.
+
+**New / resolved / recurring defect classes** (from the rows, not free-typed).
+Recurring: CX22-02 is the 2nd instance of CX14-01's pair (a pre-pass validating
+an input the selected action never consumes) — discharged structurally by moving
+the non-writing skip to the pass. CX23-02 is a DC-4 instance on a newly-reachable
+exit. New: CX22-01, CX22-03, CX23-01 and CX24-01 each open a 1st-instance pair,
+every one of them introduced by the immediately-preceding fix; none is being
+instance-patched, and CX22-03's fix removed the second copy of the location rule
+rather than adding a third.
+
+**Ruling out the other outcomes.** `CLOSE-CLEAN` is unavailable: the round-24
+correction has not yet been reviewed, and neither the §6 gate nor the wave gate
+is current on this tree. `DEFER-STANDARD-AND-PROCEED` / `-AND-CLOSE` are legal
+in principle here (zero critical residue) but there is nothing worth deferring —
+the single residue was fixed in this batch, and deferring a fix already written
+would mint debt for no gain. `ESCALATE-OPEN` needs validation unavailable,
+severity unresolvable, or no credible next action; none holds — every round
+collected cleanly with archived evidence, and the next actions are named and
+finite.
+
+**Named finite next correction.** The round-24 fix is applied (a registered
+finalization code whose declared retryability matches its envelope). Next: the
+delta-scoped round 25 over it, then the §6 architect gate re-run on the current
+tree, then the composite wave gate, then closure.
 
 ## Deferrals
 
