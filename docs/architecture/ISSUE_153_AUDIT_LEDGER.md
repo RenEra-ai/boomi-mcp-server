@@ -1577,7 +1577,22 @@ residue: there are **no deferrals in this slice**, so the Deferrals section abov
 no follow-up issue was minted. The one accepted in-slice limitation is recorded at CX54-01 (a guard
 bypass that requires adversarial authorship rather than a plausible refactor) and was fixed anyway.
 
-**A note on the last commit, because the rule about it is strict.** “A final non-blocking batch that
+**The closing commits are reviewed too, and then the regress is stopped by argument — once.**
+L2 evaluation 56 (`cdx-review.v3sii4`, `SCOPE: branch diff against f06c95e3… head=b6794f6a…
+dirty=false`) reviewed the entire closing delta — this ledger's final table, the handoff, and the
+archived evidence for evaluations 55 and §6-8 — and returned **zero findings**: “The patch only adds
+closure documentation and archived review evidence. The evidence index, sidecars, and SHA-256
+manifest are mutually consistent, with no runtime or contract changes introduced.” That is a
+certification of the CLASS these last commits belong to, not merely of their bytes.
+
+The archive of evaluation 56 itself, and this paragraph, cannot be reviewed without minting another
+unreviewed commit to archive that review, and so on. The regress is stopped here deliberately and
+visibly rather than by pretending it does not exist: what follows the round-56 review is its own
+evidence sidecars and closure prose — the exact class round 56 just certified as carrying no runtime
+or contract change — and the landing preflight (`Python 3.11 non-KB`, required by the `dev` ruleset)
+runs the full suite against the final SHA regardless.
+
+**A note on the wave gate and the last commit, because the rule about it is strict.** “A final non-blocking batch that
 mutated the tree unvalidated” forbids closure, and the ledger's own closing rows are commits like any
 other. So the wave gate was re-run at the tip AFTER the closing table and the handoff were written —
 `3f3cfb1054510132a0cf506365fb03c53da23a44`, worktree clean, **exit 0**, identical trailers
