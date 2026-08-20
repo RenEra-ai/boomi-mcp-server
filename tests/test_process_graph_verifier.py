@@ -1361,13 +1361,26 @@ def test_every_outgoing_connection_must_bind_not_merely_one():
         '<dragpoint name="shape2.dragpoint2" toShape="shape3" x="400.0" y="140.0"/>',
     )
     assert _orphan_codes(verify_process_graph(xml)) == ["shape2"]
-    # The message must name the unattributed TARGET, not just the call, or the
-    # author cannot tell which of several branches is the broken one.
+    # The message must name the offending CONNECTION, not its target.
+    #
+    # An earlier version of this test asserted the TARGET appeared — which is
+    # what pushed the diagnostic into naming it, and the target is exactly the
+    # wrong thing to name here: both dragpoints point at `shape3`, only one is
+    # bound, so naming the target claimed the connections to it were unattributed
+    # (one is not) and that the shape was unreachable (the bound one reaches it).
+    # A test can push a message into being wrong; this one now pins what the
+    # author actually needs — which branch to repair.
     issue = next(
         i for i in verify_process_graph(xml)["errors"]
         if i["code"] == "PROCESS_CALL_ORPHAN_CONTINUATION"
     )
-    assert "shape3" in issue["message"]
+    assert "shape2.dragpoint2" in issue["message"], issue["message"]
+    assert "shape2.dragpoint1" not in issue["message"], (
+        "the BOUND connection must not be named as an offender"
+    )
+    # ...and the message must not assert an unreachability it did not establish:
+    # `shape3` is still reached by the bound dragpoint.
+    assert "shape3" not in issue["message"], issue["message"]
 
 
 def test_a_multi_return_fan_out_with_every_branch_bound_is_clean():

@@ -504,8 +504,23 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
                 )
             )
         else:
-            targets = ", ".join(
-                sorted({(dp.get("toShape") or "?").strip() or "?" for dp in unbound})
+            # Name the offending CONNECTION, not its target. Two dragpoints can
+            # point at the same shape with only one of them bound, and naming the
+            # target then says two false things at once: that the connections to
+            # it are unattributed (one is not) and that the shape is unreachable
+            # (the bound one still reaches it). It also leaves the author unable
+            # to tell WHICH branch to repair, which is the one thing a served
+            # diagnostic on a multi-branch shape has to do.
+            offenders = ", ".join(
+                sorted(
+                    "{0}{1}".format(
+                        (dp.get("name") or "").strip() or "(unnamed connection)",
+                        " (identifier '{0}')".format((dp.get("identifier") or "").strip())
+                        if (dp.get("identifier") or "").strip()
+                        else " (no identifier)",
+                    )
+                    for dp in unbound
+                )
             )
             errors.append(
                 _issue(
@@ -513,11 +528,11 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
                     name,
                     stype,
                     f"Process Call '{name}' declares return path(s) "
-                    f"{', '.join(sorted(declared_keys))}, but its connection(s) to "
-                    f"{targets} are not attributed to any of them. A connection is "
-                    "bound to a return path by carrying that path's child shape name "
-                    "as its identifier, so an unattributed connection does not exist "
-                    "on the platform and the shapes it points at are left unreachable.",
+                    f"{', '.join(sorted(declared_keys))}, but {offenders} "
+                    "is not attributed to any of them. A connection is bound to a "
+                    "return path by carrying that path's child shape name as its "
+                    "identifier, so the platform drops an unattributed connection — "
+                    "and anything it is the only route to becomes unreachable.",
                     f"Give each outgoing connection from '{name}' the identifier of "
                     "the return path it belongs to, or remove the connections that "
                     "belong to none.",
