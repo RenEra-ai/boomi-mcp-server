@@ -1,0 +1,89 @@
+You have reviewed this implementation against its ARCHITECT DESIGN PLAN twice already — first at
+tip 753b46f3bb620d449f1294c82578a928455fdeca, then over the replay delta ending at
+574d541195ba2d6251663bba90ded5741b132c3d. Both rounds returned ISSUES FOUND. All ten findings
+across the two rounds have been reconciled and are recorded in
+`docs/architecture/ISSUE_175_AUDIT_LEDGER.md` (rows `L3-01`..`L3-07`, `L3R-01`..`L3R-05`).
+
+This is the THIRD evaluation of this gate, and it is a DELTA re-review, NOT a fresh full review.
+
+Repository: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: codex/issue-175
+Previously reviewed tip: 574d541195ba2d6251663bba90ded5741b132c3d
+Current tip: c2ebc43dccff85ecec96aa9a4152ce4747dab805 (clean tree)
+
+Review the correction delta `git diff 574d541..c2ebc43`. Do NOT re-review the whole
+implementation — the earlier rounds covered it, and re-reviewing already-passed code dilutes
+findings. Your question is narrow:
+
+    **Did the round-2 corrections do what they claimed, without contradicting, silently
+    narrowing, or quietly exceeding what the plan authorizes?**
+
+## What the round-2 corrections claimed to do
+
+1. **`L3R-01`** — the terminal-form prefix rule in
+   `src/boomi_mcp_server/compiler/process_ir/body_capabilities.py` now carries the same
+   slot-admissibility guard the step check already had, so a Decision FALSE arm (which admits no
+   Process Call in any slot) reports the generic `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY`
+   at `/terminal` on BOTH the parser and the compiler paths, while a TRUE arm / Branch leg still
+   reports the dedicated return-path code.
+
+2. **`L3R-02`** — **your round-1 finding was accepted after all: refutation `D11` was WITHDRAWN and
+   the wider verifier rule REVERTED.**
+   `src/boomi_mcp_server/categories/components/process_graph_verifier.py`'s
+   `PROCESS_CALL_ORPHAN_CONTINUATION` now fires ONLY when a Process Call declares no bindable
+   return path beside an outgoing connection. Identifier-correspondence and per-branch binding
+   validation for POPULATED declarations were reverted and carried to follow-up issue #176.
+   Judge specifically whether the revert is COMPLETE, and whether the retained rule still detects
+   the malformed-empty declaration case and raw dragpoint coverage as you required in round 1.
+
+3. **`L3R-03`** — the `_build_plan` regression was strengthened (asserting
+   `planned_action == "error_process_validation"` plus the exact code and field, replacing a weak
+   `!= "create"`), and an `_apply_plan` regression was added that patches `_execute_component` as a
+   tripwire and asserts `call_count == 0`. See `tests/test_integration_builder.py`.
+
+4. **`L3R-04`** — GitHub issue descriptions #134, #141 and #156 were updated (they were stale served
+   records), and the reconciliation record was corrected.
+
+5. **`L3R-05`** — documentation corrections: the wrapper docstring example in
+   `src/boomi_mcp_server/categories/components/builders/process_flow_builder.py`, the
+   diagnostic-code notes in
+   `src/boomi_mcp_server/compiler/process_ir/semantic_validation/effects.py`, and the commentary in
+   `tests/test_process_ir_semantic_effects.py`.
+
+## Also landed in this delta — judge these too
+
+6. **The live UI canvas check was MEASURED**, closing the one acceptance criterion previously
+   recorded as unverified. Evidence: `docs/architecture/evidence/issue-175/live-ui/`
+   (`PROVENANCE.md`, `dom-measurements.json`, `prefix-control.stored.xml`,
+   `postfix.stored.xml`). A pre-fix control was planted through the DIRECT Component API — the
+   fixed MCP boundary refuses that shape — and renders three shapes with ONE edge (an orphaned
+   Stop) against the post-fix component's two attached shapes. The same readback answers the
+   report's open §6 probe 1: Boomi STORES the contradictory dragpoint and declines to render it.
+
+7. **`docs/architecture/ADR-001-process-ir-authority.md`** — the §9 exception previously recorded
+   the canvas leg as INCONCLUSIVE. That is no longer true, so it now states both measurements and
+   says the runtime one still carries the exception. Judge whether the ADR now OVERSTATES: the
+   claim must not exceed what the archived evidence actually shows.
+
+8. **Ledger row `L3R-03`** carries a dated revision moving the UI half from `not-validated` to
+   `fixed`, with the original disposition retained.
+
+## Where to look hardest
+
+- **Is the `L3R-02` revert honest and complete?** The risk runs in both directions: leftover
+  identifier-correspondence logic that still rejects a legitimate populated declaration, OR an
+  over-revert that no longer catches the empty/malformed-declaration case this slice exists to
+  catch.
+- **Does `L3R-01`'s guard ordering actually FIX the reported asymmetry** on both the parser and the
+  compiler paths, or does it merely move it?
+- **Does the ADR amendment claim more than the evidence supports?** This is the second round in a
+  row where an ADR claim outran its evidence; check that the archived measurement actually shows
+  what the prose says.
+- **Anything in this delta that the plan did not authorize.**
+
+## Output
+
+Report concrete, verifiable findings only — name the file and state specifically what contradicts
+the plan. If the delta is faithful, say so plainly rather than manufacturing findings.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'

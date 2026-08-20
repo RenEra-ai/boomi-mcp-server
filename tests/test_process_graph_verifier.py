@@ -1308,15 +1308,17 @@ def test_a_real_return_path_declaration_still_certifies_the_continuation():
     """The discriminator, without which the tightening above could be satisfied
     by a rule that simply flagged every processcall carrying an edge.
 
-    The shape is the one the UI-built m11 capture records verbatim: the return
-    path's `childShapeName` AND the outgoing dragpoint's `identifier` carrying
-    the SAME value. `returnLabel` is legitimately EMPTY there, which is why only
+    The fixture reproduces the UI-built m11 capture verbatim — the return path's
+    `childShapeName` and the outgoing dragpoint's `identifier` carrying the SAME
+    value — because copying an attested shape is how a fixture earns its
+    authority. `returnLabel` is legitimately EMPTY there, which is why only
     `childShapeName` is required of the declaration.
 
-    The first version of this test set only the declaration and left the base
-    fixture's identifier-less dragpoint in place — a shape the live evidence says
-    is NOT valid, asserted clean. A fixture written from memory is not evidence;
-    the capture is.
+    What the capture does NOT establish is that the pairing is REQUIRED: it is
+    one sample, and #175's rule was narrowed to the empty-declaration case for
+    exactly that reason (see the scope record below). So this asserts only that
+    the attested shape verifies clean — which is a fact about the shape, not a
+    claim that unpaired shapes are invalid.
     """
     assert _orphan_codes(verify_process_graph(_connected(identifier="shape233"))) == []
 
@@ -1366,9 +1368,17 @@ def test_a_call_declaring_nothing_bindable_is_flagged_however_it_is_spelled():
 
 
 def test_a_multi_return_fan_out_with_every_branch_bound_is_clean():
-    """The discriminator for the rule above: the platform's own multi-return
-    shape — one branch per Return Documents step, each attributed — must verify
-    clean, or the universal rule would have banned legitimate fan-out."""
+    """The discriminator for the rule above: a multi-return fan-out — one branch
+    per Return Documents step, each attributed — must verify clean, or the rule
+    would have banned legitimate fan-out.
+
+    PROVENANCE: this fixture is SYNTHETIC, hand-extended from the single-return
+    m11 capture by adding a second declaration/dragpoint pair in the same shape.
+    No multi-return parent has been captured live — that is #176's probe 4, still
+    open. So it is a NEGATIVE guard only: it proves this rule does not fire on a
+    plausible fan-out, and it must not be read as attesting the platform's
+    multi-return wire form, which remains unmeasured.
+    """
     xml = _load("processcall_orphan_continuation.xml").replace(
         "<returnpaths/>",
         '<returnpaths>'

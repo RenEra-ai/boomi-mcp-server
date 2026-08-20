@@ -63,9 +63,12 @@ from ...errors import (
 from ...models.process_ir import (
     _CONNECTOR_KINDS,
     LINEAR_BODY_KINDS,
+    PLACEMENT_CONNECTOR_MIXING,
+    PROCESS_CALL_PLACEMENT_CONTEXT_LABELS,
     PROCESS_IR_V1_MAX_CONTROL_DEPTH,
     TRY_CATCH_BODY_KINDS,
     ProcessIRV1,
+    process_call_placement_verdict,
 )
 from .diagnostics import raise_compile_error
 
@@ -218,11 +221,11 @@ def _walk_body(
                 "(process_call_connector_mixing is gated)"
             ),
         )
-    if (call_index is not None or terminal_is_call) and (
-        connector_above or connector_in_body
-    ):
-        # ``process_call_connector_mixing`` is gated PER ROOT-TO-LEAF PATH.
-        # ``models.process_ir`` states this too, but only from
+    if (call_index is not None or terminal_is_call) and connector_above:
+        # The CROSS-NESTING half of ``process_call_connector_mixing``: a connector
+        # on an ANCESTOR path. It has no same-body verdict to render — the body
+        # cannot see its ancestors — so this branch keeps its own diagnosis.
+        # ``models.process_ir`` states the rule too, but only from
         # ``parse_process_ir_v1`` — and ``ProcessIRV1`` is EXPORTED, so a caller
         # can build one with ``model_validate`` and hand it straight to the
         # compiler. A gate that only one of two public entry points enforces is
@@ -237,49 +240,39 @@ def _walk_body(
                 "(process_call_connector_mixing is gated)"
             ),
         )
-    # Guarded by admissibility, exactly like the step check below. Without it a
-    # body that admits NO call in any slot — a Decision FALSE arm — reported the
-    # continuation code at `/steps/0` while the parser reported the generic
-    # placement code at `/terminal` for the same document. The prefix rule is
-    # only meaningful once the slot admits the kind; where it does not, the slot
-    # check is the true diagnosis and must win.
-    if terminal_is_call and steps and is_allowed(context, TERMINAL_SLOT, "process_call"):
-        # The empty-prefix rule, re-derived here rather than inherited from the
-        # model: a call ends its path, so a body that reaches one has nothing
-        # left to run before it. Same mutable-model reasoning as the mixing rule
-        # above — appending a step to a validated terminal-call leg must not
-        # produce an emitted graph whose call is wired onward.
-        raise raise_compile_error(
-            PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
-            _SEMANTIC_PHASE,
-            _join(path, "steps", 0),
-            message=(
-                "a process_call terminal admits no preceding steps — the call ends "
-                "the path it is on"
-            ),
-        )
-    # #175: a `process_call` in a body that admits it as a TERMINAL is a
-    # CONTINUATION request, not a kind the slot never admitted — and the two
-    # deserve different codes. Checked before the generic slot check below,
-    # which would otherwise report "not admitted in this control-body slot" and
-    # send the caller to the placement table to discover the kind IS listed.
-    #
-    # This mirrors the parser's own translation exactly, so the two public entry
-    # points agree on the code for one defect: reachable by authoring through
-    # `parse_process_ir_v1`, and by mutating an exported model and handing it
-    # straight to `compile_process_ir_v1`.
-    if is_allowed(context, TERMINAL_SLOT, "process_call"):
-        for index, step in enumerate(steps):
-            if getattr(step, "kind", None) == "process_call":
-                raise raise_compile_error(
-                    PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
-                    _SEMANTIC_PHASE,
-                    _join(path, "steps", index),
-                    message=(
-                        "a process_call is the terminal of its path — author it in "
-                        "this body's terminal slot, with nothing after it"
-                    ),
-                )
+    # SAME-BODY placement is decided by ONE authority, in the model, and merely
+    # RENDERED here. Both public entry points reach this rule — authoring through
+    # `parse_process_ir_v1`, and a mutated exported model handed straight to
+    # `compile_process_ir_v1` — and while each carried its own copy the two
+    # disagreed on four documents (#175 round 3, sibling sweep): the prefix
+    # pointer, the connector-with-call-terminal pointer, and two orderings where
+    # one path reported mixing and the other the return-path rule. The verdict
+    # also fixes the ORDER, so "which rule fires" is decided once.
+    verdict = process_call_placement_verdict(
+        steps, terminal, context=PROCESS_CALL_PLACEMENT_CONTEXT_LABELS[context]
+    )
+    if verdict is not None:
+        reason, at, message = verdict
+        if reason == PLACEMENT_CONNECTOR_MIXING:
+            raise raise_compile_error(
+                PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+                _SEMANTIC_PHASE,
+                _join(path, *at),
+                message=message,
+            )
+        # The return-path reasons are guarded by admissibility, the generic slot
+        # check is not. Without the guard a body that admits NO call in any slot —
+        # a Decision FALSE arm — reported the continuation code while the parser
+        # reported the generic placement code for the same document. Where the
+        # slot never admitted the kind, the slot check is the true diagnosis and
+        # must win.
+        if is_allowed(context, TERMINAL_SLOT, "process_call"):
+            raise raise_compile_error(
+                PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+                _SEMANTIC_PHASE,
+                _join(path, *at),
+                message=message,
+            )
     for index, step in enumerate(steps):
         _check(context, STEP_SLOT, step, _join(path, "steps", index))
     terminal_path = _join(path, "terminal")

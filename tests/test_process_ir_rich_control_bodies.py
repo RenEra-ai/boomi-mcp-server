@@ -31,6 +31,8 @@ if str(_ROOT) not in sys.path:
 if str(_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_ROOT / "src"))
 
+import copy
+
 from boomi_mcp.categories.components.process_graph_verifier import verify_process_graph
 from boomi_mcp.compiler.process_ir import body_capabilities as bodycaps
 from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
@@ -1313,3 +1315,126 @@ def test_control_wiring_code_covers_transition_ROLE_corruption():
     with pytest.raises(ProcessIRCompileError) as excinfo:
         check_emission_plan_invariants(plan.model_copy(update={"nodes": tuple(nodes)}), cfg, table)
     assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID
+
+
+# ---------------------------------------------------------------------------
+# #175 round 3 — ONE authority for process_call placement, rendered twice.
+#
+# Both public entry points enforce this rule: authoring through
+# `parse_process_ir_v1`, and a mutated exported model handed straight to
+# `compile_process_ir_v1`. While each carried its own copy of the decision the
+# two disagreed on FOUR documents — the prefix pointer, the
+# connector-with-call-terminal pointer, and two orderings where one path
+# reported mixing and the other the return-path rule. The whole suite was green
+# throughout: nothing pinned the agreement, which is why the divergence
+# survived three review rounds. This is that pin.
+# ---------------------------------------------------------------------------
+
+_PLACEMENT_DPP = {
+    "kind": "set_dpp", "name": "DPP_P", "source_values": [{"value_type": "current"}],
+}
+_PLACEMENT_CONN = {"kind": "connector_call", "operation_ref": "op_rest_get", "action": "GET"}
+_PLACEMENT_CALL = {"kind": "process_call", "process_ref": "child_process"}
+_PLACEMENT_STOP = {"kind": "stop"}
+
+#: Every same-body placement a Branch leg can express, legal and illegal. The
+#: legal row is load-bearing: without it a verdict that simply raised on every
+#: body would satisfy every other row.
+_PLACEMENT_CASES = [
+    ("call_in_steps", [_PLACEMENT_CALL], _PLACEMENT_STOP),
+    ("prefix_then_call_terminal", [_PLACEMENT_DPP], _PLACEMENT_CALL),
+    ("call_in_steps_and_call_terminal", [_PLACEMENT_CALL], _PLACEMENT_CALL),
+    ("connector_then_call_terminal", [_PLACEMENT_CONN], _PLACEMENT_CALL),
+    ("call_then_connector", [_PLACEMENT_CALL, _PLACEMENT_CONN], _PLACEMENT_STOP),
+    ("connector_then_call", [_PLACEMENT_CONN, _PLACEMENT_CALL], _PLACEMENT_STOP),
+    ("bare_call_terminal_is_legal", [], _PLACEMENT_CALL),
+]
+
+
+def _placement_doc(steps, terminal):
+    return {"version": "1", "body": {"kind": "sequence", "steps": [{
+        "kind": "branch", "legs": [
+            {"steps": copy.deepcopy(steps), "terminal": copy.deepcopy(terminal)},
+            {"steps": [copy.deepcopy(_PLACEMENT_DPP)], "terminal": {"kind": "stop"}},
+        ]}]}}
+
+
+def _placement_node(payload):
+    name = {
+        "set_dpp": "SetDppNodeV1", "connector_call": "ConnectorCallNodeV1",
+        "process_call": "ProcessCallNodeV1", "stop": "StopNodeV1",
+    }[payload["kind"]]
+    return getattr(ir_module, name).model_validate(copy.deepcopy(payload))
+
+
+def _placement_via_parser(steps, terminal):
+    try:
+        parse_process_ir_v1(_placement_doc(steps, terminal))
+    except ProcessIRValidationError as exc:
+        first = exc.diagnostics[0]
+        return (first.code, first.path)
+    return None
+
+
+def _placement_via_compiler(steps, terminal):
+    """Reach the compiler with a model the parser would have refused: build a
+    legal leg, then overwrite its slots the way an exported model can be mutated.
+    That bypass is precisely what the compiler-side check exists for."""
+    from boomi_mcp.compiler.process_ir.body_capabilities import validate_body_capabilities
+
+    ir = parse_process_ir_v1(_placement_doc([_PLACEMENT_DPP], {"kind": "stop"}))
+    leg = ir.body.steps[0].legs[0]
+    leg.steps = [_placement_node(s) for s in steps]
+    leg.terminal = _placement_node(terminal)
+    try:
+        validate_body_capabilities(ir)
+    except ProcessIRCompileError as exc:
+        first = exc.diagnostics[0]
+        return (first.code, first.path)
+    return None
+
+
+@pytest.mark.parametrize(
+    "label,steps,terminal", _PLACEMENT_CASES, ids=[c[0] for c in _PLACEMENT_CASES]
+)
+def test_both_entry_points_agree_on_process_call_placement(label, steps, terminal):
+    """Same document, same answer — CODE and POINTER, not just code.
+
+    Pointer parity is the half that was broken: round 3 found the two paths
+    serving `/terminal` and `/steps/0` for one body, so a caller who fixed what
+    the compiler pointed at would still be refused by the parser.
+    """
+    assert _placement_via_parser(steps, terminal) == _placement_via_compiler(steps, terminal)
+
+
+def test_the_legal_terminal_form_is_actually_accepted_by_both():
+    """Non-vacuity for the row above: if the verdict refused every body, every
+    parity assertion would still hold. Both paths must ACCEPT the bare terminal
+    call — the one form #175 ships."""
+    assert _placement_via_parser([], _PLACEMENT_CALL) is None
+    assert _placement_via_compiler([], _PLACEMENT_CALL) is None
+
+
+def test_every_body_context_has_a_placement_label():
+    """Coverage derived from the authority's full case set, not restated.
+
+    The compiler indexes the label table by body context, so a context added
+    without a label is a KeyError raised while DIAGNOSING — a crash on the error
+    path, which is the worst place to find one.
+    """
+    from boomi_mcp.compiler.process_ir.body_capabilities import PUBLIC_BODY_CONTEXTS
+
+    assert set(ir_module.PROCESS_CALL_PLACEMENT_CONTEXT_LABELS) == set(PUBLIC_BODY_CONTEXTS)
+
+
+def test_the_placement_verdict_is_the_only_copy_of_the_decision():
+    """The structural claim itself: the compiler RENDERS the verdict, it does not
+    re-derive it. A second copy is how the four divergences arose, so its return
+    is what the compiler must branch on."""
+    import inspect
+    from boomi_mcp.compiler.process_ir import body_capabilities
+
+    source = inspect.getsource(body_capabilities._walk_body)
+    assert "process_call_placement_verdict(" in source
+    # The reasons are compared by NAME, never by a re-spelled literal.
+    assert '"prefix"' not in source and '"step_form"' not in source

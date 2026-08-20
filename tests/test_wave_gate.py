@@ -6288,3 +6288,113 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
     # adjustment rounds. A floor, not equality — later record-only corrections
     # may append rounds, and fewer than this means the archive lost rows.
     assert total_152_rows >= 90, total_152_rows
+
+
+def test_no_durable_doc_claims_submitted_bytes_match_a_readback():
+    """A durable claim the shipped model says is impossible must be unwritable.
+
+    THE AUTHORITY is ``models/authoring_workflow.py``: ``submitted_xml_digest``
+    "is never compared against a live readback: a readback carries
+    server-assigned attributes and would mismatch on every healthy apply". Drift
+    is detected readback-to-readback instead.
+
+    THE DEFECT this closes recurred twice inside #175 alone. Round 2 found an
+    ADR-001 claim that the UI suppressed a connection, which QA had recorded as
+    inconclusive. Round 3 found the replacement claim — that submitted and stored
+    bytes "agree" after a live round trip — which nobody had measured and which
+    contradicts the contract above. Both were corrected in prose, and prose
+    corrections are exactly what recur: the repo's own lesson from #171 is that
+    structural fixes written as PROSE come back and executable ones hold.
+
+    So the rule is executable. A doc may say the platform STORED something, or
+    that a graph survived a round trip — those are observable. It may not say the
+    submitted BYTES equal, match or agree with what came back, because no such
+    measurement is available to make.
+    """
+    import re as _re
+
+    # BIDIRECTIONAL PIN: if the contract this guard derives from is ever changed,
+    # this test must fail rather than keep enforcing a rule the code abandoned.
+    contract = (_ROOT / "src/boomi_mcp/models/authoring_workflow.py").read_text(
+        encoding="utf-8"
+    )
+    assert "never compared against a live readback" in contract, (
+        "the authority for this guard moved or was reworded — re-derive the rule "
+        "from models/authoring_workflow.py before editing this test"
+    )
+
+    # One sentence claiming submitted BYTES and a readback are the same thing.
+    #
+    # Scanned over WHITESPACE-FLOWED text, not raw lines. The first version of
+    # this guard excluded newlines from the sentence body and was therefore inert
+    # against the very sentence it was written for, which is hard-wrapped across
+    # two markdown lines — it passed its own single-line witness and passed the
+    # restored defect too. The witness below is now the real wrapped text.
+    claim = _re.compile(
+        r"[^.]{0,200}\bsubmitted\b[^.]{0,200}\bbytes?\b[^.]{0,200}"
+        r"\b(agree|identical|equal|match(?:es|ed)?|the same)\b",
+        _re.IGNORECASE,
+    )
+
+    def _flow(text):
+        """Markdown hard-wraps sentences; the claim is a property of the prose,
+        not of where the author happened to break the line."""
+        return _re.sub(r"\s+", " ", text)
+
+    # Non-vacuity FIRST: a guard that cannot flag the sentence it exists for is
+    # decoration. This is the sentence round 3 caught, with its real line break.
+    witness = (
+        "The same readback settles what the report\n"
+        "  left open — Boomi **stores** the contradictory dragpoint and declines "
+        "to draw it, so submitted\n  and stored bytes agree and there is no "
+        "attestation drift."
+    )
+    assert claim.search(_flow(witness)), (
+        "the scanner cannot see the claim it was built for"
+    )
+    assert not claim.search(_flow(
+        "Boomi stores the contradictory dragpoint and declines to render it."
+    )), "the scanner flags an ordinary store-not-strip statement"
+    assert not claim.search(_flow(
+        "The emitted XML must equal the golden file byte for byte."
+    )), "the scanner flags golden-corpus byte equality, which is a different claim"
+
+    # SCOPE: documents that ASSERT current truth. Two exemptions, both principled
+    # rather than convenient, and both load-bearing — without them this guard
+    # would demand the impossible.
+    #
+    #  * An AUDIT LEDGER is append-only: a committed row is never edited, only
+    #    superseded by an appended revision row. Its superseded rows are SUPPOSED
+    #    to retain the withdrawn claim verbatim, and its finding rows quote a
+    #    reviewer's wording verbatim by contract. Rewriting either to satisfy a
+    #    scanner would destroy the record this repo relies on.
+    #  * The EVIDENCE ARCHIVE holds collector artifacts — a reviewer's own text,
+    #    byte-verified against its attestation. It is not ours to edit at all.
+    #
+    # What remains is exactly where the defect recurred: ADR-001 both times, plus
+    # the architecture docs and the evidence PROVENANCE/measurement files we write.
+    def _exempt(path):
+        rel = path.relative_to(_ROOT).as_posix()
+        return (
+            path.name.startswith("ISSUE_") and path.name.endswith("_AUDIT_LEDGER.md")
+        ) or "/architect-reviews/" in rel or "/commit-reviews/" in rel
+
+    scanned, offenders = 0, []
+    for path in sorted((_ROOT / "docs/architecture").rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in {".md", ".json"}:
+            continue
+        if _exempt(path):
+            continue
+        # Golden-corpus byte equality is a DIFFERENT and legitimate claim
+        # (emitted == golden file); it never involves a live readback.
+        text = _flow(path.read_text(encoding="utf-8", errors="replace"))
+        scanned += 1
+        for match in claim.finditer(text):
+            offenders.append("{0}: {1}".format(
+                path.relative_to(_ROOT), match.group(0).strip()[:160]
+            ))
+    assert scanned > 20, "the scan found almost nothing to read: {0}".format(scanned)
+    assert offenders == [], (
+        "a durable doc claims submitted bytes match a readback, which "
+        "models/authoring_workflow.py says never happens:\n  " + "\n  ".join(offenders)
+    )

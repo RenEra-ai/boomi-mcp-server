@@ -32,9 +32,15 @@ Process Call is the path terminal — so there is nothing left to orphan.
 ## What this settles, and what it does not
 
 **Settles §6 probe 1** (strip vs store), which the bug report left open and made the P0
-escalation conditional on: the answer is **(b) stored but not rendered**. Submitted bytes
-and stored bytes agree, so there is no attestation drift of the kind #153's digest design
-would have to absorb, and the severity stays at the filed P1.
+escalation conditional on: the answer is **(b) stored but not rendered**. The comparison is
+at the GRAPH level, which is the level the question is asked at — the stored component still
+carries the `shape2 -> shape3` dragpoint, so the platform does not strip the contradiction on
+save. It is deliberately NOT a byte comparison: this repo never compares submitted bytes with
+a readback, because a readback carries server-assigned attributes and would differ on every
+healthy apply (see `submitted_xml_digest` in `models/authoring_workflow.py`, and
+`ProcessLiveReadbackAttestationV1`, which detects drift by comparing readback to readback).
+Because nothing is stripped, the report's conditional P0 does not trigger and the severity
+stays at the filed P1.
 
 **Settles the UI leg of ADR-001's §9 exception.** That amendment previously rested on the
 runtime measurement alone and recorded the canvas behaviour as REPORTED / INCONCLUSIVE,

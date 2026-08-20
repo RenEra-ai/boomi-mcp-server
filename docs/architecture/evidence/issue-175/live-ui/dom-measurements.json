@@ -57,6 +57,7 @@
   "probe_6_1_answer": {
     "question": "Strip vs store: does Boomi strip the dragpoint of an empty-returnpaths Process Call on save?",
     "answer": "(b) STORED BUT NOT RENDERED",
-    "evidence": "The pre-fix control was read back through the Component API after save: shape2 -> shape3 is still present in the stored bytes, while the canvas draws no such edge. There is no submitted-vs-stored drift, so the P0 escalation condition in the bug report's severity line does NOT trigger; the defect is a canvas/graph-validity defect at P1, as filed."
+    "evidence": "The pre-fix control was read back through the Component API after save: the shape2 -> shape3 dragpoint is still present in the stored component, while the canvas draws no such edge. The platform therefore STORES the contradiction rather than stripping it, so the P0 escalation condition in the bug report's severity line does NOT trigger; the defect is a canvas/graph-validity defect at P1, as filed.",
+    "comparison_level": "GRAPH, not bytes. Submitted bytes are never compared against a readback in this repo: a readback carries server-assigned attributes and would differ on every healthy apply (models/authoring_workflow.py, submitted_xml_digest). What was checked is that the dragpoint, the stop shape and the returnpaths element survive the round trip as authored."
   }
 }

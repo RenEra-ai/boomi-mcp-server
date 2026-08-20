@@ -467,16 +467,18 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
         dragpoints = _direct_children(_first_direct(shape, "dragpoints"), "dragpoint")
         if not dragpoints:
             continue
-        # ONE invariant, stated universally: every outgoing connection must be
-        # attributed to a return path this call DECLARES. `declared` is empty when
-        # the call declares nothing bindable, so the no-declaration case falls out
-        # of the same statement rather than needing its own condition.
+        # ONE invariant: a Process Call carrying an outgoing connection must
+        # DECLARE at least one bindable return path. Stated as a property of the
+        # declaration alone — not of the edges — so there is no per-edge case to
+        # get progressively weaker.
         #
-        # Written this way deliberately. Three review rounds each found a weaker
-        # form of this rule — "has any child element", then "some edge binds",
-        # then "every edge binds" — and each was a correct defect. That is the
-        # instance-patch pattern; the answer is to make the weaker forms
-        # unwritable, not to add a fourth condition.
+        # Three review rounds each found a weaker form of an EARLIER, wider rule
+        # — "has any child element", then "some edge binds", then "every edge
+        # binds" — and each was a correct defect. That is the instance-patch
+        # pattern. The answer was not a fourth condition: the wider rule rested
+        # on a single live sample and was withdrawn to #176 (see below), leaving
+        # the narrow property above, which four captures and one runtime
+        # measurement support.
         # SCOPE, deliberately narrow (#175; the wider rule was reverted here and
         # belongs to #176).
         #

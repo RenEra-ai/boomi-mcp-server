@@ -341,8 +341,14 @@ Every authoring capability sits in exactly one of four states:
   the direct Component API renders three shapes and ONE edge: the trailing Stop has no inbound
   connection despite a stored `shape2 -> shape3` dragpoint. The post-fix component authored through
   the MCP boundary renders two shapes, both attached. The same readback settles what the report
-  left open — Boomi **stores** the contradictory dragpoint and declines to draw it, so submitted
-  and stored bytes agree and there is no attestation drift.
+  left open — Boomi **stores** the contradictory dragpoint and declines to draw it. Stated at the
+  strength of the measurement: what was compared is the GRAPH, not the bytes. The stored component
+  still carries the `shape2 -> shape3` dragpoint, so the platform does not strip the contradiction
+  on save; this repo never compares submitted bytes against a readback at all, because a readback
+  carries server-assigned attributes and would differ on every healthy apply
+  (`models/authoring_workflow.py`, `submitted_xml_digest`). The report made its P0 escalation
+  conditional on the platform STRIPPING the dragpoint; it does not, so the severity stays at the
+  filed P1.
 
   The runtime measurement remains the stronger of the two and is still what this exception rests
   on; the canvas measurement corroborates it rather than replacing it.

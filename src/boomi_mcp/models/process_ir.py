@@ -342,10 +342,21 @@ def _continuation_error(message: str) -> PydanticCustomError:
     )
 
 
-def _body_kind_error(message: str) -> PydanticCustomError:
-    """#141: a known node kind in a control-body slot that does not admit it."""
+def _body_kind_error(
+    message: str, *, at: Tuple[Any, ...] = ()
+) -> PydanticCustomError:
+    """#141: a known node kind in a control-body slot that does not admit it.
+
+    ``at`` behaves exactly as it does for :func:`_return_path_binding_error` — the
+    offending node's position relative to the model raising this, appended by
+    ``_translate_pydantic_error``. Added in #175 round 3: the mixing rule names a
+    step index in its MESSAGE ("step 1") while its pointer addressed the whole
+    body, so the two halves of one diagnostic disagreed about what to look at.
+    """
     return PydanticCustomError(  # noqa: EM101
-        "process_ir_capability_node_not_allowed_in_body", message
+        "process_ir_capability_node_not_allowed_in_body",
+        message,
+        {"offending_path": tuple(at)} if at else None,
     )
 
 
@@ -1195,34 +1206,115 @@ def _check_process_call_terminal_form(
     path — and ``body_capabilities`` re-derives both from the compiler side, so a
     mutated model that never re-ran this validator is still refused.
     """
-    for index, step in enumerate(steps):
-        if getattr(step, "kind", None) == "process_call":
-            raise _return_path_binding_error(
-                "a process_call may not be followed by another node in a {0} — it "
-                "is the terminal of its path (step {1})".format(context, index),
-                at=("steps", index),
-            )
-    if getattr(terminal, "kind", None) != "process_call":
+    verdict = process_call_placement_verdict(steps, terminal, context=context)
+    if verdict is None:
         return
-    # Connector mixing is checked FIRST and reported with the mixing code. Both
-    # rules reject this body, but they are different facts: the prefix rule is a
-    # #175 return-path consequence, while mixing stays gated even once return-path
-    # binding lands. Reporting the prefix rule here would tell a caller to drop
-    # the connector when in truth the pairing is gated on its own.
-    for index, step in enumerate(steps):
-        if getattr(step, "kind", None) in _CONNECTOR_KINDS:
-            raise _body_kind_error(
-                "a process_call may not share a root-to-leaf path with a connector "
-                "step — a connector runs upstream in this {0} (step {1}; "
-                "process_call_connector_mixing is gated)".format(context, index)
-            )
+    reason, at, message = verdict
+    if reason == PLACEMENT_CONNECTOR_MIXING:
+        raise _body_kind_error(message, at=at)
+    raise _return_path_binding_error(message, at=at)
+
+
+# The three ways a body can place a ``process_call`` wrongly. Names, not bare
+# strings, because both renderers branch on them.
+PLACEMENT_CONNECTOR_MIXING = "connector_mixing"
+PLACEMENT_STEP_FORM = "step_form"
+PLACEMENT_PREFIX = "prefix"
+
+#: The human label each body context contributes to a placement message, keyed by
+#: the compiler's body-context name. ONE table: the message text is authored here,
+#: and the compiler renders it, so the two entry points cannot drift to
+#: "decision true-arm" and "decision true arm" for the same body.
+#: ``test_every_body_context_has_a_placement_label`` derives its coverage from the
+#: compiler's published context set rather than restating it.
+PROCESS_CALL_PLACEMENT_CONTEXT_LABELS: Mapping[str, str] = MappingProxyType({
+    "branch_leg": "branch leg",
+    "decision_true_arm": "decision true-arm",
+    "decision_false_arm": "decision false-arm",
+    "try_body": "try body",
+    "catch_body": "catch body",
+})
+
+
+def process_call_placement_verdict(
+    steps: List[Any], terminal: Any, *, context: str
+) -> Optional[Tuple[str, Tuple[Any, ...], str]]:
+    """THE authority on how a body's ``process_call`` placement is diagnosed.
+
+    Returns ``(reason, at, message)`` for the first rule this body breaks, or
+    ``None`` when the placement is legal. ``at`` is the offending node's position
+    relative to the body.
+
+    **Why this exists.** Two public entry points enforce this rule — the model
+    validators reached by authoring, and ``body_capabilities`` reached by handing
+    a mutated ``ProcessIRV1`` straight to ``compile_process_ir_v1`` — and until
+    #175 round 3 each carried its OWN copy of the decision. A sibling sweep found
+    the two copies disagreeing on four documents: the prefix pointer
+    (``/terminal`` vs ``/steps/0``), the connector-with-call-terminal pointer,
+    and two orderings where one path reported mixing and the other reported the
+    return-path rule for the same body. Neither copy was wrong in isolation;
+    having two was the defect. Both now RENDER this verdict instead of deciding,
+    so a divergence is unwritable rather than merely absent.
+
+    **The order is DERIVED, not chosen.** A ``process_call`` is not a member of
+    any step-slot union — #175 moved it to the terminal slot — so for a body with
+    a call in ``steps`` the parser never reaches a mixing question at all: the
+    union rejects the call first, and ``_translate_pydantic_error`` serves the
+    return-path code at that step. Step form therefore comes FIRST here, because
+    that is what the type system already decides; ordering mixing ahead of it
+    would make the compiler contradict the union rather than render it. (Measured:
+    ordering mixing first left ``[call, connector]`` and ``[connector, call]``
+    disagreeing between the two paths in exactly the way this function exists to
+    prevent.)
+
+    Mixing then precedes the PREFIX reason, for a body whose call is the terminal.
+    Both reject it, but they have different lifetimes: the prefix reason is a #175
+    consequence that #176 lifts once a call can be bound to its child's
+    return-document shapes, while ``process_call_connector_mixing`` stays gated
+    beyond it. Reporting the prefix on a body that also mixes would tell the caller
+    to drop the prefix when the pairing is gated regardless — advice that expires,
+    and expires wrong.
+
+    This check is BODY-LOCAL and not sufficient alone: a body cannot see its
+    ancestors. ``_walk_controls`` and ``body_capabilities`` enforce the
+    cross-nesting half — that no connector sits upstream on the same root-to-leaf
+    path — which has no same-body verdict to render.
+    """
+    call_index = next(
+        (i for i, s in enumerate(steps) if getattr(s, "kind", None) == "process_call"),
+        None,
+    )
+    terminal_is_call = getattr(terminal, "kind", None) == "process_call"
+    if call_index is None and not terminal_is_call:
+        return None
+    if call_index is not None:
+        return (
+            PLACEMENT_STEP_FORM,
+            ("steps", call_index),
+            "a process_call may not be followed by another node in a {0} — it "
+            "is the terminal of its path (step {1})".format(context, call_index),
+        )
+    connector_index = next(
+        (i for i, s in enumerate(steps) if getattr(s, "kind", None) in _CONNECTOR_KINDS),
+        None,
+    )
+    if connector_index is not None:
+        return (
+            PLACEMENT_CONNECTOR_MIXING,
+            ("steps", connector_index),
+            "a process_call may not share a root-to-leaf path with a connector "
+            "step — a connector runs upstream in this {0} (step {1}; "
+            "process_call_connector_mixing is gated)".format(context, connector_index),
+        )
     if steps:
-        raise _return_path_binding_error(
+        return (
+            PLACEMENT_PREFIX,
+            ("terminal",),
             "a process_call {0} terminal admits no preceding steps — a call whose "
             "child returns no documents ends the path it is on, and a prefix before "
             "it is not attested".format(context),
-            at=("terminal",),
         )
+    return None
 
 
 def _check_stop_terminal_has_work(steps: List[Any], terminal: Any, *, context: str) -> None:
@@ -1284,7 +1376,10 @@ class BranchLegV1(_ProcessIRBase):
             raise _cardinality_error(
                 "a trailing cache_put belongs in the leg terminal (target-less staging leg), not in steps"
             )
-        _check_process_call_terminal_form(self.steps, self.terminal, context="branch leg")
+        _check_process_call_terminal_form(
+            self.steps, self.terminal,
+            context=PROCESS_CALL_PLACEMENT_CONTEXT_LABELS["branch_leg"],
+        )
         _check_stop_terminal_has_work(self.steps, self.terminal, context="branch leg")
         return self
 
@@ -1362,10 +1457,12 @@ class DecisionTrueArmV1(_ProcessIRBase):
                 "decision true-arm steps must not end in cache_put — the arm terminal would receive an empty stream"
             )
         _check_process_call_terminal_form(
-            self.steps, self.terminal, context="decision true-arm"
+            self.steps, self.terminal,
+            context=PROCESS_CALL_PLACEMENT_CONTEXT_LABELS["decision_true_arm"],
         )
         _check_stop_terminal_has_work(
-            self.steps, self.terminal, context="decision true-arm"
+            self.steps, self.terminal,
+            context=PROCESS_CALL_PLACEMENT_CONTEXT_LABELS["decision_true_arm"],
         )
         return self
 
