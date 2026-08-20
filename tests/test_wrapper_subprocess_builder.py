@@ -448,20 +448,35 @@ def test_the_prefix_golden_really_carries_the_defect():
     assert "<returnpaths/>" in _PREFIX_GOLDEN.read_text()
 
 
-def test_rebuilding_a_prefix_parent_removes_both_the_stop_and_the_dead_edge():
-    """What an UPDATE submits for a component that already carries the defect.
+def test_updating_a_prefix_parent_removes_both_the_stop_and_the_dead_edge():
+    """What an UPDATE actually SUBMITS for a component carrying the defect.
 
-    An update re-emits the parent from its config, so this is the payload the
-    platform receives — and it must contain neither the orphaned Stop nor the
-    dragpoint that never bound. Both are asserted, because removing only the edge
-    would leave a Stop floating with no inbound connection at all, which is the
-    reported artifact, and removing only the Stop would leave a dragpoint
-    pointing at a shape that no longer exists.
+    This drives the real update path — `merge_for_update`, with the process
+    route's own `PRESERVATION_POLICY` — against the frozen pre-fix bytes as the
+    live component. An earlier version of this pin only rebuilt from config and
+    compared, which a reviewer correctly rejected: a merge that RETAINED the old
+    Stop or the dead edge would have passed it, so the property it claimed to
+    pin was not pinned at all.
+
+    Both removals are asserted, because removing only the edge would leave the
+    Stop floating with no inbound connection — the reported artifact — and
+    removing only the Stop would leave a dragpoint pointing at a shape that no
+    longer exists.
     """
+    from src.boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+    from src.boomi_mcp.categories.components.builders.process_flow_builder import (
+        ProcessFlowBuilder,
+    )
+
     cfg = _corpus.wrapper_parent_case_config()
-    emitted = WrapperSubprocessBuilder.build(
+    desired = WrapperSubprocessBuilder.build(
         cfg, name="Wrapper Parent Golden", folder_name="Golden/Fixtures"
     )
+    # The live component, as it exists on the platform before the update.
+    current = _PREFIX_GOLDEN.read_text()
+    emitted = merge_for_update(current, desired, ProcessFlowBuilder.PRESERVATION_POLICY)
     _, shapes = _parse_shapes(emitted)
 
     assert "stop" not in _by_type(shapes), _by_type(shapes)

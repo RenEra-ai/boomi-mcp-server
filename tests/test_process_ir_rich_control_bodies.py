@@ -1629,6 +1629,26 @@ def test_the_root_verdict_yields_to_the_control_continuation_rule():
 
     with pytest.raises(ProcessIRCompileError) as excinfo:
         compile_process_ir_v1(ir, None)
-    # FAIL-CLOSED: a later, kind-agnostic invariant still refuses it, exactly as
-    # it would for any other kind appended after a control node.
-    assert excinfo.value.diagnostics[0].code, excinfo.value.diagnostics
+    # FAIL-CLOSED, and named. "Some nonempty code exists" proves nothing about
+    # WHICH rule owns the document — a reviewer rejected exactly that assertion.
+    # The refusal must come from a kind-agnostic flow invariant, which is what
+    # makes a root call behave like any other kind after a control node, and it
+    # must NOT be the process-call placement code, whose whole point here is to
+    # have yielded.
+    from boomi_mcp.errors import (
+        PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+        PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+    )
+    code = excinfo.value.diagnostics[0].code
+    assert code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW, [
+        (d.code, d.path) for d in excinfo.value.diagnostics]
+    assert code != PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
+
+    # ...and the SAME document with an ordinary kind is refused the same way,
+    # which is the claim "the continuation rule owns this" actually rests on.
+    other = parse_process_ir_v1(
+        {"version": "1", "body": {"kind": "sequence", "steps": [copy.deepcopy(branch)]}})
+    other.body.steps = [other.body.steps[0], _placement_node(_PLACEMENT_DPP)]
+    with pytest.raises(ProcessIRCompileError) as other_exc:
+        compile_process_ir_v1(other, None)
+    assert other_exc.value.diagnostics[0].code == code

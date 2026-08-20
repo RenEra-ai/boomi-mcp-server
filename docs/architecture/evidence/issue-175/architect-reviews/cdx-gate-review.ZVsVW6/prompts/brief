@@ -1,0 +1,108 @@
+You have reviewed this implementation against its ARCHITECT DESIGN PLAN three times already —
+first at tip 753b46f3bb620d449f1294c82578a928455fdeca, then over the replay delta ending at
+574d541195ba2d6251663bba90ded5741b132c3d, then over the round-3 delta ending at
+c2ebc43dccff85ecec96aa9a4152ce4747dab805. All three rounds returned ISSUES FOUND (7, 5 and 4
+findings). All sixteen findings are reconciled and recorded in
+`docs/architecture/ISSUE_175_AUDIT_LEDGER.md` (rows `L3-01`..`L3-07`, `L3R-01`..`L3R-05`,
+`L3R2-01`..`L3R2-04`).
+
+This is the FOURTH evaluation of this gate, and it is a DELTA re-review, NOT a fresh full review.
+
+Repository: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: codex/issue-175
+Previously reviewed tip: c2ebc43dccff85ecec96aa9a4152ce4747dab805
+Current tip: 05f9b9638e90a431ad102e77a1bff5eaa753baac (clean tree)
+
+Review the correction delta `git diff c2ebc43..05f9b96`. Do NOT re-review the whole
+implementation — the three earlier rounds covered it, and re-reviewing already-passed code dilutes
+findings. Your question is narrow:
+
+    **Did the round-3 corrections do what they claimed, without contradicting, silently
+    narrowing, or quietly exceeding what the plan authorizes?**
+
+NOTE ON PATHS: the Python package is `src/boomi_mcp/` (earlier briefs of mine mistyped it as
+`src/boomi_mcp_server/`). The five commits in this delta are 2e03be1, 11ab615, 702f4c8, a3d21e9,
+05f9b96.
+
+## What the corrections since round 3 claim to do
+
+Round 3's four findings (`L3R2-01`..`L3R2-04`) were fixed; then two Stage-2 repo Codex support
+reviews and one live QA engagement found further defects **inside those fixes**, which were also
+fixed. The delta is therefore the round-3 batch PLUS its own correction rounds. Net effect:
+
+1. **One authority for `process_call` placement** (`L3R2-01`, the structural fix for defect class
+   DC-175-E at its fifth instance). `process_call_placement_verdict()` (bodies) and
+   `process_call_root_verdict()` (root sequence) in `src/boomi_mcp/models/process_ir.py` decide the
+   `(reason, at, message)` triple; `src/boomi_mcp/compiler/process_ir/body_capabilities.py` now
+   RENDERS those verdicts rather than deciding independently. The claim is that both public entry
+   points — `parse_process_ir_v1` and a mutated model handed to `compile_process_ir_v1` — now agree
+   on CODE, POINTER **and** MESSAGE for every placement. A parametrised parity test over the
+   published body-context set is the non-vacuity witness.
+
+2. **Precedence, not merely shared implementation.** The verdict deliberately YIELDS (returns
+   `None`) in three situations: where the slot admits no Process Call at all (a Decision FALSE arm,
+   a Try/Catch body), where an ancestor connector is involved but the slot is closed, and where the
+   control-continuation rule owns the document (e.g. `[branch, process_call]`). The claim is that
+   each yielded case is still refused by the rule that properly owns it, and that fail-closed was
+   verified for the last one — the full pipeline still refuses.
+
+3. **The step-form message is one shared constant.** The discriminated union rejects a Process Call
+   in a step slot before the model validator ever runs, so the parser's translated message and the
+   verdict's message had to become literally the same string rather than two hand-kept copies.
+
+4. **The served `PROCESS_CALL_ORPHAN_CONTINUATION` message** in
+   `src/boomi_mcp/categories/components/process_graph_verifier.py` no longer says the shapes it
+   points at are "left unreachable". The check could not establish that — a sibling branch leg can
+   reach them — so the message is bounded to what the check actually computes.
+
+5. **The defect-class ledger table was recomputed from the rows** (it had drifted to
+   instantiation-era counts), `DC-175-H` added, and **`DC-175-D` recorded as a DEVIATION from the
+   structural-fix rule, to newly-filed issue #177, reason class `blocked-by-mechanism`**, because
+   seven instances of that class had accumulated with no structural fix and no recorded deviation.
+
+6. **An executable prose guard** —
+   `test_no_durable_doc_claims_submitted_bytes_match_a_readback` in `tests/test_wave_gate.py` —
+   refuses any durable doc claiming submitted bytes match a live readback, deriving its rule from
+   the contract text in `src/boomi_mcp/models/authoring_workflow.py`. It has been corrected three
+   times: the first version was vacuous (newline-blind), the second order/polarity-blind, the third
+   clause-blind. It now carries an explicitly recorded SCOPE limitation: it is a best-effort lint
+   over ONE claim shape, not a decision procedure over English, with completeness owned by #177.
+
+7. **Supporting evidence/record updates**: the round-3 gate attestation archived under
+   `docs/architecture/evidence/issue-175/architect-reviews/cdx-gate-review.xEZ510/`, `SHA256SUMS`
+   and `index.jsonl` updated, ADR-001 §9 wording corrected, `live-ui/PROVENANCE.md` and
+   `live-ui/dom-measurements.json` adjusted, and the permanent regression pin in
+   `tests/test_wrapper_subprocess_builder.py` (`L3R2-02`'s coverage half).
+
+## Where to look hardest
+
+- **Does the placement authority now actually hold?** Three consecutive rounds each found one more
+  ring of parser/compiler divergence: round 1 found the pointer gap, round 2's fix only MOVED the
+  asymmetry, round 3 found the moved copy. Look for a placement — any slot, any nesting depth, any
+  ancestor context — where the two entry points still serve a different code, a different pointer,
+  or a different message. If a fourth ring exists, name it with a concrete document (the IR that
+  reproduces it) rather than a description.
+- **Did yielding open a hole?** Every case where `process_call_placement_verdict()` /
+  `process_call_root_verdict()` now returns `None` must still be refused SOMEWHERE. Verify that by
+  construction rather than assuming the fallthrough rule catches it. A yield that reaches no
+  refusal is a capability-reachability defect, not a cosmetic one.
+- **Is the `DC-175-D` deviation to #177 legitimate, or is it deferring work that belonged in this
+  slice?** Judge it against the repository's own rule in `CLAUDE.md`: a structural-fix deviation is
+  available to Standard tier only, on stated grounds (invariant infeasible in-slice; mechanism not
+  yet characterised; or the hand-model IS the authority), with the follow-up filed at that
+  reconciliation. Check the grounds actually hold, and that no instance of that class is left
+  unresolved in this slice.
+- **Is the recorded scope limitation on the prose guard honest, or is it rationalising an
+  inadequate guard?** A guard that has been corrected three times and then narrows its own claim is
+  exactly the shape that can be either an honest bound or a retreat. Decide which, on the code.
+- **Anything in this delta the plan did not authorize** — added scope, a narrowed rule, a
+  weakened assertion, or a documentation claim that outruns its archived evidence (this has now
+  been a finding in two separate rounds).
+
+## Output
+
+Report concrete, verifiable findings only — name the file and state specifically what contradicts
+the plan or the claims above. If the delta is faithful, say so plainly rather than manufacturing
+findings.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'

@@ -6375,10 +6375,18 @@ def test_no_durable_doc_claims_submitted_bytes_match_a_readback():
             verb = _EQUALITY.search(clause)
             if not verb:
                 continue
-            # POLARITY, within THIS clause only: a negation ahead of the equality
-            # verb inverts the claim, and "mismatch" states the contract rather
-            # than breaking it.
-            if _NEGATION.search(clause[: verb.start()]) or "mismatch" in clause:
+            # POLARITY, scoped to a WINDOW around the equality verb — not the
+            # prefix, and not the whole clause. Both wider readings were wrong:
+            # prefix-only classified "Submitted bytes match no live readback" as
+            # forbidden (the negation trails the verb), and clause-wide then
+            # suppressed the real historical defect, whose sentence ends "...and
+            # there is no attestation drift" — a negation belonging to a
+            # different assertion entirely. A negation that inverts THIS claim
+            # sits next to THIS verb. "mismatch" states the contract outright.
+            words = clause.split()
+            at = len(clause[: verb.start()].split())
+            near = " ".join(words[max(0, at - 3): at + 3])
+            if _NEGATION.search(near) or "mismatch" in clause:
                 continue
             return True
         return False
@@ -6413,6 +6421,8 @@ def test_no_durable_doc_claims_submitted_bytes_match_a_readback():
         "Submitted bytes do not match a live readback.",
         "The submitted digest is never compared against a readback.",
         "A readback would mismatch the submitted bytes on every healthy apply.",
+        # the negation TRAILS the verb — accurate, and must not be flagged
+        "Submitted bytes match no live readback.",
         # unrelated, legitimate byte equality: golden corpus, no readback involved
         "The emitted XML must equal the golden file byte for byte.",
         # an ordinary store-not-strip observation

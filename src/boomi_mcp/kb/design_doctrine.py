@@ -250,7 +250,12 @@ _ENTRIES: List[Dict[str, Any]] = [
             "its document path — the subprocess return value, emittable today by "
             "the typed builder and live-verified — which Process Route maps to "
             "named return paths; a Return Documents path never routes onward to "
-            "a Stop."
+            "a Stop. On the CALLER side that hand-back is not yet expressible: "
+            "Boomi projects a Process Call's outbound connection from the called "
+            "process's Return Documents shapes, and binding them is gated as "
+            "process_call_return_path_binding (#175/#176). Today a Process Call "
+            "is a path TERMINAL — a parent calls its child and ends there, with "
+            "no trailing Stop and no outgoing connection."
         ),
         "when_to_use": (
             "Any integration with more than one logical operation, or where "

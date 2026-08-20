@@ -30,7 +30,8 @@ are out of scope.
 
 Issue #90 M4.5.5 adds a verified standalone Process Call in the main flow
 and the `WrapperSubprocessBuilder` (`process_kind="wrapper_subprocess"`): a
-thin parent `start -> process call(s) -> stop` that invokes in-spec child
+thin parent `start -> process call` (EXACTLY one call, which TERMINATES the
+path — no trailing stop; #175) that invokes an in-spec child
 processes by `$ref:` or existing components by id. The standalone processcall
 shape is transcribed from the live `work` wrapper exemplar (it continues past
 a child failure: abort="false", wait="true"); the DLQ catch-leg processcall
