@@ -4987,6 +4987,14 @@ def _family_lookup_mutants(ep):
                 return folded
         return next((_fold(r.connector_type) for r in rows if r.ref == ref), None)
 
+    def penultimate_row(symbols, ref):
+        """Confirms the ref exists, then reads `rows[-2]` — invisible while every
+        padded row put the referenced symbol exactly there (L2 round 48)."""
+        rows = _rows(symbols)
+        if not any(r.ref == ref for r in rows):
+            return None
+        return _fold(rows[-2].connector_type) if len(rows) > 1 else _fold(rows[0].connector_type)
+
     def big_table_listener(symbols, ref):
         """A path taken only for production-sized tables — invisible to every
         probe while the largest carried three symbols (L2 round 47)."""
@@ -5007,6 +5015,7 @@ def _family_lookup_mutants(ep):
         "wrong-loop-var": wrong_loop_var,
         "listener-anywhere": listener_anywhere,
         "big-table-listener": big_table_listener,
+        "penultimate-row": penultimate_row,
     }
 
 
@@ -5057,13 +5066,34 @@ def test_the_served_revision_binds_multi_symbol_family_lookup():
         value = index.get(ref)
         return value.strip().lower() if isinstance(value, str) else None
 
-    try:
-        ep._operation_connector_family = _by_index
-        assert _compiler_revision() == baseline, (
-            "an equivalent lookup moved the served revision"
-        )
-    finally:
-        ep._operation_connector_family = original
+    def _by_bisect(symbols, ref):
+        """Correct on every valid input BY RELYING ON THE DOCUMENTED SORT.
+
+        `SymbolTableV1` canonicalises by `ref`, so a binary search is a faithful
+        implementation — and it was the one that exposed the probes building
+        tables production cannot supply (L2 round 48). It must leave the
+        revision identical, or the oracle is rotating callers' bindings for
+        implementation shape rather than behaviour.
+        """
+        import bisect
+
+        rows = tuple(symbols.symbols or ())
+        refs = [row.ref for row in rows]
+        position = bisect.bisect_left(refs, ref)
+        if position < len(rows) and rows[position].ref == ref:
+            value = rows[position].connector_type
+            return value.strip().lower() if isinstance(value, str) else None
+        return None
+
+    for equivalent in (_by_index, _by_bisect):
+        try:
+            ep._operation_connector_family = equivalent
+            assert _compiler_revision() == baseline, (
+                "an equivalent lookup moved the served revision: %s"
+                % equivalent.__name__
+            )
+        finally:
+            ep._operation_connector_family = original
 
     # CONTROL 2 — the mutants really are invisible to a ONE-SYMBOL case set, so
     # "the shipped oracle could not see them" is measured rather than asserted.
@@ -5170,6 +5200,28 @@ def test_the_profile_case_set_keeps_both_arities_and_both_directions():
     }
     assert len(resolved_indices) >= 3, sorted(resolved_indices)
     assert 0 in resolved_indices and max(resolved_indices) >= 2, sorted(resolved_indices)
+
+    # ...and the index FROM THE END varies too (L2 round 48). Absolute spread is
+    # not sufficient: the first attempt varied it while leaving
+    # `arity - 1 - position == 1` in every row, so the referenced symbol was
+    # `rows[-2]` throughout and a lookup reading the penultimate row was as
+    # invisible as everything had been before the padding existed.
+    from_end = {
+        len(rows) - 1 - next(i for i, (r, _t) in enumerate(rows) if r == ref)
+        for rows, ref in seen
+        if len(rows) > 1 and any(r == ref for r, _t in rows)
+    }
+    assert len(from_end) >= 3, sorted(from_end)
+
+    # EVERY probe table is canonically sorted by `ref`, because that is the only
+    # order production can supply — `SymbolTableV1` sorts on `ref` at
+    # construction. A probe in any other order makes the served revision rotate
+    # for an implementation that is correct on every valid input (a binary
+    # search over the documented sorted tuple), which invalidates caller
+    # bindings for no behaviour change. This is the false-POSITIVE direction,
+    # and it is asserted here rather than left to the shape of the decoy refs.
+    for rows, _ref in seen:
+        assert list(rows) == sorted(rows), rows
 
     listener_families = {f.strip().lower() for f in ep.LISTENER_CONNECTOR_TYPES}
 

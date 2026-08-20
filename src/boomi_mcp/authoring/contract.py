@@ -962,11 +962,26 @@ def _padded(symbol_of, referenced, decoy_family: str, *, position: int, arity: i
     """
     arity = max(arity, 2)
     position = max(0, min(position, arity - 1))
+    # CANONICALLY SORTED BY `ref`, because that is the only order production can
+    # supply: `SymbolTableV1` sorts on `ref` at construction, so a probe that
+    # inserts the referenced row at an arbitrary index builds a table the
+    # compiler never sees. That is not merely unrealistic — it makes the served
+    # revision rotate for an implementation that is CORRECT on every valid input
+    # (a binary search over the documented sorted tuple), which invalidates
+    # caller bindings for no behaviour change (L2 round 48).
+    #
+    # So the decoys are minted on the lexical side that puts them where they
+    # belong: `$ref:before-*` sorts ahead of `$ref:op`, `$ref:zafter-*` behind
+    # it. The referenced symbol lands at `position` AND the tuple is sorted.
     rows = [
-        symbol_of("$ref:decoy-%d" % index, decoy_family)
-        for index in range(arity - 1)
+        symbol_of("$ref:before-%d" % index, decoy_family)
+        for index in range(position)
     ]
-    rows.insert(position, referenced)
+    rows.append(referenced)
+    rows.extend(
+        symbol_of("$ref:zafter-%d" % index, decoy_family)
+        for index in range(arity - 1 - position)
+    )
     return rows
 
 
@@ -1202,8 +1217,20 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
     # Position and arity cycles, so the padded rows spread across indices and
     # table sizes instead of all sharing one shape. Deterministic and finite:
     # the oracle must be reproducible byte-for-byte on every call.
-    _spread = _cycle((0, 1, 2, 3))
-    _sizes = _cycle((2, 3, 4, 5))
+    # (position, arity) pairs chosen so that NEITHER the absolute index NOR the
+    # index from the end is the same in every row.
+    #
+    # Two independent cycles were the first attempt and did not achieve it:
+    # equal lengths gave the pairs (0,2), (1,3), (2,4), (3,5), and in every one
+    # of those `arity - 1 - position == 1`, so the referenced symbol was
+    # `rows[-2]` throughout and a lookup reading the penultimate row stayed
+    # invisible (L2 round 48). Changing the cycle LENGTHS did not fix it either
+    # — measured, the from-end index was still uniformly 1 — because the
+    # property is about the pairs, not about how they are generated. So the
+    # pairs are stated, and the accompanying guard asserts the property they are
+    # chosen to satisfy; if a later edit breaks it, the guard fails rather than
+    # the coverage silently going flat.
+    _shapes = _cycle(((0, 2), (2, 3), (0, 4), (3, 5), (1, 3)))
     for family in families:
         symbols = [_symbol("$ref:op", family)]
         # Advanced once per FAMILY, not per (family, role): the derivation
@@ -1211,7 +1238,7 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
         # so advancing per role handed every row that DOES reach it the same two
         # cycle positions — measured, indices {0, 2} only. A spread that aliases
         # against an early return is not a spread.
-        _position, _arity = next(_spread), next(_sizes)
+        _position, _arity = next(_shapes)
         for role in connector_roles:
             cases["connector-%s-%s" % (role, family)] = _classify(
                 _connector(role, "$ref:op"), symbols
