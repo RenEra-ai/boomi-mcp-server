@@ -5303,18 +5303,32 @@ def test_the_family_lookup_ignores_symbols_it_was_not_asked_about():
     baseline = ep._operation_connector_family(alone, "$ref:op")
     assert baseline == "database", baseline
 
+    # THE POSITION IS CHOSEN BY THE REFS, NOT BY AN INSERTION SLOT. The first
+    # version of this loop inserted the referenced row at `slot` and then handed
+    # the list to `SymbolTableV1`, which canonicalises by `ref` — and every
+    # `$ref:pad-*` sorts AFTER `$ref:op`, so the slot was discarded and the
+    # referenced symbol sat at index 0 in all 116 cases. The loop looked like it
+    # swept every position and swept one. So decoys are minted on BOTH lexical
+    # sides, and the resulting index is ASSERTED rather than assumed — an
+    # arrangement that silently collapses fails here instead of passing.
+    positions = set()
     checked = 0
     for size in (2, 3, 5, 6, 9, 17, 33, 41):
         for slot in range(size):
-            decoys = [
-                # A listener family on every decoy: if the lookup ever answers
-                # from a row it was not asked about, the answer flips to a
-                # DIFFERENT value rather than coincidentally matching.
-                _symbol("$ref:pad-%03d" % index, listener_family)
-                for index in range(size - 1)
+            # `slot` decoys sort BEFORE the referenced ref, the rest after.
+            rows = [
+                _symbol("$ref:aa-%03d" % index, listener_family)
+                for index in range(slot)
             ]
-            rows = decoys[:slot] + [referenced] + decoys[slot:]
+            rows.append(referenced)
+            rows.extend(
+                _symbol("$ref:zz-%03d" % index, listener_family)
+                for index in range(size - 1 - slot)
+            )
             table = SymbolTableV1(symbols=tuple(rows))
+            actual = [row.ref for row in table.symbols].index("$ref:op")
+            assert actual == slot, (size, slot, actual)
+            positions.add(actual)
             assert ep._operation_connector_family(table, "$ref:op") == baseline, (
                 size, slot,
             )
@@ -5323,6 +5337,8 @@ def test_the_family_lookup_ignores_symbols_it_was_not_asked_about():
             assert ep._operation_connector_family(table, "$ref:absent") is None
             checked += 1
     assert checked >= 100, checked
+    # The sweep really covered every index up to the largest table.
+    assert positions == set(range(41)), sorted(positions)
 
     # NON-VACUITY: the property must be violable, or the loop above proves
     # nothing. A lookup that answers from the first row satisfies it on a
@@ -5332,5 +5348,27 @@ def test_the_family_lookup_ignores_symbols_it_was_not_asked_about():
         value = rows[0].connector_type if rows else None
         return value.strip().lower() if isinstance(value, str) else None
 
-    table = SymbolTableV1(symbols=(_symbol("$ref:aaa", listener_family), referenced))
+    table = SymbolTableV1(symbols=(_symbol("$ref:aa-x", listener_family), referenced))
+    assert [row.ref for row in table.symbols].index("$ref:op") == 1, table.symbols
     assert _first_row(table, "$ref:op") != ep._operation_connector_family(table, "$ref:op")
+
+    # ...and the reviewer's own escape from the FIRST version of this test: a
+    # regression keyed on a large table that reads `symbols[0]` after confirming
+    # the ref. It passed the collapsed sweep because the referenced symbol was
+    # always index 0 there; it must fail now.
+    def _big_table_first_row(symbols, ref):
+        rows = tuple(symbols.symbols or ())
+        if len(rows) > 40 and any(r.ref == ref for r in rows):
+            value = rows[0].connector_type
+            return value.strip().lower() if isinstance(value, str) else None
+        return ep._operation_connector_family(symbols, ref)
+
+    big = SymbolTableV1(symbols=tuple(
+        [_symbol("$ref:aa-%03d" % i, listener_family) for i in range(20)]
+        + [referenced]
+        + [_symbol("$ref:zz-%03d" % i, listener_family) for i in range(20)]
+    ))
+    assert len(big.symbols) == 41
+    assert _big_table_first_row(big, "$ref:op") != ep._operation_connector_family(
+        big, "$ref:op"
+    )
