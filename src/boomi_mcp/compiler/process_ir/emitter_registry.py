@@ -601,7 +601,13 @@ _REGISTRATIONS: Tuple[EmitterRegistration, ...] = (
     EmitterRegistration("doccacheretrieve", DocCacheRetrieveInputV1, "doccacheretrieve", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_cache, _emit_doccacheretrieve, _pre_doccacheretrieve),
     EmitterRegistration("doccacheremove", DocCacheRemoveInputV1, "doccacheremove", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_cache, _emit_doccacheremove, _pre_doccacheremove),
     EmitterRegistration("setproperties_step", SetPropertiesStepInputV1, "documentproperties", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_setproperties, _emit_setproperties),
-    EmitterRegistration("processcall", ProcessCallInputV1, "processcall", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_process, _emit_processcall),
+    # #175: EXACT_ZERO, not EXACT_ONE. A process call ends its path — the platform
+    # projects a call's outbound connection from the CALLED process's
+    # return-document shapes, and V1 declares none — so a plan node carrying an
+    # outgoing transition is malformed and is refused here, the last canonical
+    # boundary before bytes. ZERO_OR_ONE would be the dangerous spelling: it would
+    # keep emitting exactly the shape this issue exists to remove.
+    EmitterRegistration("processcall", ProcessCallInputV1, "processcall", CAPABILITY_PROCESS_IR_V1, EXACT_ZERO, _req_process, _emit_processcall),
     EmitterRegistration("branch", BranchInputV1, "branch", CAPABILITY_PROCESS_IR_V1, BRANCH, _no_requirements, _emit_branch),
     EmitterRegistration("decision", DecisionInputV1, "decision", CAPABILITY_PROCESS_IR_V1, EXACT_TWO, _no_requirements, _emit_decision, _pre_decision),
     EmitterRegistration("catcherrors", CatchErrorsInputV1, "catcherrors", CAPABILITY_PROCESS_IR_V1, EXACT_TWO, _no_requirements, _emit_catcherrors, _pre_catcherrors),

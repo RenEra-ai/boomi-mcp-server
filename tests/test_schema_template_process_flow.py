@@ -376,9 +376,11 @@ def test_template_reserved_flow_control_stage_kind_flipped_in_sync_pipeline():
 
 
 def test_both_process_protocols_advertise_return_documents_surface():
-    # Issue #107 M10.3 (QA Bug #140): BOTH process kinds support a Return
-    # Documents terminal at runtime, so BOTH protocol templates must advertise
-    # the #107 surface — not just database_to_api_sync.
+    # Issue #107 M10.3 (QA Bug #140): BOTH process kinds document the Return
+    # Documents surface, so a caller is never left guessing whether the field
+    # exists. #175 changed what the WRAPPER does with it, not whether it is
+    # advertised: the block is still described, and `enabled=true` is now a
+    # documented refusal rather than an undocumented one.
     for protocol in ("database_to_api_sync", "wrapper_subprocess"):
         result = get_schema_template_action(
             resource_type="process", operation="create", protocol=protocol
@@ -391,9 +393,33 @@ def test_both_process_protocols_advertise_return_documents_surface():
             "return_documents.label",
         ):
             assert field in optional, f"{protocol}: {field} missing"
-        assert result["supported_terminal_shapes"] == ["stop", "returndocuments"], protocol
         codes = {e["error_code"] for e in result["structured_errors"]}
         assert "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID" in codes, protocol
+
+    # The terminal shapes DIVERGE, and the served text must say so rather than
+    # advertising a terminal the protocol can no longer emit.
+    linear = get_schema_template_action(
+        resource_type="process", operation="create", protocol="database_to_api_sync"
+    )
+    assert linear["supported_terminal_shapes"] == ["stop", "returndocuments"]
+
+    wrapper = get_schema_template_action(
+        resource_type="process", operation="create", protocol="wrapper_subprocess"
+    )
+    # #175: the call IS the terminal. A wrapper emits neither a Stop nor a
+    # Return Documents shape, so advertising either would send a caller after a
+    # shape the builder now refuses to produce.
+    assert wrapper["supported_terminal_shapes"] == ["processcall"]
+    wrapper_codes = {e["error_code"] for e in wrapper["structured_errors"]}
+    assert "PROCESS_CALL_CONFIG_INVALID" in wrapper_codes
+    field_list = next(
+        e["field"] for e in wrapper["structured_errors"]
+        if e["error_code"] == "PROCESS_CALL_CONFIG_INVALID"
+    )
+    # The two withdrawn shapes must be reachable from the served error surface,
+    # or a caller hitting them has no documented way to find out why.
+    assert "return_documents.enabled" in field_list
+    assert "process_calls" in field_list
 
 
 def test_template_documents_catch_exception_surface(template):
@@ -800,3 +826,78 @@ def test_dataprocess_points_at_script_authoring_schema(template):
     blob = json.dumps(template)
     assert "script_dataprocess" in blob
     assert "storeStream" in blob
+
+
+# ---------------------------------------------------------------------------
+# #175 QA-175-r1-03 — a code the builder can raise must be discoverable from the
+# template that governs the protocol.
+#
+# The finding and QA-175-r1-01 are the same shape: a #175 consequence applied to
+# the `wrapper_subprocess` protocol at every layer and to `database_to_api_sync`
+# at only one. Two instances of one mechanism, so the response is structural —
+# the served list is checked against what the builder ACTUALLY raises, DERIVED by
+# driving it, rather than against a hand-maintained expectation that has to be
+# remembered next time.
+# ---------------------------------------------------------------------------
+
+def test_each_protocol_publishes_the_process_call_code_it_can_raise():
+    import sys
+    from pathlib import Path
+
+    _root = Path(__file__).resolve().parent.parent
+    for _p in (str(_root), str(_root / "src")):
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
+    import _wave_gate_golden_corpus as corpus
+    from src.boomi_mcp.categories.components.builders import (
+        BuilderValidationError,
+        ProcessFlowBuilder,
+        WrapperSubprocessBuilder,
+    )
+
+    CODE = "PROCESS_CALL_CONFIG_INVALID"
+    EXC = {"message_template": "{1}", "parameter_source": "caught_error"}
+
+    def raises_code(builder, cfg):
+        """Does this protocol serve CODE for this config, at either gate?"""
+        err = builder.validate_config(cfg)
+        if err is not None and err.error_code == CODE:
+            return True
+        try:
+            builder.build(cfg, name="N")
+        except BuilderValidationError as exc:
+            return exc.error_code == CODE
+        return False
+
+    # Probes per protocol, each a shape #175 withdrew.
+    sync_cfg = corpus.dlq_config(
+        {"mode": "error_subprocess_ref", "process_id": corpus.DLQ_PROC_ID}
+    )
+    sync_cfg["reliability"]["catch_exception"] = dict(EXC)
+    wrapper_cfg = {
+        "process_kind": "wrapper_subprocess",
+        "process_calls": [
+            {"process_id": corpus.DLQ_PROC_ID},
+            {"process_id": corpus.DLQ_PROC_ID},
+        ],
+    }
+    probes = {
+        "database_to_api_sync": (ProcessFlowBuilder, sync_cfg),
+        "wrapper_subprocess": (WrapperSubprocessBuilder, wrapper_cfg),
+    }
+
+    for protocol, (builder, cfg) in sorted(probes.items()):
+        can_raise = raises_code(builder, cfg)
+        assert can_raise, (
+            f"{protocol}: the probe no longer produces {CODE}; this check has "
+            "gone vacuous and needs a live shape, not deleting"
+        )
+        served = get_schema_template_action(
+            resource_type="process", operation="create", protocol=protocol
+        )
+        published = {e["error_code"] for e in served["structured_errors"]}
+        assert CODE in published, (
+            f"{protocol} can raise {CODE} but its schema template does not "
+            "publish it — a caller who hits it has no documented way to find "
+            "out why (QA-175-r1-03)"
+        )

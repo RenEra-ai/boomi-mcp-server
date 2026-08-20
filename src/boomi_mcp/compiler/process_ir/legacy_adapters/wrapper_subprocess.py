@@ -1,8 +1,9 @@
 """Production ``wrapper_subprocess`` -> ProcessIR adapter (issue #139 M12.4).
 
 Normalizes an already-validated wrapper-parent config (``start -> process
-call(s) -> stop|return_documents``) into a :class:`ProcessIRV1` plus one
-``process`` symbol requirement per called child. Envelope data (description,
+call``, #175: exactly one call, and the call is the END of the path) into a
+:class:`ProcessIRV1` plus one ``process`` symbol requirement for the called
+child. Envelope data (description,
 folder, ``process_extensions``) is NOT represented here — the component
 assembler owns it, exactly as the legacy ``WrapperSubprocessBuilder.build``
 does. The IR is built to mirror that build's resolved-ref semantics
@@ -99,14 +100,32 @@ def adapt_wrapper_subprocess(config: Dict[str, Any]) -> LegacyAdapterResultV1:
                 )
             )
 
+    # #175: NO terminal is appended. A process call ends its path — the platform
+    # projects a call's outbound connection from the CALLED process's
+    # return-document shapes, and this adapter declares none — so the Stop this
+    # used to append was the orphan shape the issue exists to remove, and the
+    # Return Documents terminal was a continuation the platform never honoured.
+    #
+    # Both withdrawn shapes are REJECTED here, never silently dropped. Truncating
+    # the call list or discarding an authored Return Documents terminal would be
+    # data loss: the caller asked for behaviour this adapter cannot produce, and
+    # saying so is the only honest outcome. `WrapperSubprocessBuilder` gates both
+    # earlier, at validate_config and at build; this is the bypass boundary.
+    if len(calls) != 1:
+        raise adapter_diagnostic(
+            LEGACY_ADAPTER_SEMANTIC_LOSS,
+            "/process_calls",
+            "a wrapper parent supports exactly one process call — a call ends its "
+            "path, so a chain would need each child's return paths bound to it",
+        )
     rd = config.get("return_documents")
     if isinstance(rd, dict) and rd.get("enabled") is True:
-        terminal: Dict[str, Any] = {"kind": "return_documents"}
-        if rd.get("label") is not None:
-            terminal["label"] = str(rd["label"] or "")
-        steps.append(terminal)
-    else:
-        steps.append({"kind": "stop"})
+        raise adapter_diagnostic(
+            LEGACY_ADAPTER_SEMANTIC_LOSS,
+            "/return_documents/enabled",
+            "a wrapper parent cannot return documents after its process call — the "
+            "call ends its path, and routing past it needs the child's return paths",
+        )
 
     ir = parse_process_ir_v1(
         {"version": "1", "body": {"kind": "sequence", "steps": steps}}

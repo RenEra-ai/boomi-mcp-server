@@ -7,25 +7,17 @@
         "kind": "branch",
         "legs": [
           {
-            "steps": [
-              {
-                "kind": "process_call",
-                "process_ref": "child_process"
-              }
-            ],
+            "steps": [],
             "terminal": {
-              "kind": "stop"
+              "kind": "process_call",
+              "process_ref": "child_process"
             }
           },
           {
-            "steps": [
-              {
-                "kind": "process_call",
-                "process_ref": "child_process"
-              }
-            ],
+            "steps": [],
             "terminal": {
-              "kind": "stop"
+              "kind": "process_call",
+              "process_ref": "child_process"
             }
           }
         ]

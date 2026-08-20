@@ -56,6 +56,7 @@ from typing import Any, Dict, FrozenSet, List, Mapping, Tuple
 from ...errors import (
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
 )
@@ -91,11 +92,15 @@ _TRY_CATCH = frozenset(TRY_CATCH_BODY_KINDS)
 #: Live evidence (`.codex/plans/issue-141-live-captures.md`):
 #:
 #: * ``connector_call`` in every body  -> capability ``connector_call_in_control_body``.
-#: * ``process_call`` in a Branch leg  -> §2.2, seven Branch legs whose bodies run
-#:   process calls; admitted only under PATH MODE (that body is ProcessCall-only
-#:   and ends in ``stop``), which the model enforces.
-#: * ``process_call`` on a TRUE arm    -> §2.2, ``decision ->true-> processcall``,
-#:   twice. Absent from the FALSE arm: the capture attests TRUE outcomes only.
+#: * ``process_call`` as a Branch-leg TERMINAL -> §2.2, seven Branch legs whose
+#:   bodies run process calls. #141 read those as ProcessCall STEPS ending in a
+#:   ``stop``; #175 corrected that: the capture attests the control edge landing
+#:   ON the call, and the platform projects a call's outbound connection from the
+#:   CALLED process's return-document shapes — four of the five captured calls
+#:   have none and no outgoing edge at all. So the call IS the end of the leg.
+#: * ``process_call`` as a TRUE-arm TERMINAL -> §2.2, ``decision ->true->
+#:   processcall``, twice. Absent from the FALSE arm in BOTH slots: the capture
+#:   attests TRUE outcomes only.
 #: * ``decision`` as a Branch-leg terminal -> §2.1, leg 2 routes into a Decision.
 #: * ``branch`` as a Branch-leg terminal   -> DELIBERATELY ABSENT. It appears
 #:   nowhere in either captured process, and fail-closed is the rule for an
@@ -105,11 +110,13 @@ _TRY_CATCH = frozenset(TRY_CATCH_BODY_KINDS)
 #:   to do some work first (the empty-leg question is UNPROVEN, capture §2.4).
 BODY_CAPABILITIES_V1: Mapping[Tuple[str, str], FrozenSet[str]] = MappingProxyType(
     {
-        (BRANCH_LEG, STEP_SLOT): _LINEAR | {"connector_call", "process_call"},
-        (BRANCH_LEG, TERMINAL_SLOT): frozenset({"target", "cache_put", "stop", "decision"}),
-        (DECISION_TRUE_ARM, STEP_SLOT): _LINEAR | {"connector_call", "process_call"},
+        (BRANCH_LEG, STEP_SLOT): _LINEAR | {"connector_call"},
+        (BRANCH_LEG, TERMINAL_SLOT): frozenset(
+            {"target", "cache_put", "stop", "process_call", "decision"}
+        ),
+        (DECISION_TRUE_ARM, STEP_SLOT): _LINEAR | {"connector_call"},
         (DECISION_TRUE_ARM, TERMINAL_SLOT): frozenset(
-            {"target", "stop", "exception", "branch", "decision"}
+            {"target", "stop", "exception", "process_call", "branch", "decision"}
         ),
         (DECISION_FALSE_ARM, STEP_SLOT): _LINEAR | {"connector_call"},
         (DECISION_FALSE_ARM, TERMINAL_SLOT): frozenset(
@@ -193,6 +200,12 @@ def _walk_body(
     connector_index = next(
         (i for i, k in enumerate(kinds) if k in _CONNECTOR_KINDS), None
     )
+    # #175 moved ``process_call`` into the TERMINAL slot, so every rule that used
+    # to read ``kinds`` alone has to read the terminal too. Missing one of these
+    # would not merely lose a diagnostic: it would let the widened slot smuggle
+    # the mixed path that #141 gated straight past the compiler.
+    terminal_is_call = getattr(terminal, "kind", None) == "process_call"
+    call_index = kinds.index("process_call") if "process_call" in kinds else None
     if process_call_above and (connector_index is not None or
                                getattr(terminal, "kind", None) in _CONNECTOR_KINDS):
         raise raise_compile_error(
@@ -205,7 +218,9 @@ def _walk_body(
                 "(process_call_connector_mixing is gated)"
             ),
         )
-    if "process_call" in kinds and (connector_above or connector_in_body):
+    if (call_index is not None or terminal_is_call) and (
+        connector_above or connector_in_body
+    ):
         # ``process_call_connector_mixing`` is gated PER ROOT-TO-LEAF PATH.
         # ``models.process_ir`` states this too, but only from
         # ``parse_process_ir_v1`` — and ``ProcessIRV1`` is EXPORTED, so a caller
@@ -215,10 +230,26 @@ def _walk_body(
         raise raise_compile_error(
             PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
             _SEMANTIC_PHASE,
-            _join(path, "steps", kinds.index("process_call")),
+            _join(path, "steps", call_index) if call_index is not None
+            else _join(path, "terminal"),
             message=(
                 "a process_call may not share a root-to-leaf path with a connector step "
                 "(process_call_connector_mixing is gated)"
+            ),
+        )
+    if terminal_is_call and steps:
+        # The empty-prefix rule, re-derived here rather than inherited from the
+        # model: a call ends its path, so a body that reaches one has nothing
+        # left to run before it. Same mutable-model reasoning as the mixing rule
+        # above — appending a step to a validated terminal-call leg must not
+        # produce an emitted graph whose call is wired onward.
+        raise raise_compile_error(
+            PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+            _SEMANTIC_PHASE,
+            _join(path, "steps", 0),
+            message=(
+                "a process_call terminal admits no preceding steps — the call ends "
+                "the path it is on"
             ),
         )
     for index, step in enumerate(steps):
@@ -230,7 +261,7 @@ def _walk_body(
         terminal_path,
         depth,
         connector_above or connector_in_body,
-        process_call_above or "process_call" in kinds,
+        process_call_above or call_index is not None or terminal_is_call,
     )
 
 
@@ -445,6 +476,37 @@ def _check_try_catch_placement(ir: ProcessIRV1) -> None:
                 )
 
 
+def _check_process_call_placement(ir: ProcessIRV1) -> None:
+    """Re-check WHERE a root ``process_call`` sits, independently of the model (#175).
+
+    A call ends its path, so the only supported root shape is the exact
+    singleton. Same mutable-model defence as the body rules: ``ProcessIRV1`` is
+    exported, so a caller can validate a legal singleton, append a stop, and hand
+    the model straight to ``compile_process_ir_v1``.
+
+    Without this the appended step would not be caught HERE but much later, by
+    ``check_cfg_invariants`` reporting that flow continues past a terminal node —
+    fail-closed, but blaming the CFG for an authoring defect and pointing at a
+    node id rather than the authored pointer. ``validate_body_capabilities`` runs
+    before lowering, so this claims the diagnosis first.
+    """
+    steps = list(ir.body.steps)
+    if len(steps) == 1:
+        return
+    for index, step in enumerate(steps):
+        if getattr(step, "kind", None) != "process_call":
+            continue
+        raise raise_compile_error(
+            PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+            _SEMANTIC_PHASE,
+            _join("/body", "steps", index),
+            message=(
+                "a process_call is the terminal of its path — a root sequence "
+                "containing one admits no other step"
+            ),
+        )
+
+
 def validate_body_capabilities(ir: ProcessIRV1) -> None:
     """Check every control-body slot and the control-depth bound.
 
@@ -455,6 +517,7 @@ def validate_body_capabilities(ir: ProcessIRV1) -> None:
     so no pre-#141 dialect changes behaviour.
     """
     _check_try_catch_placement(ir)
+    _check_process_call_placement(ir)
     root_kinds = [getattr(step, "kind", None) for step in ir.body.steps]
     connector_at_root = any(k in _CONNECTOR_KINDS for k in root_kinds)
     for index, step in enumerate(ir.body.steps):

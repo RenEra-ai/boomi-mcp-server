@@ -39,6 +39,7 @@ from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
 from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
 from boomi_mcp.errors import (
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
@@ -443,6 +444,9 @@ def test_true_outcome_precedes_false_everywhere():
 # ---------------------------------------------------------------------------
 
 
+# #175: the calls are the leg TERMINALS, with no trailing stop. This document is
+# the case definition that owns `process_ir_rich_branch_process_call.xml`, so the
+# golden follows from it — the bytes are never hand-edited.
 PROCESS_CALL_BRANCH_DOC = {
     "version": "1",
     "body": {
@@ -452,12 +456,12 @@ PROCESS_CALL_BRANCH_DOC = {
                 "kind": "branch",
                 "legs": [
                     {
-                        "steps": [{"kind": "process_call", "process_ref": "child_process"}],
-                        "terminal": {"kind": "stop"},
+                        "steps": [],
+                        "terminal": {"kind": "process_call", "process_ref": "child_process"},
                     },
                     {
-                        "steps": [{"kind": "process_call", "process_ref": "child_process"}],
-                        "terminal": {"kind": "stop"},
+                        "steps": [],
+                        "terminal": {"kind": "process_call", "process_ref": "child_process"},
                     },
                 ],
             }
@@ -535,15 +539,17 @@ def test_registry_step_rows_match_the_model_unions(context, slot, alias_name):
 
 
 def test_registry_terminal_rows_are_the_shipped_matrix():
+    # #175 moved `process_call` from the STEP row into these two TERMINAL rows.
     assert bodycaps.BODY_CAPABILITIES_V1[(bodycaps.BRANCH_LEG, bodycaps.TERMINAL_SLOT)] == {
         "target",
         "cache_put",
         "stop",
+        "process_call",
         "decision",
     }
     assert bodycaps.BODY_CAPABILITIES_V1[
         (bodycaps.DECISION_TRUE_ARM, bodycaps.TERMINAL_SLOT)
-    ] == {"target", "stop", "exception", "branch", "decision"}
+    ] == {"target", "stop", "exception", "process_call", "branch", "decision"}
     assert bodycaps.BODY_CAPABILITIES_V1[
         (bodycaps.DECISION_FALSE_ARM, bodycaps.TERMINAL_SLOT)
     ] == {"stop", "exception", "branch", "decision"}
@@ -651,13 +657,16 @@ def test_process_call_body_requires_a_control_only_root():
     is exactly the `process_call_connector_mixing` the manifest still reports as
     gated — the root's connector sits on that leg's root-to-leaf path.
     """
+    # #175: the call is now the leg TERMINAL, which is precisely why the ancestor
+    # walk had to learn to look at terminals — checking only `steps` would let
+    # this mixed path through the moment the kind moved slots.
     doc = {
         "version": "1",
         "body": {"kind": "sequence", "steps": [
             call("op_rest_get", action="GET"),
             {"kind": "branch", "legs": [
-                {"steps": [{"kind": "process_call", "process_ref": "child_process"}],
-                 "terminal": {"kind": "stop"}},
+                {"steps": [],
+                 "terminal": {"kind": "process_call", "process_ref": "child_process"}},
                 {"steps": [{"kind": "message", "text": "m"}], "terminal": {"kind": "stop"}},
             ]},
         ]},
@@ -665,6 +674,9 @@ def test_process_call_body_requires_a_control_only_root():
     with pytest.raises(ProcessIRValidationError) as excinfo:
         parse_process_ir_v1(doc)
     assert excinfo.value.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+    assert excinfo.value.diagnostics[0].path.endswith("/terminal"), (
+        excinfo.value.diagnostics[0].path
+    )
     # ...and the legitimate shape is untouched.
     compile_doc(PROCESS_CALL_BRANCH_DOC)
 
@@ -868,7 +880,7 @@ def test_process_call_mixing_is_checked_along_the_whole_path_not_just_the_root()
     doc = {"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "branch", "legs": [
             {"steps": [call("op_rest_get", action="GET")],
-             "terminal": _dec({"steps": [PC], "terminal": {"kind": "stop"}},
+             "terminal": _dec({"steps": [], "terminal": PC},
                               {"steps": [], "terminal": {"kind": "stop"}})},
             {"steps": [MSG], "terminal": {"kind": "stop"}},
         ]},
@@ -882,7 +894,7 @@ def test_process_call_mixing_is_checked_along_the_whole_path_not_just_the_root()
     ok = {"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "branch", "legs": [
             {"steps": [MSG],
-             "terminal": _dec({"steps": [PC], "terminal": {"kind": "stop"}},
+             "terminal": _dec({"steps": [], "terminal": PC},
                               {"steps": [], "terminal": {"kind": "stop"}})},
             {"steps": [MSG], "terminal": {"kind": "stop"}},
         ]},
@@ -924,33 +936,41 @@ def test_the_termination_prepass_does_not_steal_non_control_diagnostics():
 # ---------------------------------------------------------------------------
 
 
-def test_a_decision_arm_admits_at_most_one_process_call():
+def test_a_decision_arm_admits_exactly_one_terminal_process_call():
     """The capture attests exactly one `decision ->true-> processcall` (twice).
 
-    A CHAIN of process calls on an arm is unproven, so it stays closed even
-    though the Branch-leg rule is deliberately plural.
+    #141 enforced "at most one" with an explicit `max_calls=1` bound on a list of
+    STEPS. #175 makes the bound structural instead: the call is the arm's single
+    TERMINAL, so a chain has nowhere to be written and the counting rule is gone
+    rather than merely satisfied. A rule you cannot express is stronger than a
+    rule you have to remember to check.
     """
     PC = {"kind": "process_call", "process_ref": "child_process"}
     MSG = {"kind": "message", "text": "m"}
     ok = {"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "branch", "legs": [
-            {"steps": [MSG], "terminal": _dec({"steps": [PC], "terminal": {"kind": "stop"}},
+            {"steps": [MSG], "terminal": _dec({"steps": [], "terminal": PC},
                                               {"steps": [], "terminal": {"kind": "stop"}})},
             {"steps": [MSG], "terminal": {"kind": "stop"}},
         ]},
     ]}}
     compile_doc(ok)
 
+    # A chain: the second call would need the first child's return paths to be
+    # reachable at all, so it is a continuation request, not a cardinality slip.
     too_many = {"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "branch", "legs": [
-            {"steps": [MSG], "terminal": _dec({"steps": [PC, PC], "terminal": {"kind": "stop"}},
+            {"steps": [MSG], "terminal": _dec({"steps": [PC], "terminal": PC},
                                               {"steps": [], "terminal": {"kind": "stop"}})},
             {"steps": [MSG], "terminal": {"kind": "stop"}},
         ]},
     ]}}
     with pytest.raises(ProcessIRValidationError) as excinfo:
         parse_process_ir_v1(too_many)
-    assert excinfo.value.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+    assert (
+        excinfo.value.diagnostics[0].code
+        == PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
+    ), [(d.code, d.path) for d in excinfo.value.diagnostics]
 
 
 def test_a_map_must_follow_its_call_immediately():
@@ -1125,7 +1145,7 @@ def test_the_mixing_gate_holds_on_the_COMPILER_entry_point_too():
     doc = {"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "branch", "legs": [
             {"steps": [call("op_rest_get", action="GET")],
-             "terminal": _dec({"steps": [PC], "terminal": {"kind": "stop"}},
+             "terminal": _dec({"steps": [], "terminal": PC},
                               {"steps": [], "terminal": {"kind": "stop"}})},
             {"steps": [MSG], "terminal": {"kind": "stop"}},
         ]},
@@ -1216,7 +1236,13 @@ def test_the_mixing_gate_propagates_in_BOTH_directions():
 
     ir = parse_process_ir_v1(PROCESS_CALL_BRANCH_DOC)
     leg = ir.body.steps[0].legs[0]
-    # process_call above -> nested decision -> connector_call below
+    # #175: the call is a TERMINAL now, so "a call above something" can only be
+    # reached by MUTATION — which is exactly this test's premise. Push the call
+    # into the leg's steps (a slot the union no longer admits, so no authored
+    # payload can arrive this way) and hang a connector-bearing Decision off it.
+    leg.steps = [ir_module.ProcessCallNodeV1.model_validate(
+        {"kind": "process_call", "process_ref": "child_process"}
+    )]
     leg.terminal = ir_module.DecisionNodeV1.model_validate({
         "kind": "decision", "comparison": "equals",
         "left": {"value_type": "static", "static_value": "a"},

@@ -104,6 +104,12 @@ _EXIT_KINDS = {
     "stop": "stop",
     "return_documents": "return_documents",
     "exception": "exception",
+    # #175. A process call ends its path: whether execution continues is decided
+    # by the CALLED process's return-document shapes, and V1 emits only the
+    # non-returning form. Both readers of this table — the leg/arm terminal and
+    # the root sequence — then treat it as an exit with no successor, so it needs
+    # no separate handling anywhere else.
+    "process_call": "process_call",
 }
 
 

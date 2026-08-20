@@ -2800,6 +2800,44 @@ def _terminal_flow_entry(config: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     return ("stop", {"continue_": True})
 
 
+def _process_call_catch_composition_error(
+    dlq_mode: str, has_catch_exception: bool
+) -> Optional[BuilderValidationError]:
+    """#175: the ONE definition of which catch-leg compositions a TERMINAL
+    Process Call permits.
+
+    An ``error_subprocess_ref`` DLQ route emits a process call, and a call ends
+    its path — Boomi projects a call's outbound connection from the CALLED
+    process's return-document shapes, and this builder declares none. So a
+    trailing Exception is unreachable, and emitting it would put an orphan on
+    the canvas.
+
+    This lives in ONE function because the first version of the rule did not:
+    it was enforced only where the leg is emitted, so ``validate_config``
+    accepted the composition, ``plan`` reported success, and apply created the
+    preceding components before the build refused (QA-175-r1-01). A rule that
+    one of two enforcement sites knows is not a rule — and the module's own
+    convention is the double gate, plan-time for the caller and build-time for
+    the validate-bypass path. Both sites now ask the same function, so they
+    cannot disagree.
+
+    Returns the error rather than raising, so the plan-time validator can return
+    it and the emit-time guard can raise it.
+    """
+    if dlq_mode == "error_subprocess_ref" and has_catch_exception:
+        return BuilderValidationError(
+            "reliability.catch_exception cannot follow an error-subprocess DLQ route.",
+            error_code="PROCESS_CALL_CONFIG_INVALID",
+            field="reliability.catch_exception",
+            hint=(
+                "A process call ends the path it is on, so the Exception would be "
+                "unreachable. Drop catch_exception, throw the error inside the error "
+                "subprocess instead, or use dlq.mode='document_cache_ref'."
+            ),
+        )
+    return None
+
+
 def _validate_reliability(reliability: Any) -> Optional[BuilderValidationError]:
     if reliability is None:
         return None
@@ -2888,6 +2926,15 @@ def _validate_reliability(reliability: Any) -> Optional[BuilderValidationError]:
     if catch_exception_err is not None:
         return catch_exception_err
     has_catch_exception = isinstance(catch_exception, dict)
+    # #175, PLAN-TIME half of the double gate. Placed after the shape validators
+    # above so a malformed catch_exception still reports its own defect, and
+    # before the retry/notify gates so the caller hears the real obstacle rather
+    # than a downstream consequence of it.
+    composition_err = _process_call_catch_composition_error(
+        dlq_mode, has_catch_exception
+    )
+    if composition_err is not None:
+        return composition_err
     if (
         retry_count > 0
         and dlq_mode not in _TRY_CATCH_DLQ_MODES
@@ -3194,13 +3241,30 @@ def _emit_flow_shape(
     if kind == "processcall":
         # Standalone main-flow Process Call (issue #90 wrapper_subprocess):
         # main-flow geometry, abort defaults False (parent continues past a
-        # child failure — the live-observed wrapper value), forward dragpoint
-        # to the next shape.
+        # child failure — the live-observed wrapper value).
+        #
+        # #175: TERMINAL. `next_name` is ignored, exactly as the returndocuments
+        # branch below ignores it and for the same reason — this generic dispatch
+        # is driven by a loop that hands every shape its successor, so a
+        # `next_name` here is a loop artifact rather than authored intent, and
+        # terminality is a property of the KIND. Boomi projects a call's outbound
+        # connection from the CALLED process's return-document shapes, so a
+        # non-returning call has no edge to draw.
+        #
+        # Nothing is lost by ignoring it: authored continuation is refused
+        # upstream, where the intent actually lives (WrapperSubprocessBuilder's
+        # validate_config and build, the wrapper adapter, the flow-sequence
+        # codec, and the ProcessIR grammar). The catch leg does NOT come through
+        # here — it calls `_emit_processcall` directly, where a non-None
+        # `next_name` is a real request and is refused rather than dropped.
+        # Since #139 the wrapper builds through the canonical adapter, so no
+        # production caller reaches this branch at all; it remains as the
+        # emittable-registry entry's real emitter.
         return _emit_processcall(
             shape_name,
             str(params.get("process_id") or "").strip(),
             shape_index,
-            next_name,
+            None,
             wait=bool(params.get("wait", True)),
             abort=bool(params.get("abort", False)),
             y=_SHAPE_Y,
@@ -4330,10 +4394,39 @@ def _emit_catch_leg(
         dlq_index = idx
         dlq_name = f"shape{idx}"
         idx += 1
+    # #175. An `error_subprocess_ref` DLQ route emits a process call, and a call
+    # ends its path — Boomi projects a call's outbound connection from the CALLED
+    # process's return-document shapes, and this builder declares none.
+    #
+    # Two of the three compositions that used to put a terminal AFTER that call
+    # were emitting the defect (measured at baseline: `catch_notify +
+    # error_subprocess_ref` produced notify -> pc -> stop with a dead edge and an
+    # orphan Stop; adding `catch_exception` produced pc -> exception, an
+    # unreachable throw). They are handled differently because the intent differs:
+    #
+    #  * the trailing catch-row Stop carries no intent of its own — it exists only
+    #    because the pre-#108 notify path needed *a* terminal — so it is simply
+    #    not emitted, and the call becomes the leg's end. Nothing is lost.
+    #  * a `catch_exception` IS authored intent: the caller asked to throw after
+    #    handing off to the subprocess. That cannot be expressed while the call is
+    #    terminal, and silently dropping the Exception would lose the intent, so
+    #    the composition is refused instead.
+    #
+    # The bare DLQ-only leg and every `document_cache_ref` composition are
+    # untouched: a Document Cache load legitimately continues downstream.
+    dlq_is_process_call = dlq_present and mode == "error_subprocess_ref"
+    # EMIT-TIME half of the double gate, asking the SAME function the plan-time
+    # validator asks — the two cannot drift into disagreeing about which
+    # compositions are legal.
+    composition_err = _process_call_catch_composition_error(
+        mode if dlq_present else "disabled", exception_present
+    )
+    if composition_err is not None:
+        raise composition_err
     terminal_kind: Optional[str] = None
     if exception_present:
         terminal_kind = "exception"
-    elif notify_present:
+    elif notify_present and not dlq_is_process_call:
         terminal_kind = "stop"
     terminal_index = terminal_name = None
     if terminal_kind is not None:
@@ -4783,6 +4876,40 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
         return_documents_err = _validate_return_documents(config.get("return_documents"))
         if return_documents_err is not None:
             return return_documents_err
+        # #175, checked AFTER the shape validators above so a malformed block
+        # still reports its own defect rather than this capability refusal — a
+        # caller with a typo in `return_documents` must hear about the typo.
+        #
+        # A process call ends its path: Boomi projects a call's outbound
+        # connection from the CALLED process's return-document shapes, and this
+        # builder declares none. So a second call has nothing to hang off the
+        # first, and a Return Documents terminal has nothing to route into it.
+        # Both used to emit — with a dead edge and an orphaned shape on the
+        # canvas — and both are now refused before anything is created.
+        if len(calls) != 1:
+            return BuilderValidationError(
+                "wrapper_subprocess supports exactly one process call, got "
+                f"{len(calls)}.",
+                error_code="PROCESS_CALL_CONFIG_INVALID",
+                field="process_calls",
+                hint=(
+                    "A process call ends the path it is on, so calls cannot be "
+                    "chained. Use one wrapper per child, or await the gated "
+                    "process_call_return_path_binding capability."
+                ),
+            )
+        rd = config.get("return_documents")
+        if isinstance(rd, dict) and rd.get("enabled") is True:
+            return BuilderValidationError(
+                "wrapper_subprocess cannot return documents after its process call.",
+                error_code="PROCESS_CALL_CONFIG_INVALID",
+                field="return_documents.enabled",
+                hint=(
+                    "The call ends the path, so no terminal can follow it. Have "
+                    "the CALLED child return its documents instead, or await the "
+                    "gated process_call_return_path_binding capability."
+                ),
+            )
         return cls.scan_forbidden_secret_fields(config)
 
     @classmethod
@@ -4793,7 +4920,12 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
         name: str,
         folder_name: Optional[str] = None,
     ) -> str:
-        """Emit the thin parent: start -> processcall(s) -> stop.
+        """Emit the thin parent: ``start -> processcall``, and nothing after it.
+
+        #175: exactly one call, and the call is the TERMINAL — no trailing Stop.
+        Boomi projects a call's outbound connection from the CALLED process's
+        return-document shapes, so the Stop this used to emit was never connected
+        and showed up as an orphan on the canvas.
 
         Assumes validate_config passed and that ``$ref`` tokens in process_calls
         have been substituted with real child component ids by the integration
@@ -4817,6 +4949,34 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
                     field="process_calls",
                     hint="Set subprocess_ref ('$ref:KEY') or process_id on each process call.",
                 )
+        # #175, mirrored from validate_config for the validate-bypass path (the
+        # established double-gate in this module). The adapter refuses these too,
+        # but this raise keeps the builder's own typed error and its field
+        # pointer, and it fires before anything is emitted.
+        if len(calls) != 1:
+            raise BuilderValidationError(
+                "wrapper_subprocess supports exactly one process call, got "
+                f"{len(calls)}.",
+                error_code="PROCESS_CALL_CONFIG_INVALID",
+                field="process_calls",
+                hint=(
+                    "A process call ends the path it is on, so calls cannot be "
+                    "chained. Use one wrapper per child, or await the gated "
+                    "process_call_return_path_binding capability."
+                ),
+            )
+        rd_block = config.get("return_documents")
+        if isinstance(rd_block, dict) and rd_block.get("enabled") is True:
+            raise BuilderValidationError(
+                "wrapper_subprocess cannot return documents after its process call.",
+                error_code="PROCESS_CALL_CONFIG_INVALID",
+                field="return_documents.enabled",
+                hint=(
+                    "The call ends the path, so no terminal can follow it. Have "
+                    "the CALLED child return its documents instead, or await the "
+                    "gated process_call_return_path_binding capability."
+                ),
+            )
         # Issue #99 G3: emit the hoisted/declared connection env-extension
         # override points so the wrapper-deployed package surfaces them through
         # get_extensions. Absent block -> empty <bns:processOverrides> (the

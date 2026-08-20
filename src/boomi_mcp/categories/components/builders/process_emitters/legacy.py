@@ -758,11 +758,31 @@ def _emit_processcall(
     dragpoint_y: float = _CATCH_DRAGPOINT_Y,
     userlabel: str = "Route caught errors to error subprocess",
 ) -> str:
-    transitions = (
-        linear_transitions(shape_index, [next_name], y=dragpoint_y) if next_name else ()
-    )
+    # #175: a process call ends its path. Boomi projects a call's outbound
+    # connection from the CALLED process's return-document shapes, and this
+    # emitter declares none — so a `next_name` would draw an edge the platform
+    # does not honour, leaving whatever it pointed at unreachable on the canvas.
+    # Refused rather than silently dropped: the caller asked for a continuation,
+    # and emitting the leg without it would produce a graph that quietly does
+    # less than the config said.
+    #
+    # This is the fail-closed boundary for the LEGACY chain specifically. The
+    # canonical chain is bounded by the emitter registry's zero-outgoing
+    # cardinality, which legacy emission never passes through — that asymmetry is
+    # why both guards have to exist.
+    if next_name is not None:
+        raise BuilderValidationError(
+            "a process call cannot be wired to a following shape.",
+            error_code="PROCESS_CALL_CONFIG_INVALID",
+            field="reliability.dlq.mode",
+            hint=(
+                "A process call ends the path it is on. Remove the shape that "
+                "follows it, or await the gated process_call_return_path_binding "
+                "capability."
+            ),
+        )
     ctx = ShapeRenderContext(
-        shape_id=shape_name, x=_shape_x(shape_index), y=y, transitions=transitions
+        shape_id=shape_name, x=_shape_x(shape_index), y=y, transitions=()
     )
     return rendering.render_processcall(
         ctx, userlabel=userlabel, process_id=process_id, wait=wait, abort=abort

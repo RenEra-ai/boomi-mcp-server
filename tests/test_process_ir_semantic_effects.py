@@ -51,7 +51,12 @@ def _codes(doc):
     return {f.code for f in collect_effect_findings(_prepared(doc))}
 
 
-def _process_call_doc(*, wait, trailing=()):
+def _process_call_doc(*, wait):
+    # #175: a process-call root is the EXACT SINGLETON — the call ends its own
+    # path, so the trailing stop this used to append is unauthorable. (The
+    # `trailing=` parameter went with it: no call site ever passed one, and a
+    # step after a call is now a continuation request. Downstream-read fixtures
+    # use sibling branch legs instead — see `_async_pair`.)
     return {
         "version": "1",
         "body": {
@@ -63,9 +68,7 @@ def _process_call_doc(*, wait, trailing=()):
                     "wait": wait,
                     "abort_on_error": False,
                 }
-            ]
-            + list(trailing)
-            + [{"kind": "stop"}],
+            ],
         },
     }
 
@@ -646,16 +649,33 @@ def _async_pair(reads, writes=(("dpp", "A"),), first_wait=False):
         validate_process_ir,
     )
 
+    # #175: the orchestration shape moved from a ROOT CHAIN of calls to sibling
+    # BRANCH LEGS, because a process call ends its path — a chain would need each
+    # child's return paths bound to it. The hazard is unchanged and the fixture
+    # is now the live-attested shape (capture §2.2 records Branch legs whose
+    # bodies run process calls; it records no call wired onward to another).
+    #
+    # The race is just as real here: Boomi runs legs SEQUENTIALLY, in authored
+    # order, and execution-scoped state written in an earlier leg is visible to a
+    # later one. So leg 2 reading what leg 1's non-waiting child writes is the
+    # same unordered read it always was — measured: the ordering finding still
+    # fires for `first_wait=False`, and still does not for `first_wait=True`.
     doc = {
         "version": "1",
         "body": {
             "kind": "sequence",
             "steps": [
-                {"kind": "process_call", "process_ref": "$ref:c1", "wait": first_wait,
-                 "abort_on_error": False},
-                {"kind": "process_call", "process_ref": "$ref:c2", "wait": True,
-                 "abort_on_error": False},
-                {"kind": "stop"},
+                {
+                    "kind": "branch",
+                    "legs": [
+                        {"steps": [], "terminal": {
+                            "kind": "process_call", "process_ref": "$ref:c1",
+                            "wait": first_wait, "abort_on_error": False}},
+                        {"steps": [], "terminal": {
+                            "kind": "process_call", "process_ref": "$ref:c2",
+                            "wait": True, "abort_on_error": False}},
+                    ],
+                },
             ],
         },
     }
@@ -747,9 +767,38 @@ def _orch_codes(doc, refs, summaries):
 
 
 def _branch_doc_of(legs):
+    # #175: a process call is a leg TERMINAL, not a leg step. A leg whose last
+    # element is a call therefore contributes `steps=leg[:-1], terminal=call`;
+    # any other leg keeps its Stop terminal. The emitted graph is unchanged for
+    # every non-call leg.
+    def _leg(leg):
+        if leg and leg[-1].get("kind") == "process_call":
+            return {"steps": list(leg[:-1]), "terminal": leg[-1]}
+        return {"steps": list(leg), "terminal": {"kind": "stop"}}
+
     return {"version": "1", "body": {"kind": "sequence", "steps": [
-        {"kind": "branch",
-         "legs": [{"steps": leg, "terminal": {"kind": "stop"}} for leg in legs]}]}}
+        {"kind": "branch", "legs": [_leg(leg) for leg in legs]}]}}
+
+
+def _orch_doc(*calls):
+    """An orchestration of N process calls that execute in the authored order.
+
+    #175 replaced the ROOT CHAIN these tests used (`[call, call, ..., stop]`)
+    with sibling Branch legs, because a call ends its own path — chaining would
+    need each child's return paths bound to it, which is the gated capability.
+
+    The execution semantics the tests depend on are unchanged: Boomi runs branch
+    legs SEQUENTIALLY in authored order, and execution-scoped state written in an
+    earlier leg is visible to a later one. So "call B runs after call A and can
+    read what A wrote" holds exactly as it did in the chain — and this shape is
+    the live-attested one (capture §2.2 records Branch legs running process
+    calls, and no call wired onward to another).
+
+    A Branch needs at least two legs, so a single call keeps the singleton root.
+    """
+    if len(calls) == 1:
+        return {"version": "1", "body": {"kind": "sequence", "steps": [calls[0]]}}
+    return _branch_doc_of([[call] for call in calls])
 
 
 def test_a_non_waiting_call_races_a_contract_read_in_a_LATER_branch_leg():
@@ -800,9 +849,7 @@ def test_a_trusted_synchronous_writer_answers_an_unknown_calls_race():
     """`in_process_writes` held only `_writes_of` results, so a key established
     by a WAITING child's exact summary looked unwritten and the unknown async
     call was blamed for it."""
-    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
-        _pc("$ref:u", False), _pc("$ref:w", True), _pc("$ref:r", True),
-        {"kind": "stop"}]}}
+    doc = _orch_doc(_pc("$ref:u", False), _pc("$ref:w", True), _pc("$ref:r", True))
     codes = _orch_codes(
         doc, ["$ref:u", "$ref:w", "$ref:r"],
         # deliberately NO summary for $ref:u — its effects are unknown
@@ -814,8 +861,7 @@ def test_a_trusted_synchronous_writer_answers_an_unknown_calls_race():
 def test_an_async_calls_own_declared_write_never_exempts_its_racer():
     """The discriminator that keeps the fix above from disarming the check: a
     non-waiting call's declared writes are the hazard, not a remedy for it."""
-    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
-        _pc("$ref:u", False), _pc("$ref:r", True), {"kind": "stop"}]}}
+    doc = _orch_doc(_pc("$ref:u", False), _pc("$ref:r", True))
     codes = _orch_codes(
         doc, ["$ref:u", "$ref:r"],
         [_sub("$ref:u", writes=(("dpp", "A"),)), _sub("$ref:r", reads=(("dpp", "A"),))],
@@ -829,8 +875,7 @@ def test_a_contracts_own_write_does_not_exempt_its_own_read():
     state before applying writes. The ordering collector's process-wide write
     union did not, so a contract declaring `reads=(A,), writes=(A,)` exempted
     its own read from the very race it was exposed to."""
-    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
-        _pc("$ref:u", False), _pc("$ref:rw", True), {"kind": "stop"}]}}
+    doc = _orch_doc(_pc("$ref:u", False), _pc("$ref:rw", True))
     codes = _orch_codes(
         doc, ["$ref:u", "$ref:rw"],
         # no summary for the async call — its effects are unknown
@@ -842,9 +887,7 @@ def test_a_contracts_own_write_does_not_exempt_its_own_read():
 def test_a_separate_synchronous_writer_still_exempts_the_read():
     """The discriminator: excluding a node's OWN writes must not disturb the
     exemption a DIFFERENT trusted writer provides."""
-    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
-        _pc("$ref:u", False), _pc("$ref:w", True), _pc("$ref:r", True),
-        {"kind": "stop"}]}}
+    doc = _orch_doc(_pc("$ref:u", False), _pc("$ref:w", True), _pc("$ref:r", True))
     codes = _orch_codes(
         doc, ["$ref:u", "$ref:w", "$ref:r"],
         [_sub("$ref:w", writes=(("dpp", "A"),)), _sub("$ref:r", reads=(("dpp", "A"),))],
@@ -859,9 +902,7 @@ def test_another_nodes_write_still_exempts_a_read_write_contract():
     waiting contract that reads AND writes A — was rejected. Writers are
     tracked per node, because the question is "does some node OTHER THAN ME
     write this?" and a set of keys cannot answer it."""
-    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
-        _pc("$ref:u", False), _pc("$ref:w", True), _pc("$ref:rw", True),
-        {"kind": "stop"}]}}
+    doc = _orch_doc(_pc("$ref:u", False), _pc("$ref:w", True), _pc("$ref:rw", True))
     codes = _orch_codes(
         doc, ["$ref:u", "$ref:w", "$ref:rw"],
         [_sub("$ref:w", writes=(("dpp", "A"),)),
@@ -873,8 +914,7 @@ def test_another_nodes_write_still_exempts_a_read_write_contract():
 def test_the_self_write_exclusion_survives_the_per_node_rewrite():
     """The round-4 behaviour must not regress: with NO other writer, the
     read+write contract is still exposed to the race."""
-    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
-        _pc("$ref:u", False), _pc("$ref:rw", True), {"kind": "stop"}]}}
+    doc = _orch_doc(_pc("$ref:u", False), _pc("$ref:rw", True))
     codes = _orch_codes(
         doc, ["$ref:u", "$ref:rw"],
         [_sub("$ref:rw", reads=(("dpp", "A"),), writes=(("dpp", "A"),))],
@@ -912,14 +952,24 @@ def test_the_unsafe_branch_is_authorable():
             return False
 
     def _leg_parses(legs):
-        return _parses([{"kind": "branch", "legs": [
-            {"steps": leg, "terminal": {"kind": "stop"}} for leg in legs]}])
+        # #175: a call is a leg TERMINAL. `_branch_doc_of` applies that
+        # convention, so this stays a statement about the legs, not the slots.
+        return _parses(_branch_doc_of(legs)["body"]["steps"])
 
-    # MIXING is gated ...
+    # MIXING a call with property steps is gated, in either slot ...
     assert not _parses([pc, read, {"kind": "stop"}])
     assert not _leg_parses([[pc, read], [pc2]])
-    # ... the process call itself is not
-    assert _parses([pc, pc2, {"kind": "stop"}])
+    # ... and #175 additionally gates CONTINUATION: a call ends its path, so a
+    # root chain and a trailing stop are both refused. The pre-#175 spellings of
+    # the two "allowed" rows below are kept here as the negative half, because
+    # what this test exists to do is re-derive the reachability facts rather than
+    # trust a comment about them.
+    assert not _parses([pc, pc2, {"kind": "stop"}])
+    assert not _parses([pc, {"kind": "stop"}])
+    # ... while the call ITSELF remains authorable, as the exact-singleton root
+    # and as a leg terminal. Both reach the collector, so the UNSAFE branch below
+    # is still driven by a real document.
+    assert _parses([pc])
     assert _leg_parses([[pc], [pc2]])
 
 
@@ -929,8 +979,8 @@ def test_the_unsafe_finding_comes_from_a_parsed_document_not_only_a_synthetic_cf
     which cannot show that the compiler ever produces the shape."""
     doc = {"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "branch", "legs": [
-            {"steps": [_pc("$ref:a", False)], "terminal": {"kind": "stop"}},
-            {"steps": [_pc("$ref:b", True)], "terminal": {"kind": "stop"}}]}]}}
+            {"steps": [], "terminal": _pc("$ref:a", False)},
+            {"steps": [], "terminal": _pc("$ref:b", True)}]}]}}
     codes = _orch_codes(
         doc, ["$ref:a", "$ref:b"],
         [_sub("$ref:a", writes=(("dpp", "A"),)), _sub("$ref:b", reads=(("dpp", "A"),))],
@@ -956,8 +1006,7 @@ def test_a_non_waiting_child_establishes_nothing_downstream_in_any_scope():
     )
 
     def _report(scope, wait):
-        doc = {"version": "1", "body": {"kind": "sequence", "steps": [
-            _pc("$ref:a", wait), _pc("$ref:b", True), {"kind": "stop"}]}}
+        doc = _orch_doc(_pc("$ref:a", wait), _pc("$ref:b", True))
         symbols = SymbolTableV1(symbols=(
             ComponentSymbolV1(ref="$ref:a", component_id="i1", component_type="process"),
             ComponentSymbolV1(ref="$ref:b", component_id="i2", component_type="process"),
@@ -968,11 +1017,31 @@ def test_a_non_waiting_child_establishes_nothing_downstream_in_any_scope():
         ))
         return validate_process_ir(parse_process_ir_v1(doc), symbols, caps)
 
-    for scope in ("dpp", "cache", "ddp"):
+    # EXECUTION-scoped state (process properties, the document cache) crosses
+    # branch legs, because legs run sequentially inside one execution. So the
+    # wait discriminator is exactly as before: a fire-and-forget child
+    # establishes nothing, a waiting one does.
+    for scope in ("dpp", "cache"):
         assert _report(scope, False).is_valid is False, scope
         # the discriminator: a WAITING child genuinely does establish it, and
         # a rule that rejected both would make every subprocess summary useless
         assert _report(scope, True).is_valid is True, scope
+
+    # DDP is DOCUMENT-scoped, and #175's move to sibling legs makes that
+    # visible: each leg receives an INDEPENDENT COPY of the document stream, so
+    # a document property written in leg 0 is not the one leg 1 reads — whether
+    # or not the child was waited on. The lattice says so with its own, more
+    # specific code rather than the ordering finding, which is the stronger
+    # statement: not "this race is unproven" but "this read can never be
+    # established here at all".
+    #
+    # Measured, both directions, rather than assumed from the scope name.
+    for wait in (False, True):
+        report = _report("ddp", wait)
+        assert report.is_valid is False, wait
+        assert "PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID" in {
+            f.code for f in report.errors
+        }, wait
 
 
 # ---------------------------------------------------------------------------
@@ -993,11 +1062,11 @@ def test_an_async_writers_declared_write_never_exempts_another_calls_racer():
     hazard of its own, isolating the exemption path: delete the exclusion and
     that write lands in the index, exempts the read, and the finding vanishes.
     """
-    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+    doc = _orch_doc(
         _pc("$ref:u", False),   # unknown async call — no summary
         _pc("$ref:r", True),    # reads A
         _pc("$ref:v", False),   # async, DECLARES it writes A, and runs after
-        {"kind": "stop"}]}}
+    )
     codes = _orch_codes(
         doc, ["$ref:u", "$ref:r", "$ref:v"],
         [_sub("$ref:r", reads=(("dpp", "A"),)),
@@ -1019,7 +1088,7 @@ def test_a_later_legs_membership_extends_past_its_first_node():
 
     doc = {"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "branch", "legs": [
-            {"steps": [_pc("$ref:a", False)], "terminal": {"kind": "stop"}},
+            {"steps": [], "terminal": _pc("$ref:a", False)},
             {"steps": [
                 {"kind": "set_dpp", "name": "FIRST",
                  "source_values": [{"value_type": "static", "value": "v"}]},
@@ -1115,7 +1184,7 @@ def test_the_unsafe_branch_is_producible_from_an_authorable_document():
 
     doc = {"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "branch", "legs": [
-            {"steps": [_pc("$ref:child", False)], "terminal": {"kind": "stop"}},
+            {"steps": [], "terminal": _pc("$ref:child", False)},
             {"steps": [{"kind": "set_dpp", "name": "OUT", "source_values": [
                 {"value_type": "dpp", "property_name": "A"}]}],
              "terminal": {"kind": "stop"}}]}]}}

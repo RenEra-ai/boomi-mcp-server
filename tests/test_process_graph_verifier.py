@@ -9,6 +9,7 @@ Run with PYTHONPATH=src (the editable install .pth is stale):
     PYTHONPATH=src pytest tests/test_process_graph_verifier.py
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -1139,3 +1140,114 @@ def test_migrated_recipe_xml_reverifies_standalone(label):
     """
     result = verify_process_graph(_artifact(label).process_xml)
     assert _codes(result["errors"]) == set()
+
+
+# ---------------------------------------------------------------------------
+# #175 — a Process Call may not continue without a declared return path.
+#
+# The invariant is DERIVED from the runtime authority: Boomi projects a Process
+# Call's outbound connection from the CALLED process's Return Documents shapes,
+# named in `configuration/processcall/returnpaths`. `_is_terminal` already knew
+# the permissive half (no return path => the call may end the path); nothing
+# rejected the contradictory pairing, so every process this repo emitted passed
+# clean while the UI declined to draw the connection and left the downstream
+# shape orphaned on the canvas.
+# ---------------------------------------------------------------------------
+
+_M11 = Path(__file__).resolve().parent / "fixtures" / "live_xml" / "m11"
+
+# The one Process Call in the tree that DECLARES a return path — UI-built and
+# frozen long before this slice, which is what makes it a clean-room positive
+# oracle rather than a restatement of our own emitter.
+_LIVE_RETURNING = (
+    '<returnpaths><returnpaths childShapeName="shape233" returnLabel=""/></returnpaths>'
+)
+
+
+def _live_variant() -> str:
+    return (_M11 / "process_doccacheretrieve_loadalldoc_variant.xml").read_text(
+        encoding="utf-8"
+    )
+
+
+def _orphan_codes(result):
+    return sorted(
+        i["shape"] for i in result["errors"]
+        if i["code"] == "PROCESS_CALL_ORPHAN_CONTINUATION"
+    )
+
+
+def test_a_process_call_with_no_return_path_may_not_continue():
+    """The frozen negative control: a graph this repo actually produced.
+
+    Captured from the wrapper golden at the pre-fix baseline, so it is a real
+    artifact rather than a hand-built shape invented to satisfy the rule.
+    """
+    result = verify_process_graph(_load("processcall_orphan_continuation.xml"))
+    assert _orphan_codes(result) == ["shape2"]
+    issue = next(
+        i for i in result["errors"] if i["code"] == "PROCESS_CALL_ORPHAN_CONTINUATION"
+    )
+    assert issue["shape_type"] == "processcall"
+    assert result["shapes_checked"] == 3, "a zero shape count makes this vacuous"
+
+
+def test_a_terminal_process_call_is_clean_in_both_spellings():
+    """The permissive half must survive: an ABSENT and an EMPTY returnpaths
+    element are both "the child returns nothing", and neither carries an edge."""
+    empty = _load("processcall_orphan_continuation.xml").replace(
+        '<dragpoints><dragpoint name="shape2.dragpoint1" toShape="shape3" '
+        'x="400.0" y="104.0"/></dragpoints>',
+        "<dragpoints/>",
+    )
+    assert _orphan_codes(verify_process_graph(empty)) == []
+    absent = empty.replace("<parameters/><returnpaths/>", "<parameters/>")
+    assert "<returnpaths/>" not in absent
+    assert _orphan_codes(verify_process_graph(absent)) == []
+
+
+def test_the_live_returning_call_keeps_its_connection():
+    """The positive oracle, and the guard against a one-sided rule.
+
+    `shape10` of the UI-built m11 capture declares a return path AND carries an
+    outgoing dragpoint — the platform's own answer to what a valid connected
+    Process Call looks like. A rule that merely banned "processcall with an
+    edge" would reject it.
+    """
+    assert _orphan_codes(verify_process_graph(_live_variant())) == []
+
+
+def test_clearing_only_the_live_return_path_produces_the_error():
+    """Two-directional mutation control on that same capture.
+
+    Mutating ONLY `shape10`'s own element (a document-wide replace would rewrite
+    `shape4`'s empty element, which appears earlier — that mistake made an early
+    run of this control report a false result), and asserting the restore is
+    byte-identical, so a pass cannot come from the harness rather than the rule.
+    """
+    src = _live_variant()
+    shape10 = re.search(r'<shape\b[^>]*name="shape10"[^>]*>.*?</shape>', src, re.S).group(0)
+    assert _LIVE_RETURNING in shape10 and 'identifier="shape233"' in shape10
+
+    mutant = src.replace(shape10, shape10.replace(_LIVE_RETURNING, "<returnpaths/>"), 1)
+    assert _orphan_codes(verify_process_graph(mutant)) == ["shape10"]
+
+    restored = mutant.replace(shape10.replace(_LIVE_RETURNING, "<returnpaths/>"), shape10, 1)
+    assert restored == src, "the control is only meaningful if the restore is exact"
+    assert _orphan_codes(verify_process_graph(restored)) == []
+
+
+def test_an_unresolved_dragpoint_target_still_reports_the_call():
+    """Keyed on RAW dragpoint children, not on resolved edges.
+
+    A continuation the author asked for is a continuation whether or not its
+    target resolves, so the call must be reported even when the generic
+    dangling-edge diagnostic also fires — reading `edges[...]` instead would have
+    let a malformed target hide the real defect.
+    """
+    xml = _load("processcall_orphan_continuation.xml").replace(
+        'toShape="shape3" x="400.0"', 'toShape="nonexistent" x="400.0"'
+    )
+    result = verify_process_graph(xml)
+    assert _orphan_codes(result) == ["shape2"]
+    assert "DRAGPOINT_TO_SHAPE_UNRESOLVED" in _codes(result["errors"])

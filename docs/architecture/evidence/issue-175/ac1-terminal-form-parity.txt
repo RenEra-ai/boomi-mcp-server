@@ -1,0 +1,15 @@
+AC-1 structural parity vs the live UI-built terminal form (measured, tree at slice tip)
+
+Source of truth: tests/fixtures/live_xml/m11/process_doccacheretrieve_loadalldoc_variant.xml
+(UI-built, frozen long before baseline 3fd5027) — 3 terminal processcalls (shape4/33/34),
+which collapse to exactly ONE skeleton after masking identity+geometry
+(name, x, y, processId, userlabel, abort):
+
+<shape image="processcall_icon" name="~" shapetype="processcall" userlabel="~" x="~" y="~"><configuration><processcall abort="~" processId="~" wait="true"><parameters/><returnpaths/></processcall></configuration><dragpoints/></shape>
+
+Emitted at the slice tip:
+  tests/fixtures/golden_xml/processcall_standalone_parent.xml       1 call  -> MATCHES
+  tests/fixtures/golden_xml/process_ir_rich_branch_process_call.xml 2 calls -> BOTH MATCH
+
+3/3 emitted terminal calls are structurally identical to the platform's own form:
+same element order, empty <returnpaths/>, empty <dragpoints/>.

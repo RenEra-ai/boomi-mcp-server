@@ -102,6 +102,13 @@ _ALLOWED_EXIT_ROLES = {
     "exception": ("exception",),
     "connector": (None, "routed_target"),
     "cache_put": (None, "cache_stage"),
+    # #175. ``None`` is deliberately ABSENT, exactly as for the three terminals
+    # above: every process_call node is an exit, so a call leaf that somehow
+    # reached the CFG without its role is rejected rather than quietly treated as
+    # a non-terminal. The same table rejects the inverse — a node of any other
+    # semantic kind claiming this role — so both adversarial directions are
+    # covered by membership, with no extra branch.
+    "process_call": ("process_call",),
 }
 
 # The only authored positions that can hold a target terminal:

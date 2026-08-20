@@ -316,6 +316,44 @@ Every authoring capability sits in exactly one of four states:
 - **Parity gates before any behavior claim.** An adapter is complete only when it demonstrates parity at every level: schema acceptance, JSON round-trip, semantic equivalence, ComponentPlan equivalence, and emitted-XML parity, plus `process_graph_verifier` verification and live MCP QA. **XML parity is byte-identical wherever a raw-byte golden exists today** (the 18 raw-byte goldens, inventory §3.1); where the current baseline is canonicalized (§3.2) or un-goldened (§3.4, e.g. `sync_pipeline`), the adapter must **first establish a raw-byte baseline** for the covered output before any cutover. Parity is never downgraded from byte-identity to canonical-equivalence to pass a gate.
 - **Replacement documentation before deprecation.** No surface is deprecated until its replacement is documented and its adapter has passed the parity gates.
 - **Announced policy before warnings or removal.** Deprecation warnings, and later removal, happen only under an announced policy — never as a side effect of landing an M12 issue. Per the milestone entry gate, merging #135 deprecates nothing. This gate explicitly covers the §5 `LEGACY_ADAPTER_AUTHORITY_CONFLICT` rejection of a currently-accepted contradictory or ambiguous authored `spec.pipeline`, **scoped by surface** (§5 transition): withdrawing **V1's** current acceptance — rejecting on the V1 surface a payload that plans clean today — is a compatibility tightening that lands only behind this announced policy with a documented replacement surface, never as a side effect of #139's cutover. Rejection on a **new opt-in/versioned strict surface**, which withdraws no existing V1 acceptance, **may** ship with #139 and does not deprecate V1.
+- **Defect exception, dated 2026-08-20 (#134 / #175) — narrow, and not a general weakening.**
+  The bullet above governs withdrawing an acceptance that is otherwise *sound*. It does not
+  govern withdrawing one whose OUTPUT is invalid on the platform. #175 found that every emitted
+  Process Call asserted graph wiring Boomi does not back: the platform projects a call's outbound
+  connection from the CALLED process's Return Documents shapes (`configuration/processcall/
+  returnpaths`), so a call whose child returns nothing has no outgoing edge at all — while this
+  server emitted an empty `returnpaths` together with a dragpoint to a trailing Stop. The UI
+  resolves the contradiction by not drawing the connection, leaving the Stop orphaned on the
+  canvas. Four of the five Process Calls in the in-tree UI-built captures are the terminal form;
+  the one connected call is the only one with a populated `returnpaths`.
+
+  Withdrawing those shapes on V1 — a root chain of calls, a call followed by `stop` or
+  `return_documents`, a multi-call `wrapper_subprocess`, a wrapper with
+  `return_documents.enabled=true`, and a legacy catch leg whose error-subprocess call is followed
+  by an Exception — is therefore a compatibility tightening under the letter of the bullet above,
+  and it lands in #175 rather than behind an announced deprecation. The prerequisites, all of
+  which must hold for this exception to apply, are:
+
+  1. **The withdrawn acceptance produced invalid output.** Not merely undesirable or unproven:
+     the emitted XML asserted a connection the platform's own data model does not support. A
+     capability that never worked is not one callers can be relying on.
+  2. **The owner's recorded no-consumer posture.** #134's body states it directly: *"This server
+     has no external consumers: no compatibility, deprecation-window, or [migration] obligation."*
+     The announced-policy machinery in the bullet above exists to protect consumers; with none,
+     it protects nobody and costs a shipped defect.
+  3. **The contraction is fail-closed and typed.** Every withdrawn form raises a stable code
+     (`PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED` on the canonical
+     surface, `PROCESS_CALL_CONFIG_INVALID` on the legacy facade) with static remediation, before
+     any component is created or updated. Nothing is silently truncated or dropped — in
+     particular a multi-call list is refused rather than emitting its first entry, and an
+     authored Return Documents terminal is refused rather than discarded.
+  4. **Every withdrawn capability is transferred, not deleted.** The returning-child form is
+     filed as #176 with acceptance criteria, and each refusal's remediation names the gated
+     capability `process_call_return_path_binding` that will restore it.
+
+  This exception is scoped to the Process Call return-path defect and consumes no precedent for
+  any other tightening. A later contraction that cannot show all four prerequisites — most of all
+  the first — is governed by the unmodified bullet above.
 
 ## 10. M12 Dependency DAG
 

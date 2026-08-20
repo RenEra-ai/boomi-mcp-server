@@ -65,6 +65,7 @@ from typing_extensions import Annotated
 from ..errors import (
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_REFERENCE_INVALID_FORMAT,
     PROCESS_IR_SCHEMA_BRANCH_CARDINALITY,
@@ -345,6 +346,18 @@ def _body_kind_error(message: str) -> PydanticCustomError:
     """#141: a known node kind in a control-body slot that does not admit it."""
     return PydanticCustomError(  # noqa: EM101
         "process_ir_capability_node_not_allowed_in_body", message
+    )
+
+
+def _return_path_binding_error(message: str) -> PydanticCustomError:
+    """#175: a process call authored so that execution continues past it.
+
+    Distinct from ``_body_kind_error``: the kind IS admitted here, in the
+    terminal position. What is unsupported is the CONTINUATION — which needs the
+    called process's return-document shapes and is gated separately.
+    """
+    return PydanticCustomError(  # noqa: EM101
+        "process_ir_capability_process_call_return_path_binding_unsupported", message
     )
 
 
@@ -958,8 +971,22 @@ class SetDppNodeV1(_ProcessIRBase):
 
 
 class ProcessCallNodeV1(_ProcessIRBase):
-    """Standalone Process Call (wrapper parity). ``process_ref`` accepts a
-    '$ref:KEY' in-spec child token or a literal existing component id."""
+    """Invokes another process, and TERMINATES the path it is on.
+
+    ``process_ref`` accepts a '$ref:KEY' in-spec child token or a literal
+    existing component id.
+
+    Whether execution continues past a call is not decided by this document: it
+    is decided by the called process, which hands control back only through the
+    return-document steps it declares. ProcessIR v1 supports the non-returning
+    form, where the call is the end of its path — so a call is authored as a
+    TERMINAL, with nothing after it and no trailing stop. Authoring a node after
+    a call is rejected.
+
+    Binding a RETURNING child's return paths is published separately as the
+    gated capability ``process_call_return_path_binding``; see the
+    ``process_ir_authoring`` capability entries.
+    """
 
     kind: Literal["process_call"]
     process_ref: ComponentRefV1
@@ -1062,14 +1089,21 @@ def _kinds_of(union_alias: Any) -> Tuple[str, ...]:
 #: The exact kind set of :data:`LinearNodeV1`, shared by every control body.
 LINEAR_BODY_KINDS: Tuple[str, ...] = _kinds_of(LinearNodeV1)
 
-# #141 M12.6. The step vocabularies inside a control body. Both admit the linear
-# set plus ``connector_call`` (capability ``connector_call_in_control_body``);
-# only a Branch leg and a Decision TRUE arm additionally admit ``process_call``,
-# and only under the ProcessCall PATH MODE enforced below — both placements are
-# live-attested (`.codex/plans/issue-141-live-captures.md` §2.1/§2.2).
+# #141 M12.6, amended by #175. The step vocabularies inside a control body. Both
+# admit the linear set plus ``connector_call`` (capability
+# ``connector_call_in_control_body``).
+#
+# ``process_call`` is deliberately ABSENT from both step sets. #141 admitted it
+# as a STEP and required the body to end in a ``stop``, but that generalised past
+# the evidence: the captures attest a control edge landing ON a Process Call, not
+# a Process Call wired onward to a Stop. The platform keys a call's outbound
+# connection on the CALLED process's return-document shapes, so a call whose
+# child returns nothing is itself the end of the path — it belongs in the
+# TERMINAL slot, which is where #175 moved it.
 #
 # Nested control is a TERMINAL, never a step: a step is by definition followed by
-# something on the same path, and a control node terminalizes its path.
+# something on the same path, and a control node terminalizes its path. A
+# ``process_call`` is terminal for the same structural reason.
 BranchLegStepV1 = Annotated[
     Union[
         FlowControlNodeV1,
@@ -1083,14 +1117,13 @@ BranchLegStepV1 = Annotated[
         SetDdpNodeV1,
         SetDppNodeV1,
         ConnectorCallNodeV1,
-        ProcessCallNodeV1,
     ],
     Field(discriminator="kind"),
 ]
 
-# The TRUE arm shares the Branch leg's step vocabulary (ProcessCall included —
-# live-attested twice at capture §2.2 as ``decision ->true-> processcall``); the
-# FALSE arm is the reject route and admits no ProcessCall.
+# The TRUE arm shares the Branch leg's step vocabulary; the FALSE arm is the
+# reject route and admits no ProcessCall in EITHER slot (capture §2.2 attests
+# ``decision ->true-> processcall`` only).
 DecisionTrueArmStepV1 = BranchLegStepV1
 
 DecisionFalseArmStepV1 = Annotated[
@@ -1125,43 +1158,57 @@ def _check_cache_put_followed_by_read(steps: List[Any], *, context: str) -> None
                 )
 
 
-def _check_process_call_path_mode(
-    steps: List[Any], terminal: Any, *, context: str, max_calls: Optional[int] = None
+def _check_process_call_terminal_form(
+    steps: List[Any], terminal: Any, *, context: str
 ) -> None:
-    """ProcessCall PATH MODE (#141).
+    """ProcessCall TERMINAL FORM (#141 PATH MODE, amended by #175).
 
-    ``process_call_connector_mixing`` stays gated PER ROOT-TO-LEAF PATH, so a body
-    that uses ProcessCall must use nothing else: every step is a ``process_call``
-    and the body ends on a plain ``stop``. Sibling legs are independent paths and
-    are unaffected — the check is deliberately body-local.
+    A process call ends its path. The platform projects a call's outbound
+    connection from the CALLED process's return-document shapes, so a call whose
+    child returns nothing has no outgoing edge at all — and ProcessIR v1 has no
+    field, and no cross-component check, that could establish the child returns
+    anything. V1 therefore admits the terminal form ONLY:
+
+    * the call sits in the terminal slot, with an EMPTY step prefix;
+    * nothing follows it — not a stop, not a nested control node.
+
+    ``process_call_connector_mixing`` stays gated PER ROOT-TO-LEAF PATH. Moving
+    the call to the terminal slot makes ``steps=[connector_call], terminal=
+    process_call`` representable for the first time, so the mixing rule is
+    enforced here against the terminal as well as against the steps — otherwise
+    widening the slot would silently open the very hole #141 gated.
 
     This check is BODY-LOCAL and therefore not sufficient on its own: a body
-    cannot see its ancestors. ``_check_process_call_root`` on the document root
-    enforces the other half — that a ProcessCall body hangs off a CONTROL-ONLY
-    root, so no connector sits upstream on the same root-to-leaf path.
+    cannot see its ancestors. ``_walk_controls`` on the whole document enforces
+    the other half — that no connector sits upstream on the same root-to-leaf
+    path — and ``body_capabilities`` re-derives both from the compiler side, so a
+    mutated model that never re-ran this validator is still refused.
     """
-    if not any(getattr(step, "kind", None) == "process_call" for step in steps):
+    for index, step in enumerate(steps):
+        if getattr(step, "kind", None) == "process_call":
+            raise _return_path_binding_error(
+                "a process_call may not be followed by another node in a {0} — it "
+                "is the terminal of its path (step {1})".format(context, index)
+            )
+    if getattr(terminal, "kind", None) != "process_call":
         return
-    for step in steps:
-        if step.kind != "process_call":
+    # Connector mixing is checked FIRST and reported with the mixing code. Both
+    # rules reject this body, but they are different facts: the prefix rule is a
+    # #175 return-path consequence, while mixing stays gated even once return-path
+    # binding lands. Reporting the prefix rule here would tell a caller to drop
+    # the connector when in truth the pairing is gated on its own.
+    for index, step in enumerate(steps):
+        if getattr(step, "kind", None) in _CONNECTOR_KINDS:
             raise _body_kind_error(
-                "a {0} that uses process_call may contain only process_call steps "
-                "(process_call_connector_mixing is gated per path)".format(context)
+                "a process_call may not share a root-to-leaf path with a connector "
+                "step — a connector runs upstream in this {0} (step {1}; "
+                "process_call_connector_mixing is gated)".format(context, index)
             )
-    if getattr(terminal, "kind", None) != "stop":
-        raise _body_kind_error(
-            "a process_call {0} must end in a stop terminal".format(context)
-        )
-    # A Decision arm passes ``max_calls=1``. The capture attests exactly one
-    # ``decision ->true-> processcall`` (twice); a CHAIN of process calls on an
-    # arm is unproven, and the reconciliation asked for the single-call shape.
-    # A Branch leg passes no bound, because the reconciliation states that rule
-    # as "every step in that leg must be process_call" — plural by construction.
-    if max_calls is not None and len(steps) > max_calls:
-        raise _body_kind_error(
-            "a process_call {0} may contain at most {1} process_call step".format(
-                context, max_calls
-            )
+    if steps:
+        raise _return_path_binding_error(
+            "a process_call {0} terminal admits no preceding steps — a call whose "
+            "child returns no documents ends the path it is on, and a prefix before "
+            "it is not attested".format(context)
         )
 
 
@@ -1184,9 +1231,14 @@ def _check_stop_terminal_has_work(steps: List[Any], terminal: Any, *, context: s
 class BranchLegV1(_ProcessIRBase):
     """One Branch leg (#141: rich bodies).
 
-    Steps are the linear vocabulary plus ``connector_call`` and ``process_call``;
-    the terminal is a routed target endpoint, a target-less staging ``cache_put``
-    (the staging pattern), a plain ``stop``, or a nested ``decision``.
+    Steps are the linear vocabulary plus ``connector_call``; the terminal is a
+    routed target endpoint, a target-less staging ``cache_put`` (the staging
+    pattern), a plain ``stop``, a ``process_call``, or a nested ``decision``.
+
+    A ``process_call`` is a TERMINAL, never a step, and admits no step prefix: a
+    call ends the path it is on, because whether execution continues past it is
+    determined by the called process's return-document shapes rather than by this
+    document. Authoring anything after a call is rejected.
 
     A nested ``branch`` is deliberately ABSENT — a Branch is not a legal Branch-leg
     terminal. Only placements with attested evidence are admitted, and this one
@@ -1202,7 +1254,13 @@ class BranchLegV1(_ProcessIRBase):
 
     steps: List[BranchLegStepV1] = Field(default_factory=list)
     terminal: Annotated[
-        Union[TargetEndpointV1, CachePutNodeV1, StopNodeV1, "DecisionNodeV1"],
+        Union[
+            TargetEndpointV1,
+            CachePutNodeV1,
+            StopNodeV1,
+            ProcessCallNodeV1,
+            "DecisionNodeV1",
+        ],
         Field(discriminator="kind"),
     ]
 
@@ -1213,7 +1271,7 @@ class BranchLegV1(_ProcessIRBase):
             raise _cardinality_error(
                 "a trailing cache_put belongs in the leg terminal (target-less staging leg), not in steps"
             )
-        _check_process_call_path_mode(self.steps, self.terminal, context="branch leg")
+        _check_process_call_terminal_form(self.steps, self.terminal, context="branch leg")
         _check_stop_terminal_has_work(self.steps, self.terminal, context="branch leg")
         return self
 
@@ -1251,9 +1309,14 @@ class BranchNodeV1(_ProcessIRBase):
 class DecisionTrueArmV1(_ProcessIRBase):
     """TRUE (success) arm (#141: rich bodies).
 
-    Steps are the linear vocabulary plus ``connector_call`` and ``process_call``;
-    the terminal is a routed target, a plain ``stop``, an ``exception``, or a
+    Steps are the linear vocabulary plus ``connector_call``; the terminal is a
+    routed target, a plain ``stop``, an ``exception``, a ``process_call``, or a
     nested ``branch``/``decision``.
+
+    A ``process_call`` is a TERMINAL, never a step, and admits no step prefix: a
+    call ends the path it is on, because whether execution continues past it is
+    determined by the called process's return-document shapes rather than by this
+    document. Authoring anything after a call is rejected.
 
     This arm admits ``process_call`` and a routed target; the FALSE arm admits
     neither. The asymmetry is deliberate — each placement is admitted only where
@@ -1271,6 +1334,7 @@ class DecisionTrueArmV1(_ProcessIRBase):
             TargetEndpointV1,
             StopNodeV1,
             ExceptionNodeV1,
+            ProcessCallNodeV1,
             BranchNodeV1,
             "DecisionNodeV1",
         ],
@@ -1284,8 +1348,8 @@ class DecisionTrueArmV1(_ProcessIRBase):
             raise _cardinality_error(
                 "decision true-arm steps must not end in cache_put — the arm terminal would receive an empty stream"
             )
-        _check_process_call_path_mode(
-            self.steps, self.terminal, context="decision true-arm", max_calls=1
+        _check_process_call_terminal_form(
+            self.steps, self.terminal, context="decision true-arm"
         )
         _check_stop_terminal_has_work(
             self.steps, self.terminal, context="decision true-arm"
@@ -1643,9 +1707,10 @@ class SequenceNodeV1(_ProcessIRBase):
       ``target``+``stop``, a standalone ``return_documents`` terminal (the
       legacy Return Documents path never emits the target), or a terminal
       control (``branch``/``decision``/``exception``);
-    - a process-call flow contains only ``process_call`` steps plus a
-      ``stop``/``return_documents`` terminal (mixed connector execution is
-      capability-gated);
+    - a process-call root is EXACTLY one ``process_call`` and nothing else: the
+      call ends its own path, so no trailing ``stop``/``return_documents`` and no
+      second call may follow it (mixed connector execution stays
+      capability-gated, and keeps its own diagnostic);
     - a CONTROL-ONLY root (#141) is exactly one ``branch``/``decision`` and
       nothing else;
     - ``cache_put`` must be immediately followed by a stream-replacing cache
@@ -1709,22 +1774,30 @@ class SequenceNodeV1(_ProcessIRBase):
                 )
 
         if "process_call" in kinds:
-            for i, kind in enumerate(kinds[:-1]):
-                if kind != "process_call":
+            # PROCESS-CALL ROOT (#141, amended by #175). A call ends its path, so
+            # the only supported root shape is the EXACT SINGLETON — matched
+            # exactly, like the control-only roots above. Before #175 this branch
+            # required a trailing stop/return_documents and accepted a chain; both
+            # emitted a call wired onward with no return path declared, which the
+            # platform does not honour.
+            if kinds == ["process_call"]:
+                return self
+            # Connector mixing keeps its own code and its precedence: it stays
+            # gated on its own terms even once return-path binding lands, so a
+            # caller must not be told to "drop the trailing stop" when the real
+            # obstacle is the connector.
+            for kind in kinds:
+                if kind in _CONNECTOR_KINDS:
                     raise _capability_error(
-                        "a process-call sequence may mix only process_call steps with a "
-                        "stop/return_documents terminal "
+                        "a process_call may not share a root-to-leaf path with a "
+                        "connector step "
                         "(process_call_connector_mixing is gated)"
                     )
-            if kinds[-1] not in ("stop", "return_documents"):
-                if kinds[-1] != "process_call":
-                    raise _capability_error(
-                        "a process-call sequence must end in a stop or return_documents terminal"
-                    )
-                raise _cardinality_error(
-                    "a process-call sequence must end in a stop or return_documents terminal"
-                )
-            return self
+            raise _return_path_binding_error(
+                "a process_call is the terminal of its path — a root sequence "
+                "containing one admits no other step, including a trailing stop or "
+                "return_documents"
+            )
 
         # Connector-call flow (#140). Checked BEFORE the source/target branch so
         # the two legacy branches above and the legacy branch below keep their
@@ -1890,13 +1963,22 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         # have two names.
         "generalized_connector_call": "supported",  # #140
         "mixed_connector_execution": "supported",  # #140 — many calls per path
-        # Still GATED after #141: ProcessCall and connector execution may not share
-        # one root-to-leaf path. #141 admits ProcessCall in a Branch leg / Decision
-        # TRUE arm only in PATH MODE (that body is ProcessCall-only and ends in a
-        # stop), reachable only under a control-only root — so no path ever mixes
-        # the two. Sibling legs are independent paths, not a mix.
+        # Still GATED after #141 and #175: ProcessCall and connector execution may
+        # not share one root-to-leaf path. #175 admits ProcessCall as the TERMINAL
+        # of a Branch leg / Decision TRUE arm (empty step prefix), reachable only
+        # under a control-only root — so no path ever mixes the two. Sibling legs
+        # are independent paths, not a mix. The terminal-slot move is why the gate
+        # is now enforced against the terminal as well as the steps.
         "process_call_connector_mixing": "gated",  # process_call x connector
         "connector_call_in_control_body": "supported",  # #141
+        # #175 M12 defect slice. A process call ends its path: the platform
+        # projects a call's outbound connection from the CALLED process's
+        # return-document shapes, so a call whose child returns nothing has no
+        # outgoing edge. The terminal form is what V1 emits; binding a RETURNING
+        # child's return paths needs the child's compiled shapes (a cross-component
+        # late binding) and is gated.
+        "terminal_process_call": "supported",  # #175
+        "process_call_return_path_binding": "gated",  # #175
         "continuation_after_branch_or_decision": "gated",  # #141 — terminal fan-out only
         "rich_branch_decision_bodies": "supported",  # #141
         "scoped_try_catch": "supported",  # #142
@@ -2120,6 +2202,14 @@ _REMEDIATION = {
         "get_schema_template(schema_name='process_ir_authoring', category='placement'); "
         "a kind absent from a slot is rejected, so absence is the rule, not an omission."
     ),
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED: (
+        "Author the process call as the TERMINAL of its path and remove whatever "
+        "followed it — a call whose child returns no documents ends the path, so a "
+        "trailing stop is not needed and cannot be emitted. A call that must hand "
+        "control onward needs its child's return-document shapes bound to it; that "
+        "capability is published as process_call_return_path_binding at "
+        "get_schema_template(schema_name='process_ir_authoring', category='capability')."
+    ),
     PROCESS_IR_SEMANTIC_NESTING_LIMIT: (
         "Reduce Branch/Decision nesting to at most "
         "PROCESS_IR_V1_MAX_CONTROL_DEPTH levels, or move the deeper routing into a "
@@ -2158,6 +2248,10 @@ _CUSTOM_ERROR_CODES = {
         PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED
     ),
     "process_ir_semantic_catch_unterminated": PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
+    # #175
+    "process_ir_capability_process_call_return_path_binding_unsupported": (
+        PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
+    ),
 }
 
 _MESSAGES = {
@@ -2181,6 +2275,9 @@ _MESSAGES = {
         "unsupported error scope or error-scope placement"
     ),
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED: "the catch body does not reach a terminal",
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED: (
+        "a process call may not be followed by another node in ProcessIR v1"
+    ),
 }
 
 
@@ -2330,6 +2427,42 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
             and "idempotency" not in loc
             and any(part in _BODY_LOC_SEGMENTS for part in loc)
         ):
+            # #175: ``process_call`` in a body STEP slot is the pre-#175 authoring
+            # of a continuation, not a caller reaching for a kind this slot never
+            # admitted. It IS admitted here — in the terminal slot — so the
+            # generic body-placement message ("not admitted in this slot") would
+            # be actively misleading, and its remediation would send the caller to
+            # the placement table to discover the kind is listed after all. Give
+            # it the dedicated code, whose remediation says the actual fix: make
+            # the call the terminal and drop what followed it.
+            #
+            # Checked here rather than in a `mode="before"` validator because the
+            # discriminated union rejects the tag before any model validator runs,
+            # so this translation is the only place that still knows the tag.
+            #
+            # Scoped to the bodies that actually admit a terminal call — a Branch
+            # leg and a Decision TRUE arm. The INNERMOST enclosing body decides,
+            # so this reads the LAST body segment rather than asking whether one
+            # appears anywhere: a Branch nested under a FALSE arm is still a
+            # Branch leg. A Decision FALSE arm and the Try/Catch bodies admit no
+            # call in any slot, so they keep the body-placement code, which for
+            # them is the true diagnosis.
+            innermost = next(
+                (part for part in reversed(loc) if part in _BODY_LOC_SEGMENTS), None
+            )
+            if (
+                tag == "process_call"
+                and loc[-2:-1] == ("steps",)
+                and innermost in ("legs", "true_arm")
+            ):
+                return _diagnostic(
+                    PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+                    path,
+                    message=(
+                        "a process_call is the terminal of its path — author it in "
+                        "this body's terminal slot, with nothing after it"
+                    ),
+                )
             return _diagnostic(
                 PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
                 path,
@@ -2394,18 +2527,30 @@ def _walk_controls(node: Any, path: Tuple[Any, ...], depth: int, connector_above
 
     for steps, terminal, body_path in bodies:
         kinds = [step.kind for step in steps]
-        if "process_call" in kinds and connector_above:
-            raise ProcessIRValidationError([
-                _diagnostic(
-                    PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
-                    body_path + ("steps", kinds.index("process_call")),
-                    message=(
-                        "a process_call may not share a root-to-leaf path with a "
-                        "connector step — a connector runs upstream of this body "
-                        "(process_call_connector_mixing is gated)"
-                    ),
-                )
-            ])
+        # #175: the call moved to the TERMINAL slot, so the ancestor half of the
+        # mixing gate has to look there too. Checking only ``steps`` would leave
+        # `source -> branch -> leg(terminal=process_call)` accepted — a connector
+        # genuinely upstream of a call on the same root-to-leaf path, which is
+        # exactly what this gate exists to refuse.
+        if connector_above:
+            if "process_call" in kinds:
+                offending = body_path + ("steps", kinds.index("process_call"))
+            elif getattr(terminal, "kind", None) == "process_call":
+                offending = body_path + ("terminal",)
+            else:
+                offending = None
+            if offending is not None:
+                raise ProcessIRValidationError([
+                    _diagnostic(
+                        PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+                        offending,
+                        message=(
+                            "a process_call may not share a root-to-leaf path with a "
+                            "connector step — a connector runs upstream of this body "
+                            "(process_call_connector_mixing is gated)"
+                        ),
+                    )
+                ])
         connector_here = (
             connector_above
             or any(k in _CONNECTOR_KINDS for k in kinds)

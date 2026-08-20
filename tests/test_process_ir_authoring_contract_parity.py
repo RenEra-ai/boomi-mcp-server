@@ -958,7 +958,13 @@ def test_the_published_capability_table_matches_the_registry_exactly():
         "in the doc only": sorted(published - set(PROCESS_IR_V1_CAPABILITIES)),
         "in the registry only": sorted(set(PROCESS_IR_V1_CAPABILITIES) - published),
     }
-    assert len(published) == 25, len(published)
+    # NON-VACUITY, not a pin: the set equality above is the real assertion, and
+    # it already fails if the doc gains, loses or renames a row. This line exists
+    # only so a regex that matched NOTHING cannot make that comparison trivially
+    # true against an empty set. A floor says exactly that and cannot go stale;
+    # the exact count it replaced (25) had to be hand-edited on every capability
+    # addition, which is the hand-typed-count trap #165 closed elsewhere.
+    assert len(published) >= 25, len(published)
 
 
 def test_every_semantic_rule_names_the_authority_it_states_a_fact_about():

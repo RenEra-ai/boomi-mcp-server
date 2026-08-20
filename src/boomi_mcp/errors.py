@@ -212,6 +212,18 @@ PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID = (
     "PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID"
 )
 
+# Terminal Process Call (#175). A Process Call's outbound connection is a
+# projection of the CALLED process's Return Documents shapes, not a free graph
+# edge: the platform keys the connection on those return paths, so a call whose
+# child returns nothing ends its path. ProcessIR v1 therefore admits the
+# TERMINAL form only, and every authored form that asks a Process Call to
+# continue raises this code — the binding that would make continuation valid
+# needs the child's compiled shapes and is gated as
+# `process_call_return_path_binding`.
+PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED = (
+    "PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED"
+)
+
 # State lineage: document-scoped (DDP) vs execution-scoped (DPP/cache).
 PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE = (
     "PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE"
@@ -1109,6 +1121,19 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "match the source it claims to describe."
             ),
             owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A process call was authored so that execution continues past "
+                "it. A call's outbound path is a projection of the called "
+                "process's return-document shapes, so ProcessIR v1 supports the "
+                "terminal form only; binding a returning child's return paths "
+                "is gated as process_call_return_path_binding."
+            ),
+            owner="#175",
         ),
         ErrorCodeSpec(
             code=PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,

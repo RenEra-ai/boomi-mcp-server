@@ -86,12 +86,15 @@ def test_parent_shape_sequence_and_wiring():
         "process_calls": [{"subprocess_ref": _CHILD_ID}],
     }
     _, shapes = _parse_shapes(WrapperSubprocessBuilder.build(cfg, name="N"))
-    assert _by_type(shapes) == ["start", "processcall", "stop"]
-    start, call, stop = shapes
-    # start -> processcall -> stop
+    # #175: `start -> processcall`, and the call is the END. No trailing Stop is
+    # emitted, because Boomi projects a call's outbound connection from the
+    # CALLED process's return-document shapes — with none declared there is no
+    # connection to draw, so the Stop this used to emit was never wired to
+    # anything and showed up as an orphan on the canvas.
+    assert _by_type(shapes) == ["start", "processcall"]
+    start, call = shapes
     assert [dp.attrib["toShape"] for dp in start.find("dragpoints")] == [call.attrib["name"]]
-    assert [dp.attrib["toShape"] for dp in call.find("dragpoints")] == [stop.attrib["name"]]
-    assert list(stop.find("dragpoints")) == []
+    assert list(call.find("dragpoints")) == []
 
 
 def test_standalone_processcall_is_verified_shape():
@@ -120,19 +123,82 @@ def test_explicit_process_id_target():
     assert shapes[1].find("configuration/processcall").attrib["processId"] == _CHILD_ID
 
 
-def test_multi_child_parent_chains():
+def test_multi_child_parent_is_refused_not_chained():
+    """#175 F22. This used to emit `start -> pc1 -> pc2 -> stop`.
+
+    That chain asserted graph wiring the platform does not back: pc1's edge to
+    pc2 exists only if pc1's CHILD declares return-document shapes, and this
+    builder declares none — so the UI drew no connection and pc2 plus the Stop
+    floated unreachable. The capability is transferred to #176, not dropped, and
+    the refusal is typed and pre-mutation. Kept as a refusal test rather than
+    deleted, so the withdrawn shape still has a witness.
+    """
     cfg = {
         "process_kind": "wrapper_subprocess",
         "process_calls": [{"process_id": _CHILD_ID}, {"process_id": _CHILD_ID_2}],
     }
+    err = WrapperSubprocessBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "PROCESS_CALL_CONFIG_INVALID"
+    assert err.field == "process_calls"
+
+    # ...and the build path refuses independently, for the validate-bypass
+    # caller: a gate only one of two entry points enforces is not a gate.
+    with pytest.raises(BuilderValidationError) as excinfo:
+        WrapperSubprocessBuilder.build(cfg, name="N")
+    assert excinfo.value.error_code == "PROCESS_CALL_CONFIG_INVALID"
+
+
+def test_wrapper_return_documents_is_refused_not_emitted():
+    """#175 F23. `return_documents.enabled=true` used to emit
+    `start -> processcall -> returndocuments`.
+
+    Same defect as the chain above: the Return Documents terminal is reachable
+    only through the child's return paths. The CHILD-side capability is
+    untouched — a called process still returns documents its own way; what is
+    refused is the PARENT routing past its call.
+    """
+    cfg = {
+        "process_kind": "wrapper_subprocess",
+        "process_calls": [{"process_id": _CHILD_ID}],
+        "return_documents": {"enabled": True, "label": "out"},
+    }
+    err = WrapperSubprocessBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "PROCESS_CALL_CONFIG_INVALID"
+    assert err.field == "return_documents.enabled"
+
+    with pytest.raises(BuilderValidationError) as excinfo:
+        WrapperSubprocessBuilder.build(cfg, name="N")
+    assert excinfo.value.error_code == "PROCESS_CALL_CONFIG_INVALID"
+
+
+def test_a_disabled_return_documents_block_stays_valid():
+    """The discriminator: only `enabled=true` is refused. A present-but-disabled
+    block is exactly what it always was, so the refusal cannot be satisfied by a
+    guard that rejects the KEY rather than the VALUE."""
+    cfg = {
+        "process_kind": "wrapper_subprocess",
+        "process_calls": [{"process_id": _CHILD_ID}],
+        "return_documents": {"enabled": False},
+    }
+    assert WrapperSubprocessBuilder.validate_config(cfg) is None
     _, shapes = _parse_shapes(WrapperSubprocessBuilder.build(cfg, name="N"))
-    assert _by_type(shapes) == ["start", "processcall", "processcall", "stop"]
-    # start -> pc1 -> pc2 -> stop
-    assert [dp.attrib["toShape"] for dp in shapes[0].find("dragpoints")] == [shapes[1].attrib["name"]]
-    assert [dp.attrib["toShape"] for dp in shapes[1].find("dragpoints")] == [shapes[2].attrib["name"]]
-    assert [dp.attrib["toShape"] for dp in shapes[2].find("dragpoints")] == [shapes[3].attrib["name"]]
-    assert shapes[1].find("configuration/processcall").attrib["processId"] == _CHILD_ID
-    assert shapes[2].find("configuration/processcall").attrib["processId"] == _CHILD_ID_2
+    assert _by_type(shapes) == ["start", "processcall"]
+
+
+def test_a_malformed_return_documents_block_keeps_its_own_diagnostic():
+    """Precedence: the #175 capability refusal runs AFTER the shape validators,
+    so a caller with a typo hears about the typo rather than being told their
+    Return Documents block is gated."""
+    cfg = {
+        "process_kind": "wrapper_subprocess",
+        "process_calls": [{"process_id": _CHILD_ID}],
+        "return_documents": {"enabled": True, "nonsense_key": 1},
+    }
+    err = WrapperSubprocessBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID", err.error_code
 
 
 def test_abort_on_error_true_emits_abort_attr():

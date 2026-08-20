@@ -67,9 +67,12 @@ _FORBIDDEN_SUBSTRINGS = (
 
 
 def _wrapper_cfg(**over):
+    # #175: a wrapper parent is exactly ONE process call — the call ends its
+    # path, so a chain would need each child's return paths bound to it. The
+    # withdrawn two-call shape is kept as a refusal witness below.
     cfg = {
         "process_kind": "wrapper_subprocess",
-        "process_calls": [{"process_id": _C1}, {"process_id": _C2}],
+        "process_calls": [{"process_id": _C1}],
     }
     cfg.update(over)
     return cfg
@@ -445,17 +448,57 @@ def test_flow_live_ref_without_recorded_selector_fails_closed():
     assert [d.code for d in exc.value.diagnostics] == ["LEGACY_ADAPTER_SEMANTIC_LOSS"]
 
 
-def test_wrapper_requirements_are_process_typed_and_deduped():
-    # The same child called twice yields ONE requirement (SymbolTableV1 rejects
-    # duplicate refs; the adapter must not emit a colliding pair). Wrapper calls are
-    # NOT role-scoped: legacy_selector == ir_ref == pid.
+def test_wrapper_requirements_are_process_typed():
+    # Wrapper calls are NOT role-scoped: legacy_selector == ir_ref == pid.
     result = adapt_wrapper_subprocess(
-        {"process_kind": "wrapper_subprocess", "process_calls": [{"process_id": _C1}, {"process_id": _C1}]}
+        {"process_kind": "wrapper_subprocess", "process_calls": [{"process_id": _C1}]}
     )
     refs = [r.ir_ref for r in result.symbol_requirements]
     assert refs == [_C1]
     assert result.symbol_requirements[0].legacy_selector == _C1
     assert result.symbol_requirements[0].expected_component_type == "process"
+
+
+def test_a_multi_call_wrapper_is_refused_not_truncated():
+    """#175 F24. This is the ADAPTER's own boundary, reached only by a caller
+    that skipped `WrapperSubprocessBuilder.validate_config`.
+
+    The failure mode it guards is silent DATA LOSS: emitting the first call and
+    dropping the rest would produce a process that quietly does less than the
+    config asked for. (The old dedup case lived here — the same child called
+    twice, collapsing to one requirement. That shape is refused now, so the
+    dedup path is unreachable from a valid wrapper; it stays covered where it is
+    still real, on the symbol table's own duplicate-ref rule.)
+    """
+    for calls in (
+        [{"process_id": _C1}, {"process_id": _C2}],
+        [{"process_id": _C1}, {"process_id": _C1}],   # even the same child twice
+    ):
+        with pytest.raises(LegacyAdapterError) as exc:
+            adapt_wrapper_subprocess(
+                {"process_kind": "wrapper_subprocess", "process_calls": calls}
+            )
+        assert [d.code for d in exc.value.diagnostics] == ["LEGACY_ADAPTER_SEMANTIC_LOSS"]
+        assert exc.value.diagnostics[0].legacy_source_path == "/process_calls"
+
+
+def test_a_return_documents_wrapper_is_refused_not_dropped():
+    """#175 F24, the other half: discarding an authored Return Documents
+    terminal would lose the caller's stated intent just as silently."""
+    with pytest.raises(LegacyAdapterError) as exc:
+        adapt_wrapper_subprocess(
+            _wrapper_cfg(return_documents={"enabled": True, "label": "out"})
+        )
+    assert [d.code for d in exc.value.diagnostics] == ["LEGACY_ADAPTER_SEMANTIC_LOSS"]
+    assert exc.value.diagnostics[0].legacy_source_path == "/return_documents/enabled"
+
+
+def test_a_singleton_wrapper_emits_no_terminal_after_its_call():
+    """#175: the adapter appends neither a Stop nor a Return Documents node —
+    the call IS the terminal, which is what removes the orphan from the canvas."""
+    result = adapt_wrapper_subprocess(_wrapper_cfg())
+    kinds = [step.kind for step in result.process_ir.body.steps]
+    assert kinds == ["process_call"]
 
 
 # ---------------------------------------------------------------------------

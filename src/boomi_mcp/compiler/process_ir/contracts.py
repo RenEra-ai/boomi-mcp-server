@@ -635,12 +635,17 @@ CfgSemanticV1 = Annotated[
 # leg or a decision true-arm: the IR has no Stop after it, so the emission plan
 # owns the synthetic one. ``cache_stage`` is a target-less staging leg, which
 # legitimately ends with no terminal shape at all (builder :5685-5688).
+# ``process_call`` (#175) is an exit because the CALLED process decides whether
+# execution continues, and a call whose child returns nothing ends the path here.
+# Unlike ``routed_target`` it grows no synthetic Stop: the platform emits the call
+# shape with no outgoing connection at all.
 CfgExitRoleV1 = Literal[
     "stop",
     "return_documents",
     "exception",
     "routed_target",
     "cache_stage",
+    "process_call",
 ]
 
 CfgEdgeKindV1 = Literal[

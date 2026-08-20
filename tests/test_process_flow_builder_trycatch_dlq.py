@@ -461,10 +461,16 @@ def test_notify_error_subprocess_shape_sequence():
         catch_notify=_CATCH_NOTIFY,
     )
     _, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
+    # #175: no trailing catch-row Stop after the process call. The call ends its
+    # path, so the Stop this used to emit was never connected to it — measured at
+    # baseline, this exact composition produced the orphan the issue reports.
+    # The Stop carried no intent of its own (it existed only because the pre-#108
+    # notify path needed *a* terminal), so nothing is lost by dropping it.
     assert _by_type(shapes) == [
         "start", "catcherrors", "connectoraction", "connectoraction",
-        "stop", "notify", "processcall", "stop",
+        "stop", "notify", "processcall",
     ]
+    assert list(shapes[6].find("dragpoints")) == []
 
 
 def test_notify_catch_leg_wiring_resolves():
@@ -479,22 +485,32 @@ def test_notify_catch_leg_wiring_resolves():
         catcherrors = shapes[1]
         notify = shapes[5]
         dlq_route = shapes[6]
-        catch_stop = shapes[7]
         # catcherrors Catch dragpoint targets the Notify (not the DLQ route).
         catch_dp = {dp.attrib["identifier"]: dp for dp in catcherrors.find("dragpoints")}
         assert catch_dp["error"].attrib["toShape"] == notify.attrib["name"]
-        # Notify -> DLQ route -> catch Stop.
+        # Notify -> DLQ route.
         assert notify.attrib["shapetype"] == "notify"
         notify_dps = list(notify.find("dragpoints"))
         assert len(notify_dps) == 1
         assert notify_dps[0].attrib["toShape"] == dlq_route.attrib["name"]
+        # #175: what follows the DLQ route depends on WHICH route it is, and the
+        # discriminator is the platform's own rule, not a preference. A Document
+        # Cache load legitimately continues downstream, so it keeps its catch-row
+        # Stop; a process call ends its path, so it has no outgoing edge and no
+        # Stop is emitted after it.
         dlq_dps = list(dlq_route.find("dragpoints"))
-        assert len(dlq_dps) == 1
-        assert dlq_dps[0].attrib["toShape"] == catch_stop.attrib["name"]
-        # Catch Stop is terminal and on the catch row.
-        assert catch_stop.attrib["shapetype"] == "stop"
-        assert catch_stop.attrib["y"] == "456.0"
-        assert list(catch_stop.find("dragpoints")) == []
+        if dlq_route.attrib["shapetype"] == "processcall":
+            assert dlq_dps == []
+            assert len(shapes) == 7
+        else:
+            assert dlq_route.attrib["shapetype"] == "doccacheload"
+            catch_stop = shapes[7]
+            assert len(dlq_dps) == 1
+            assert dlq_dps[0].attrib["toShape"] == catch_stop.attrib["name"]
+            # Catch Stop is terminal and on the catch row.
+            assert catch_stop.attrib["shapetype"] == "stop"
+            assert catch_stop.attrib["y"] == "456.0"
+            assert list(catch_stop.find("dragpoints")) == []
         # Every dragpoint target resolves.
         for shape in shapes:
             for dp in shape.find("dragpoints"):
@@ -876,3 +892,201 @@ def test_exception_leg_is_not_a_bare_stop_branch():
     catch_dp = next(d for d in ce.find("dragpoints") if d.attrib.get("identifier") == "error")
     target = by_name[catch_dp.attrib["toShape"]]
     assert target.attrib["shapetype"] == "exception"
+
+
+# ---------------------------------------------------------------------------
+# #175 — the SECOND instance of the defect class, in the legacy catch leg.
+#
+# An `error_subprocess_ref` DLQ route emits a process call, and the leg used to
+# wire that call to whatever trailing terminal the composition produced. Measured
+# at the pre-fix baseline, three compositions carried the defect and one did not:
+#
+#     bare error_subprocess_ref              -> clean (already terminal)
+#     catch_notify + error_subprocess_ref    -> notify -> pc -> stop      DEFECT
+#     error_subprocess_ref + catch_exception -> pc -> exception           DEFECT
+#     notify + err_sub + catch_exception     -> notify -> pc -> exception DEFECT
+#
+# NONE of them was covered by a test that ran the graph verifier, which is why
+# the suite stayed green while every affected build emitted the orphan. Closing
+# that gap is what these tests do.
+# ---------------------------------------------------------------------------
+
+from boomi_mcp.categories.components.process_graph_verifier import verify_process_graph
+
+_CATCH_EXCEPTION = {"message_template": "{1}", "parameter_source": "caught_error"}
+
+
+def _dlq_cfg(dlq, *, notify=False, exception=False):
+    cfg = _config(dlq, catch_notify=_CATCH_NOTIFY if notify else None)
+    if exception:
+        cfg["reliability"]["catch_exception"] = dict(_CATCH_EXCEPTION)
+    return cfg
+
+
+def _orphan_shapes(xml):
+    return sorted(
+        i["shape"] for i in verify_process_graph(xml)["errors"]
+        if i["code"] == "PROCESS_CALL_ORPHAN_CONTINUATION"
+    )
+
+
+@pytest.mark.parametrize("notify,label", [(False, "bare"), (True, "notify")])
+def test_an_error_subprocess_catch_leg_emits_no_orphan_continuation(notify, label):
+    xml = ProcessFlowBuilder.build(
+        _dlq_cfg({"mode": "error_subprocess_ref", "process_id": _PROC_ID}, notify=notify),
+        name="N",
+    )
+    assert _orphan_shapes(xml) == [], label
+    # ...and the call really is the last shape, so this does not pass because the
+    # process call vanished along with its edge.
+    _, shapes = _parse_shapes(xml)
+    assert shapes[-1].attrib["shapetype"] == "processcall", label
+    assert list(shapes[-1].find("dragpoints")) == [], label
+
+
+@pytest.mark.parametrize("notify,label", [(False, "exception"), (True, "notify+exception")])
+def test_an_exception_after_an_error_subprocess_call_is_refused(notify, label):
+    """Refused rather than silently dropped.
+
+    A `catch_exception` is authored INTENT — "hand off to the subprocess, then
+    throw" — and that cannot be expressed while the call is terminal. Emitting
+    the leg without the Exception would lose the intent silently, so the
+    composition fails typed, and before anything is created.
+    """
+    cfg = _dlq_cfg(
+        {"mode": "error_subprocess_ref", "process_id": _PROC_ID},
+        notify=notify, exception=True,
+    )
+    with pytest.raises(BuilderValidationError) as excinfo:
+        ProcessFlowBuilder.build(cfg, name="N")
+    assert excinfo.value.error_code == "PROCESS_CALL_CONFIG_INVALID", label
+    assert excinfo.value.field == "reliability.catch_exception", label
+
+
+@pytest.mark.parametrize(
+    "notify,exception,label",
+    [(False, False, "bare"), (True, False, "notify"), (False, True, "exception")],
+)
+def test_the_document_cache_dlq_route_is_untouched(notify, exception, label):
+    """The over-firing control, and the discriminator for the rule itself.
+
+    A Document Cache load legitimately continues downstream — it is deliberately
+    excluded from the always-terminal set — so the SAME trailing shapes that make
+    the process-call compositions fail must leave this route exactly as it was.
+    A guard keyed on "something followed a shape", rather than on the declared
+    return path, would break all three of these.
+    """
+    xml = ProcessFlowBuilder.build(
+        _dlq_cfg({"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
+                 notify=notify, exception=exception),
+        name="N",
+    )
+    assert _orphan_shapes(xml) == [], label
+    types = _by_type(_parse_shapes(xml)[1])
+    assert "doccacheload" in types, label
+    # The cache route keeps whatever terminal its composition implies: none at
+    # all when it is itself the end of the leg, else the Stop or the Exception.
+    expected_last = "doccacheload" if not (notify or exception) else ("exception" if exception else "stop")
+    assert types[-1] == expected_last, (label, types)
+
+
+# ---------------------------------------------------------------------------
+# #175 QA-175-r1-01 — the two enforcement sites must agree, over the WHOLE
+# composition matrix rather than over the one pair that was reported.
+#
+# The first version of the rule lived only in `_emit_catch_leg`, so
+# `validate_config` accepted `error_subprocess_ref` + `catch_exception`, `plan`
+# reported success, and apply created the preceding components before the build
+# refused. Live QA measured that: inventory 26 -> 27 before the refusal.
+#
+# The matrix is DERIVED from the authority's own case set — every supported DLQ
+# mode crossed with notify/exception presence — not from a hand-listed pair, so
+# a mode added later is covered without editing this test.
+# ---------------------------------------------------------------------------
+
+def test_both_enforcement_sites_agree_on_every_catch_composition():
+    from src.boomi_mcp.categories.components.builders import process_flow_builder as _pfb
+
+    modes = {
+        "disabled": None,
+        "document_cache_ref": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
+        "error_subprocess_ref": {"mode": "error_subprocess_ref", "process_id": _PROC_ID},
+    }
+    # Every mode the module supports must appear above, or the matrix silently
+    # stops covering one.
+    assert set(modes) - {"disabled"} == set(_pfb._TRY_CATCH_DLQ_MODES), sorted(
+        set(_pfb._TRY_CATCH_DLQ_MODES) ^ (set(modes) - {"disabled"})
+    )
+
+    refused_at_plan, refused_at_build = set(), set()
+    for mode_name, dlq in sorted(modes.items()):
+        for notify in (False, True):
+            for exception in (False, True):
+                if mode_name == "disabled" and not exception:
+                    continue  # no catch path at all — not a composition
+                cell = (mode_name, notify, exception)
+                cfg = _config(dlq or {"mode": "disabled"},
+                              catch_notify=_CATCH_NOTIFY if notify else None)
+                if exception:
+                    cfg["reliability"]["catch_exception"] = dict(_CATCH_EXCEPTION)
+
+                err = ProcessFlowBuilder.validate_config(cfg)
+                if err is not None and err.error_code == "PROCESS_CALL_CONFIG_INVALID":
+                    refused_at_plan.add(cell)
+                try:
+                    ProcessFlowBuilder.build(cfg, name="N")
+                except BuilderValidationError as exc:
+                    if exc.error_code == "PROCESS_CALL_CONFIG_INVALID":
+                        refused_at_build.add(cell)
+
+    # The agreement property — the whole point of the shared definition.
+    assert refused_at_plan == refused_at_build, {
+        "plan-only (apply would mutate first)": sorted(refused_at_plan ^ refused_at_build
+                                                       & refused_at_plan),
+        "build-only": sorted(refused_at_build - refused_at_plan),
+    }
+    # ...and NON-VACUITY: the matrix must actually contain refusals, or the
+    # equality above holds trivially with two empty sets.
+    assert refused_at_plan == {
+        ("error_subprocess_ref", False, True),
+        ("error_subprocess_ref", True, True),
+    }, sorted(refused_at_plan)
+
+
+def test_the_composition_rule_has_exactly_one_definition():
+    """Both sites route through `_process_call_catch_composition_error`.
+
+    Asserted by MUTATION rather than by reading the source: neutralise the one
+    function and BOTH enforcement sites must stop refusing. If either kept
+    refusing, it would be carrying its own copy of the rule — which is the
+    defect this structure exists to make impossible.
+    """
+    from src.boomi_mcp.categories.components.builders import process_flow_builder as _pfb
+
+    cfg = _dlq_cfg({"mode": "error_subprocess_ref", "process_id": _PROC_ID}, exception=True)
+    assert ProcessFlowBuilder.validate_config(cfg) is not None
+    with pytest.raises(BuilderValidationError):
+        ProcessFlowBuilder.build(cfg, name="N")
+
+    original = _pfb._process_call_catch_composition_error
+    try:
+        _pfb._process_call_catch_composition_error = lambda *a, **k: None
+        assert ProcessFlowBuilder.validate_config(cfg) is None, (
+            "plan-time site kept refusing with the shared rule neutralised — it "
+            "carries its own copy"
+        )
+        # The build stops refusing on the COMPOSITION rule too — but it does not
+        # sail through, because a third and independent boundary catches the
+        # same shape one layer down: the shared renderer refuses to wire a
+        # process call to a following shape at all. That is defence in depth,
+        # not a duplicated composition rule, and the two are told apart by WHICH
+        # field the refusal names.
+        with pytest.raises(BuilderValidationError) as deeper:
+            ProcessFlowBuilder.build(cfg, name="N")
+        assert deeper.value.field == "reliability.dlq.mode", deeper.value.field
+        assert "wired to a following shape" in str(deeper.value)
+    finally:
+        _pfb._process_call_catch_composition_error = original
+
+    # ...and the restore is real, not just the finally running.
+    assert ProcessFlowBuilder.validate_config(cfg) is not None

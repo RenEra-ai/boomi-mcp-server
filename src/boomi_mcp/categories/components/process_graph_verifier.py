@@ -49,6 +49,9 @@ _TERMINAL_SHAPE_TYPES = frozenset({"stop", "returndocuments", "doccacheload", "e
 # ``_TERMINAL_SHAPE_TYPES``: ``doccacheload`` is excluded because a Document
 # Cache load can legitimately continue downstream in hand-authored/live XML,
 # and ``processcall`` is conditionally terminal (handled by ``_is_terminal``).
+# ``processcall`` stays out of this set because its continuation is legal when
+# the child declares return paths; the illegal half — no declared return path
+# yet an outgoing dragpoint — is Pass 2a′, which reports its own code.
 _ALWAYS_TERMINAL_SHAPE_TYPES = frozenset({"stop", "returndocuments", "exception"})
 
 # Shape types whose outputs are explicit branch outputs that must be wired.
@@ -119,6 +122,24 @@ def _shape_type(shape: ET.Element) -> str:
     return (shape.get("shapetype") or "").strip().lower()
 
 
+def _processcall_declares_return_paths(shape: ET.Element) -> bool:
+    """Whether a ``processcall`` declares any return path from its child.
+
+    The called process's Return Documents shapes are the ONLY authority on
+    whether a Process Call continues: ``configuration/processcall/returnpaths``
+    names them by ``childShapeName``, and a call whose child returns nothing
+    carries the element empty (or not at all). This is the single definition of
+    that question — ``_is_terminal`` and the continuation invariant below both
+    read it, so the two can never drift into disagreeing about the same shape.
+    """
+    config = _first_direct(shape, "configuration")
+    processcall = _first_direct(config, "processcall")
+    returnpaths = _first_direct(processcall, "returnpaths")
+    if returnpaths is None:
+        return False
+    return len(list(returnpaths)) > 0
+
+
 def _is_terminal(shape: ET.Element, shape_type: str) -> bool:
     """A shape that legitimately needs no outbound edge.
 
@@ -129,12 +150,7 @@ def _is_terminal(shape: ET.Element, shape_type: str) -> bool:
     if shape_type in _TERMINAL_SHAPE_TYPES:
         return True
     if shape_type == "processcall":
-        config = _first_direct(shape, "configuration")
-        processcall = _first_direct(config, "processcall")
-        returnpaths = _first_direct(processcall, "returnpaths")
-        if returnpaths is None:
-            return True
-        return len(list(returnpaths)) == 0
+        return not _processcall_declares_return_paths(shape)
     return False
 
 
@@ -392,6 +408,45 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
                     f"'{name}' with a non-terminal shape if the path must continue.",
                 )
             )
+
+    # ------------------------------------------------------------------
+    # Pass 2a′ — a Process Call may not continue without a declared return path.
+    # ------------------------------------------------------------------
+    # The inverse of the ``_is_terminal`` rule above, and the reason this pass
+    # exists at all (issue #175): that rule PERMITS a call with no declared
+    # return path to end the path, but nothing rejected the contradictory
+    # pairing — an empty/absent ``returnpaths`` together with an outgoing
+    # dragpoint. Boomi keys the outbound connection on the return paths, not on
+    # the dragpoint, so the platform simply does not draw the edge and whatever
+    # the dragpoint pointed at is left orphaned on the canvas.
+    #
+    # Keyed on the RAW dragpoint children rather than ``edges[name]``, which
+    # holds only resolved targets: a dragpoint whose ``toShape`` is missing,
+    # empty or unresolved is still a continuation the author asked for, and it
+    # must be reported here as well as by the generic edge diagnostics.
+    for shape in shape_elems:
+        name = shape.get("name") or ""
+        stype = _shape_type(shape)
+        if stype != "processcall" or _processcall_declares_return_paths(shape):
+            continue
+        if not _direct_children(_first_direct(shape, "dragpoints"), "dragpoint"):
+            continue
+        errors.append(
+            _issue(
+                "PROCESS_CALL_ORPHAN_CONTINUATION",
+                name,
+                stype,
+                f"Process Call '{name}' declares no return path from the called "
+                "process but carries an outgoing connection. The called process's "
+                "Return Documents shapes are what make a forward connection "
+                "valid, so this connection does not exist on the platform and "
+                "the shapes it points at are left unreachable.",
+                f"Remove the outgoing connection from '{name}' — a call whose "
+                "child returns no documents ends its path — or, if the child "
+                "does return documents, declare its Return Documents shapes as "
+                f"the return paths of '{name}'.",
+            )
+        )
 
     # ------------------------------------------------------------------
     # Pass 2b — terminal-shape exclusivity / untraceable rejected docs (#102 C2).

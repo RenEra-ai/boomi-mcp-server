@@ -7764,15 +7764,19 @@ _PROCESS_FLOW_PROTOCOLS = {
             "reliability.dlq.document_cache_id",
             "reliability.dlq.process_id",
             # Issue #89 M4.5.4: optional Notify on the wired catch leg
-            # (catch -> notify -> dlq route -> stop). Requires a wired DLQ.
+            # (catch -> notify -> dlq route [-> stop]). Requires a wired DLQ.
+            # #175: the trailing Stop is emitted only for a DOCUMENT-CACHE route;
+            # an error-subprocess route is a Process Call, which ends the path.
             "reliability.catch_notify",
             "reliability.catch_notify.message_template",
             "reliability.catch_notify.level",
             # Issue #108 M10.4: optional deliberate Exception (Throw) terminal on
             # the catch leg — the leg ends in a thrown user-defined error (fail or
             # halt) instead of a bare Stop, and needs no DLQ (bare
-            # catch -> [notify ->] exception). Composes with catch_notify / a DLQ
-            # route: [notify ->] [dlq route ->] exception.
+            # catch -> [notify ->] exception). Composes with catch_notify and a
+            # DOCUMENT-CACHE route: [notify ->] [document-cache route ->]
+            # exception. #175: NOT with error_subprocess_ref — that route's
+            # Process Call ends the path, so the Exception is unreachable.
             "reliability.catch_exception",
             "reliability.catch_exception.title",
             "reliability.catch_exception.message_template",
@@ -8034,6 +8038,12 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_DLQ_BINDING_INVALID", "field": "reliability.dlq|reliability.dlq.mode|reliability.dlq.document_cache_id|reliability.dlq.process_id"},
             {"error_code": "PROCESS_NOTIFY_CONFIG_INVALID", "field": "reliability.catch_notify|reliability.catch_notify.message_template|reliability.catch_notify.level"},
             {"error_code": "PROCESS_EXCEPTION_CONFIG_INVALID", "field": "reliability.catch_exception|reliability.catch_exception.message_template|reliability.catch_exception.title|reliability.catch_exception.stop_single_document|reliability.catch_exception.parameter_source"},
+            # #175: an error-subprocess DLQ route emits a Process Call, which ends
+            # the path — so a catch_exception after it is unreachable and the
+            # composition is refused at PLAN time. Published here because a code a
+            # caller can actually receive must be discoverable from the template
+            # that governs the protocol (QA-175-r1-03).
+            {"error_code": "PROCESS_CALL_CONFIG_INVALID", "field": "reliability.catch_exception"},
             {"error_code": "PROCESS_PATH_REPLACEMENT_INVALID", "field": "target.dynamic_path|target.dynamic_path.ddp_name|target.dynamic_path.segments"},
             # Issue #112 M10.8: Branch fan-out. BRANCH_OUTPUT_UNSET is the hard error
             # for an enabled branch with no targets (also the verifier's hard error
@@ -8143,9 +8153,12 @@ _PROCESS_FLOW_PROTOCOLS = {
             "verified Notify step at the HEAD of the catch leg. It requires a wired "
             "catch path — a supported DLQ (document_cache_ref / error_subprocess_ref) "
             "OR a reliability.catch_exception throw terminal (issue #108 M10.4). The "
-            "leg is one of: notify -> dlq route -> catch stop (DLQ, no exception); "
-            "notify -> exception (catch_exception, no DLQ); or notify -> dlq route "
-            "-> exception (both). message_template "
+            "leg is one of: notify -> document-cache dlq route -> catch stop; notify -> "
+            "error-subprocess dlq route (TERMINAL - the Process Call ends the path, "
+            "so no catch stop follows it, issue #175); notify -> exception "
+            "(catch_exception, no DLQ); or notify -> document-cache dlq route -> "
+            "exception. An error-subprocess route CANNOT be combined with "
+            "catch_exception - see the #175 note below. message_template "
             "must reference the platform caught-error property "
             "(meta.base.catcherrorsmessage) so the Notify logs the real error; "
             "level is one of supported_notify_levels (INFO/WARNING/ERROR). The "
@@ -8158,8 +8171,13 @@ _PROCESS_FLOW_PROTOCOLS = {
             "of a bare catch-row Stop (the Boomi docs: a Stop is a successful "
             "conclusion; an error path uses an Exception). It needs no DLQ (a bare "
             "catcherrors -> exception is the live 'fail/halt' shape) and composes "
-            "with catch_notify and/or a DLQ route: [notify ->] [dlq route ->] "
-            "exception; it also un-gates retry_count > 0 without a DLQ. "
+            "with catch_notify and with a DOCUMENT-CACHE DLQ route: [notify ->] "
+            "[document-cache dlq route ->] exception. It does NOT compose with "
+            "dlq.mode='error_subprocess_ref' (issue #175): that route emits a "
+            "Process Call, a call ends the path it is on, and the Exception would "
+            "be unreachable - the combination returns PROCESS_CALL_CONFIG_INVALID "
+            "on field reliability.catch_exception, at PLAN time, before anything "
+            "is created. It also un-gates retry_count > 0 without a DLQ. "
             "message_template carries the {1} placeholder bound by parameter_source "
             "(caught_error = the platform Try/Catch error message; current_document "
             "= the current document; none = a static message with no parameter). "
@@ -8404,12 +8422,16 @@ _PROCESS_FLOW_PROTOCOLS = {
         "protocol": "wrapper_subprocess",
         "process_kind": "wrapper_subprocess",
         "summary": (
-            "A thin wrapper-parent ('facade') process: start -> Process Call(s) "
-            "-> stop (issue #90 M4.5.5). The parent orchestrates child processes "
-            "(the logic units) authored in the SAME IntegrationSpecV1 and "
-            "referenced by key (subprocess_ref='$ref:KEY'), or existing Boomi "
-            "components referenced by id (process_id). No connector source/target "
-            "of its own."
+            "A thin wrapper-parent ('facade') process: start -> Process Call "
+            "(issue #90 M4.5.5). EXACTLY ONE call, and the call ENDS the process "
+            "- no trailing Stop, because whether execution continues past a call "
+            "is decided by the called process, which hands control back only "
+            "through the return-document steps it declares (issue #175). The "
+            "parent runs a child process (the logic unit) authored in the SAME "
+            "IntegrationSpecV1 and referenced by key "
+            "(subprocess_ref='$ref:KEY'), or an existing Boomi component "
+            "referenced by id (process_id). No connector source/target of its "
+            "own. To run several children, author one wrapper per child."
         ),
         "required_fields": [
             "process_kind",
@@ -8428,22 +8450,22 @@ _PROCESS_FLOW_PROTOCOLS = {
             # called child's process_extensions; may also be declared directly.
             "process_extensions",
             "process_extensions.connections",
-            # Issue #107 M10.3: a wrapper that is itself a subprocess may end in a
-            # Return Documents terminal (subprocess return value) instead of a
-            # Stop. Same shape as database_to_api_sync.
+            # Issue #107 M10.3, GATED by #175: the block is still accepted, but
+            # `enabled: true` is refused - a Return Documents terminal after the
+            # parent's own call needs the child's return paths (#176).
             "return_documents",
             "return_documents.enabled",
             "return_documents.label",
         ],
-        "supported_terminal_shapes": ["stop", "returndocuments"],
+        "supported_terminal_shapes": ["processcall"],
         "field_notes": {
-            "process_calls": "Non-empty list; each entry is one standalone Process Call to a child process.",
+            "process_calls": "EXACTLY ONE entry (#175): one standalone Process Call to a child process. A call ends the path it is on, so calls cannot be chained - author one wrapper per child. More than one entry returns PROCESS_CALL_CONFIG_INVALID on field process_calls.",
             "process_calls[].subprocess_ref": "$ref:KEY of an in-spec process component (the child). EXACTLY ONE of subprocess_ref / process_id per entry.",
             "process_calls[].process_id": "Component id of an EXISTING Boomi process (no in-spec child required).",
             "process_calls[].wait": "Wait for the child to finish before continuing (default true).",
             "process_calls[].abort_on_error": "Abort the parent if the child fails (default false — the parent continues, matching the live wrapper exemplar).",
             "process_extensions": "Issue #99 G3: same shape as the database_to_api_sync process_extensions (connections[].connection_id + fields[].{id,label,xpath}). The integration builder HOISTS a called child's process_extensions onto the wrapper automatically so a wrapper-deployed package surfaces the child override points via get_extensions; you rarely declare it by hand.",
-            "return_documents": "Issue #107 M10.3: optional {enabled: bool, label?: str}. When enabled=true the wrapper ends in a Return Documents terminal (the subprocess return value) instead of a Stop — use when the wrapper is itself a subprocess that returns documents to its caller. label is the optional Boomi custom label identifying the returned document type(s). Malformed config returns PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID.",
+            "return_documents": "GATED (#175). Optional {enabled: bool, label?: str}; enabled=false or absent is the only accepted form. enabled=true returns PROCESS_CALL_CONFIG_INVALID on field return_documents.enabled: the wrapper’s Process Call ends the path, so no terminal can follow it, and routing past a call requires binding the CALLED process’s return-document shapes (the gated capability process_call_return_path_binding). Have the child return its documents instead. A malformed block still returns PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID.",
         },
         "structured_errors": [
             {"error_code": "PROCESS_KIND_UNSUPPORTED", "field": "process_kind"},
@@ -8453,7 +8475,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_REF_SELF_REFERENCE", "field": "process_calls[N].subprocess_ref"},
             {"error_code": "PROCESS_REF_NOT_FOUND", "field": "process_calls[N].subprocess_ref"},
             {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "process_calls[N].subprocess_ref|process_extensions.connections[N].connection_id"},
-            {"error_code": "PROCESS_CALL_CONFIG_INVALID", "field": "process_calls[N].process_id|process_calls[N].wait|process_calls[N].abort_on_error"},
+            {"error_code": "PROCESS_CALL_CONFIG_INVALID", "field": "process_calls|process_calls[N].process_id|process_calls[N].wait|process_calls[N].abort_on_error|return_documents.enabled"},
             {"error_code": "PROCESS_EXTENSIONS_INVALID", "field": "process_extensions|process_extensions.connections|process_extensions.connections[N].connection_id|process_extensions.connections[N].fields"},
             {"error_code": "MISSING_PROCESS_DEPENDENCY", "field": "process_extensions"},
             {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
@@ -8489,6 +8511,15 @@ _PROCESS_FLOW_PROTOCOLS = {
             "error.",
             "Branch shape and cross-part document-handoff contracts are out of "
             "scope (Branch stays gated; #14 owns composed fanout).",
+            "Issue #175: a Process Call ends the path it is on. Boomi projects a "
+            "call's outbound connection from the CALLED process's return-document "
+            "shapes, so a call whose child returns nothing has no outgoing "
+            "connection at all - the wrapper emits start -> Process Call and "
+            "stops there. Two shapes this protocol accepted before now return "
+            "PROCESS_CALL_CONFIG_INVALID before anything is created: more than "
+            "one entry in process_calls, and return_documents.enabled=true. "
+            "Both need the child's return paths bound to the call, which is "
+            "published as the gated capability process_call_return_path_binding.",
         ],
         "example_component_spec": {
             "key": "wrapper_parent",

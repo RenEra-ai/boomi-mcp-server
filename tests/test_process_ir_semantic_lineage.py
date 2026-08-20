@@ -818,9 +818,8 @@ def _async_decision_doc(wait):
     return {"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "branch", "legs": [
             {"steps": [{"kind": "message", "text": "m"}], "terminal": decision},
-            {"steps": [{"kind": "process_call", "process_ref": "$ref:a",
-                        "wait": wait, "abort_on_error": False}],
-             "terminal": {"kind": "stop"}}]}]}}
+            {"steps": [], "terminal": {"kind": "process_call", "process_ref": "$ref:a",
+                                                  "wait": wait, "abort_on_error": False}}]}]}}
 
 
 def _async_case(wait, with_contract):
@@ -917,9 +916,8 @@ def test_a_nonstrict_ddp_read_still_fails_on_a_cross_copy_async_write():
     doc = {"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "branch", "legs": [
             {"steps": [{"kind": "message", "text": "m"}], "terminal": decision},
-            {"steps": [{"kind": "process_call", "process_ref": "$ref:a",
-                        "wait": False, "abort_on_error": False}],
-             "terminal": {"kind": "stop"}}]}]}}
+            {"steps": [], "terminal": {"kind": "process_call", "process_ref": "$ref:a",
+                                                  "wait": False, "abort_on_error": False}}]}]}}
     symbols = SymbolTableV1(symbols=(
         ComponentSymbolV1(ref="$ref:a", component_id="i1",
                           component_type="process"),))
@@ -947,9 +945,8 @@ def test_a_later_leg_async_write_keeps_the_precise_ordering_code():
     doc = {"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "branch", "legs": [
             {"steps": [_read_prop("dpp", "A")], "terminal": {"kind": "stop"}},
-            {"steps": [{"kind": "process_call", "process_ref": "$ref:a",
-                        "wait": False, "abort_on_error": False}],
-             "terminal": {"kind": "stop"}}]}]}}
+            {"steps": [], "terminal": {"kind": "process_call", "process_ref": "$ref:a",
+                                                  "wait": False, "abort_on_error": False}}]}]}}
     symbols = SymbolTableV1(symbols=(
         ComponentSymbolV1(ref="$ref:a", component_id="i1",
                           component_type="process"),))

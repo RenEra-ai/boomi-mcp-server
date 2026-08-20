@@ -99,6 +99,7 @@ so the reservation cannot rot into an accidental capability.
 | `exception` | authored `ExceptionNodeV1` | emitted as-is, no Stop follows |
 | `routed_target` | a `target` terminating a branch leg or decision true arm | **compiler appends a synthetic Stop** |
 | `cache_stage` | a target-less staging leg ending in `cache_put` | **no additional synthetic Stop** — the cache shape itself is the terminal |
+| `process_call` | an authored `process_call` (#175) — the root singleton, a branch-leg terminal, or a decision TRUE-arm terminal | **no synthetic Stop and no outgoing transition** — the platform projects a call's outbound connection from the CALLED process's return-document shapes, and v1 declares none. The emitter registration is `EXACT_ZERO`, so a plan node carrying an outgoing transition is refused with `PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID`. Unlike every other exit role, `None` is NOT an accepted value: every `process_call` node must carry the role, so a call leaf that reached the CFG without it is rejected rather than read as linear. No return-path metadata enters semantic or emitter input in #175 — that binding is #176. |
 
 ## 4. Research ledger (the #137 research gate)
 
@@ -566,9 +567,11 @@ byte-parity evidence: **`docs/architecture/PROCESS_EMITTER_REGISTRY_V1.md`**.
 
 ## 11. #141 M12.6 — rich Branch/Decision bodies (shipped dark)
 
-Branch legs and Decision arms may now hold `connector_call`, `process_call` and nested `decision`
-nodes (the exact matrix and its live evidence: [PROCESS_IR_V1 §3b](PROCESS_IR_V1.md)). Three compiler
-changes carry it; the emitter registry is untouched.
+Branch legs and Decision arms may now hold `connector_call` and nested `decision` nodes, and (since
+#175) a `process_call` as their TERMINAL rather than as a step (the exact matrix and its live
+evidence: [PROCESS_IR_V1 §3b](PROCESS_IR_V1.md)). Three compiler changes carry #141; the emitter
+registry was untouched by it — #175 later changed one registration, the Process Call's outgoing
+cardinality, from `EXACT_ONE` to `EXACT_ZERO`.
 
 ### Per-path document dataflow (replaces the flat spine)
 
@@ -672,9 +675,11 @@ for what they covered and incomplete for what #141 added:
   `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY`, not `PROCESS_IR_SCHEMA_UNKNOWN_NODE` — calling a
   documented kind "unknown" sends the caller to fix the wrong thing. A genuinely unknown tag keeps
   the unknown-node code.
-* **A Decision arm admits at most ONE `process_call`**; the capture attests exactly one
-  `decision →true→ processcall`, and a chain is unproven. The Branch-leg rule stays plural, as the
-  reconciliation states it.
+* **A Decision arm admits at most ONE `process_call`** — *superseded by #175, which made the bound
+  STRUCTURAL rather than counted*: the call is now the arm's single TERMINAL, so a chain has nowhere
+  to be written and the explicit `max_calls=1` check is gone rather than merely satisfied. The
+  Branch-leg rule was stated as plural for the same reason it is now singular: #141 read the capture
+  as a leg of process-call STEPS, and #175 re-read it as the control edge landing ON the call.
 
 ## 12. #142 M12.7 — scoped error handling and retry safety (shipped dark)
 

@@ -9108,8 +9108,30 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             if component_id:
                 id_registry[key] = component_id
 
+            # QA-175-r1-02. `status` was derived from the REQUESTED action alone,
+            # so a step that failed still recorded `status="created"` beside
+            # `component_id: null` — the apply record asserting a mutation that
+            # did not happen. Reproduced on four distinct failure modes.
+            #
+            # The correct derivation already existed one code path over, in
+            # `_execute_canonical_process._canonical_result`: `refused` when the
+            # step provably wrote nothing, else `failed`. This site carried a
+            # second, wrong hand-copy of the same fact — the defect shape this
+            # whole slice is about — so it now asks the outcome instead of the
+            # request. `refused` and `failed` are both statuses the downstream
+            # consumers already understand (`_NON_WRITING_STEP_STATUSES`), and
+            # `failed` is deliberately a WRITING status: a step that committed
+            # and then failed to report must stay visible to the write-accounting
+            # checks.
+            step_succeeded = bool(exec_result.get("_success", False))
+            if step_succeeded:
+                step_status = "updated" if comp.action == "update" else "created"
+            elif exec_result.get("write_attempted") is False:
+                step_status = "refused"
+            else:
+                step_status = "failed"
             results[key] = {
-                "status": "updated" if comp.action == "update" else "created",
+                "status": step_status,
                 "component_id": component_id,
                 "type": comp.type,
                 "name": comp.name,

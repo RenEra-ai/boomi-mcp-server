@@ -20,6 +20,7 @@ if _src not in sys.path:
 import boomi_mcp.models as models
 from boomi_mcp.errors import (
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_REFERENCE_INVALID_FORMAT,
     PROCESS_IR_SCHEMA_BRANCH_CARDINALITY,
@@ -185,16 +186,30 @@ def test_control_vocabulary_parses_and_roundtrips():
 
 
 def test_wrapper_vocabulary_parses_and_roundtrips():
-    ir = parse_process_ir_v1(
+    # #175: a process-call root is the EXACT SINGLETON — the call ends its own
+    # path, so the chain-plus-terminal form this test used before is now a
+    # continuation request (see test_sequence_ordering_rules). Both field
+    # variants are still covered, one document each, so the defaults and the
+    # non-defaults keep their round-trip coverage.
+    defaults = parse_process_ir_v1(doc({"kind": "process_call", "process_ref": "$ref:child"}))
+    call = defaults.body.steps[0]
+    assert call.wait is True and call.abort_on_error is False and call.label is None
+    assert ProcessIRV1.model_validate(defaults.model_dump(mode="json")) == defaults
+
+    explicit = parse_process_ir_v1(
         doc(
-            {"kind": "process_call", "process_ref": "$ref:child"},
-            {"kind": "process_call", "process_ref": "lit-id", "wait": False, "abort_on_error": True, "label": "L"},
-            {"kind": "return_documents", "label": "out"},
+            {
+                "kind": "process_call",
+                "process_ref": "lit-id",
+                "wait": False,
+                "abort_on_error": True,
+                "label": "L",
+            }
         )
     )
-    calls = [s for s in ir.body.steps if s.kind == "process_call"]
-    assert calls[0].wait is True and calls[0].abort_on_error is False
-    assert calls[1].wait is False and calls[1].abort_on_error is True
+    call = explicit.body.steps[0]
+    assert call.wait is False and call.abort_on_error is True and call.label == "L"
+    assert ProcessIRV1.model_validate(explicit.model_dump(mode="json")) == explicit
 
 
 def test_linear_return_documents_is_a_standalone_terminal():
@@ -516,10 +531,45 @@ def test_branch_leg_and_true_arm_still_reject_a_bare_stop():
             [source(), {"kind": "cache_put", "cache_ref": "$ref:c"}, message(), target(), {"kind": "stop"}],
             PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
         ),
-        # process_call mixed with a connector node
-        ([{"kind": "process_call", "process_ref": "x"}, message(), {"kind": "stop"}], PROCESS_IR_CAPABILITY_UNSUPPORTED),
-        # process_call sequence without terminal
-        ([{"kind": "process_call", "process_ref": "x"}], PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
+        # #175 F5. process_call genuinely mixed with a CONNECTOR keeps the mixing
+        # code and its precedence: that pairing stays gated on its own terms even
+        # once return-path binding lands, so it must not be reported as a
+        # return-path problem. (Before #175 this row used `message()`, which is
+        # not a connector at all — the old validator raised the mixing code for
+        # any non-process_call neighbour, so the case never tested what its label
+        # claimed.)
+        (
+            [{"kind": "process_call", "process_ref": "x"}, target(), {"kind": "stop"}],
+            PROCESS_IR_CAPABILITY_UNSUPPORTED,
+        ),
+        # #175 F4/F2. A non-connector neighbour is a CONTINUATION request, and now
+        # reports as one: the call ends its path, so neither the message nor the
+        # trailing stop can follow it.
+        (
+            [{"kind": "process_call", "process_ref": "x"}, message(), {"kind": "stop"}],
+            PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+        ),
+        (
+            [{"kind": "process_call", "process_ref": "x"}, {"kind": "stop"}],
+            PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+        ),
+        # #175 F3. Same for a return_documents terminal: the wrapper "call a child,
+        # then return documents" shape needs the child to hand control back, which
+        # is exactly the gated binding.
+        (
+            [{"kind": "process_call", "process_ref": "x"}, {"kind": "return_documents"}],
+            PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+        ),
+        # #175 F4. A CHAIN of calls: every call but the last would need its child's
+        # return paths to reach the next one.
+        (
+            [
+                {"kind": "process_call", "process_ref": "x"},
+                {"kind": "process_call", "process_ref": "y"},
+                {"kind": "stop"},
+            ],
+            PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+        ),
     ],
 )
 def test_sequence_ordering_rules(steps, expect_code):
@@ -596,42 +646,99 @@ def test_nested_branch_in_a_branch_leg_stays_gated():  # #141
     assert err.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
 
 
-def test_process_call_allowed_in_a_branch_leg_only_in_path_mode():  # #141
-    """ProcessCall inside a Branch leg is live-attested (capture §2.2), but
-    ``process_call_connector_mixing`` stays gated PER PATH: a leg that uses
-    ProcessCall may contain nothing else and must end in a stop."""
+def test_process_call_is_a_branch_leg_terminal_not_a_step():  # #141, amended by #175
+    """ProcessCall inside a Branch leg is live-attested (capture §2.2) — as the END
+    of the leg, which is where #175 moved it.
+
+    #141 read the capture as "a leg of process_call STEPS ending in a stop". The
+    capture attests the control edge landing ON a call; the trailing stop was an
+    inference, and it is the shape the platform declines to draw. So the call is
+    the leg's TERMINAL, with an empty step prefix, and the old step form is now a
+    continuation request.
+    """
     ok = {
+        "kind": "branch",
+        "legs": [
+            {"steps": [], "terminal": {"kind": "process_call", "process_ref": "x"}},
+            {"steps": [message()], "terminal": {"kind": "stop"}},
+        ],
+    }
+    ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [ok]}})
+    assert ir.body.steps[0].legs[0].terminal.kind == "process_call"
+    assert ir.body.steps[0].legs[0].steps == []
+
+    # F6 — the pre-#175 form: a call as a STEP, wired onward to a stop.
+    as_step = {
         "kind": "branch",
         "legs": [
             {"steps": [{"kind": "process_call", "process_ref": "x"}], "terminal": {"kind": "stop"}},
             {"steps": [message()], "terminal": {"kind": "stop"}},
         ],
     }
-    ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [ok]}})
-    assert ir.body.steps[0].legs[0].steps[0].kind == "process_call"
+    err = parse_error({"version": "1", "body": {"kind": "sequence", "steps": [as_step]}})
+    assert (
+        err.diagnostics[0].code
+        == PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
+    ), codes_of(err)
 
+    # F8 — a terminal call with a non-connector prefix. The prefix is unattested:
+    # the capture shows the control edge landing directly on the call.
+    with_prefix = {
+        "kind": "branch",
+        "legs": [
+            {"steps": [message()], "terminal": {"kind": "process_call", "process_ref": "x"}},
+            {"steps": [message()], "terminal": {"kind": "stop"}},
+        ],
+    }
+    err = parse_error({"version": "1", "body": {"kind": "sequence", "steps": [with_prefix]}})
+    assert (
+        err.diagnostics[0].code
+        == PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
+    ), codes_of(err)
+
+
+def test_a_connector_prefix_before_a_terminal_process_call_keeps_the_mixing_code():  # #175 F11
+    """Moving the call to the terminal slot made ``steps=[connector_call],
+    terminal=process_call`` REPRESENTABLE for the first time — a shape the #141
+    step-only mixing check could never have seen.
+
+    It must keep reporting as MIXING, not as a return-path problem: the pairing
+    stays gated on its own terms even once return-path binding lands, so telling
+    the caller to "remove what follows the call" would send them the wrong way.
+    """
     mixed = {
         "kind": "branch",
         "legs": [
             {
-                "steps": [{"kind": "process_call", "process_ref": "x"}, message()],
-                "terminal": {"kind": "stop"},
+                "steps": [{"kind": "connector_call", "operation_ref": "$ref:op"}],
+                "terminal": {"kind": "process_call", "process_ref": "x"},
             },
             {"steps": [message()], "terminal": {"kind": "stop"}},
         ],
     }
     err = parse_error({"version": "1", "body": {"kind": "sequence", "steps": [mixed]}})
-    assert err.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+    assert err.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY, codes_of(err)
 
-    not_stop = {
+
+def test_a_connector_above_a_terminal_process_call_is_still_mixing():  # #175 F12
+    """The ANCESTOR half of the mixing gate has to look at the terminal too.
+
+    ``source -> branch -> leg(terminal=process_call)`` puts a connector genuinely
+    upstream of a call on the same root-to-leaf path. Before #175 the whole-document
+    walk only inspected each body's ``steps``, so moving the call to the terminal
+    would have slipped straight past it — widening the slot would have opened the
+    exact hole #141 gated.
+    """
+    bad = {
         "kind": "branch",
         "legs": [
-            {"steps": [{"kind": "process_call", "process_ref": "x"}], "terminal": target()},
-            {"steps": [message()], "terminal": {"kind": "stop"}},
+            {"steps": [], "terminal": {"kind": "process_call", "process_ref": "x"}},
+            {"steps": [message()], "terminal": target()},
         ],
     }
-    err = parse_error({"version": "1", "body": {"kind": "sequence", "steps": [not_stop]}})
-    assert err.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+    err = parse_error(doc(source(), bad))
+    assert err.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY, codes_of(err)
+    assert err.diagnostics[0].path.endswith("/terminal"), err.diagnostics[0].path
 
 
 def test_process_call_stays_out_of_the_decision_false_arm():  # #141
@@ -836,7 +943,9 @@ def test_legacy_sequences_are_untouched_by_the_connector_call_branch():
     present, so every legacy shape must still parse exactly as before."""
     parse_process_ir_v1(doc(source(), {"kind": "map_ref", "map_ref": "$ref:m"}, target(), {"kind": "stop"}))
     parse_process_ir_v1(doc(source(), {"kind": "return_documents"}))
-    parse_process_ir_v1(doc({"kind": "process_call", "process_ref": "$ref:p"}, {"kind": "stop"}))
+    # #175: the process-call root is now the exact singleton — the trailing stop
+    # this line used to carry is the continuation the platform never honoured.
+    parse_process_ir_v1(doc({"kind": "process_call", "process_ref": "$ref:p"}))
 
 
 # ---------------------------------------------------------------------------
@@ -1084,14 +1193,35 @@ def golden_documents():
             ),
         )
     )
+    # #175: the process-call root is the exact singleton. The pre-#175 document
+    # chained two calls into a return_documents terminal — a form the platform
+    # never honoured, because each call's outbound edge would need its child's
+    # return paths. Every FIELD variant it covered is kept: the literal component
+    # id, and non-default wait/abort_on_error/label all ride on the one call.
     wrapper_flow = parse_process_ir_v1(
         doc(
-            {"kind": "process_call", "process_ref": "$ref:child"},
-            {"kind": "process_call", "process_ref": "00000000-0000-0000-0000-000000000001", "wait": False, "abort_on_error": True, "label": "second"},
-            {"kind": "return_documents", "label": "out"},
+            {
+                "kind": "process_call",
+                "process_ref": "00000000-0000-0000-0000-000000000001",
+                "wait": False,
+                "abort_on_error": True,
+                "label": "second",
+            }
         )
     )
-    return {"linear_flow": linear_flow, "control_flow": control_flow, "wrapper_flow": wrapper_flow}
+    # ...and the `return_documents` terminal keeps its own canonical document
+    # rather than losing coverage along with the chain that used to carry it.
+    # It is the CHILD-side capability — how a called process hands documents
+    # back — which is exactly the half #175 leaves intact.
+    return_documents_flow = parse_process_ir_v1(
+        doc(source(), message("collect"), {"kind": "return_documents", "label": "out"})
+    )
+    return {
+        "linear_flow": linear_flow,
+        "control_flow": control_flow,
+        "wrapper_flow": wrapper_flow,
+        "return_documents_flow": return_documents_flow,
+    }
 
 
 def canonical_golden_payload() -> str:
@@ -1193,6 +1323,13 @@ def test_capability_manifest_immutable_and_complete():
     assert PROCESS_IR_V1_CAPABILITIES["verified_write_replay_safety"] == "gated"
     assert PROCESS_IR_V1_CAPABILITIES["listener_error_scope"] == "gated"
     assert PROCESS_IR_V1_CAPABILITIES["nested_try_catch"] == "gated"
+    # #175. The pair is the whole point: the non-returning form is what V1 emits,
+    # and the returning form is gated rather than absent, so a caller reading the
+    # manifest can tell "this repo will not do it" from "this repo cannot do it
+    # yet". Binding a returning child's return paths needs that child's compiled
+    # shapes, which is a cross-component late binding (#176).
+    assert PROCESS_IR_V1_CAPABILITIES["terminal_process_call"] == "supported"
+    assert PROCESS_IR_V1_CAPABILITIES["process_call_return_path_binding"] == "gated"
     assert set(PROCESS_IR_V1_CAPABILITIES.values()) <= {
         "supported",
         "gated",
@@ -1209,6 +1346,7 @@ def test_capability_manifest_immutable_and_complete():
         "mixed_connector_execution",
         "rich_branch_decision_bodies",
         "scoped_try_catch",
+        "terminal_process_call",
         "typed_idempotency_evidence",
     ]
 

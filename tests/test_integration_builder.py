@@ -8451,3 +8451,75 @@ class TestBuildPlanApiServiceComponent:
                 step["validation_error"]["error_code"]
                 == "API_SERVICE_ROUTE_PROCESS_REF_INVALID"
             ), padded
+
+
+# ---------------------------------------------------------------------------
+# QA-175-r1-02 — an apply step's `status` must describe the OUTCOME, not the
+# request.
+#
+# It was derived from `comp.action` alone, so a step that failed still recorded
+# `status="created"` next to `component_id: None` — the apply record asserting a
+# mutation that never happened. The correct derivation already existed one code
+# path over (`_execute_canonical_process._canonical_result`); this site carried a
+# second, wrong hand-copy of the same fact.
+# ---------------------------------------------------------------------------
+
+def test_a_failed_apply_step_is_not_recorded_as_created():
+    """Drives the derivation directly over the outcome matrix.
+
+    The three cells are the authority's own cases — succeeded, failed having
+    provably written nothing, and failed with the write unconfirmed — so the
+    conservative WRITING status (`failed`) is kept for exactly the case where a
+    write may have landed and must stay visible to the write-accounting checks.
+    """
+    from src.boomi_mcp.categories import integration_builder as ib
+
+    def derive(action, exec_result):
+        succeeded = bool(exec_result.get("_success", False))
+        if succeeded:
+            return "updated" if action == "update" else "created"
+        if exec_result.get("write_attempted") is False:
+            return "refused"
+        return "failed"
+
+    # A create that failed having issued no write is REFUSED — a non-writing
+    # status, so the write-accounting checks correctly skip it.
+    assert derive("create", {"_success": False, "write_attempted": False}) == "refused"
+    assert "refused" in ib._NON_WRITING_STEP_STATUSES
+
+    # A create that failed with the write UNCONFIRMED is `failed` — which is
+    # deliberately a WRITING status, because the component may exist.
+    assert derive("create", {"_success": False}) == "failed"
+    assert "failed" not in ib._NON_WRITING_STEP_STATUSES, (
+        "a failed step may have committed before failing to report; treating it "
+        "as non-writing would hide exactly the case the warning is for"
+    )
+
+    # ...and neither failure mode is ever reported as a completed mutation.
+    for exec_result in ({"_success": False}, {"_success": False, "write_attempted": False}):
+        for action in ("create", "update"):
+            assert derive(action, exec_result) not in ("created", "updated")
+
+    # The success cells still report the mutation they performed.
+    assert derive("create", {"_success": True}) == "created"
+    assert derive("update", {"_success": True}) == "updated"
+
+
+def test_the_apply_loop_uses_that_derivation_not_the_requested_action():
+    """Pins the SITE, not just the rule.
+
+    A copy of the derivation in a test proves nothing about the apply loop, so
+    this reads the loop's own source and asserts it branches on the execution
+    outcome. The pre-fix line — an unconditional
+    `"status": "updated" if comp.action == "update" else "created"` — must not
+    come back.
+    """
+    import inspect
+    from src.boomi_mcp.categories import integration_builder as ib
+
+    src = inspect.getsource(ib)
+    assert '"status": "updated" if comp.action == "update" else "created",' not in src, (
+        "the apply loop is deriving step status from the REQUESTED action again "
+        "(QA-175-r1-02) — a failed step will report itself as created"
+    )
+    assert 'step_status = "refused"' in src and 'step_status = "failed"' in src

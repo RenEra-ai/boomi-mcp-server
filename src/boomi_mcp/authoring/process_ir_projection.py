@@ -523,19 +523,27 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         "category": "orchestration",
         "title": "Process call",
         "summary": (
-            "Invokes another process by opaque reference. wait=false returns "
-            "immediately and therefore establishes no downstream state."
+            "Invokes another process by opaque reference, and ENDS the path it "
+            "is on: whether execution continues past a call is decided by the "
+            "called process, which hands control back only through the "
+            "return-document steps it declares, so this version supports the "
+            "non-returning form only. wait=false returns immediately and "
+            "therefore establishes no downstream state."
         ),
         _ORDERING: (
             "A process call may not share a root-to-leaf path with a connector "
             "call while that combination is capability-gated; sibling paths are "
             "independent and do not count as sharing.",
-            "Where a process call is admitted in a control body, that body is "
-            "process-call-only and ends in a stop.",
+            "Nothing may follow a process call. Author it as the terminal of its "
+            "path, with no steps before it in that body and no stop after it; a "
+            "root sequence containing a call holds that call and nothing else.",
+            "To run several children, give each its own path — separate branch "
+            "paths, or separate wrappers — rather than chaining calls.",
         ),
         _DOCS: ("required", "documents", "per_document"),
         _REFS: (("process_ref", True),),
-        _CAPS: ("process_call_connector_mixing",),
+        _CAPS: ("process_call_connector_mixing", "terminal_process_call",
+                "process_call_return_path_binding"),
         _STAGES: ("author", "repair"),
     },
     "branch": {

@@ -877,8 +877,21 @@ def render_doccacheload(ctx: ShapeRenderContext, *, userlabel: str, doc_cache_id
 def render_processcall(
     ctx: ShapeRenderContext, *, userlabel: str, process_id: str, wait: bool, abort: bool
 ) -> str:
-    """Verified ``processcall`` shape. Terminal (empty dragpoints) or forward,
-    from ``ctx.transitions``."""
+    """Verified ``processcall`` shape, from ``ctx.transitions``.
+
+    TERMINAL-ONLY under every current authority (#175): the emitted
+    ``<returnpaths/>`` is empty, and Boomi projects a call's outbound connection
+    from the CALLED process's return-document shapes — so with no return path
+    declared there is no forward connection to draw, and every caller must pass
+    an empty ``transitions``. The registry pins that with a zero-outgoing
+    cardinality, the legacy emitter refuses a ``next_name``, and the graph
+    verifier rejects the pairing outright.
+
+    This function stays transition-driven rather than hard-coding
+    ``<dragpoints/>``: a future returning-child binding supplies real return-path
+    data, and it must supply BOTH halves together — the ``<returnpaths>`` entries
+    naming the child's shapes AND an outgoing route keyed to them.
+    """
     wait_s = "true" if wait else "false"
     abort_s = "true" if abort else "false"
     dragpoints_xml = _dragpoints_block(ctx.transitions)

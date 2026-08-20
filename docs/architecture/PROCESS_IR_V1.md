@@ -78,7 +78,7 @@ Root sequence (`SequenceNodeV1.steps`, discriminated on `kind`):
 | `cache_get` | `CacheGetNodeV1` | `empty_cache_behavior="stopprocess"`, `external_writer=False` (authored lineage assertion) — kept distinct from `document_cache_retrieve` |
 | `cache_remove` | `CacheRemoveNodeV1` | `remove_all_documents=True` |
 | `set_ddp` / `set_dpp` | `SetDdpNodeV1` / `SetDppNodeV1` | bare `name` (no wire prefix, no whitespace), ordered `source_values` (static/current/profile/ddp/dpp); DPP adds `persist=False` |
-| `process_call` | `ProcessCallNodeV1` | `process_ref`, `wait=True`, `abort_on_error=False`, optional `label` (wrapper parity) |
+| `process_call` | `ProcessCallNodeV1` | `process_ref`, `wait=True`, `abort_on_error=False`, optional `label` (wrapper parity). **TERMINAL** (#175): the call ends its path — see §3b |
 | `branch` | `BranchNodeV1` | 2–25 `BranchLegV1` legs; **#141** rich bodies — see §3b |
 | `decision` | `DecisionNodeV1` | 7 comparisons; `track`/`static` operands; typed `true_arm`/`false_arm`; **#141** rich bodies incl. nested decision — see §3b |
 | `exception` | `ExceptionNodeV1` | `message_template` (needs `{1}` unless `parameter_source="none"`), optional `title`, `stop_single_document=False`, `parameter_source="caught_error"`; **no `label`** (legacy parity) |
@@ -93,10 +93,15 @@ Sequence rules (local/structural — the CFG-aware checks are #137/#143):
   position. The Return Documents terminal is standalone because the legacy builder emits
   ONLY `returndocuments` after the sequence when `return_documents` is enabled — the
   configured legacy root target is dead config and is not represented in IR.
-- A **process-call flow** contains only `process_call` steps plus a `stop`/`return_documents`
-  terminal; mixing connector nodes with process calls is capability-gated
+- A **process-call root** is EXACTLY one `process_call` and nothing else (#175). A call ends its
+  own path — Boomi projects a call's outbound connection from the CALLED process's Return
+  Documents shapes, and ProcessIR v1 declares none — so no trailing `stop`/`return_documents` and
+  no second call may follow it. Each of those forms raises
+  `PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED`. Mixing connector nodes
+  with process calls stays separately capability-gated
   (`process_call_connector_mixing` — renamed from `mixed_connector_execution` by
-  #140, which took that name back for its own, ADR-001 §8 meaning).
+  #140, which took that name back for its own, ADR-001 §8 meaning) and keeps its own diagnostic,
+  because it remains gated on its own terms even once return-path binding lands.
 - `cache_put` must be immediately followed by a stream-replacing cache read
   (`cache_get`/`document_cache_retrieve`); a trailing `cache_put` in a branch leg is expressed
   as the leg's staging **terminal**, and a decision false-arm may end its steps with
@@ -149,25 +154,38 @@ against the model unions in both directions. **Absence is denial** — there is 
 
 | Slot | Admitted kinds |
 |---|---|
-| `branch_leg.step` | the linear set, `connector_call`, `process_call` |
-| `branch_leg.terminal` | `target`, `cache_put`, `stop`, `decision` |
-| `decision_true_arm.step` | the linear set, `connector_call`, `process_call` |
-| `decision_true_arm.terminal` | `target`, `stop`, `exception`, `branch`, `decision` |
+| `branch_leg.step` | the linear set, `connector_call` |
+| `branch_leg.terminal` | `target`, `cache_put`, `stop`, `process_call`, `decision` |
+| `decision_true_arm.step` | the linear set, `connector_call` |
+| `decision_true_arm.terminal` | `target`, `stop`, `exception`, `process_call`, `branch`, `decision` |
 | `decision_false_arm.step` | the linear set, `connector_call` |
 | `decision_false_arm.terminal` | `stop`, `exception`, `branch`, `decision` |
 
 Every admitted placement is live-attested in `.codex/plans/issue-141-live-captures.md`.
 Deliberate exclusions, all fail-closed on absent evidence: **`branch` as a Branch-leg terminal**
 (nested control in a leg is attested only as a *Decision*), **`process_call` on a FALSE arm**
-(attested on TRUE outcomes only), and `return_documents` anywhere in a body.
+(attested on TRUE outcomes only, in EITHER slot), and `return_documents` anywhere in a body.
 
-**ProcessCall path mode.** A body that uses `process_call` may contain nothing else and must end in
-`stop`, **and no connector may run anywhere upstream on its root-to-leaf path**. Both halves are
-required: the body-local rule keeps the body connector-free, but a body cannot see its ancestors.
-Checking only the ROOT is not enough either — a connector can sit in an outer control body while the
-`process_call` sits in a nested one, both on one path — so the document is walked carrying whether a
-connector has run above. That is what makes `process_call_connector_mixing` honestly gated at every
-depth rather than only the shallowest; sibling legs are independent paths, not a mix.
+**ProcessCall terminal form (#141 path mode, amended by #175).** A `process_call` is a body's
+TERMINAL, with an EMPTY step prefix, **and no connector may run anywhere upstream on its
+root-to-leaf path**.
+
+#141 admitted the call as a *step* and required the body to end in `stop`. That generalised past
+its evidence: the capture attests a control edge landing ON a call, and the trailing `stop` was an
+inference. Boomi projects a call's outbound connection from the CALLED process's Return Documents
+shapes — four of the five Process Calls in the capture declare none and carry no outgoing edge at
+all — so the call IS the end of the leg, and the `stop` #141 required was a shape the platform
+never connected. Authoring a call as a step, or a call terminal with any prefix, now raises
+`PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED`.
+
+The mixing halves are both still required: the body-local rule keeps the body connector-free, but
+a body cannot see its ancestors. Checking only the ROOT is not enough either — a connector can sit
+in an outer control body while the `process_call` sits in a nested one, both on one path — so the
+document is walked carrying whether a connector has run above. Moving the call into the terminal
+slot made `steps=[connector_call], terminal=process_call` representable for the first time, so
+both the body-local check and the ancestor walk read the TERMINAL as well as the steps; without
+that, widening the slot would have silently reopened the very path #141 gated. Sibling legs are
+independent paths, not a mix.
 
 **Bare Stop.** A Decision FALSE arm may be a bare `stop` with no steps. #141 removed the old "reject
 path is never a bare Stop" rule: it was legacy *builder* parity, and a real production Decision
@@ -357,7 +375,9 @@ Published as the immutable `PROCESS_IR_V1_CAPABILITIES` manifest (not an authore
 |---|---|---|
 | `generalized_connector_call` — the `connector_call` node | **supported** | #140 (shipped) |
 | `mixed_connector_execution` — multiple connector calls, several families, in one linear path | **supported** | #140 (shipped) |
-| `process_call_connector_mixing` — mixing `process_call` steps with connector execution **on one root-to-leaf path** | gated | still gated after #141 (path mode; see §3b) |
+| `process_call_connector_mixing` — mixing `process_call` with connector execution **on one root-to-leaf path** | gated | still gated after #141/#175 (see §3b) |
+| `terminal_process_call` — a `process_call` as the end of its path: empty return paths, no outgoing connection, no trailing `stop` | **supported** | #175 (shipped) |
+| `process_call_return_path_binding` — binding a RETURNING child's return-document shapes so a call may hand control onward | gated | #176 — needs the child's compiled shapes (a cross-component late binding) |
 | `connector_call_in_control_body` — a `connector_call` inside a Branch leg or Decision arm | **supported** | #141 (shipped) |
 | `rich_branch_decision_bodies` — the §3b body matrix, nested Decision, bare false Stop | **supported** | #141 (shipped) |
 | `continuation_after_branch_or_decision` | gated | #141 — terminal fan-out only |

@@ -248,10 +248,21 @@ false, and the second was introduced while correcting the first:
 * "the reads can only come from a subprocess summary" — no; the reader is an ordinary `set_dpp` in a
   LATER leg, and legs run sequentially.
 
-Through the direct API the code IS producible —
-`branch([[process_call(wait=False)], [set_dpp reading a DPP]])` reports it under the EMPTY
+Through the direct API the code IS producible — a Branch whose first leg terminates in a
+`process_call(wait=False)` and whose second leg reads a DPP reports it under the EMPTY
 `DEFAULT_VALIDATION_CAPABILITIES`, pinned by
 `test_the_unsafe_branch_is_producible_from_an_authorable_document`.
+
+**#175 note.** The call is now the leg's TERMINAL rather than a leg step, so the shape is written
+`{"steps": [], "terminal": process_call(wait=False)}`. The analysis is unchanged and the finding
+still fires: legs run SEQUENTIALLY, so a later leg still executes after an earlier leg's
+fire-and-forget child. What #175 removed is the ROOT CHAIN spelling of the same hazard (a call
+followed by another call), because a call ends its own path — the equivalent orchestration is
+sibling legs, which is also the live-attested shape. One consequence is worth stating because it is
+easy to misread as a regression: a cross-leg **DDP** read can never be established, whatever `wait`
+says, since each leg receives an independent copy of the document stream — that case reports
+`PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID`, a stricter finding than the ordering one, in both
+directions.
 
 | Code | Why it cannot fire from a legacy config |
 |---|---|

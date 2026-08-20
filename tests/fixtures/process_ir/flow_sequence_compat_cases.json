@@ -142,13 +142,12 @@
       "needs_fallback_target": true
     },
     "wrapper_process_calls": {
+      "_comment": "#175: a wrapper parent is exactly ONE process call, and the call is the end of the path — no trailing Stop, and no Return Documents terminal (that would need the child to hand control back, which is the gated return-path binding, #176). The single call keeps every field variant the old two-call case covered: the $ref child token plus non-default wait/abort_on_error/label. The withdrawn multi-call and return_documents payloads are preserved as explicit negative cases in tests/test_process_ir_flow_sequence_codec.py and tests/test_wrapper_subprocess_builder.py.",
       "config": {
         "process_kind": "wrapper_subprocess",
         "process_calls": [
-          {"subprocess_ref": "$ref:child"},
-          {"process_id": "00000000-0000-0000-0000-000000000001", "wait": false, "abort_on_error": true, "label": "second"}
-        ],
-        "return_documents": {"enabled": true, "label": "wrapper-out"}
+          {"subprocess_ref": "$ref:child", "wait": false, "abort_on_error": true, "label": "second"}
+        ]
       }
     }
   }

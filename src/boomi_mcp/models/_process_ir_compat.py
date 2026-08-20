@@ -58,6 +58,7 @@ from .process_ir import (
     parse_process_ir_v1,
 )
 from ..errors import (
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_SCHEMA_INVALID,
 )
@@ -691,6 +692,26 @@ def legacy_flow_sequence_to_ir(config: Any) -> ProcessIRV1:
                 "process_calls must be a non-empty list",
             )
         rd_enabled = _validated_return_documents(cfg)
+        # #175: a process call ends its path, so a wrapper is exactly ONE call
+        # with no terminal after it. Both withdrawn shapes are refused rather
+        # than truncated — dropping a call, or discarding an authored Return
+        # Documents terminal, would silently produce a process that does less
+        # than the config asked for. `_validated_return_documents` runs FIRST so
+        # a malformed block still reports its own defect.
+        if len(calls) != 1:
+            raise _reject(
+                PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+                "/process_calls",
+                "a wrapper supports exactly one process call — a call ends its path, "
+                "so a chain would need each child's return paths bound to it",
+            )
+        if rd_enabled:
+            raise _reject(
+                PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+                "/return_documents/enabled",
+                "a wrapper cannot return documents after its process call — the call "
+                "ends its path, and routing past it needs the child's return paths",
+            )
         steps: List[Dict[str, Any]] = []
         for i, raw_call in enumerate(calls):
             call = _require_dict(raw_call, f"/process_calls/{i}", "process call")
@@ -734,7 +755,7 @@ def legacy_flow_sequence_to_ir(config: Any) -> ProcessIRV1:
                         )
                     node[flag] = call[flag]
             steps.append(_maybe_label(call, node))
-        steps.append(_return_documents_node(cfg) if rd_enabled else {"kind": "stop"})
+        # No terminal is appended: the call IS the terminal (#175).
         return parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": steps}})
 
     if process_kind != "database_to_api_sync":
@@ -1064,6 +1085,18 @@ def ir_to_legacy_flow_sequence(
     kinds = [s.kind for s in steps]
 
     if "process_call" in kinds:
+        # #175: the only wrapper shape that exists is the exact singleton. A
+        # mutated model carrying a chain, or a terminal after the call, must be
+        # REFUSED rather than serialized into a legacy config that looks
+        # ordinary — a lossy reverse trip is how a withdrawn capability comes
+        # back through the side door.
+        if kinds != ["process_call"]:
+            raise _reject(
+                PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+                "/body/steps",
+                "a process_call is the terminal of its path — a wrapper document is "
+                "exactly one call with nothing after it",
+            )
         config: Dict[str, Any] = {"process_kind": "wrapper_subprocess", "process_calls": []}
         for node in steps:
             if node.kind == "process_call":

@@ -1265,8 +1265,19 @@ def test_return_documents_rejects_unknown_key():
     assert err.field == "return_documents"
 
 
-def test_wrapper_subprocess_ends_in_return_documents():
-    # A wrapper/facade that is itself a subprocess can end in Return Documents.
+def test_wrapper_subprocess_return_documents_after_a_call_is_refused():
+    """#175 F23. This used to emit `start -> processcall -> returndocuments`.
+
+    #107 admitted the shape on the reasoning that a wrapper which is itself a
+    subprocess may hand its documents back. That half is still true — but it is
+    the CALLED process that hands documents back, and here the Return Documents
+    shape sat downstream of the parent's own call. Boomi projects a call's
+    outbound connection from the child's return-document shapes, so the edge into
+    that terminal was never drawn and it floated unreachable.
+
+    The capability is transferred to #176, not withdrawn: a child process still
+    ends in Return Documents exactly as before.
+    """
     from src.boomi_mcp.categories.components.builders import WrapperSubprocessBuilder
 
     cfg = {
@@ -1274,14 +1285,10 @@ def test_wrapper_subprocess_ends_in_return_documents():
         "process_calls": [{"process_id": "55555555-5555-5555-5555-555555555555"}],
         "return_documents": {"enabled": True, "label": "Done"},
     }
-    assert WrapperSubprocessBuilder.validate_config(cfg, depends_on=[]) is None
-    xml = WrapperSubprocessBuilder.build(cfg, name="Wrapper RD")
-    _, _, shapes = _parse_process(xml)
-    assert [s.attrib["shapetype"] for s in shapes] == [
-        "start", "processcall", "returndocuments",
-    ]
-    assert 'shapetype="stop"' not in xml
-    assert shapes[-1].attrib["userlabel"] == "Done"
+    err = WrapperSubprocessBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_CALL_CONFIG_INVALID"
+    assert err.field == "return_documents.enabled"
 
 
 def test_wrapper_subprocess_rejects_invalid_return_documents():

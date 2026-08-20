@@ -1826,6 +1826,21 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     # has to be able to name that declaration.
     "ENTRY_CALL_ROLE",
     "ENTRY_ROLE_RESTRICTIONS",
+    # #175 (M12 defect slice). Served error codes from the two families the
+    # taxonomy-derived allowlist above does NOT cover: `BuilderValidationError`
+    # codes, which are inline strings on the legacy builder facade, and
+    # `verify_process_graph` codes, which are served directly in the verifier's
+    # own result rather than through `ERROR_TAXONOMY`. A finding row's whole job
+    # is to name the code the tool served, so these have to be nameable — and
+    # deriving them is not available: neither family has a registry to import,
+    # which is itself why they are hand-listed here rather than asked for.
+    # Like the entries above, this set does not grow one per slice; any later
+    # ledger touching the wrapper facade or the graph verifier names the same
+    # codes.
+    "PROCESS_CALL_CONFIG_INVALID",
+    "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID",
+    "PROCESS_CALL_ORPHAN_CONTINUATION",
+    "PROCESS_GRAPH_INTEGRITY_FAILED",
     "EXCLUDED_PLAN_FIELDS",
     "PROCESS_PRESERVATION_POLICY",
     "AUTHORING_CAPABILITY_REGISTRY",
