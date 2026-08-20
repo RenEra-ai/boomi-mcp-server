@@ -1527,6 +1527,27 @@ proved the same over the previous hop (`5131c8d6` → `aa2dbc5b`, 1868 leaves), 
 `5131c8d6` to HEAD is dark. A third QA dispatch for the same fact was declined deliberately: the
 measurement is objective, the instrument is QA's rather than mine, and both trees are pinned by SHA.
 
+**Both downstream loops close clean.** L2 Stage-2 at evaluation 55 (`cdx-review.1OdnmR`,
+zero findings) and the §6 architect gate at evaluation 8 (`cdx-gate-review.buHwWo`,
+`parsedVerdict: NO ISSUES`, `stopped:true`), the latter reviewing `5c25d9ee` and stating
+**AR5-01 RESOLVED**: “Valid symbol tables reject duplicate refs, so this is behaviorally equivalent
+to the previous scan **without a finite-size boundary**” — and, on the guard, “no plausible
+refactor-shaped escape from the single-expression guard”.
+
+That is the convergence the last thirteen rounds were working toward, and it is worth naming what
+actually produced it. Every widening of a finite artifact was met with a regression one step beyond
+it — one more table size, one more syntax spelling, one more API. The sequence ended only when the
+binding stopped being finite: the lookup resolves by key, so size cannot enter, and the guard pins
+one expression rather than enumerating what is forbidden. Ten probe-shape dimensions and four guard
+bypasses were each a correct finding about an artifact that could not have been made correct by
+another instance of the same kind of fix.
+
+**Threat boundary, recorded at CX54-01 and unexercised since.** Round 54's bypass already required
+adversarial authorship (`build_index(**({} if (rows := symbols.symbols) else {}))`); it was fixed
+because it cost two lines, but the recorded rule from that point is that a further bypass of that
+character is an accepted limitation with its construction written down, not another round. Round 55
+and §6 evaluation 8 both returned clean without needing it.
+
 ## Deferrals
 
 Pointer-only — reason class, placement, and lineage live on the finding row and in the filed issue.
