@@ -75,11 +75,25 @@ def _operation_connector_family(
     the IR — it is a fact of the component plan the compiler receives — so this
     must come from the symbol table and never from the authored node.
     """
-    for symbol in symbols.symbols or ():
-        if symbol.ref == operation_ref:
-            family = symbol.connector_type
-            return family.strip().lower() if isinstance(family, str) else None
-    return None
+    # THROUGH THE TABLE'S OWN INDEX, so the answer cannot depend on how many
+    # symbols there are (§6 evaluation 7). The scan this replaces was correct,
+    # but its correctness was only ever demonstrated by SAMPLING: the oracle
+    # bound the behaviour on tables it happened to construct, and every round
+    # that widened those samples was met with a regression keyed one size above
+    # the largest — `len > 3`, then `len > 5`, then `len > 41`. That regress is
+    # unbounded by construction, because any finite artifact has a largest case.
+    #
+    # A dict lookup ends it rather than outrunning it: there is no iteration to
+    # branch on, no index to read from, and no length to compare, so a
+    # size-dependent answer cannot be written here without adding one of those
+    # back — which `test_the_family_lookup_cannot_depend_on_table_size` refuses
+    # structurally, at any size, without needing a case for it.
+    #
+    # `build_index()` is the model's own documented API and rejects duplicate
+    # refs at construction, so this resolves exactly what the scan resolved.
+    symbol = symbols.build_index().get(operation_ref)
+    family = getattr(symbol, "connector_type", None)
+    return family.strip().lower() if isinstance(family, str) else None
 
 
 def derive_process_execution_profile(

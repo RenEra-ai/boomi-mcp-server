@@ -5116,18 +5116,26 @@ def test_the_served_revision_binds_multi_symbol_family_lookup():
     # gained. Writing this control over all five was the first draft, and it
     # failed on that mutant: the claim was broader than the fact. Scoped here to
     # the four whose invisibility is the finding.
-    class _Row:
-        def __init__(self, ref, connector_type):
-            self.ref = ref
-            self.connector_type = connector_type
+    # REAL model objects, not stand-ins. A hand-built table with only `.symbols`
+    # cannot answer `build_index()`, which the lookup now uses — the same defect
+    # the reviewer found in the oracle's probes, reproduced here in a control.
+    from boomi_mcp.compiler.process_ir.contracts import (
+        ComponentSymbolV1,
+        SymbolTableV1,
+    )
 
-    class _Table:
-        def __init__(self, rows):
-            self.symbols = tuple(rows)
+    def _row(ref, family):
+        return ComponentSymbolV1(
+            ref=ref, component_id="id-" + ref, component_type="connector-action",
+            connector_type=family,
+        )
 
-    single = [_Table(()), _Table((_Row("$ref:op", "database"),)),
-              _Table((_Row("$ref:op", sorted(ep.LISTENER_CONNECTOR_TYPES)[0]),)),
-              _Table((_Row("$ref:other", "database"),))]
+    single = [
+        SymbolTableV1(symbols=()),
+        SymbolTableV1(symbols=(_row("$ref:op", "database"),)),
+        SymbolTableV1(symbols=(_row("$ref:op", sorted(ep.LISTENER_CONNECTOR_TYPES)[0]),)),
+        SymbolTableV1(symbols=(_row("$ref:other", "database"),)),
+    ]
     # The partition is DERIVED, not written down: a mutant is "invisible to a
     # one-symbol case set" exactly when it agrees with the real function on every
     # 0- and 1-symbol table. The first draft hand-listed which mutants were
@@ -5372,3 +5380,99 @@ def test_the_family_lookup_ignores_symbols_it_was_not_asked_about():
     assert _big_table_first_row(big, "$ref:op") != ep._operation_connector_family(
         big, "$ref:op"
     )
+
+
+def test_the_family_lookup_cannot_depend_on_table_size():
+    """§6 evaluation 7: the sampling regress, ended structurally rather than outrun.
+
+    Nine rounds established the shape of this problem. Each widening of the
+    oracle's probe sizes was met with a regression keyed one size above the
+    largest — `len > 3`, then `len > 5`, then `len > 41` against a 42-row table —
+    and that is not a sequence of oversights, it is what any finite artifact
+    permits. A digest over samples, and equally a property test over enumerated
+    sizes, both have a largest case; a mutant one above it always escapes.
+
+    So the property is made UNWRITABLE instead of merely untested.
+    `_operation_connector_family` resolves through the table's own
+    `build_index()` dict, and this test refuses — at the AST level — any length
+    comparison, subscript, or iteration over the rows inside it. A
+    size-dependent answer needs one of those, so it cannot be introduced without
+    failing here, at every size at once and without a case for any of them.
+
+    This is deliberately a check on the FUNCTION, not on a sample of its
+    behaviour, which is the only kind of check that closes the class.
+    """
+    import ast
+    import inspect
+
+    import boomi_mcp.compiler.process_ir.execution_profile as ep
+
+    source = inspect.getsource(ep._operation_connector_family)
+    tree = ast.parse(textwrap_dedent(source))
+    func = tree.body[0]
+    assert isinstance(func, ast.FunctionDef), type(func)
+
+    # The BODY only. Annotations like `Optional[str]` are subscripts too, and
+    # counting them would make this assertion about the signature's typing
+    # rather than about what the function does — measured: the first draft
+    # failed on its own correct implementation for exactly that reason.
+    offenders = []
+    for statement in func.body:
+        for node in ast.walk(statement):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id in {"len", "enumerate", "sorted", "reversed",
+                                    "list", "tuple"}:
+                    offenders.append("call to %s()" % node.func.id)
+            if isinstance(node, ast.Subscript):
+                offenders.append("subscript")
+            if isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+                offenders.append("iteration over the table")
+            if isinstance(node, ast.While):
+                offenders.append("while loop")
+    assert offenders == [], (
+        "the family lookup may not depend on how many symbols the table holds; "
+        "found: %s" % sorted(set(offenders))
+    )
+
+    # ...and it really does resolve through the index API, so the absence of
+    # those constructs means "answers by key" rather than "answers nothing".
+    assert "build_index" in source, source
+
+    # NON-VACUITY, in both directions. The check must reject a size-dependent
+    # implementation and accept the real one — otherwise it is an assertion
+    # about formatting.
+    def _detect(fn_source):
+        found = []
+        probe = ast.parse(textwrap_dedent(fn_source)).body[0]
+        for statement in probe.body:
+            for node in ast.walk(statement):
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and node.func.id == "len"):
+                    found.append("len")
+                if isinstance(node, ast.Subscript):
+                    found.append("subscript")
+                if isinstance(node, (ast.For, ast.comprehension)):
+                    found.append("iteration")
+        return sorted(set(found))
+
+    assert _detect(source) == []
+    assert _detect(
+        "def probe(symbols, ref):\n"
+        "    rows = symbols.symbols\n"
+        "    if len(rows) > 41:\n"
+        "        return rows[0].connector_type\n"
+        "    return None\n"
+    ) == ["len", "subscript"]
+    assert _detect(
+        "def probe(symbols, ref):\n"
+        "    for row in symbols.symbols:\n"
+        "        if row.ref == ref:\n"
+        "            return row.connector_type\n"
+        "    return None\n"
+    ) == ["iteration"]
+
+
+def textwrap_dedent(text):
+    import textwrap
+
+    return textwrap.dedent(text)
