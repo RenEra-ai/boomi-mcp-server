@@ -1,0 +1,73 @@
+Approvals, network access and write access are unavailable in this read-only review session — do
+not wait on any of them, and do not attempt to modify the worktree. Work from the repository as it
+is on disk and emit your findings as PLAIN TEXT NOW.
+
+This is the FIFTH evaluation of the §6 architect implementation gate for issue #175, and it is a
+DELTA re-review.
+
+Repository: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: codex/issue-175
+Previously reviewed tip: 05f9b9638e90a431ad102e77a1bff5eaa753baac
+Current tip: e63fc8c5e781988949f82bbcf7f264353ac0b293 (clean tree)
+
+Review ONLY `git diff 05f9b96..e63fc8c` (commits 5bad33b, 63a8ec7, 5c63bf7, e63fc8c). Do NOT
+re-review the whole implementation — four earlier rounds covered it. The question is narrow:
+
+    Did the round-4 corrections do what they claimed, without contradicting, silently narrowing,
+    or quietly exceeding what the architect design plan (inlined below) authorizes?
+
+Round 4's six findings were dispositioned FOUR FIXED, TWO DEFERRED.
+
+Fixed in this delta:
+1. Served text corrected — the compatibility inventory's `wrapper_subprocess` rows, the legacy
+   builder's module docstring in
+   `src/boomi_mcp/categories/components/builders/process_flow_builder.py`, and the machine-served
+   `emittable_today` doctrine entry in `src/boomi_mcp/kb/design_doctrine.py` no longer advertise
+   the withdrawn plural-call / continuing-parent shape. Live QA then found two more served
+   `field_notes` in `src/boomi_mcp/categories/meta_tools.py` (`process_calls[].wait`,
+   `process_calls[].abort_on_error`) describing a parent continuing past the call; corrected too.
+2. The defect-class table in `docs/architecture/ISSUE_175_AUDIT_LEDGER.md` was re-derived
+   mechanically over every row, including that round's own late-appended rows.
+3. The update-repair pin in `tests/test_wrapper_subprocess_builder.py` now drives `merge_for_update`
+   with the process route's real `PRESERVATION_POLICY` against the frozen pre-fix golden bytes,
+   instead of comparing a fresh rebuild.
+4. The prose guard's polarity check in `tests/test_wave_gate.py` is scoped to a ±3-word window
+   around the equality verb — a prefix-only check flagged an accurate negated sentence, and a
+   clause-wide check then suppressed the real defect.
+5. Served-surface digests were rebaselined and the §11.2/§11.3 inventory tables regenerated from
+   `tests/fixtures/m12_12/legacy_reachability_inventory.json`.
+6. The fail-closed test in `tests/test_process_ir_rich_control_bodies.py` now names the owning code
+   (`PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW`) and adds an ordinary-kind control, instead of asserting
+   merely that some nonempty code exists.
+
+Deliberately DEFERRED with issues filed at reconciliation — do NOT re-report these as new findings:
+- Diagnostic IDENTITY between the two ProcessIR entry points (same document, different
+  code/pointer/message) → defect class DC-175-E → issue #178, with five known divergences
+  enumerated there as a regression corpus. The SAFETY property is not deferred and was measured:
+  live QA swept 46 documents and found zero accept/refuse asymmetry.
+- Served-text/enforcement consistency, and the fact that a predicate over English prose cannot make
+  the coverage claim the repo's structural-fix rule demands → DC-175-D and DC-175-G → issue #177.
+  The prose guard is explicitly demoted to a best-effort lint.
+If you find MORE instances of those two classes, put them in ONE consolidated paragraph naming the
+owning issue, not as separate findings.
+
+Look hardest at: anything the deferrals do NOT cover (a document ACCEPTED by one entry point and
+REFUSED by the other breaks the stated safety property and is top-severity); whether the
+served-text corrections introduced a NEW false claim (judge the new wording against what the code
+actually does); whether the update-repair pin is now real (would a merge retaining the orphaned
+Stop or dead dragpoint fail it?); whether the new fail-closed test is non-vacuous; whether the
+deferrals are legitimate under `CLAUDE.md` (Standard tier, stated grounds, follow-up filed at
+reconciliation, reason class and placement recorded); and anything in this delta the plan did not
+authorize.
+
+KNOWN AND EXPECTED — not a finding: a review based at an INTERMEDIATE commit of this branch reports
+`MANIFEST_TRANSITION_ILLEGAL` for `tests/fixtures/wave_gate/test_nodes.jsonl`. Ledger row
+`L2-r9-01` measures and refutes it: the required gate's baseline is `origin/dev` (= `3fd5027`), the
+manifest passes there, and the prescribed remedy was built and run — it fails against that
+baseline. No manifest is legal against both. Do not re-raise it; refute the measurement if you
+disagree.
+
+Concrete, verifiable findings only — name the file and what specifically contradicts the plan. If
+the delta is faithful, say so plainly.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.

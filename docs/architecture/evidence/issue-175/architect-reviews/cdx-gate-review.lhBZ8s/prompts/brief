@@ -1,0 +1,140 @@
+You have reviewed this implementation against its ARCHITECT DESIGN PLAN four times already —
+at tip 753b46f3bb620d449f1294c82578a928455fdeca, then over the replay delta ending at
+574d541195ba2d6251663bba90ded5741b132c3d, then over the round-3 delta ending at
+c2ebc43dccff85ecec96aa9a4152ce4747dab805, then over the round-4 delta ending at
+05f9b9638e90a431ad102e77a1bff5eaa753baac. All four rounds returned ISSUES FOUND
+(7, 5, 4 and 6 findings). All twenty-two findings are reconciled and recorded in
+`docs/architecture/ISSUE_175_AUDIT_LEDGER.md` (rows `L3-01`..`L3-07`, `L3R-01`..`L3R-05`,
+`L3R2-01`..`L3R2-04`, `L3R3-01`..`L3R3-06`).
+
+This is the FIFTH evaluation of this gate, and it is a DELTA re-review, NOT a fresh full review.
+
+Repository: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: codex/issue-175
+Previously reviewed tip: 05f9b9638e90a431ad102e77a1bff5eaa753baac
+Current tip: e63fc8c5e781988949f82bbcf7f264353ac0b293 (clean tree)
+
+Review the correction delta `git diff 05f9b96..e63fc8c`. Do NOT re-review the whole
+implementation — the four earlier rounds covered it, and re-reviewing already-passed code dilutes
+findings. Your question is narrow:
+
+    **Did the round-4 corrections do what they claimed, without contradicting, silently
+    narrowing, or quietly exceeding what the plan authorizes?**
+
+NOTE ON PATHS: the Python package is `src/boomi_mcp/`. The four commits in this delta are
+5bad33b, 63a8ec7, 5c63bf7, e63fc8c.
+
+## Changed files in this delta
+
+```
+docs/architecture/ISSUE_175_AUDIT_LEDGER.md
+docs/architecture/M12_COMPATIBILITY_INVENTORY.md
+docs/architecture/evidence/issue-175/SHA256SUMS
+docs/architecture/evidence/issue-175/architect-reviews/cdx-gate-review.ZVsVW6/…   (round-4 evidence archive)
+docs/architecture/evidence/issue-175/commit-reviews/cdx-review.EgqwAF/…          (support-review evidence archive)
+docs/architecture/evidence/issue-175/index.jsonl
+src/boomi_mcp/categories/components/builders/process_flow_builder.py
+src/boomi_mcp/categories/meta_tools.py
+src/boomi_mcp/kb/design_doctrine.py
+tests/fixtures/m12_12/legacy_reachability_inventory.json
+tests/fixtures/wave_gate/test_nodes.jsonl
+tests/test_process_ir_rich_control_bodies.py
+tests/test_wave_gate.py
+tests/test_wrapper_subprocess_builder.py
+```
+
+## How round 4's six findings were dispositioned: FOUR FIXED, TWO DEFERRED
+
+### Fixed in this delta
+
+1. **`L3R3-04` — served text corrected (the plan-listed, already-known DC-175-D instances).**
+   The compatibility inventory's `wrapper_subprocess` rows, the legacy builder's module docstring
+   in `process_flow_builder.py`, and the machine-served `emittable_today` doctrine entry in
+   `src/boomi_mcp/kb/design_doctrine.py` no longer advertise the withdrawn plural-call /
+   continuing-parent shape. Live QA then found two MORE served `field_notes` in
+   `src/boomi_mcp/categories/meta_tools.py` — `process_calls[].wait` and
+   `process_calls[].abort_on_error` — still describing a parent that continues past the call, in
+   the same served payload whose summary says the call ends the path; those are corrected too
+   (ledger row `QA-175-r5-02`).
+
+2. **`L3R3-05` — the defect-class table was re-derived mechanically over every row.** It had been
+   recomputed before that round's own rows were appended, so it went stale again the moment those
+   rows landed. `DC-175-D`, `DC-175-E`, `DC-175-F` and `DC-175-G` counts and row lists in
+   `ISSUE_175_AUDIT_LEDGER.md` now include the final delta rows.
+
+3. **`L3R3-03` — the update-repair pin now drives a real update.**
+   `test_updating_a_prefix_parent_removes_both_the_stop_and_the_dead_edge` in
+   `tests/test_wrapper_subprocess_builder.py` (renamed from `test_rebuilding_…`) now passes the
+   frozen pre-fix golden bytes through `merge_for_update(current, desired,
+   ProcessFlowBuilder.PRESERVATION_POLICY)` — the process route's real preservation policy — rather
+   than comparing a fresh rebuild.
+
+4. **`L3R3-06` (polarity half) — the prose guard's polarity check is scoped to a WINDOW around the
+   equality verb** in `tests/test_wave_gate.py`. A prefix-only check flagged the accurate sentence
+   "Submitted bytes match no live readback." (the negation trails the verb); a clause-wide check
+   then suppressed the real historical defect, whose sentence ends "…and there is no attestation
+   drift" (a negation belonging to a different assertion). The window is ±3 words. A new accepted
+   case is added to the guard's own control corpus.
+
+5. Served-surface digests were rebaselined (`tests/fixtures/m12_12/legacy_reachability_inventory.json`,
+   `docs/architecture/evidence/issue-175/SHA256SUMS`) and the §11.2/§11.3 inventory tables in
+   `M12_COMPATIBILITY_INVENTORY.md` regenerated from the fixture.
+
+6. `tests/test_process_ir_rich_control_bodies.py` — the fail-closed test for the root verdict's
+   deliberate yield on `[branch, process_call]` no longer asserts merely "some nonempty code
+   exists". It now asserts the code is `PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW`, asserts it is NOT the
+   process-call return-path-binding code, and adds a control: the SAME document with an ORDINARY
+   kind in place of the Process Call is refused with the SAME code — which is the claim "the
+   kind-agnostic continuation rule owns this document" actually rests on.
+
+### Deliberately DEFERRED, with issues filed at reconciliation — do NOT re-report these as new findings
+
+- **`L3R3-01` + `L3R3-02` → defect class DC-175-E → issue #178.** Diagnostic IDENTITY between the
+  two ProcessIR entry points (`parse_process_ir_v1` vs a mutated model handed to
+  `compile_process_ir_v1`): the same document, different code / pointer / message. Five known
+  divergences — including the ones you reported — are enumerated in #178 as a regression corpus.
+  The SAFETY property is NOT deferred and was measured: live QA swept 46 documents and found zero
+  accept/refuse asymmetry.
+- **`L3R3-04` residue + `L3R3-06` (coverage half) → DC-175-D and DC-175-G → issue #177.** The
+  general served-text/enforcement consistency mechanism, and the fact that a predicate over English
+  prose cannot make the coverage claim the repo's structural-fix rule demands. The prose guard is
+  explicitly demoted in the ledger to a best-effort lint; it is no longer claimed as DC-175-G's
+  structural invariant.
+
+If you find MORE instances of those two deferred classes, note them in ONE consolidated paragraph
+naming the issue that owns them, rather than as separate findings.
+
+## Where to look hardest
+
+- **Anything the deferrals do not actually cover.** A document ACCEPTED by one entry point and
+  REFUSED by the other would break the stated safety property and is NOT deferred — that is a
+  top-severity finding.
+- **Did the served-text corrections introduce a NEW false claim?** Judge the new wording against
+  what the code actually does, not against the old wording. In particular the new
+  `process_calls[].wait` / `[].abort_on_error` notes, the new `emittable_today` doctrine sentence,
+  and the new `process_flow_builder.py` docstring.
+- **Is the update-repair pin now real** — would a merge that RETAINED the orphaned Stop or the dead
+  dragpoint fail it? Check that `merge_for_update` is genuinely on the path and that the assertions
+  would catch a retention.
+- **Is the new fail-closed / continuation-ownership test non-vacuous** — does its control actually
+  discriminate, or would it pass under a wrong implementation too?
+- **Are the deferrals legitimate** under the repo's own rule in `CLAUDE.md` (Standard tier, stated
+  grounds, follow-up filed at reconciliation, reason class and roadmap placement recorded), or are
+  they deferring work that belonged in this slice?
+- **Anything in this delta the plan did not authorize.**
+
+## Known and expected — NOT a finding
+
+A review based at an INTERMEDIATE commit of this branch will report `MANIFEST_TRANSITION_ILLEGAL`
+for `tests/fixtures/wave_gate/test_nodes.jsonl`. That is measured and refuted in ledger row
+`L2-r9-01`: the required gate's baseline is `origin/dev` (= `3fd5027`), the manifest passes there,
+and the prescribed remedy was BUILT and RUN — it fails against that baseline. No manifest is legal
+against both. Please do not re-raise it; if you disagree, refute the measurement rather than
+restating the symptom.
+
+## Output
+
+Concrete, verifiable findings only — name the file and what specifically contradicts the plan. If
+the delta is faithful, say so plainly.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.

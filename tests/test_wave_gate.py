@@ -6385,6 +6385,9 @@ def test_no_durable_doc_claims_submitted_bytes_match_a_readback():
             # sits next to THIS verb. "mismatch" states the contract outright.
             words = clause.split()
             at = len(clause[: verb.start()].split())
+            # THREE words before the verb, and TWO after it (the slice starts at
+            # the verb itself, so `at + 3` yields verb + 2). Stated as measured
+            # rather than as "+/-3", which is what an earlier comment claimed.
             near = " ".join(words[max(0, at - 3): at + 3])
             if _NEGATION.search(near) or "mismatch" in clause:
                 continue
