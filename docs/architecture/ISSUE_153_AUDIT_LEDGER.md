@@ -1487,6 +1487,34 @@ or a defect outside this artifact — is judged on its own merits as always.
 
 **No deferrals.** Zero critical residue, zero unresolved standard residue.
 
+**L2 closes clean at evaluation 49, and the stopping rule was not needed.** Run dir
+`cdx-review.J7Jtrq`, `STATUS: completed`, `SCOPE: branch diff against
+249376aa16f79a81b0ef3bd7932dc3483d906f83 (249376a) head=a1ff4dff7adf6cb36e5c623a23885b296c596f02
+dirty=false`, **zero findings**, teardown confirmed. Verbatim: “The patch correctly generates
+canonically sorted probe tables while varying absolute and relative symbol positions. The affected
+test file and audit-ledger validation tests pass.”
+
+The rule recorded before round 49 said that another dimension of the probe's shape would be recorded
+as an accepted limitation rather than fixed. It returned none, so the rule went unexercised — which
+is worth stating plainly, because a rule that is never tested is not evidence of anything. What the
+clean round does show is that the round-47/48 correction changed KIND: the shape is generated and the
+guard asserts the resulting spread (both arities, ≥3 distinct absolute indices including 0, ≥3
+distinct from-the-end indices, max arity ≥4, both directions carried by ≥2 rows, opposite-class
+decoys, and every table canonically sorted), so the next edit that flattens coverage fails the gate
+instead of going quietly dark. Ten dimensions were found by inspection across seven rounds; the
+eleventh, if it exists, now has to get past a property rather than past me.
+
+**Darkness proof for the round-47/48 correction, measured rather than delegated.** The correction
+touched only probe inputs and tests, so the claim owed was that the served surface did not move.
+Snapshotting `aa2dbc5b` and `a1ff4dff` through QA's own r20 instrument
+(`.claude/agent-memory/boomi-qa-tester/harness/153-r20-served-surface-snapshot.py`, which reads the
+schema universe from `get_schema_template`'s own refusal envelope rather than a hand-list) and
+diffing them leaf by leaf: **1869 leaf fields compared, zero differences** — both revisions, the full
+`list_capabilities()` payload, all 105 schema templates, and the oracle's 58 row values. QA round 20
+proved the same over the previous hop (`5131c8d6` → `aa2dbc5b`, 1868 leaves), so the whole chain from
+`5131c8d6` to HEAD is dark. A third QA dispatch for the same fact was declined deliberately: the
+measurement is objective, the instrument is QA's rather than mine, and both trees are pinned by SHA.
+
 ## Deferrals
 
 Pointer-only — reason class, placement, and lineage live on the finding row and in the filed issue.
