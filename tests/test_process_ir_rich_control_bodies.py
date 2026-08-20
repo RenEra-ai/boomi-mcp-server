@@ -1493,3 +1493,69 @@ def test_a_slot_that_admits_no_call_reports_the_slot_check_on_both_paths(steps, 
     doc = _decision_placement_doc(steps, terminal)
     assert _placement_via_parser(None, None, doc=doc) == \
         _false_arm_via_compiler(steps, terminal), label
+
+
+# ---------------------------------------------------------------------------
+# #175 round 5 — the ROOT sequence gets the same treatment as a body.
+#
+# Round 3 gave the BODY rule one authority and left the root rule as two
+# hand-written copies. Live QA's own sibling sweep found them disagreeing on all
+# five illegal root shapes — on the pointer for three, and on the CODE itself
+# when a connector is present, where one path served a capability refusal at
+# `/body` and the other a return-path refusal at a step index. A machine consumer
+# branching on the code took a different branch depending on the entry point.
+# ---------------------------------------------------------------------------
+
+_ROOT_CASES = [
+    ("call_then_stop", [_PLACEMENT_CALL, _PLACEMENT_STOP]),
+    ("step_then_call", [_PLACEMENT_DPP, _PLACEMENT_CALL]),
+    ("call_then_step", [_PLACEMENT_CALL, _PLACEMENT_DPP]),
+    ("connector_then_call", [_PLACEMENT_CONN, _PLACEMENT_CALL]),
+    ("call_then_connector", [_PLACEMENT_CALL, _PLACEMENT_CONN]),
+    ("two_calls", [_PLACEMENT_CALL, _PLACEMENT_CALL]),
+    ("singleton_is_legal", [_PLACEMENT_CALL]),
+]
+
+
+def _root_doc(steps):
+    return {"version": "1", "body": {"kind": "sequence", "steps": copy.deepcopy(steps)}}
+
+
+def _root_via_parser(steps):
+    try:
+        parse_process_ir_v1(_root_doc(steps))
+    except ProcessIRValidationError as exc:
+        first = exc.diagnostics[0]
+        return (first.code, first.path, first.message)
+    return None
+
+
+def _root_via_compiler(steps):
+    from boomi_mcp.compiler.process_ir.body_capabilities import validate_body_capabilities
+
+    ir = parse_process_ir_v1(_root_doc([_PLACEMENT_CALL]))
+    ir.body.steps = [_placement_node(s) for s in steps]
+    try:
+        validate_body_capabilities(ir)
+    except ProcessIRCompileError as exc:
+        first = exc.diagnostics[0]
+        return (first.code, first.path, first.message)
+    return None
+
+
+@pytest.mark.parametrize("label,steps", _ROOT_CASES, ids=[c[0] for c in _ROOT_CASES])
+def test_both_entry_points_agree_on_root_process_call_placement(label, steps):
+    """One document, one code, one pointer, one message — at the ROOT too.
+
+    `two_calls` is here because it is the shape that once raised StopIteration
+    out of the validator: the offending index is written against the first call's
+    INDEX precisely so an all-call chain still has an answer.
+    """
+    assert _root_via_parser(steps) == _root_via_compiler(steps)
+
+
+def test_the_legal_root_singleton_is_accepted_by_both():
+    """Non-vacuity: a verdict that refused every root would satisfy every parity
+    assertion above. The exact singleton is the one root form #175 ships."""
+    assert _root_via_parser([_PLACEMENT_CALL]) is None
+    assert _root_via_compiler([_PLACEMENT_CALL]) is None

@@ -1244,6 +1244,56 @@ PROCESS_CALL_PLACEMENT_CONTEXT_LABELS: Mapping[str, str] = MappingProxyType({
 })
 
 
+PLACEMENT_ROOT_CONNECTOR_MIXING = "root_connector_mixing"
+PLACEMENT_ROOT_SINGLETON = "root_singleton"
+
+
+def process_call_root_verdict(kinds):
+    """THE authority on how a ROOT sequence's ``process_call`` placement is
+    diagnosed. Same contract as :func:`process_call_placement_verdict`, for the
+    slot that function deliberately does not cover.
+
+    It exists for the same reason and was found the same way. The body rule got
+    one authority in round 3; the ROOT rule was left as two hand-written copies,
+    and live QA's own sibling sweep measured them disagreeing on all five illegal
+    root shapes — on the POINTER for `[pc, stop]`, `[set, pc]` and `[pc, set]`
+    (one path names the call, the other names the node beside it), and on the
+    CODE itself when a connector is present, where one path serves a capability
+    refusal at `/body` and the other a return-path refusal at a step index. A
+    machine consumer branching on the code took a different branch depending on
+    which entry point it called.
+
+    Returns ``(reason, at, message)`` or ``None`` when the root is legal.
+    """
+    if kinds == ["process_call"] or "process_call" not in kinds:
+        return None
+    # Connector mixing keeps its own code AND its precedence: it stays gated on
+    # its own terms even once return-path binding lands, so a caller must not be
+    # told to drop the trailing stop when the real obstacle is the connector.
+    if any(kind in _CONNECTOR_KINDS for kind in kinds):
+        return (
+            PLACEMENT_ROOT_CONNECTOR_MIXING,
+            (),
+            "a process_call may not share a root-to-leaf path with a "
+            "connector step (process_call_connector_mixing is gated)",
+        )
+    # The only legal process-call root is the exact singleton, so the offending
+    # node is the first step that is not THE call. Written against the first
+    # call's INDEX rather than as "the first non-call": an all-call chain has no
+    # non-call element, and that spelling raised StopIteration straight out of
+    # the validator. This form is total — the singleton returned above, so at
+    # least two steps remain and an index other than the first call exists.
+    first_call = kinds.index("process_call")
+    offending = next(i for i in range(len(kinds)) if i != first_call)
+    return (
+        PLACEMENT_ROOT_SINGLETON,
+        ("steps", offending),
+        "a process_call is the terminal of its path — a root sequence "
+        "containing one admits no other step, including a trailing stop or "
+        "return_documents (step {0})".format(offending),
+    )
+
+
 def process_call_placement_verdict(
     steps: List[Any], terminal: Any, *, context: str
 ) -> Optional[Tuple[str, Tuple[Any, ...], str]]:
@@ -1902,40 +1952,13 @@ class SequenceNodeV1(_ProcessIRBase):
             # required a trailing stop/return_documents and accepted a chain; both
             # emitted a call wired onward with no return path declared, which the
             # platform does not honour.
-            if kinds == ["process_call"]:
+            verdict = process_call_root_verdict(kinds)
+            if verdict is None:
                 return self
-            # Connector mixing keeps its own code and its precedence: it stays
-            # gated on its own terms even once return-path binding lands, so a
-            # caller must not be told to "drop the trailing stop" when the real
-            # obstacle is the connector.
-            for kind in kinds:
-                if kind in _CONNECTOR_KINDS:
-                    raise _capability_error(
-                        "a process_call may not share a root-to-leaf path with a "
-                        "connector step "
-                        "(process_call_connector_mixing is gated)"
-                    )
-            # The only legal process-call root is the exact singleton, so the
-            # offending node is simply the first step that is not THE call.
-            # Written against the first call's index rather than as "the first
-            # non-call": an all-call chain has no non-call element at all, and
-            # the earlier spelling raised StopIteration straight out of the
-            # validator — `parse_process_ir_v1` catches only `ValidationError`,
-            # so unsupported caller input escaped as an unhandled exception
-            # instead of the typed diagnostic. This form is total: the singleton
-            # returned above, so at least two steps remain and an index other
-            # than the first call always exists.
-            first_call = kinds.index("process_call")
-            offending_index = next(
-                i for i in range(len(kinds)) if i != first_call
-            )
-            raise _return_path_binding_error(
-                "a process_call is the terminal of its path — a root sequence "
-                "containing one admits no other step, including a trailing stop or "
-                "return_documents (step {0})".format(offending_index),
-                at=("steps", offending_index),
-            )
-
+            reason, at, message = verdict
+            if reason == PLACEMENT_ROOT_CONNECTOR_MIXING:
+                raise _capability_error(message)
+            raise _return_path_binding_error(message, at=at)
         # Connector-call flow (#140). Checked BEFORE the source/target branch so
         # the two legacy branches above and the legacy branch below keep their
         # exact behaviour on every payload that contains no connector_call.

@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10188,"minimum_collected":10188,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10196,"minimum_collected":10196,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -10223,3 +10223,11 @@
 {"kind":"test","id":"pytest-010222","node_id":"tests/test_process_ir_rich_control_bodies.py::test_a_slot_that_admits_no_call_reports_the_slot_check_on_both_paths[connector_then_call]","state":"active"}
 {"kind":"test","id":"pytest-010223","node_id":"tests/test_process_ir_rich_control_bodies.py::test_a_slot_that_admits_no_call_reports_the_slot_check_on_both_paths[prefix_then_call]","state":"active"}
 {"kind":"test","id":"pytest-010224","node_id":"tests/test_process_ir_rich_control_bodies.py::test_a_slot_that_admits_no_call_reports_the_slot_check_on_both_paths[bare_call]","state":"active"}
+{"kind":"test","id":"pytest-010225","node_id":"tests/test_process_ir_rich_control_bodies.py::test_both_entry_points_agree_on_root_process_call_placement[call_then_stop]","state":"active"}
+{"kind":"test","id":"pytest-010226","node_id":"tests/test_process_ir_rich_control_bodies.py::test_both_entry_points_agree_on_root_process_call_placement[step_then_call]","state":"active"}
+{"kind":"test","id":"pytest-010227","node_id":"tests/test_process_ir_rich_control_bodies.py::test_both_entry_points_agree_on_root_process_call_placement[call_then_step]","state":"active"}
+{"kind":"test","id":"pytest-010228","node_id":"tests/test_process_ir_rich_control_bodies.py::test_both_entry_points_agree_on_root_process_call_placement[connector_then_call]","state":"active"}
+{"kind":"test","id":"pytest-010229","node_id":"tests/test_process_ir_rich_control_bodies.py::test_both_entry_points_agree_on_root_process_call_placement[call_then_connector]","state":"active"}
+{"kind":"test","id":"pytest-010230","node_id":"tests/test_process_ir_rich_control_bodies.py::test_both_entry_points_agree_on_root_process_call_placement[two_calls]","state":"active"}
+{"kind":"test","id":"pytest-010231","node_id":"tests/test_process_ir_rich_control_bodies.py::test_both_entry_points_agree_on_root_process_call_placement[singleton_is_legal]","state":"active"}
+{"kind":"test","id":"pytest-010232","node_id":"tests/test_process_ir_rich_control_bodies.py::test_the_legal_root_singleton_is_accepted_by_both","state":"active"}

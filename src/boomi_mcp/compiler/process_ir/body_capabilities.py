@@ -55,6 +55,7 @@ from typing import Any, Dict, FrozenSet, List, Mapping, Tuple
 
 from ...errors import (
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
+    PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
@@ -64,11 +65,13 @@ from ...models.process_ir import (
     _CONNECTOR_KINDS,
     LINEAR_BODY_KINDS,
     PLACEMENT_CONNECTOR_MIXING,
+    PLACEMENT_ROOT_CONNECTOR_MIXING,
     PROCESS_CALL_PLACEMENT_CONTEXT_LABELS,
     PROCESS_IR_V1_MAX_CONTROL_DEPTH,
     TRY_CATCH_BODY_KINDS,
     ProcessIRV1,
     process_call_placement_verdict,
+    process_call_root_verdict,
 )
 from .diagnostics import raise_compile_error
 
@@ -515,21 +518,28 @@ def _check_process_call_placement(ir: ProcessIRV1) -> None:
     node id rather than the authored pointer. ``validate_body_capabilities`` runs
     before lowering, so this claims the diagnosis first.
     """
-    steps = list(ir.body.steps)
-    if len(steps) == 1:
+    verdict = process_call_root_verdict(
+        [getattr(step, "kind", None) for step in ir.body.steps]
+    )
+    if verdict is None:
         return
-    for index, step in enumerate(steps):
-        if getattr(step, "kind", None) != "process_call":
-            continue
+    reason, at, message = verdict
+    if reason == PLACEMENT_ROOT_CONNECTOR_MIXING:
+        # Mixing keeps its own code at the root, exactly as it does on the parser
+        # path: the two must not serve different CODES for one document, which is
+        # what live QA measured before this was unified.
         raise raise_compile_error(
-            PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+            PROCESS_IR_CAPABILITY_UNSUPPORTED,
             _SEMANTIC_PHASE,
-            _join("/body", "steps", index),
-            message=(
-                "a process_call is the terminal of its path — a root sequence "
-                "containing one admits no other step"
-            ),
+            _join("/body", *at),
+            message=message,
         )
+    raise raise_compile_error(
+        PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+        _SEMANTIC_PHASE,
+        _join("/body", *at),
+        message=message,
+    )
 
 
 def validate_body_capabilities(ir: ProcessIRV1) -> None:
