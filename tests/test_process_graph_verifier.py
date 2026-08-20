@@ -1338,3 +1338,53 @@ def test_an_unattributed_connection_is_not_a_bound_return_path(identifier, label
     assert _orphan_codes(verify_process_graph(_connected(identifier=identifier))) == [
         "shape2"
     ], label
+
+
+def test_every_outgoing_connection_must_bind_not_merely_one():
+    """Stage-2 review round 3, and the reason the guard is now ONE rule.
+
+    A Process Call may legitimately carry several outgoing branches — the docs
+    describe one per Return Documents step in the child. The check asked whether
+    SOME edge bound, so a mixed set (one attributed, one not) certified the whole
+    shape while Pass 1 had already entered the unattributed target in the edge
+    map, leaving a platform-dropped branch represented as reachable.
+
+    Three rounds each found a weaker form of one rule — "has any child element",
+    "some edge binds", "every edge binds". This test pins the universal
+    statement, so the weaker forms are unwritable rather than merely unwritten.
+    """
+    xml = _connected(identifier="shape233").replace(
+        '<dragpoint identifier="shape233" name="shape2.dragpoint1" toShape="shape3" '
+        'x="400.0" y="104.0"/>',
+        '<dragpoint identifier="shape233" name="shape2.dragpoint1" toShape="shape3" '
+        'x="400.0" y="104.0"/>'
+        '<dragpoint name="shape2.dragpoint2" toShape="shape3" x="400.0" y="140.0"/>',
+    )
+    assert _orphan_codes(verify_process_graph(xml)) == ["shape2"]
+    # The message must name the unattributed TARGET, not just the call, or the
+    # author cannot tell which of several branches is the broken one.
+    issue = next(
+        i for i in verify_process_graph(xml)["errors"]
+        if i["code"] == "PROCESS_CALL_ORPHAN_CONTINUATION"
+    )
+    assert "shape3" in issue["message"]
+
+
+def test_a_multi_return_fan_out_with_every_branch_bound_is_clean():
+    """The discriminator for the rule above: the platform's own multi-return
+    shape — one branch per Return Documents step, each attributed — must verify
+    clean, or the universal rule would have banned legitimate fan-out."""
+    xml = _load("processcall_orphan_continuation.xml").replace(
+        "<returnpaths/>",
+        '<returnpaths>'
+        '<returnpaths childShapeName="shape233" returnLabel=""/>'
+        '<returnpaths childShapeName="shape244" returnLabel="second"/>'
+        "</returnpaths>",
+    ).replace(
+        _NO_ID_DRAGPOINT,
+        '<dragpoint identifier="shape233" name="shape2.dragpoint1" toShape="shape3" '
+        'x="400.0" y="104.0"/>'
+        '<dragpoint identifier="shape244" name="shape2.dragpoint2" toShape="shape3" '
+        'x="400.0" y="140.0"/>',
+    )
+    assert _orphan_codes(verify_process_graph(xml)) == []

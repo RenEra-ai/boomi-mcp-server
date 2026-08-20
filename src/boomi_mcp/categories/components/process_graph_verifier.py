@@ -467,8 +467,26 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
         dragpoints = _direct_children(_first_direct(shape, "dragpoints"), "dragpoint")
         if not dragpoints:
             continue
-        declared = _processcall_return_path_keys(shape)
-        if not declared:
+        # ONE invariant, stated universally: every outgoing connection must be
+        # attributed to a return path this call DECLARES. `declared` is empty when
+        # the call declares nothing bindable, so the no-declaration case falls out
+        # of the same statement rather than needing its own condition.
+        #
+        # Written this way deliberately. Three review rounds each found a weaker
+        # form of this rule — "has any child element", then "some edge binds",
+        # then "every edge binds" — and each was a correct defect. That is the
+        # instance-patch pattern; the answer is to make the weaker forms
+        # unwritable, not to add a fourth condition.
+        declared_keys = _processcall_return_path_keys(shape)
+        unbound = [
+            dp for dp in dragpoints
+            if (dp.get("identifier") or "").strip() not in declared_keys
+        ]
+        if not unbound:
+            continue
+        # The message discriminates between the two ways an edge ends up
+        # unbound, because the remedies differ; the RULE above does not.
+        if not declared_keys:
             errors.append(
                 _issue(
                     "PROCESS_CALL_ORPHAN_CONTINUATION",
@@ -485,31 +503,24 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
                     f"the return paths of '{name}'.",
                 )
             )
-            continue
-        # A DECLARED return path is not yet a BOUND one. The platform attributes
-        # an outgoing connection to a specific return branch through the
-        # dragpoint's ``identifier``, which carries the same value as that
-        # branch's ``childShapeName`` — the live UI-built capture pairs them
-        # exactly (``identifier="shape233"`` against
-        # ``childShapeName="shape233"``). A connection carrying no identifier, or
-        # one naming a branch this call does not declare, belongs to no return
-        # path, so the platform drops it and its target is orphaned — the same
-        # failure this pass exists to catch, one step further in.
-        if not any((dp.get("identifier") or "").strip() in declared for dp in dragpoints):
+        else:
+            targets = ", ".join(
+                sorted({(dp.get("toShape") or "?").strip() or "?" for dp in unbound})
+            )
             errors.append(
                 _issue(
                     "PROCESS_CALL_ORPHAN_CONTINUATION",
                     name,
                     stype,
                     f"Process Call '{name}' declares return path(s) "
-                    f"{', '.join(sorted(declared))} but none of its outgoing "
-                    "connections is attributed to one. A connection is bound to a "
-                    "return path by carrying that path's child shape name as its "
-                    "identifier, so an unattributed connection does not exist on "
-                    "the platform and the shapes it points at are left unreachable.",
-                    f"Give the outgoing connection from '{name}' the identifier of "
-                    "the return path it belongs to, or remove the connection and "
-                    "let the call end its path.",
+                    f"{', '.join(sorted(declared_keys))}, but its connection(s) to "
+                    f"{targets} are not attributed to any of them. A connection is "
+                    "bound to a return path by carrying that path's child shape name "
+                    "as its identifier, so an unattributed connection does not exist "
+                    "on the platform and the shapes it points at are left unreachable.",
+                    f"Give each outgoing connection from '{name}' the identifier of "
+                    "the return path it belongs to, or remove the connections that "
+                    "belong to none.",
                 )
             )
 
