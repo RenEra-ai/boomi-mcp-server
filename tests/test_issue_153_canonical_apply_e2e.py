@@ -5383,19 +5383,24 @@ def test_the_family_lookup_ignores_symbols_it_was_not_asked_about():
 
 
 def _table_access_offenders(function_source):
-    """How the lookup touches its symbol table — every access, whitelisted.
+    """How the lookup touches its symbol table — pinned to ONE exact expression.
 
-    A WHITELIST, deliberately, because the blacklist that preceded it was
-    bypassed the round after it shipped: banning `len`, subscripts and `for`
-    still admits `symbols.symbols.__len__()` followed by
-    `next(iter(symbols.symbols))`, which is size-dependent and contains none of
-    the banned forms. Enumerating syntax is the same defect this slice has been
-    closing everywhere else, one level up — there is always another spelling.
+    Three versions of this check were defeated in three consecutive rounds, and
+    the progression is the whole lesson:
 
-    So the rule is stated positively and derived from the contract instead: the
-    ONLY thing the function may do with its table is ask it for its index. Any
-    other attribute reached on the parameter is reported, whatever the spelling,
-    including `.symbols` itself.
+    1. a BLACKLIST of `len`, subscripts and iteration — bypassed by
+       `symbols.symbols.__len__()` plus `next(iter(symbols.symbols))`;
+    2. an ALLOWLIST of the `build_index` attribute — bypassed by binding
+       `index = symbols.build_index()` and then branching on `len(index) > 41`,
+       because after the first hop nothing referenced the table any more;
+    3. this one, which permits a single EXPRESSION rather than an API.
+
+    The permitted access is exactly `<table>.build_index().get(<ref param>)` —
+    the keyed chain, with the reference parameter as its key, and the index not
+    bound to a name where anything else could inspect it. Every other way of
+    reaching either the table or its index is reported, whatever the spelling.
+    There is no residual surface to enumerate: the expression is stated, not a
+    class of expressions.
     """
     import ast
     import textwrap
@@ -5404,19 +5409,50 @@ def _table_access_offenders(function_source):
     func = tree.body[0]
     assert isinstance(func, ast.FunctionDef), type(func)
     table = func.args.args[0].arg
+    key = func.args.args[1].arg
 
-    offenders = []
+    def _is_keyed_chain(node):
+        """`<table>.build_index().get(<key>)`, and nothing looser."""
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and len(node.args) == 1
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id == key
+            and isinstance(node.func.value, ast.Call)
+            and isinstance(node.func.value.func, ast.Attribute)
+            and node.func.value.func.attr == "build_index"
+            and not node.func.value.args
+            and isinstance(node.func.value.func.value, ast.Name)
+            and node.func.value.func.value.id == table
+        )
+
+    # Every node that is part of an approved chain is exempt; anything else that
+    # names the table, or calls `build_index`, is an offender.
+    approved = set()
     for statement in func.body:
         for node in ast.walk(statement):
-            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-                if node.value.id == table and node.attr != "build_index":
-                    offenders.append("%s.%s" % (table, node.attr))
-            # ...and the parameter may not escape into anything else, which is
-            # how it would be read without an attribute access at all.
-            if isinstance(node, ast.Call):
-                for argument in list(node.args) + [kw.value for kw in node.keywords]:
-                    if isinstance(argument, ast.Name) and argument.id == table:
-                        offenders.append("%s passed to a call" % table)
+            if _is_keyed_chain(node):
+                for inner in ast.walk(node):
+                    approved.add(id(inner))
+
+    offenders = []
+    chains = 0
+    for statement in func.body:
+        for node in ast.walk(statement):
+            if _is_keyed_chain(node):
+                chains += 1
+                continue
+            if id(node) in approved:
+                continue
+            if isinstance(node, ast.Name) and node.id == table:
+                offenders.append("%s reached outside the keyed chain" % table)
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "build_index"):
+                offenders.append("build_index() outside the keyed chain")
+    if chains != 1:
+        offenders.append("expected exactly one keyed lookup, found %d" % chains)
     return sorted(set(offenders))
 
 
@@ -5449,38 +5485,33 @@ def test_the_family_lookup_cannot_depend_on_table_size():
 
     source = inspect.getsource(ep._operation_connector_family)
     assert _table_access_offenders(source) == [], _table_access_offenders(source)
-    # ...and it really does resolve through the index API, so "no other access"
-    # means "answers by key" rather than "answers nothing".
-    assert "build_index" in source
 
-    # NON-VACUITY, in both directions — including the exact bypass that defeated
-    # the previous version of this guard.
-    assert _table_access_offenders(
-        "def probe(symbols, ref):\n"
-        "    if symbols.symbols.__len__() > 41:\n"
-        "        return next(iter(symbols.symbols)).connector_type\n"
-        "    return symbols.build_index().get(ref)\n"
-    ) == ["symbols.symbols"]
-    assert _table_access_offenders(
-        "def probe(symbols, ref):\n"
-        "    rows = symbols.symbols\n"
-        "    if len(rows) > 41:\n"
-        "        return rows[0].connector_type\n"
-        "    return None\n"
-    ) == ["symbols.symbols"]
-    assert _table_access_offenders(
-        "def probe(symbols, ref):\n"
-        "    for row in symbols.symbols:\n"
-        "        if row.ref == ref:\n"
-        "            return row.connector_type\n"
-        "    return None\n"
-    ) == ["symbols.symbols"]
-    # ...a helper that is handed the whole table can do anything with it, so the
-    # parameter escaping into a call is reported too.
-    assert _table_access_offenders(
-        "def probe(symbols, ref):\n"
-        "    return _elsewhere(symbols, ref)\n"
-    ) == ["symbols passed to a call"]
+    # NON-VACUITY. Every bypass that defeated a previous version of this guard
+    # is kept as a permanent case, so a regression to any of them fails here.
+    def _rejects(body):
+        found = _table_access_offenders("def probe(symbols, ref):\n" + body)
+        assert found, body
+        return found
+
+    # 1. the original scan.
+    _rejects("    for row in symbols.symbols:\n"
+             "        if row.ref == ref:\n"
+             "            return row.connector_type\n"
+             "    return None\n")
+    # 2. the blacklist's bypass: dunder length plus next(iter(...)).
+    _rejects("    if symbols.symbols.__len__() > 41:\n"
+             "        return next(iter(symbols.symbols)).connector_type\n"
+             "    return symbols.build_index().get(ref)\n")
+    # 3. the allowlist's bypass: bind the index, then branch on ITS size.
+    _rejects("    index = symbols.build_index()\n"
+             "    if len(index) > 41:\n"
+             "        return list(index.values())[0].connector_type\n"
+             "    return index.get(ref)\n")
+    # 4. the table handed to a helper that can do anything with it.
+    _rejects("    return _elsewhere(symbols, ref)\n")
+    # 5. keyed, but on something other than the reference it was asked about.
+    _rejects("    return symbols.build_index().get('$ref:hardcoded')\n")
+
     # ...and the real shape is accepted, or this rejects everything and proves
     # nothing.
     assert _table_access_offenders(
