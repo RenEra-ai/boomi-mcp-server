@@ -5412,18 +5412,28 @@ def _table_access_offenders(function_source):
     key = func.args.args[1].arg
 
     def _is_keyed_chain(node):
-        """`<table>.build_index().get(<key>)`, and nothing looser."""
+        """`<table>.build_index().get(<key>)`, and nothing looser.
+
+        BOTH calls must be argument-free apart from the single positional key.
+        Checking only positional arguments left a hole: keyword expansion is an
+        arbitrary expression, so
+        `build_index(**({} if (rows := symbols.symbols) else {}))` passes no
+        keywords at runtime, captures the rows through a walrus, and had its
+        whole subtree exempted as part of an approved chain (L2 round 54).
+        """
         return (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "get"
             and len(node.args) == 1
+            and not node.keywords
             and isinstance(node.args[0], ast.Name)
             and node.args[0].id == key
             and isinstance(node.func.value, ast.Call)
             and isinstance(node.func.value.func, ast.Attribute)
             and node.func.value.func.attr == "build_index"
             and not node.func.value.args
+            and not node.func.value.keywords
             and isinstance(node.func.value.func.value, ast.Name)
             and node.func.value.func.value.id == table
         )
@@ -5511,6 +5521,13 @@ def test_the_family_lookup_cannot_depend_on_table_size():
     _rejects("    return _elsewhere(symbols, ref)\n")
     # 5. keyed, but on something other than the reference it was asked about.
     _rejects("    return symbols.build_index().get('$ref:hardcoded')\n")
+    # 6. keyword expansion smuggling a walrus capture into an approved chain —
+    #    passes no keywords at runtime, captures the rows anyway.
+    _rejects("    hit = symbols.build_index("
+             "**({} if (rows := symbols.symbols) else {})).get(ref)\n"
+             "    if len(rows) > 41:\n"
+             "        return rows[0].connector_type\n"
+             "    return getattr(hit, 'connector_type', None)\n")
 
     # ...and the real shape is accepted, or this rejects everything and proves
     # nothing.
