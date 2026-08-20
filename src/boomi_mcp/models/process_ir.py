@@ -1267,6 +1267,16 @@ def process_call_root_verdict(kinds):
     """
     if kinds == ["process_call"] or "process_call" not in kinds:
         return None
+    # PRECEDENCE, not just a shared implementation. A control node followed by
+    # any step is owned by the control-continuation rule, which applies to every
+    # kind alike — `[branch, set_dpp]` and `[branch, process_call]` are one
+    # defect, and answering the second here made this verdict speak for a
+    # document it does not own (round 6: parser served the continuation code at
+    # `/body`, this served the return-path code at a step index). Yielding makes
+    # a root call behave exactly like any other kind after a control node.
+    _CONTROL = ("branch", "decision", "try_catch")
+    if any(k in _CONTROL for k in kinds[:-1]):
+        return None
     # Connector mixing keeps its own code AND its precedence: it stays gated on
     # its own terms even once return-path binding lands, so a caller must not be
     # told to drop the trailing stop when the real obstacle is the connector.

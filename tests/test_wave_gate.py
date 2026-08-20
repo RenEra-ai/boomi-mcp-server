@@ -6298,6 +6298,24 @@ def test_no_durable_doc_claims_submitted_bytes_match_a_readback():
     server-assigned attributes and would mismatch on every healthy apply". Drift
     is detected readback-to-readback instead.
 
+    SCOPE, stated because three review rounds each found a phrasing this guard
+    did not model — vacuous against a hard-wrapped sentence, then order- and
+    polarity-blind, then clause-blind. Every version passed its own witnesses;
+    each next reviewer supplied the case I had not thought of. That is the
+    signature of a finite artifact binding an unbounded space: English has no
+    closed case set, so widening the samples cannot converge and each round would
+    keep producing a correct finding.
+
+    So this guard is a BEST-EFFORT LINT over one specific claim shape — "the
+    submitted bytes and a readback are the same thing" — and it is NOT, and
+    cannot be made, a complete decision procedure over prose. It is pinned by the
+    real historical defect and by the counter-examples reviewers supplied, and it
+    fails closed on those. Completeness is not attempted here; the general
+    served-text/enforcement consistency mechanism is #177, where the invariants
+    derive from runtime authorities rather than from reading English. A future
+    round finding a fourth phrasing should add it to the witness table and move
+    on, not treat the omission as a defect in the design.
+
     THE DEFECT this closes recurred twice inside #175 alone. Round 2 found an
     ADR-001 claim that the UI suppressed a connection, which QA had recorded as
     inconclusive. Round 3 found the replacement claim — that submitted and stored
@@ -6338,21 +6356,32 @@ def test_no_durable_doc_claims_submitted_bytes_match_a_readback():
     _NEGATION = _re.compile(r"\b(not|never|cannot|can't|no|nor|without)\b", _re.I)
 
     def _claims_byte_equality(sentence):
-        low = sentence.lower()
-        if "submitted" not in low:
-            return False
-        if not _re.search(r"\b(bytes?|payload|digest)\b", low):
-            return False
-        if not _re.search(r"\b(readback|read back|stored|live)\b", low):
-            return False
-        verb = _EQUALITY.search(low)
-        if not verb:
-            return False
-        # POLARITY: a negation anywhere ahead of the verb inverts the claim, and
-        # "mismatch" states the contract rather than breaking it.
-        if _NEGATION.search(low[: verb.start()]) or "mismatch" in low:
-            return False
-        return True
+        """One CLAUSE claiming submitted bytes and a readback are the same thing.
+
+        Clause-scoped, not sentence-scoped (round 6). Negation was checked over
+        the whole prefix, so "No live verification is performed, but submitted
+        bytes match the stored readback" was suppressed by a `no` belonging to a
+        different clause. And `submitted` was a SUBSTRING test, so `unsubmitted`
+        — an explicitly different subject — satisfied it.
+        """
+        for clause in _re.split(r"\b(?:but|however|although|though|whereas)\b|[;,]",
+                                sentence.lower()):
+            if not _re.search(r"\bsubmitted\b", clause):
+                continue
+            if not _re.search(r"\b(bytes?|payload|digest)\b", clause):
+                continue
+            if not _re.search(r"\b(readback|read back|stored|live)\b", clause):
+                continue
+            verb = _EQUALITY.search(clause)
+            if not verb:
+                continue
+            # POLARITY, within THIS clause only: a negation ahead of the equality
+            # verb inverts the claim, and "mismatch" states the contract rather
+            # than breaking it.
+            if _NEGATION.search(clause[: verb.start()]) or "mismatch" in clause:
+                continue
+            return True
+        return False
 
     def _flow(text):
         """Markdown hard-wraps sentences; the claim is a property of the prose,
@@ -6374,6 +6403,9 @@ def test_no_durable_doc_claims_submitted_bytes_match_a_readback():
         # the same claim with the verb BEFORE the noun, which an ordered pattern missed
         "The submitted payload matches the stored bytes.",
         "The submitted digest is identical to the live readback.",
+        # a negation belonging to a DIFFERENT clause must not shield the claim
+        "No live verification is performed, but submitted bytes match the "
+        "stored readback.",
     ]
     MUST_NOT_FLAG = [
         # correct statements of the contract — flagging these would be the guard
@@ -6385,6 +6417,8 @@ def test_no_durable_doc_claims_submitted_bytes_match_a_readback():
         "The emitted XML must equal the golden file byte for byte.",
         # an ordinary store-not-strip observation
         "Boomi stores the contradictory dragpoint and declines to render it.",
+        # an explicitly DIFFERENT subject — the word boundary is what tells them apart
+        "An unsubmitted payload matches the stored bytes.",
     ]
     for text in MUST_FLAG:
         assert _offending_sentences(text), "scanner missed a real claim: " + text[:60]

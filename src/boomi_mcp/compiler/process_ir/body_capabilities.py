@@ -224,7 +224,18 @@ def _walk_body(
                 "(process_call_connector_mixing is gated)"
             ),
         )
-    if (call_index is not None or terminal_is_call) and connector_above:
+    if (
+        (call_index is not None or terminal_is_call)
+        and connector_above
+        # ...and only where this body ADMITS a call at all. Round 6: a root
+        # connector above a Decision FALSE arm whose terminal was mutated to a
+        # call made this branch answer first, so both paths served the same code
+        # at the same pointer with DIFFERENT MESSAGES — ancestor mixing here,
+        # generic slot admission there. Where the slot never admitted the kind,
+        # the slot check is the true diagnosis, and that is as true of the
+        # cross-nesting rule as of the body-local ones.
+        and is_allowed(context, TERMINAL_SLOT, "process_call")
+    ):
         # The CROSS-NESTING half of ``process_call_connector_mixing``: a connector
         # on an ANCESTOR path. It has no same-body verdict to render — the body
         # cannot see its ancestors — so this branch keeps its own diagnosis.

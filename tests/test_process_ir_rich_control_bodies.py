@@ -1559,3 +1559,76 @@ def test_the_legal_root_singleton_is_accepted_by_both():
     assertion above. The exact singleton is the one root form #175 ships."""
     assert _root_via_parser([_PLACEMENT_CALL]) is None
     assert _root_via_compiler([_PLACEMENT_CALL]) is None
+
+
+# ---------------------------------------------------------------------------
+# #175 round 6 — the two remaining ways a placement answer could still diverge.
+# ---------------------------------------------------------------------------
+
+def test_an_ancestor_connector_still_yields_to_the_slot_check():
+    """Cross-nesting mixing is subject to the same precedence as everything else.
+
+    A root connector above a Decision whose FALSE-arm terminal is mutated to a
+    call: both paths already agreed on code and pointer, and served DIFFERENT
+    MESSAGES — ancestor mixing from the compiler, generic slot admission from the
+    parser. Comparing whole diagnostics is what surfaced it, which is why the
+    parity assertions compare messages too.
+    """
+    from boomi_mcp.compiler.process_ir.body_capabilities import validate_body_capabilities
+
+    def decision(false_terminal):
+        return {"kind": "decision", "comparison": "equals",
+                "left": {"value_type": "static", "static_value": "a"},
+                "right": {"value_type": "static", "static_value": "b"},
+                "true_arm": {"steps": [copy.deepcopy(_PLACEMENT_DPP)],
+                             "terminal": {"kind": "stop"}},
+                "false_arm": {"steps": [copy.deepcopy(_PLACEMENT_DPP)],
+                              "terminal": copy.deepcopy(false_terminal)}}
+
+    authored = {"version": "1", "body": {"kind": "sequence", "steps": [
+        copy.deepcopy(_PLACEMENT_CONN), decision(_PLACEMENT_CALL)]}}
+    try:
+        parse_process_ir_v1(authored)
+        parser = None
+    except ProcessIRValidationError as exc:
+        d = exc.diagnostics[0]
+        parser = (d.code, d.path, d.message)
+
+    ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        copy.deepcopy(_PLACEMENT_CONN), decision({"kind": "stop"})]}})
+    ir.body.steps[1].false_arm.terminal = _placement_node(_PLACEMENT_CALL)
+    try:
+        validate_body_capabilities(ir)
+        compiler = None
+    except ProcessIRCompileError as exc:
+        d = exc.diagnostics[0]
+        compiler = (d.code, d.path, d.message)
+
+    assert parser == compiler
+
+
+def test_the_root_verdict_yields_to_the_control_continuation_rule():
+    """`[branch, process_call]` is a control-continuation defect, not a
+    process-call one — `[branch, set_dpp]` is the same defect with a different
+    kind, and the verdict must not claim the first while ignoring the second.
+
+    Two assertions, because yielding must not open a hole: the placement check
+    stays silent, and the FULL pipeline still refuses the mutated model.
+    """
+    from boomi_mcp.compiler.process_ir.body_capabilities import validate_body_capabilities
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+
+    branch = {"kind": "branch", "legs": [
+        {"steps": [copy.deepcopy(_PLACEMENT_DPP)], "terminal": {"kind": "stop"}},
+        {"steps": [copy.deepcopy(_PLACEMENT_DPP)], "terminal": {"kind": "stop"}}]}
+    ir = parse_process_ir_v1(
+        {"version": "1", "body": {"kind": "sequence", "steps": [copy.deepcopy(branch)]}})
+    ir.body.steps = [ir.body.steps[0], _placement_node(_PLACEMENT_CALL)]
+
+    validate_body_capabilities(ir)  # yields — the continuation rule owns this
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        compile_process_ir_v1(ir, None)
+    # FAIL-CLOSED: a later, kind-agnostic invariant still refuses it, exactly as
+    # it would for any other kind appended after a control node.
+    assert excinfo.value.diagnostics[0].code, excinfo.value.diagnostics
