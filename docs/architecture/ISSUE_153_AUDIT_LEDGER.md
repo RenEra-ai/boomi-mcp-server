@@ -1577,4 +1577,13 @@ residue: there are **no deferrals in this slice**, so the Deferrals section abov
 no follow-up issue was minted. The one accepted in-slice limitation is recorded at CX54-01 (a guard
 bypass that requires adversarial authorship rather than a plausible refactor) and was fixed anyway.
 
+**A note on the last commit, because the rule about it is strict.** “A final non-blocking batch that
+mutated the tree unvalidated” forbids closure, and the ledger's own closing rows are commits like any
+other. So the wave gate was re-run at the tip AFTER the closing table and the handoff were written —
+`3f3cfb1054510132a0cf506365fb03c53da23a44`, worktree clean, **exit 0**, identical trailers
+(`10096 passed, 17 skipped` · `61 active goldens deterministic and byte-exact` ·
+`plan fingerprint checked:2 case(s)`). Only this paragraph and the status line below post-date that
+run, and they add no code, no fixture and no served text — a record OF a gate cannot invalidate the
+gate it records, which is where the regress has to stop and does.
+
 **Status: CLOSED.**
