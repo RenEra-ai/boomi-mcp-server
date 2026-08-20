@@ -1420,3 +1420,49 @@ def test_flow_control_description_states_batching_without_configurable_paralleli
     assert "no caller-configurable parallel" in lowered
     assert "split_documents" in lowered and "combine_documents" in lowered
     assert "threading" not in lowered
+
+
+@pytest.mark.parametrize(
+    "steps,expected_pointer,label",
+    [
+        ([{"kind": "process_call", "process_ref": "a"},
+          {"kind": "process_call", "process_ref": "b"}],
+         "/body/steps/1", "an all-call chain with NO trailing terminal"),
+        ([{"kind": "process_call", "process_ref": "a"},
+          {"kind": "process_call", "process_ref": "b"},
+          {"kind": "process_call", "process_ref": "c"}],
+         "/body/steps/1", "three calls, no terminal"),
+        ([{"kind": "process_call", "process_ref": "a"},
+          {"kind": "process_call", "process_ref": "b"},
+          {"kind": "stop"}],
+         "/body/steps/1", "a call chain WITH a trailing stop"),
+        ([message(), {"kind": "process_call", "process_ref": "a"}],
+         "/body/steps/0", "a step BEFORE the call"),
+    ],
+)
+def test_every_illegal_process_call_root_returns_a_typed_diagnostic(
+    steps, expected_pointer, label
+):
+    """#175 Stage-2: an unsupported root must never escape as an exception.
+
+    The offending index was first written as "the first step that is not a
+    process_call". An ALL-CALL chain has no such step, so `next(...)` raised
+    `StopIteration` straight out of the model validator — and
+    `parse_process_ir_v1` catches only `ValidationError`, so caller input escaped
+    as an unhandled exception instead of the typed refusal. No test covered a
+    call chain without a trailing terminal, which is why the suite stayed green.
+
+    The selection is written against the first call's INDEX instead, which is
+    total: the legal singleton returns earlier, so at least two steps remain and
+    an index other than the first call always exists.
+
+    The pointer matters too, not just the absence of a crash: `[pc, pc, stop]`
+    previously pointed at the trailing stop, but removing the stop would not fix
+    the document — the second CALL is the first thing that may not follow a call.
+    """
+    err = parse_error({"version": "1", "body": {"kind": "sequence", "steps": steps}})
+    assert (
+        err.diagnostics[0].code
+        == PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
+    ), (label, codes_of(err))
+    assert err.diagnostics[0].path == expected_pointer, (label, codes_of(err))

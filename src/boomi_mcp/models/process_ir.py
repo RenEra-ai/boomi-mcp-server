@@ -1806,8 +1806,19 @@ class SequenceNodeV1(_ProcessIRBase):
                         "connector step "
                         "(process_call_connector_mixing is gated)"
                     )
+            # The only legal process-call root is the exact singleton, so the
+            # offending node is simply the first step that is not THE call.
+            # Written against the first call's index rather than as "the first
+            # non-call": an all-call chain has no non-call element at all, and
+            # the earlier spelling raised StopIteration straight out of the
+            # validator — `parse_process_ir_v1` catches only `ValidationError`,
+            # so unsupported caller input escaped as an unhandled exception
+            # instead of the typed diagnostic. This form is total: the singleton
+            # returned above, so at least two steps remain and an index other
+            # than the first call always exists.
+            first_call = kinds.index("process_call")
             offending_index = next(
-                i for i, kind in enumerate(kinds) if kind != "process_call"
+                i for i in range(len(kinds)) if i != first_call
             )
             raise _return_path_binding_error(
                 "a process_call is the terminal of its path — a root sequence "

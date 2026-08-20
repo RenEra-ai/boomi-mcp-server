@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10165,"minimum_collected":10165,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10169,"minimum_collected":10169,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -10200,3 +10200,7 @@
 {"kind":"test","id":"pytest-010199","node_id":"tests/test_wrapper_subprocess_builder.py::test_wrapper_return_documents_is_refused_not_emitted","state":"active"}
 {"kind":"test","id":"pytest-010200","node_id":"tests/test_wrapper_subprocess_builder.py::test_a_disabled_return_documents_block_stays_valid","state":"active"}
 {"kind":"test","id":"pytest-010201","node_id":"tests/test_wrapper_subprocess_builder.py::test_a_malformed_return_documents_block_keeps_its_own_diagnostic","state":"active"}
+{"kind":"test","id":"pytest-010202","node_id":"tests/test_process_ir_models.py::test_every_illegal_process_call_root_returns_a_typed_diagnostic[steps0-/body/steps/1-an all-call chain with NO trailing terminal]","state":"active"}
+{"kind":"test","id":"pytest-010203","node_id":"tests/test_process_ir_models.py::test_every_illegal_process_call_root_returns_a_typed_diagnostic[steps1-/body/steps/1-three calls, no terminal]","state":"active"}
+{"kind":"test","id":"pytest-010204","node_id":"tests/test_process_ir_models.py::test_every_illegal_process_call_root_returns_a_typed_diagnostic[steps2-/body/steps/1-a call chain WITH a trailing stop]","state":"active"}
+{"kind":"test","id":"pytest-010205","node_id":"tests/test_process_ir_models.py::test_every_illegal_process_call_root_returns_a_typed_diagnostic[steps3-/body/steps/0-a step BEFORE the call]","state":"active"}
