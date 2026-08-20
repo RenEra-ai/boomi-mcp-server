@@ -233,5 +233,55 @@ source edit and can never be regenerated afterwards.
 
 ## Final-tree validation (filled at close; every roster gate current on the FINAL sha)
 
+Final tree: `e23db7c11dadceb3dc2ca8ed9169d3c1715b85cc`, worktree clean. Each row names the artifact, not a claim about it.
+
 | Gate | Evidence (quoted output / run URL / archived round) | SHA |
 | --- | --- | --- |
+| 1. Stage-1 QA (live, through the public MCP tool boundary) | **Round 6, CLEAN — 0 findings**, archived at `docs/architecture/evidence/issue-175/stage1-qa-round-6.md`. All four dispatched checks PASS, plus a LIVE grading of the newly-written `abort_on_error` claim and an entry-point accept/refuse symmetry spot-check at 0/10. Rounds 1–5 are archived beside it (rounds 4 and 5 were only made durable at round 5 of the §6 gate — they had lived under gitignored `agents/`, which is finding L3R4-02). Round 5 carries the **46-document accept/refuse asymmetry sweep, 0 divergences**, which is the measurement the #178 deferral rests on. | `adb905a` (round 6); earlier rounds at their own tips, each stated in its report |
+| 2. Stage-2 repo Codex review | Nine collected rounds, every one archived under `commit-reviews/` with `teardown: confirmed stopped`. The loop closed CLEAN at round 5 (`cdx-review.E08BBR`); rounds 6–9 are support reviews billed to the §6 correction batches, the last being `cdx-review.EgqwAF`, base `a3d21e9`, head `5c63bf7`, whose single P1 is refuted by construction in row L2-r9-01. | last reviewed `5c63bf7`; the delta after it is ledger/evidence only, covered by gate 3 below |
+| 3. §6 architect implementation review (additive gate) | **Five rounds, all attested and archived** under `architect-reviews/`. Round 5 (`cdx-gate-review.lhBZ8s`, base `05f9b96`, head `e63fc8c`) found the code-level corrections FAITHFUL — *"The update merge pin, fail-closed ownership control, new served wording, checksums, and manifest against 3fd5027 otherwise checked out. I found no accept/refuse asymmetry or unauthorized production behavior."* Its five findings were all audit-record and are all `fixed` (L3R4-01..05). | `e63fc8c` reviewed; the delta since is the discharge of those five findings plus this table |
+| 4. Composite wave gate | **PASSED, exit 0, clean worktree** at `e63fc8c`: `manifests ok (10198 required nodes, 61 active goldens)`, `collection ok (10198 tests)`, `non-KB suite green (10181 passed, 17 skipped, cap 30)`, `61 active goldens deterministic and byte-exact`, `plan fingerprint checked:2 case(s)`. Output archived at the run described in W-175-01's lineage. An earlier attempt at the same tip refused `WORKTREE_DIRTY` because I archived a review run while the gate was reading the tree — the refusal was correct and the re-run on an untouched tree is the attestation of record. | `e63fc8c`, re-confirmed at the closing tip below |
+| 5. Terminal correction loop | Not opened. No roster addition was needed, so none was minted. | — |
+
+## Closure
+
+**#175 CLOSES.** Final tree stated in the table above, worktree clean, every roster gate current.
+
+**Against the global bar:**
+
+- **Zero unresolved critical findings.** Three rows carry the Critical tier — `L3-06a` and
+  `L3R-03a` (re-derived from the mutation-accounting class anchor, not chosen) and `L2-r7-01a`
+  (raw P1, never lowered). All three are discharged: two `fixed` and validated, one
+  `finding-refuted` by construction. No critical finding is deferred, which the rules forbid
+  outright.
+- **Every standard blocking-class finding is fixed or checkpoint-deferred.** Two are deferred —
+  `L3R3-01` and `L3R3-02` — both to **#178**, `blocked-by-mechanism`, individually enumerated
+  there with acceptance criteria and a roadmap slot recorded at filing time, authorized by the
+  CP 3/6 checkpoint that pre-exists this closure as an in-tree row. Neither consumes
+  `window-exhausted` lineage.
+- **Three structural-fix deviations**, each with its follow-up filed at reconciliation:
+  DC-175-E → **#178**; DC-175-D and DC-175-G → **#177**. These defer class INVARIANTS, not
+  findings.
+
+**The acceptance criteria.** All five are met, including the one that was going to close
+unverified: the live UI canvas check was measured in both directions, with a pre-fix control
+planted through the direct Component API reproducing the orphaned Stop and the post-fix
+component rendering two attached shapes. That measurement also settled the report's open §6
+probe 1 — Boomi STORES the contradictory dragpoint rather than stripping it — so the report's
+conditional P0 never triggered and the severity stayed at the filed P1.
+
+**What is deliberately NOT claimed.** Diagnostic IDENTITY between the two ProcessIR entry points
+is not uniform, and #178 owns it. What IS established, and separately measured rather than
+assumed, is the SAFETY property: no document is accepted by one entry point and refused by the
+other — 46 documents swept in QA round 5 with zero divergences, corroborated at 0/10 in round 6,
+and confirmed independently by the §6 reviewer at round 5.
+
+**Honest summary of the shape of this slice.** The behaviour landed early; almost everything
+after it was the record catching up with the code, and then the record catching up with itself.
+Of the last three review rounds, most findings were defects in my own CLAIMS rather than in
+shipped behaviour — a class table re-derived before its own rows were appended (three times), a
+deviation that said every instance was fixed while three served texts still advertised the
+withdrawn shape, a guard called a structural fix while the same file disclaimed its
+completeness, an update-repair pin that compared a rebuild instead of an update, and QA evidence
+that was never durable because it lived in a gitignored directory. Each was caught by a gate,
+not by me, and each is recorded above with the measurement that settled it.
