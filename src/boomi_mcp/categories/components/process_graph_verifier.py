@@ -508,11 +508,20 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
                 "PROCESS_CALL_ORPHAN_CONTINUATION",
                 name,
                 stype,
+                # States ONLY what this check establishes. An earlier revision
+                # ended "...and the shapes it points at are left unreachable",
+                # which this check cannot know: a target reached by a sibling
+                # branch leg is perfectly reachable, and the verifier emits no
+                # unreachability error for it — so one payload certified the
+                # shape reachable and told the caller it was not. That wording
+                # was fixed once and came back with the #175 scope revert; it is
+                # the same defect class, so the claim is now bounded to the
+                # connection rather than extended to the graph.
                 f"Process Call '{name}' declares no return path from the called "
                 "process but carries an outgoing connection. The called process's "
                 "Return Documents shapes are what make a forward connection "
-                "valid, so this connection does not exist on the platform and "
-                "the shapes it points at are left unreachable.",
+                "valid, so the platform does not bind this connection and it "
+                "does not exist in the emitted graph.",
                 f"Remove the outgoing connection from '{name}' — a call whose "
                 "child returns no documents ends its path — or, if the child "
                 "does return documents, declare its Return Documents shapes as "

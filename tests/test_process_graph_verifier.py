@@ -1393,3 +1393,56 @@ def test_a_multi_return_fan_out_with_every_branch_bound_is_clean():
         'x="400.0" y="140.0"/>',
     )
     assert _orphan_codes(verify_process_graph(xml)) == []
+
+
+# ---------------------------------------------------------------------------
+# #175 round 4 — the served message may claim only what this check establishes.
+#
+# An earlier revision ended "...and the shapes it points at are left
+# unreachable". That was corrected once (round 4 of the repo gate) and came BACK
+# with the scope revert, which restored the older wording wholesale. Same defect
+# class, second appearance — so it gets a witness, not just another edit.
+# ---------------------------------------------------------------------------
+
+_SHARED_TARGET_GRAPH = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><bns:Component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bns="http://api.platform.boomi.com/" type="process" name="SharedTarget"><bns:encryptedValues/><bns:description></bns:description><bns:object><process xmlns="" allowSimultaneous="false" enableUserLog="false" processLogOnErrorOnly="false" purgeDataImmediately="false" stopProcessingIfZeroDocuments="true" updateRunDates="true" workload="general"><shapes>
+<shape image="start" name="shape1" shapetype="start" x="96.0" y="94.0"><configuration><noaction/></configuration><dragpoints><dragpoint name="shape1.dragpoint1" toShape="shape2" x="240.0" y="104.0"/></dragpoints></shape>
+<shape image="branch_icon" name="shape2" shapetype="branch" x="256.0" y="96.0"><configuration><branch/></configuration><dragpoints><dragpoint identifier="1" name="shape2.dragpoint1" toShape="shape3" x="400.0" y="60.0"/><dragpoint identifier="2" name="shape2.dragpoint2" toShape="shape4" x="400.0" y="150.0"/></dragpoints></shape>
+<shape image="processcall_icon" name="shape3" shapetype="processcall" x="416.0" y="52.0"><configuration><processcall abort="false" processId="11111111-1111-1111-1111-111111111111" wait="true"><parameters/><returnpaths/></processcall></configuration><dragpoints><dragpoint name="shape3.dragpoint1" toShape="shape5" x="560.0" y="60.0"/></dragpoints></shape>
+<shape image="message_icon" name="shape4" shapetype="message" x="416.0" y="142.0"><configuration><message><msg>x</msg></message></configuration><dragpoints><dragpoint name="shape4.dragpoint1" toShape="shape5" x="560.0" y="150.0"/></dragpoints></shape>
+<shape image="stop_icon" name="shape5" shapetype="stop" x="576.0" y="96.0"><configuration><stop continue="true"/></configuration><dragpoints/></shape>
+</shapes></process></bns:object><bns:processOverrides/></bns:Component>"""
+
+
+def test_the_orphan_message_does_not_claim_an_unreachability_it_cannot_know():
+    """`shape5` is reached by the sibling MESSAGE leg, so it is reachable — and
+    the verifier agrees, emitting no unreachability error for it. A message that
+    told the caller otherwise would have the same payload assert both.
+
+    Constructed as the concrete case the claim excludes: the orphan rule must
+    still fire on `shape3` (it declares nothing bindable yet carries an edge),
+    while nothing in the result may describe `shape5` as unreachable.
+    """
+    result = verify_process_graph(_SHARED_TARGET_GRAPH)
+    codes = [e["code"] for e in result["errors"]]
+    assert "PROCESS_CALL_ORPHAN_CONTINUATION" in codes, codes
+
+    # The verifier's own verdict on reachability, which the message must not
+    # contradict: no unreachability error is raised for the shared target.
+    assert not [c for c in codes if "UNREACH" in c], codes
+
+    orphan = next(e for e in result["errors"]
+                  if e["code"] == "PROCESS_CALL_ORPHAN_CONTINUATION")
+    assert "unreachable" not in orphan["message"].lower(), orphan["message"]
+    # ...and it still says the useful thing: the CONNECTION is not bound.
+    assert "does not bind this connection" in orphan["message"], orphan["message"]
+
+
+def test_the_orphan_message_stays_bounded_on_a_genuinely_dead_end_too():
+    """Non-vacuity companion: the wording must be correct where the target IS
+    only reachable through the unbound call, not merely silent everywhere. The
+    rule still fires and the message still avoids a reachability verdict it does
+    not compute."""
+    result = verify_process_graph(_load("processcall_orphan_continuation.xml"))
+    orphan = next(e for e in result["errors"]
+                  if e["code"] == "PROCESS_CALL_ORPHAN_CONTINUATION")
+    assert "unreachable" not in orphan["message"].lower(), orphan["message"]
