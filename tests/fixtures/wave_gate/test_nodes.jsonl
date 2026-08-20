@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10020,"minimum_collected":10020,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10165,"minimum_collected":10165,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -3082,7 +3082,7 @@
 {"kind":"test","id":"pytest-003081","node_id":"tests/test_legacy_process_ir_adapters.py::test_registry_sync_pipeline_entry_fails_closed_on_a_listener_config","state":"active"}
 {"kind":"test","id":"pytest-003082","node_id":"tests/test_legacy_process_ir_adapters.py::test_registry_unknown_dialect_returns_none","state":"active"}
 {"kind":"test","id":"pytest-003083","node_id":"tests/test_legacy_process_ir_adapters.py::test_wrapper_records_unknown_root_and_call_keys_as_noop","state":"active"}
-{"kind":"test","id":"pytest-003084","node_id":"tests/test_legacy_process_ir_adapters.py::test_wrapper_requirements_are_process_typed_and_deduped","state":"active"}
+{"kind":"test","id":"pytest-003084","node_id":"tests/test_legacy_process_ir_adapters.py::test_wrapper_requirements_are_process_typed_and_deduped","state":"tombstone"}
 {"kind":"test","id":"pytest-003085","node_id":"tests/test_list_capabilities_wrapper.py::test_list_capabilities_wrapper_does_not_call_boomi_or_credentials","state":"active"}
 {"kind":"test","id":"pytest-003086","node_id":"tests/test_list_capabilities_wrapper.py::test_list_capabilities_wrapper_filters_to_live_registry","state":"active"}
 {"kind":"test","id":"pytest-003087","node_id":"tests/test_list_capabilities_wrapper.py::test_list_capabilities_wrapper_includes_orchestrate_deploy","state":"active"}
@@ -4572,7 +4572,7 @@
 {"kind":"test","id":"pytest-004571","node_id":"tests/test_process_flow_builder.py::test_validate_config_accepts_ref_connection_id_in_depends_on","state":"active"}
 {"kind":"test","id":"pytest-004572","node_id":"tests/test_process_flow_builder.py::test_validate_config_surfaces_process_extensions_error","state":"active"}
 {"kind":"test","id":"pytest-004573","node_id":"tests/test_process_flow_builder.py::test_wrapper_subprocess_emits_empty_overrides","state":"active"}
-{"kind":"test","id":"pytest-004574","node_id":"tests/test_process_flow_builder.py::test_wrapper_subprocess_ends_in_return_documents","state":"active"}
+{"kind":"test","id":"pytest-004574","node_id":"tests/test_process_flow_builder.py::test_wrapper_subprocess_ends_in_return_documents","state":"tombstone"}
 {"kind":"test","id":"pytest-004575","node_id":"tests/test_process_flow_builder.py::test_wrapper_subprocess_rejects_invalid_return_documents","state":"active"}
 {"kind":"test","id":"pytest-004576","node_id":"tests/test_process_flow_builder_dynamic_path.py::test_all_static_segments_rejected","state":"active"}
 {"kind":"test","id":"pytest-004577","node_id":"tests/test_process_flow_builder_dynamic_path.py::test_blank_ddp_name_rejected","state":"active"}
@@ -5770,7 +5770,7 @@
 {"kind":"test","id":"pytest-005769","node_id":"tests/test_process_ir_models.py::test_non_mapping_payload_is_schema_invalid[x]","state":"active"}
 {"kind":"test","id":"pytest-005770","node_id":"tests/test_process_ir_models.py::test_package_exports_pinned","state":"active"}
 {"kind":"test","id":"pytest-005771","node_id":"tests/test_process_ir_models.py::test_private_codec_not_imported_by_package_import","state":"active"}
-{"kind":"test","id":"pytest-005772","node_id":"tests/test_process_ir_models.py::test_process_call_allowed_in_a_branch_leg_only_in_path_mode","state":"active"}
+{"kind":"test","id":"pytest-005772","node_id":"tests/test_process_ir_models.py::test_process_call_allowed_in_a_branch_leg_only_in_path_mode","state":"tombstone"}
 {"kind":"test","id":"pytest-005773","node_id":"tests/test_process_ir_models.py::test_process_call_stays_out_of_the_decision_false_arm","state":"active"}
 {"kind":"test","id":"pytest-005774","node_id":"tests/test_process_ir_models.py::test_property_name_rules[  ]","state":"active"}
 {"kind":"test","id":"pytest-005775","node_id":"tests/test_process_ir_models.py::test_property_name_rules[HAS SPACE]","state":"active"}
@@ -5801,7 +5801,7 @@
 {"kind":"test","id":"pytest-005800","node_id":"tests/test_process_ir_models.py::test_sequence_ordering_rules[steps6-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]","state":"active"}
 {"kind":"test","id":"pytest-005801","node_id":"tests/test_process_ir_models.py::test_sequence_ordering_rules[steps7-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]","state":"active"}
 {"kind":"test","id":"pytest-005802","node_id":"tests/test_process_ir_models.py::test_sequence_ordering_rules[steps8-PROCESS_IR_CAPABILITY_UNSUPPORTED]","state":"active"}
-{"kind":"test","id":"pytest-005803","node_id":"tests/test_process_ir_models.py::test_sequence_ordering_rules[steps9-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]","state":"active"}
+{"kind":"test","id":"pytest-005803","node_id":"tests/test_process_ir_models.py::test_sequence_ordering_rules[steps9-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]","state":"tombstone"}
 {"kind":"test","id":"pytest-005804","node_id":"tests/test_process_ir_models.py::test_strict_scalar_coercions_rejected[node0]","state":"active"}
 {"kind":"test","id":"pytest-005805","node_id":"tests/test_process_ir_models.py::test_strict_scalar_coercions_rejected[node1]","state":"active"}
 {"kind":"test","id":"pytest-005806","node_id":"tests/test_process_ir_models.py::test_strict_scalar_coercions_rejected[node2]","state":"active"}
@@ -5834,7 +5834,7 @@
 {"kind":"test","id":"pytest-005833","node_id":"tests/test_process_ir_rich_control_bodies.py::test_a_call_after_a_send_inside_one_leg_is_still_rejected","state":"active"}
 {"kind":"test","id":"pytest-005834","node_id":"tests/test_process_ir_rich_control_bodies.py::test_a_control_only_root_admits_nothing_beside_the_control","state":"active"}
 {"kind":"test","id":"pytest-005835","node_id":"tests/test_process_ir_rich_control_bodies.py::test_a_control_subtree_may_not_escape_its_own_region","state":"active"}
-{"kind":"test","id":"pytest-005836","node_id":"tests/test_process_ir_rich_control_bodies.py::test_a_decision_arm_admits_at_most_one_process_call","state":"active"}
+{"kind":"test","id":"pytest-005836","node_id":"tests/test_process_ir_rich_control_bodies.py::test_a_decision_arm_admits_at_most_one_process_call","state":"tombstone"}
 {"kind":"test","id":"pytest-005837","node_id":"tests/test_process_ir_rich_control_bodies.py::test_a_documents_required_call_with_no_producer_on_its_path_is_rejected","state":"active"}
 {"kind":"test","id":"pytest-005838","node_id":"tests/test_process_ir_rich_control_bodies.py::test_a_legacy_map_beside_non_call_neighbours_stays_unchecked","state":"active"}
 {"kind":"test","id":"pytest-005839","node_id":"tests/test_process_ir_rich_control_bodies.py::test_a_legacy_source_endpoint_feeds_a_call_inside_a_control_body","state":"active"}
@@ -5879,7 +5879,7 @@
 {"kind":"test","id":"pytest-005878","node_id":"tests/test_process_ir_rich_control_bodies.py::test_the_depth_bound_is_re_derived_from_the_cfg","state":"active"}
 {"kind":"test","id":"pytest-005879","node_id":"tests/test_process_ir_rich_control_bodies.py::test_the_documented_depth_is_two","state":"active"}
 {"kind":"test","id":"pytest-005880","node_id":"tests/test_process_ir_rich_control_bodies.py::test_the_mixing_gate_holds_on_the_COMPILER_entry_point_too","state":"active"}
-{"kind":"test","id":"pytest-005881","node_id":"tests/test_process_ir_rich_control_bodies.py::test_the_mixing_gate_propagates_in_BOTH_directions","state":"active"}
+{"kind":"test","id":"pytest-005881","node_id":"tests/test_process_ir_rich_control_bodies.py::test_the_mixing_gate_propagates_in_BOTH_directions","state":"tombstone"}
 {"kind":"test","id":"pytest-005882","node_id":"tests/test_process_ir_rich_control_bodies.py::test_the_send_gate_covers_every_downstream_node[follower0-message]","state":"active"}
 {"kind":"test","id":"pytest-005883","node_id":"tests/test_process_ir_rich_control_bodies.py::test_the_send_gate_covers_every_downstream_node[follower1-set_ddp]","state":"active"}
 {"kind":"test","id":"pytest-005884","node_id":"tests/test_process_ir_rich_control_bodies.py::test_the_send_gate_covers_every_downstream_node[follower2-flow_control]","state":"active"}
@@ -9667,7 +9667,7 @@
 {"kind":"test","id":"pytest-009666","node_id":"tests/test_wrapper_subprocess_builder.py::test_abort_on_error_true_emits_abort_attr","state":"active"}
 {"kind":"test","id":"pytest-009667","node_id":"tests/test_wrapper_subprocess_builder.py::test_build_bypass_raises_on_missing_target","state":"active"}
 {"kind":"test","id":"pytest-009668","node_id":"tests/test_wrapper_subprocess_builder.py::test_explicit_process_id_target","state":"active"}
-{"kind":"test","id":"pytest-009669","node_id":"tests/test_wrapper_subprocess_builder.py::test_multi_child_parent_chains","state":"active"}
+{"kind":"test","id":"pytest-009669","node_id":"tests/test_wrapper_subprocess_builder.py::test_multi_child_parent_chains","state":"tombstone"}
 {"kind":"test","id":"pytest-009670","node_id":"tests/test_wrapper_subprocess_builder.py::test_parent_shape_sequence_and_wiring","state":"active"}
 {"kind":"test","id":"pytest-009671","node_id":"tests/test_wrapper_subprocess_builder.py::test_registry_exposes_wrapper_subprocess","state":"active"}
 {"kind":"test","id":"pytest-009672","node_id":"tests/test_wrapper_subprocess_builder.py::test_standalone_processcall_is_verified_shape","state":"active"}
@@ -10048,3 +10048,155 @@
 {"kind":"test","id":"pytest-010047","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_dry_emit_binds_symbols_the_ir_never_names","state":"active"}
 {"kind":"test","id":"pytest-010048","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_an_undeclared_derived_dependency_refuses_before_the_first_write","state":"active"}
 {"kind":"test","id":"pytest-010049","node_id":"tests/test_wave_gate.py::test_a_lowered_source_severity_always_names_its_refutation","state":"active"}
+{"kind":"test","id":"pytest-010050","node_id":"tests/test_canonical_process_apply.py::test_the_emitted_xml_carries_real_ids_and_no_placeholders","state":"active"}
+{"kind":"test","id":"pytest-010051","node_id":"tests/test_canonical_process_apply.py::test_the_plan_itself_still_holds_placeholders","state":"active"}
+{"kind":"test","id":"pytest-010052","node_id":"tests/test_canonical_process_apply.py::test_a_dependency_with_no_applied_id_fails_closed","state":"active"}
+{"kind":"test","id":"pytest-010053","node_id":"tests/test_canonical_process_apply.py::test_a_plan_whose_fingerprint_does_not_match_is_refused","state":"active"}
+{"kind":"test","id":"pytest-010054","node_id":"tests/test_canonical_process_apply.py::test_extension_refs_are_resolved_to_applied_ids","state":"active"}
+{"kind":"test","id":"pytest-010055","node_id":"tests/test_canonical_process_apply.py::test_extension_field_order_is_preserved","state":"active"}
+{"kind":"test","id":"pytest-010056","node_id":"tests/test_canonical_process_apply.py::test_a_create_attestation_binds_the_plan_it_executed","state":"active"}
+{"kind":"test","id":"pytest-010057","node_id":"tests/test_canonical_process_apply.py::test_the_submitted_digest_is_over_the_bytes_that_were_sent","state":"active"}
+{"kind":"test","id":"pytest-010058","node_id":"tests/test_canonical_process_apply.py::test_a_create_without_a_result_id_fails_closed","state":"active"}
+{"kind":"test","id":"pytest-010059","node_id":"tests/test_canonical_process_apply.py::test_an_update_attestation_names_its_target","state":"active"}
+{"kind":"test","id":"pytest-010060","node_id":"tests/test_canonical_process_apply.py::test_a_readback_failure_records_unknown_not_agreement","state":"active"}
+{"kind":"test","id":"pytest-010061","node_id":"tests/test_canonical_process_apply.py::test_the_mutation_and_readback_records_are_separate_objects","state":"active"}
+{"kind":"test","id":"pytest-010062","node_id":"tests/test_canonical_process_apply.py::test_a_plan_whose_slot_inventory_disagrees_with_its_references_is_refused","state":"active"}
+{"kind":"test","id":"pytest-010063","node_id":"tests/test_canonical_process_apply.py::test_the_slot_disagreement_refusal_is_not_the_relocatability_refusal","state":"active"}
+{"kind":"test","id":"pytest-010064","node_id":"tests/test_error_taxonomy.py::test_issue_153_owns_its_three_families_as_a_biconditional","state":"active"}
+{"kind":"test","id":"pytest-010065","node_id":"tests/test_error_taxonomy.py::test_issue_153_does_not_extend_a_family_it_does_not_own","state":"active"}
+{"kind":"test","id":"pytest-010066","node_id":"tests/test_error_taxonomy.py::test_issue_153_codes_carry_distinct_registered_categories","state":"active"}
+{"kind":"test","id":"pytest-010067","node_id":"tests/test_integration_builder.py::test_a_failed_apply_step_is_not_recorded_as_created","state":"active"}
+{"kind":"test","id":"pytest-010068","node_id":"tests/test_integration_builder.py::test_the_catch_composition_refusal_happens_at_PLAN_time","state":"active"}
+{"kind":"test","id":"pytest-010069","node_id":"tests/test_integration_builder.py::test_the_apply_loop_uses_that_derivation_not_the_requested_action","state":"active"}
+{"kind":"test","id":"pytest-010070","node_id":"tests/test_integration_unified_dag.py::test_all_four_dependency_directions_order_in_one_pass","state":"active"}
+{"kind":"test","id":"pytest-010071","node_id":"tests/test_integration_unified_dag.py::test_a_components_only_spec_orders_exactly_as_before","state":"active"}
+{"kind":"test","id":"pytest-010072","node_id":"tests/test_integration_unified_dag.py::test_the_order_is_deterministic_not_insertion_ordered","state":"active"}
+{"kind":"test","id":"pytest-010073","node_id":"tests/test_integration_unified_dag.py::test_a_process_only_spec_orders","state":"active"}
+{"kind":"test","id":"pytest-010074","node_id":"tests/test_integration_unified_dag.py::test_a_cycle_that_crosses_the_two_tuples_is_detected","state":"active"}
+{"kind":"test","id":"pytest-010075","node_id":"tests/test_integration_unified_dag.py::test_a_process_only_cycle_is_detected","state":"active"}
+{"kind":"test","id":"pytest-010076","node_id":"tests/test_integration_unified_dag.py::test_an_unknown_dependency_is_named[<lambda>-process -> unknown]","state":"active"}
+{"kind":"test","id":"pytest-010077","node_id":"tests/test_integration_unified_dag.py::test_an_unknown_dependency_is_named[<lambda>-component -> unknown]","state":"active"}
+{"kind":"test","id":"pytest-010078","node_id":"tests/test_integration_unified_dag.py::test_a_duplicate_key_across_the_two_tuples_is_named","state":"active"}
+{"kind":"test","id":"pytest-010079","node_id":"tests/test_integration_unified_dag.py::test_the_named_errors_stay_catchable_as_ValueError","state":"active"}
+{"kind":"test","id":"pytest-010080","node_id":"tests/test_integration_unified_dag.py::test_a_root_declaring_every_reference_passes","state":"active"}
+{"kind":"test","id":"pytest-010081","node_id":"tests/test_integration_unified_dag.py::test_an_undeclared_reference_is_refused[declared0]","state":"active"}
+{"kind":"test","id":"pytest-010082","node_id":"tests/test_integration_unified_dag.py::test_an_undeclared_reference_is_refused[declared1]","state":"active"}
+{"kind":"test","id":"pytest-010083","node_id":"tests/test_integration_unified_dag.py::test_an_undeclared_reference_is_refused[declared2]","state":"active"}
+{"kind":"test","id":"pytest-010084","node_id":"tests/test_integration_unified_dag.py::test_the_message_names_the_missing_keys","state":"active"}
+{"kind":"test","id":"pytest-010085","node_id":"tests/test_integration_unified_dag.py::test_extension_binding_references_count_as_references","state":"active"}
+{"kind":"test","id":"pytest-010086","node_id":"tests/test_integration_unified_dag.py::test_a_root_may_declare_more_than_it_references","state":"active"}
+{"kind":"test","id":"pytest-010087","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_confirmed_write_with_no_id_is_recorded_as_unidentified","state":"active"}
+{"kind":"test","id":"pytest-010088","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_no_write_note_is_recorded_for_a_step_that_never_wrote","state":"active"}
+{"kind":"test","id":"pytest-010089","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_successful_apply_serves_no_write_notes_and_would_serve_an_uncovered_one","state":"active"}
+{"kind":"test","id":"pytest-010090","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_a_plan_model_refusal_reaches_the_caller_with_its_own_code","state":"active"}
+{"kind":"test","id":"pytest-010091","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_every_reader_of_the_named_code_map_resolves_a_bare_custom_error","state":"active"}
+{"kind":"test","id":"pytest-010092","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_entry_role_restriction_is_pinned_to_the_invariant_that_enforces_it","state":"active"}
+{"kind":"test","id":"pytest-010093","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_served_revision_binds_multi_symbol_family_lookup","state":"active"}
+{"kind":"test","id":"pytest-010094","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_profile_case_set_keeps_both_arities_and_both_directions","state":"active"}
+{"kind":"test","id":"pytest-010095","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_family_lookup_ignores_symbols_it_was_not_asked_about","state":"active"}
+{"kind":"test","id":"pytest-010096","node_id":"tests/test_issue_153_canonical_apply_e2e.py::test_the_family_lookup_cannot_depend_on_table_size","state":"active"}
+{"kind":"test","id":"pytest-010097","node_id":"tests/test_legacy_process_ir_adapters.py::test_wrapper_requirements_are_process_typed","state":"active"}
+{"kind":"test","id":"pytest-010098","node_id":"tests/test_legacy_process_ir_adapters.py::test_a_multi_call_wrapper_is_refused_not_truncated","state":"active"}
+{"kind":"test","id":"pytest-010099","node_id":"tests/test_legacy_process_ir_adapters.py::test_a_return_documents_wrapper_is_refused_not_dropped","state":"active"}
+{"kind":"test","id":"pytest-010100","node_id":"tests/test_legacy_process_ir_adapters.py::test_a_singleton_wrapper_emits_no_terminal_after_its_call","state":"active"}
+{"kind":"test","id":"pytest-010101","node_id":"tests/test_m12_11_authoring_plan.py::test_the_served_plan_never_echoes_an_authored_process_ir_value","state":"active"}
+{"kind":"test","id":"pytest-010102","node_id":"tests/test_m12_11_authoring_plan.py::test_the_legacy_component_plan_echo_cannot_restore_withheld_roots","state":"active"}
+{"kind":"test","id":"pytest-010103","node_id":"tests/test_m12_11_schema_templates.py::test_the_superseded_request_version_is_no_longer_served","state":"active"}
+{"kind":"test","id":"pytest-010104","node_id":"tests/test_process_emitter_parity.py::test_registry_shapes_match_legacy_builder_bytes[return_documents_flow]","state":"active"}
+{"kind":"test","id":"pytest-010105","node_id":"tests/test_process_emitter_parity.py::test_registry_process_xml_matches_committed_fixture[return_documents_flow]","state":"active"}
+{"kind":"test","id":"pytest-010106","node_id":"tests/test_process_emitter_parity.py::test_registry_emission_is_deterministic[return_documents_flow]","state":"active"}
+{"kind":"test","id":"pytest-010107","node_id":"tests/test_process_emitter_parity.py::test_registry_verifier_matches_legacy_verifier[return_documents_flow]","state":"active"}
+{"kind":"test","id":"pytest-010108","node_id":"tests/test_process_execution_profile.py::test_a_connector_source_entry_on_a_normal_family_is_scheduled","state":"active"}
+{"kind":"test","id":"pytest-010109","node_id":"tests/test_process_execution_profile.py::test_the_entry_node_is_read_from_the_cfgs_own_entry_id","state":"active"}
+{"kind":"test","id":"pytest-010110","node_id":"tests/test_process_execution_profile.py::test_every_listener_family_derives_listener[listener]","state":"active"}
+{"kind":"test","id":"pytest-010111","node_id":"tests/test_process_execution_profile.py::test_every_listener_family_derives_listener[web_services]","state":"active"}
+{"kind":"test","id":"pytest-010112","node_id":"tests/test_process_execution_profile.py::test_every_listener_family_derives_listener[web_services_server]","state":"active"}
+{"kind":"test","id":"pytest-010113","node_id":"tests/test_process_execution_profile.py::test_every_listener_family_derives_listener[wss]","state":"active"}
+{"kind":"test","id":"pytest-010114","node_id":"tests/test_process_execution_profile.py::test_every_listener_family_derives_listener[wssserver]","state":"active"}
+{"kind":"test","id":"pytest-010115","node_id":"tests/test_process_execution_profile.py::test_listener_detection_is_case_and_whitespace_insensitive[WSS]","state":"active"}
+{"kind":"test","id":"pytest-010116","node_id":"tests/test_process_execution_profile.py::test_listener_detection_is_case_and_whitespace_insensitive[  wss  ]","state":"active"}
+{"kind":"test","id":"pytest-010117","node_id":"tests/test_process_execution_profile.py::test_listener_detection_is_case_and_whitespace_insensitive[Web_Services]","state":"active"}
+{"kind":"test","id":"pytest-010118","node_id":"tests/test_process_execution_profile.py::test_listener_detection_is_case_and_whitespace_insensitive[  WSSSERVER  ]","state":"active"}
+{"kind":"test","id":"pytest-010119","node_id":"tests/test_process_execution_profile.py::test_listener_detection_is_case_and_whitespace_insensitive[Listener]","state":"active"}
+{"kind":"test","id":"pytest-010120","node_id":"tests/test_process_execution_profile.py::test_the_rule_uses_the_compilers_own_authority_not_a_second_copy","state":"active"}
+{"kind":"test","id":"pytest-010121","node_id":"tests/test_process_execution_profile.py::test_an_unresolvable_entry_operation_falls_back_to_scheduled","state":"active"}
+{"kind":"test","id":"pytest-010122","node_id":"tests/test_process_execution_profile.py::test_a_symbol_with_no_connector_family_is_scheduled","state":"active"}
+{"kind":"test","id":"pytest-010123","node_id":"tests/test_process_execution_profile.py::test_the_profile_values_are_exactly_two","state":"active"}
+{"kind":"test","id":"pytest-010124","node_id":"tests/test_process_flow_builder.py::test_wrapper_subprocess_return_documents_after_a_call_is_refused","state":"active"}
+{"kind":"test","id":"pytest-010125","node_id":"tests/test_process_flow_builder_trycatch_dlq.py::test_an_error_subprocess_catch_leg_emits_no_orphan_continuation[False-bare]","state":"active"}
+{"kind":"test","id":"pytest-010126","node_id":"tests/test_process_flow_builder_trycatch_dlq.py::test_an_error_subprocess_catch_leg_emits_no_orphan_continuation[True-notify]","state":"active"}
+{"kind":"test","id":"pytest-010127","node_id":"tests/test_process_flow_builder_trycatch_dlq.py::test_an_exception_after_an_error_subprocess_call_is_refused[False-exception]","state":"active"}
+{"kind":"test","id":"pytest-010128","node_id":"tests/test_process_flow_builder_trycatch_dlq.py::test_an_exception_after_an_error_subprocess_call_is_refused[True-notify+exception]","state":"active"}
+{"kind":"test","id":"pytest-010129","node_id":"tests/test_process_flow_builder_trycatch_dlq.py::test_the_document_cache_dlq_route_is_untouched[False-False-bare]","state":"active"}
+{"kind":"test","id":"pytest-010130","node_id":"tests/test_process_flow_builder_trycatch_dlq.py::test_the_document_cache_dlq_route_is_untouched[True-False-notify]","state":"active"}
+{"kind":"test","id":"pytest-010131","node_id":"tests/test_process_flow_builder_trycatch_dlq.py::test_the_document_cache_dlq_route_is_untouched[False-True-exception]","state":"active"}
+{"kind":"test","id":"pytest-010132","node_id":"tests/test_process_flow_builder_trycatch_dlq.py::test_both_enforcement_sites_agree_on_every_catch_composition","state":"active"}
+{"kind":"test","id":"pytest-010133","node_id":"tests/test_process_flow_builder_trycatch_dlq.py::test_the_composition_rule_has_exactly_one_definition","state":"active"}
+{"kind":"test","id":"pytest-010134","node_id":"tests/test_process_graph_verifier.py::test_a_process_call_with_no_return_path_may_not_continue","state":"active"}
+{"kind":"test","id":"pytest-010135","node_id":"tests/test_process_graph_verifier.py::test_a_terminal_process_call_is_clean_in_both_spellings","state":"active"}
+{"kind":"test","id":"pytest-010136","node_id":"tests/test_process_graph_verifier.py::test_the_live_returning_call_keeps_its_connection","state":"active"}
+{"kind":"test","id":"pytest-010137","node_id":"tests/test_process_graph_verifier.py::test_clearing_only_the_live_return_path_produces_the_error","state":"active"}
+{"kind":"test","id":"pytest-010138","node_id":"tests/test_process_graph_verifier.py::test_an_unresolved_dragpoint_target_still_reports_the_call","state":"active"}
+{"kind":"test","id":"pytest-010139","node_id":"tests/test_process_graph_verifier.py::test_a_malformed_return_path_cannot_certify_a_continuation[<returnpaths><returnpaths/></returnpaths>-no childShapeName]","state":"active"}
+{"kind":"test","id":"pytest-010140","node_id":"tests/test_process_graph_verifier.py::test_a_malformed_return_path_cannot_certify_a_continuation[<returnpaths><returnpaths childShapeName=\"\" returnLabel=\"\"/></returnpaths>-empty childShapeName]","state":"active"}
+{"kind":"test","id":"pytest-010141","node_id":"tests/test_process_graph_verifier.py::test_a_malformed_return_path_cannot_certify_a_continuation[<returnpaths><returnpaths childShapeName=\"   \"/></returnpaths>-whitespace childShapeName]","state":"active"}
+{"kind":"test","id":"pytest-010142","node_id":"tests/test_process_graph_verifier.py::test_a_malformed_return_path_cannot_certify_a_continuation[<returnpaths><bogus/></returnpaths>-unrelated child element]","state":"active"}
+{"kind":"test","id":"pytest-010143","node_id":"tests/test_process_graph_verifier.py::test_a_real_return_path_declaration_still_certifies_the_continuation","state":"active"}
+{"kind":"test","id":"pytest-010144","node_id":"tests/test_process_graph_verifier.py::test_an_unattributed_connection_is_not_a_bound_return_path[None-no identifier at all]","state":"active"}
+{"kind":"test","id":"pytest-010145","node_id":"tests/test_process_graph_verifier.py::test_an_unattributed_connection_is_not_a_bound_return_path[shapeXXX-identifier names an undeclared path]","state":"active"}
+{"kind":"test","id":"pytest-010146","node_id":"tests/test_process_graph_verifier.py::test_every_outgoing_connection_must_bind_not_merely_one","state":"active"}
+{"kind":"test","id":"pytest-010147","node_id":"tests/test_process_graph_verifier.py::test_a_multi_return_fan_out_with_every_branch_bound_is_clean","state":"active"}
+{"kind":"test","id":"pytest-010148","node_id":"tests/test_process_ir_compiler.py::test_plan_matches_legacy_builder_xml_for_goldens[return_documents_flow]","state":"active"}
+{"kind":"test","id":"pytest-010149","node_id":"tests/test_process_ir_compiler.py::test_emitter_inputs_match_legacy_configuration_for_goldens[return_documents_flow]","state":"active"}
+{"kind":"test","id":"pytest-010150","node_id":"tests/test_process_ir_compiler.py::test_exactly_one_entry_and_all_paths_terminate[return_documents_flow]","state":"active"}
+{"kind":"test","id":"pytest-010151","node_id":"tests/test_process_ir_compiler.py::test_cfg_carries_no_layout_or_shape_state[return_documents_flow]","state":"active"}
+{"kind":"test","id":"pytest-010152","node_id":"tests/test_process_ir_compiler.py::test_synthetic_nodes_have_no_authored_provenance[return_documents_flow]","state":"active"}
+{"kind":"test","id":"pytest-010153","node_id":"tests/test_process_ir_compiler.py::test_two_compilations_are_byte_identical[return_documents_flow]","state":"active"}
+{"kind":"test","id":"pytest-010154","node_id":"tests/test_process_ir_compiler.py::test_input_key_order_cannot_change_output[return_documents_flow]","state":"active"}
+{"kind":"test","id":"pytest-010155","node_id":"tests/test_process_ir_compiler.py::test_symbol_insertion_order_cannot_change_output[return_documents_flow]","state":"active"}
+{"kind":"test","id":"pytest-010156","node_id":"tests/test_process_ir_compiler.py::test_mutating_the_ir_after_lowering_does_not_change_snapshots[return_documents_flow]","state":"active"}
+{"kind":"test","id":"pytest-010157","node_id":"tests/test_process_ir_models.py::test_sequence_ordering_rules[steps9-PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED]","state":"active"}
+{"kind":"test","id":"pytest-010158","node_id":"tests/test_process_ir_models.py::test_sequence_ordering_rules[steps10-PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED]","state":"active"}
+{"kind":"test","id":"pytest-010159","node_id":"tests/test_process_ir_models.py::test_sequence_ordering_rules[steps11-PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED]","state":"active"}
+{"kind":"test","id":"pytest-010160","node_id":"tests/test_process_ir_models.py::test_sequence_ordering_rules[steps12-PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED]","state":"active"}
+{"kind":"test","id":"pytest-010161","node_id":"tests/test_process_ir_models.py::test_process_call_is_a_branch_leg_terminal_not_a_step","state":"active"}
+{"kind":"test","id":"pytest-010162","node_id":"tests/test_process_ir_models.py::test_a_connector_prefix_before_a_terminal_process_call_keeps_the_mixing_code","state":"active"}
+{"kind":"test","id":"pytest-010163","node_id":"tests/test_process_ir_models.py::test_a_connector_above_a_terminal_process_call_is_still_mixing","state":"active"}
+{"kind":"test","id":"pytest-010164","node_id":"tests/test_process_ir_rich_control_bodies.py::test_a_decision_arm_admits_exactly_one_terminal_process_call","state":"active"}
+{"kind":"test","id":"pytest-010165","node_id":"tests/test_process_ir_rich_control_bodies.py::test_the_call_above_connector_direction_is_shadowed_not_silently_dropped","state":"active"}
+{"kind":"test","id":"pytest-010166","node_id":"tests/test_process_ir_rich_control_bodies.py::test_the_connector_above_call_direction_is_still_live_and_enforced","state":"active"}
+{"kind":"test","id":"pytest-010167","node_id":"tests/test_process_preservation_policy_is_shared.py::test_every_process_builder_references_the_same_object[ProcessFlowBuilder]","state":"active"}
+{"kind":"test","id":"pytest-010168","node_id":"tests/test_process_preservation_policy_is_shared.py::test_every_process_builder_references_the_same_object[WrapperSubprocessBuilder]","state":"active"}
+{"kind":"test","id":"pytest-010169","node_id":"tests/test_process_preservation_policy_is_shared.py::test_every_process_builder_references_the_same_object[SyncPipelineBuilder]","state":"active"}
+{"kind":"test","id":"pytest-010170","node_id":"tests/test_process_preservation_policy_is_shared.py::test_the_policy_is_deeply_immutable_so_sharing_cannot_alias","state":"active"}
+{"kind":"test","id":"pytest-010171","node_id":"tests/test_process_preservation_policy_is_shared.py::test_the_policy_still_says_exactly_what_the_three_originals_said","state":"active"}
+{"kind":"test","id":"pytest-010172","node_id":"tests/test_process_preservation_policy_is_shared.py::test_all_consumers_observe_one_object_so_a_change_cannot_reach_only_some","state":"active"}
+{"kind":"test","id":"pytest-010173","node_id":"tests/test_process_preservation_policy_is_shared.py::test_the_plan_projection_is_complete_not_a_lossy_restatement","state":"active"}
+{"kind":"test","id":"pytest-010174","node_id":"tests/test_process_preservation_policy_is_shared.py::test_no_process_builder_hand_builds_its_own_policy_any_more","state":"active"}
+{"kind":"test","id":"pytest-010175","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_valid_parsed_root_still_composes","state":"active"}
+{"kind":"test","id":"pytest-010176","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_raw_dictionary_root_is_accepted_and_parsed","state":"active"}
+{"kind":"test","id":"pytest-010177","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_malformed_root_fails_typed_never_as_a_raw_keyerror[malformed0-empty object]","state":"active"}
+{"kind":"test","id":"pytest-010178","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_malformed_root_fails_typed_never_as_a_raw_keyerror[malformed1-no body]","state":"active"}
+{"kind":"test","id":"pytest-010179","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_malformed_root_fails_typed_never_as_a_raw_keyerror[malformed2-no version]","state":"active"}
+{"kind":"test","id":"pytest-010180","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_malformed_root_fails_typed_never_as_a_raw_keyerror[malformed3-unknown node kind]","state":"active"}
+{"kind":"test","id":"pytest-010181","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_malformed_root_fails_typed_never_as_a_raw_keyerror[malformed4-unsupported version]","state":"active"}
+{"kind":"test","id":"pytest-010182","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_non_object_root_fails_typed_too[x]","state":"active"}
+{"kind":"test","id":"pytest-010183","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_non_object_root_fails_typed_too[7]","state":"active"}
+{"kind":"test","id":"pytest-010184","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_non_object_root_fails_typed_too[None]","state":"active"}
+{"kind":"test","id":"pytest-010185","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_non_object_root_fails_typed_too[True]","state":"active"}
+{"kind":"test","id":"pytest-010186","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_non_object_root_fails_typed_too[scalar4]","state":"active"}
+{"kind":"test","id":"pytest-010187","node_id":"tests/test_recipe_direct_root_preflight.py::test_the_process_ir_authority_codes_travel_value_free","state":"active"}
+{"kind":"test","id":"pytest-010188","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_malformed_root_KEY_is_refused_by_the_shared_key_rule[]","state":"active"}
+{"kind":"test","id":"pytest-010189","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_malformed_root_KEY_is_refused_by_the_shared_key_rule[ padded]","state":"active"}
+{"kind":"test","id":"pytest-010190","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_malformed_root_KEY_is_refused_by_the_shared_key_rule[padded ]","state":"active"}
+{"kind":"test","id":"pytest-010191","node_id":"tests/test_recipe_direct_root_preflight.py::test_a_malformed_root_KEY_is_refused_by_the_shared_key_rule[with\\tcontrol]","state":"active"}
+{"kind":"test","id":"pytest-010192","node_id":"tests/test_recipe_direct_root_preflight.py::test_validation_happens_before_composition_not_during_it","state":"active"}
+{"kind":"test","id":"pytest-010193","node_id":"tests/test_recipe_direct_root_preflight.py::test_no_direct_roots_is_unchanged_behaviour","state":"active"}
+{"kind":"test","id":"pytest-010194","node_id":"tests/test_schema_template_process_flow.py::test_each_protocol_publishes_the_process_call_code_it_can_raise","state":"active"}
+{"kind":"test","id":"pytest-010195","node_id":"tests/test_wave_gate.py::test_passing_provider_none_falls_through_to_the_registered_provider","state":"active"}
+{"kind":"test","id":"pytest-010196","node_id":"tests/test_wave_gate.py::test_the_registered_provider_satisfies_the_gate_it_activates","state":"active"}
+{"kind":"test","id":"pytest-010197","node_id":"tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000061]","state":"active"}
+{"kind":"test","id":"pytest-010198","node_id":"tests/test_wrapper_subprocess_builder.py::test_multi_child_parent_is_refused_not_chained","state":"active"}
+{"kind":"test","id":"pytest-010199","node_id":"tests/test_wrapper_subprocess_builder.py::test_wrapper_return_documents_is_refused_not_emitted","state":"active"}
+{"kind":"test","id":"pytest-010200","node_id":"tests/test_wrapper_subprocess_builder.py::test_a_disabled_return_documents_block_stays_valid","state":"active"}
+{"kind":"test","id":"pytest-010201","node_id":"tests/test_wrapper_subprocess_builder.py::test_a_malformed_return_documents_block_keeps_its_own_diagnostic","state":"active"}
