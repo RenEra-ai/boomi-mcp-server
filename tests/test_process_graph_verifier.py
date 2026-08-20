@@ -1251,3 +1251,90 @@ def test_an_unresolved_dragpoint_target_still_reports_the_call():
     result = verify_process_graph(xml)
     assert _orphan_codes(result) == ["shape2"]
     assert "DRAGPOINT_TO_SHAPE_UNRESOLVED" in _codes(result["errors"])
+
+
+@pytest.mark.parametrize(
+    "declaration,label",
+    [
+        ("<returnpaths><returnpaths/></returnpaths>", "no childShapeName"),
+        ('<returnpaths><returnpaths childShapeName="" returnLabel=""/></returnpaths>',
+         "empty childShapeName"),
+        ('<returnpaths><returnpaths childShapeName="   "/></returnpaths>',
+         "whitespace childShapeName"),
+        ("<returnpaths><bogus/></returnpaths>", "unrelated child element"),
+    ],
+)
+def test_a_malformed_return_path_cannot_certify_a_continuation(declaration, label):
+    """Stage-2 review round 1. Counting CHILD ELEMENTS was not enough.
+
+    The first version asked "does `returnpaths` have any children?", so a
+    hand-authored or escape-hatch document declaring a child that names no shape
+    in the called process counted as returning — and SUPPRESSED the continuation
+    error for a path the platform cannot bind. The check now asks what the live
+    capture shows a real entry to be: a `returnpaths` child with a non-empty
+    `childShapeName`.
+
+    Failing toward "declares nothing" is the safe direction: it reports the
+    continuation rather than certifying it.
+    """
+    xml = _load("processcall_orphan_continuation.xml").replace(
+        "<returnpaths/>", declaration
+    )
+    assert _orphan_codes(verify_process_graph(xml)) == ["shape2"], label
+
+
+# The base fixture's dragpoint deliberately carries NO identifier, so turning it
+# into a VALID connected call takes both halves of the live pairing.
+_NO_ID_DRAGPOINT = (
+    '<dragpoint name="shape2.dragpoint1" toShape="shape3" x="400.0" y="104.0"/>'
+)
+
+
+def _connected(identifier=None, declared="shape233"):
+    """The fixture rewritten as a connected call, per the live wire shape."""
+    xml = _load("processcall_orphan_continuation.xml").replace(
+        "<returnpaths/>",
+        f'<returnpaths><returnpaths childShapeName="{declared}" returnLabel=""/></returnpaths>',
+    )
+    if identifier is not None:
+        xml = xml.replace(
+            _NO_ID_DRAGPOINT,
+            _NO_ID_DRAGPOINT.replace("<dragpoint ", f'<dragpoint identifier="{identifier}" '),
+        )
+    return xml
+
+
+def test_a_real_return_path_declaration_still_certifies_the_continuation():
+    """The discriminator, without which the tightening above could be satisfied
+    by a rule that simply flagged every processcall carrying an edge.
+
+    The shape is the one the UI-built m11 capture records verbatim: the return
+    path's `childShapeName` AND the outgoing dragpoint's `identifier` carrying
+    the SAME value. `returnLabel` is legitimately EMPTY there, which is why only
+    `childShapeName` is required of the declaration.
+
+    The first version of this test set only the declaration and left the base
+    fixture's identifier-less dragpoint in place — a shape the live evidence says
+    is NOT valid, asserted clean. A fixture written from memory is not evidence;
+    the capture is.
+    """
+    assert _orphan_codes(verify_process_graph(_connected(identifier="shape233"))) == []
+
+
+@pytest.mark.parametrize(
+    "identifier,label",
+    [(None, "no identifier at all"), ("shapeXXX", "identifier names an undeclared path")],
+)
+def test_an_unattributed_connection_is_not_a_bound_return_path(identifier, label):
+    """Stage-2 review round 2. A DECLARED return path is not yet a BOUND one.
+
+    The platform attributes an outgoing connection to a specific return branch
+    through the dragpoint's `identifier`, which carries that branch's
+    `childShapeName`. A connection carrying no identifier, or naming a branch the
+    call does not declare, belongs to no return path — so the platform drops it
+    and its target is orphaned, which is the same failure this pass exists to
+    catch, one step further in.
+    """
+    assert _orphan_codes(verify_process_graph(_connected(identifier=identifier))) == [
+        "shape2"
+    ], label

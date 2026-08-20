@@ -123,7 +123,7 @@ def _shape_type(shape: ET.Element) -> str:
 
 
 def _processcall_declares_return_paths(shape: ET.Element) -> bool:
-    """Whether a ``processcall`` declares any return path from its child.
+    """Whether a ``processcall`` declares a BINDABLE return path from its child.
 
     The called process's Return Documents shapes are the ONLY authority on
     whether a Process Call continues: ``configuration/processcall/returnpaths``
@@ -131,13 +131,48 @@ def _processcall_declares_return_paths(shape: ET.Element) -> bool:
     carries the element empty (or not at all). This is the single definition of
     that question — ``_is_terminal`` and the continuation invariant below both
     read it, so the two can never drift into disagreeing about the same shape.
+
+    "Bindable" is the load-bearing word, and counting child elements was not
+    enough. A hand-authored or escape-hatch document can carry
+    ``<returnpaths><returnpaths/></returnpaths>``, an entry with an empty
+    ``childShapeName``, or an unrelated child — all of which named no shape in
+    the called process, yet all of which counted as "declares return paths" and
+    so SUPPRESSED the continuation error for a path the platform cannot bind.
+    The check therefore asks what the live UI-built capture shows a real entry
+    to be: a ``returnpaths`` child carrying a non-empty ``childShapeName``
+    (``tests/fixtures/live_xml/m11/…``, shape10 — ``childShapeName="shape233"``,
+    with ``returnLabel`` legitimately empty, which is why only the former is
+    required).
+
+    Failing toward "declares nothing" is the safe direction: it reports the
+    continuation rather than certifying it.
     """
     config = _first_direct(shape, "configuration")
     processcall = _first_direct(config, "processcall")
     returnpaths = _first_direct(processcall, "returnpaths")
     if returnpaths is None:
         return False
-    return len(list(returnpaths)) > 0
+    return bool(_processcall_return_path_keys(shape))
+
+
+def _processcall_return_path_keys(shape: ET.Element) -> set:
+    """The child shape names this ``processcall`` declares as return paths.
+
+    These are the keys an outgoing connection must be attributed to: the live
+    capture pairs ``returnpaths/@childShapeName`` with the outgoing
+    ``dragpoint/@identifier`` carrying the SAME value, which is how the platform
+    knows which return branch an edge belongs to.
+    """
+    config = _first_direct(shape, "configuration")
+    processcall = _first_direct(config, "processcall")
+    returnpaths = _first_direct(processcall, "returnpaths")
+    if returnpaths is None:
+        return set()
+    return {
+        (entry.get("childShapeName") or "").strip()
+        for entry in _direct_children(returnpaths, "returnpaths")
+        if (entry.get("childShapeName") or "").strip()
+    }
 
 
 def _is_terminal(shape: ET.Element, shape_type: str) -> bool:
@@ -427,26 +462,56 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
     for shape in shape_elems:
         name = shape.get("name") or ""
         stype = _shape_type(shape)
-        if stype != "processcall" or _processcall_declares_return_paths(shape):
+        if stype != "processcall":
             continue
-        if not _direct_children(_first_direct(shape, "dragpoints"), "dragpoint"):
+        dragpoints = _direct_children(_first_direct(shape, "dragpoints"), "dragpoint")
+        if not dragpoints:
             continue
-        errors.append(
-            _issue(
-                "PROCESS_CALL_ORPHAN_CONTINUATION",
-                name,
-                stype,
-                f"Process Call '{name}' declares no return path from the called "
-                "process but carries an outgoing connection. The called process's "
-                "Return Documents shapes are what make a forward connection "
-                "valid, so this connection does not exist on the platform and "
-                "the shapes it points at are left unreachable.",
-                f"Remove the outgoing connection from '{name}' — a call whose "
-                "child returns no documents ends its path — or, if the child "
-                "does return documents, declare its Return Documents shapes as "
-                f"the return paths of '{name}'.",
+        declared = _processcall_return_path_keys(shape)
+        if not declared:
+            errors.append(
+                _issue(
+                    "PROCESS_CALL_ORPHAN_CONTINUATION",
+                    name,
+                    stype,
+                    f"Process Call '{name}' declares no return path from the called "
+                    "process but carries an outgoing connection. The called process's "
+                    "Return Documents shapes are what make a forward connection "
+                    "valid, so this connection does not exist on the platform and "
+                    "the shapes it points at are left unreachable.",
+                    f"Remove the outgoing connection from '{name}' — a call whose "
+                    "child returns no documents ends its path — or, if the child "
+                    "does return documents, declare its Return Documents shapes as "
+                    f"the return paths of '{name}'.",
+                )
             )
-        )
+            continue
+        # A DECLARED return path is not yet a BOUND one. The platform attributes
+        # an outgoing connection to a specific return branch through the
+        # dragpoint's ``identifier``, which carries the same value as that
+        # branch's ``childShapeName`` — the live UI-built capture pairs them
+        # exactly (``identifier="shape233"`` against
+        # ``childShapeName="shape233"``). A connection carrying no identifier, or
+        # one naming a branch this call does not declare, belongs to no return
+        # path, so the platform drops it and its target is orphaned — the same
+        # failure this pass exists to catch, one step further in.
+        if not any((dp.get("identifier") or "").strip() in declared for dp in dragpoints):
+            errors.append(
+                _issue(
+                    "PROCESS_CALL_ORPHAN_CONTINUATION",
+                    name,
+                    stype,
+                    f"Process Call '{name}' declares return path(s) "
+                    f"{', '.join(sorted(declared))} but none of its outgoing "
+                    "connections is attributed to one. A connection is bound to a "
+                    "return path by carrying that path's child shape name as its "
+                    "identifier, so an unattributed connection does not exist on "
+                    "the platform and the shapes it points at are left unreachable.",
+                    f"Give the outgoing connection from '{name}' the identifier of "
+                    "the return path it belongs to, or remove the connection and "
+                    "let the call end its path.",
+                )
+            )
 
     # ------------------------------------------------------------------
     # Pass 2b — terminal-shape exclusivity / untraceable rejected docs (#102 C2).
