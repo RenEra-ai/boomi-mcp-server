@@ -185,12 +185,13 @@ def test_the_unknown_ordering_finding_is_a_warning_not_a_block():
 # `test_the_unsafe_branch_is_authorable` below, and the corrected reachability
 # note in effects.py.
 #
-# What is gated is MIXING a process call with property steps, not the process
-# call itself:
-#     root  [process_call, set_dpp]      -> PROCESS_IR_CAPABILITY_UNSUPPORTED
-#     root  [process_call, process_call] -> ALLOWED
-#     leg   [process_call, set_dpp]      -> PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
-#     leg   [process_call]               -> ALLOWED
+# What is gated is MIXING a process call with property steps AND — since #175 —
+# CONTINUATION past a call in any slot. Re-measured at this tree:
+#     root  [process_call, set_dpp, stop]   -> ...PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
+#     root  [process_call, process_call]    -> ...PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
+#     root  [process_call]                  -> ALLOWED (the exact singleton)
+#     leg   steps=[process_call, set_dpp]   -> ...PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
+#     leg   steps=[], terminal=process_call -> ALLOWED (the call is the TERMINAL)
 # An earlier version of this block read the first two rows as "no read can follow
 # a non-waiting call in any authorable document". That does not follow: the reads
 # this collector scans come from a subprocess SUMMARY, not from a set_property

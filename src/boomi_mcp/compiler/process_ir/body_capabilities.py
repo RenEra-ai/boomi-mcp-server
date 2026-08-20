@@ -237,7 +237,13 @@ def _walk_body(
                 "(process_call_connector_mixing is gated)"
             ),
         )
-    if terminal_is_call and steps:
+    # Guarded by admissibility, exactly like the step check below. Without it a
+    # body that admits NO call in any slot — a Decision FALSE arm — reported the
+    # continuation code at `/steps/0` while the parser reported the generic
+    # placement code at `/terminal` for the same document. The prefix rule is
+    # only meaningful once the slot admits the kind; where it does not, the slot
+    # check is the true diagnosis and must win.
+    if terminal_is_call and steps and is_allowed(context, TERMINAL_SLOT, "process_call"):
         # The empty-prefix rule, re-derived here rather than inherited from the
         # model: a call ends its path, so a body that reaches one has nothing
         # left to run before it. Same mutable-model reasoning as the mixing rule

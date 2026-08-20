@@ -1,0 +1,63 @@
+You reviewed this implementation against its ARCHITECT DESIGN PLAN once already, at tip
+753b46f3bb620d449f1294c82578a928455fdeca, and returned ISSUES FOUND with seven findings.
+
+This is the REPLAY over the correction delta. Six of the seven were fixed; one was
+severity-refuted with reasoning you should judge. Your question now is narrower:
+
+    **Do the corrections actually discharge the findings, and did any of them introduce a
+    new contradiction with the plan?**
+
+Repository: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Previously reviewed tip: 753b46f3bb620d449f1294c82578a928455fdeca
+Current tip: 574d541195ba2d6251663bba90ded5741b132c3d
+
+Review the delta `git diff 753b46f..574d541`.
+
+## What was done with each of your seven findings
+
+1. **Verifier exceeds authorized scope** — KEPT, recorded as deviation D11 rather than
+   reverted, on this reasoning: #176 owns EMITTING a return-path binding; validating a
+   hand-authored or live-readback graph whose connection the platform would drop is
+   verification, which is this module's purpose. The repo's own Stage-2 gate demanded exactly
+   this widening in two consecutive rounds — the narrower rule was found certifying
+   continuations the platform drops — so reverting would reintroduce two findings this slice
+   already validated. It cannot regress this server's own output: with #176 gated, no
+   connected Process Call is emitted at all, so the check is reachable only on hand-authored
+   or live-readback XML, and it fails toward reporting. **Judge this refutation.** If you
+   still believe it should be reverted, say so and say what the reversion should NOT
+   reintroduce.
+2. **Incomplete pointers** — FIXED. The validator now passes the offending position through
+   the pydantic error context and the translator appends it. Measured: `/body/steps/1`,
+   `/body/steps/2`, `.../legs/0/steps/0`, `.../legs/0/terminal`.
+3. **Mutable-model body continuation got the generic code** — FIXED. The compiler path now
+   mirrors the parser's translation, scoped by whether the body admits a terminal call, so a
+   Decision FALSE arm correctly keeps the generic code.
+4. **Compiler diagnostic registry omitted** — FIXED. Message and remediation registered; the
+   missing-terminal remediation now lists the process-call terminal.
+5. **ADR asserts what the evidence does not establish** — FIXED. The UI claim is attributed
+   to the report and marked inconclusive; the exception now rests on the runtime measurement.
+   Prerequisite 4 is scoped to include the legacy facade, and the catch-composition hint now
+   names the gated capability. The §8 matrix row is qualified.
+6. **Missing validation and integration coverage** — the post-correction public-boundary QA
+   re-run was RUN (clean, two rounds), and a `_build_plan` regression now pins the catch
+   refusal at plan time with zero planned mutation. The UI-built Probe 2 and post-fix canvas
+   check remain UNMEASURED — the browser extension was unavailable on two attempts — and are
+   carried to #176 rather than claimed.
+7. **Skipped documentation corrections** — FIXED, all three.
+
+## Also in this delta
+
+A later Stage-2 repo review found that the finding-2 fix introduced a CRASH: an all-call root
+raised `StopIteration` out of `parse_process_ir_v1`. That is fixed and pinned, and confirmed
+at the public boundary with an A/B against the pre-fix code. Judge that fix too.
+
+Seven required test node ids were tombstoned in `tests/fixtures/wave_gate/test_nodes.jsonl`
+because the tests were renamed or replaced; each has a named successor and the active floor
+was raised. Judge whether any tombstone drops coverage rather than relocating it.
+
+## Output
+
+Report concrete, verifiable findings only. If the corrections discharge the findings, say so
+plainly rather than manufacturing new ones.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'

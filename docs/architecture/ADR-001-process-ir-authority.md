@@ -326,15 +326,26 @@ Every authoring capability sits in exactly one of four states:
   five Process Calls in the in-tree UI-built captures are the terminal form; the one connected
   call is the only one with a populated `returnpaths`.
 
-  **Stated at the strength the evidence actually supports.** The orphaned Stop on the canvas is a
-  REPORTED observation (issue #175, manual UI inspection). Live QA could not reproduce the
-  rendering leg — browser automation was unavailable — and recorded UI behaviour as INCONCLUSIVE.
-  What live QA did establish is stronger than the canvas claim: with a child proven to return
-  nothing, the shape downstream of the call DOES NOT EXECUTE. A control process
-  (`start -> message -> exception`) raised its canary error; the graph-identical probe
-  (`start -> processcall(empty returnpaths, dragpoint) -> exception`) completed with zero error
-  documents and no error record. The connection is dead at RUNTIME, not merely unrendered, and it
-  is that measurement — not the canvas report — that this exception rests on.
+  **Stated at the strength the evidence actually supports.** Two independent measurements, either
+  of which carries the point.
+
+  The load-bearing one is RUNTIME: with a child proven to return nothing, the shape downstream of
+  the call DOES NOT EXECUTE. A control process (`start -> message -> exception`) raised its canary
+  error; the graph-identical probe (`start -> processcall(empty returnpaths, dragpoint) ->
+  exception`) completed with zero error documents and no error record. The connection is dead at
+  runtime, not merely unrendered.
+
+  The canvas leg — reported in issue #175 from manual UI inspection, and recorded as INCONCLUSIVE
+  through three QA rounds while browser automation was unavailable — is now measured too, in both
+  directions (`docs/architecture/evidence/issue-175/live-ui/`). A pre-fix control planted through
+  the direct Component API renders three shapes and ONE edge: the trailing Stop has no inbound
+  connection despite a stored `shape2 -> shape3` dragpoint. The post-fix component authored through
+  the MCP boundary renders two shapes, both attached. The same readback settles what the report
+  left open — Boomi **stores** the contradictory dragpoint and declines to draw it, so submitted
+  and stored bytes agree and there is no attestation drift.
+
+  The runtime measurement remains the stronger of the two and is still what this exception rests
+  on; the canvas measurement corroborates it rather than replacing it.
 
   Withdrawing those shapes on V1 — a root chain of calls, a call followed by `stop` or
   `return_documents`, a multi-call `wrapper_subprocess`, a wrapper with

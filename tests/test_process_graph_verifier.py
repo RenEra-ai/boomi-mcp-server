@@ -1325,62 +1325,44 @@ def test_a_real_return_path_declaration_still_certifies_the_continuation():
     "identifier,label",
     [(None, "no identifier at all"), ("shapeXXX", "identifier names an undeclared path")],
 )
-def test_an_unattributed_connection_is_not_a_bound_return_path(identifier, label):
-    """Stage-2 review round 2. A DECLARED return path is not yet a BOUND one.
+def test_a_populated_declaration_is_not_judged_here(identifier, label):
+    """SCOPE RECORD, not an endorsement: #175 does not judge a POPULATED declaration.
 
-    The platform attributes an outgoing connection to a specific return branch
-    through the dragpoint's `identifier`, which carries that branch's
-    `childShapeName`. A connection carrying no identifier, or naming a branch the
-    call does not declare, belongs to no return path — so the platform drops it
-    and its target is orphaned, which is the same failure this pass exists to
-    catch, one step further in.
+    An earlier revision flagged these — a declared return path whose key no
+    outgoing dragpoint carries — because the single connected Process Call in the
+    live corpus pairs `returnpaths/@childShapeName` with `dragpoint/@identifier`.
+    ONE observation is not a platform rule. If any valid platform form omits the
+    identifier, that check would reject a customer's legitimate process through
+    `build_integration(action="verify")`: a false positive on real data inferred
+    from a single sample. Two internal review rounds asked for the wider rule and
+    both reasoned from that same sample, which is agreement rather than evidence.
+
+    So this pins the BOUNDARY of #175 rather than the behaviour of #176: these
+    shapes verify clean here, and the binding contract that decides them is
+    #176's to establish from a UI-built returning parent. If #176 proves the
+    pairing is required, this is the test to invert — left visible for that
+    reason rather than deleted.
     """
-    assert _orphan_codes(verify_process_graph(_connected(identifier=identifier))) == [
-        "shape2"
-    ], label
+    assert _orphan_codes(verify_process_graph(_connected(identifier=identifier))) == [], label
 
 
-def test_every_outgoing_connection_must_bind_not_merely_one():
-    """Stage-2 review round 3, and the reason the guard is now ONE rule.
+def test_a_call_declaring_nothing_bindable_is_flagged_however_it_is_spelled():
+    """The half #175 DOES own, and what makes the narrowing above safe.
 
-    A Process Call may legitimately carry several outgoing branches — the docs
-    describe one per Return Documents step in the child. The check asked whether
-    SOME edge bound, so a mixed set (one attributed, one not) certified the whole
-    shape while Pass 1 had already entered the unattributed target in the edge
-    map, leaving a platform-dropped branch represented as reachable.
-
-    Three rounds each found a weaker form of one rule — "has any child element",
-    "some edge binds", "every edge binds". This test pins the universal
-    statement, so the weaker forms are unwritable rather than merely unwritten.
+    Every spelling of "declares no bindable return path" still reports, so the
+    reported defect — an empty `returnpaths` beside an outgoing connection — is
+    caught however the empty declaration is written. This is the case the live
+    captures evidence four times over and that QA measured at runtime.
     """
-    xml = _connected(identifier="shape233").replace(
-        '<dragpoint identifier="shape233" name="shape2.dragpoint1" toShape="shape3" '
-        'x="400.0" y="104.0"/>',
-        '<dragpoint identifier="shape233" name="shape2.dragpoint1" toShape="shape3" '
-        'x="400.0" y="104.0"/>'
-        '<dragpoint name="shape2.dragpoint2" toShape="shape3" x="400.0" y="140.0"/>',
-    )
-    assert _orphan_codes(verify_process_graph(xml)) == ["shape2"]
-    # The message must name the offending CONNECTION, not its target.
-    #
-    # An earlier version of this test asserted the TARGET appeared — which is
-    # what pushed the diagnostic into naming it, and the target is exactly the
-    # wrong thing to name here: both dragpoints point at `shape3`, only one is
-    # bound, so naming the target claimed the connections to it were unattributed
-    # (one is not) and that the shape was unreachable (the bound one reaches it).
-    # A test can push a message into being wrong; this one now pins what the
-    # author actually needs — which branch to repair.
-    issue = next(
-        i for i in verify_process_graph(xml)["errors"]
-        if i["code"] == "PROCESS_CALL_ORPHAN_CONTINUATION"
-    )
-    assert "shape2.dragpoint2" in issue["message"], issue["message"]
-    assert "shape2.dragpoint1" not in issue["message"], (
-        "the BOUND connection must not be named as an offender"
-    )
-    # ...and the message must not assert an unreachability it did not establish:
-    # `shape3` is still reached by the bound dragpoint.
-    assert "shape3" not in issue["message"], issue["message"]
+    for declaration in ("<returnpaths/>",
+                        "<returnpaths><returnpaths/></returnpaths>",
+                        '<returnpaths><returnpaths childShapeName=""/></returnpaths>',
+                        "<returnpaths><bogus/></returnpaths>"):
+        xml = _load("processcall_orphan_continuation.xml").replace(
+            "<returnpaths/>", declaration
+        )
+        assert _orphan_codes(verify_process_graph(xml)) == ["shape2"], declaration
+
 
 
 def test_a_multi_return_fan_out_with_every_branch_bound_is_clean():

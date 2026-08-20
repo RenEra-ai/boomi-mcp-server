@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "issue": 175,
+  "measured_at": "2026-08-20T16:30:00Z",
+  "acceptance_criterion": "4 (UI half) — \"UI shows no orphaned shapes\"",
+  "account": "traininghlibbochkarov-JKIY2X",
+  "surface": "Boomi Integration Build canvas, platform.boomi.com, Chrome extension",
+  "method": {
+    "why_dom_not_screenshot": "The canvas renders at a devicePixelRatio of 2.5, so screenshot pixel coordinates are not CSS coordinates and the third shape sat outside the captured viewport. Shape and edge positions are therefore read from the live DOM via getBoundingClientRect, and each reading is attributed to the component whose name is visible in the editor header at the moment of measurement.",
+    "shape_selector": ".shapeLabel (visible only; the inactive component panel's nodes have zero-area boxes)",
+    "edge_selector": ".gwt-connectors-path-connected (a drawn, attached connector; the palette's shape icons live under .shape_palette_widget and are excluded)",
+    "trap_recorded": "A first pass matched three elements labelled Start / Process Call / Stop via alt-text and looked like a surviving orphan. All three resolved to shape_palette_widget entries at 0x0 — the left-hand shape palette, not the canvas. A second pass, taken immediately after a URL-hash navigation, reported the previous component's canvas because the Boomi SPA keeps open component tabs mounted and does not re-render on a hash change alone; it was corrected by a hard reload plus a visible-header attribution check."
+  },
+  "components": [
+    {
+      "role": "PRE-FIX negative control",
+      "name": "UICHECK175_PREFIX_88622e",
+      "component_id": "230906ef-d641-428f-a453-e3a7d60c8a13",
+      "provenance": "Pre-fix golden bytes (git show 3fd5027:tests/fixtures/golden_xml/processcall_standalone_parent.xml) planted through the DIRECT Boomi REST API, because the fixed MCP tool boundary now refuses this shape — which is the fix. Only the placeholder processId (repointed at the real _QA_FIXTURE_noop so the canvas resolves the child) and the component name differ from those bytes.",
+      "stored_xml": {
+        "shapetypes": ["start", "processcall", "stop"],
+        "dragpoint_targets": ["shape2", "shape3"],
+        "returnpaths": ["<returnpaths/>"]
+      },
+      "canvas": {
+        "shape_labels": [
+          {"text": "Start - No Data", "css_x": 544},
+          {"text": "Run main-logic subprocess / _QA_FIXTURE_noop", "css_x": 704},
+          {"text": "End and continue", "css_x": 864}
+        ],
+        "rendered_edges": [{"from_x": 580, "to_x": 696}],
+        "rendered_edge_count": 1
+      },
+      "result": "ORPHAN PRESENT. The stored XML carries a shape2 -> shape3 dragpoint, but the canvas draws exactly one edge (580->696 = Start -> Process Call). The stop at css_x 864 has no inbound edge and renders as a free-floating red STOP icon."
+    },
+    {
+      "role": "POST-FIX subject",
+      "name": "UICHECK175_9510fe",
+      "component_id": "5ff25f37-9e20-4021-b913-8998874ccb4b",
+      "provenance": "Authored at the fixed tip through the PUBLIC MCP tool boundary (build_integration apply, _success true, status created).",
+      "stored_xml": {
+        "shapetypes": ["start", "processcall"],
+        "dragpoint_targets": ["shape2"],
+        "returnpaths": ["<returnpaths/>"]
+      },
+      "canvas": {
+        "shape_labels": [
+          {"text": "Start - No Data", "css_x": 544},
+          {"text": "Run main-logic subprocess / _QA_FIXTURE_noop", "css_x": 704}
+        ],
+        "rendered_edges": [{"from_x": 580, "to_x": 696}],
+        "rendered_edge_count": 1
+      },
+      "result": "NO ORPHAN. Two shapes, one edge, every shape attached. The Process Call is the path terminal, exactly the live m11 terminal form."
+    }
+  ],
+  "probe_6_1_answer": {
+    "question": "Strip vs store: does Boomi strip the dragpoint of an empty-returnpaths Process Call on save?",
+    "answer": "(b) STORED BUT NOT RENDERED",
+    "evidence": "The pre-fix control was read back through the Component API after save: shape2 -> shape3 is still present in the stored bytes, while the canvas draws no such edge. There is no submitted-vs-stored drift, so the P0 escalation condition in the bug report's severity line does NOT trigger; the defect is a canvas/graph-validity defect at P1, as filed."
+  }
+}

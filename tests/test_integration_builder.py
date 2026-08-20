@@ -8540,11 +8540,62 @@ def test_the_catch_composition_refusal_happens_at_PLAN_time(mock_pag):
 
     assert plan["_success"] is True
     step = plan["steps"][0]
-    # The planner must NOT report this as a mutation it intends to perform.
-    assert step["planned_action"] != "create", step
-    blob = json.dumps(step)
-    assert "PROCESS_CALL_CONFIG_INVALID" in blob, step
-    assert "reliability.catch_exception" in blob, step
+    # Not merely "not create" — that would also be satisfied by `reuse`, which IS
+    # a mutation-free outcome but not a REFUSAL. Assert the refusal itself.
+    assert step["planned_action"] == "error_process_validation", step
+    assert step["validation_error"]["error_code"] == "PROCESS_CALL_CONFIG_INVALID", step
+    assert step["validation_error"]["field"] == "reliability.catch_exception", step
+
+
+@patch("src.boomi_mcp.categories.integration_builder._execute_component")
+@patch(_PATCH_TARGET)
+def test_apply_refuses_the_catch_composition_without_executing_anything(mock_pag, mock_exec):
+    """The other half of QA-175-r1-01, at `_apply_plan` rather than `_build_plan`.
+
+    The live defect was not "the plan text was wrong" — it was that APPLY reached
+    the platform and created a component before the refusal. Live QA measured the
+    inventory going 26 -> 27, and again 22 -> 22 after the fix. This is the
+    offline regression for that: apply must refuse the whole plan and never call
+    the component executor at all.
+
+    `_execute_component` is patched purely as a TRIPWIRE — if the refusal ever
+    moves back to build time, this fires on the call count rather than on a
+    message, which is the property that actually matters.
+    """
+    mock_pag.return_value = []
+    cfg = {
+        "process_kind": "database_to_api_sync",
+        "name": "Refused Catch Apply",
+        "source": {"connector_type": "database", "connection_id": "c1",
+                   "operation_id": "o1", "action_type": "Get"},
+        "transform": {"mode": "passthrough"},
+        "target": {"connector_type": "rest", "connection_id": "c2",
+                   "operation_id": "o2", "action_type": "POST"},
+        "reliability": {
+            "retry_count": 0,
+            "dlq": {"mode": "error_subprocess_ref",
+                    "process_id": "11111111-1111-1111-1111-111111111111"},
+            "catch_exception": {"message_template": "{1}",
+                                "parameter_source": "caught_error"},
+        },
+    }
+    comp = _comp(name="Refused Catch Apply", comp_type="process")
+    comp_dict = comp.model_dump()
+    comp_dict["config"] = cfg
+    config = _build_config([comp_dict])
+    config["dry_run"] = False
+
+    result = _apply_plan(MagicMock(), "dev", config)
+
+    assert result["_success"] is False
+    assert "unresolvable_steps" in result, result
+    assert result["unresolvable_steps"][0]["planned_action"] == "error_process_validation"
+    # THE point: nothing was executed. A refusal that fires after a write is the
+    # defect, not the fix.
+    assert mock_exec.call_count == 0, (
+        "apply reached the component executor before refusing — this is exactly "
+        "the QA-175-r1-01 failure (inventory 26 -> 27)"
+    )
 
 
 def test_the_apply_loop_uses_that_derivation_not_the_requested_action():

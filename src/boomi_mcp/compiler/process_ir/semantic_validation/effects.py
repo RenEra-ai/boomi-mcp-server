@@ -46,11 +46,15 @@ rejected outright inside a Branch or Decision body", so no read could follow a
 non-waiting call in any authorable document, and that the rule was therefore
 proven only against a hand-built CFG. Re-measured, one claim at a time:
 
-    root  [process_call, set_dpp, stop]        -> PROCESS_IR_CAPABILITY_UNSUPPORTED
-    root  [process_call, process_call, stop]   -> ...RETURN_PATH_BINDING_UNSUPPORTED  (#175)
+    root  [process_call, set_dpp, stop]        -> ...PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
+    root  [process_call, process_call, stop]   -> ...PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
     root  [process_call]                       -> ALLOWED (the exact singleton, #175)
-    leg   [process_call, set_dpp]              -> PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+    leg   steps=[process_call, set_dpp]        -> ...PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
     leg   steps=[], terminal=process_call      -> ALLOWED (#175: the call is the TERMINAL)
+
+(Re-measured at the #175 tree. Since a call is a TERMINAL, anything following one
+in a body that admits it is a CONTINUATION request and reports the dedicated code,
+not the generic placement code the pre-#175 rows recorded.)
 
 So what is gated is MIXING a process call with property steps, not the process
 call itself — and, since #175, CONTINUATION past a call in any slot. A Branch

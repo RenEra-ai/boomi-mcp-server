@@ -477,67 +477,46 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
         # then "every edge binds" — and each was a correct defect. That is the
         # instance-patch pattern; the answer is to make the weaker forms
         # unwritable, not to add a fourth condition.
+        # SCOPE, deliberately narrow (#175; the wider rule was reverted here and
+        # belongs to #176).
+        #
+        # This fires only when the call declares NO bindable return path at all —
+        # the case the platform's own captures evidence four times over, and the
+        # one live QA measured at runtime: with a child proven to return nothing,
+        # the shape downstream of such a call does not execute.
+        #
+        # It does NOT judge a POPULATED declaration. An earlier revision also
+        # required every outgoing dragpoint's `identifier` to match a declared
+        # `childShapeName`, because the one connected call in the live corpus
+        # pairs them. One sample is not a platform rule: if any valid platform
+        # form omits the identifier, that check would reject a customer's
+        # legitimate process through `build_integration(action="verify")` — a
+        # false positive on real data, inferred from a single observation. Two
+        # internal review rounds asked for the wider rule and both reasoned from
+        # that same sample, which is agreement, not evidence.
+        #
+        # #176 owns the binding contract and will establish the wire rule from a
+        # UI-built returning parent. Until then this stays with what is
+        # measured, and a populated declaration is left alone.
         declared_keys = _processcall_return_path_keys(shape)
-        unbound = [
-            dp for dp in dragpoints
-            if (dp.get("identifier") or "").strip() not in declared_keys
-        ]
-        if not unbound:
+        if declared_keys:
             continue
-        # The message discriminates between the two ways an edge ends up
-        # unbound, because the remedies differ; the RULE above does not.
-        if not declared_keys:
-            errors.append(
-                _issue(
-                    "PROCESS_CALL_ORPHAN_CONTINUATION",
-                    name,
-                    stype,
-                    f"Process Call '{name}' declares no return path from the called "
-                    "process but carries an outgoing connection. The called process's "
-                    "Return Documents shapes are what make a forward connection "
-                    "valid, so this connection does not exist on the platform and "
-                    "the shapes it points at are left unreachable.",
-                    f"Remove the outgoing connection from '{name}' — a call whose "
-                    "child returns no documents ends its path — or, if the child "
-                    "does return documents, declare its Return Documents shapes as "
-                    f"the return paths of '{name}'.",
-                )
+        errors.append(
+            _issue(
+                "PROCESS_CALL_ORPHAN_CONTINUATION",
+                name,
+                stype,
+                f"Process Call '{name}' declares no return path from the called "
+                "process but carries an outgoing connection. The called process's "
+                "Return Documents shapes are what make a forward connection "
+                "valid, so this connection does not exist on the platform and "
+                "the shapes it points at are left unreachable.",
+                f"Remove the outgoing connection from '{name}' — a call whose "
+                "child returns no documents ends its path — or, if the child "
+                "does return documents, declare its Return Documents shapes as "
+                f"the return paths of '{name}'.",
             )
-        else:
-            # Name the offending CONNECTION, not its target. Two dragpoints can
-            # point at the same shape with only one of them bound, and naming the
-            # target then says two false things at once: that the connections to
-            # it are unattributed (one is not) and that the shape is unreachable
-            # (the bound one still reaches it). It also leaves the author unable
-            # to tell WHICH branch to repair, which is the one thing a served
-            # diagnostic on a multi-branch shape has to do.
-            offenders = ", ".join(
-                sorted(
-                    "{0}{1}".format(
-                        (dp.get("name") or "").strip() or "(unnamed connection)",
-                        " (identifier '{0}')".format((dp.get("identifier") or "").strip())
-                        if (dp.get("identifier") or "").strip()
-                        else " (no identifier)",
-                    )
-                    for dp in unbound
-                )
-            )
-            errors.append(
-                _issue(
-                    "PROCESS_CALL_ORPHAN_CONTINUATION",
-                    name,
-                    stype,
-                    f"Process Call '{name}' declares return path(s) "
-                    f"{', '.join(sorted(declared_keys))}, but {offenders} "
-                    "is not attributed to any of them. A connection is bound to a "
-                    "return path by carrying that path's child shape name as its "
-                    "identifier, so the platform drops an unattributed connection — "
-                    "and anything it is the only route to becomes unreachable.",
-                    f"Give each outgoing connection from '{name}' the identifier of "
-                    "the return path it belongs to, or remove the connections that "
-                    "belong to none.",
-                )
-            )
+        )
 
     # ------------------------------------------------------------------
     # Pass 2b — terminal-shape exclusivity / untraceable rejected docs (#102 C2).

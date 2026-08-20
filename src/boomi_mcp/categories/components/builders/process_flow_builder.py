@@ -4797,9 +4797,13 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
 
         {"process_kind": "wrapper_subprocess",
          "process_calls": [
-             {"subprocess_ref": "$ref:main_logic", "wait": true, "abort_on_error": false, "label": "..."},
-             {"process_id": "<existing component id>"}
+             {"subprocess_ref": "$ref:main_logic", "wait": true, "abort_on_error": false, "label": "..."}
          ]}
+
+    EXACTLY ONE entry (#175). A second entry, or ``return_documents.enabled``,
+    returns ``PROCESS_CALL_CONFIG_INVALID``; use ``{"process_id": "<existing
+    component id>"}`` in place of ``subprocess_ref`` to call a component that is
+    not in the spec.
 
     Inherits the plaintext-secret scan/redact from ProcessFlowBuilder; overrides
     validate_config (wrapper shape) and build (parent emission). Child-first apply

@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10169,"minimum_collected":10169,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10170,"minimum_collected":10170,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -10142,9 +10142,9 @@
 {"kind":"test","id":"pytest-010141","node_id":"tests/test_process_graph_verifier.py::test_a_malformed_return_path_cannot_certify_a_continuation[<returnpaths><returnpaths childShapeName=\"   \"/></returnpaths>-whitespace childShapeName]","state":"active"}
 {"kind":"test","id":"pytest-010142","node_id":"tests/test_process_graph_verifier.py::test_a_malformed_return_path_cannot_certify_a_continuation[<returnpaths><bogus/></returnpaths>-unrelated child element]","state":"active"}
 {"kind":"test","id":"pytest-010143","node_id":"tests/test_process_graph_verifier.py::test_a_real_return_path_declaration_still_certifies_the_continuation","state":"active"}
-{"kind":"test","id":"pytest-010144","node_id":"tests/test_process_graph_verifier.py::test_an_unattributed_connection_is_not_a_bound_return_path[None-no identifier at all]","state":"active"}
-{"kind":"test","id":"pytest-010145","node_id":"tests/test_process_graph_verifier.py::test_an_unattributed_connection_is_not_a_bound_return_path[shapeXXX-identifier names an undeclared path]","state":"active"}
-{"kind":"test","id":"pytest-010146","node_id":"tests/test_process_graph_verifier.py::test_every_outgoing_connection_must_bind_not_merely_one","state":"active"}
+{"kind":"test","id":"pytest-010144","node_id":"tests/test_process_graph_verifier.py::test_an_unattributed_connection_is_not_a_bound_return_path[None-no identifier at all]","state":"tombstone"}
+{"kind":"test","id":"pytest-010145","node_id":"tests/test_process_graph_verifier.py::test_an_unattributed_connection_is_not_a_bound_return_path[shapeXXX-identifier names an undeclared path]","state":"tombstone"}
+{"kind":"test","id":"pytest-010146","node_id":"tests/test_process_graph_verifier.py::test_every_outgoing_connection_must_bind_not_merely_one","state":"tombstone"}
 {"kind":"test","id":"pytest-010147","node_id":"tests/test_process_graph_verifier.py::test_a_multi_return_fan_out_with_every_branch_bound_is_clean","state":"active"}
 {"kind":"test","id":"pytest-010148","node_id":"tests/test_process_ir_compiler.py::test_plan_matches_legacy_builder_xml_for_goldens[return_documents_flow]","state":"active"}
 {"kind":"test","id":"pytest-010149","node_id":"tests/test_process_ir_compiler.py::test_emitter_inputs_match_legacy_configuration_for_goldens[return_documents_flow]","state":"active"}
@@ -10204,3 +10204,7 @@
 {"kind":"test","id":"pytest-010203","node_id":"tests/test_process_ir_models.py::test_every_illegal_process_call_root_returns_a_typed_diagnostic[steps1-/body/steps/1-three calls, no terminal]","state":"active"}
 {"kind":"test","id":"pytest-010204","node_id":"tests/test_process_ir_models.py::test_every_illegal_process_call_root_returns_a_typed_diagnostic[steps2-/body/steps/1-a call chain WITH a trailing stop]","state":"active"}
 {"kind":"test","id":"pytest-010205","node_id":"tests/test_process_ir_models.py::test_every_illegal_process_call_root_returns_a_typed_diagnostic[steps3-/body/steps/0-a step BEFORE the call]","state":"active"}
+{"kind":"test","id":"pytest-010206","node_id":"tests/test_integration_builder.py::test_apply_refuses_the_catch_composition_without_executing_anything","state":"active"}
+{"kind":"test","id":"pytest-010207","node_id":"tests/test_process_graph_verifier.py::test_a_populated_declaration_is_not_judged_here[None-no identifier at all]","state":"active"}
+{"kind":"test","id":"pytest-010208","node_id":"tests/test_process_graph_verifier.py::test_a_populated_declaration_is_not_judged_here[shapeXXX-identifier names an undeclared path]","state":"active"}
+{"kind":"test","id":"pytest-010209","node_id":"tests/test_process_graph_verifier.py::test_a_call_declaring_nothing_bindable_is_flagged_however_it_is_spelled","state":"active"}
