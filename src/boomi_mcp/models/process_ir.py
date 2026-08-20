@@ -1217,6 +1217,14 @@ def _check_process_call_terminal_form(
 
 # The three ways a body can place a ``process_call`` wrongly. Names, not bare
 # strings, because both renderers branch on them.
+#: The ONE wording for "a process_call sits in a step slot". Both entry points
+#: serve it: `_translate_pydantic_error` for the union rejection a caller hits by
+#: authoring, and `process_call_placement_verdict` for the mutable-model path.
+PROCESS_CALL_STEP_FORM_MESSAGE = (
+    "a process_call is the terminal of its path — author it in "
+    "this body's terminal slot, with nothing after it"
+)
+
 PLACEMENT_CONNECTOR_MIXING = "connector_mixing"
 PLACEMENT_STEP_FORM = "step_form"
 PLACEMENT_PREFIX = "prefix"
@@ -1288,12 +1296,16 @@ def process_call_placement_verdict(
     if call_index is None and not terminal_is_call:
         return None
     if call_index is not None:
-        return (
-            PLACEMENT_STEP_FORM,
-            ("steps", call_index),
-            "a process_call may not be followed by another node in a {0} — it "
-            "is the terminal of its path (step {1})".format(context, call_index),
-        )
+        # The SHARED constant, not a context-specific rendering. For this reason
+        # the parser never reaches this function at all — `process_call` is in no
+        # step-slot union, so pydantic rejects the node and
+        # `_translate_pydantic_error` serves the message. If the verdict phrased
+        # it differently the two entry points would agree on code and pointer and
+        # still hand the caller different words, which is what round 5 measured.
+        # The step INDEX is deliberately absent: the pointer already carries it,
+        # and duplicating a fact into the message is the same mechanism that
+        # produced the shared-target defect earlier in this slice.
+        return (PLACEMENT_STEP_FORM, ("steps", call_index), PROCESS_CALL_STEP_FORM_MESSAGE)
     connector_index = next(
         (i for i, s in enumerate(steps) if getattr(s, "kind", None) in _CONNECTOR_KINDS),
         None,
@@ -2590,10 +2602,7 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
                 return _diagnostic(
                     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
                     path,
-                    message=(
-                        "a process_call is the terminal of its path — author it in "
-                        "this body's terminal slot, with nothing after it"
-                    ),
+                    message=PROCESS_CALL_STEP_FORM_MESSAGE,
                 )
             return _diagnostic(
                 PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,

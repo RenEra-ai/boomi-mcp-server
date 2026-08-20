@@ -6323,41 +6323,73 @@ def test_no_durable_doc_claims_submitted_bytes_match_a_readback():
         "from models/authoring_workflow.py before editing this test"
     )
 
-    # One sentence claiming submitted BYTES and a readback are the same thing.
+    # A sentence claiming submitted BYTES and a readback are the SAME thing.
     #
-    # Scanned over WHITESPACE-FLOWED text, not raw lines. The first version of
-    # this guard excluded newlines from the sentence body and was therefore inert
-    # against the very sentence it was written for, which is hard-wrapped across
-    # two markdown lines — it passed its own single-line witness and passed the
-    # restored defect too. The witness below is now the real wrapped text.
-    claim = _re.compile(
-        r"[^.]{0,200}\bsubmitted\b[^.]{0,200}\bbytes?\b[^.]{0,200}"
-        r"\b(agree|identical|equal|match(?:es|ed)?|the same)\b",
-        _re.IGNORECASE,
+    # A bare regex was the first attempt and it failed BOTH ways (round 5): it
+    # flagged "Submitted bytes do not match a live readback", which is a correct
+    # statement of the contract, and it MISSED "The submitted payload matches the
+    # stored bytes", because `match` came before `bytes` and the pattern was
+    # order-sensitive. Order-insensitive token tests plus an explicit polarity
+    # check replace it — a claim and its negation must not look alike to a guard
+    # whose whole job is judging the claim.
+    _EQUALITY = _re.compile(
+        r"\b(agrees?|identical|equals?|match|matches|matched|the same)\b", _re.I
     )
+    _NEGATION = _re.compile(r"\b(not|never|cannot|can't|no|nor|without)\b", _re.I)
+
+    def _claims_byte_equality(sentence):
+        low = sentence.lower()
+        if "submitted" not in low:
+            return False
+        if not _re.search(r"\b(bytes?|payload|digest)\b", low):
+            return False
+        if not _re.search(r"\b(readback|read back|stored|live)\b", low):
+            return False
+        verb = _EQUALITY.search(low)
+        if not verb:
+            return False
+        # POLARITY: a negation anywhere ahead of the verb inverts the claim, and
+        # "mismatch" states the contract rather than breaking it.
+        if _NEGATION.search(low[: verb.start()]) or "mismatch" in low:
+            return False
+        return True
 
     def _flow(text):
         """Markdown hard-wraps sentences; the claim is a property of the prose,
         not of where the author happened to break the line."""
         return _re.sub(r"\s+", " ", text)
 
-    # Non-vacuity FIRST: a guard that cannot flag the sentence it exists for is
-    # decoration. This is the sentence round 3 caught, with its real line break.
-    witness = (
-        "The same readback settles what the report\n"
-        "  left open — Boomi **stores** the contradictory dragpoint and declines "
-        "to draw it, so submitted\n  and stored bytes agree and there is no "
-        "attestation drift."
-    )
-    assert claim.search(_flow(witness)), (
-        "the scanner cannot see the claim it was built for"
-    )
-    assert not claim.search(_flow(
-        "Boomi stores the contradictory dragpoint and declines to render it."
-    )), "the scanner flags an ordinary store-not-strip statement"
-    assert not claim.search(_flow(
-        "The emitted XML must equal the golden file byte for byte."
-    )), "the scanner flags golden-corpus byte equality, which is a different claim"
+    def _offending_sentences(text):
+        return [s.strip() for s in _flow(text).split(".") if _claims_byte_equality(s)]
+
+    # Non-vacuity FIRST, and in BOTH directions — a guard that cannot flag the
+    # sentence it exists for is decoration, and one that flags the contract's own
+    # correct wording is worse than nothing because it pressures the author to
+    # delete an accurate statement.
+    MUST_FLAG = [
+        # the real defect, with its real line break
+        "The same readback settles what the report\n  left open — Boomi **stores** "
+        "the contradictory dragpoint and declines to draw it, so submitted\n  and "
+        "stored bytes agree and there is no attestation drift.",
+        # the same claim with the verb BEFORE the noun, which an ordered pattern missed
+        "The submitted payload matches the stored bytes.",
+        "The submitted digest is identical to the live readback.",
+    ]
+    MUST_NOT_FLAG = [
+        # correct statements of the contract — flagging these would be the guard
+        # telling an author to remove the truth
+        "Submitted bytes do not match a live readback.",
+        "The submitted digest is never compared against a readback.",
+        "A readback would mismatch the submitted bytes on every healthy apply.",
+        # unrelated, legitimate byte equality: golden corpus, no readback involved
+        "The emitted XML must equal the golden file byte for byte.",
+        # an ordinary store-not-strip observation
+        "Boomi stores the contradictory dragpoint and declines to render it.",
+    ]
+    for text in MUST_FLAG:
+        assert _offending_sentences(text), "scanner missed a real claim: " + text[:60]
+    for text in MUST_NOT_FLAG:
+        assert not _offending_sentences(text), "scanner false-positived: " + text[:60]
 
     # SCOPE: documents that ASSERT current truth. Two exemptions, both principled
     # rather than convenient, and both load-bearing — without them this guard
@@ -6387,11 +6419,12 @@ def test_no_durable_doc_claims_submitted_bytes_match_a_readback():
             continue
         # Golden-corpus byte equality is a DIFFERENT and legitimate claim
         # (emitted == golden file); it never involves a live readback.
-        text = _flow(path.read_text(encoding="utf-8", errors="replace"))
         scanned += 1
-        for match in claim.finditer(text):
+        for sentence in _offending_sentences(
+            path.read_text(encoding="utf-8", errors="replace")
+        ):
             offenders.append("{0}: {1}".format(
-                path.relative_to(_ROOT), match.group(0).strip()[:160]
+                path.relative_to(_ROOT), sentence[:160]
             ))
     assert scanned > 20, "the scan found almost nothing to read: {0}".format(scanned)
     assert offenders == [], (

@@ -248,8 +248,19 @@ def _walk_body(
     # pointer, the connector-with-call-terminal pointer, and two orderings where
     # one path reported mixing and the other the return-path rule. The verdict
     # also fixes the ORDER, so "which rule fires" is decided once.
-    verdict = process_call_placement_verdict(
-        steps, terminal, context=PROCESS_CALL_PLACEMENT_CONTEXT_LABELS[context]
+    # The WHOLE verdict is guarded by admissibility, mixing included. Where the
+    # slot never admitted a process_call — a Decision FALSE arm, a Try/Catch body
+    # — the parser reports the slot check at `/terminal`, and a body-local verdict
+    # would answer a question the caller never got to ask: round 5 measured the
+    # compiler pointing at the legal connector step while the parser pointed at
+    # the illegal terminal. Where the kind is not admitted, the slot check is the
+    # true diagnosis and must win, exactly as it does for the return-path reasons.
+    verdict = (
+        process_call_placement_verdict(
+            steps, terminal, context=PROCESS_CALL_PLACEMENT_CONTEXT_LABELS[context]
+        )
+        if is_allowed(context, TERMINAL_SLOT, "process_call")
+        else None
     )
     if verdict is not None:
         reason, at, message = verdict
@@ -260,19 +271,12 @@ def _walk_body(
                 _join(path, *at),
                 message=message,
             )
-        # The return-path reasons are guarded by admissibility, the generic slot
-        # check is not. Without the guard a body that admits NO call in any slot —
-        # a Decision FALSE arm — reported the continuation code while the parser
-        # reported the generic placement code for the same document. Where the
-        # slot never admitted the kind, the slot check is the true diagnosis and
-        # must win.
-        if is_allowed(context, TERMINAL_SLOT, "process_call"):
-            raise raise_compile_error(
-                PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
-                _SEMANTIC_PHASE,
-                _join(path, *at),
-                message=message,
-            )
+        raise raise_compile_error(
+            PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+            _SEMANTIC_PHASE,
+            _join(path, *at),
+            message=message,
+        )
     for index, step in enumerate(steps):
         _check(context, STEP_SLOT, step, _join(path, "steps", index))
     terminal_path = _join(path, "terminal")

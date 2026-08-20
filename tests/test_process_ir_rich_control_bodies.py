@@ -1367,12 +1367,12 @@ def _placement_node(payload):
     return getattr(ir_module, name).model_validate(copy.deepcopy(payload))
 
 
-def _placement_via_parser(steps, terminal):
+def _placement_via_parser(steps, terminal, doc=None):
     try:
-        parse_process_ir_v1(_placement_doc(steps, terminal))
+        parse_process_ir_v1(doc if doc is not None else _placement_doc(steps, terminal))
     except ProcessIRValidationError as exc:
         first = exc.diagnostics[0]
-        return (first.code, first.path)
+        return (first.code, first.path, first.message)
     return None
 
 
@@ -1390,7 +1390,7 @@ def _placement_via_compiler(steps, terminal):
         validate_body_capabilities(ir)
     except ProcessIRCompileError as exc:
         first = exc.diagnostics[0]
-        return (first.code, first.path)
+        return (first.code, first.path, first.message)
     return None
 
 
@@ -1398,11 +1398,16 @@ def _placement_via_compiler(steps, terminal):
     "label,steps,terminal", _PLACEMENT_CASES, ids=[c[0] for c in _PLACEMENT_CASES]
 )
 def test_both_entry_points_agree_on_process_call_placement(label, steps, terminal):
-    """Same document, same answer — CODE and POINTER, not just code.
+    """Same document, same answer — CODE, POINTER **and MESSAGE**.
 
-    Pointer parity is the half that was broken: round 3 found the two paths
-    serving `/terminal` and `/steps/0` for one body, so a caller who fixed what
-    the compiler pointed at would still be refused by the parser.
+    Each of the three has been the broken one. Round 3 found the paths serving
+    `/terminal` and `/steps/0` for one body, so a caller who fixed what the
+    compiler pointed at would still be refused by the parser. Round 5 then found
+    that comparing only code and pointer was itself the gap: for a call in a step
+    slot the two agreed on both and still handed the caller DIFFERENT WORDS,
+    because the union rejection is translated in one place and the verdict is
+    rendered in another. Comparing the whole diagnostic is what makes that
+    unwritable.
     """
     assert _placement_via_parser(steps, terminal) == _placement_via_compiler(steps, terminal)
 
@@ -1438,3 +1443,53 @@ def test_the_placement_verdict_is_the_only_copy_of_the_decision():
     assert "process_call_placement_verdict(" in source
     # The reasons are compared by NAME, never by a re-spelled literal.
     assert '"prefix"' not in source and '"step_form"' not in source
+
+
+def _decision_placement_doc(false_steps, false_terminal):
+    """A Decision FALSE arm admits NO process_call in any slot, so it exercises
+    the branch a Branch leg cannot: what the two entry points say when the kind
+    was never admitted here at all."""
+    return {"version": "1", "body": {"kind": "sequence", "steps": [{
+        "kind": "decision", "comparison": "equals",
+        "left": {"value_type": "static", "static_value": "a"},
+        "right": {"value_type": "static", "static_value": "b"},
+        "true_arm": {"steps": [copy.deepcopy(_PLACEMENT_DPP)],
+                     "terminal": {"kind": "stop"}},
+        "false_arm": {"steps": copy.deepcopy(false_steps),
+                      "terminal": copy.deepcopy(false_terminal)},
+    }]}}
+
+
+def _false_arm_via_compiler(false_steps, false_terminal):
+    from boomi_mcp.compiler.process_ir.body_capabilities import validate_body_capabilities
+
+    ir = parse_process_ir_v1(_decision_placement_doc([_PLACEMENT_DPP], {"kind": "stop"}))
+    arm = ir.body.steps[0].false_arm
+    arm.steps = [_placement_node(s) for s in false_steps]
+    arm.terminal = _placement_node(false_terminal)
+    try:
+        validate_body_capabilities(ir)
+    except ProcessIRCompileError as exc:
+        first = exc.diagnostics[0]
+        return (first.code, first.path, first.message)
+    return None
+
+
+@pytest.mark.parametrize("steps,terminal,label", [
+    ([_PLACEMENT_CONN], _PLACEMENT_CALL, "connector step + call terminal"),
+    ([_PLACEMENT_DPP], _PLACEMENT_CALL, "prefix + call terminal"),
+    ([], _PLACEMENT_CALL, "bare call terminal"),
+], ids=["connector_then_call", "prefix_then_call", "bare_call"])
+def test_a_slot_that_admits_no_call_reports_the_slot_check_on_both_paths(steps, terminal, label):
+    """Where the kind was never admitted, the SLOT check is the true diagnosis.
+
+    Round 5 measured the compiler answering a body-local placement question the
+    caller never got to ask: for a FALSE arm holding a legal connector step and a
+    call terminal, it pointed at the LEGAL connector while the parser pointed at
+    the illegal terminal. The verdict is body-local and cannot know the slot was
+    closed, so the guard belongs at the call site — and this pins it for every
+    placement, not just the one that was reported.
+    """
+    doc = _decision_placement_doc(steps, terminal)
+    assert _placement_via_parser(None, None, doc=doc) == \
+        _false_arm_via_compiler(steps, terminal), label
