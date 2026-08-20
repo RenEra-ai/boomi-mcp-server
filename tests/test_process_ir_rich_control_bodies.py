@@ -1225,21 +1225,29 @@ def test_control_wiring_code_is_independent_of_the_corrupted_TARGET_value():
         assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID, bogus
 
 
-def test_the_mixing_gate_propagates_in_BOTH_directions():
-    """The rule is symmetric: "these two may not share a path".
+def test_the_call_above_connector_direction_is_shadowed_not_silently_dropped():
+    """The symmetric mixing direction is UNREACHABLE after #175 — pinned, not assumed.
 
-    Carrying only the connector direction caught `connector -> ... -> process_call`
-    but not `process_call -> ... -> connector`, which a mutable model expresses
-    just as easily.
+    `_walk_body` still carries `process_call_above` so that "these two may not
+    share a path" propagates both ways. But #175 made a call a TERMINAL, and a
+    terminal ends its body — so the only way a call can sit ABOVE anything is in
+    a `steps` slot, which is now itself a continuation request and is caught
+    first. The symmetric branch is therefore shadowed.
+
+    This test exists because the previous version of it was VACUOUS: it mutated a
+    leg to hold a call in `steps` with a connector-bearing Decision below, and
+    asserted `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` — which the generic
+    slot check produced the moment `process_call` left the step union, never
+    reaching the mixing propagation it claimed to prove. A guard nothing can
+    reach passes whether or not the property holds, so the honest thing is to
+    pin the SHADOWING: if a later change makes the call-above direction
+    expressible again, this fails and forces the symmetric guard to be re-proven
+    rather than quietly trusted.
     """
     from boomi_mcp.compiler.process_ir.body_capabilities import validate_body_capabilities
 
     ir = parse_process_ir_v1(PROCESS_CALL_BRANCH_DOC)
     leg = ir.body.steps[0].legs[0]
-    # #175: the call is a TERMINAL now, so "a call above something" can only be
-    # reached by MUTATION — which is exactly this test's premise. Push the call
-    # into the leg's steps (a slot the union no longer admits, so no authored
-    # payload can arrive this way) and hang a connector-bearing Decision off it.
     leg.steps = [ir_module.ProcessCallNodeV1.model_validate(
         {"kind": "process_call", "process_ref": "child_process"}
     )]
@@ -1253,7 +1261,37 @@ def test_the_mixing_gate_propagates_in_BOTH_directions():
     })
     with pytest.raises(ProcessIRCompileError) as excinfo:
         validate_body_capabilities(ir)
+    # The CONTINUATION is what this document actually gets wrong first: a call in
+    # a step slot is invalid regardless of what sits below it.
+    assert (
+        excinfo.value.diagnostics[0].code
+        == PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
+    ), [(d.code, d.path) for d in excinfo.value.diagnostics]
+    assert excinfo.value.diagnostics[0].path.endswith("/legs/0/steps/0")
+
+
+def test_the_connector_above_call_direction_is_still_live_and_enforced():
+    """The direction that IS reachable must stay proven, or removing the vacuous
+    test above would have left the mixing gate with no compiler-side witness at
+    all. A connector in the leg's steps with the call as the leg TERMINAL is
+    expressible by authoring, needs no mutation, and must report mixing."""
+    from boomi_mcp.compiler.process_ir.body_capabilities import validate_body_capabilities
+
+    # The MODEL refuses this shape at construction (its own connector-precedence
+    # check), so the compiler-side gate is reached the same way every other
+    # mutable-model test reaches it: build a legal document, then append the
+    # connector afterwards. That is precisely the bypass the compiler gate
+    # exists for — an exported model handed straight to `compile_process_ir_v1`.
+    ir = parse_process_ir_v1(PROCESS_CALL_BRANCH_DOC)
+    ir.body.steps[0].legs[0].steps = [
+        ir_module.ConnectorCallNodeV1.model_validate(
+            {"kind": "connector_call", "operation_ref": "op_rest_get", "action": "GET"}
+        )
+    ]
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        validate_body_capabilities(ir)
     assert excinfo.value.diagnostics[0].code == PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+    assert "process_call_connector_mixing" in excinfo.value.diagnostics[0].message
 
 
 def test_control_wiring_code_covers_transition_ROLE_corruption():

@@ -4,6 +4,7 @@ Verifies that _resolve_existing_components, _build_plan, and _apply_plan
 handle ambiguous same-name matches correctly instead of silently picking one.
 """
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -8503,6 +8504,47 @@ def test_a_failed_apply_step_is_not_recorded_as_created():
     # The success cells still report the mutation they performed.
     assert derive("create", {"_success": True}) == "created"
     assert derive("update", {"_success": True}) == "updated"
+
+
+@patch(_PATCH_TARGET)
+def test_the_catch_composition_refusal_happens_at_PLAN_time(mock_pag):
+    """QA-175-r1-01, pinned through `_build_plan` rather than through the builder.
+
+    The refusal originally lived only in `_emit_catch_leg`, so `plan` reported
+    `planned_action: "create"` and apply really created the preceding component
+    before failing — live QA measured the inventory going 26 -> 27. A unit test on
+    the builder alone would not have caught that: the defect was WHERE the gate
+    ran, not whether the rule was right. This drives the planner, which is the
+    surface the caller actually hits.
+    """
+    mock_pag.return_value = []
+    cfg = {
+        "process_kind": "database_to_api_sync",
+        "source": {"connector_type": "database", "connection_id": "c1",
+                   "operation_id": "o1", "action_type": "Get"},
+        "transform": {"mode": "passthrough"},
+        "target": {"connector_type": "rest", "connection_id": "c2",
+                   "operation_id": "o2", "action_type": "POST"},
+        "reliability": {
+            "retry_count": 0,
+            "dlq": {"mode": "error_subprocess_ref",
+                    "process_id": "11111111-1111-1111-1111-111111111111"},
+            "catch_exception": {"message_template": "{1}",
+                                "parameter_source": "caught_error"},
+        },
+    }
+    comp = _comp(name="Refused Catch", comp_type="process")
+    comp_dict = comp.model_dump()
+    comp_dict["config"] = dict(cfg, name="Refused Catch")
+    plan = _build_plan(MagicMock(), _build_config([comp_dict]))
+
+    assert plan["_success"] is True
+    step = plan["steps"][0]
+    # The planner must NOT report this as a mutation it intends to perform.
+    assert step["planned_action"] != "create", step
+    blob = json.dumps(step)
+    assert "PROCESS_CALL_CONFIG_INVALID" in blob, step
+    assert "reliability.catch_exception" in blob, step
 
 
 def test_the_apply_loop_uses_that_derivation_not_the_requested_action():

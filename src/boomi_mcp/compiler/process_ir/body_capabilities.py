@@ -252,6 +252,28 @@ def _walk_body(
                 "the path it is on"
             ),
         )
+    # #175: a `process_call` in a body that admits it as a TERMINAL is a
+    # CONTINUATION request, not a kind the slot never admitted — and the two
+    # deserve different codes. Checked before the generic slot check below,
+    # which would otherwise report "not admitted in this control-body slot" and
+    # send the caller to the placement table to discover the kind IS listed.
+    #
+    # This mirrors the parser's own translation exactly, so the two public entry
+    # points agree on the code for one defect: reachable by authoring through
+    # `parse_process_ir_v1`, and by mutating an exported model and handing it
+    # straight to `compile_process_ir_v1`.
+    if is_allowed(context, TERMINAL_SLOT, "process_call"):
+        for index, step in enumerate(steps):
+            if getattr(step, "kind", None) == "process_call":
+                raise raise_compile_error(
+                    PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
+                    _SEMANTIC_PHASE,
+                    _join(path, "steps", index),
+                    message=(
+                        "a process_call is the terminal of its path — author it in "
+                        "this body's terminal slot, with nothing after it"
+                    ),
+                )
     for index, step in enumerate(steps):
         _check(context, STEP_SLOT, step, _join(path, "steps", index))
     terminal_path = _join(path, "terminal")

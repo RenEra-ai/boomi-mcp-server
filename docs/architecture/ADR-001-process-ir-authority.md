@@ -301,7 +301,7 @@ Every authoring capability sits in exactly one of four states:
 
 | State | Contents |
 |---|---|
-| **Emittable now** | Supported linear DB/REST/SOAP/WSS flows, maps, current Data Process/control/property/cache nodes, wrapper ProcessCall, current terminals, and legacy reliability paths. |
+| **Emittable now** | Supported linear DB/REST/SOAP/WSS flows, maps, current Data Process/control/property/cache nodes, wrapper ProcessCall (#175: TERMINAL form only — exactly one call, ending its path; binding a returning child's return paths is gated as `process_call_return_path_binding`, #176), current terminals, and legacy reliability paths. |
 | **Gated** (future M12 issues behind capability gates) | Generalized ConnectorCall, multiple connector calls per path, rich Branch/Decision bodies and continuation, scoped Try/Catch over composed flows, keyed cache, bounded loops, joins, and topology compilation. |
 | **Guidance-only** | Doctrine, queue/Event Streams guidance, and current schedule/deployment/topology advice. |
 | **Unsupported** (permanently, by design) | Caller-authored CFG edges, raw XML/layout/shape IDs in IR, unrestricted loops/joins, speculative queue mutation, credentials, and secret values. |
@@ -322,10 +322,19 @@ Every authoring capability sits in exactly one of four states:
   Process Call asserted graph wiring Boomi does not back: the platform projects a call's outbound
   connection from the CALLED process's Return Documents shapes (`configuration/processcall/
   returnpaths`), so a call whose child returns nothing has no outgoing edge at all — while this
-  server emitted an empty `returnpaths` together with a dragpoint to a trailing Stop. The UI
-  resolves the contradiction by not drawing the connection, leaving the Stop orphaned on the
-  canvas. Four of the five Process Calls in the in-tree UI-built captures are the terminal form;
-  the one connected call is the only one with a populated `returnpaths`.
+  server emitted an empty `returnpaths` together with a dragpoint to a trailing Stop. Four of the
+  five Process Calls in the in-tree UI-built captures are the terminal form; the one connected
+  call is the only one with a populated `returnpaths`.
+
+  **Stated at the strength the evidence actually supports.** The orphaned Stop on the canvas is a
+  REPORTED observation (issue #175, manual UI inspection). Live QA could not reproduce the
+  rendering leg — browser automation was unavailable — and recorded UI behaviour as INCONCLUSIVE.
+  What live QA did establish is stronger than the canvas claim: with a child proven to return
+  nothing, the shape downstream of the call DOES NOT EXECUTE. A control process
+  (`start -> message -> exception`) raised its canary error; the graph-identical probe
+  (`start -> processcall(empty returnpaths, dragpoint) -> exception`) completed with zero error
+  documents and no error record. The connection is dead at RUNTIME, not merely unrendered, and it
+  is that measurement — not the canvas report — that this exception rests on.
 
   Withdrawing those shapes on V1 — a root chain of calls, a call followed by `stop` or
   `return_documents`, a multi-call `wrapper_subprocess`, a wrapper with
@@ -349,7 +358,8 @@ Every authoring capability sits in exactly one of four states:
      authored Return Documents terminal is refused rather than discarded.
   4. **Every withdrawn capability is transferred, not deleted.** The returning-child form is
      filed as #176 with acceptance criteria, and each refusal's remediation names the gated
-     capability `process_call_return_path_binding` that will restore it.
+     capability `process_call_return_path_binding` that will restore it — on the canonical
+     surface and on the legacy wrapper facade alike, the catch-composition refusal included.
 
   This exception is scoped to the Process Call return-path defect and consumes no precedent for
   any other tightening. A later contraction that cannot show all four prerequisites — most of all

@@ -349,15 +349,26 @@ def _body_kind_error(message: str) -> PydanticCustomError:
     )
 
 
-def _return_path_binding_error(message: str) -> PydanticCustomError:
+def _return_path_binding_error(
+    message: str, *, at: Tuple[Any, ...] = ()
+) -> PydanticCustomError:
     """#175: a process call authored so that execution continues past it.
 
     Distinct from ``_body_kind_error``: the kind IS admitted here, in the
     terminal position. What is unsupported is the CONTINUATION — which needs the
     called process's return-document shapes and is gated separately.
+
+    ``at`` carries the offending node's position RELATIVE to the model raising
+    this. A model-level validator's error is located at the model, so a defect at
+    ``/body/steps/1`` would otherwise be served as ``/body`` — a pointer that is
+    technically valid and practically useless on a long list. Pydantic passes the
+    context through untouched, and ``_translate_pydantic_error`` appends it, so
+    the served diagnostic addresses the node the caller has to change.
     """
     return PydanticCustomError(  # noqa: EM101
-        "process_ir_capability_process_call_return_path_binding_unsupported", message
+        "process_ir_capability_process_call_return_path_binding_unsupported",
+        message,
+        {"offending_path": tuple(at)} if at else None,
     )
 
 
@@ -1188,7 +1199,8 @@ def _check_process_call_terminal_form(
         if getattr(step, "kind", None) == "process_call":
             raise _return_path_binding_error(
                 "a process_call may not be followed by another node in a {0} — it "
-                "is the terminal of its path (step {1})".format(context, index)
+                "is the terminal of its path (step {1})".format(context, index),
+                at=("steps", index),
             )
     if getattr(terminal, "kind", None) != "process_call":
         return
@@ -1208,7 +1220,8 @@ def _check_process_call_terminal_form(
         raise _return_path_binding_error(
             "a process_call {0} terminal admits no preceding steps — a call whose "
             "child returns no documents ends the path it is on, and a prefix before "
-            "it is not attested".format(context)
+            "it is not attested".format(context),
+            at=("terminal",),
         )
 
 
@@ -1793,10 +1806,14 @@ class SequenceNodeV1(_ProcessIRBase):
                         "connector step "
                         "(process_call_connector_mixing is gated)"
                     )
+            offending_index = next(
+                i for i, kind in enumerate(kinds) if kind != "process_call"
+            )
             raise _return_path_binding_error(
                 "a process_call is the terminal of its path — a root sequence "
                 "containing one admits no other step, including a trailing stop or "
-                "return_documents"
+                "return_documents (step {0})".format(offending_index),
+                at=("steps", offending_index),
             )
 
         # Connector-call flow (#140). Checked BEFORE the source/target branch so
@@ -2337,6 +2354,13 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
         # Custom messages are static strings raised by OUR validators (never
         # authored values), so surfacing them keeps diagnostics actionable.
         message = str(error.get("msg") or _MESSAGES[code])
+        # #175: a validator that knows WHICH node offended says so through the
+        # error context, because a model-level validator's own loc is the model.
+        # The segments are our own literals and integers — never authored values
+        # — so appending them cannot leak payload into a pointer.
+        offending = (error.get("ctx") or {}).get("offending_path") or ()
+        if offending:
+            path = _loc_to_path(loc + tuple(offending))
         return _diagnostic(code, path, message=message)
 
     # #142: the retry bound and the scope literal get their own codes, checked

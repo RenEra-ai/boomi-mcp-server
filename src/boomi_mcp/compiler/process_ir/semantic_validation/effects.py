@@ -47,15 +47,17 @@ non-waiting call in any authorable document, and that the rule was therefore
 proven only against a hand-built CFG. Re-measured, one claim at a time:
 
     root  [process_call, set_dpp, stop]        -> PROCESS_IR_CAPABILITY_UNSUPPORTED
-    root  [process_call, process_call, stop]   -> ALLOWED
+    root  [process_call, process_call, stop]   -> ...RETURN_PATH_BINDING_UNSUPPORTED  (#175)
+    root  [process_call]                       -> ALLOWED (the exact singleton, #175)
     leg   [process_call, set_dpp]              -> PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
-    leg   [process_call]                       -> ALLOWED
+    leg   steps=[], terminal=process_call      -> ALLOWED (#175: the call is the TERMINAL)
 
 So what is gated is MIXING a process call with property steps, not the process
-call itself. A Branch whose legs each hold one process call is authorable, and
+call itself — and, since #175, CONTINUATION past a call in any slot. A Branch
+whose legs each TERMINATE in one process call is authorable, and
 a subprocess SUMMARY supplies the read that the authored surface will not — the
 reads this collector scans come from the contract, not from a ``set_property``
-node. ``branch([[call(wait=False)], [call(wait=True)]])`` with two summaries is
+node. ``branch`` with a non-waiting call terminating leg 0 and a waiting one terminating leg 1, plus two summaries, is
 a genuine, parseable document that reports ``…SIDE_EFFECT_ORDERING_UNSAFE``.
 
 The synthetic-CFG tests are kept because they pin the shape independently of

@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ...errors import (
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_COMPILE_ERROR_REGION_INVALID,
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
     PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING,
@@ -115,6 +116,15 @@ _REMEDIATION = {
         "published at get_schema_template(schema_name='process_ir_authoring', "
         "category='placement'); a kind absent from a slot is rejected outright."
     ),
+    # --- #175 -------------------------------------------------------------
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED: (
+        "Author the process call as the TERMINAL of its path and remove whatever "
+        "followed it — a call whose child returns no documents ends the path, so a "
+        "trailing stop is not needed and cannot be emitted. A call that must hand "
+        "control onward needs its child's return-document shapes bound to it; that "
+        "capability is published as process_call_return_path_binding at "
+        "get_schema_template(schema_name='process_ir_authoring', category='capability')."
+    ),
     PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID: (
         "This is a compiler defect: derived branch/decision wiring (count, order, "
         "labels, or target) is wrong. Please report it with the authored path."
@@ -124,8 +134,8 @@ _REMEDIATION = {
         "reachable from the single entry."
     ),
     PROCESS_IR_SEMANTIC_MISSING_TERMINAL: (
-        "End the path in a stop, return_documents, exception, or routed target "
-        "terminal."
+        "End the path in a stop, return_documents, exception, routed target, or "
+        "process call terminal — a process call ends the path it is on."
     ),
     PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW: (
         "Give the flow exactly one entry and one successor per step; joins, cycles, "
@@ -244,6 +254,9 @@ _MESSAGES = {
     PROCESS_IR_COMPILE_EMITTER_MISSING: "no registered emitter for the node kind",
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED: (
         "unsupported error scope or error-scope placement"
+    ),
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED: (
+        "a process call may not be followed by another node in ProcessIR v1"
     ),
     PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION: (
         "a positive retry count would re-run the flow's document source"

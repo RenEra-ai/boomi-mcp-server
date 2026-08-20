@@ -1,0 +1,106 @@
+You are reviewing an IMPLEMENTATION against the ARCHITECT DESIGN PLAN that authorized it.
+
+Repository: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: codex/issue-175
+Baseline (before the work): 3fd5027e16d4f9fe5377884a0140909a3b4d1e67
+Current tip: 753b46f3bb620d449f1294c82578a928455fdeca
+
+Read the tree at the current tip. Your question is NOT "is this code good in isolation" — the
+repository's own gates already ran and are clean (full non-KB suite 10146 passed / 17 skipped; a
+detached Codex code review over the same delta returned no findings on its final round; one live
+QA engagement through the public MCP tool boundary). Your question is:
+
+    **Does the implementation faithfully realize the attested design plan, and does anything in it
+    contradict, silently narrow, or quietly exceed what that plan authorized?**
+
+## What the issue is
+
+Boomi does not key a Process Call's outbound connection on the dragpoint. The parent shape carries
+a `<returnpaths>` element naming the CALLED process's Return Documents shapes by `childShapeName`;
+only those make a forward connection valid, and a call whose child returns nothing is a path
+terminal with no outgoing edge. This server hardcoded `<returnpaths/>` EMPTY everywhere and still
+drew a dragpoint to a trailing Stop, so the platform drew no connection and the Stop was orphaned.
+
+## Changed files (excluding the evidence archive, which is audit record, not code)
+
+docs/architecture/ADR-001-process-ir-authority.md
+docs/architecture/ISSUE_175_AUDIT_LEDGER.md
+docs/architecture/M12_COMPATIBILITY_INVENTORY.md
+docs/architecture/PROCESS_IR_COMPILER_V1.md
+docs/architecture/PROCESS_IR_SEMANTIC_VALIDATION_V1.md
+docs/architecture/PROCESS_IR_V1.md
+src/boomi_mcp/authoring/process_ir_projection.py
+src/boomi_mcp/categories/components/builders/process_emitters/legacy.py
+src/boomi_mcp/categories/components/builders/process_emitters/rendering.py
+src/boomi_mcp/categories/components/builders/process_flow_builder.py
+src/boomi_mcp/categories/components/process_graph_verifier.py
+src/boomi_mcp/categories/integration_builder.py
+src/boomi_mcp/categories/meta_tools.py
+src/boomi_mcp/compiler/process_ir/body_capabilities.py
+src/boomi_mcp/compiler/process_ir/contracts.py
+src/boomi_mcp/compiler/process_ir/emitter_registry.py
+src/boomi_mcp/compiler/process_ir/invariants.py
+src/boomi_mcp/compiler/process_ir/legacy_adapters/wrapper_subprocess.py
+src/boomi_mcp/compiler/process_ir/lowering.py
+src/boomi_mcp/errors.py
+src/boomi_mcp/models/_process_ir_compat.py
+src/boomi_mcp/models/process_ir.py
+tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json
+tests/fixtures/golden_xml/process_ir_rich_branch_process_call.xml
+tests/fixtures/golden_xml/processcall_standalone_parent.xml
+tests/fixtures/m12_12/legacy_reachability_inventory.json
+tests/fixtures/process_graph/processcall_orphan_continuation.xml
+tests/fixtures/process_ir/emitter_parity/return_documents_flow.process.xml
+tests/fixtures/process_ir/emitter_parity/wrapper_flow.process.xml
+tests/fixtures/process_ir/flow_sequence_compat_cases.json
+tests/fixtures/process_ir/process_ir_compiler_v1.json
+tests/fixtures/process_ir/process_ir_v1.json
+tests/fixtures/process_ir/process_ir_v1.schema.json
+tests/fixtures/process_ir/rich_control/branch_process_call.json
+tests/test_integration_builder.py
+tests/test_legacy_process_ir_adapters.py
+tests/test_process_flow_builder.py
+tests/test_process_flow_builder_trycatch_dlq.py
+tests/test_process_graph_verifier.py
+tests/test_process_ir_authoring_contract_parity.py
+tests/test_process_ir_models.py
+tests/test_process_ir_rich_control_bodies.py
+tests/test_process_ir_semantic_effects.py
+tests/test_process_ir_semantic_lineage.py
+tests/test_schema_template_process_flow.py
+tests/test_wave_gate.py
+tests/test_wrapper_subprocess_builder.py
+
+## Where to look hardest
+
+1. **The capability contraction.** The plan authorized making every CONNECTED Process Call form a
+   typed refusal. Verify the implementation withdrew exactly what the plan authorized and no more —
+   and that nothing is silently DROPPED rather than refused. Specifically check that a multi-call
+   wrapper list is never truncated to its first entry and an authored Return Documents terminal is
+   never discarded: both must raise.
+2. **The ADR-001 §9 exception.** The plan required a dated, narrow exception because §9 forbids
+   withdrawing V1 acceptance "as a side effect of landing an M12 issue". Judge whether the
+   amendment actually establishes its four prerequisites, or whether it merely asserts them.
+3. **Deviations.** The implementation plan recorded ten deliberate deviations (D1–D10) from the
+   architect plan. Judge whether each is justified or whether one quietly drops something the
+   architect required. Two conditional items were resolved by measurement rather than implemented —
+   an `integration_builder` merge-authority change (live QA showed an update already removes the
+   orphan and its edge) and a fourth live probe (moved to the follow-up issue). Judge those
+   resolutions.
+4. **Scope creep in the other direction.** Two fixes landed that the architect plan did NOT ask
+   for: a plan-time gate on the `database_to_api_sync` catch composition, and an apply-step status
+   derivation in `integration_builder.py` that is PRE-EXISTING and outside the plan's file list.
+   Both came from live QA findings. Judge whether they belong in this slice or should have been
+   deferred.
+5. **The `process_call_connector_mixing` gate.** Moving the kind from the body STEP union to the
+   TERMINAL union made `steps=[connector_call], terminal=process_call` representable for the first
+   time. Verify the gate was extended to terminals everywhere it needed to be, and that no path
+   through the widened slot escapes it.
+
+## Output
+
+Report concrete, verifiable findings only. For each, name the file and what specifically
+contradicts the plan. If the implementation is faithful, say so plainly rather than manufacturing
+findings.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'

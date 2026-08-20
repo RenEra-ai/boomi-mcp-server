@@ -10,9 +10,14 @@ no Stop follows it (the verifier's ``RETURN_DOCS_STOP_EXCLUSIVE`` invariant).
 It emits NO standalone components (``emit_components`` -> ``[]``); the terminal is
 realized inline on the process flow, so the primitive only contributes a
 ``process_config`` fragment (keyed ``return_documents``) plus an empty
-``depends_on``. ``ProcessFlowBuilder`` / ``WrapperSubprocessBuilder`` read that
-block and emit the terminal shape (see ``process_flow_builder._terminal_flow_entry``
-/ ``_emit_returndocuments``).
+``depends_on``. ``ProcessFlowBuilder`` reads that block and emits the terminal
+shape (see ``process_flow_builder._terminal_flow_entry`` / ``_emit_returndocuments``).
+
+``WrapperSubprocessBuilder`` no longer does (#175): a wrapper's own Process Call
+ends its path, so no terminal can follow it there, and ``return_documents.enabled``
+is refused with ``PROCESS_CALL_CONFIG_INVALID``. That withdraws nothing from THIS
+primitive — the child process still declares its own return documents, which is
+the side of the contract this primitive models.
 """
 
 from __future__ import annotations
@@ -70,13 +75,22 @@ class ReturnDocumentsPrimitive(PrimitivePattern):
         description=(
             "Declare a process-level Return Documents terminal shape that returns "
             "the current documents to the calling source point (subprocess return "
-            "value). Replaces the trailing Stop; nothing follows it."
+            "value). Replaces the trailing Stop; nothing follows it. This is the "
+            "CHILD side of the contract: declaring it here gives this process a "
+            "return value, and does NOT by itself let a parent's Process Call "
+            "continue onward — the parent must bind these return-document shapes "
+            "to its call, which is published as the gated capability "
+            "process_call_return_path_binding."
         ),
         tags=["terminal", "subprocess", "return-documents"],
         use_cases=[
             "Give a subprocess a return value (documents returned to the parent)",
             "Return documents to a Process Call / Process Route caller",
         ],
+        # #175: `wrapper_subprocess` no longer emits this terminal — a wrapper's
+        # own Process Call ends its path, so nothing can follow it there. The
+        # child process declares its return documents itself, which is what this
+        # primitive is for.
         not_for=[
             "Ending a top-level process that has no caller (use the default Stop)",
             "Mid-flow document manipulation (use data_process / a map)",

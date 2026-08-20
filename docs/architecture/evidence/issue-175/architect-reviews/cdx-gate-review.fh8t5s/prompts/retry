@@ -1,0 +1,14 @@
+Approvals are unavailable in this read-only review session, and there is no human on the other end
+of this turn to answer a question. Do not request approval, do not ask questions, and do not wait
+for anything.
+
+Read the repository at the current tip yourself, judge the implementation against the ARCHITECT
+DESIGN PLAN that was inlined with the original request, and emit your findings NOW, in this turn,
+as plain text.
+
+For each finding: name the file, and state specifically what contradicts, silently narrows, or
+quietly exceeds what the plan authorized. Report only concrete, verifiable findings — if the
+implementation is faithful to the plan, say so plainly rather than manufacturing findings to fill
+a report.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'

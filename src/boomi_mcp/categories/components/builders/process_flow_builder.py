@@ -2832,7 +2832,10 @@ def _process_call_catch_composition_error(
             hint=(
                 "A process call ends the path it is on, so the Exception would be "
                 "unreachable. Drop catch_exception, throw the error inside the error "
-                "subprocess instead, or use dlq.mode='document_cache_ref'."
+                "subprocess instead, or use dlq.mode='document_cache_ref'. Routing "
+                "past a call requires binding the called process's return-document "
+                "shapes, published as the gated capability "
+                "process_call_return_path_binding."
             ),
         )
     return None
@@ -4772,15 +4775,23 @@ def _validate_processcall_entry(
 
 
 class WrapperSubprocessBuilder(ProcessFlowBuilder):
-    """Thin wrapper-parent ("facade") process: start -> process call(s) -> stop.
+    """Thin wrapper-parent ("facade") process: start -> process call. Nothing follows.
 
-    Issue #90 (M4.5.5). Emits a parent process whose only steps are standalone
-    Process Call shapes invoking in-spec child processes (by ``subprocess_ref``
-    = ``$ref:KEY``) or existing components (by ``process_id``). The standalone
-    processcall shape is transcribed from the live ``work`` wrapper exemplar
-    (component 6a432a0b-..., a processcall calling the main-logic subprocess
-    57a5822c-...): ``abort="false"`` (the parent continues past a child failure),
-    ``wait="true"``, empty parameters/returnpaths.
+    Issue #90 (M4.5.5), amended by #175. Emits a parent process whose only step
+    is ONE standalone Process Call invoking an in-spec child process (by
+    ``subprocess_ref`` = ``$ref:KEY``) or an existing component (by
+    ``process_id``). The call is the TERMINAL: Boomi projects a call's outbound
+    connection from the CALLED process's return-document shapes, and this builder
+    declares none, so no Stop is emitted after it. The standalone processcall
+    shape is transcribed from the live ``work`` wrapper exemplar (component
+    6a432a0b-..., a processcall calling the main-logic subprocess 57a5822c-...):
+    ``abort="false"`` (the parent continues past a child failure), ``wait="true"``,
+    empty parameters/returnpaths.
+
+    A second call, and ``return_documents.enabled=true``, are refused with
+    ``PROCESS_CALL_CONFIG_INVALID`` at validate AND at build — both would need the
+    child's return paths bound to the call (gated as
+    ``process_call_return_path_binding``, #176).
 
     Config shape::
 

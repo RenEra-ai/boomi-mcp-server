@@ -1,0 +1,759 @@
+You are reviewing an IMPLEMENTATION against the ARCHITECT DESIGN PLAN that authorized it.
+
+Repository: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server
+Branch: codex/issue-175
+Baseline (before the work): 3fd5027e16d4f9fe5377884a0140909a3b4d1e67
+Current tip: 753b46f3bb620d449f1294c82578a928455fdeca
+
+Read the tree at the current tip. Your question is NOT "is this code good in isolation" — the
+repository's own gates already ran and are clean (full non-KB suite 10146 passed / 17 skipped; a
+detached Codex code review over the same delta returned no findings on its final round; one live
+QA engagement through the public MCP tool boundary). Your question is:
+
+    **Does the implementation faithfully realize the attested design plan, and does anything in it
+    contradict, silently narrow, or quietly exceed what that plan authorized?**
+
+## What the issue is
+
+Boomi does not key a Process Call's outbound connection on the dragpoint. The parent shape carries
+a `<returnpaths>` element naming the CALLED process's Return Documents shapes by `childShapeName`;
+only those make a forward connection valid, and a call whose child returns nothing is a path
+terminal with no outgoing edge. This server hardcoded `<returnpaths/>` EMPTY everywhere and still
+drew a dragpoint to a trailing Stop, so the platform drew no connection and the Stop was orphaned.
+
+## Changed files (excluding the evidence archive, which is audit record, not code)
+
+docs/architecture/ADR-001-process-ir-authority.md
+docs/architecture/ISSUE_175_AUDIT_LEDGER.md
+docs/architecture/M12_COMPATIBILITY_INVENTORY.md
+docs/architecture/PROCESS_IR_COMPILER_V1.md
+docs/architecture/PROCESS_IR_SEMANTIC_VALIDATION_V1.md
+docs/architecture/PROCESS_IR_V1.md
+src/boomi_mcp/authoring/process_ir_projection.py
+src/boomi_mcp/categories/components/builders/process_emitters/legacy.py
+src/boomi_mcp/categories/components/builders/process_emitters/rendering.py
+src/boomi_mcp/categories/components/builders/process_flow_builder.py
+src/boomi_mcp/categories/components/process_graph_verifier.py
+src/boomi_mcp/categories/integration_builder.py
+src/boomi_mcp/categories/meta_tools.py
+src/boomi_mcp/compiler/process_ir/body_capabilities.py
+src/boomi_mcp/compiler/process_ir/contracts.py
+src/boomi_mcp/compiler/process_ir/emitter_registry.py
+src/boomi_mcp/compiler/process_ir/invariants.py
+src/boomi_mcp/compiler/process_ir/legacy_adapters/wrapper_subprocess.py
+src/boomi_mcp/compiler/process_ir/lowering.py
+src/boomi_mcp/errors.py
+src/boomi_mcp/models/_process_ir_compat.py
+src/boomi_mcp/models/process_ir.py
+tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json
+tests/fixtures/golden_xml/process_ir_rich_branch_process_call.xml
+tests/fixtures/golden_xml/processcall_standalone_parent.xml
+tests/fixtures/m12_12/legacy_reachability_inventory.json
+tests/fixtures/process_graph/processcall_orphan_continuation.xml
+tests/fixtures/process_ir/emitter_parity/return_documents_flow.process.xml
+tests/fixtures/process_ir/emitter_parity/wrapper_flow.process.xml
+tests/fixtures/process_ir/flow_sequence_compat_cases.json
+tests/fixtures/process_ir/process_ir_compiler_v1.json
+tests/fixtures/process_ir/process_ir_v1.json
+tests/fixtures/process_ir/process_ir_v1.schema.json
+tests/fixtures/process_ir/rich_control/branch_process_call.json
+tests/test_integration_builder.py
+tests/test_legacy_process_ir_adapters.py
+tests/test_process_flow_builder.py
+tests/test_process_flow_builder_trycatch_dlq.py
+tests/test_process_graph_verifier.py
+tests/test_process_ir_authoring_contract_parity.py
+tests/test_process_ir_models.py
+tests/test_process_ir_rich_control_bodies.py
+tests/test_process_ir_semantic_effects.py
+tests/test_process_ir_semantic_lineage.py
+tests/test_schema_template_process_flow.py
+tests/test_wave_gate.py
+tests/test_wrapper_subprocess_builder.py
+
+## Where to look hardest
+
+1. **The capability contraction.** The plan authorized making every CONNECTED Process Call form a
+   typed refusal. Verify the implementation withdrew exactly what the plan authorized and no more —
+   and that nothing is silently DROPPED rather than refused. Specifically check that a multi-call
+   wrapper list is never truncated to its first entry and an authored Return Documents terminal is
+   never discarded: both must raise.
+2. **The ADR-001 §9 exception.** The plan required a dated, narrow exception because §9 forbids
+   withdrawing V1 acceptance "as a side effect of landing an M12 issue". Judge whether the
+   amendment actually establishes its four prerequisites, or whether it merely asserts them.
+3. **Deviations.** The implementation plan recorded ten deliberate deviations (D1–D10) from the
+   architect plan. Judge whether each is justified or whether one quietly drops something the
+   architect required. Two conditional items were resolved by measurement rather than implemented —
+   an `integration_builder` merge-authority change (live QA showed an update already removes the
+   orphan and its edge) and a fourth live probe (moved to the follow-up issue). Judge those
+   resolutions.
+4. **Scope creep in the other direction.** Two fixes landed that the architect plan did NOT ask
+   for: a plan-time gate on the `database_to_api_sync` catch composition, and an apply-step status
+   derivation in `integration_builder.py` that is PRE-EXISTING and outside the plan's file list.
+   Both came from live QA findings. Judge whether they belong in this slice or should have been
+   deferred.
+5. **The `process_call_connector_mixing` gate.** Moving the kind from the body STEP union to the
+   TERMINAL union made `steps=[connector_call], terminal=process_call` representable for the first
+   time. Verify the gate was extended to terminals everywhere it needed to be, and that no path
+   through the widened slot escapes it.
+
+## Output
+
+Report concrete, verifiable findings only. For each, name the file and what specifically
+contradicts the plan. If the implementation is faithful, say so plainly rather than manufacturing
+findings.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'
+
+
+=== ARCHITECT DESIGN PLAN (verbatim) ===
+# Issue #175 — Terminal Process Call and Fail-Closed Continuation
+
+## DISPOSITION
+
+This run ships **A + C** and closes #175 only if their live and repository gates pass.
+
+- **A lands in #175.** Process Call becomes a terminal in every currently supported ProcessIR and legacy-wrapper placement: empty `returnpaths`, no outgoing dragpoint, and no synthetic trailing Stop.
+- **C lands in #175.** The graph verifier reports `PROCESS_CALL_ORPHAN_CONTINUATION` at ERROR severity whenever a Process Call has absent/empty `returnpaths` and any outgoing dragpoint.
+- **B does not land here.** Returning-child binding requires child-shape introspection, literal-component GET, ordered return-route materialization, and multi-return fan-out. File a dedicated child issue under epic #134 before recording the deferral or closing #175. Place it immediately after #175 and before #156.
+- **Connected Process Calls become impossible to author until B lands.** Direct ProcessIR, mutable-model compiler entry, wrapper configuration, legacy catch composition, emitter registration, and the verifier all fail closed. No surface may continue emitting empty `returnpaths` plus an edge.
+- **No `returns` Boolean is introduced.** In the future B design, authored continuation/return-route structure expresses intent; child inspection proves it. A caller assertion is never silently trusted.
+- **A is partly derived-matrix and partly root-local.** Branch and Decision TRUE-arm placement moves from the `step` rows to the `terminal` rows in the body-capability matrix. Root `SequenceNodeV1` requires a targeted exact-singleton `[process_call]` rule because the body registry does not govern the root.
+- **No ProcessIRV2.** The live #134 owner record, inspected read-only, states that M12 has no external consumers and no compatibility/deprecation obligation. Record a narrow dated #134/#175 exception in ADR-001. Do not claim full compatibility:
+  - All non-Process-Call V1 documents remain valid.
+  - A single-call `wrapper_subprocess` request remains valid and now emits `Start → terminal Process Call`.
+  - Existing ProcessIR Process Call continuations, multi-call wrappers, wrapper `return_documents.enabled=true`, and catch `error_subprocess → exception` become typed pre-mutation refusals.
+  - These capabilities are transferred to the B follow-up rather than silently dropped or approximated.
+
+Exactly what #175 ships:
+
+1. Root, Branch-leg, and Decision TRUE-arm terminal Process Calls.
+2. Single-call wrapper parents without trailing Stops.
+3. Terminal legacy error-subprocess paths without trailing Stops.
+4. Typed refusal for every connected/chained Process Call form.
+5. A verifier error with permanent non-vacuity evidence.
+6. Updated machine-served schemas, capabilities, protocols, revisions, docs, goldens, and audit evidence.
+7. Live create/readback/update/UI validation on `renera`.
+
+The original source P1 label remains immutable and already derives to **Critical** under the repository rules. If live probing shows Boomi strips the submitted dragpoint, record that as additional P0 evidence and add mutation-accounting/apply-preservation to the affected blocking classes. The tier remains Critical either way.
+
+Close #175 only when the final tree is current on every required gate, the B follow-up has an actual issue number and roadmap placement, and no connected Process Call remains reachable. If a live probe refutes conditional terminality or post-fix normalization/preservation remains, leave #175 open with `ESCALATE-OPEN`.
+
+## PROBE PLAN
+
+Use one `boomi-qa-tester` Stage-1 engagement through the public MCP boundary on the disposable `renera` profile. Run the characterization probes as its first task, preserve that agent identity for post-fix validation, and derive expectations only from:
+
+- The pre-baseline M11 UI-built captures.
+- Official Process Call and Return Documents documentation/platform templates.
+- Live platform readback and execution evidence.
+
+Generated goldens and components produced by the implementation are not positive clean-room oracles. A pre-fix generated component may be used only as a negative diagnostic witness.
+
+### Load-bearing probes
+
+**Probe 1 + Probe 3 — malformed non-returning call, readback, UI, and runtime**
+
+Create an intentionally malformed parent containing `Start → Process Call(empty returnpaths) → Stop`, aimed at a child independently proven to return no documents. Preserve the exact submitted XML, GET the stored component, inspect the UI, and use execution records/shape metrics to determine whether the downstream Stop is reached.
+
+Outcome mapping:
+
+- **Boomi strips the Process Call dragpoint**
+  - Preserve the original P1 label and add P0 normalization-drift evidence.
+  - A + C remain the implementation.
+  - Add mandatory `create → GET → update → GET` coverage for mutation accounting and update preservation.
+  - An explicit update of a pre-fix component must remove the orphan Stop and must not resurrect its edge.
+  - If the existing update merge retains the orphan, change the integration update boundary in this slice so the compiled process graph is replacement-authoritative.
+  - If corrected terminal XML still changes on readback, #175 cannot close.
+
+- **Boomi stores the dragpoint but the UI suppresses it**
+  - A + C remain unchanged; the defect is persisted dead graph state plus canvas corruption.
+  - The post-fix update test must remove both the dead edge and orphan Stop.
+
+- **Boomi stores and renders the dragpoint, but the downstream shape never executes**
+  - A + C remain; record runtime correctness, not merely canvas correctness.
+
+- **Boomi stores/renders it and the downstream shape executes for a child independently proven to return nothing**
+  - This refutes the proposed terminal invariant.
+  - Stop implementation, do not ship C, leave #175 open, and re-plan from the captured platform behavior.
+
+- **Execution observability is unavailable**
+  - Mark runtime semantics inconclusive; do not invent a result.
+  - A + C may still proceed from the independent docs/M11 structural evidence, but the ledger must retain the unresolved runtime question in the B follow-up.
+
+**Probe 2 — UI-built returning child and parent**
+
+Build a child with one Return Documents shape through the UI, build its parent, and export both.
+
+- Populated ordered `returnpaths` plus an outgoing edge confirms C and records B’s exact wire shape.
+- Any valid UI-built component with empty `returnpaths` plus an outgoing edge refutes C; do not ship the verifier rule until reconciled.
+- Differences in `childShapeName`, `returnLabel`, or nesting affect only B’s acceptance contract because #175 emits no connected form.
+
+### Confirmatory/B-only probe
+
+**Probe 4 — two Return Documents shapes**
+
+Capture a child with two labeled Return Documents shapes and its UI-built parent.
+
+- Confirm entry ordering, labels, shape-name namespace, and whether the parent exposes one branch per child return.
+- Record the evidence in the B issue.
+- This result does not alter #175’s terminal-only implementation unless the platform produces a valid empty-`returnpaths` continuation.
+
+### Mandatory post-fix live probes
+
+- Build and GET a single-call wrapper. Assert exactly Start plus Process Call, empty `returnpaths`, no Process Call dragpoint, no Stop, clean graph verification, and clean UI.
+- Update that component using the same specification and GET it again. Assert no orphan or edge is resurrected.
+- Exercise a Branch or Decision TRUE path ending directly in Process Call—the changed ProcessIR capability class.
+- Submit connected direct ProcessIR, multi-call wrapper, enabled wrapper Return Documents, and Process Call followed by catch Exception requests. Each must return its exact typed error before any mutation.
+- Execute the terminal wrapper and confirm the child is invoked successfully.
+
+Do not compare `submitted_xml_digest` directly with the readback `digest` if they use different algorithms. Compare a common canonical projection of the owned `<process>` subtree/shape graph, then independently validate each served digest according to its documented algorithm.
+
+## FILE-BY-FILE PLAN
+
+### Audit and roadmap records
+
+**`docs/architecture/ISSUE_175_AUDIT_LEDGER.md`**
+
+- Instantiate from `docs/architecture/templates/AUDIT_LEDGER_TEMPLATE.md`.
+- Record expected step-0 baseline `3fd5027e16d4f9fe5377884a0140909a3b4d1e67`; abort if the printed implementation baseline differs.
+- Declare the slice behavior-affecting and roster Stage-1 QA, Stage-2 repository review, and the composite wave gate. Do not mint undeclared loops.
+- Seed the report’s P1 as Critical and record affected classes: emitted graph validity, runtime behavior, machine-served contracts, and capability reachability; add mutation accounting/apply preservation if Probe 1 shows stripping.
+- Seed defect classes for:
+  - one-sided returnpath/outgoing-edge invariant;
+  - grammar claiming child-return semantics without child authority;
+  - generated golden treated as platform evidence;
+  - served prose collapsing returning and non-returning calls;
+  - legacy continuation semantic loss.
+- Record fixture provenance, each evaluation, second-instance structural-fix checks, checkpoint decisions, issue deferral lineage, and durable review attestation paths.
+
+**`docs/architecture/evidence/issue-175/index.jsonl` and `SHA256SUMS`**
+
+- Add the evidence skeleton before QA.
+- Archive probe inputs/results, independent M11/doc provenance, live submitted/readback projections, screenshots or execution evidence, QA reports, and detached-review attestations.
+- Never promote implementation-generated goldens to platform evidence.
+
+**GitHub #134, #141, #156, and new B issue**
+
+- #134: update the Process Call capability row to distinguish terminal/non-returning support from gated returning-child binding.
+- #141: record that its captures attest direct outcomes into terminal Process Calls, not Process Call steps connected to Stops.
+- #156: permit terminal-only catch-leg Process Call; make any connected recovery form depend on B.
+- File a dedicated #134 child issue titled **“Process Call return-path late binding for returning subprocesses”** before any deferral is recorded. Insert its assigned number into the ledger and #175 closure note.
+
+### Public errors and grammar
+
+**`src/boomi_mcp/errors.py`**
+
+- Add `PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED`.
+- Register it in `ERROR_TAXONOMY` as a non-retryable ProcessIR capability error owned by #175.
+- Give it static, served remediation directing callers to author a terminal Process Call or await `capability.process_call_return_path_binding`.
+- Do not reuse this code for the legacy wrapper facade; retain that surface’s established `PROCESS_CALL_CONFIG_INVALID`.
+- Guard with taxonomy completeness and duplicate-code tests.
+
+**`src/boomi_mcp/models/process_ir.py`**
+
+- Keep `ProcessCallNodeV1` fields unchanged; do not add `returns` or child-return metadata.
+- Rewrite its published docstring to state that V1 supports terminal, non-returning invocation only and that downstream return-path binding is gated.
+- Remove `ProcessCallNodeV1` from `BranchLegStepV1`; `DecisionTrueArmStepV1` changes with that alias.
+- Add `ProcessCallNodeV1` to `BranchLegV1.terminal` and `DecisionTrueArmV1.terminal`. Leave the Decision FALSE arm unchanged.
+- Replace `_check_process_call_path_mode` with terminal-form checks:
+  - Branch/TRUE terminal Process Call requires `steps=[]`.
+  - Any Process Call in `steps` produces the dedicated return-path-binding error.
+  - A Process Call terminal with a prefix also produces that code rather than silently widening #141 beyond its evidence.
+- Add `mode="before"` validation where needed so old raw `steps:[{"kind":"process_call"}]` documents receive the dedicated code before discriminated-union parsing degrades them to a generic unknown-node error.
+- Change root sequence rules:
+  - `[process_call]` is valid.
+  - Any Process Call with any predecessor or successor—including Stop, Return Documents, or another Process Call—is rejected with the dedicated code.
+  - Existing non-Process-Call sequence rules retain their current diagnostic precedence.
+- Update `_walk_controls` to treat a terminal Process Call as being on the path for connector-mixing and ancestor checks.
+- Update Pydantic-error-to-public-diagnostic mapping and remediation so every direct parse path returns the new code and an exact JSON pointer.
+- Add capability entries:
+  - `terminal_process_call: supported`
+  - `process_call_return_path_binding: gated`
+- Correct the #141 provenance comments at the body unions, validators, whole-document walk, and capability manifest.
+- Risk: changing unions alters the published schema and old authored documents. Pin exact accepted/rejected JSON shapes and error codes.
+
+**`src/boomi_mcp/compiler/process_ir/body_capabilities.py`**
+
+- Move `process_call` from `(branch_leg, step)` and `(decision_true_arm, step)` to their terminal rows.
+- Update the evidence comments to say the captures attest terminal calls.
+- Independently enforce the empty-prefix terminal rule against mutable `ProcessIRV1` objects.
+- Independently reject a root Process Call that is not the exact singleton.
+- Include terminal Process Calls in symmetric connector/path mixing detection and point at `/terminal` when applicable.
+- Raise `PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED` for continuation attempts; retain the generic body-placement code for genuinely unsupported contexts such as Decision FALSE.
+- Risk: model validation can be bypassed by mutating exported models. Mutable-model tests must prove this compiler gate is independent.
+
+### CFG, lowering, and emission
+
+**`src/boomi_mcp/compiler/process_ir/contracts.py`**
+
+- Add `"process_call"` to `CfgExitRoleV1`.
+- Do not change `ProcessCallSemanticV1` or `ProcessCallInputV1`; #175 carries no return-route binding.
+- Risk: serializers and compiler snapshots gain a new exit-role value. Regenerate compiler artifacts and pin it.
+
+**`src/boomi_mcp/compiler/process_ir/lowering.py`**
+
+- Add `"process_call": "process_call"` to `_EXIT_KINDS`.
+- Let existing sequence/body lowering mark a terminal Process Call as an exit node with no successor.
+- Ensure it appears in `exit_node_ids`, and its emitted shape appears in `terminal_shape_ids`.
+- Keep process id, wait, abort, label lowering unchanged.
+- Risk: accidental ordering-edge retention would recreate the defect. Assert zero outgoing CFG and plan transitions.
+
+**`src/boomi_mcp/compiler/process_ir/invariants.py`**
+
+- Add `_ALLOWED_EXIT_ROLES["process_call"] = ("process_call",)`.
+- Reject a Process Call exit with any successor.
+- Reject a Process Call leaf lacking its exit role and any non-Process-Call semantic node claiming that role.
+- Risk: an unchecked new exit role could make malformed CFGs appear terminal. Add all three adversarial cases.
+
+**`src/boomi_mcp/compiler/process_ir/diagnostics.py`**
+
+- Register the new compiler-side diagnostic message and remediation.
+- Update missing-terminal wording to list terminal Process Call where the relevant context admits it.
+- Keep messages static and free of repository paths.
+
+**`src/boomi_mcp/compiler/process_ir/emitter_registry.py`**
+
+- Change the Process Call registration’s outgoing cardinality from `EXACT_ONE` to `EXACT_ZERO`.
+- Keep `_emit_processcall` and required component-reference handling unchanged.
+- This is the final canonical fail-closed boundary: even a malformed plan cannot emit a connected Process Call.
+- Risk: an incorrect `ZERO_OR_ONE` would preserve the invalid form; test zero accepted and one rejected with `PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID`.
+
+**`src/boomi_mcp/categories/components/builders/process_emitters/rendering.py`**
+
+- Leave XML behavior unchanged: it already emits `<parameters/><returnpaths/>` and derives empty `<dragpoints/>` from zero transitions.
+- Change `render_processcall` documentation from “terminal or forward” to “terminal-only in current ProcessIR/legacy authorities; future return binding must supply verified return-path data.”
+- Do not teach this low-level renderer cross-component lookup.
+- Risk: future callers might treat its generic transition parameter as permission. Registry and legacy guards provide enforcement.
+
+**`src/boomi_mcp/categories/components/builders/process_emitters/legacy.py`**
+
+- Make legacy `_emit_processcall` reject any non-`None` `next_name` with `PROCESS_CALL_CONFIG_INVALID`.
+- Allow `next_name=None`, preserving valid terminal error-subprocess emission.
+- Risk: overlooked legacy callers may now fail. The failure is intentional and must occur before component mutation; inventory and builder tests enumerate them.
+
+### Wrapper and compatibility paths
+
+**`src/boomi_mcp/compiler/process_ir/legacy_adapters/wrapper_subprocess.py`**
+
+- Convert exactly one validated wrapper call into root `body.steps=[ProcessCallNodeV1(...)]`.
+- Append neither Stop nor Return Documents.
+- If called with multiple calls or enabled Return Documents despite validation, raise `LEGACY_ADAPTER_SEMANTIC_LOSS`; never truncate the list or discard a terminal.
+- Preserve all call fields and `$ref`/literal component reference behavior.
+- Risk: silent truncation would be data loss. Add bypass tests proving rejection.
+
+**`src/boomi_mcp/categories/components/builders/process_flow_builder.py`**
+
+- In `WrapperSubprocessBuilder.validate_config`, preserve existing malformed-entry and malformed-Return-Documents diagnostic precedence, then:
+  - require exactly one Process Call;
+  - accept absent or structurally valid `return_documents.enabled=false`;
+  - reject valid `enabled=true` using `PROCESS_CALL_CONFIG_INVALID` with a field pointer and gated-capability hint.
+- Mirror these gates in `build` before invoking the adapter.
+- Emit `Start → terminal Process Call`, with no Stop.
+- Apply the same outbound rule to error-subprocess catch paths:
+  - bare error subprocess remains terminal and byte-stable;
+  - notification followed by error subprocess becomes notification → terminal Process Call, without a Stop;
+  - error subprocess followed by catch Exception is rejected pre-build because it requires Process Call continuation;
+  - document-cache DLQ paths remain unchanged.
+- Update comments that currently promise empty `returnpaths` plus continuation.
+- Risk: wrapper/catch capabilities could be silently altered. Tests must distinguish accepted terminal forms from explicit typed refusals.
+
+**`src/boomi_mcp/models/_process_ir_compat.py`**
+
+- Legacy wrapper → ProcessIR:
+  - accept exactly one call and no enabled Return Documents;
+  - produce the singleton terminal Process Call.
+- ProcessIR → legacy wrapper:
+  - recognize only singleton terminal Process Call;
+  - reconstruct the same one-call configuration and preserve wait/abort/label/reference fields.
+- Reject old multi-call and Return-Documents wrapper forms with the dedicated ProcessIR capability code.
+- Add defensive refusal for impossible mixed/multi mutated models.
+- Risk: compatibility codecs may otherwise serialize a narrower document as though nothing was lost. Round-trip tests must assert equality for the supported singleton and typed refusal for transferred forms.
+
+**`src/boomi_mcp/categories/integration_builder.py`**
+
+- No unconditional production change.
+- Add plan/apply tests proving every new refusal occurs before mutation and that updating a pre-fix wrapper removes the obsolete edge/Stop.
+- If live Probe 1 shows the update merge preserves or resurrects that graph, change the merge boundary so newly compiled process `<shapes>` and dragpoints replace the existing compiler-owned graph; preserve only the existing allowlisted platform-owned metadata outside that graph.
+- Do not add a general migration that rewrites unrelated live components.
+- Risk: incorrect merge authority is mutation-accounting/apply-preservation Critical and blocks closure.
+
+### Verifier
+
+**`src/boomi_mcp/categories/components/process_graph_verifier.py`**
+
+- Add a helper such as `_processcall_has_declared_return_paths` and reuse it from `_is_terminal`.
+- After collecting each shape’s raw dragpoint children, report:
+  - code: `PROCESS_CALL_ORPHAN_CONTINUATION`
+  - severity: `ERROR`
+  - condition: `shapetype=processcall`, missing/empty `returnpaths`, and at least one raw dragpoint.
+- Key the check off raw dragpoints even if `toShape` is absent or unresolved; generic edge diagnostics may co-report.
+- Do not add a second orphan-Stop warning: existing `SHAPE_UNREACHABLE` already covers that artifact.
+- Do not register this code in the global authoring taxonomy. Verifier codes are served directly in `verify_process_graph` results; compiler emission verification continues to surface its generic `PROCESS_IR_COMPILE_VERIFIER_FAILED` wrapper while retaining verifier details.
+- Risk: a one-sided or vacuous guard. Permanent tests must include a concrete rejected graph and valid terminal/populated-returnpath witnesses.
+
+### Machine-served authoring surfaces
+
+**`src/boomi_mcp/authoring/process_ir_projection.py`**
+
+- Change Process Call summary/order rules to terminal/no-return/no-downstream semantics.
+- Link it to both `terminal_process_call` and `process_call_return_path_binding`.
+- Let placement rows derive from the updated body registry; do not hand-maintain a duplicate placement list.
+- Risk: enforcement and served projection drift. Bidirectional parity tests remain mandatory.
+
+**`src/boomi_mcp/models/process_ir_authoring.py`**
+
+- No type change is expected.
+- Confirm its existing capability/placement models can express the new values without widening internal compiler vocabulary into the public contract.
+- Any required type edit must remain representational only; it must not become a second placement authority.
+
+**`src/boomi_mcp/categories/meta_tools.py`**
+
+- Update the served `wrapper_subprocess` protocol:
+  - summary: exactly one call;
+  - graph: Start → terminal Process Call;
+  - supported terminal shape: `processcall`;
+  - multi-call and enabled Return Documents: gated;
+  - singleton `$ref`/literal example retained;
+  - `PROCESS_CALL_CONFIG_INVALID` fields include `process_calls` and `return_documents.enabled`.
+- Remove prose advertising Process Call chains and wrapper Return Documents.
+- Risk: stale served prose would make the removed capability reachable. Snapshot tests must assert exact content.
+
+**`src/boomi_mcp/patterns/primitives/return_documents.py`**
+
+- Preserve the child-side Return Documents primitive.
+- Clarify its served description: declaring Return Documents in a child does not itself author the caller’s return-path binding; that parent-side capability is gated.
+- Do not remove Return Documents from ordinary child process authoring.
+- Risk: conflating caller and child semantics would advertise B as shipped.
+
+**`src/boomi_mcp/authoring/contract.py`**
+
+- Keep the ProcessIR selector/version and authoring contract registry version unchanged.
+- Allow the compiler revision to move because the capability manifest/body matrix changes.
+- Assert recipe source, registry, and implementation revisions remain stable.
+- Risk: stale revision caching. Revision tests must prove the compiler revision changes exactly where expected.
+
+### Semantic analysis and documentation
+
+**`src/boomi_mcp/compiler/process_ir/semantic_validation/effects.py`**
+
+- Replace examples/comments that treat multi-call/root Process Call chains as valid.
+- Use terminal Branch/TRUE-arm Process Calls in effect examples.
+- Preserve `wait=false` effect behavior and warnings using a supported singleton fixture.
+- No algorithm change is expected because effects operate on CFG nodes.
+
+**`src/boomi_mcp/compiler/process_ir/semantic_validation/flow.py` and `findings.py`**
+
+- Update terminal/remediation wording to include Process Call exit role.
+- Keep flow algorithms unchanged unless tests expose an assumption that every Process Call has a successor.
+- Pin that a terminal `wait=false` call establishes no downstream state because no downstream path exists.
+
+**`docs/architecture/ADR-001-process-ir-authority.md`**
+
+- Add a dated #134/#175 exception to the normal “accepted-document semantic change requires a new IR version” rule.
+- State the prerequisites: owner-approved no-consumer M12 posture, invalid existing emission, fail-closed contraction, typed diagnostics, and capability transfer to a filed issue.
+- Make clear this is not a general weakening of versioning policy.
+
+**`docs/architecture/PROCESS_IR_V1.md`**
+
+- Document root singleton and control-body terminal JSON forms.
+- Document rejected continuation/multi-call forms and migration guidance.
+- Separate terminal Process Call support from gated return-path binding.
+- Correct #141 provenance.
+
+**`docs/architecture/PROCESS_IR_COMPILER_V1.md`**
+
+- Add the Process Call CFG exit role, zero-outgoing emitter cardinality, and verifier invariant.
+- State that no returnpath metadata enters semantic/emitter input in #175.
+
+**`docs/architecture/PROCESS_IR_SEMANTIC_VALIDATION_V1.md`**
+
+- Remove wrapper/multi-call examples that become invalid.
+- Explain that child Return Documents effects cannot be projected into the caller until B.
+
+**`docs/architecture/M12_COMPATIBILITY_INVENTORY.md`**
+
+- Regenerate its owned block through `tests/_m12_12_legacy_inventory.py`.
+- Record the singleton wrapper transfer and explicit refusal of multi-call/Return-Documents wrappers.
+- Assert recipe-specific source/registry/implementation digests do not change; unexplained recipe digest churn is blocking.
+
+**`.codex/plans/issue-141-live-captures.md`**
+
+- Amend the capture interpretation: empty-returnpath Process Calls are terminal, and the connected-to-Stop sample is valid only because it has a populated child returnpath.
+- Treat this ignored/local plan as supporting context, not durable completion evidence; mirror the correction in committed architecture docs and GitHub #141.
+
+### Fixtures and generated artifacts
+
+**`tests/fixtures/process_ir/rich_control/branch_process_call.json`**
+
+- Change each affected path from `steps:[process_call], terminal:stop` to `steps:[], terminal:process_call`.
+- Preserve references, labels, and sibling ordering.
+
+**`tests/_wave_gate_golden_corpus.py`**
+
+- Keep the rich Branch case as the authority for the preceding JSON form.
+- Keep the existing singleton wrapper case as the authority for wrapper output.
+- Do not add hand-authored expected bytes or counts.
+
+**`tests/fixtures/golden_xml/process_ir_rich_branch_process_call.xml`**
+
+- Regenerate from its case after implementation.
+- Expected graph: Start → Branch, with each relevant branch edge ending directly at a Process Call; no trailing Stops and no Process Call dragpoints.
+
+**`tests/fixtures/golden_xml/processcall_standalone_parent.xml`**
+
+- Regenerate from the existing wrapper case.
+- Expected graph: Start → Process Call only.
+
+**`tests/fixtures/golden_xml/try_catch_dlq_error_subprocess.xml`**
+
+- Regenerate/check through its case but require byte stability; it already demonstrates a valid terminal legacy error-subprocess call.
+- Any new Stop or outgoing Process Call edge is a regression.
+
+**`tests/fixtures/wave_gate/goldens.jsonl`**
+
+- Keep the existing active rows and counts unchanged; it contains paths/ownership, not generated byte digests.
+- Do not hand-edit it unless the corpus generator proves a case was added or removed, which this plan does not require.
+
+**`tests/test_process_ir_models.py::golden_documents()` and generated ProcessIR fixtures**
+
+- Change `wrapper_flow` to one terminal Process Call while retaining non-default `wait`, `abort_on_error`, label, and `$ref` fields for coverage.
+- Add a separate valid `return_documents_flow` document so direct Return Documents emitter coverage is not silently lost.
+- Mechanically regenerate:
+  - `tests/fixtures/process_ir/process_ir_v1.json`
+  - `tests/fixtures/process_ir/process_ir_v1.schema.json`
+  - `tests/fixtures/process_ir/process_ir_compiler_v1.json`
+  - `tests/fixtures/process_ir/emitter_parity/wrapper_flow.process.xml`
+  - a new `tests/fixtures/process_ir/emitter_parity/return_documents_flow.process.xml`
+- Never hand-edit serialized compiler/schema/XML bytes.
+
+**`tests/fixtures/process_ir/flow_sequence_compat_cases.json`**
+
+- Make the positive wrapper case singleton/no Return Documents.
+- Preserve old multi-call and enabled-Return-Documents payloads as explicit negative cases expecting the dedicated code.
+
+**`tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json`**
+
+- Regenerate from the served projection; placement and capability entries must move.
+
+**`tests/fixtures/authoring_contract/process_ir_authoring_v1.schema.json`**
+
+- Expect byte stability because the contract’s type shape does not change.
+- Any churn requires an explained model change and review.
+
+**`tests/fixtures/m12_12/legacy_reachability_inventory.json`**
+
+- Regenerate through the inventory writer.
+- Expect compiler/capability facts to move and recipe package revisions to remain stable.
+
+**New negative verifier fixture**
+
+- Add a frozen minimal XML fixture under `tests/fixtures/process_graph_verifier/` containing Start → Process Call(empty returnpaths) → Stop.
+- Record provenance as baseline `3fd5027e16d4f9fe5377884a0140909a3b4d1e67`.
+- Use it only as a negative witness; it is not a platform-valid oracle.
+
+The two M11 live XML fixtures remain byte-for-byte unchanged.
+
+## TESTS AND GATES
+
+### Grammar and contract tests
+
+Update/add tests in:
+
+- `tests/test_process_ir_models.py`
+- `tests/test_process_ir_rich_control_bodies.py`
+- `tests/test_process_ir_authoring_contract.py`
+- `tests/test_process_ir_authoring_contract_parity.py`
+- `tests/test_process_ir_authoring_contract_clean_room.py`
+- `tests/test_schema_template_process_flow.py`
+- error-taxonomy tests
+
+Required cases:
+
+- Root `[process_call]` validates.
+- Root Process Call followed by Stop, Return Documents, another Process Call, or any other node returns the dedicated code.
+- Branch and Decision TRUE accept `steps=[]`, `terminal=process_call`.
+- Process Call in body `steps` and terminal Process Call with a prefix return the dedicated code and exact pointer.
+- Decision FALSE continues to reject Process Call as an unsupported body placement.
+- All non-Process-Call golden documents retain validation behavior.
+- Generated JSON schema moves Process Call from body step to terminal unions.
+- Clean-room authoring coverage derives terminal placement from M11 evidence and marks return-path binding gated.
+- Served wrapper protocol and capability entries match enforcement exactly.
+
+### Compiler and emitter tests
+
+Update/add tests in:
+
+- `tests/test_process_ir_compiler.py`
+- `tests/test_process_ir_compiler_invariants.py`
+- `tests/test_process_emitter_registry.py`
+- `tests/test_process_emitter_parity.py`
+- `tests/test_process_ir_semantic_effects.py` and semantic pipeline/policy tests
+
+Required cases:
+
+- Terminal Process Call is a CFG exit with zero successors.
+- Its plan node has zero outgoing transitions and is in `terminal_shape_ids`.
+- Process Call leaf missing its exit role fails invariants.
+- Non-Process-Call node claiming the role fails.
+- Process Call exit with an outgoing edge fails.
+- Emitter registration accepts zero and rejects one outgoing transition.
+- Terminal output contains empty `returnpaths`, empty dragpoints, and no Stop.
+- `wait=true/false`, abort, label, and reference fields remain byte-correct.
+- Compile/fingerprint is deterministic across repeated runs.
+- `wait=false` effect diagnostics remain covered using a supported singleton.
+
+### Wrapper, compatibility, and integration tests
+
+Update/add tests in:
+
+- `tests/test_wrapper_subprocess_builder.py`
+- `tests/test_wrapper_subprocess_extensions_hoist.py`
+- `tests/test_process_ir_flow_sequence_codec.py`
+- `tests/test_legacy_process_ir_adapters.py`
+- `tests/test_legacy_adapter_cutover.py`
+- `tests/test_process_flow_builder_trycatch_dlq.py`
+- `tests/test_integration_builder.py`
+- `tests/test_issue_153_canonical_apply_e2e.py` where its update harness is reusable
+
+Required cases:
+
+- Existing singleton wrapper request remains accepted and preserves every field.
+- Wrapper output contains only Start and terminal Process Call.
+- Multi-call and enabled Return Documents fail before build/apply with stable typed errors.
+- Adapter bypass attempts fail with `LEGACY_ADAPTER_SEMANTIC_LOSS`.
+- Supported singleton legacy ↔ IR round-trip is lossless.
+- Bare error subprocess remains terminal and its golden stays byte-identical.
+- Notification → error subprocess has no trailing Stop.
+- Error subprocess → catch Exception is typed-rejected; Exception is never silently dropped.
+- Document-cache DLQ behavior remains unchanged.
+- Plan/apply mutation counts remain zero for every rejected form.
+- Updating a pre-fix malformed wrapper removes obsolete graph state; if not, apply the conditional integration-builder fix.
+
+### Verifier non-vacuity and negative controls
+
+Update `tests/test_process_graph_verifier.py` with:
+
+- Minimal Start → Process Call(empty returns) → Stop produces exactly `PROCESS_CALL_ORPHAN_CONTINUATION` at ERROR and checks all three shapes.
+- Missing `returnpaths` and `<returnpaths/>` without dragpoints remain valid terminal forms.
+- Populated returnpaths plus a dragpoint remains valid.
+- A raw dragpoint with missing/unresolved `toShape` still produces the Process Call error alongside generic diagnostics.
+- M11 `shape10` remains valid.
+- M11 terminal Process Calls remain valid.
+- Clearing `shape10`’s returnpath in memory produces the new error—an independent mutation witness.
+- Integration verification preserves the raw verifier code while returning its established top-level graph-integrity error.
+
+Before regenerating goldens, run the new verifier against the baseline versions of:
+
+- `process_ir_rich_branch_process_call.xml`
+- `processcall_standalone_parent.xml`
+- `wrapper_flow.process.xml`
+
+Record that all fail the new rule. After regeneration, all must pass. Preserve the minimal baseline fixture as the permanent negative control.
+
+### Completion gates
+
+1. Before edits, print and record the literal baseline; expected value is `3fd5027e16d4f9fe5377884a0140909a3b4d1e67`.
+2. Run targeted affected tests, then the full non-KB suite.
+3. Complete the single Stage-1 `boomi-qa-tester` engagement, including characterization and post-fix public-MCP scenarios.
+4. Reconcile every QA finding, derive severity, assign defect class, perform the second-instance check, and validate every correction.
+5. Commit the QA-validated tree at Stage 1.5.
+6. Run the detached Stage-2 Codex review from the literal baseline, apply `receiving-code-review` discipline, and use affected QA plus fix-only review for corrections.
+7. Run the composite wave gate: entire suite, every active golden, deterministic compile/fingerprint checks, integration-level review, and one live scenario for each changed capability class.
+8. Mechanically regenerate case-owned artifacts only; unexplained schema, recipe-revision, manifest-count, or unrelated golden churn is blocking.
+9. Close #175 only after current-tip attestations, zero Critical residue, and a valid B issue/deferral record.
+
+## RISKS
+
+1. **Critical — a connected Process Call remains reachable through a bypass.**
+   - Detection: Pydantic tests, mutable-model compiler tests, CFG invariants, `EXACT_ZERO`, legacy emitter guard, verifier fixture, and live refusal/no-mutation probes.
+
+2. **Critical — Boomi strips submitted graph state or update merge resurrects the orphan.**
+   - Detection: live submitted/readback canonical projection, create → GET → update → GET, mutation counts, and #153 apply/update harness.
+
+3. **Critical — shipped wrapper/catch capability is silently truncated.**
+   - Detection: adapter bypass tests, exact typed refusals, no-mutation assertions, and explicit checks that calls, Return Documents, or Exceptions are never dropped.
+
+4. **High — verifier rejects legitimate returning-child XML.**
+   - Detection: unchanged M11 populated-returnpath sample, Probe 2 UI export, and populated-returnpath unit witness. Any valid empty-returnpath continuation blocks C.
+
+5. **High — served schema or capability text still advertises continuation.**
+   - Detection: generated ProcessIR schema, authoring contract snapshot, body-registry parity, schema-template test, meta-tool protocol snapshot, and inventory regeneration.
+
+6. **High — existing malformed live components now fail verification.**
+   - Detection/handling: explicit migration documentation and update-path test. This is intentional fail-closed behavior; no automatic bulk rewrite is included.
+
+7. **High — V1 compatibility contraction violates documented policy.**
+   - Detection: ADR amendment citing the live #134 owner decision, exact compatibility inventory, and explicit transferred-capability issue. No claim of universal backward compatibility.
+
+8. **Medium — generated goldens become circular evidence.**
+   - Detection: M11/docs remain the positive oracle; baseline generated bytes are negative-only; case-first regeneration and provenance ledger.
+
+9. **Medium — digest comparison produces a false drift conclusion.**
+   - Detection: use one common canonical projection for submitted/readback comparison and validate served digests separately.
+
+10. **Medium — wrapper fixture contraction loses wait/abort/effect or Return Documents coverage.**
+    - Detection: retain non-default Process Call fields in the singleton fixture and add a separate Return Documents emitter-parity document.
+
+11. **Medium — shape ordinals/layout/fingerprints churn beyond removed Stops.**
+    - Detection: case-owned goldens, exact graph assertions, deterministic compilation, and composite wave checks.
+
+12. **Medium — unrelated recipe package revisions move.**
+    - Detection: regenerated compatibility inventory must show stable recipe source, registry, and implementation digests. Any change is blocking until explained.
+
+13. **Critical stop condition — live evidence shows a non-returning child legitimately continues.**
+    - Detection: Probe 1/3 UI and runtime evidence. Action: halt A/C, leave #175 open, and re-plan.
+
+## OUT OF SCOPE / DEFERRALS
+
+### Returning-child return-path binding
+
+- **Reason class:** `out-of-scope-by-design`
+- **Issue:** new dedicated child issue under #134, titled **“Process Call return-path late binding for returning subprocesses”**; its assigned number must be filed and recorded before #175’s deferral or closure.
+- **Roadmap placement:** immediately after #175 and before #156. #156 depends on it for any connected Process Call form.
+- **Acceptance criteria for that issue:**
+  - Structural continuation/return-route authoring expresses intent; no trusted Boolean.
+  - In-spec `$ref` children derive ordered Return Documents shape names/labels from their compiled child graph.
+  - Literal component ids are GET and inspected during planning.
+  - No-return/mismatch cases fail typed before mutation.
+  - Semantic/emitter inputs carry verified bindings and render matching ordered `returnpaths` and outgoing routes.
+  - Single- and multi-return UI/runtime/create/readback/update behavior is attested.
+  - Served schemas, capabilities, revisions, and compatibility records move together.
+
+This is not unresolved blocking residue in #175 once all connected forms are unreachable; it is a deliberately gated capability transfer.
+
+### Generic orphan-Stop warning
+
+- **Reason class:** `out-of-scope-by-design`
+- **Issue:** none required; existing `SHAPE_UNREACHABLE` already covers the class.
+- Do not add a duplicate warning that would create double-reporting without new protection.
+
+### Automatic repair of unrelated existing live components
+
+- **Reason class:** `out-of-scope-by-design`
+- **Issue:** file a migration issue only if live inventory finds material affected components.
+- Explicitly updating an affected component must repair it; unattended bulk rewrite is not part of #175.
+
+### Other #154 grammar gaps
+
+- **Reason class:** `out-of-scope-by-design`
+- **Issue:** existing #154.
+- #175 changes only Process Call terminality and does not widen Return Documents or other body placements.
+
+### Caller-trusted `returns` flag
+
+- **Disposition:** rejected, not deferred.
+- A declaration without child inspection is not an acceptable authority and must not be introduced by this or the follow-up issue.
+
+
+=== ISSUE ACCEPTANCE CRITERIA (issue #175 §9, verbatim) ===
+1. A `process_call` whose child does not return documents emits as a path terminal: empty
+   `returnpaths`, empty dragpoints, no trailing Stop shape in the emitted XML — byte-parity
+   with the live m11 terminal form.
+2. A `process_call` wired to a following shape emits `returnpaths` entries naming the child's
+   Return Documents shapes (order per child configuration); validation fails typed when the child
+   provably returns nothing.
+3. `verify_process_graph` rejects empty-`returnpaths` + outgoing-dragpoint as an ERROR; the
+   pre-fix goldens fail against the new rule (negative control).
+4. Live round-trip on renera: create -> GET -> readback digest equals submitted digest for both
+   forms (no platform normalization residue); UI shows no orphaned shapes.
+5. Wrapper parent golden updated; wrapper over a non-returning child renders a clean canvas.
