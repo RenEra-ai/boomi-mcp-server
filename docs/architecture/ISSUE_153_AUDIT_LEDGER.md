@@ -1410,6 +1410,32 @@ discharged and the L2 loop closes with no residue: 46 evaluations, every finding
 on recorded evidence, no deferral. The window's escape hatch — "if round 46 returns another finding
 in this same artifact, stop deriving and take a deviation" — was not needed.
 
+**A stopping rule recorded BEFORE the round that will test it.** Rounds 43, 44, 45, 47 and §6
+evaluation 5 have every one of them found a different hand-picked dimension of the same artifact's
+probe shape: the entry-kind set, the role vocabulary, entry-position legality, how the listener role
+is chosen, symbol-table arity, the referenced symbol's index, the largest table size, and how many
+rows carry each direction. Every finding was correct and every fix was real. The sequence has not
+converged, and there is no reason to think inspection will exhaust it — decoy family diversity,
+reference-string shapes, and symbol attributes beyond `connector_type` are all dimensions nobody has
+looked at yet.
+
+What changed in the round-47 correction is the kind of fix: the shape is now GENERATED from position
+and arity cycles and the guard asserts the resulting SPREAD (both arities present, at least three
+distinct resolved indices including 0, a maximum arity of at least 4, each direction carried by at
+least two rows, opposite-class decoys throughout) rather than asserting the particular rows. That is
+the difference between patching an instance and closing a class, and round 48 is the test of whether
+it held.
+
+The rule, fixed now so it cannot be rationalised afterwards: **round 48's validation runs
+unconditionally — an applied correction is never budget-gated — but if it returns yet another
+dimension of the probe shape, that is not a ninth fix.** It is the measured demonstration that this
+surface is inexhaustible by inspection, and the correct response is to record what the oracle does
+and does not bind, as an accepted in-slice limitation with its scope measured rather than asserted,
+and to file the further hardening as a follow-up issue. The reachability criterion recorded at the
+evaluation-45 checkpoint still says such a finding is real; what it does not say is that a real
+finding is always worth another round on the same artifact when eight consecutive rounds have shown
+the next one will exist too.
+
 ## Deferrals
 
 Pointer-only — reason class, placement, and lineage live on the finding row and in the filed issue.
