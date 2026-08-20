@@ -63,6 +63,42 @@ suffixed component and leaves the original byte-identical.
 4. **Re-run the wave gate at the FINAL sha, from a verified-clean tree.**
 5. Ledger final-tree validation table, then finish = FF-push to `dev` + close, **NO PR**.
 
+## DONE — all of the above is complete
+
+Every item in that list was carried out; the ledger's final-tree validation table carries the quoted
+evidence. Summary of where it landed:
+
+- **AR1-09 and the rest of the AR1/AR2/AR3 sets: RESOLVED**, confirmed by the §6 gate across
+  evaluations 4-8.
+- **L2 Stage-2 closed CLEAN at evaluation 55** (`cdx-review.1OdnmR`, zero findings).
+- **§6 architect gate closed at evaluation 8 with `VERDICT: NO ISSUES`** (`cdx-gate-review.buHwWo`).
+- **Wave gate exit 0** at the final tree: 10096 passed / 17 skipped, 61 goldens deterministic and
+  byte-exact, plan fingerprint checked 2 cases.
+- **No deferrals, no follow-up issues minted, zero unresolved critical findings.**
+
+### The one thing worth carrying to the next slice
+
+The last thirteen rounds were spent on ONE test-support artifact — the oracle that fingerprints the
+execution-profile derivation into the served `compiler_revision` — and every finding in that stretch
+was correct while almost none of them mattered. The pattern, stated so it is recognisable early next
+time: **a finite artifact asked to bind an unbounded space attracts an unbounded queue of correct
+findings**, each one step past the last widening. Ten probe-shape dimensions (kinds, roles, entry
+legality, listener-role selection, arity, absolute index, table size, direction redundancy, from-end
+index, canonical order) and four guard bypasses (a syntax blacklist, an API allowlist, the API's
+result escaping the pin, a keyword-expansion walrus) — fourteen rounds, and none of them was going to
+be the last.
+
+It ended when the binding stopped being finite: the lookup resolves **by key**, so table size cannot
+enter the answer at all, and the guard pins **one expression** rather than enumerating what is
+forbidden. Both are checks on what the code is ALLOWED to do rather than samples of what it does.
+
+Two rules were recorded mid-slice and are worth reusing verbatim: **a finding earns a fix when the
+behaviour it protects is reachable by a caller, or when it removes a cost the current code imposes**
+(the evaluation-45 checkpoint) — and its sharp corollary, learned by nearly getting it wrong on
+AR5-01: **a criterion is only as good as the proposition you apply it to.** Lowering's listener
+refusal is about the ENTRY node; the finding was about the symbol TABLE. Applying a true statement to
+the wrong proposition would have shipped a Critical as deferred.
+
 ## Hard-won gotchas (do not rediscover)
 
 - **While ANY gate is in flight, the tree is frozen.** I broke this four times; each time a Codex
