@@ -5085,7 +5085,18 @@ def test_the_served_revision_binds_multi_symbol_family_lookup():
             return value.strip().lower() if isinstance(value, str) else None
         return None
 
-    for equivalent in (_by_index, _by_bisect):
+    def _by_table_api(symbols, ref):
+        """The table's OWN documented API (§6 evaluation 6).
+
+        `SymbolTableV1.build_index()` exists to be used, so an implementation
+        that uses it is faithful by construction — and it was the one that
+        exposed the probes passing a stand-in object which cannot answer it.
+        """
+        row = symbols.build_index().get(ref)
+        value = getattr(row, "connector_type", None)
+        return value.strip().lower() if isinstance(value, str) else None
+
+    for equivalent in (_by_index, _by_bisect, _by_table_api):
         try:
             ep._operation_connector_family = equivalent
             assert _compiler_revision() == baseline, (
@@ -5250,3 +5261,76 @@ def test_the_profile_case_set_keeps_both_arities_and_both_directions():
     # ...and the rows' VALUES are what the directions above claim, so this guard
     # cannot pass over a case set whose answers have silently changed.
     assert oracle["cases"]["non-listener-family"] == "scheduled"
+
+
+def test_the_family_lookup_ignores_symbols_it_was_not_asked_about():
+    """§6 evaluation 6: no finite probe set can bind an unbounded table size.
+
+    The oracle's largest probe carries five symbols; production tables have no
+    bound, so a regression that changes behaviour only above five leaves the
+    served revision byte-identical. That is not a defect in the probe set — it
+    is what a digest over samples inherently cannot do, and raising the bound
+    only moves the threshold, which is why five previous rounds of exactly that
+    move each produced the next one.
+
+    The property is therefore asserted where quantification is possible: over
+    generated tables rather than over the digest. `_operation_connector_family`
+    must depend ONLY on the row whose `ref` matches — so adding any number of
+    non-matching symbols, in any position, must not change its answer. Any
+    regression that behaves differently on a large table breaks this, whether or
+    not the oracle happens to contain a probe that size.
+
+    Sizes run well past anything the oracle carries, and the referenced symbol
+    is placed at every index of every size, so the tested space includes the
+    sixth-symbol case the reviewer constructed and far beyond it.
+    """
+    import boomi_mcp.compiler.process_ir.execution_profile as ep
+    from boomi_mcp.compiler.process_ir.contracts import (
+        ComponentSymbolV1,
+        SymbolTableV1,
+    )
+
+    listener_family = sorted(ep.LISTENER_CONNECTOR_TYPES)[0]
+
+    def _symbol(ref, family):
+        return ComponentSymbolV1(
+            ref=ref, component_id="id-" + ref, component_type="connector-action",
+            connector_type=family,
+        )
+
+    referenced = _symbol("$ref:op", "database")
+    alone = SymbolTableV1(symbols=(referenced,))
+    baseline = ep._operation_connector_family(alone, "$ref:op")
+    assert baseline == "database", baseline
+
+    checked = 0
+    for size in (2, 3, 5, 6, 9, 17, 33, 41):
+        for slot in range(size):
+            decoys = [
+                # A listener family on every decoy: if the lookup ever answers
+                # from a row it was not asked about, the answer flips to a
+                # DIFFERENT value rather than coincidentally matching.
+                _symbol("$ref:pad-%03d" % index, listener_family)
+                for index in range(size - 1)
+            ]
+            rows = decoys[:slot] + [referenced] + decoys[slot:]
+            table = SymbolTableV1(symbols=tuple(rows))
+            assert ep._operation_connector_family(table, "$ref:op") == baseline, (
+                size, slot,
+            )
+            # ...and a reference present in NO row still resolves to nothing,
+            # however many rows there are.
+            assert ep._operation_connector_family(table, "$ref:absent") is None
+            checked += 1
+    assert checked >= 100, checked
+
+    # NON-VACUITY: the property must be violable, or the loop above proves
+    # nothing. A lookup that answers from the first row satisfies it on a
+    # one-symbol table and fails here.
+    def _first_row(symbols, ref):
+        rows = tuple(symbols.symbols or ())
+        value = rows[0].connector_type if rows else None
+        return value.strip().lower() if isinstance(value, str) else None
+
+    table = SymbolTableV1(symbols=(_symbol("$ref:aaa", listener_family), referenced))
+    assert _first_row(table, "$ref:op") != ep._operation_connector_family(table, "$ref:op")

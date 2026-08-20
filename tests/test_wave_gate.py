@@ -5905,6 +5905,17 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
         "commit-reviews/cdx-review.qwXEHm": "failed",
         # refused start — never an evaluation; carries only start.json+refusal.json
         "architect-reviews/cdx-gate-review.TnpZpj": "refused",
+        # #153 §6 evaluation 6, FIRST attempt: STUCK — 963 events over ~3 minutes,
+        # then 20 minutes of silence. The discriminator that mattered was the
+        # event COUNT, not the clock: two probes 3.5 minutes apart showed it
+        # frozen at 963 while `lastEventAgoMs` grew 986742 -> 1196523. A machine
+        # that had merely suspended (which this one did twice in the same
+        # session, and which had already saved one healthy 43-minute review from
+        # being aborted) makes the count JUMP on wake. Interrupted and collected
+        # `--outcome failed`; the collector refused to attest and confirmed
+        # teardown, so the gate was re-run from scratch as cdx-gate-review.AD8APo
+        # with byte-identical prompts — which is why the two share a prompt hash.
+        "architect-reviews/cdx-gate-review.5CZKUD": "failed",
     }
     # Collector-specific sidecar allowlists: an archived run dir may hold nothing
     # else — a smuggled extra file is as suspect as a missing one.

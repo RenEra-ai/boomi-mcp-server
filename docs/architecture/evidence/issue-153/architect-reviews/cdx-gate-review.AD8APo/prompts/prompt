@@ -1,0 +1,807 @@
+You are running the ARCHITECT IMPLEMENTATION REVIEW for GitHub issue #153 (M12.15 — Canonical ProcessIR component materialization and direct apply) in this repository (boomi-mcp-server). This is the SIXTH run of this gate, and it is scoped: it re-runs the gate over the correction your fifth run demanded, not over the whole implementation again.
+
+Your run 5 reviewed `153c8aa4b0bb8caf3535146cc8074978e1d2fd94` and found AR1-01 … AR4-03 resolved except AR4-01, plus one new defect:
+
+  AR5-01 (Critical, served contract): "The execution-profile revision's behavior oracle constructs
+  only zero- or one-symbol tables, while the real derivation searches the entire symbol table, so
+  multi-symbol lookup behavior is not bound by the served revision."
+
+WHAT HAPPENED SINCE, and what you are being asked to judge. Current HEAD is `83eb6ffad781359ca62d2743502c3e793e733ad2`. Only two files under `src/` and `tests/` changed: `src/boomi_mcp/authoring/contract.py` (the oracle) and `tests/test_issue_153_canonical_apply_e2e.py`.
+
+1. **AR5-01 was FIXED, not deferred, and the reasoning is worth checking.** Your review noted that listener lowering is still refused at `lowering.py:816`, so this might fall under a recorded rule that defers findings guarding unreachable paths. Three independent verifications — one of them tasked specifically with REFUTING reachability — concluded the opposite, and the damaging direction is not the one your probe took. Your probe went real=`listener` → mutant=`scheduled`, which does need a graph lowering rejects. The reachable direction is the reverse: a correctly-`scheduled` process stamped with listener `<process>` bytes, which needs no listener entry at all — only a listener-family symbol somewhere in the table (and `build_symbol_table` projects every component of the spec into one table sorted by `$ref:KEY`) plus a lookup that answers from the wrong row. Two verifiers materialized exactly those bytes from a request that compiles today, one end-to-end through `build_integration_action(..., "apply", ...)`. `canonical_process_apply.py` cannot catch it because it re-derives with the same function. **Please check that reasoning as adversarially as you can; if it is wrong, the fix is unnecessary and I want to know.**
+
+2. **The fix adds no rows and rotates nothing.** The oracle serves outcomes, so decoy symbols whose refs match nothing make a row discriminating while leaving its value — and `compiler_revision` — byte-identical at `sha256:abe89cd6…543b80`, which is the digest already pinned in `tests/fixtures/m12_12/legacy_reachability_inventory.json`. A leaf-by-leaf snapshot of the served surface across the change found 1869 fields identical, including all 105 schema templates.
+
+3. **Two further repo-review rounds then hardened it, and both are in this delta.** Round 47 found no probe exceeded three symbols while a production table has four. Round 48 found (a) the referenced symbol was always `rows[-2]` because the position and arity cycles advanced in lockstep, and (b) the probes built tables in an order `SymbolTableV1` cannot supply — it canonicalises by `ref` — so a faithful binary-search implementation would have rotated every caller's binding for no behavioural change. Both are fixed: `_padded` now mints decoys on the correct lexical side so every probe table is canonically sorted, and the (position, arity) pairs are stated as data with a guard asserting the property they satisfy.
+
+4. **The guard is now the specification.** `test_the_profile_case_set_keeps_both_arities_and_both_directions` asserts, over the tables actually recorded reaching the lookup: both arities represented, at least three distinct absolute indices including 0, at least three distinct from-the-end indices, maximum arity at least 4, each answer direction carried by at least two multi-symbol rows, an opposite-class decoy in every multi-symbol table, and every table canonically sorted. `test_the_served_revision_binds_multi_symbol_family_lookup` kills nine wrong-row mutants and holds two equivalent implementations (a dict index and a binary search over the sorted tuple) to an identical revision.
+
+WHAT I AM ASKING FOR, and please keep it to this scope:
+
+- Is AR5-01 RESOLVED at this tree? Is AR4-01, which you downgraded to PARTIALLY RESOLVED for the same reason?
+- Is the reachability reasoning in (1) correct? Say so plainly if it is not.
+- Are there NEW concrete defects in the two changed files? Report them with file:line and a Critical/Standard tier.
+
+One thing you should know about how a finding will be dispositioned, so you can calibrate what is worth reporting rather than withhold anything: this artifact has now produced ten correct findings across seven rounds, each a different hand-picked dimension of the same probe's shape. A recorded rule says that an eleventh dimension of the SAME kind will be written down as an accepted limitation with its scope measured and deferred to a follow-up issue, rather than fixed in this slice. A finding of a different kind — a cost the code imposes on callers, a defect outside this artifact, or evidence that the reachability argument above is wrong — is judged on its merits as always. Report everything you find either way; this governs my disposition, not your reporting.
+
+Inspect the code as it IS on disk. Operational note learned the hard way in earlier runs: `paginate_metadata` against an unpatched MagicMock never terminates and grows memory without bound — if you write a probe that drives the apply or compile path, patch the network boundary BEFORE constructing payloads. The repository is read-only to you.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
+
+
+=== ARCHITECT DESIGN PLAN (verbatim) ===
+# Issue #153 — Canonical ProcessIR Component Materialization and Direct Apply
+
+## 1. Evidence
+
+Inspected at repository commit `9f19aad5b280d58c02ef5cd840ff150d0193c1dd`. The issue’s broad architecture is accurate, with these current locations and corrections:
+
+- Direct apply is still refused in two layers:
+
+  - `src/boomi_mcp/authoring/contract.py:141-178` reports process materialization as unavailable.
+  - `src/boomi_mcp/authoring/contract.py:181-227` marks both process-compiling intents as apply-unsupported with `PROCESS_KIND_REQUIRED`.
+  - `src/boomi_mcp/authoring/workflow.py:331-400` derives the same materialization gap.
+  - `src/boomi_mcp/authoring/workflow.py:1687-1722` hard-refuses apply after compilation.
+
+- Direct requests still use a singular root:
+
+  - `src/boomi_mcp/models/authoring_workflow.py:142-156` defines `ProcessIRAuthoringIntentV1` with `component_key` and `process_ir`.
+  - `src/boomi_mcp/authoring/workflow.py:403-448` normalizes that pair into a components-only `IntegrationSpecV1` plus a parallel roots tuple.
+  - Recipe normalization likewise carries composed roots separately from `IntegrationSpecV1` at `src/boomi_mcp/authoring/workflow.py:451-523`.
+  - `_NormalizedIntent` encodes that split representation at `src/boomi_mcp/authoring/workflow.py:221-230`.
+
+- `ProcessIRV1` remains correctly semantic-only: it contains exactly `version` and `body` at `src/boomi_mcp/models/process_ir.py:1818-1822`. It must not gain envelope, placement, action, policy, or XML fields.
+
+- Existing compiler output is not a deployable component:
+
+  - `ProcessEmissionArtifact` is explicitly shape/process output rather than a Boomi `Component` envelope at `src/boomi_mcp/compiler/process_ir/emitter_registry.py:194-204`.
+  - `emit_process` performs emission, XML parsing, and graph verification at `src/boomi_mcp/compiler/process_ir/emitter_registry.py:775-854`.
+  - Recipe execution invokes it only as a semantic/emission validation gate at `src/boomi_mcp/recipes/engine.py:1665-1676`.
+
+- The three behavior-complete legacy helper areas exist at the cited locations:
+
+  - Extension extraction and validation: `src/boomi_mcp/categories/components/builders/process_flow_builder.py:1270-1427`.
+  - Override rendering: `src/boomi_mcp/categories/components/builders/process_flow_builder.py:1430-1477`.
+  - Scheduled/listener option rendering: `src/boomi_mcp/categories/components/builders/process_flow_builder.py:1480-1505`.
+  - Full component-envelope assembly: `src/boomi_mcp/categories/components/builders/process_flow_builder.py:1508-1584`.
+  - Legacy entry-profile inference currently comes from `source_is_listener` at `src/boomi_mcp/categories/components/builders/process_flow_builder.py:887-904`.
+  - The three migrated legacy arms already feed canonical shape fragments into the common assembler at `src/boomi_mcp/categories/components/builders/process_flow_builder.py:4413-4472`, `:5104-5162`, and `:6049-6109`.
+
+- Legacy rendering details that parity must preserve:
+
+  - Extension connection and field order are retained; IDs are stripped; labels are validated by trimming but their exact bytes are retained; database fields require XPath at `process_flow_builder.py:1270-1427`.
+  - Scheduled and listener options differ in `allowSimultaneous`, `updateRunDates`, and the presence of `stopZero` at `process_flow_builder.py:1480-1505`.
+  - The envelope contains the XML declaration, `Component type="process"`, optional `folderName`, encrypted values, description, object/process/shapes, and overrides at `process_flow_builder.py:1508-1584`.
+  - Process preservation owns `bns:object/process` at `process_flow_builder.py:6123-6145`; the general preservation policy preserves folder and unknown root attributes while owning `name` at `src/boomi_mcp/categories/components/builders/_preservation_policy.py:143-194`.
+
+- Existing integration apply orchestration is reusable:
+
+  - Component normalization and collision decisions occur in `_build_plan` beginning at `src/boomi_mcp/categories/components/integration_builder.py:5616`, with topological ordering at `:5699`, participant lookup at `:5704`, collision resolution at `:5731-5791`, and planned steps emitted at `:6585-6633`.
+  - Typed apply preflight is at `src/boomi_mcp/categories/components/integration_builder.py:6867-6934`.
+  - Fail-fast validation runs at `:6942-7092`.
+  - Ordered application, late dependency-ID resolution, execution, result-ID publication, and partial-result handling occur at `:7159-7225`.
+  - Legacy create still dispatches through `process_kind` at `:3462-3588`.
+  - Legacy structured process update and preservation are at `:3006-3175`.
+  - `_resolve_dependency_tokens` already substitutes IDs for supporting components at `:2930-2940`.
+  - No replacement orchestration is needed; canonical processes need a provider/participant branch at these seams.
+
+- The current DAG is component-only:
+
+  - `_topological_order` is currently `def _topological_order(spec: IntegrationSpecV1) -> List[str]` at `src/boomi_mcp/categories/components/integration_builder.py:875-905`.
+  - It detects component duplicates, missing dependencies, and cycles, but raises plain `ValueError`; the issue’s claim that named DAG errors already exist is not true at this commit.
+  - API Service route references are required to appear in `depends_on` at `integration_builder.py:1917-2025`, confirming that component-to-process edges are already semantically real.
+
+- Late binding is already a compiler property:
+
+  - Placeholder IDs are generated at `src/boomi_mcp/recipes/materialization.py:107-117`.
+  - `build_symbol_table` creates placeholder-backed symbols at `src/boomi_mcp/recipes/materialization.py:120-193`.
+  - Lowering embeds resolved connector, map, cache, and process IDs at `src/boomi_mcp/compiler/process_ir/lowering.py:880-975`.
+  - Therefore final XML must be produced by recompiling with the actual ordered-apply symbol table, not by string-replacing placeholders.
+  - Listener lowering remains rejected at `src/boomi_mcp/compiler/process_ir/lowering.py:816-829`; #153 should nevertheless define the listener profile contract so #158 can activate it without changing the materializer interface.
+
+- Existing fingerprint/revision machinery:
+
+  - Current artifact fingerprints cover normalized IR and emission-plan material, not a deployable plan, at `src/boomi_mcp/models/authoring_workflow.py:395-410` and `src/boomi_mcp/authoring/workflow.py:1316-1412`.
+  - Deterministic JSON serialization is provided by `canonical_json_bytes` at `src/boomi_mcp/authoring/revisions.py:38-56`.
+  - Authoring revision derivation is behavior-manifest based rather than source- or Git-based at `src/boomi_mcp/authoring/contract.py:760-851`.
+  - `_live_component_digest` performs live readback and returns `None` on failure at `src/boomi_mcp/categories/components/integration_builder.py:7266-7288`.
+  - Build provenance is currently assembled only after the whole apply loop at `integration_builder.py:7291-7323`.
+  - `compare_live_build_provenance` compares apply-time live digests with verify-time live digests and treats a missing baseline as unknown at `src/boomi_mcp/authoring/workflow.py:1774-1904`, especially `:1846-1888`.
+
+- Direct-root composition preflight is currently too late:
+
+  - `compose()` begins processing at `src/boomi_mcp/recipes/composer.py:215-255`.
+  - Direct roots are accepted at `:223` and passed into composition at `:263-270`.
+  - The raw access that can raise `KeyError` is now at `:317-321`, specifically `roots[key]["body"]`.
+  - Full ProcessIR parsing does not happen until `:359-398`, after composition work. The issue’s cited range is directionally correct, but the exact unsafe access has drifted to `:317-321`.
+
+- The #152 wave-gate provider seam is present and inactive:
+
+  - `PLAN_FINGERPRINT_PROVIDER` is `None` at `scripts/wave_gate.py:2111-2124`.
+  - Required mutations are exactly `semantic`, `envelope`, `policy`, and `revision` at `:2129-2132`.
+  - The gate calls `cases()`, `mutations(case)`, and `fingerprint(...)`, compares canonical bytes and digests, and checks account/environment invariance at `:2153-2246`.
+  - Return-value and `sha256:<hex>` validation are at `:2351-2389`.
+  - The provider gate runs after suite/golden validation at `:2518-2536`; the CLI flag is registered at `:3312-3313`.
+
+- Existing model conventions differ by subsystem:
+
+  - `IntegrationSpecV1` and `IntegrationComponentSpec` are legacy-compatible, mutable, and extra-tolerant at `src/boomi_mcp/models/integration_models.py:12-124`; they cannot be globally strictified without breaking compatibility tests at `tests/test_integration_models.py:77-113`.
+  - Process IR uses `extra="forbid"` but is not frozen at `src/boomi_mcp/models/process_ir.py:189-199`.
+  - New authoring contracts use strict, frozen Pydantic models at `src/boomi_mcp/models/authoring_workflow.py:97-120`.
+  - `_FrozenMapping` at `src/boomi_mcp/models/_process_ir_compat.py:66-118` is a compatibility/test helper. Compiler contracts explicitly warn against making it a runtime dependency at `src/boomi_mcp/compiler/process_ir/contracts.py:255-264`.
+  - New contracts should therefore use strict frozen models plus immutable tuples, not `_FrozenMapping` or mutable dictionaries.
+
+## 2. Model design
+
+### `src/boomi_mcp/models/process_component.py` — new public envelope/unit contracts
+
+Create a private `_ProcessComponentModel` base with Pydantic `extra="forbid"` and `frozen=True`. Use tuples for all collections and closed `Literal` types for all discriminants.
+
+Supporting binding models:
+
+- `ProcessOverrideFieldV1`
+
+  - `id: str`, required; trim once and reject empty.
+  - `label: str`, required; reject `label.strip() == ""`, but preserve the original label bytes after validation to maintain legacy XML parity.
+  - `xpath: str | None = None`; if supplied, require nonempty and no surrounding whitespace.
+  - Error: `PROCESS_COMPONENT_SCHEMA_INVALID`.
+
+- `ProcessConnectionOverrideV1`
+
+  - `connection_id: ComponentRefV1`, required. Materializable requests must use `$ref:KEY`; literal Boomi IDs remain valid in generic semantic ProcessIR but fail materialization with `PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE`.
+  - `connector_type: str | None = None`; if present, trim, reject empty, and case-fold for canonical comparison.
+  - `fields: tuple[ProcessOverrideFieldV1, ...]`, required and nonempty.
+  - If `connector_type == "database"`, every field must have `xpath`.
+  - Preserve connection and field order because the legacy XML writer is order-sensitive.
+  - Do not invent duplicate-field rejection; the existing renderer preserves duplicate IDs and parity takes precedence.
+
+- `ProcessExtensionBindingsV1`
+
+  - `connections: tuple[ProcessConnectionOverrideV1, ...] = ()`.
+  - No open extension dictionary; unknown keys fail `PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD`.
+
+`ProcessComponentEnvelopeV1`:
+
+- `component_key: RecipeComponentKey`, required. Reuse the existing key validation from `src/boomi_mcp/models/recipe_contributions.py:147-173`.
+- `name: str`, required with no default. Trim once, reject empty.
+- `action: Literal["create", "update"]`, required with no default.
+- `component_id: str | None = None`. When supplied, require nonempty and no surrounding whitespace. It is permitted for create because existing collision/reuse handling can target a known component, but it is never fingerprint-covered.
+- `description: str = ""`.
+- `folder_name: str | None = None`; when supplied, require nonempty and no surrounding whitespace.
+- `depends_on: tuple[RecipeComponentKey, ...] = ()`; reject self-dependency and duplicates, then canonicalize to sorted key order because dependency order is set semantics.
+- `process_extensions: ProcessExtensionBindingsV1 = ProcessExtensionBindingsV1()`.
+- Do not expose `folder_id`: it is account-bound and belongs only to the internal resolved plan/attestation. Current process builders also do not safely author folder IDs; one existing path explicitly rejects them at `process_flow_builder.py:5262-5284`.
+
+`ProcessAuthoringUnitV1`:
+
+- `envelope: ProcessComponentEnvelopeV1`, required.
+- `process_ir: ProcessIRV1`, required.
+- No root list and no optional envelope: one model instance is exactly one envelope and exactly one root.
+- Reparse `process_ir.model_dump(mode="json")` through `parse_process_ir_v1` when normalizing/compiling. A frozen outer Pydantic model does not make the existing mutable nested `ProcessIRV1` deeply immutable.
+
+Export only the public envelope, unit, and binding models through `src/boomi_mcp/models/__init__.py`. Keep the materialization plan internal.
+
+### `src/boomi_mcp/models/integration_models.py`
+
+Add:
+
+- `processes: tuple[ProcessAuthoringUnitV1, ...] = ()` to `IntegrationSpecV1`.
+- A cross-model validation pass that builds one namespace from `components[].key` and `processes[].envelope.component_key`.
+- Reject duplicates within either tuple or across tuples with `INTEGRATION_COMPONENT_KEY_DUPLICATE`.
+- Preserve the existing extra-tolerant and mutable behavior of `IntegrationSpecV1` and `IntegrationComponentSpec`; introducing `processes` must not silently strictify legacy component callers.
+- Update the `components` description to state that it contains supporting components and reference-only existing processes; canonical authored roots live in `processes`.
+
+Do not add an `IntegrationSpecV1` version such as `1.2`: its machine schema digest and surrounding authoring contract revision carry the change, while its existing `"1.0" | "1.1"` values describe the integration-spec authority rather than the authoring request wire revision.
+
+### `src/boomi_mcp/authoring/process_materialization.py` — new internal plan contracts
+
+Define strict/frozen, tuple-only internal models:
+
+`ProcessComponentSymbolSlotV1`:
+
+- `slot_id: str`, required, stable source pointer such as a ProcessIR JSON pointer or extension-binding pointer.
+- `ref: ComponentRefV1`, required and exactly `$ref:KEY`.
+- `expected_component_types: tuple[str, ...]`, required, nonempty, normalized/sorted.
+- Reject duplicate `slot_id` values.
+- The compile-time placeholder for `$ref:KEY` is deterministically `id-KEY`.
+
+`ProcessPreservationPolicyV1`:
+
+- `policy_id: Literal["process.read_merge_write.v1"]`.
+- `component_type: Literal["process"]`.
+- `owned_root_attributes: tuple[str, ...]`, containing `("name",)`.
+- `owned_paths: tuple[str, ...]`, containing the normalized representation of `bns:object/process`.
+- `preserved_root_attributes` and `preserved_paths`, as deterministic tuples describing the current folder/unknown-state preservation behavior.
+- Construct this projection from the same neutral preservation constant used for execution so it cannot drift into a second behavioral authority.
+
+`ProcessComponentMaterializationPlanV1`:
+
+- `version: Literal["1"] = "1"`.
+- `envelope: ProcessComponentEnvelopeV1`, required, normalized.
+- `process_ir: ProcessIRV1`, required, canonical-reparsed.
+- `emission_plan: EmissionPlanV1`, required, generated using placeholder symbols.
+- `unresolved_symbol_slots: tuple[ProcessComponentSymbolSlotV1, ...]`, required, sorted by `slot_id`.
+- `execution_profile: Literal["scheduled", "listener"]`, required and compiler-derived.
+- `compiler_revision: DigestString`, required.
+- `emitter_revision: DigestString`, required.
+- `materializer_revision: DigestString`, required.
+- `conflict_policy: Literal["reuse", "clone", "fail"]`, required.
+- `preservation_policy: ProcessPreservationPolicyV1`, required.
+- `resolved_folder_id: str | None = None`, an account-bound apply overlay excluded from canonical fingerprint material.
+- `plan_fingerprint: DigestString`, required and recomputed by model validation. A mismatch raises `PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH`.
+
+The model must additionally reject:
+
+- Literal account IDs in materializable ProcessIR or extension references: `PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE`.
+- Unsupported/contradictory entry profiles: `PROCESS_MATERIALIZATION_EXECUTION_PROFILE_INVALID`.
+- Duplicate/malformed symbol slots or plan/envelope disagreement: `PROCESS_MATERIALIZATION_PLAN_INVALID`.
+- Failed late binding or a required slot still containing a placeholder: `PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID`.
+
+Register the following issue-owned named errors and map model/semantic failures to them rather than returning only a raw Pydantic message:
+
+- `PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD`
+- `PROCESS_COMPONENT_SCHEMA_INVALID`
+- `PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY`
+- `PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT`
+- `INTEGRATION_COMPONENT_KEY_DUPLICATE`
+- `INTEGRATION_DEPENDENCY_NOT_FOUND`
+- `INTEGRATION_DEPENDENCY_CYCLE`
+- `INTEGRATION_DEPENDENCY_REQUIRED`
+- `PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE`
+- `PROCESS_MATERIALIZATION_EXECUTION_PROFILE_INVALID`
+- `PROCESS_MATERIALIZATION_PLAN_INVALID`
+- `PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH`
+- `PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID`
+- `PROCESS_MATERIALIZATION_PLACEMENT_NOT_FOUND`
+- `PROCESS_MATERIALIZATION_PLACEMENT_AMBIGUOUS`
+- `PROCESS_MATERIALIZATION_RESULT_ID_MISSING`
+
+Do not reuse `TOPOLOGY_*`, whose ownership is reserved at `src/boomi_mcp/errors.py:264-304`, or extend the existing #146-only `AUTHORING_*` family at `:331-355`.
+
+## 3. Fingerprint design
+
+Implement one function in `src/boomi_mcp/authoring/process_materialization.py` that builds canonical material independently from account binding.
+
+The exact canonical JSON object is:
+
+```text
+{
+  "kind": "process_component_materialization_plan",
+  "version": "1",
+  "envelope": {
+    "component_key": ...,
+    "name": ...,
+    "action": ...,
+    "description": ...,
+    "folder_name": ...,
+    "depends_on": [...],
+    "process_extensions": ...
+  },
+  "process_ir": ...normalized ProcessIR JSON...,
+  "emission_plan": ...placeholder-backed EmissionPlanV1 JSON...,
+  "unresolved_symbol_slots": [...ordered slots...],
+  "execution_profile": "scheduled" | "listener",
+  "policies": {
+    "conflict_policy": ...,
+    "preservation_policy": ...full normalized policy projection...
+  },
+  "revisions": {
+    "compiler_revision": ...,
+    "emitter_revision": ...,
+    "materializer_revision": ...
+  }
+}
+```
+
+Covered fields:
+
+- All normalized envelope fields except `component_id`.
+- `action` is covered even though it is also recorded at mutation time: changing create/update changes the execution plan and must invalidate the plan fingerprint.
+- Normalized ProcessIR.
+- Placeholder-backed emission plan.
+- Every unresolved logical symbol slot and expected type.
+- Compiler-derived execution profile.
+- Conflict and full preservation policies.
+- Compiler, emitter, and materializer revisions.
+
+Explicit exclusions:
+
+- `component_id`.
+- Resolved folder ID.
+- Account, environment, profile, and scope identifiers.
+- Actual late-bound Boomi IDs.
+- A clone-generated concrete name or result ID.
+- Submitted XML and live-readback digests.
+- The `plan_fingerprint` field itself.
+
+Serialize with `canonical_json_bytes` from `src/boomi_mcp/authoring/revisions.py:38-56`: sorted keys, compact separators, ASCII-safe encoding, and `allow_nan=False`. Hash those exact bytes with raw SHA-256 and return `sha256:<lowercase hex>`. Do not wrap already-serialized bytes in an object-oriented fingerprint helper that would change the material.
+
+Normalization rules:
+
+- Sort `depends_on` and symbol slots.
+- Preserve extension connection and field order because it affects XML bytes.
+- Normalize optional values consistently: absent optional values serialize as JSON `null`; empty binding tuples serialize as `[]`.
+- A permutation of `depends_on` is normalization-equivalent and should retain the fingerprint; any byte-relevant extension ordering change should change it.
+
+Revision sources:
+
+- Continue using the behavior-manifest principle in `authoring/contract.py:760-851`; do not use Git SHA or source-file hashes.
+- Compiler revision includes ProcessIR schema/emission-plan authority and the execution-profile derivation contract.
+- Add an emitter revision helper in `compiler/process_ir/emitter_registry.py` that hashes an explicit wire version plus the sorted registry projection currently available around `:593-634`: emitter kind, input model, shape type, capability, outgoing behavior, and precondition presence.
+- Materializer revision hashes an explicit materializer wire version, both exact option fragments, envelope layout version, extension/override layout version, and the normalized preservation policy.
+
+Relocatability proof:
+
+- Build the same covered plan for two synthetic accounts/environments with different `component_id` and resolved folder IDs. Assert identical canonical bytes and identical fingerprints.
+- Mutate only `component_id` or resolved folder ID and assert equality.
+- Mutate every covered leaf class—semantic IR, envelope, extension binding, emission plan, profile, policy, and each revision—and assert different bytes and fingerprints.
+- Add field-coverage accounting that introspects the plan/envelope models and requires every field to appear in either the covered or explicit-exclusion set. A future field added without a fingerprint decision must fail the test.
+
+### `scripts/wave_gate.py` provider
+
+Implement a stdlib-only `_CanonicalProcessPlanFingerprintProvider` and assign an instance to `PLAN_FINGERPRINT_PROVIDER` at `scripts/wave_gate.py:2111-2124`.
+
+- `cases() -> list[str]`: return stable, sorted case names, including at least a scheduled-create root with a dependency reference and a scheduled-update root with a dependency reference.
+- `mutations(case)`: return exactly `semantic`, `envelope`, `policy`, and `revision`.
+- `fingerprint(case, *, account, environment, mutation=None)`: lazily import the production plan/fingerprint builder, construct the case, and return `(fingerprint, canonical_material)`.
+- `semantic` mutates a real ProcessIR semantic value or node.
+- `envelope` mutates `name` or `description`.
+- `policy` mutates conflict policy, e.g. `reuse` to `fail`.
+- `revision` mutates only the materializer revision through a private test/provider injection seam.
+- Account/environment identities must alter the excluded synthetic component/folder IDs so the gate’s invariance assertion is non-vacuous.
+- Preserve negative tests by explicitly injecting or monkeypatching `None`; the installed provider should make normal successful gate output omit `PLAN_FINGERPRINT_PENDING issue=#153`.
+
+## 4. Attestation design
+
+Add strict/frozen attestation models to `src/boomi_mcp/models/authoring_workflow.py`:
+
+`ResolvedProcessPlacementV1`:
+
+- `folder_name: str | None`
+- `folder_id: str | None`
+- At least one can be absent for account-root placement, but any supplied value is nonblank.
+
+`ProcessMutationAttestationV1`:
+
+- `component_key: RecipeComponentKey`
+- `plan_fingerprint: DigestString`
+- `account_scope_hash: DigestString`
+- `action: Literal["create", "update"]`
+- `target_component_id: str | None`
+- `result_component_id: str`
+- `resolved_placement: ResolvedProcessPlacementV1`
+- `submitted_xml_digest: DigestString`
+
+Validation:
+
+- Update requires `target_component_id`, and target/result IDs must match.
+- Create requires `target_component_id is None`; its server-assigned `result_component_id` is required.
+- Clone conflict handling is attested as action `create`.
+- A successful create response without a result ID fails closed with `PROCESS_MATERIALIZATION_RESULT_ID_MISSING`.
+
+`ProcessLiveReadbackAttestationV1`:
+
+- `component_key: RecipeComponentKey`
+- `component_id: str`
+- `digest: DigestString | None`
+
+Extend `AuthoringBuildProvenanceV1` with ordered mutation and readback-attestation tuples. Retain the existing live-component provenance mapping for compatibility and drift comparison.
+
+Recording points in `integration_builder.py`:
+
+1. After late recompile/materialization, compute `submitted_xml_digest` from the exact UTF-8 bytes that will be submitted.
+2. For create, digest the final XML immediately before the raw create call. The raw create path sends the XML unchanged at `src/boomi_mcp/categories/components/_shared.py:378-405` and `src/boomi_mcp/categories/components/manage_component.py:165-175`.
+3. For update, digest the exact `merged_xml` produced after live-state preservation at `integration_builder.py:3049-3063`, not the pre-merge desired XML.
+4. Immediately after a successful API result and result-ID extraction at `integration_builder.py:7206-7218`, persist the mutation attestation before processing the next root.
+5. Then call `_live_component_digest` and persist the separate readback attestation. A readback exception records `digest=None`; it does not reverse or hide the successful mutation.
+
+Allocate the typed build record before the first canonical mutation, with status `in_progress`, and durably append attestations after each successful root. On a later failure, set the build status to `failed_partial` and return its `build_id` with partial results. This changes the current all-at-end behavior at `integration_builder.py:7291-7323` only for typed canonical apply and guarantees:
+
+- Roots successfully applied before failure retain their attestations.
+- The failed root and every unapplied root have no successful mutation attestation.
+- Ambiguous transport failures retain the existing mutation-status/reconciliation evidence but do not fabricate an attestation.
+- Reuse/no-op results do not receive mutation attestations because no create/update was executed.
+
+The two attestations must remain separate because:
+
+- The action is an API endpoint choice and is not present in XML.
+- A create result ID is server-assigned and cannot be in submitted XML.
+- Update preservation deliberately echoes the current component/folder attributes rather than the requested placement.
+- Live readback can contain server-assigned or normalized attributes, so comparing submitted bytes to readback bytes would report healthy applies as drift.
+
+Verification must compare only live-at-apply and live-at-verify readback digests through `compare_live_build_provenance`. `digest=None` means unknown/unverifiable, never match. A non-`None` mismatch continues to raise `AUTHORING_LIVE_DEPLOYMENT_DRIFT`.
+
+Placement resolution:
+
+- Resolve `folder_name` at apply time to an exact, non-deleted, unique account folder.
+- Do not use a silent “first name match” policy like the current helper behavior at `src/boomi_mcp/categories/components/folders.py:137-156`.
+- Zero matches raise `PROCESS_MATERIALIZATION_PLACEMENT_NOT_FOUND`; multiple matches raise `PROCESS_MATERIALIZATION_PLACEMENT_AMBIGUOUS`.
+- Create records the requested name and resolved ID.
+- Update records the effective current placement preserved into the submitted XML, because requested placement is not merged by the current update policy.
+
+## 5. Extraction design
+
+### New `src/boomi_mcp/categories/components/process_component_materializer.py`
+
+Create a neutral `ProcessComponentMaterializer` that has no import of:
+
+- `ProcessFlowBuilder`
+- `get_process_flow_builder`
+- ProcessIR/compiler modules
+- legacy registries
+- `process_kind`
+
+Its public materialization method accepts only:
+
+- Component name and description.
+- Optional resolved folder name used by the current XML envelope.
+- Emitted canonical `shape_xml_parts`.
+- Typed extension bindings.
+- Recorded `execution_profile`.
+- The shared process preservation policy.
+
+Move/re-home the following behavior:
+
+- `_assemble_process_component_xml` from `process_flow_builder.py:1508-1584` into `_assemble_component_xml`.
+- `_emit_process_overrides` from `:1430-1477` into `_render_process_overrides`.
+- The option-bytes half of `_get_process_options` from `:1480-1505` into `_process_options_xml(profile)`.
+- `_extract_process_extension_connections` from `:1270-1427` into a compatibility adapter named `extension_bindings_from_legacy_config`; canonical callers pass the typed bindings directly.
+
+Keep behind in `process_flow_builder.py`:
+
+- `ProcessFlowBuilder.build()` and all `process_kind` dispatch.
+- Shape generation.
+- Legacy config parsing outside extension bindings.
+- The current source/listener sniff.
+- Builder registries and legacy process construction.
+- Existing sync-specific validation precedence.
+
+The legacy module should retain thin private aliases/delegators for the moved helper names so existing callers and tests remain stable. All three migrated arms continue to call the same bytes-producing implementation and remain the parity oracle through #160.
+
+### Compiler-side profile split
+
+Create `src/boomi_mcp/compiler/process_ir/execution_profile.py` with:
+
+```text
+derive_process_execution_profile(
+    cfg: SemanticCfgV1,
+    symbols: SymbolTableV1,
+) -> Literal["scheduled", "listener"]
+```
+
+The compiler determines the entry execution profile from the semantic CFG entry node and resolved entry-symbol metadata. Relevant connector roles already exist in `src/boomi_mcp/compiler/process_ir/contracts.py:433-481`, and the semantic entry node is represented at `:683-688`.
+
+- Record the result on `ProcessComponentMaterializationPlanV1`.
+- For #153’s currently lowerable roots, the result will ordinarily be `scheduled`.
+- Preserve the closed `listener` value now so #158 can enable listener lowering without modifying the plan/materializer interface.
+- The materializer maps only the recorded profile to the exact legacy option fragment.
+- It never receives or re-inspects ProcessIR and cannot infer the profile.
+- Callers cannot author a separate scheduled/listener flag.
+
+## 6. Unified DAG
+
+Keep the public signature unchanged:
+
+```python
+# Current and proposed signature
+def _topological_order(spec: IntegrationSpecV1) -> List[str]:
+```
+
+Extend its implementation at `integration_builder.py:875-905`:
+
+- Build one participant table containing every `components[].key` and every `processes[].envelope.component_key`.
+- Read dependencies from `component.depends_on` or `process.envelope.depends_on`.
+- Add every edge to one indegree/adjacency graph.
+- Run one deterministic, key-sorted Kahn traversal.
+- Run one cycle test against the total combined participant count.
+- Do not introduce a process-only sorter.
+
+This produces all four directions naturally:
+
+- component → component
+- component → process
+- process → component
+- process → process
+
+Validation behavior:
+
+- Duplicate key anywhere: `INTEGRATION_COMPONENT_KEY_DUPLICATE`.
+- Unknown target in either tuple: `INTEGRATION_DEPENDENCY_NOT_FOUND`.
+- Self-edge or mixed cycle: `INTEGRATION_DEPENDENCY_CYCLE`.
+- Every `$ref:KEY` used by ProcessIR or process extension bindings must also appear in that process envelope’s `depends_on`; otherwise `INTEGRATION_DEPENDENCY_REQUIRED`.
+- Extra declared dependencies remain legal.
+- Extend `_check_api_service_route_dependencies` at `integration_builder.py:1917-2025` to look up both participant kinds. For #153, a scheduled canonical process remains invalid as an API Service listener target; #158 will use the recorded listener profile. This check must not inspect `process_kind`.
+
+## 7. Provider wiring
+
+Introduce an internal canonical-process participant/provider in `src/boomi_mcp/categories/components/integration_builder.py`; do not replace the surrounding planner or apply loop.
+
+### Compile and bundle
+
+- `authoring/workflow.py` should normalize all process roots into `IntegrationSpecV1.processes`.
+- Extend `_PlanInternals` at `authoring/workflow.py:1100-1107` to carry a materialization plan per process key.
+- Extend artifact construction at `authoring/workflow.py:1316-1412` so each root produces both its existing semantic/emission artifact and a relocatable component-materialization-plan artifact.
+- Extend `CompiledBundle` at `authoring/workflow.py:1537-1549` to retain the keyed plans. Current preflight recomputation at `:1615-1621` must no longer discard them.
+- The bundle binding must cover the plan fingerprints and revisions so apply cannot execute a different plan from the compiled result.
+
+### Planning
+
+At `_build_plan` (`integration_builder.py:5616`):
+
+- Add a small common participant adapter exposing key, name, action, component ID, dependencies, and kind for components and process units.
+- Use it for combined collisions and dependency order.
+- Add the canonical `process_ir_materializer` planning branch before the existing legacy `process_kind` branch at `:5792-5820`.
+- Retain the existing legacy branch untouched.
+- Use the neutral process preservation-policy metadata for canonical update planning.
+
+### Late binding and execution
+
+In the ordered apply loop at `integration_builder.py:7159-7225`, canonical process steps should:
+
+1. Verify the stored plan fingerprint and all recorded behavior revisions.
+2. Confirm every plan symbol slot refers to a dependency already present in `id_registry`.
+3. Extend `recipes/materialization.build_symbol_table` (`recipes/materialization.py:120-193`) to accept the combined participant projection. Canonical process units enter the symbol table as type `process`.
+4. Populate actual IDs for every required slot. Unrelated future participants may retain deterministic placeholders, but no slot required by the executing root may remain unresolved.
+5. Reparse the frozen plan’s ProcessIR, rerun `compile_process_ir_v1`, and lower with this actual symbol table. Never patch placeholder XML.
+6. Re-derive the execution profile and assert it matches the plan.
+7. Call `emit_process`.
+8. Resolve extension `$ref` values through the same `id_registry`.
+9. Call `ProcessComponentMaterializer`.
+10. Execute create through the existing raw create seam or update through `_apply_structured_update` with the neutral process preservation policy.
+11. Publish the result ID into the same `id_registry` at the existing `:7206-7208` seam, enabling downstream component-to-process and process-to-process references.
+12. Record the two attestations as specified above.
+
+Do not route canonical roots through `_execute_component`’s legacy `process_kind` branch. Raw legacy `IntegrationSpecV1.components` process entries continue to use the existing branch at `integration_builder.py:3462-3588`.
+
+Update verification at `integration_builder.py:7345-7469` to iterate combined participants/results:
+
+- Existence check for every process unit.
+- Process XML parse and graph verification.
+- Dependency/result-map consistency.
+- Live readback digest comparison using only apply-readback versus verify-readback evidence.
+
+## 8. Refusal removal and revision bumps
+
+### Wire-shape change
+
+Replace `ProcessIRAuthoringIntentV1.component_key` and `.process_ir` at `models/authoring_workflow.py:142-156` with:
+
+- `integration_name`, required.
+- `units: tuple[ProcessAuthoringUnitV1, ...]`, required, minimum length one.
+- `components: tuple[IntegrationComponentSpec, ...] = ()`.
+- Existing conflict policy.
+- No compatibility alias for the singular fields.
+
+Update ProcessIR error pointers in `authoring/workflow.py:656-709` from `/intent/process_ir` to `/intent/units/{index}/process_ir`.
+
+Normalize direct requests directly into `IntegrationSpecV1(processes=units)`. Remove the parallel normalized-roots representation from `_NormalizedIntent`.
+
+For recipe intents, lift each composed root into one unit as follows:
+
+- Find exactly one same-key, non-reference-only process component in the recipe result.
+- Require that caller input actually supplied both `name` and `action`; because `IntegrationComponentSpec.action` currently has a default, inspect `model_fields_set` rather than accepting the default silently.
+- Build the envelope from top-level component fields plus the allowlisted config keys `description`, `folder_name`, and `process_extensions`.
+- Never read or copy `process_kind`.
+- Remove the lifted process entry from `components`; leave supporting components and reference-only existing processes there.
+- Reject missing, duplicate, or cardinality-mismatched root/envelope pairs with `PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY`.
+
+This is an interim compatibility bridge until #159 migrates recipe/composition authoring.
+
+### Refusal removal
+
+- In `authoring/contract.py:141-227`, mark process materialization supported and both process-compiling intents apply-capable. Remove `PROCESS_KIND_REQUIRED`.
+- In `authoring/workflow.py:331-400` and `:1687-1722`, remove `_materialization_gaps` and the hard refusal.
+- Remove the special advisory treatment of direct ProcessIR planning failures at `authoring/workflow.py:1141-1202`; these requests are now apply-capable and errors are blocking.
+- Update machine-served contract text at `authoring/contract.py:502-592` to describe process units, relocatable plans, late binding, mutation attestations, and separate readback attestations.
+- Update the MCP-facing descriptions and examples in `src/boomi_mcp/server.py:2333-2408`, `:3209-3221`, and `:3511-3519`.
+- Remove stale “next step/process-kind required” text in `src/boomi_mcp/categories/meta_tools.py:9700-9787`, `:9943-9964`, and `:10083-10112`.
+
+### Machine-served revisions
+
+Bump atomically with the wire/refusal change:
+
+- `AUTHORING_CONTRACT_VERSION` from `"1"` to `"2"` at `models/authoring_workflow.py:77-84`.
+- Every corresponding `contract_version: Literal["1"]` on:
+
+  - `AuthoringRequestV1`
+  - `AuthoringRevisionBindingV1`
+  - result base/plan/compile models
+  - `AuthoringBuildProvenanceV1`
+
+  becomes literal `"2"`.
+
+- In the schema registry at `authoring/contract.py:73-123`, publish only version 2 for changed owned schemas:
+
+  - Authoring request
+  - Plan result
+  - Compile result
+  - Revision binding
+  - Build provenance
+
+- Do not leave version-1 aliases; the issue explicitly declares zero users.
+- Bump capability versions for the authorities whose public promises change:
+
+  - `authoring.process_ir`
+  - `authoring.integration_spec`
+  - `authoring.compile`
+  - `authoring.revision_binding`
+  - `authoring.process_ir.contract`
+  - `authoring.process_ir.pre_selection`
+  - `authoring.typed_apply.process_materialization`
+
+- Change the typed materialization capability state from unsupported to supported.
+- Extend `ArtifactFingerprintV1` with the closed artifact kind `process_component_materialization_plan`.
+- The inherited `IntegrationSpecV1` schema digest and aggregate schema/capability revisions will change automatically; pin their new values in contract tests.
+- Keep the standalone ProcessIR semantic schema, topology schema, validation-report schema, and `account_scope_fingerprint` domain unchanged because their wire semantics do not change.
+
+## 9. Direct-root preflight
+
+Modify `src/boomi_mcp/recipes/composer.py` at the beginning of `compose()` (`:215-255`), before contribution classification, patches, or root combination:
+
+- Validate each `direct_process_roots` key with the existing recipe component-key rules.
+- Parse every supplied direct-root value with `parse_process_ir_v1`.
+- Convert the parsed model to the mutable normalized payload composition expects.
+- Catch only `ProcessIRValidationError` and translate it into a typed `RecipeError` with:
+
+  - `RECIPE_CONSTRAINT_FAILED`
+  - phase `composition`
+  - target `direct_process:<key>`
+  - preserved ProcessIR cause codes and paths
+
+- Do not blanket-catch `KeyError`, `TypeError`, or arbitrary exceptions.
+- Retain the final parse at `composer.py:359-398` because patches/composition can invalidate an initially valid root.
+- After this change, the raw access at `composer.py:317-321` operates only on validated normalized roots and cannot expose a raw `KeyError`.
+
+## 10. Test plan
+
+### New model and plan tests
+
+`tests/test_process_component_models.py`:
+
+- Required `name`, `action`, envelope, and ProcessIR.
+- Unknown-field rejection at every new strict model.
+- Frozen-model mutation rejection.
+- Exactly one envelope/root per unit.
+- Key/name/component-ID/folder/field validation.
+- Self and duplicate dependency rejection.
+- Dependency canonicalization.
+- Database XPath rule.
+- Connection/field order preservation.
+- Shared component/process namespace duplicate rejection.
+- Proof that nested ProcessIR is reparsed rather than trusted after outer-model construction.
+
+`tests/test_process_materialization_plan.py`:
+
+- Symbol-slot extraction from IR and extension references.
+- Stable slot ordering and placeholder IDs.
+- Literal-ID rejection.
+- Compiler-derived profile validation.
+- Policy projection and revision requirements.
+- Plan/envelope consistency.
+- Fingerprint self-check and mismatch failure.
+- Introspection-based covered-versus-excluded field accounting.
+
+`tests/test_process_materialization_fingerprint.py`:
+
+- Repeated build determinism.
+- Account/environment and component/folder-ID relocatability.
+- Excluded-only mutation invariance.
+- Covered-leaf mutation matrix.
+- Dependency permutation normalization.
+- Extension-order sensitivity.
+- Exact SHA-256/raw-canonical-byte agreement.
+- Distinct semantic/envelope/policy/revision provider mutations.
+
+### Materializer and parity tests
+
+`tests/test_process_component_materializer.py`:
+
+- Exact scheduled and listener option bytes.
+- Extension escaping, ordering, database XPath, description, and folder behavior.
+- Full envelope XML parsing and graph verification.
+- Preservation-policy projection parity.
+
+Extend existing independent parity suites around:
+
+- `tests/test_process_emitter_parity.py:1171-1232`
+- Current sync parity cases around `:131-171` and `:814-852`
+- Current listener cases around `:125-151` and `:387-408`
+- Existing process-flow coverage around `:1805-2013`
+
+Before extraction, freeze independent expected bytes from the existing legacy assembler for all three migrated arms. After extraction, compare canonical materializer output with those pre-extraction fixtures byte-for-byte. Do not make the differential test call two wrappers around the same newly extracted helper; that would be circular and could pass after a shared regression.
+
+### Non-vacuous legacy-independence proof
+
+Use three complementary checks:
+
+1. Execute the public canonical plan→compile→materialize path while monkeypatching `ProcessFlowBuilder.build`, `get_process_flow_builder`, and every legacy process builder registry entry to raise immediately. Assert successful materialization and assert a spy on `ProcessComponentMaterializer.materialize` was called.
+2. Add an AST/import guard that rejects references to `ProcessFlowBuilder`, `get_process_flow_builder`, or the identifier/string `process_kind` in the neutral materializer and canonical provider modules.
+3. Extend the #149 reachability inventory tests at `tests/test_issue_149_legacy_reachability_freeze.py:187-228` and `:284-375` with canonical provider consumer/lookup/renderer rows. The canonical path must show zero legacy builder resolution.
+
+The dynamic test proves behavior, the spy prevents a vacuous “nothing executed” pass, and the static/reachability tests prevent a hidden alternate lookup.
+
+### DAG, public workflow, and apply tests
+
+Extend integration-builder tests to cover:
+
+- All four dependency directions.
+- Deterministic mixed topological order.
+- Cross-tuple duplicate, unknown dependency, self-edge, and mixed cycle error codes.
+- `$ref` without matching `depends_on`.
+- API Service route lookup against a process unit.
+- Actual late-bound IDs in emitted XML and absence of `id-KEY` placeholders.
+- Process-to-process dependency publication through the shared result registry.
+- Multi-root result and verification maps.
+
+Extend `tests/test_m12_11_apply_verify.py` with:
+
+- Direct canonical create.
+- Canonical update with live-state preservation.
+- Conflict `reuse`, `clone`, and `fail`.
+- Exact submitted-XML digest for create.
+- Update digest over merged bytes, not desired bytes.
+- Mutation attestation target/result/action/placement/account fields.
+- Separate post-apply readback digest.
+- Readback failure records `None` and verify reports unknown.
+- Live-readback mismatch reports `AUTHORING_LIVE_DEPLOYMENT_DRIFT`.
+- Partial multi-root failure retains only earlier successful attestations.
+- Missing create result ID fails closed.
+- Graph verification for every canonical process root.
+- Public plan→compile→materialize dry-run with no `process_kind`.
+
+Add composer tests proving malformed dictionaries, scalars, missing body, and bad root keys fail typed before contribution/patch processing and never reach the unsafe lookup.
+
+### Contract, golden, and gate tests
+
+Update:
+
+- `tests/test_integration_models.py` for additive `processes` while retaining current compatibility behavior.
+- Schema-template, capability, wrapper-contract, revision-binding, server-description, and clean-room contract tests for authoring version 2.
+- Error-taxonomy ownership tests for every new named error.
+- Wave-gate tests so the real provider passes, each required mutation is detected, account/environment changes remain invariant, negative `None` injection still emits pending, and successful output has no pending token.
+- Golden manifest with a new canonical full component-envelope artifact and graph-verification corpus. Keep existing semantic-only ProcessIR goldens, including the current rows at `tests/fixtures/wave_gate/goldens.jsonl:25-27`, rather than rewriting them into deployment artifacts.
+
+Final validation:
+
+- `PYTHONPATH=src .venv/bin/python -m pytest`
+- `PYTHONPATH=src .venv/bin/python scripts/wave_gate.py wave --base <previous-dev-sha> --require-plan-fingerprint`
+- Python 3.11 CI.
+- One public-MCP live QA pass on the renera account: direct ProcessIR create, readback, update-preservation, verify, cleanup, plus one multi-root apply.
+- Follow repository policy: QA first, commit the QA-validated boundary, then one full Codex review and delta-scoped re-review for any correction.
+
+## 11. Sequencing
+
+1. **Freeze behavior first.** Add independent legacy-envelope fixtures, renderer parity coverage, and the expanded #149 reachability inventory before moving helpers. Checkpoint: current legacy suite and new frozen fixtures pass.
+2. **Add the public contracts and named errors.** Introduce envelope/binding/unit models and additive `IntegrationSpecV1.processes`. Checkpoint: model, compatibility, and error-taxonomy tests pass.
+3. **Normalize one representation.** Reshape direct intent to `units`, implement recipe-root lifting, and eliminate the workflow’s parallel roots tuple while keeping apply refusal active. Checkpoint: plan/compile and recipe tests pass.
+4. **Fix direct-root preflight.** Move initial ProcessIR parsing ahead of composition and add typed negative tests. Checkpoint: composer suite passes.
+5. **Build the relocatable planning layer.** Add profile derivation, symbol slots, preservation projection, behavior revisions, plan construction, canonical fingerprinting, and the wave-gate provider. Checkpoint: fingerprint matrix and required provider mutations pass.
+6. **Extract the neutral materializer.** Re-home helpers, retain legacy aliases, and prove byte parity on all three arms. Checkpoint: frozen-byte, graph, AST, and legacy-path suites pass.
+7. **Unify the DAG and planning adapters.** Extend the one sorter, collision planning, reference/dependency checks, combined symbol-table construction, and canonical dry-run route. Keep network mutation refused. Checkpoint: all mixed-DAG and plan→compile→materialize tests pass.
+8. **Wire ordered execution.** Add actual-ID recompilation, neutral create/update execution, immediate mutation/readback attestations, durable partial-build recording, and combined verification. Checkpoint: create/update/preservation/partial-failure tests pass.
+9. **Publish atomically.** Remove both refusals and land every schema, capability, contract-text, MCP-description, and provenance revision bump in the same change. Checkpoint: no served surface claims version 1 or process materialization unsupported.
+10. **Close the wave.** Run the full suite, active goldens, determinism checks, wave-gate fingerprint requirement, scoped live QA, and repository review workflow.
+
+Highest-risk areas are late ID binding across mixed roots, update-byte accounting versus preserved placement, durable partial-mutation evidence, and accidental circular parity tests. The ordering above keeps mutation disabled until models, fingerprints, extraction parity, and the mixed DAG are independently green.
+
+## 12. Open questions and recorded decisions
+
+- **Recipe envelope source:** The issue changes the direct `process_ir` wire shape but does not define a new recipe-envelope field, while #159 owns recipe migration. Decision: lift the same-key, caller-authored process component from the current recipe catalog into a unit, require `name` and `action` to be explicitly present via `model_fields_set`, and ignore `process_kind`. This avoids inventing a temporary second recipe API.
+
+- **Literal ProcessIR component IDs:** `ComponentRefV1` currently accepts `$ref:KEY` or literal IDs at `models/process_ir.py:202-232`, but a relocatable plan cannot safely cover an account ID. Decision: retain literal references for generic semantic ProcessIR compatibility, but reject them during component-materialization planning. Callers represent existing account components in `components` and reference them by logical `$ref`.
+
+- **Folder wire shape:** The issue mentions “resolved folder placement” while excluding resolved folder IDs from the fingerprint. Decision: public callers supply only `folder_name`; apply resolves a unique folder ID into the internal plan/attestation. No public `folder_id` is added.
+
+- **Action coverage:** The acceptance text emphasizes that action targeting is explicitly attested, which could be read as excluding it from the plan fingerprint. Decision: cover normalized `action` in the relocatable plan because it is account-independent execution policy, and also attest the action actually performed. Only `component_id` and resolved folder ID are excluded.
+
+- **Entry profile at #153:** Listener lowering is currently rejected. Decision: define and fingerprint the closed scheduled/listener profile now, derive it in the compiler, and keep current listener rejection until #158. The materializer contract is therefore ready without prematurely widening lowering.
+
+- **Partial-failure durability:** Existing build provenance is registered only after the complete apply loop. Decision: canonical typed apply allocates an in-progress build record before mutation and appends per-root evidence immediately. Returning attestations only in an ephemeral failure response is insufficient for mutation accounting.
+
+- **Update placement:** Current preservation intentionally retains live folder attributes rather than applying requested placement. Decision: record the effective preserved placement for update attestations and do not claim the requested placement was executed.
+
+- **DAG error naming:** Current `_topological_order` raises plain `ValueError`; there are no reusable named component-DAG errors at this commit. Decision: introduce issue-owned integration dependency codes while retaining the existing topological algorithm and one-sorter architecture.
+
+- **IntegrationSpec version:** Decision: add `processes` without inventing `"1.2"`; bump the enclosing machine-served authoring/schema/capability revisions and resulting digests instead.
+
+- **Legacy helper ownership:** Decision: retain private delegating aliases in `process_flow_builder.py` so the legacy path remains live and byte-identical. No deletion, registry cleanup, or process-kind retirement belongs in #153.

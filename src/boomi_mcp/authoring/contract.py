@@ -1092,11 +1092,20 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
     derive = module.derive_process_execution_profile
     families = sorted(module.LISTENER_CONNECTOR_TYPES)
 
+    contracts = _import("contracts")
+
     def _classify(node, symbols=(), entry_id="entry"):
         cfg = SimpleNamespace(
             entry_node_id=entry_id, nodes=() if node is None else (node,)
         )
-        return derive(cfg, SimpleNamespace(symbols=tuple(symbols)))
+        # A REAL `SymbolTableV1`, not a stand-in (§6 evaluation 6). A
+        # `SimpleNamespace` carrying only `.symbols` cannot answer the table's
+        # own documented `build_index()` API, so an implementation that used it
+        # — behaviourally identical on every real table, and the API the model
+        # exists to offer — rotated the served revision for no behaviour change.
+        # The stand-in also let the probes hold orders the real model forbids.
+        # Constructing the real thing costs a few field values and removes both.
+        return derive(cfg, contracts.SymbolTableV1(symbols=tuple(symbols)))
 
     def _connector(role, operation_ref):
         return SimpleNamespace(
@@ -1107,7 +1116,12 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
         )
 
     def _symbol(ref, connector_type):
-        return SimpleNamespace(ref=ref, connector_type=connector_type)
+        return contracts.ComponentSymbolV1(
+            ref=ref,
+            component_id="id-%s" % ref.rsplit(":", 1)[-1],
+            component_type="connector-action",
+            connector_type=connector_type,
+        )
 
     # EVERY entry-node kind the CFG schema admits, read from the schema (L2
     # round 43). The first version stood one hand-picked `message` node in for
