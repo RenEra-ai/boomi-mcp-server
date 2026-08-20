@@ -5382,8 +5382,46 @@ def test_the_family_lookup_ignores_symbols_it_was_not_asked_about():
     )
 
 
+def _table_access_offenders(function_source):
+    """How the lookup touches its symbol table — every access, whitelisted.
+
+    A WHITELIST, deliberately, because the blacklist that preceded it was
+    bypassed the round after it shipped: banning `len`, subscripts and `for`
+    still admits `symbols.symbols.__len__()` followed by
+    `next(iter(symbols.symbols))`, which is size-dependent and contains none of
+    the banned forms. Enumerating syntax is the same defect this slice has been
+    closing everywhere else, one level up — there is always another spelling.
+
+    So the rule is stated positively and derived from the contract instead: the
+    ONLY thing the function may do with its table is ask it for its index. Any
+    other attribute reached on the parameter is reported, whatever the spelling,
+    including `.symbols` itself.
+    """
+    import ast
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(function_source))
+    func = tree.body[0]
+    assert isinstance(func, ast.FunctionDef), type(func)
+    table = func.args.args[0].arg
+
+    offenders = []
+    for statement in func.body:
+        for node in ast.walk(statement):
+            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                if node.value.id == table and node.attr != "build_index":
+                    offenders.append("%s.%s" % (table, node.attr))
+            # ...and the parameter may not escape into anything else, which is
+            # how it would be read without an attribute access at all.
+            if isinstance(node, ast.Call):
+                for argument in list(node.args) + [kw.value for kw in node.keywords]:
+                    if isinstance(argument, ast.Name) and argument.id == table:
+                        offenders.append("%s passed to a call" % table)
+    return sorted(set(offenders))
+
+
 def test_the_family_lookup_cannot_depend_on_table_size():
-    """§6 evaluation 7: the sampling regress, ended structurally rather than outrun.
+    """§6 evaluation 7 and L2 round 52: the sampling regress, ended structurally.
 
     Nine rounds established the shape of this problem. Each widening of the
     oracle's probe sizes was met with a regression keyed one size above the
@@ -5392,84 +5430,64 @@ def test_the_family_lookup_cannot_depend_on_table_size():
     permits. A digest over samples, and equally a property test over enumerated
     sizes, both have a largest case; a mutant one above it always escapes.
 
-    So the property is made UNWRITABLE instead of merely untested.
+    So the property is made UNWRITABLE rather than merely untested.
     `_operation_connector_family` resolves through the table's own
-    `build_index()` dict, and this test refuses — at the AST level — any length
-    comparison, subscript, or iteration over the rows inside it. A
-    size-dependent answer needs one of those, so it cannot be introduced without
-    failing here, at every size at once and without a case for any of them.
+    `build_index()` dict, and the check below is a WHITELIST: the only thing the
+    function may do with its table is ask it for that index. A size-dependent
+    answer needs to reach the rows, and there is no spelling of reaching them
+    that this permits.
 
-    This is deliberately a check on the FUNCTION, not on a sample of its
-    behaviour, which is the only kind of check that closes the class.
+    The first version of this guard blacklisted `len`, subscripts and iteration,
+    and was bypassed the very next round by `symbols.symbols.__len__()` plus
+    `next(iter(symbols.symbols))`. That is recorded here because it is the same
+    defect the whole artifact has been about: enumerating forms instead of
+    deriving from the contract.
     """
-    import ast
     import inspect
 
     import boomi_mcp.compiler.process_ir.execution_profile as ep
 
     source = inspect.getsource(ep._operation_connector_family)
-    tree = ast.parse(textwrap_dedent(source))
-    func = tree.body[0]
-    assert isinstance(func, ast.FunctionDef), type(func)
+    assert _table_access_offenders(source) == [], _table_access_offenders(source)
+    # ...and it really does resolve through the index API, so "no other access"
+    # means "answers by key" rather than "answers nothing".
+    assert "build_index" in source
 
-    # The BODY only. Annotations like `Optional[str]` are subscripts too, and
-    # counting them would make this assertion about the signature's typing
-    # rather than about what the function does — measured: the first draft
-    # failed on its own correct implementation for exactly that reason.
-    offenders = []
-    for statement in func.body:
-        for node in ast.walk(statement):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                if node.func.id in {"len", "enumerate", "sorted", "reversed",
-                                    "list", "tuple"}:
-                    offenders.append("call to %s()" % node.func.id)
-            if isinstance(node, ast.Subscript):
-                offenders.append("subscript")
-            if isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
-                offenders.append("iteration over the table")
-            if isinstance(node, ast.While):
-                offenders.append("while loop")
-    assert offenders == [], (
-        "the family lookup may not depend on how many symbols the table holds; "
-        "found: %s" % sorted(set(offenders))
-    )
-
-    # ...and it really does resolve through the index API, so the absence of
-    # those constructs means "answers by key" rather than "answers nothing".
-    assert "build_index" in source, source
-
-    # NON-VACUITY, in both directions. The check must reject a size-dependent
-    # implementation and accept the real one — otherwise it is an assertion
-    # about formatting.
-    def _detect(fn_source):
-        found = []
-        probe = ast.parse(textwrap_dedent(fn_source)).body[0]
-        for statement in probe.body:
-            for node in ast.walk(statement):
-                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                        and node.func.id == "len"):
-                    found.append("len")
-                if isinstance(node, ast.Subscript):
-                    found.append("subscript")
-                if isinstance(node, (ast.For, ast.comprehension)):
-                    found.append("iteration")
-        return sorted(set(found))
-
-    assert _detect(source) == []
-    assert _detect(
+    # NON-VACUITY, in both directions — including the exact bypass that defeated
+    # the previous version of this guard.
+    assert _table_access_offenders(
+        "def probe(symbols, ref):\n"
+        "    if symbols.symbols.__len__() > 41:\n"
+        "        return next(iter(symbols.symbols)).connector_type\n"
+        "    return symbols.build_index().get(ref)\n"
+    ) == ["symbols.symbols"]
+    assert _table_access_offenders(
         "def probe(symbols, ref):\n"
         "    rows = symbols.symbols\n"
         "    if len(rows) > 41:\n"
         "        return rows[0].connector_type\n"
         "    return None\n"
-    ) == ["len", "subscript"]
-    assert _detect(
+    ) == ["symbols.symbols"]
+    assert _table_access_offenders(
         "def probe(symbols, ref):\n"
         "    for row in symbols.symbols:\n"
         "        if row.ref == ref:\n"
         "            return row.connector_type\n"
         "    return None\n"
-    ) == ["iteration"]
+    ) == ["symbols.symbols"]
+    # ...a helper that is handed the whole table can do anything with it, so the
+    # parameter escaping into a call is reported too.
+    assert _table_access_offenders(
+        "def probe(symbols, ref):\n"
+        "    return _elsewhere(symbols, ref)\n"
+    ) == ["symbols passed to a call"]
+    # ...and the real shape is accepted, or this rejects everything and proves
+    # nothing.
+    assert _table_access_offenders(
+        "def probe(symbols, ref):\n"
+        "    hit = symbols.build_index().get(ref)\n"
+        "    return getattr(hit, 'connector_type', None)\n"
+    ) == []
 
 
 def textwrap_dedent(text):
