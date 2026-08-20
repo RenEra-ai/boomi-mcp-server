@@ -4926,45 +4926,59 @@ def test_the_entry_role_restriction_is_pinned_to_the_invariant_that_enforces_it(
 # --------------------------------------------------------------------------
 
 def _family_lookup_mutants(ep):
-    """Variants of `_operation_connector_family` that are byte-identical to the
-    real one on every 0- or 1-symbol table.
+    """Wrong-row variants of `_operation_connector_family`.
 
-    That equivalence is the whole finding: the oracle passed at most one symbol
-    per case, so each of these left the served `compiler_revision` unchanged
-    while changing what a real request materializes. They are defined here in
-    one place because both the kill test and the "the oracle could not see them"
-    non-vacuity control need exactly the same set.
+    Each answers from a row it was not asked for, or refuses a table shape. The
+    set grew as two more gates found shapes the earlier padding could not see:
+    `second` (the referenced symbol sat at index 1 in every padded row) and
+    `big-table-listener` (no probe exceeded three symbols, while a normal
+    compiling database-source/WSS-target process carries four).
+
+    Whether a mutant is INVISIBLE to a one-symbol case set is derived below by
+    comparison, never asserted here — a first draft hand-listed that partition
+    and got it wrong.
     """
-    listener = ep.LISTENER_CONNECTOR_TYPES
+    listener = {f.strip().lower() for f in ep.LISTENER_CONNECTOR_TYPES}
+    real = ep._operation_connector_family
 
     def _fold(value):
         return value.strip().lower() if isinstance(value, str) else None
 
+    def _rows(symbols):
+        return tuple(symbols.symbols or ())
+
     def first0_refchecked(symbols, ref):
-        rows = tuple(symbols.symbols or ())
-        if rows and rows[0].ref == ref:
-            return _fold(rows[0].connector_type)
-        return None
+        rows = _rows(symbols)
+        return _fold(rows[0].connector_type) if rows and rows[0].ref == ref else None
 
     def first0_refblind(symbols, ref):
-        rows = tuple(symbols.symbols or ())
+        rows = _rows(symbols)
+        return _fold(rows[0].connector_type) if rows else None
+
+    def last_row(symbols, ref):
+        rows = _rows(symbols)
+        return _fold(rows[-1].connector_type) if rows else None
+
+    def second_row(symbols, ref):
+        rows = _rows(symbols)
+        if len(rows) > 1:
+            return _fold(rows[1].connector_type)
         return _fold(rows[0].connector_type) if rows else None
 
     def single_symbol_only(symbols, ref):
-        rows = tuple(symbols.symbols or ())
+        rows = _rows(symbols)
         if len(rows) > 1:
             return None
         return next((_fold(r.connector_type) for r in rows if r.ref == ref), None)
 
     def wrong_loop_var(symbols, ref):
-        rows = tuple(symbols.symbols or ())
-        for row in rows:
-            if row.ref == ref:
-                return _fold(rows[0].connector_type)
+        rows = _rows(symbols)
+        if any(r.ref == ref for r in rows):
+            return _fold(rows[0].connector_type)
         return None
 
     def listener_anywhere(symbols, ref):
-        rows = tuple(symbols.symbols or ())
+        rows = _rows(symbols)
         if not any(r.ref == ref for r in rows):
             return None
         for row in rows:
@@ -4973,12 +4987,26 @@ def _family_lookup_mutants(ep):
                 return folded
         return next((_fold(r.connector_type) for r in rows if r.ref == ref), None)
 
+    def big_table_listener(symbols, ref):
+        """A path taken only for production-sized tables — invisible to every
+        probe while the largest carried three symbols (L2 round 47)."""
+        rows = _rows(symbols)
+        if len(rows) > 3:
+            for row in rows:
+                folded = _fold(row.connector_type)
+                if folded in listener:
+                    return folded
+        return real(symbols, ref)
+
     return {
         "first0-refchecked": first0_refchecked,
         "first0-refblind": first0_refblind,
+        "last-row": last_row,
+        "second-row": second_row,
         "single-symbol-only": single_symbol_only,
         "wrong-loop-var": wrong_loop_var,
         "listener-anywhere": listener_anywhere,
+        "big-table-listener": big_table_listener,
     }
 
 
@@ -5059,21 +5087,29 @@ def test_the_served_revision_binds_multi_symbol_family_lookup():
     single = [_Table(()), _Table((_Row("$ref:op", "database"),)),
               _Table((_Row("$ref:op", sorted(ep.LISTENER_CONNECTOR_TYPES)[0]),)),
               _Table((_Row("$ref:other", "database"),))]
-    invisible = {k: v for k, v in mutants.items() if k != "first0-refblind"}
-    assert len(invisible) == 4, sorted(invisible)
-    for name, mutant in invisible.items():
-        for table in single:
-            for ref in ("$ref:op", "$ref:missing"):
-                assert mutant(table, ref) == original(table, ref), (name, ref)
-    # ...and the excluded one is excluded for a MEASURED reason, not by taste:
-    # it differs from the real function on a one-symbol table.
-    mismatch = [
-        (tuple((r.ref, r.connector_type) for r in t.symbols), ref)
-        for t in single
-        for ref in ("$ref:op", "$ref:missing")
-        if mutants["first0-refblind"](t, ref) != original(t, ref)
-    ]
-    assert mismatch, "first0-refblind is invisible to single-symbol tables after all"
+    # The partition is DERIVED, not written down: a mutant is "invisible to a
+    # one-symbol case set" exactly when it agrees with the real function on every
+    # 0- and 1-symbol table. The first draft hand-listed which mutants were
+    # invisible and was wrong about one of them, which is the same hand-model
+    # defect this whole artifact keeps producing.
+    def _agrees_on_small_tables(mutant):
+        return all(
+            mutant(table, ref) == original(table, ref)
+            for table in single
+            for ref in ("$ref:op", "$ref:missing")
+        )
+
+    invisible = {k for k, v in mutants.items() if _agrees_on_small_tables(v)}
+    visible = set(mutants) - invisible
+    # Both groups must be non-empty, or the derivation has collapsed and this
+    # control is asserting nothing.
+    assert invisible and visible, (sorted(invisible), sorted(visible))
+    # The invisible group is the finding: those are the regressions the shipped
+    # one-symbol case set could not possibly have caught, and they are killed
+    # above only because the probes now carry real tables.
+    assert "listener-anywhere" in invisible and "big-table-listener" in invisible, (
+        sorted(invisible)
+    )
 
 
 def test_the_profile_case_set_keeps_both_arities_and_both_directions():
@@ -5116,13 +5152,32 @@ def test_the_profile_case_set_keeps_both_arities_and_both_directions():
     assert any(a == 1 for a in arities), sorted(arities)
     assert any(a > 1 for a in arities), sorted(arities)
 
+    # PRODUCTION-SIZED, not merely multi-symbol (L2 round 47). A normal compiling
+    # database-source / WSS-target process carries four symbols — two operations
+    # and two connections — so a regression on a path like `len(symbols) > 3`
+    # was invisible while every probe topped out at three.
+    assert max(arities) >= 4, sorted(arities)
+
+    # ...and the referenced symbol is not always at the same INDEX (QA round 20,
+    # which censused it and found index 1 in all eleven padded rows). With one
+    # universal index, an off-by-one to that index is exactly the shape the
+    # decoys cannot see, and a direction carried by a single row goes dark the
+    # moment that row is simplified.
+    resolved_indices = {
+        next(i for i, (r, _t) in enumerate(rows) if r == ref)
+        for rows, ref in seen
+        if len(rows) > 1 and any(r == ref for r, _t in rows)
+    }
+    assert len(resolved_indices) >= 3, sorted(resolved_indices)
+    assert 0 in resolved_indices and max(resolved_indices) >= 2, sorted(resolved_indices)
+
     listener_families = {f.strip().lower() for f in ep.LISTENER_CONNECTOR_TYPES}
 
     def _is_listener(value):
         return isinstance(value, str) and value.strip().lower() in listener_families
 
     multi = [(rows, ref) for rows, ref in seen if len(rows) > 1]
-    directions = set()
+    directions = []
     for rows, ref in multi:
         referenced = next((t for r, t in rows if r == ref), None)
         answer = "listener" if _is_listener(referenced) else "scheduled"
@@ -5133,8 +5188,12 @@ def test_the_profile_case_set_keeps_both_arities_and_both_directions():
             "a multi-symbol probe carries only same-class decoys, which "
             "discriminate nothing: %r" % (rows,)
         )
-        directions.add(answer)
-    assert directions == {"listener", "scheduled"}, sorted(directions)
+        directions.append(answer)
+    assert set(directions) == {"listener", "scheduled"}, sorted(set(directions))
+    # ...and NEITHER direction rests on a single row, so simplifying any one
+    # padded table cannot silently take a whole direction dark.
+    for answer in ("listener", "scheduled"):
+        assert directions.count(answer) >= 2, (answer, directions)
 
     # ...and the rows' VALUES are what the directions above claim, so this guard
     # cannot pass over a case set whose answers have silently changed.

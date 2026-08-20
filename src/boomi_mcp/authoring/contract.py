@@ -933,6 +933,43 @@ def _cfg_semantic_members():
     return typing.get_args(union)
 
 
+def _cycle(values):
+    """`itertools.cycle`, spelled locally so the oracle has no import surprises."""
+    while True:
+        for value in values:
+            yield value
+
+
+def _padded(symbol_of, referenced, decoy_family: str, *, position: int, arity: int):
+    """`referenced` surrounded by inert decoys, at `position` in a table of `arity`.
+
+    The decoys carry `decoy_family` and refs that match NOTHING, so they cannot
+    change what the lookup returns — the row's value, and therefore the served
+    revision, is identical to the unpadded row. What they change is what a WRONG
+    lookup returns: taking the first row, the last row, index 1, any
+    listener-family row, or refusing tables above some size all diverge here
+    while remaining byte-identical on a one-symbol table.
+
+    `symbol_of` is the caller's own symbol constructor, passed in rather than
+    reached for, so this helper cannot drift from how the oracle builds its rows.
+
+    Position and arity are parameters rather than constants because fixing them
+    is how this went wrong twice: every padded row put the referenced symbol at
+    index 1 with at most three symbols, so an off-by-one to index 1 and a
+    `len(symbols) > 3` path stayed invisible, and one failure direction rested on
+    a single row. The accompanying structural guard asserts the spread rather
+    than trusting these call sites to keep varying it.
+    """
+    arity = max(arity, 2)
+    position = max(0, min(position, arity - 1))
+    rows = [
+        symbol_of("$ref:decoy-%d" % index, decoy_family)
+        for index in range(arity - 1)
+    ]
+    rows.insert(position, referenced)
+    return rows
+
+
 def _entry_roles(member) -> Tuple[str, ...]:
     """The roles this member may carry AT THE ENTRY POSITION.
 
@@ -1114,9 +1151,18 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
             [_symbol("$ref:op", families[0] if families else "http")],
             entry_id="somewhere-else",
         ),
+        # The SECOND row carrying the `scheduled` direction with a multi-symbol
+        # table (QA round 20: that direction rested on one row, so simplifying
+        # it would take the direction dark while the digest stood still). The
+        # entry's reference resolves to nothing here, so the honest answer is
+        # `scheduled`; every symbol present — the decoys and the unreferenced
+        # one — is a listener family, so ANY lookup that answers from a row it
+        # was not asked for flips this row. The existing `first0-refblind` kill
+        # is retained by construction: index 0 is still a listener family.
         "operation-unresolved": _classify(
             _connector(listener_role, "$ref:missing"),
-            [_symbol("$ref:op", families[0] if families else "http")],
+            _padded(_symbol, _symbol("$ref:op", families[0] if families else "http"),
+                    families[-1] if families else "http", position=1, arity=3),
         ),
         # THE ONLY ROW THAT CAN PIN THE scheduled -> listener DIRECTION, and the
         # only reason it can is the decoys (§6 AR5-01). The entry's reference
@@ -1141,11 +1187,8 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
         # passes.
         "non-listener-family": _classify(
             _connector(listener_role, "$ref:op"),
-            [
-                _symbol("$ref:a-decoy", families[0] if families else "http"),
-                _symbol("$ref:op", "database"),
-                _symbol("$ref:z-decoy", families[0] if families else "http"),
-            ],
+            _padded(_symbol, _symbol("$ref:op", "database"),
+                    families[0] if families else "http", position=2, arity=4),
         ),
     })
     # The `connector` rows, per family and per role. The ROLES come from
@@ -1156,8 +1199,19 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
     # admitted role is also what makes the role test part of the covered
     # behaviour rather than an untested branch.
     connector_roles = _literal_options(_connector_member(), "role")
+    # Position and arity cycles, so the padded rows spread across indices and
+    # table sizes instead of all sharing one shape. Deterministic and finite:
+    # the oracle must be reproducible byte-for-byte on every call.
+    _spread = _cycle((0, 1, 2, 3))
+    _sizes = _cycle((2, 3, 4, 5))
     for family in families:
         symbols = [_symbol("$ref:op", family)]
+        # Advanced once per FAMILY, not per (family, role): the derivation
+        # returns early for the non-listener role and never reaches the lookup,
+        # so advancing per role handed every row that DOES reach it the same two
+        # cycle positions — measured, indices {0, 2} only. A spread that aliases
+        # against an early return is not a spread.
+        _position, _arity = next(_spread), next(_sizes)
         for role in connector_roles:
             cases["connector-%s-%s" % (role, family)] = _classify(
                 _connector(role, "$ref:op"), symbols
@@ -1168,12 +1222,19 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
             # first symbol, or refuses a table of more than one, answers
             # `scheduled` here. Its plain sibling above stays single-symbol on
             # purpose, so both arities remain represented in the case set.
+            # The POSITION and the ARITY are varied across these rows, not fixed
+            # (L2 round 47 + QA round 20, which found the same gap from two
+            # sides): with the referenced symbol at index 1 in every padded row
+            # and no table larger than three, an off-by-one to index 1 and a
+            # `len(symbols) > 3` path were both invisible, and one direction
+            # rested on a single row. `_padded` walks positions and sizes so no
+            # index and no arity is universal. Decoy refs still match nothing, so
+            # every row's VALUE — and the served revision — is unchanged.
             cases["connector-%s-unnormalized-%s" % (role, family)] = _classify(
                 _connector(role, "$ref:op"),
-                [
-                    _symbol("$ref:a-decoy", "database"),
-                    _symbol("$ref:op", "  " + family.upper() + "  "),
-                ],
+                _padded(_symbol,
+                        _symbol("$ref:op", "  " + family.upper() + "  "),
+                        "database", position=_position, arity=_arity),
             )
     return {
         "profiles": sorted({module.SCHEDULED, module.LISTENER}),
