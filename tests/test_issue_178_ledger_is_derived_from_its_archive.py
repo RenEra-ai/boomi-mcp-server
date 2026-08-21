@@ -73,8 +73,16 @@ def _collected_review_runs(loop_prefix=STAGE2_LOOP_PREFIX):
     ]
 
 
+#: The heading that owns the Stage-2 evaluation table. Parsing is bounded to this
+#: SECTION, not the file: the §6 architect gate is already on this slice's roster
+#: and will be recorded in its own numbered table of `cdx-gate-review.*` rows. A
+#: whole-file scan would read those as Stage-2 history and then reject them as
+#: unowned, so the guard would fail on a correctly-kept record.
+STAGE2_HEADING = "## Stage-2 repo Codex review (loop 2)"
+
+
 def _stage2_table_runs():
-    """Run-dir names listed in the Stage-2 EVALUATION TABLE specifically.
+    """Run-dir names listed in the Stage-2 EVALUATION TABLE, in order.
 
     Parsing the table rather than the whole file is the point. A whole-file
     substring check is satisfied by the run's own FINDING row, so it passes while
@@ -82,10 +90,29 @@ def _stage2_table_runs():
     table row left all six assertions green. That is exactly the `L2R3-02`
     accounting defect, so the guard that claims to prevent it must read the table
     the cumulative count is displayed in.
+
+    A LIST, not a set: duplicates inflate the evaluation count just as effectively
+    as omissions hide it, and set membership cannot see a row listed twice.
     """
+    text = LEDGER.read_text(encoding="utf-8")
+    # Anchored at LINE START, not by substring. The ledger quotes this heading
+    # inside a finding row that explains the fix, and finding rows come earlier in
+    # the file — so a bare `index()` matched the quotation, sliced an empty
+    # section, and reported zero table rows. Measured, on this file.
+    heading = re.search(
+        r"^{0}$".format(re.escape(STAGE2_HEADING)), text, re.MULTILINE
+    )
+    assert heading is not None, "the Stage-2 section heading was not found"
+    rest = text[heading.end():]
+    # Stop at the next top-level heading, so a later section's numbered table is
+    # never read as this one's history.
+    end = rest.find("\n## ")
+    section = rest if end == -1 else rest[:end]
     rows = []
-    for line in LEDGER.read_text(encoding="utf-8").splitlines():
-        match = re.match(r"\|\s*\d+\s*\|\s*`(cdx(?:-gate)?-review\.[A-Za-z0-9_-]+)`", line)
+    for line in section.splitlines():
+        # `cdx-review.` ONLY — a gate-review run belongs to a different loop and
+        # is not Stage-2 history even when it appears in a numbered row.
+        match = re.match(r"\|\s*\d+\s*\|\s*`(cdx-review\.[A-Za-z0-9_-]+)`", line)
         if match:
             rows.append(match.group(1))
     return rows
@@ -116,12 +143,21 @@ def test_every_archived_review_round_appears_in_the_stage2_table():
     )
 
 
-def test_the_stage2_table_lists_no_round_the_loop_does_not_own():
-    """The table must not pad its own history either — a row for a run that is not
-    a collected Stage-2 round inflates the cumulative count just as badly."""
-    owned = set(_collected_review_runs())
-    extra = [name for name in _stage2_table_runs() if name not in owned]
-    assert extra == [], sorted(extra)
+def test_the_stage2_table_matches_the_archive_exactly_once_each():
+    """The table must not pad its own history either.
+
+    Compared as MULTISETS. Set membership passes a run listed twice — both copies
+    are "owned" — while the displayed evaluation count is silently inflated, which
+    is the same accounting corruption as an omission pointing the other way.
+    """
+    from collections import Counter
+
+    listed = Counter(_stage2_table_runs())
+    owned = Counter(_collected_review_runs())
+    assert listed == owned, {
+        "duplicated_or_unowned": sorted((listed - owned).elements()),
+        "missing": sorted((owned - listed).elements()),
+    }
 
 
 def test_the_ledger_cites_no_review_round_the_archive_lacks():
