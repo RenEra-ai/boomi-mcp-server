@@ -828,3 +828,95 @@ def test_type_faithfulness_accepts_every_legal_generated_document():
         assert_process_ir_v1_type_faithful(ir)
         checked += 1
     assert checked, "no accepted case observed — the assertion would be vacuous"
+
+
+def test_a_one_shot_iterable_field_is_read_exactly_once():
+    """The re-parse must not DESTROY the state it is judging (#178 Stage-2 r2).
+
+    `ProcessIRV1` is not validate-on-assignment, so a field can hold a one-shot
+    iterable. An earlier revision dumped to json as a cheap type-violation
+    detector and re-dumped raw when that raised — but the first dump CONSUMES a
+    generator, so the second saw an exhausted one, reported an empty
+    `/body/steps`, and refused a document the parser accepts. Worse, the served
+    diagnostic described the probe's own damage (a cardinality violation) rather
+    than anything about the document.
+
+    The compile entry now reads the state exactly once. This test pins that
+    property where it is observable: through the public entry, end to end.
+    """
+    ir = _control_flow_ir()
+    original = len(ir.body.steps)
+    assert original > 1, "the control needs several steps to be meaningful"
+    ir.body.steps = (step for step in ir.body.steps)
+
+    revalidated = pl._reparse_process_ir_for_compile(ir)
+    assert len(revalidated.body.steps) == original, (
+        "the re-parse consumed the iterable before judging it"
+    )
+    assert canonical_process_ir_json(revalidated) == canonical_process_ir_json(
+        _control_flow_ir()
+    )
+
+
+def test_the_reparse_never_builds_a_json_projection_of_the_caller_model():
+    """A `mode="json"` dump REPAIRS wrong-typed values, so building one — even
+    only to probe — reopens the hole this entry exists to close. Pinned on the
+    source because the defect is the CALL, not an observable output."""
+    import ast
+    import inspect
+    import textwrap
+
+    # Scan the CODE, not the prose. The docstring names `mode="json"` in order to
+    # explain why it is wrong, so a raw substring check matches the explanation
+    # and reports the very thing it is meant to permit — the first draft of this
+    # test did exactly that.
+    tree = ast.parse(
+        textwrap.dedent(inspect.getsource(pl._reparse_process_ir_for_compile))
+    )
+    func = tree.body[0]
+    body = func.body[1:] if ast.get_docstring(func) else func.body
+    code = "\n".join(ast.dump(node) for node in body)
+    assert "json" not in code, ast.unparse(ast.Module(body=body, type_ignores=[]))
+    assert "raw_process_ir_payload" in code
+
+
+def test_the_caller_model_is_read_exactly_once_and_that_is_the_contract():
+    """A one-shot iterable field makes a model SINGLE-USE. Pinned, not fixed.
+
+    Re-validating reads every field, so the first compile drains a generator and
+    a second compile of the same object refuses. This cannot be sequenced away —
+    the identical drain occurs on the pre-#178 dump shape, so it is a property of
+    re-parsing at all rather than of any particular implementation, and Python
+    offers no way to read a one-shot iterable twice.
+
+    It is pinned here so the behaviour is a stated contract rather than a
+    surprise: QA measured the canonical apply path handing ONE model object to
+    the public entry three times, which is safe only because production models
+    come from a parse and hold materialised containers.
+    """
+    ir = _control_flow_ir()
+    original = len(ir.body.steps)
+    ir.body.steps = (step for step in ir.body.steps)
+
+    first = pl._reparse_process_ir_for_compile(ir)
+    assert len(first.body.steps) == original
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        pl._reparse_process_ir_for_compile(ir)
+    assert excinfo.value.diagnostics[0].code == "PROCESS_IR_SCHEMA_INVALID_CARDINALITY"
+
+    # ...and the documented escape hatch really is one: the model handed back by
+    # the first call is materialised, so it compiles repeatedly.
+    for _ in range(3):
+        again = pl._reparse_process_ir_for_compile(first)
+        assert len(again.body.steps) == original
+
+
+def test_the_precondition_is_stated_on_the_public_entry():
+    """A contract nobody can find is not a contract. This is the one place a
+    caller of the public entry would look."""
+    import inspect
+
+    doc = inspect.getdoc(pl.compile_process_ir_v1) or ""
+    assert "READ EXACTLY ONCE" in doc
+    assert "one-shot" in doc.lower()

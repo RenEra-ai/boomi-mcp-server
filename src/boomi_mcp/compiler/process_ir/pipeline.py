@@ -209,41 +209,32 @@ def _reparse_process_ir_for_compile(ir: ProcessIRV1) -> ProcessIRV1:
     The dump is guarded SEPARATELY because it happens before
     ``_parse_payload_for_compile`` and so is outside that helper's own guard.
 
+    ``mode="python"`` is the whole point, and ``mode="json"`` is WRONG here. A
+    json dump is COERCIVE: it renders a ``datetime`` in a ``str`` field as an ISO
+    string and ``bytes`` as text, handing the parser an already-repaired document
+    that it then accepts — which is how a mutated model slipped past this very
+    re-parse. The raw state is what the authority must judge.
+
     ``warnings=False`` is load-bearing for the AR2-01 reason
     ``authoring/workflow.py`` already documents: dumping a model that may have
     been mutated renders the caller's authored values into a pydantic serializer
-    warning before the value-free parser runs — measured to emit the authored
-    secret verbatim, and to RAISE under ``-W error``.
+    warning before the value-free parser runs — measured to emit an authored
+    secret verbatim.
+
+    Exactly ONE dump, deliberately. An earlier revision dumped to json with
+    ``warnings="error"`` as a cheap detector and fell back to a raw dump when it
+    raised. That is a DESTRUCTIVE probe: a field holding a one-shot iterable
+    (``ir.body.steps = (s for s in ir.body.steps)``) is CONSUMED by the first
+    dump, so the fallback re-dumped an exhausted generator, saw an empty
+    ``/body/steps``, and refused a document the parser accepts — with a
+    cardinality diagnostic that described the probe's damage rather than the
+    document. Measured at `1618f99`. Reading the state once removes the failure
+    mode instead of sequencing around it.
     """
-    # `warnings="error"` is the cheap DETECTOR, not the diagnostic. A json dump is
-    # COERCIVE — it renders a `datetime` in a `str` field as an ISO string and
-    # `bytes` as text — so a caller who mutates a field to a wrong-typed value
-    # hands the parser an already-repaired document and gets it accepted, while the
-    # same raw value through `parse_and_compile_process_ir_v1` is refused. Pydantic
-    # itself notices the mismatch while serializing, so raising on that costs
-    # nothing on the happy path (measured: 0 false positives across 126 legal
-    # generated cases and every committed fixture).
-    #
-    # The serializer's own error text is NEVER surfaced: it interpolates the
-    # authored value, which is the AR2-01 hazard. It is caught here and the
-    # PARSER's diagnostic is re-derived from the raw state instead, so the caller
-    # gets a real pointer rather than a bare refusal.
     try:
-        payload = ir.model_dump(mode="json", warnings="error")
-    except Exception:  # noqa: BLE001 - deliberate: never leak internals
-        # The serializer objected, so the raw state contradicts the declared
-        # types and the json dump would have REPAIRED it. Hand the parser the RAW
-        # state and let IT decide — this layer never invents a rule of its own.
-        #
-        # That distinction is load-bearing, not stylistic: an earlier revision
-        # strict-validated here instead, which refused `bytes` even though the
-        # parser accepts it, and so made the two public entry points disagree on
-        # `bytes` where they had previously agreed. Exceeding the authority
-        # reintroduces DC-175-E one layer up.
-        try:
-            payload = raw_process_ir_payload(ir)
-        except ProcessIRValidationError as exc:
-            raise _compile_error_from_validation(exc) from None
+        payload = raw_process_ir_payload(ir)
+    except ProcessIRValidationError as exc:
+        raise _compile_error_from_validation(exc) from None
     return _parse_payload_for_compile(payload)
 
 
@@ -268,6 +259,19 @@ def compile_process_ir_v1(
     The compile stages consume the FRESH re-parsed model, never the caller-owned
     object that was merely checked — otherwise a mutation performed between the
     check and the stages would still reach them.
+
+    PRECONDITION — the caller's model is READ EXACTLY ONCE. Re-validating means
+    reading every field, so a model whose field holds a ONE-SHOT ITERABLE
+    (``ir.body.steps = (s for s in ir.body.steps)``) is single-use: the first
+    compile succeeds and drains it, and a second compile of the SAME OBJECT sees
+    an empty sequence and refuses. That is Python's iterator semantics, not a
+    compiler rule, and it cannot be sequenced away — the identical drain occurs
+    for any re-parse design, measured on the pre-#178 shape too. Callers that
+    compile one model more than once (the canonical apply path does, three times
+    per typed apply) must therefore hold a materialised model; every production
+    model does, because it comes from a parse. A caller needing the exact model
+    that was compiled should take it from
+    :func:`compile_process_ir_model_v1` rather than re-compiling its own.
     """
     # Bound to a local rather than nested into the call below, so the source
     # READS in execution order. Nested, the core's name appears textually first
