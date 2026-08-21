@@ -1,0 +1,696 @@
+"""#178: the two ProcessIR V1 entry points serve ONE diagnostic identity.
+
+`ProcessIRV1` is exported and MUTABLE, so a caller may parse a legal document,
+mutate the model, and hand it straight to `compile_process_ir_v1` — reaching the
+compile stages with a document the parser would have refused. Before #178 the two
+paths agreed on the DECISION for most such documents but not on which diagnostic
+they served, and — measured at the `cdd7a3b` baseline — not always on the decision
+either: a Branch leg with a trailing `cache_put`, a root `source` out of position,
+a one-leg Branch, and any mutated `version` were all refused by the parser and
+ACCEPTED by the compiler, which models none of those rules.
+
+#175 answered that class structurally FOUR times (one body verdict, one root
+verdict, admissibility guards, precedence yields) and each round revealed the next
+ring, because the two paths were never written to share a rule ORDERING — only
+outcomes. So the fix is not another verdict function: public compile re-parses
+through the parser, which becomes the single authority for grammar.
+
+WHY THIS FILE IS DERIVED, NOT HAND-LISTED
+-----------------------------------------
+#175's parity witnesses were hand-enumerated samples, and every round found a
+sample they lacked — which is the recorded reason it deviated to #178. So the case
+set here is a PRODUCT generated from the two runtime authorities:
+
+* `BODY_CAPABILITIES_V1` — the `(context, slot) -> admitted kinds` matrix the
+  compiler actually consults;
+* `process_ir_v1_node_kinds()` — the parser's own closed node vocabulary.
+
+Nothing below hard-codes a case count. The expected total is recomputed from those
+authorities inside the test, so adding a node kind or a matrix row changes the
+expectation automatically and a generator that silently stopped producing cases
+fails instead of passing.
+
+THE VACUITY PROBLEM THIS FILE IS BUILT AGAINST
+----------------------------------------------
+This repo has four recorded instances of a guard that passed because it enumerated
+nothing (#149, #151, #162, #175). Four defences, all mechanical:
+
+1. every untouched carrier is parsed and validated before it is mutated, so a
+   broken carrier fails loudly instead of emptying a whole family;
+2. both partitions (parser-accepted and parser-refused) are asserted non-empty;
+3. the generated count must equal the product formula recomputed at runtime, and
+   every matrix-DENIED cell must own at least one parser-refused case;
+4. `test_the_gate_fails_when_the_structural_fix_is_removed` deletes the fix and
+   asserts this same collector goes red.
+
+Measured when written, at the fixed tree: 820 cases, 126 parser-accepted /
+694 parser-refused, ZERO mismatches. With `_reparse_process_ir_for_compile`
+neutered: 422 mismatches of 820. The witness is not theoretical.
+"""
+
+import copy
+import sys
+from pathlib import Path
+from typing import get_args
+
+import pytest
+from pydantic import TypeAdapter
+
+_ROOT = Path(__file__).resolve().parent.parent
+for _p in (str(_ROOT), str(_ROOT / "src")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from boomi_mcp.compiler.process_ir import body_capabilities as bc  # noqa: E402
+from boomi_mcp.compiler.process_ir import pipeline as pl  # noqa: E402
+from boomi_mcp.compiler.process_ir.diagnostics import (  # noqa: E402
+    ProcessIRCompileError,
+)
+from boomi_mcp.models.process_ir import (  # noqa: E402
+    ProcessIRValidationError,
+    ProcessNodeV1,
+    canonical_process_ir_json,
+    parse_process_ir_v1,
+    process_ir_v1_node_kinds,
+    process_ir_v1_parse_diagnostic_specs,
+)
+
+NODE = TypeAdapter(ProcessNodeV1)
+
+#: The parser's own vocabulary, minus the body wrapper. `sequence` is the BODY,
+#: never a step, so it is not a placement candidate.
+KINDS = tuple(sorted(set(process_ir_v1_node_kinds()) - {"sequence"}))
+#: The compiler's authority. Read, never restated.
+MATRIX = bc.BODY_CAPABILITIES_V1
+CONTEXTS = tuple(sorted({context for context, _slot in MATRIX}))
+
+_REF = "c_ref"
+_STOP = {"kind": "stop"}
+_CONN = {"kind": "connector_call", "operation_ref": _REF}
+
+
+def _atom(kind):
+    """A minimal, internally valid node of `kind`.
+
+    The FIELD SET is derived from each model class's own required fields (see
+    `test_every_atom_is_minimal_against_its_model`); only the VALUES are authored
+    here, and they are inert placeholders. This is not a hand-model of the
+    grammar — a kind whose requirements change fails that test rather than
+    silently producing an invalid atom that makes its whole family vacuous.
+    """
+    if kind == "branch":
+        return {
+            "kind": "branch",
+            "legs": [
+                {"steps": [{"kind": "message", "text": "a"}], "terminal": dict(_STOP)},
+                {"steps": [{"kind": "message", "text": "b"}], "terminal": dict(_STOP)},
+            ],
+        }
+    if kind == "decision":
+        return {
+            "kind": "decision",
+            "comparison": "equals",
+            "left": {"value_type": "static", "static_value": "1"},
+            "right": {"value_type": "static", "static_value": "1"},
+            "true_arm": {
+                "steps": [{"kind": "message", "text": "t"}],
+                "terminal": dict(_STOP),
+            },
+            "false_arm": {
+                "steps": [{"kind": "message", "text": "f"}],
+                "terminal": dict(_STOP),
+            },
+        }
+    if kind == "try_catch":
+        return {
+            "kind": "try_catch",
+            "scope": "process",
+            "try_body": {"steps": [dict(_CONN)], "terminal": dict(_STOP)},
+            "catch_body": {
+                "steps": [{"kind": "message", "text": "c"}],
+                "terminal": dict(_STOP),
+            },
+        }
+    if kind == "data_process":
+        return {
+            "kind": "data_process",
+            "steps": [
+                {
+                    "operation": "custom_scripting",
+                    "language": "groovy2",
+                    "script": "x",
+                }
+            ],
+        }
+    simple = {
+        "cache_get": {"cache_ref": _REF},
+        "cache_put": {"cache_ref": _REF},
+        "cache_remove": {"cache_ref": _REF},
+        "document_cache_retrieve": {"cache_ref": _REF},
+        "connector_call": {"operation_ref": _REF},
+        # The `{1}` placeholder is REQUIRED by the model's own validator.
+        "exception": {"message_template": "boom {1}"},
+        "flow_control": {"for_each_count": 1},
+        "map_ref": {"map_ref": _REF},
+        "message": {"text": "m"},
+        "process_call": {"process_ref": _REF},
+        "return_documents": {},
+        "stop": {},
+        "set_ddp": {
+            "name": "n",
+            "source_values": [{"value_type": "static", "value": "v"}],
+        },
+        "set_dpp": {
+            "name": "n",
+            "source_values": [{"value_type": "static", "value": "v"}],
+        },
+        "source": {"connection_ref": _REF, "operation_ref": _REF},
+        "target": {"connection_ref": _REF, "operation_ref": _REF},
+    }
+    return {"kind": kind, **simple[kind]}
+
+
+#: A legal root used only as something to MUTATE. Root cases cannot be built as
+#: raw payloads: an illegal root payload never parses into a model at all, so
+#: there would be nothing to hand the compiler and the entire root half of the
+#: product — which is where corpus rows 2 and 3 live — would silently skip itself.
+_ROOT_CARRIER = {
+    "version": "1",
+    "body": {"kind": "sequence", "steps": [dict(_CONN), dict(_STOP)]},
+}
+
+
+def _carrier(context, mode):
+    """An untouched, LEGAL document holding the target body."""
+    if context == bc.BRANCH_LEG:
+        control = _atom("branch")
+    elif context in (bc.DECISION_TRUE_ARM, bc.DECISION_FALSE_ARM):
+        control = _atom("decision")
+    else:
+        control = copy.deepcopy(_atom("try_catch"))
+        if mode == "connector_above":
+            # The ancestor mode is NOT free for try/catch: a connector scope must
+            # protect the call that produces the documents, so the scope changes
+            # with the mode rather than a connector merely being prepended.
+            control["scope"] = "connector"
+            control["try_body"] = {"steps": [dict(_CONN)], "terminal": dict(_STOP)}
+    steps = [dict(_CONN), control] if mode == "connector_above" else [control]
+    return {"version": "1", "body": {"kind": "sequence", "steps": steps}}
+
+
+def _body_of(ir, context, mode):
+    node = ir.body.steps[1] if mode == "connector_above" else ir.body.steps[0]
+    if context == bc.BRANCH_LEG:
+        return node.legs[0]
+    if context == bc.DECISION_TRUE_ARM:
+        return node.true_arm
+    if context == bc.DECISION_FALSE_ARM:
+        return node.false_arm
+    if context == bc.TRY_BODY:
+        return node.try_body
+    return node.catch_body
+
+
+MODES = ("clean", "connector_above")
+
+
+def _generate():
+    """The derived product. Returns (cases, carrier_failures)."""
+    cases = []
+    carrier_failures = []
+    for context, slot in sorted(MATRIX):
+        for mode in MODES:
+            base = _carrier(context, mode)
+            try:
+                parse_process_ir_v1(copy.deepcopy(base))
+            except ProcessIRValidationError as exc:  # pragma: no cover - guard
+                carrier_failures.append((context, slot, mode, str(exc)[:160]))
+                continue
+            for kind in KINDS:
+                ir = parse_process_ir_v1(copy.deepcopy(base))
+                body = _body_of(ir, context, mode)
+                node = NODE.validate_python(copy.deepcopy(_atom(kind)))
+                if slot == bc.STEP_SLOT:
+                    body.steps = [node]
+                else:
+                    body.terminal = node
+                cases.append(
+                    ("{0}/{1}={2}/mode={3}".format(context, slot, kind, mode), ir)
+                )
+    # ROOT product — the matrix has no root row, and root precedence is exactly
+    # where two rules collide (corpus rows 2 and 3).
+    parse_process_ir_v1(copy.deepcopy(_ROOT_CARRIER))
+    for first in KINDS:
+        ir = parse_process_ir_v1(copy.deepcopy(_ROOT_CARRIER))
+        ir.body.steps = [NODE.validate_python(copy.deepcopy(_atom(first)))]
+        cases.append(("root/[{0}]".format(first), ir))
+        for second in KINDS:
+            other = parse_process_ir_v1(copy.deepcopy(_ROOT_CARRIER))
+            other.body.steps = [
+                NODE.validate_python(copy.deepcopy(_atom(first))),
+                NODE.validate_python(copy.deepcopy(_atom(second))),
+            ]
+            cases.append(("root/[{0},{1}]".format(first, second), other))
+    return cases, carrier_failures
+
+
+class _GrammarBoundary(ProcessIRCompileError):
+    """Marks passage through the compile-side GRAMMAR boundary.
+
+    It must SUBCLASS `ProcessIRCompileError`: `_guarded` re-raises that family
+    untouched but converts anything else into a value-free
+    `PROCESS_IR_COMPILE_INTERNAL` — measured, and it made every parser-accepted
+    case look like a mismatch until the sentinel was given the right base.
+
+    Raised in place of CFG lowering, so a case that reaches it passed the
+    re-parse and `validate_body_capabilities` without being judged on symbol or
+    semantic grounds the parser could not possibly reach.
+    """
+
+    def __init__(self):
+        super().__init__([])
+
+
+def _vector(exc):
+    """The full served identity, not just the code.
+
+    `remediation` is compared too: it is served machine-facing text and was
+    MEASURED to diverge between the two paths on corpus row 1, so a
+    (code, path, message) assertion would leave a real divergence unpinned.
+    """
+    return tuple(
+        (d.code, d.path, d.message, getattr(d, "remediation", None))
+        for d in exc.diagnostics
+    )
+
+
+def _measure(ir):
+    """(parser_outcome, compiler_outcome) for one already-built model."""
+    payload = ir.model_dump(mode="json", warnings=False)
+    try:
+        parse_process_ir_v1(copy.deepcopy(payload))
+        parser = ("ACCEPTED",)
+    except ProcessIRValidationError as exc:
+        parser = ("REFUSED",) + _vector(exc)
+
+    real = pl.lower_process_ir_to_cfg
+
+    def _boundary(*_a, **_k):
+        raise _GrammarBoundary()
+
+    pl.lower_process_ir_to_cfg = _boundary
+    try:
+        pl.compile_process_ir_v1(ir, None)
+        compiler = ("REACHED-NO-BOUNDARY",)
+    except _GrammarBoundary:
+        compiler = ("ACCEPTED",)
+    except ProcessIRCompileError as exc:
+        compiler = ("REFUSED",) + _vector(exc)
+    finally:
+        pl.lower_process_ir_to_cfg = real
+    return parser, compiler
+
+
+_CACHE = {}
+
+
+def _measured():
+    """Measure every case ONCE; the parity and safety tests read this."""
+    if not _CACHE:
+        cases, failures = _generate()
+        _CACHE["failures"] = failures
+        _CACHE["cases"] = cases
+        _CACHE["rows"] = [(cid, ir) + _measure(ir) for cid, ir in cases]
+    return _CACHE
+
+
+# ---------------------------------------------------------------------------
+# Structure — the generator itself must be sound before its verdict means
+# anything.
+# ---------------------------------------------------------------------------
+
+
+def test_every_atom_is_minimal_against_its_model():
+    """The palette is keyed by the runtime vocabulary and validates against the
+    runtime union. A new node kind fails HERE, closed, instead of quietly having
+    no cases generated for it."""
+    assert set(KINDS), "the node vocabulary is empty — everything below is vacuous"
+    for kind in KINDS:
+        NODE.validate_python(copy.deepcopy(_atom(kind)))
+    union_kinds = set()
+    for cls in get_args(get_args(ProcessNodeV1)[0]):
+        field = cls.model_fields.get("kind")
+        if field is not None:
+            union_kinds.add(get_args(field.annotation)[0])
+    assert union_kinds == set(KINDS), union_kinds.symmetric_difference(set(KINDS))
+
+
+def test_the_matrix_is_a_total_grid_and_every_carrier_is_legal():
+    """A context missing a slot, or a carrier that is already invalid, would empty
+    a whole family and leave the gate green for the wrong reason."""
+    for context in CONTEXTS:
+        for slot in (bc.STEP_SLOT, bc.TERMINAL_SLOT):
+            assert (context, slot) in MATRIX, (context, slot)
+    assert _measured()["failures"] == [], _measured()["failures"]
+
+
+def test_the_generated_count_equals_the_runtime_product():
+    """Derived, never hard-coded. A generator that stopped early — or a matrix row
+    that vanished — changes this equality instead of shrinking coverage
+    silently."""
+    expected_body = len(MATRIX) * len(MODES) * len(KINDS)
+    expected_root = len(KINDS) + len(KINDS) * len(KINDS)
+    cases = _measured()["cases"]
+    assert len(cases) == expected_body + expected_root, len(cases)
+    assert len({cid for cid, _ir in cases}) == len(cases), "case ids collide"
+
+
+def test_both_partitions_are_populated():
+    """The whole gate is vacuous if everything lands on one side."""
+    rows = _measured()["rows"]
+    accepted = [r for r in rows if r[2][0] == "ACCEPTED"]
+    refused = [r for r in rows if r[2][0] == "REFUSED"]
+    assert accepted, "no parser-accepted case — the parity check proves nothing"
+    assert refused, "no parser-refused case — the parity check proves nothing"
+
+
+def test_every_denied_matrix_cell_owns_a_refused_case():
+    """Coverage claimed from the AUTHORITY's own case set: each `(context, slot,
+    kind)` the matrix does not admit must actually be exercised and refused."""
+    refused_ids = {
+        cid for cid, _ir, parser, _c in _measured()["rows"] if parser[0] == "REFUSED"
+    }
+    missing = []
+    for (context, slot), admitted in sorted(MATRIX.items()):
+        for kind in KINDS:
+            if kind in admitted:
+                continue
+            if not any(
+                cid.startswith("{0}/{1}={2}/".format(context, slot, kind))
+                for cid in refused_ids
+            ):
+                missing.append((context, slot, kind))
+    assert missing == [], missing
+
+
+# ---------------------------------------------------------------------------
+# The gate itself.
+# ---------------------------------------------------------------------------
+
+
+def test_both_entry_points_serve_one_diagnostic_identity():
+    """THE GATE. For every generated document the two entry points must agree on
+    the complete ordered diagnostic vector — code, JSON pointer, message and
+    remediation — not merely on whether they refuse."""
+    mismatches = [
+        (cid, parser, compiler)
+        for cid, _ir, parser, compiler in _measured()["rows"]
+        if parser != compiler
+    ]
+    assert mismatches == [], "\n".join(
+        "{0}\n  parser  : {1}\n  compiler: {2}".format(*m) for m in mismatches[:20]
+    )
+
+
+def test_a_parser_finding_is_served_through_the_compile_error_family():
+    """`ProcessIRValidationError` and `ProcessIRCompileError` are unrelated types,
+    and every production handler catches only the latter. A raw parser error
+    escaping the compile entry would defeat all of them and serve a refusal with
+    no error code."""
+    seen = 0
+    for _cid, _ir, parser, compiler in _measured()["rows"]:
+        if parser[0] != "REFUSED":
+            continue
+        seen += 1
+        assert compiler[0] == "REFUSED"
+    assert seen, "no refused case observed — the assertion would be vacuous"
+
+
+def test_translated_parser_diagnostics_carry_the_schema_phase():
+    """`phase` is the compiler-side half of the served identity and has no parser
+    counterpart, so it is pinned separately rather than left to drift."""
+    checked = 0
+    for _cid, ir, parser, _compiler in _measured()["rows"]:
+        if parser[0] != "REFUSED":
+            continue
+        with pytest.raises(ProcessIRCompileError) as excinfo:
+            pl.compile_process_ir_v1(ir, None)
+        assert all(d.phase == "schema" for d in excinfo.value.diagnostics), [
+            (d.code, d.phase) for d in excinfo.value.diagnostics
+        ]
+        checked += 1
+        if checked >= 40:  # a sample is enough for a field-level invariant
+            break
+    assert checked, "no refused case observed — the assertion would be vacuous"
+
+
+def test_the_safety_property_holds_in_both_directions():
+    """ACCEPTANCE ONLY — deliberately not derived from diagnostic equality, so it
+    still means something if the identity gate above is ever weakened.
+
+    This property did NOT hold at the `cdd7a3b` baseline, contrary to #178's own
+    premise: the compiler accepted and fully compiled a Branch leg with a trailing
+    `cache_put`, a root `source` out of position, and any mutated `version`. So
+    this test FAILED before the fix and passes after it, which is the strongest
+    available witness that it is not vacuous.
+
+    Scope: grammar acceptance at the compile entry. Full compilation may still
+    reject a parser-valid document on symbol, CFG or lineage grounds the parser
+    cannot reach, which is why CFG lowering is replaced by a boundary sentinel.
+    """
+    divergent = [
+        (cid, parser[0], compiler[0])
+        for cid, _ir, parser, compiler in _measured()["rows"]
+        if (parser[0] == "ACCEPTED") != (compiler[0] == "ACCEPTED")
+    ]
+    assert divergent == [], divergent[:20]
+
+
+def test_a_legal_document_round_trips_through_the_reparse_unchanged():
+    """The re-parse must be IDENTITY on canonical JSON for accepted documents.
+
+    `build_materialization_plan` stores the CALLER's model in the plan and
+    fingerprints it, while the emission plan now comes from the re-parsed copy.
+    Those agree only because of this property, and nothing else pinned it.
+    """
+    checked = 0
+    for _cid, ir, parser, _compiler in _measured()["rows"]:
+        if parser[0] != "ACCEPTED":
+            continue
+        reparsed = parse_process_ir_v1(ir.model_dump(mode="json", warnings=False))
+        assert canonical_process_ir_json(reparsed) == canonical_process_ir_json(ir)
+        checked += 1
+    assert checked, "no accepted case observed — the assertion would be vacuous"
+
+
+def test_no_legacy_exemption_can_reach_a_parser_diagnostic():
+    """The re-parse is unconditional, including for policy-bearing legacy callers.
+    That is sound only because a legacy policy downgrades post-lowering SEMANTIC
+    findings while the parser raises GRAMMAR findings. Derived from both
+    authorities, so it fails closed if either set grows."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        validation_policy as vp,
+    )
+
+    parser_codes = {spec["code"] for spec in process_ir_v1_parse_diagnostic_specs()}
+    exempt_codes = set(vp._EXEMPT_CODE.values())
+    assert parser_codes and exempt_codes, "one side is empty — the check is vacuous"
+    assert parser_codes & exempt_codes == set(), sorted(parser_codes & exempt_codes)
+
+
+# ---------------------------------------------------------------------------
+# Non-vacuity: delete the fix, and this same collector must go red.
+# ---------------------------------------------------------------------------
+
+
+def test_the_gate_fails_when_the_structural_fix_is_removed(monkeypatch):
+    """THE WITNESS. Neuter `_reparse_process_ir_for_compile` — the exact edit a
+    future refactor might make "because the caller already parsed" — and assert
+    the collector above reports real mismatches, including the specific corpus
+    case. Hand-run when written: 422 mismatches of 820.
+
+    A guard whose failure mode has never been observed is not a guard.
+    """
+    # The probe is a case measured to diverge under the mutant — a witness aimed
+    # at a case that agrees either way would pass while proving nothing. This one
+    # is the ACCEPT-DIRECTION hole: the parser refuses a trailing `cache_put` in a
+    # Branch leg and the unfixed compiler models no such rule, so it accepts and
+    # compiles the document.
+    probe = "branch_leg/step=cache_put/mode=clean"
+    cases = _measured()["cases"]
+    assert any(cid == probe for cid, _ir in cases), "the probe case vanished"
+
+    monkeypatch.setattr(pl, "_reparse_process_ir_for_compile", lambda ir: ir)
+
+    mismatches = {}
+    for cid, ir in cases:
+        parser, compiler = _measure(ir)
+        if parser != compiler:
+            mismatches[cid] = (parser, compiler)
+
+    assert mismatches, "removing the re-parse changed nothing — the gate is vacuous"
+    assert probe in mismatches, sorted(mismatches)[:20]
+    parser, compiler = mismatches[probe]
+    assert parser[0] == "REFUSED" and compiler[0] == "ACCEPTED", (parser, compiler)
+    assert parser[1][0] == "PROCESS_IR_SCHEMA_INVALID_CARDINALITY", parser
+    # The witness must be BROAD, not a single lucky cell: the unfixed compiler
+    # diverges across the grammar, which is why a verdict function per rule could
+    # never close this class.
+    assert len(mismatches) > 100, len(mismatches)
+
+
+# ---------------------------------------------------------------------------
+# The five inherited divergences, as a regression corpus.
+# ---------------------------------------------------------------------------
+
+
+def _corpus_branch_cache_prefix_call():
+    ir = parse_process_ir_v1(_carrier(bc.BRANCH_LEG, "clean"))
+    leg = ir.body.steps[0].legs[0]
+    leg.steps = [NODE.validate_python(_atom("cache_put"))]
+    leg.terminal = NODE.validate_python(_atom("process_call"))
+    return ir
+
+
+def _corpus_root_branch_then_call():
+    ir = parse_process_ir_v1(copy.deepcopy(_ROOT_CARRIER))
+    ir.body.steps = [
+        NODE.validate_python(_atom("branch")),
+        NODE.validate_python(_atom("process_call")),
+    ]
+    return ir
+
+
+def _corpus_root_call_then_source():
+    ir = parse_process_ir_v1(copy.deepcopy(_ROOT_CARRIER))
+    ir.body.steps = [
+        NODE.validate_python(_atom("process_call")),
+        NODE.validate_python(_atom("source")),
+    ]
+    return ir
+
+
+def _corpus_process_try_call_first_step():
+    ir = parse_process_ir_v1(_carrier(bc.TRY_BODY, "clean"))
+    ir.body.steps[0].try_body.steps = [NODE.validate_python(_atom("process_call"))]
+    return ir
+
+
+def _corpus_connector_above_leg_terminal_call():
+    """Row 5, NO-PREFIX reading — the message-only divergence.
+
+    `leg.steps` is cleared deliberately: the carrier's legs each carry a `message`
+    step, and leaving it makes this the PREFIX reading instead, which is a
+    different defect with a different code. #175's wording ("Root connector ->
+    Branch leg terminal Process Call") does not say which, so both are pinned.
+    """
+    ir = parse_process_ir_v1(_carrier(bc.BRANCH_LEG, "connector_above"))
+    leg = ir.body.steps[1].legs[0]
+    leg.steps = []
+    leg.terminal = NODE.validate_python(_atom("process_call"))
+    return ir
+
+
+def _corpus_connector_above_leg_prefix_terminal_call():
+    """Row 5, PREFIX reading — a CODE divergence rather than a message one."""
+    ir = parse_process_ir_v1(_carrier(bc.BRANCH_LEG, "connector_above"))
+    leg = ir.body.steps[1].legs[0]
+    leg.steps = [NODE.validate_python(_atom("set_dpp"))]
+    leg.terminal = NODE.validate_python(_atom("process_call"))
+    return ir
+
+
+#: Each row pins the PARSER triple MEASURED AT THE BASELINE `cdd7a3b`, before any
+#: source edit, and archived in
+#: `docs/architecture/evidence/issue-178/baseline-corpus-characterization.md`.
+#: The assertion is that public compile now serves that same triple. Reintroducing
+#: any of the five divergences fails here.
+CORPUS = [
+    (
+        "branch-cache-prefix-process-call-terminal",
+        _corpus_branch_cache_prefix_call,
+        "PROCESS_IR_SCHEMA_INVALID_CARDINALITY",
+        "/body/steps/0/legs/0",
+    ),
+    (
+        "root-branch-then-process-call",
+        _corpus_root_branch_then_call,
+        "PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED",
+        "/body",
+    ),
+    (
+        "root-process-call-then-source",
+        _corpus_root_call_then_source,
+        "PROCESS_IR_SCHEMA_INVALID_CARDINALITY",
+        "/body",
+    ),
+    (
+        "process-try-process-call-first-step",
+        _corpus_process_try_call_first_step,
+        "PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY",
+        "/body/steps/0/try_body/steps/0",
+    ),
+    (
+        "root-connector-branch-process-call-terminal",
+        _corpus_connector_above_leg_terminal_call,
+        "PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY",
+        "/body/steps/1/legs/0/terminal",
+    ),
+    (
+        "root-connector-branch-process-call-terminal-with-prefix",
+        _corpus_connector_above_leg_prefix_terminal_call,
+        "PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED",
+        "/body/steps/1/legs/0/terminal",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "case_id,build,expected_code,expected_path",
+    CORPUS,
+    ids=[row[0] for row in CORPUS],
+)
+def test_the_inherited_divergences_are_pinned(
+    case_id, build, expected_code, expected_path
+):
+    """#175 ledger rows `L3R3-01` and `L3R3-02`, discharged.
+
+    Both were deferred once under `blocked-by-mechanism`, so neither may be
+    deferred again. Two of the five were reviewer-reported and never independently
+    reproduced at #175; all five reproduce at the baseline, and row 3
+    (`root-process-call-then-source`) needed a `source` carrying BOTH
+    `connection_ref` and `operation_ref` — the shape that defeated the earlier
+    probe.
+    """
+    ir = build()
+
+    with pytest.raises(ProcessIRValidationError) as parser_exc:
+        parse_process_ir_v1(ir.model_dump(mode="json", warnings=False))
+    parser_first = parser_exc.value.diagnostics[0]
+    assert (parser_first.code, parser_first.path) == (expected_code, expected_path)
+
+    with pytest.raises(ProcessIRCompileError) as compile_exc:
+        pl.compile_process_ir_v1(ir, None)
+    served = compile_exc.value.diagnostics[0]
+
+    assert (served.code, served.path, served.message) == (
+        parser_first.code,
+        parser_first.path,
+        parser_first.message,
+    )
+    assert served.phase == "schema"
+
+
+def test_the_corpus_message_clause_divergence_is_closed():
+    """Row 5's no-prefix reading was a MESSAGE-ONLY divergence: identical code and
+    pointer, and only the parser's message carried the upstream-connector clause.
+    A code-and-pointer assertion would have passed throughout, so the clause is
+    asserted explicitly."""
+    ir = _corpus_connector_above_leg_terminal_call()
+    with pytest.raises(ProcessIRValidationError) as parser_exc:
+        parse_process_ir_v1(ir.model_dump(mode="json", warnings=False))
+    with pytest.raises(ProcessIRCompileError) as compile_exc:
+        pl.compile_process_ir_v1(ir, None)
+    parser_message = parser_exc.value.diagnostics[0].message
+    assert "a connector runs upstream of this body" in parser_message
+    assert compile_exc.value.diagnostics[0].message == parser_message

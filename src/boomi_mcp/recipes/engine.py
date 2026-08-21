@@ -1718,7 +1718,6 @@ def _compile_processes(
     from ..compiler.process_ir.diagnostics import ProcessIRCompileError
     from ..compiler.process_ir.emitter_registry import emit_process
     from ..compiler.process_ir.pipeline import compile_process_ir_v1
-    from ..models.process_ir import parse_process_ir_v1
 
     symbols = build_symbol_table(
         components, connector_metadata=connector_metadata, resolver=resolver
@@ -1726,11 +1725,22 @@ def _compile_processes(
     artifacts: List[Tuple[str, Any]] = []
     for process_key, root in composed.process_roots:
         try:
-            reparsed = parse_process_ir_v1(root.model_dump(mode="json"))
+            # #178: the explicit re-parse that used to sit here moved INTO
+            # `compile_process_ir_v1`, which now re-parses every caller's model
+            # through the parser authority. Keeping this one would parse twice.
+            # Two things improve by deleting it rather than merely relocating it:
+            # the dump here omitted `warnings=False`, so a mutated model could
+            # render authored values into a serializer warning (the AR2-01 hazard
+            # the other two re-parse sites already guard against), and a parse
+            # failure raised `ProcessIRValidationError`, which reached the
+            # `except Exception` arm below rather than the named one. Both arms
+            # build an identical `RecipeError`, so the emitted diagnostic is
+            # unchanged — measured, not assumed.
+            #
             # validation_policy is NOT a parameter of run_recipes and is pinned
             # to None here. A legacy dialect's exemptions are unreachable from
             # the recipe path by construction.
-            _cfg, plan = compile_process_ir_v1(reparsed, symbols, validation_policy=None)
+            _cfg, plan = compile_process_ir_v1(root, symbols, validation_policy=None)
             artifacts.append((process_key, emit_process(plan, symbols)))
         except ProcessIRCompileError as exc:
             raise RecipeError(

@@ -98,6 +98,13 @@ def test_the_canonical_chain_fires_in_order_for_every_process(monkeypatch):
         return real_emit(plan, symbols, **kwargs)
 
     monkeypatch.setattr(ir_module, "parse_process_ir_v1", spy_parse)
+    # #178: `pipeline` bound `parse_process_ir_v1` into its OWN namespace at
+    # import, so patching `ir_module` alone cannot see the compile-entry re-parse
+    # — and once the engine's explicit re-parse was removed, the only "parse" this
+    # spy still observed was the COMPOSER's. The assertions below kept passing
+    # while no longer witnessing the canonical chain's own parse at all. Patch
+    # both bindings so the chain is genuinely observed.
+    monkeypatch.setattr(pipeline_module, "parse_process_ir_v1", spy_parse)
     monkeypatch.setattr(pipeline_module, "compile_process_ir_v1", spy_compile)
     monkeypatch.setattr(emitter_module, "emit_process", spy_emit)
 
@@ -113,6 +120,11 @@ def test_the_canonical_chain_fires_in_order_for_every_process(monkeypatch):
     assert "compile" in kinds
     assert "emit" in kinds
     assert kinds.index("compile") < kinds.index("emit")
+    # #178: the compile entry re-validates through the parser authority, so a
+    # parse must occur AFTER the compile call begins — that inner parse IS the
+    # structural fix. Asserting only "parse in kinds" would be satisfied by the
+    # composer's earlier parse and would survive deletion of the re-parse.
+    assert any(k == "parse" for k in kinds[kinds.index("compile") + 1 :]), kinds
 
 
 def test_compile_is_always_called_with_no_validation_policy(monkeypatch):

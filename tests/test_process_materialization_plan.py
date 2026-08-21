@@ -484,3 +484,49 @@ def test_a_changed_preservation_policy_moves_the_fingerprint(monkeypatch):
     )
     after = pm.process_plan_fingerprint(_plan())[1]
     assert after != before, "a changed preservation policy did not move the material"
+
+
+def test_a_mutated_model_is_refused_with_the_parser_diagnostic_before_a_plan_exists():
+    """#178: `build_materialization_plan` compiles the CALLER's model directly.
+
+    `ProcessIRV1` is exported and mutable, so a caller can parse a legal document,
+    mutate it into a shape the parser would refuse, and hand it here. Before #178
+    the compiler judged that model on its own rules — which for some documents
+    meant a different diagnostic, and for others (a trailing `cache_put`, a root
+    `source` out of position, a mutated `version`) meant no refusal at all.
+
+    The compile entry now re-validates through the parser, so this call site gains
+    the guarantee without a local change. Asserted here rather than assumed,
+    because "no local change" is exactly the shape of an untested claim.
+    """
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+
+    ir = parse_process_ir_v1(copy.deepcopy(VALID_IR_DOC))
+    # `version` is the sharpest probe available: NO compiler stage reads it, so
+    # before #178 this document compiled clean. It is refused by the parser alone.
+    ir.version = "2"
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        pm.build_materialization_plan(
+            envelope=_envelope(),
+            process_ir=ir,
+            symbols=_symbols(),
+            conflict_policy="reuse",
+            compiler_revision=get_authoring_revisions()["compiler_revision"],
+            emitter_revision=emitter_revision(),
+            materializer_revision="sha256:" + "a" * 64,
+        )
+
+    served = excinfo.value.diagnostics[0]
+    assert served.code == "PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED", [
+        (d.code, d.path) for d in excinfo.value.diagnostics
+    ]
+    assert served.path == "/version"
+    assert served.phase == "schema"
+
+
+def test_the_unmutated_control_still_builds_a_plan():
+    """Non-vacuity for the test above: the same call succeeds untouched, so the
+    refusal is caused by the mutation and not by a broken fixture."""
+    plan = _plan()
+    assert plan.process_ir is not None

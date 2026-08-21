@@ -133,6 +133,84 @@ def _enforce_semantic_report(ir, cfg, symbols, policy, capabilities) -> None:
     raise ProcessIRCompileError([_restore(item) for item in report.errors])
 
 
+def _parse_payload_for_compile(payload: Any) -> ProcessIRV1:
+    """Parse an authored payload, translating parse failures into compile ones.
+
+    #178: extracted from ``parse_and_compile_process_ir_v1`` so BOTH entry points
+    raise one error family. ``ProcessIRValidationError`` and
+    ``ProcessIRCompileError`` are unrelated types — neither is a subclass of the
+    other — and every production handler catches only the latter
+    (``authoring/workflow.py``, ``recipes/engine.py``,
+    ``legacy_adapters/emission.py``; the materialization and apply call sites
+    have no local ``try`` at all). Letting a raw ``ProcessIRValidationError``
+    escape the compile entry would therefore defeat all of them and serve a
+    refusal with no ``error_code`` — measured, and the single decision that
+    separates a safe change from a broken one.
+
+    ``code``/``path``/``message``/``remediation`` are preserved VERBATIM
+    (ADR-001 §7: later introducers add codes, never rename them);
+    ``phase="schema"`` and ``node_identity`` is derived from the pointer.
+    """
+    try:
+        return parse_process_ir_v1(payload)
+    except ProcessIRValidationError as exc:
+        raise ProcessIRCompileError(
+            [
+                CompilerDiagnostic(
+                    code=item.code,
+                    phase="schema",
+                    path=item.path,
+                    node_identity=node_identity_for(item.path),
+                    message=item.message,
+                    remediation=item.remediation,
+                )
+                for item in exc.diagnostics
+            ]
+        ) from None
+    except ProcessIRCompileError:
+        raise
+    except Exception:  # noqa: BLE001 - deliberate: never leak internals
+        # An UNEXPECTED parser failure must not escape carrying its text: the
+        # message can echo authored values, and diagnostics get logged. The
+        # compile stages are already guarded this way; parse was not.
+        raise ProcessIRCompileError(
+            [diagnostic(PROCESS_IR_COMPILE_INTERNAL, "schema", "")]
+        ) from None
+
+
+def _reparse_process_ir_for_compile(ir: ProcessIRV1) -> ProcessIRV1:
+    """Re-establish the PARSER's authority over a caller-owned model (#178).
+
+    ``ProcessIRV1`` is exported and mutable, so a caller may parse a legal
+    document, mutate the model, and hand it straight to the compiler — reaching
+    the compile stages with a document the parser would have refused. The two
+    paths agreed on the DECISION for most such documents but not on which
+    diagnostic they served, and — measured at `cdd7a3b` — not always on the
+    decision either: a Branch leg with a trailing ``cache_put``, a root ``source``
+    out of position, a one-leg Branch and any mutated ``version`` were all
+    refused by the parser and ACCEPTED by the compiler, which models none of
+    those rules. Dumping and re-parsing makes the parser the single authority for
+    grammar, so both entry points refuse the same documents with the same
+    ``(code, pointer, message, remediation)``.
+
+    The dump is guarded SEPARATELY because it happens before
+    ``_parse_payload_for_compile`` and so is outside that helper's own guard.
+
+    ``warnings=False`` is load-bearing for the AR2-01 reason
+    ``authoring/workflow.py`` already documents: dumping a model that may have
+    been mutated renders the caller's authored values into a pydantic serializer
+    warning before the value-free parser runs — measured to emit the authored
+    secret verbatim, and to RAISE under ``-W error``.
+    """
+    try:
+        payload = ir.model_dump(mode="json", warnings=False)
+    except Exception:  # noqa: BLE001 - deliberate: never leak internals
+        raise ProcessIRCompileError(
+            [diagnostic(PROCESS_IR_COMPILE_INTERNAL, "schema", "")]
+        ) from None
+    return _parse_payload_for_compile(payload)
+
+
 def compile_process_ir_v1(
     ir: ProcessIRV1,
     symbols: SymbolTableV1,
@@ -140,7 +218,49 @@ def compile_process_ir_v1(
     validation_policy: Optional["LegacyValidationPolicyV1"] = None,
     capabilities: Optional["ProcessIRValidationCapabilitiesV1"] = None,
 ) -> Tuple[SemanticCfgV1, EmissionPlanV1]:
-    """Lower a validated IR into its CFG and emission plan, invariant-checked.
+    """Re-validate through the parser authority, then compile (#178).
+
+    The re-parse is UNCONDITIONAL, including when ``validation_policy`` is
+    supplied. A legacy policy reclassifies POST-LOWERING semantic findings only:
+    the four codes it can downgrade are all
+    ``PROCESS_IR_SEMANTIC_LINEAGE_*``/``PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNKNOWN``,
+    and none of them is in the parser's raisable set — so a policy has nothing to
+    exempt at the grammar boundary and skipping the re-parse for policy-bearing
+    callers would only preserve the mutable-model hole. That disjointness is
+    pinned by a derived test, not asserted here.
+
+    The compile stages consume the FRESH re-parsed model, never the caller-owned
+    object that was merely checked — otherwise a mutation performed between the
+    check and the stages would still reach them.
+    """
+    # Bound to a local rather than nested into the call below, so the source
+    # READS in execution order. Nested, the core's name appears textually first
+    # even though the re-parse evaluates first — which makes an ordering check
+    # over this function's source unreadable and, worse, wrong-looking to anyone
+    # auditing that the parser really does run first.
+    reparsed = _reparse_process_ir_for_compile(ir)
+    return _compile_parsed_process_ir_v1(
+        reparsed,
+        symbols,
+        validation_policy=validation_policy,
+        capabilities=capabilities,
+    )
+
+
+def _compile_parsed_process_ir_v1(
+    ir: ProcessIRV1,
+    symbols: SymbolTableV1,
+    *,
+    validation_policy: Optional["LegacyValidationPolicyV1"] = None,
+    capabilities: Optional["ProcessIRValidationCapabilitiesV1"] = None,
+) -> Tuple[SemanticCfgV1, EmissionPlanV1]:
+    """Lower an ALREADY-PARSED IR into its CFG and emission plan, invariant-checked.
+
+    #178: private, and never exported. Its one precondition is that ``ir`` came
+    straight from ``parse_process_ir_v1`` — public ``compile_process_ir_v1``
+    guarantees that by re-parsing, and ``parse_and_compile_process_ir_v1`` by
+    parsing. Calling it with a caller-owned model would reopen exactly the hole
+    #178 closes, which is why it is not in ``__all__``.
 
     Any unexpected exception becomes a single static ``PROCESS_IR_COMPILE_INTERNAL``
     diagnostic. The exception's text and type are deliberately NOT interpolated:
@@ -223,32 +343,12 @@ def parse_and_compile_process_ir_v1(
     that already keys on it (ADR-001 §7: later introducers add codes, never
     rename them).
     """
-    try:
-        ir = parse_process_ir_v1(payload)
-    except ProcessIRValidationError as exc:
-        raise ProcessIRCompileError(
-            [
-                CompilerDiagnostic(
-                    code=item.code,
-                    phase="schema",
-                    path=item.path,
-                    node_identity=node_identity_for(item.path),
-                    message=item.message,
-                    remediation=item.remediation,
-                )
-                for item in exc.diagnostics
-            ]
-        ) from None
-    except ProcessIRCompileError:
-        raise
-    except Exception:  # noqa: BLE001 - deliberate: never leak internals
-        # An UNEXPECTED parser failure must not escape carrying its text: the
-        # message can echo authored values, and diagnostics get logged. The
-        # compile stages are already guarded this way; parse was not.
-        raise ProcessIRCompileError(
-            [diagnostic(PROCESS_IR_COMPILE_INTERNAL, "schema", "")]
-        ) from None
-    cfg, plan = compile_process_ir_v1(
+    ir = _parse_payload_for_compile(payload)
+    # The PRIVATE core, not public `compile_process_ir_v1`. The payload has just
+    # been parsed by the authority, so routing through the public entry would dump
+    # and re-parse the very model it produced — one wasted pass per call, on the
+    # live authoring path. #178.
+    cfg, plan = _compile_parsed_process_ir_v1(
         ir, symbols, validation_policy=validation_policy, capabilities=capabilities
     )
     return ir, cfg, plan

@@ -1926,8 +1926,8 @@ def build_artifact_descriptors(
     """
     from ..compiler.process_ir.contracts import canonical_emission_plan_json
     from ..compiler.process_ir.diagnostics import ProcessIRCompileError
-    from ..compiler.process_ir.pipeline import compile_process_ir_v1
-    from ..models.process_ir import canonical_process_ir_json, parse_process_ir_v1
+    from ..compiler.process_ir.pipeline import parse_and_compile_process_ir_v1
+    from ..models.process_ir import canonical_process_ir_json
 
     fingerprints: List[ArtifactFingerprintV1] = []
     cfg_summaries: List[ProcessCfgSummaryV1] = []
@@ -1944,10 +1944,18 @@ def build_artifact_descriptors(
             # `warnings=False` for the AR2-01 reason: dumping a model that may
             # have been mutated renders the caller's values into a serializer
             # warning before the value-free parser runs.
-            reparsed = parse_process_ir_v1(
-                ir.model_dump(mode="json", warnings=False)
+            #
+            # #178: ONE call, not a parse followed by a compile. Public
+            # `compile_process_ir_v1` now re-parses for itself, so the old pairing
+            # would parse the same document twice on the live authoring path.
+            # It also closes a real hole: the parse used to raise
+            # `ProcessIRValidationError`, which the `except` below does NOT catch
+            # (it catches only `ProcessIRCompileError`), so a re-parse failure
+            # escaped this module's error channel raw. It now arrives as a
+            # compile error and is translated like every other refusal.
+            reparsed, cfg, plan = parse_and_compile_process_ir_v1(
+                ir.model_dump(mode="json", warnings=False), symbols
             )
-            cfg, plan = compile_process_ir_v1(reparsed, symbols)
         except ProcessIRCompileError as exc:
             raise AuthoringWorkflowError(
                 AUTHORING_COMPILE_BLOCKED,

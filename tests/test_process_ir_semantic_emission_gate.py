@@ -57,7 +57,12 @@ def test_the_gate_runs_inside_the_canonical_compiler():
     gated, not only the ones that happen to come through a legacy adapter."""
     import inspect
 
-    source = inspect.getsource(compiler_pipeline.compile_process_ir_v1)
+    # #178: the ordered stages moved into the private core when public
+    # `compile_process_ir_v1` became a re-parse plus a delegation. The gate this
+    # test pins is the same gate — it is inspected where it now lives, and the
+    # public entry's own obligation (re-parse BEFORE the core) is pinned
+    # separately below, so neither half can be dropped silently.
+    source = inspect.getsource(compiler_pipeline._compile_parsed_process_ir_v1)
     # Dispatched THROUGH `_guarded`, so an unexpected collector failure becomes
     # a value-free PROCESS_IR_COMPILE_INTERNAL like every other stage.
     assert "_enforce_semantic_report," in source
@@ -70,11 +75,96 @@ def test_the_gate_runs_before_any_emission_plan_exists():
     never reaches an emitter."""
     import inspect
 
-    source = inspect.getsource(compiler_pipeline.compile_process_ir_v1)
+    source = inspect.getsource(compiler_pipeline._compile_parsed_process_ir_v1)
     lowered_at = source.index("lower_process_ir_to_cfg")
     gate_at = source.index("_enforce_semantic_report,")
     plan_at = source.index("lower_cfg_to_emission_plan")
     assert lowered_at < gate_at < plan_at
+
+
+def test_public_compile_reparses_before_it_reaches_the_core():
+    """#178: the parser is the diagnostic authority, which only holds if the
+    re-parse happens FIRST. An edit that delegated to the core and re-parsed
+    afterwards would still pass every stage-ordering test above while serving the
+    compiler's diagnostics again."""
+    import inspect
+
+    source = inspect.getsource(compiler_pipeline.compile_process_ir_v1)
+    assert "_reparse_process_ir_for_compile" in source
+    assert source.index("_reparse_process_ir_for_compile") < source.index(
+        "_compile_parsed_process_ir_v1"
+    )
+
+
+def test_the_private_core_is_not_exported():
+    """The core skips the re-parse by design, so reaching it from outside would
+    reopen exactly the mutable-model hole #178 closes."""
+    from boomi_mcp.compiler import process_ir as process_ir_pkg
+
+    assert "_compile_parsed_process_ir_v1" not in compiler_pipeline.__all__
+    assert "_compile_parsed_process_ir_v1" not in getattr(
+        process_ir_pkg, "__all__", ()
+    )
+    assert not hasattr(process_ir_pkg, "_compile_parsed_process_ir_v1")
+
+
+def test_neither_entry_point_parses_twice(monkeypatch):
+    """#178 centralised the re-parse; it must not ALSO leave the old one in
+    place. Counted, because a second parse is invisible in behaviour and shows up
+    only as latency on the live authoring path."""
+    calls = []
+    real = compiler_pipeline.parse_process_ir_v1
+
+    def counting(payload):
+        calls.append(payload)
+        return real(payload)
+
+    monkeypatch.setattr(compiler_pipeline, "parse_process_ir_v1", counting)
+
+    payload = _contracted_map_doc()
+    symbols = _contracted_symbols()
+    caps = _map_capabilities()
+
+    calls.clear()
+    compiler_pipeline.parse_and_compile_process_ir_v1(
+        payload, symbols, capabilities=caps
+    )
+    assert len(calls) == 1, "parse_and_compile parsed {0} times".format(len(calls))
+
+    ir = compiler_pipeline.parse_process_ir_v1(payload)
+    calls.clear()
+    compiler_pipeline.compile_process_ir_v1(ir, symbols, capabilities=caps)
+    assert len(calls) == 1, "direct compile parsed {0} times".format(len(calls))
+
+
+def test_the_parser_has_no_validation_policy_seam():
+    """The re-parse is unconditional, including for policy-bearing legacy
+    callers. That is only sound because a policy cannot reach the parser at all —
+    asserted here rather than argued in a docstring."""
+    import inspect
+
+    assert (
+        "validation_policy"
+        not in inspect.signature(compiler_pipeline.parse_process_ir_v1).parameters
+    )
+
+
+def test_no_legacy_exemption_can_reach_a_parser_diagnostic():
+    """The load-bearing disjointness. A legacy policy downgrades post-lowering
+    semantic findings; the parser raises grammar findings. If those two code sets
+    ever intersected, the unconditional re-parse could refuse a document a legacy
+    dialect is exempt from — so the sets are derived from their own authorities
+    and asserted disjoint, and this fails closed if either grows."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import (
+        validation_policy as vp,
+    )
+    from boomi_mcp.models.process_ir import process_ir_v1_parse_diagnostic_specs
+
+    parser_codes = {spec["code"] for spec in process_ir_v1_parse_diagnostic_specs()}
+    exempt_codes = set(vp._EXEMPT_CODE.values())
+    assert parser_codes, "parser diagnostic specs are empty — the check is vacuous"
+    assert exempt_codes, "exemption map is empty — the check is vacuous"
+    assert parser_codes & exempt_codes == set(), sorted(parser_codes & exempt_codes)
 
 
 def test_the_gate_validates_the_cfg_that_was_just_lowered():

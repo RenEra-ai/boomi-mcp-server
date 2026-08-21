@@ -4124,7 +4124,14 @@ def test_the_compile_call_site_forwards_the_authority_message(monkeypatch):
     # It is imported inside the function, so patch it at its SOURCE module.
     from boomi_mcp.compiler.process_ir import pipeline
 
-    monkeypatch.setattr(pipeline, "compile_process_ir_v1", _raise)
+    # #178: patch the PRIVATE CORE, not the public entry. `build_artifact_
+    # descriptors` now reaches the compiler through `parse_and_compile_process_
+    # ir_v1` (one parse instead of a parse plus a compile), so a patch on the
+    # public wrapper no longer intercepts THIS call site — the failure would
+    # surface later, from materialization, with a different message, and the
+    # test would be grading a different line than the one it names. Every route
+    # reaches the core.
+    monkeypatch.setattr(pipeline, "_compile_parsed_process_ir_v1", _raise)
 
     # A document that genuinely reaches the compiler. `_process_ir_request`
     # declares no components, so anything built from it is stopped by semantic
@@ -4376,7 +4383,14 @@ def test_a_compile_that_names_no_diagnostic_still_answers(monkeypatch):
     def _raise_bare(*_a, **_k):
         raise ProcessIRCompileError(())
 
-    monkeypatch.setattr(pipeline, "compile_process_ir_v1", _raise_bare)
+    # #178: patch the PRIVATE CORE, not the public entry. `build_artifact_
+    # descriptors` now reaches the compiler through `parse_and_compile_process_
+    # ir_v1` (one parse instead of a parse plus a compile), so a patch on the
+    # public wrapper no longer intercepts THIS call site — the failure would
+    # surface later, from materialization, with a different message, and the
+    # test would be grading a different line than the one it names. Every route
+    # reaches the core.
+    monkeypatch.setattr(pipeline, "_compile_parsed_process_ir_v1", _raise_bare)
 
     fixture = json.loads(
         (

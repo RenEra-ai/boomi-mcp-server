@@ -1629,26 +1629,58 @@ def test_the_root_verdict_yields_to_the_control_continuation_rule():
 
     with pytest.raises(ProcessIRCompileError) as excinfo:
         compile_process_ir_v1(ir, None)
-    # FAIL-CLOSED, and named. "Some nonempty code exists" proves nothing about
-    # WHICH rule owns the document — a reviewer rejected exactly that assertion.
-    # The refusal must come from a kind-agnostic flow invariant, which is what
-    # makes a root call behave like any other kind after a control node, and it
-    # must NOT be the process-call placement code, whose whole point here is to
-    # have yielded.
+    # #178 SUPERSESSION. Until #178 this asserted the compiler's own
+    # `PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW` at `/body/steps/0` — the CFG
+    # invariant that fired once the document had been lowered. Public compile now
+    # re-parses through the parser authority first, so the document is refused by
+    # the rule this test's own docstring already named as its owner, one stage
+    # earlier and with the authored pointer intact. The old code is recorded in
+    # the #178 ledger; it is SUPERSEDED, not broken, and no `src/` consumer keyed
+    # on it for this document.
+    #
+    # Still fail-closed, and still NAMED: "some nonempty code exists" proves
+    # nothing about WHICH rule owns the document — a reviewer rejected exactly
+    # that assertion. The refusal must come from a kind-agnostic rule, and it must
+    # NOT be the process-call placement code, whose whole point here is to have
+    # yielded.
     from boomi_mcp.errors import (
         PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
         PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+        PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
     )
-    code = excinfo.value.diagnostics[0].code
-    assert code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW, [
-        (d.code, d.path) for d in excinfo.value.diagnostics]
-    assert code != PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
+    served = excinfo.value.diagnostics[0]
+    # The whole triple, not just the code: #178 exists because the two entry
+    # points agreed on the decision and disagreed on the diagnostic, so pinning
+    # the code alone would leave the pointer and message free to drift again.
+    assert (served.code, served.path, served.message) == (
+        PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
+        "/body",
+        "no step may follow a branch or decision — control nodes are terminal "
+        "fan-out in ProcessIR v1 (continuation_after_branch_or_decision is gated)",
+    ), [(d.code, d.path) for d in excinfo.value.diagnostics]
+    assert served.code != PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+    assert (
+        served.code
+        != PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
+    )
+    # The parser's finding is served through the compile error family, with the
+    # schema phase — a raw ProcessIRValidationError here would defeat every
+    # production handler, all of which catch only ProcessIRCompileError.
+    assert served.phase == "schema"
 
     # ...and the SAME document with an ordinary kind is refused the same way,
     # which is the claim "the continuation rule owns this" actually rests on.
+    # This peer is what makes the assertion above a statement about the
+    # CONTINUATION rule rather than about process calls, so it survives #178
+    # unchanged in intent — only the expected code moved.
     other = parse_process_ir_v1(
         {"version": "1", "body": {"kind": "sequence", "steps": [copy.deepcopy(branch)]}})
     other.body.steps = [other.body.steps[0], _placement_node(_PLACEMENT_DPP)]
     with pytest.raises(ProcessIRCompileError) as other_exc:
         compile_process_ir_v1(other, None)
-    assert other_exc.value.diagnostics[0].code == code
+    peer = other_exc.value.diagnostics[0]
+    assert (peer.code, peer.path, peer.message) == (
+        served.code,
+        served.path,
+        served.message,
+    )

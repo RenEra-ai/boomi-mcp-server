@@ -2528,7 +2528,22 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
         return _diagnostic(PROCESS_IR_SCHEMA_RETRY_COUNT, path)
     if err_type == "literal_error" and pointer.endswith("/scope"):
         return _diagnostic(PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED, path)
-    if err_type == "missing" and (
+    # #178: ABSENT and EXPLICITLY NULL are the same defect — the catch body does
+    # not reach a terminal — but pydantic reports them differently, and only the
+    # absent form was matched here. That mattered once the compile entry started
+    # re-parsing a dumped model: `model_dump` renders a mutated-away terminal as
+    # `"terminal": null` with the key PRESENT, so the error arrives as
+    # `model_attributes_type` and this branch never fired, degrading a named
+    # served code to the generic `PROCESS_IR_SCHEMA_INVALID`. Measured.
+    #
+    # The discriminator is the INPUT, not the error type: `"terminal": 42`
+    # reports the SAME `model_attributes_type` and is a different defect — a
+    # wrong-typed terminal, not a missing one — so it must keep its schema error
+    # rather than be relabelled "does not reach a terminal". Measured both ways.
+    if (
+        err_type == "missing"
+        or (err_type == "model_attributes_type" and error.get("input") is None)
+    ) and (
         pointer.endswith("/catch_body") or pointer.endswith("/catch_body/terminal")
     ):
         return _diagnostic(PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED, path)

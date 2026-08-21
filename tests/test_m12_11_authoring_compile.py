@@ -91,13 +91,19 @@ def test_the_canonical_compiler_is_actually_invoked(spy, monkeypatch):
     import boomi_mcp.compiler.process_ir.pipeline as pipeline
 
     seen = []
-    real = pipeline.compile_process_ir_v1
+    # #178: count the PRIVATE CORE, not the public wrapper. `build_artifact_
+    # descriptors` now reaches the compiler through `parse_and_compile_process_
+    # ir_v1`, which calls the core directly to avoid parsing the same document
+    # twice — so a spy on the public entry sees ONE call and this guard would read
+    # as a regression when nothing regressed. The core is where "the compiler was
+    # genuinely invoked" is actually decidable: every route reaches it.
+    real = pipeline._compile_parsed_process_ir_v1
 
     def _recording(ir, symbols, **kwargs):
         seen.append(kwargs)
         return real(ir, symbols, **kwargs)
 
-    monkeypatch.setattr(pipeline, "compile_process_ir_v1", _recording)
+    monkeypatch.setattr(pipeline, "_compile_parsed_process_ir_v1", _recording)
     _compile(process_ir_request())
     # TWO compiles per root since #153, and the second is load-bearing rather
     # than wasteful: `build_materialization_plan` OWNS its compilation and forces
@@ -127,16 +133,24 @@ def test_no_validation_policy_exemption_is_reachable(spy, monkeypatch):
     """A legacy dialect's exemptions must be unreachable from the typed path."""
     import boomi_mcp.compiler.process_ir.pipeline as pipeline
 
-    captured = {}
-    real = pipeline.compile_process_ir_v1
+    # PER-CALL, not merged. The previous form did `captured.update(kwargs)` and
+    # then asserted `captured.get("validation_policy") is None` — which is also
+    # true when NOTHING was captured, so the test passed whether or not the
+    # compiler ran at all, and a policy on one of two calls could be masked by a
+    # policy-free other. #178 records the per-call kwargs and asserts the call
+    # count, so the guard fails closed.
+    captured = []
+    real = pipeline._compile_parsed_process_ir_v1
 
     def _recording(ir, symbols, **kwargs):
-        captured.update(kwargs)
+        captured.append(kwargs)
         return real(ir, symbols, **kwargs)
 
-    monkeypatch.setattr(pipeline, "compile_process_ir_v1", _recording)
+    monkeypatch.setattr(pipeline, "_compile_parsed_process_ir_v1", _recording)
     _compile(process_ir_request())
-    assert captured.get("validation_policy") is None
+    assert captured, "no compile was observed — the assertion would be vacuous"
+    for kwargs in captured:
+        assert kwargs.get("validation_policy") is None, captured
 
 
 def test_no_raw_xml_or_artifact_body_appears_in_the_response(spy):

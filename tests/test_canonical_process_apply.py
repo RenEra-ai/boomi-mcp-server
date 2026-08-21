@@ -436,3 +436,72 @@ def test_the_slot_disagreement_refusal_is_not_the_relocatability_refusal():
     rendered = str(excinfo.value)
     assert "symbol slots disagree" not in rendered, rendered
     assert "relocatable" in rendered, rendered
+
+
+def test_a_fingerprint_consistent_plan_with_a_mutated_ir_refuses_before_emission():
+    """#178: apply recompiles the plan's root, so it is the LAST place a
+    grammar-invalid document could reach emitted XML.
+
+    The fingerprint guard alone does not cover this: it proves the plan matches
+    its own material, not that the material is legal. A plan forged so its
+    fingerprint AGREES therefore walks straight past it — and before #178 the
+    compile that follows judged the caller's model on the compiler's own rules,
+    which for a mutated `version` meant no refusal at all (no compiler stage
+    reads `version`). The compile entry now re-validates through the parser.
+
+    Both tripwires assert the refusal happens BEFORE anything is produced: an
+    apply that refused only after emitting would still have built the bytes.
+    """
+    import copy as _copy
+
+    from boomi_mcp.authoring.process_materialization import process_plan_fingerprint
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+
+    plan = _plan()
+    mutated = _copy.deepcopy(plan.process_ir)
+    mutated.version = "2"
+    # `model_copy` skips validation, and pydantic does not revalidate an
+    # already-built nested model — so a fingerprint-CONSISTENT forgery is
+    # constructible, which is precisely why this path needs its own guard.
+    forged = plan.model_copy(update={"process_ir": mutated})
+    digest, _material = process_plan_fingerprint(
+        forged.model_copy(update={"plan_fingerprint": "sha256:" + "0" * 64})
+    )
+    forged = forged.model_copy(update={"plan_fingerprint": digest})
+
+    # `emit_process` is imported INSIDE the function, so it must be patched at
+    # its SOURCE module — patching the apply module would silently no-op and the
+    # tripwire would read as "emission never ran" for every possible outcome.
+    from boomi_mcp.compiler.process_ir import emitter_registry as _er
+
+    emitted = []
+    real_emit = _er.emit_process
+
+    def _tripwire(*args, **kwargs):
+        emitted.append(1)
+        return real_emit(*args, **kwargs)
+
+    _er.emit_process = _tripwire
+    try:
+        with pytest.raises(ProcessIRCompileError) as excinfo:
+            cpa.materialize_canonical_process_xml(
+                plan=forged, id_registry=_REGISTRY, symbols=_symbols()
+            )
+    finally:
+        _er.emit_process = real_emit
+
+    served = excinfo.value.diagnostics[0]
+    assert served.code == "PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED", [
+        (d.code, d.path) for d in excinfo.value.diagnostics
+    ]
+    assert served.phase == "schema"
+    assert emitted == [], "emission ran before the document was refused"
+
+
+def test_the_unforged_control_still_materializes():
+    """Non-vacuity for the test above: without the mutation the same call
+    succeeds, so the refusal is the mutation's doing and not a broken forgery."""
+    xml = cpa.materialize_canonical_process_xml(
+        plan=_plan(), id_registry=_REGISTRY, symbols=_symbols()
+    )
+    assert xml.startswith("<?xml")
