@@ -18,6 +18,7 @@ from ...models.process_ir import (
     ProcessIRV1,
     ProcessIRValidationError,
     parse_process_ir_v1,
+    raw_process_ir_payload,
 )
 from .body_capabilities import validate_body_capabilities
 from .connector_resolution import validate_connector_calls
@@ -133,6 +134,30 @@ def _enforce_semantic_report(ir, cfg, symbols, policy, capabilities) -> None:
     raise ProcessIRCompileError([_restore(item) for item in report.errors])
 
 
+def _compile_error_from_validation(
+    exc: ProcessIRValidationError,
+) -> ProcessIRCompileError:
+    """One translation, used by BOTH parser-authority paths (#178).
+
+    ``code``/``path``/``message``/``remediation`` are preserved VERBATIM
+    (ADR-001 §7: later introducers add codes, never rename them); ``phase`` is
+    ``"schema"`` and ``node_identity`` is derived from the pointer.
+    """
+    return ProcessIRCompileError(
+        [
+            CompilerDiagnostic(
+                code=item.code,
+                phase="schema",
+                path=item.path,
+                node_identity=node_identity_for(item.path),
+                message=item.message,
+                remediation=item.remediation,
+            )
+            for item in exc.diagnostics
+        ]
+    )
+
+
 def _parse_payload_for_compile(payload: Any) -> ProcessIRV1:
     """Parse an authored payload, translating parse failures into compile ones.
 
@@ -154,19 +179,7 @@ def _parse_payload_for_compile(payload: Any) -> ProcessIRV1:
     try:
         return parse_process_ir_v1(payload)
     except ProcessIRValidationError as exc:
-        raise ProcessIRCompileError(
-            [
-                CompilerDiagnostic(
-                    code=item.code,
-                    phase="schema",
-                    path=item.path,
-                    node_identity=node_identity_for(item.path),
-                    message=item.message,
-                    remediation=item.remediation,
-                )
-                for item in exc.diagnostics
-            ]
-        ) from None
+        raise _compile_error_from_validation(exc) from None
     except ProcessIRCompileError:
         raise
     except Exception:  # noqa: BLE001 - deliberate: never leak internals
@@ -202,12 +215,35 @@ def _reparse_process_ir_for_compile(ir: ProcessIRV1) -> ProcessIRV1:
     warning before the value-free parser runs — measured to emit the authored
     secret verbatim, and to RAISE under ``-W error``.
     """
+    # `warnings="error"` is the cheap DETECTOR, not the diagnostic. A json dump is
+    # COERCIVE — it renders a `datetime` in a `str` field as an ISO string and
+    # `bytes` as text — so a caller who mutates a field to a wrong-typed value
+    # hands the parser an already-repaired document and gets it accepted, while the
+    # same raw value through `parse_and_compile_process_ir_v1` is refused. Pydantic
+    # itself notices the mismatch while serializing, so raising on that costs
+    # nothing on the happy path (measured: 0 false positives across 126 legal
+    # generated cases and every committed fixture).
+    #
+    # The serializer's own error text is NEVER surfaced: it interpolates the
+    # authored value, which is the AR2-01 hazard. It is caught here and the
+    # PARSER's diagnostic is re-derived from the raw state instead, so the caller
+    # gets a real pointer rather than a bare refusal.
     try:
-        payload = ir.model_dump(mode="json", warnings=False)
+        payload = ir.model_dump(mode="json", warnings="error")
     except Exception:  # noqa: BLE001 - deliberate: never leak internals
-        raise ProcessIRCompileError(
-            [diagnostic(PROCESS_IR_COMPILE_INTERNAL, "schema", "")]
-        ) from None
+        # The serializer objected, so the raw state contradicts the declared
+        # types and the json dump would have REPAIRED it. Hand the parser the RAW
+        # state and let IT decide — this layer never invents a rule of its own.
+        #
+        # That distinction is load-bearing, not stylistic: an earlier revision
+        # strict-validated here instead, which refused `bytes` even though the
+        # parser accepts it, and so made the two public entry points disagree on
+        # `bytes` where they had previously agreed. Exceeding the authority
+        # reintroduces DC-175-E one layer up.
+        try:
+            payload = raw_process_ir_payload(ir)
+        except ProcessIRValidationError as exc:
+            raise _compile_error_from_validation(exc) from None
     return _parse_payload_for_compile(payload)
 
 
@@ -245,6 +281,34 @@ def compile_process_ir_v1(
         validation_policy=validation_policy,
         capabilities=capabilities,
     )
+
+
+def compile_process_ir_model_v1(
+    ir: ProcessIRV1,
+    symbols: SymbolTableV1,
+    *,
+    validation_policy: Optional["LegacyValidationPolicyV1"] = None,
+    capabilities: Optional["ProcessIRValidationCapabilitiesV1"] = None,
+) -> Tuple[ProcessIRV1, SemanticCfgV1, EmissionPlanV1]:
+    """Re-validate a caller-owned MODEL, compile it, and hand back all three.
+
+    #178, QA round 2. The model -> payload conversion belongs in exactly ONE
+    place. A caller that dumps first and calls a payload entry point picks its own
+    dump mode, and `mode="json"` REPAIRS a wrong-typed value before the parser
+    sees it — so `authoring/workflow.py` accepted a mutated model that the compile
+    entry refused. Two public paths, two answers, for one model.
+
+    Callers that need the re-validated model (to canonicalize or fingerprint the
+    thing that was actually compiled) use this instead of dumping by hand.
+    """
+    revalidated = _reparse_process_ir_for_compile(ir)
+    cfg, plan = _compile_parsed_process_ir_v1(
+        revalidated,
+        symbols,
+        validation_policy=validation_policy,
+        capabilities=capabilities,
+    )
+    return revalidated, cfg, plan
 
 
 def _compile_parsed_process_ir_v1(
@@ -355,6 +419,7 @@ def parse_and_compile_process_ir_v1(
 
 
 __all__: List[str] = [
+    "compile_process_ir_model_v1",
     "compile_process_ir_v1",
     "parse_and_compile_process_ir_v1",
 ]

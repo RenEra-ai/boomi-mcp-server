@@ -376,7 +376,10 @@ def _compose_process_roots(
     direct_roots: Dict[str, ProcessIRV1],
 ) -> Dict[str, ProcessIRV1]:
     roots: Dict[str, Any] = {
-        key: root.model_dump(mode="json") for key, root in direct_roots.items()
+        # `warnings=False`: AR2-01 — a ProcessIR root may have been mutated, and
+        # pydantic's default renders the authored value into a serializer warning.
+        key: root.model_dump(mode="json", warnings=False)
+        for key, root in direct_roots.items()
     }
     root_writers: Dict[str, Tuple[str, str, str]] = {
         key: (DIRECT_AUTHORING_PRODUCER, "", "") for key in direct_roots
@@ -392,7 +395,8 @@ def _compose_process_roots(
                 raise _conflict(
                     root_writers[key], _producer(item), target=f"process:{key}/root"
                 )
-            roots[key] = operation.root.model_dump(mode="json")
+            # `warnings=False` for the AR2-01 reason, as above.
+            roots[key] = operation.root.model_dump(mode="json", warnings=False)
             root_writers[key] = _producer(item)
 
     # Phase 2 — insert linear steps before the terminal unit.

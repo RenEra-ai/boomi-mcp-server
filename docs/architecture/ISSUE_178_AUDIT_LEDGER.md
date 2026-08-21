@@ -90,6 +90,10 @@ escalation with this issue left open.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | INH-L3R3-01 | INHERITED, not run by this slice — origin row `L3R3-01` of `docs/architecture/ISSUE_175_AUDIT_LEDGER.md` (§6 architect implementation review of #175, round 4, base `c2ebc43`, head `05f9b96`, verdict `ISSUES FOUND`, attested against the plan bytes). The run directory name and its collected attestation are recorded on that origin row and archived under `docs/architecture/evidence/issue-175/architect-reviews/`; this slice does not restate the run token, because #178's own archive does not hold that run and a citation its archive cannot back is a fabricated row | "Root placement precedence still diverges" — `[process_call, source]` parses as cardinality at `/body` but compiles as connector mixing at `/body`; `[branch, process_call]` parses as control-continuation at `/body` and fully compiles as ambiguous-flow at `/body/steps/0`, and the added fail-closed test only asserts that SOME nonempty code exists | **P2** | machine-served schemas/contracts | DC-178-A (inherits DC-175-E) | Standard — anchor: source label P2; no critical class or anchor. | inherited at `cdd7a3bf8e2e7ae6773f6ec4250844e5c2e8cf8f` | `inherited-open` — terminal disposition recorded at #178 closure; `window-exhausted` is spent and unavailable |
 | INH-L3R3-02 | INHERITED, not run by this slice — origin row `L3R3-02` of `docs/architecture/ISSUE_175_AUDIT_LEDGER.md`, same #175 round-4 gate and archive location as INH-L3R3-01 | "Body and ancestor placement remain separate authorities" — three cases: an ancestor-connector message present on one path and absent on the other; a process-scoped `try_body` first step giving `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` versus `PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED`; a Branch leg `steps=[cache_put]` with a call terminal giving `PROCESS_IR_SCHEMA_INVALID_CARDINALITY` versus the dedicated return-path code | **P2** | machine-served schemas/contracts | DC-178-A (inherits DC-175-E) | Standard — anchor: source label P2. Same class and round as INH-L3R3-01. | inherited at `cdd7a3bf8e2e7ae6773f6ec4250844e5c2e8cf8f` | `inherited-open` — terminal disposition recorded at #178 closure; `window-exhausted` is spent and unavailable |
+| L2R1-01 | Stage-2 repo Codex review, round 1, run dir `cdx-review.kNJH4n`, base `cdd7a3bf8e2e7ae6773f6ec4250844e5c2e8cf8f`, head `818e0dae78ea729768add36517e5ef01f657f068`, dirty=false, `STATUS: completed` | "[P2] Revalidate raw values before JSON coercion" — when a caller mutates a string field to a JSON-serializable non-string such as `datetime` or `bytes`, `model_dump(mode="json")` converts it to a valid string before the parser sees it; `parse_and_compile_process_ir_v1` rejects the raw value with `PROCESS_IR_SCHEMA_INVALID` while `compile_process_ir_v1` accepts the mutated model | **P2** | runtime behavior | DC-178-B | Standard — anchor: source label P2; no critical class or anchor. | `818e0da` -> this batch | `fixed` for the `datetime` half. The `bytes` half is **refuted on measurement**: `parse_process_ir_v1` ACCEPTS a raw `bytes` value (pydantic lax-coerces `bytes` to `str`), so the claim "parse_and_compile rejects the raw value" is false for `bytes` and the two entry points never disagreed there. Implementing the finding as written produced QA-178-r2-01. |
+| QA-178-r2-01 | Stage-1 QA loop, round 2, live through the public MCP tool boundary, `818e0da` + fix delta, freeze stamp `818e0dae78ea/dirty:4db27b9d66ac/code=c4bc8a19804f`; evidence `docs/architecture/evidence/issue-178/qa-round-2.md` | "entry-point parity only partially restored — the `bytes` case and the production call site still diverge" — after the round-1 fix `compile_process_ir_v1` REFUSES a raw `bytes` value while `parse_and_compile` ACCEPTS it, where at `818e0da` both accepted; and `workflow.py` still dumped `mode="json", warnings=False` before compiling, so that call site accepted a mutated model the compile entry refused | **Medium** | runtime behavior | DC-178-B | Standard — anchor: source label Medium; no critical class or anchor. | this batch | `fixed` — the compile entry now mirrors the parser against the RAW state instead of strict-validating (a rule stricter than its own authority is the DC-175-E mechanism reintroduced), and the model->payload conversion moved into one place, `compile_process_ir_model_v1`, so no call site picks its own dump mode. |
+| QA-178-r2-02 | Stage-1 QA loop, round 2, same run | "`canonical_process_ir_json` interpolates the authored value into a serializer warning" — it dumps with pydantic's default `warnings=True`, so a `bytes` canary in `message.text` emits the planted secret verbatim in the warning text; measured IDENTICAL at `818e0da`, so pre-existing and not introduced by this slice | **Low** | *(audit/serialization hygiene — NOT one of the eight blocking classes; the warning is not a served output)* | DC-178-C | Standard — anchor: source label Low; no critical class or anchor. | pre-existing at `cdd7a3b`, fixed in this batch | `fixed` — plus a sibling sweep: `recipes/composer.py` x2 and `authoring/workflow.py:1750` carried the same unhardened dump and are hardened with it. Zero unhardened ProcessIR dump sites remain in `src/`. |
+| QA-178-r2-03 | Stage-1 QA loop, round 2, same run | "the new test's docstring claim is false for the `bytes` half" — it states the same raw value through `parse_and_compile_process_ir_v1` is refused; measured `datetime` refused, `bytes` ACCEPTED, and the docstring's own next paragraph concedes the cause | **Low** | *(prose in a test docstring — not served to callers)* | DC-178-B | Standard — anchor: source label Low. | this batch | `fixed` — the prose was rewritten and the `bytes` case became its own test asserting the compile entry must NOT be stricter than the parser. |
 
 Dispositions: `fixed` · `finding-refuted` · `severity-refuted` · `not-validated` · `deferred`
 (issue, reason class, placement). `inherited-open` is used only for a seeded `INH-*` row before
@@ -177,6 +181,7 @@ witness that it is not vacuous.
 | Evaluation | Tree | Verdict | Evidence |
 | --- | --- | --- | --- |
 | 1 | `cdd7a3bf8e2e7ae6773f6ec4250844e5c2e8cf8f` + uncommitted tree, freeze stamp `cdd7a3bf8e2e/dirty:2bbf52bd8fe0/code=65f521bce7b4` | **CLEAN — zero findings** | `docs/architecture/evidence/issue-178/qa-round-1.md` |
+| 2 | `818e0dae78ea729768add36517e5ef01f657f068` + fix delta, freeze stamps `818e0dae78ea/dirty:4db27b9d66ac/code=c4bc8a19804f` and `026385aa589b` | regression-clean; **3 findings**, all `fixed` (`QA-178-r2-01/02/03`) | `docs/architecture/evidence/issue-178/qa-round-2.md` |
 
 Suite spent once at HEAD: **10209 passed, 17 skipped, 0 failed** — *measured here*. Account and repo
 tree byte-identical after the round; every provisioned component deleted.
@@ -204,6 +209,43 @@ remediation and `authoring_contract_entry_ids`. The wrong-TYPE discriminator hol
 has no local handler. QA proved it pre-existing by seeding the identical line in both trees and
 obtaining identical envelopes. Unchanged by this slice; recorded, not filed, per the standing rule
 that an accepted pre-existing limitation is not minted as debt.
+
+## Stage-2 repo Codex review (loop 2)
+
+| Evaluation | Run dir | Base -> head | Result | Archived |
+| --- | --- | --- | --- | --- |
+| 1 | `cdx-review.kNJH4n` | `cdd7a3bf8e2e7ae6773f6ec4250844e5c2e8cf8f` -> `818e0dae78ea729768add36517e5ef01f657f068`, dirty=false | `STATUS: completed`, one **P2** (`L2R1-01`) | `docs/architecture/evidence/issue-178/commit-reviews/cdx-review.kNJH4n/`, teardown `confirmed stopped` |
+
+## Structural-fix record (second-instance trigger, DC-178-B)
+
+**DC-178-B** — *a coercive projection stands in for the raw state the authority must judge*.
+Runtime authority: `parse_process_ir_v1`. Instances: `L2R1-01` (Stage-2 round 1) and
+`QA-178-r2-01` (Stage-1 QA round 2). The second instance triggered the structural fix in the same
+batch, per the rule:
+
+- **The invariant**, derived from the authority rather than enumerated: the model-to-payload
+  conversion happens in exactly ONE place, `compile_process_ir_model_v1`, and the compile entry
+  judges the RAW state through `parse_process_ir_v1` itself. It never applies a rule of its own —
+  the withdrawn `strict=True` revision is the recorded proof that exceeding the authority
+  reintroduces the very class being closed.
+- **Sibling sweep** (every `model_dump` of a ProcessIR model in `src/`, enumerated, not sampled):
+  `pipeline.py` (the authority, `warnings="error"`), `models/process_ir.py::raw_process_ir_payload`
+  and `::canonical_process_ir_json`, `authoring/workflow.py:379` and `:1750`,
+  `recipes/composer.py` x2, `semantic_validation/context.py` x2. Three were unhardened and are
+  fixed; zero unhardened sites remain. `authoring/workflow.py:379` keeps its dump with an explicit
+  justification: it re-parses for server OWNERSHIP at intake and sits upstream of the compile
+  entry, which is now the single authority for the same property.
+- **Non-vacuity witnesses**: `test_the_gate_fails_when_the_structural_fix_is_removed` (neutering
+  the re-parse produces 422 mismatches of 820; deleting the line from the real source fails 11 of
+  19 tests) and `test_a_mutated_value_never_reaches_a_serializer_warning`, whose control asserts
+  the UNHARDENED dump still leaks, so the guard cannot silently stop detecting regressions.
+- **Coverage claim, derived from the authority's own case set**: every `(context, slot, kind)`
+  cell of `BODY_CAPABILITIES_V1` crossed with the parser's closed node vocabulary and both ancestor
+  modes, plus the root singleton and ordered-pair product the matrix has no row for.
+
+**DC-178-C** — *a ProcessIR model dumped under pydantic's default `warnings=True`, interpolating
+the authored value into a serializer warning*. Runtime authority: the AR2-01 rule. One instance
+(`QA-178-r2-02`, pre-existing) plus three siblings found by the same sweep and fixed with it.
 
 ## Final-tree validation (filled at close; every roster gate current on the FINAL sha)
 

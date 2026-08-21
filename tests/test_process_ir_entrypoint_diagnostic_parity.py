@@ -694,3 +694,137 @@ def test_the_corpus_message_clause_divergence_is_closed():
     parser_message = parser_exc.value.diagnostics[0].message
     assert "a connector runs upstream of this body" in parser_message
     assert compile_exc.value.diagnostics[0].message == parser_message
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 round 1 finding: a json dump REPAIRS some invalid mutated values.
+# ---------------------------------------------------------------------------
+
+
+def _control_flow_ir():
+    import json
+
+    doc = json.loads(
+        (_ROOT / "tests" / "fixtures" / "process_ir" / "process_ir_v1.json").read_text()
+    )["control_flow"]
+    return parse_process_ir_v1(copy.deepcopy(doc))
+
+
+def test_a_wrong_typed_mutation_is_refused_exactly_as_the_parser_refuses_it():
+    """A json dump is COERCIVE, so the re-parse alone did not close the hole.
+
+    `ProcessIRV1` is not validate-on-assignment, so `node.text = datetime(...)`
+    leaves a `str` field holding a `datetime`, and `model_dump(mode="json")`
+    renders it as `'2020-01-01T00:00:00'` — the parser is handed an
+    already-repaired document and accepts it.
+
+    The fix mirrors the PARSER against the raw state; it does not invent a
+    stricter rule. That distinction is the whole point and is asserted below by
+    `test_bytes_is_accepted_because_the_parser_accepts_it`: an earlier revision
+    strict-validated here, which refused `bytes` that the parser ACCEPTS, and so
+    made the two entry points disagree where they had agreed — DC-175-E
+    reintroduced one layer up while nominally fixing it.
+    """
+    import datetime as _dt
+
+    ir = _control_flow_ir()
+    ir.body.steps[1].text = _dt.datetime(2020, 1, 1)
+
+    # The coercion is real: the json dump alone yields a document the parser
+    # accepts. Without this control the test could pass for the wrong reason.
+    parse_process_ir_v1(copy.deepcopy(ir.model_dump(mode="json", warnings=False)))
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        pl.compile_process_ir_v1(ir, None)
+    served = excinfo.value.diagnostics[0]
+    assert served.code == "PROCESS_IR_SCHEMA_INVALID", [
+        (d.code, d.path) for d in excinfo.value.diagnostics
+    ]
+    # A REAL pointer, not a bare refusal — the parser's own translated `loc`.
+    assert served.path == "/body/steps/1/text"
+    assert served.phase == "schema"
+
+
+def test_bytes_is_accepted_because_the_parser_accepts_it():
+    """The compile entry must not be STRICTER than its own authority.
+
+    `parse_process_ir_v1` lax-coerces `bytes` to `str`, so it accepts a `bytes`
+    value in a `str` field. The compile entry therefore must too — otherwise the
+    two public entry points disagree, which is the exact defect class this slice
+    closes. Measured: a strict-validating revision refused this and had to be
+    withdrawn.
+    """
+    from boomi_mcp.models.process_ir import (
+        assert_process_ir_v1_type_faithful,
+        raw_process_ir_payload,
+    )
+
+    ir = _control_flow_ir()
+    ir.body.steps[1].text = b"abc"
+
+    # The authority accepts the RAW state...
+    parse_process_ir_v1(raw_process_ir_payload(ir))
+    assert_process_ir_v1_type_faithful(ir)
+    # ...so the compile entry must reach the compile stages rather than refuse at
+    # the grammar boundary. `symbols=None` fails later, which is not our business.
+    try:
+        pl.compile_process_ir_v1(ir, None)
+    except ProcessIRCompileError as exc:
+        assert exc.diagnostics[0].phase != "schema", [
+            (d.code, d.phase) for d in exc.diagnostics
+        ]
+
+
+def test_a_mutated_value_never_reaches_a_serializer_warning():
+    """AR2-01, swept across every ProcessIR dump site (#178 QA round 2).
+
+    A dump of a possibly-mutated model under pydantic's DEFAULT `warnings=True`
+    interpolates the authored value into a warning — measured to emit a planted
+    secret verbatim. QA found one hardened site and three unhardened siblings, so
+    this pins the property behaviourally rather than by scanning source.
+    """
+    import warnings as _warnings
+
+    from boomi_mcp.models.process_ir import (
+        canonical_process_ir_json,
+        raw_process_ir_payload,
+    )
+
+    canary = "QA178-CANARY-sk_live_0ff1ce"
+    ir = _control_flow_ir()
+    ir.body.steps[1].text = canary.encode()
+
+    for label, call in (
+        ("canonical_process_ir_json", lambda: canonical_process_ir_json(ir)),
+        ("raw_process_ir_payload", lambda: raw_process_ir_payload(ir)),
+        ("compile entry", lambda: pl._reparse_process_ir_for_compile(ir)),
+    ):
+        with _warnings.catch_warnings(record=True) as caught:
+            _warnings.simplefilter("always")
+            call()
+        leaked = [w for w in caught if canary in str(w.message)]
+        assert leaked == [], "{0} leaked the authored value".format(label)
+
+    # NON-VACUITY: the unhardened form this swept away really does leak, so the
+    # assertions above are observations rather than a guard that cannot fire.
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        ir.model_dump(mode="json")
+    assert any(canary in str(w.message) for w in caught), (
+        "the control did not leak — this test can no longer detect a regression"
+    )
+
+
+def test_type_faithfulness_accepts_every_legal_generated_document():
+    """Non-vacuity in the other direction: the new strict check must not refuse a
+    single legal document. Measured 0 false positives across the whole
+    parser-accepted partition when the check was chosen."""
+    from boomi_mcp.models.process_ir import assert_process_ir_v1_type_faithful
+
+    checked = 0
+    for _cid, ir, parser, _compiler in _measured()["rows"]:
+        if parser[0] != "ACCEPTED":
+            continue
+        assert_process_ir_v1_type_faithful(ir)
+        checked += 1
+    assert checked, "no accepted case observed — the assertion would be vacuous"

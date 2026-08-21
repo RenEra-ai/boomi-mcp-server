@@ -1747,7 +1747,12 @@ def plan_authoring_request_v1(
         normalized.integration_spec,
         boomi_client=boomi_client,
         authored_refs=_iter_authored_refs(
-            [ir.model_dump(mode="json") for _key, ir in normalized.process_roots]
+            # `warnings=False` for the AR2-01 reason: these roots feed a ref scan,
+            # and a mutated one would render its authored value into a warning.
+            [
+                ir.model_dump(mode="json", warnings=False)
+                for _key, ir in normalized.process_roots
+            ]
             + [normalized.integration_spec.model_dump(mode="json")]
         ),
     )
@@ -1926,7 +1931,7 @@ def build_artifact_descriptors(
     """
     from ..compiler.process_ir.contracts import canonical_emission_plan_json
     from ..compiler.process_ir.diagnostics import ProcessIRCompileError
-    from ..compiler.process_ir.pipeline import parse_and_compile_process_ir_v1
+    from ..compiler.process_ir.pipeline import compile_process_ir_model_v1
     from ..models.process_ir import canonical_process_ir_json
 
     fingerprints: List[ArtifactFingerprintV1] = []
@@ -1945,17 +1950,22 @@ def build_artifact_descriptors(
             # have been mutated renders the caller's values into a serializer
             # warning before the value-free parser runs.
             #
-            # #178: ONE call, not a parse followed by a compile. Public
-            # `compile_process_ir_v1` now re-parses for itself, so the old pairing
-            # would parse the same document twice on the live authoring path.
-            # It also closes a real hole: the parse used to raise
-            # `ProcessIRValidationError`, which the `except` below does NOT catch
-            # (it catches only `ProcessIRCompileError`), so a re-parse failure
-            # escaped this module's error channel raw. It now arrives as a
-            # compile error and is translated like every other refusal.
-            reparsed, cfg, plan = parse_and_compile_process_ir_v1(
-                ir.model_dump(mode="json", warnings=False), symbols
-            )
+            # #178: hand over the MODEL, never a dump this call site chose for
+            # itself. A `mode="json"` dump REPAIRS a wrong-typed value before the
+            # parser sees it (a `datetime` in a `str` field becomes an ISO
+            # string), so dumping here accepted mutated models that the compile
+            # entry refuses — two public paths, two answers for one model. QA
+            # round 2 measured it. The conversion now happens in exactly one
+            # place, inside the compiler, and this site takes back the
+            # re-validated model so it canonicalizes the thing actually compiled.
+            #
+            # It is also ONE call rather than a parse plus a compile: the compile
+            # entry re-parses for itself, so the old pairing parsed twice on the
+            # live authoring path. And it closes a real hole — the old parse
+            # raised `ProcessIRValidationError`, which the `except` below does NOT
+            # catch (only `ProcessIRCompileError`), so a re-parse failure escaped
+            # this module's error channel raw.
+            reparsed, cfg, plan = compile_process_ir_model_v1(ir, symbols)
         except ProcessIRCompileError as exc:
             raise AuthoringWorkflowError(
                 AUTHORING_COMPILE_BLOCKED,

@@ -2755,6 +2755,56 @@ def _check_whole_document_rules(ir: "ProcessIRV1") -> None:
         _walk_controls(step, ("body", "steps", index), 0, connector_at_root)
 
 
+def assert_process_ir_v1_type_faithful(ir: "ProcessIRV1") -> None:
+    """Refuse a model whose RUNTIME values contradict its own declared types.
+
+    #178. ``ProcessIRV1`` is exported, mutable, and NOT validate-on-assignment
+    (``model_config`` sets only ``extra="forbid"``), so ``node.text = datetime(...)``
+    succeeds and leaves a ``str`` field holding a ``datetime``.
+
+    That matters because ``model_dump(mode="json")`` is COERCIVE: it renders the
+    ``datetime`` as an ISO string and ``bytes`` as text, so the document handed to
+    the parser is already repaired and the parser accepts it — while the same raw
+    value passed to ``parse_and_compile_process_ir_v1`` is refused. Two public
+    entry points, two answers, which is exactly the class #178 exists to close.
+    Measured at `818e0da`: `datetime` -> ``'2020-01-01T00:00:00'`` and
+    `bytes` -> ``'abc'``, both accepted after the json dump.
+
+    The check is the PARSER ITSELF, run against the RAW state — never a stricter
+    rule of this function's own. An earlier revision used
+    ``model_validate(..., strict=True)`` here, and QA measured the consequence: it
+    refused ``bytes``, which ``parse_process_ir_v1`` ACCEPTS (pydantic lax-coerces
+    ``bytes`` to ``str``). That made the two public entry points disagree on
+    ``bytes`` where they had previously agreed — a second copy of a rule diverging
+    from its authority, which is the DC-175-E mechanism this whole slice exists to
+    remove. Mirroring the parser is the point; exceeding it reintroduces the defect
+    in a new place.
+
+    So: ``datetime`` is refused because the parser refuses it, and ``bytes`` is
+    accepted because the parser accepts it. Measured both ways at `818e0da`.
+    Diagnostics are the parser's own, carrying a real JSON pointer
+    (``/body/steps/1/text``) rather than a bare refusal.
+    """
+    parse_process_ir_v1(raw_process_ir_payload(ir))
+
+
+def raw_process_ir_payload(ir: "ProcessIRV1") -> Any:
+    """The model's RAW state as a payload, with no JSON coercion.
+
+    ``mode="python"`` deliberately: a ``mode="json"`` dump REPAIRS a wrong-typed
+    value (a ``datetime`` in a ``str`` field renders as an ISO string) and hands
+    the parser an already-valid document, which is how a mutated model slipped
+    past the compile-entry re-parse. ``warnings=False`` keeps the serializer from
+    interpolating the authored value into a warning (AR2-01).
+    """
+    try:
+        return ir.model_dump(mode="python", warnings=False)
+    except Exception:
+        raise ProcessIRValidationError(
+            [_diagnostic(PROCESS_IR_SCHEMA_INVALID, ())]
+        ) from None
+
+
 def parse_process_ir_v1(payload: Any) -> ProcessIRV1:
     """Parse an authored payload into a validated :class:`ProcessIRV1`.
 
@@ -2809,8 +2859,15 @@ def _canonical_json(value: Any) -> str:
 
 
 def canonical_process_ir_json(ir: ProcessIRV1) -> str:
-    """Canonical JSON: defaults and Nones included, keys sorted, list order kept."""
-    return _canonical_json(ir.model_dump(mode="json"))
+    """Canonical JSON: defaults and Nones included, keys sorted, list order kept.
+
+    ``warnings=False`` for the AR2-01 reason (#178, QA round 2). This dumped a
+    possibly-mutated model under pydantic's DEFAULT ``warnings=True``, so a
+    wrong-typed value rendered the caller's authored content — measured, a planted
+    secret verbatim — into a serializer warning on a path that also feeds artifact
+    fingerprints. The flag changes no emitted byte; it only stops the warning.
+    """
+    return _canonical_json(ir.model_dump(mode="json", warnings=False))
 
 
 def process_ir_v1_json_schema() -> dict:
