@@ -101,6 +101,9 @@ escalation with this issue left open.
 | L2R3-02 | Stage-2 repo Codex review, round 3, same run dir `cdx-review.Laubc9` | "[P2] Include round 2 in the Stage-2 evaluation history" — the newly archived completed run is Stage-2 evaluation 2, but the Stage-2 review table still lists only evaluation 1; because checkpoint accounting uses the cumulative evaluation number, the omission can cause the next review to be treated as round 2 and skip the mandatory round-3 checkpoint | **P2** | *(audit-record integrity — NOT one of the eight blocking classes)* | DC-178-D | Standard — anchor: source label P2. | `3cb564d` -> this batch | `fixed` — CONFIRMED: round 2's run was archived but never added to the evaluation table. Rounds 2 and 3 are now both listed, so the cumulative count the checkpoint rule keys on is correct. |
 | L2R4-01 | Stage-2 repo Codex review, round 4 (fix-only over the record batch), run dir `cdx-review.BmT1ps`, base `3cb564d7e5bd7dee9beb1ccde7152915867095d2`, head `93ac80e9055e2d4caa3e9e814234aabe5095faaf`, dirty=false, `STATUS: completed` | "[P2] Record checkpoint state before applying the correction batch" — the checkpoints do not describe the required pre-mutation state: the Stage-1 row is added after `3cb564d` already committed the round-3 corrections and therefore retrospectively says nothing is owed, while the Stage-2 row marks `L2R3-01/02` fixed even though their fixes are this post-`3cb564d` diff | **P2** | *(audit-record integrity — NOT one of the eight blocking classes)* | DC-178-D | Standard — anchor: source label P2; no critical class or anchor. | `93ac80e` -> this batch | `fixed` — CONFIRMED and the criticism is exact: describing the POST-correction state makes any checkpoint decision look trivially safe, which is the opposite of what the record is for. Both rows now state the state AT THE DECISION POINT, count the then-unresolved findings, and disclose that one was recorded late and one mid-correction — which the workflow permits only when recorded as such. |
 | L2R4-02 | Stage-2 repo Codex review, round 4, same run dir `cdx-review.BmT1ps` | "[P2] Add the required structural disposition for DC-178-D" — `QA-178-r3-02` already belongs to DC-178-D and both `L2R3` findings are assigned to the same class, so the second-instance rule has triggered; the checkpoint nevertheless claims no repeated class was instance-patched, while the structural-fix section covers only DC-178-B/C and no permitted deviation is recorded | **P2** | *(audit-record integrity — NOT one of the eight blocking classes)* | DC-178-D | Standard — anchor: source label P2. | `93ac80e` -> this batch | `fixed` — CONFIRMED: three rows carry DC-178-D and the rule had fired unacknowledged. The structural fix is recorded below and is executable rather than prose: `tests/test_issue_178_ledger_is_derived_from_its_archive.py` derives the review history and the checkpoint obligation from `index.jsonl`. Both mutants were hand-run before the claim was written. |
+| L2R5-01 | Stage-2 repo Codex review, round 5 (fix-only over the round-4 record batch), run dir `cdx-review.yTxPi2`, base `93ac80e9055e2d4caa3e9e814234aabe5095faaf`, head `e59245394825d198184d11c826cb3f47a4461cc5`, dirty=false, `STATUS: completed` | "[P2] Restrict checkpoint counts to the Stage-2 loop" — a downstream or wave correction's repo review uses the same `commit-review-collect` collector but belongs to a different `logical_loop`, and the helper counted it as a Stage-2 evaluation, so once the combined count crossed another multiple of three the guard would demand a spurious L2 checkpoint | **P2** | *(audit-record integrity — NOT one of the eight blocking classes)* | DC-178-D | Standard — anchor: source label P2; no critical class or anchor. | `e592453` -> this batch | `fixed` — CONFIRMED: the helper filtered on collector and status but not on `logical_loop`, which every archived row already carries. It now filters on it, and a second assertion refuses a table row the loop does not own, so the count cannot be inflated from either direction. |
+| L2R5-02 | Stage-2 repo Codex review, round 5, same run dir `cdx-review.yTxPi2` | "[P2] Require each run in the Stage-2 history table" — if an archived round is omitted from the Stage-2 evaluation table but remains mentioned elsewhere, such as in its finding row, the whole-file substring check still passes, permitting the exact `L2R3-02` accounting defect to recur | **P2** | *(audit-record integrity — NOT one of the eight blocking classes)* | DC-178-D | Standard — anchor: source label P2. | `e592453` -> this batch | `fixed` — CONFIRMED BY MEASUREMENT, and the guard was failing at exactly the thing it was written to prevent: deleting round 2's evaluation-table row while leaving its finding-row citation intact left all six assertions GREEN. The check now parses the evaluation TABLE rather than the file, and the same mutant hand-run afterwards fails two assertions. |
+| L2R5-03 | Stage-2 repo Codex review, round 5, same run dir `cdx-review.yTxPi2` | "[P2] Cover the QA-baseline defect in the structural guard" — the declared authority contains only collected commit-review rounds and no QA baseline or source-diff information, so if a Stage-1 evaluation again describes the wrong tested tree every new invariant still passes; `QA-178-r3-02` is not structurally prevented despite being claimed as an instance covered by this fix | **P2** | *(audit-record integrity — NOT one of the eight blocking classes)* | DC-178-D -> revised to **DC-178-E** for `QA-178-r3-02` (original class retained on that row; revision recorded here, dated 2026-08-21, second-instance check re-run before this batch) | Standard — anchor: source label P2. | `e592453` -> this batch | `fixed` by WITHDRAWING the false coverage claim rather than rewording it. The invariant genuinely does not cover that instance, so the instance is reclassified: DC-178-E's authority is `git diff`, not the archive, and its disposition is a recorded deviation on the ground that the failing claim lived in a dispatch message, which is not a tree artifact any in-tree test can assert against. |
 
 Dispositions: `fixed` · `finding-refuted` · `severity-refuted` · `not-validated` · `deferred`
 (issue, reason class, placement). `inherited-open` is used only for a seeded `INH-*` row before
@@ -236,6 +239,23 @@ prevent. Adopted as standing practice for the rest of this slice: diff the named
 the previous one (`git diff <prev> <named> -- src/`) BEFORE attesting it, and state what the delta
 contains rather than describing it by which round last ran.
 
+### Darkness proof for the round-5 record batch (owed validation) — TERMINAL record batch
+
+The batch answering `L2R5-01/02/03` touches only `docs/architecture/` and
+`tests/test_issue_178_ledger_is_derived_from_its_archive.py`. Measured at
+`3cb564d7e5bd7dee9beb1ccde7152915867095d2`: `git diff <sha> -- src/` is EMPTY, with the same
+append-and-revert control used for the round-4 proof.
+
+**This is the terminal record batch, and the reason it is not simply churn is recorded here.** The
+workflow says non-blocking notes arising from a batch's own validation never earn a further batch.
+Rounds 4 and 5 were nevertheless batched because each surfaced a FALSE CLAIM in the audit record —
+a checkpoint describing the post-correction state as though it were the decision state
+(`L2R4-01`), a structural-fix claim that measurement showed did not prevent its own defect
+(`L2R5-02`), and a coverage claim over an instance the invariant cannot reach (`L2R5-03`). A
+knowingly-false claim invalidates closure under this repo's own rules, so correcting them was
+required rather than optional. Notes from the review of THIS batch that are non-blocking and
+contain no false claim take a recorded disposition and no further batch.
+
 ### Darkness proof for the round-4 record batch (owed validation)
 
 The batch answering `L2R4-01`/`L2R4-02` touches only `docs/architecture/` and one new test file, so
@@ -268,6 +288,7 @@ an observation, not a broken probe.
 | 2 | `cdx-review.3Vo4vh` | `818e0dae78ea729768add36517e5ef01f657f068` -> `1618f99e48ee5adbf4488970b660a0f273bd4c1b`, dirty=false | `STATUS: completed`, one **P2** (`L2R2-01`) | `docs/architecture/evidence/issue-178/commit-reviews/cdx-review.3Vo4vh/`, teardown `confirmed stopped` |
 | 3 | `cdx-review.Laubc9` | `1618f99e48ee5adbf4488970b660a0f273bd4c1b` -> `3cb564d7e5bd7dee9beb1ccde7152915867095d2`, dirty=false | `STATUS: completed`, **zero code findings** ("the runtime change appears coherent"); two **P2** audit-record findings (`L2R3-01`, `L2R3-02`) | `docs/architecture/evidence/issue-178/commit-reviews/cdx-review.Laubc9/`, teardown `confirmed stopped` |
 | 4 | `cdx-review.BmT1ps` | `3cb564d7e5bd7dee9beb1ccde7152915867095d2` -> `93ac80e9055e2d4caa3e9e814234aabe5095faaf`, dirty=false | `STATUS: completed`, fix-only over the record batch; two **P2** audit-record findings (`L2R4-01`, `L2R4-02`) | `docs/architecture/evidence/issue-178/commit-reviews/cdx-review.BmT1ps/`, teardown `confirmed stopped` |
+| 5 | `cdx-review.yTxPi2` | `93ac80e9055e2d4caa3e9e814234aabe5095faaf` -> `e59245394825d198184d11c826cb3f47a4461cc5`, dirty=false | `STATUS: completed`, fix-only over the round-4 record batch; three **P2** audit-record findings (`L2R5-01/02/03`) | `docs/architecture/evidence/issue-178/commit-reviews/cdx-review.yTxPi2/`, teardown `confirmed stopped` |
 
 ## Structural-fix record (second-instance trigger, DC-178-B)
 
@@ -296,13 +317,17 @@ batch, per the rule:
   cell of `BODY_CAPABILITIES_V1` crossed with the parser's closed node vocabulary and both ancestor
   modes, plus the root singleton and ordered-pair product the matrix has no row for.
 
-**DC-178-D** — *a ledger fact maintained by hand that the durable evidence already
-knows*. Runtime authority: `docs/architecture/evidence/issue-178/index.jsonl`, which the collector
-writes one row into per COLLECTED review round. Instances: `QA-178-r3-02` (a baseline described by
-which round last ran rather than by its diff, silently carrying three unvalidated corrections),
-`L2R3-02` (a round archived but absent from the evaluation table) and `L2R3-01` (three evaluations
-accrued in each loop with the checkpoint table empty). Second instance triggered the structural fix
-in this batch:
+**DC-178-D** — *a required ledger ROW the durable evidence already knows about, left unwritten*.
+Runtime authority: `docs/architecture/evidence/issue-178/index.jsonl`, which the collector writes
+one row into per COLLECTED review round. Instances: `L2R3-02` (a round archived but absent from the
+evaluation table), `L2R3-01` (three evaluations accrued with the checkpoint table empty), and
+`L2R4-01`/`L2R4-02` from the same family. Second instance triggered the structural fix:
+
+**Coverage claim CORRECTED (`L2R5-03`).** An earlier revision of this record also listed
+`QA-178-r3-02` here and claimed the invariant covered it. Measured: it does not — this authority
+contains only collected commit-review rounds, with no QA baseline or source-diff information, so a
+Stage-1 evaluation naming the wrong tested tree leaves every assertion green. The claim is WITHDRAWN
+rather than reworded, and that finding is reclassified below as DC-178-E.
 
 - **The invariant is EXECUTABLE, not prose** — `tests/test_issue_178_ledger_is_derived_from_its_archive.py`.
   It derives the collected-round set and the checkpoint obligation from `index.jsonl` and asserts
@@ -322,6 +347,23 @@ in this batch:
   that owns it, and the measurement is recorded here so the scoping is a decision rather than an
   omission. The repo-wide direction that DOES hold — no cited run may be unarchived — is already
   enforced by `test_audit_ledger_attestations_have_durable_matching_evidence`.
+
+**DC-178-E** — *a prose CLAIM about which tree was tested, hand-modelled instead of derived from
+the diff*. Runtime authority: `git diff <previous> <named> -- src/`. One instance:
+`QA-178-r3-02`. Split out of DC-178-D on measurement (`L2R5-03`) because the mechanism and the
+authority both differ: DC-178-D is a row the archive already knows about and can therefore be
+derived; DC-178-E is an assertion about a delta that no archived artifact records, since the
+dispatch prose lives outside the tree.
+
+Disposition — a recorded DEVIATION under the Standard-tier path, on the ground that the invariant
+is infeasible in-slice: the claim that failed was made in a QA dispatch message, which is not a
+tree artifact and cannot be asserted against by any in-tree test. What IS in-tree is the practice
+that replaces it, adopted in the *Attestation correction* section above: diff the named baseline
+against the previous one before attesting, and describe a tree by its delta rather than by which
+round last ran. No follow-up issue is filed, per the standing rule that an accepted limitation is
+recorded rather than minted as debt — the discriminating evidence a second instance must supply is
+a case where the mispositioned claim is reachable from an in-tree artifact, which would make it
+DC-178-D and mechanically preventable.
 
 **DC-178-C** — *a ProcessIR model dumped under pydantic's default `warnings=True`, interpolating
 the authored value into a serializer warning*. Runtime authority: the AR2-01 rule. One instance

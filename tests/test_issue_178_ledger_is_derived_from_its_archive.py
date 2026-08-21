@@ -1,13 +1,19 @@
 """DC-178-D structural fix: the ledger's review accounting is DERIVED, not typed.
 
-Three findings in one slice had the same shape — a ledger fact maintained by hand
-that the durable evidence already knows:
+TWO findings in one slice had the same shape — a ledger row the durable evidence
+already knows about, left unwritten:
 
-* `QA-178-r3-02` — a baseline was described by "the tree you tested last round"
-  instead of by its actual diff, and silently carried three unvalidated corrections;
 * `L2R3-02` — a review round was archived but never added to the evaluation table;
 * `L2R3-01` — three evaluations accrued in each loop with the checkpoint table
   still empty.
+
+`QA-178-r3-02` (a baseline described by which round last ran, rather than by its
+diff) was ORIGINALLY assigned to this class and is NOT covered here. That claim was
+withdrawn on measurement, not narrowed after the fact: this authority holds only
+collected commit-review rounds, with no QA baseline or source-diff information, so
+a Stage-1 evaluation naming the wrong tested tree would leave every assertion in
+this file green. It is reclassified as DC-178-E, whose authority is `git diff` and
+whose disposition is recorded in the ledger.
 
 Second instance triggers the structural-fix rule, so the enumeration is replaced
 by an invariant read from the runtime authority. That authority is
@@ -47,15 +53,42 @@ def _archive_rows():
     return rows[0], rows[1:]
 
 
-def _collected_review_runs():
-    """Run-dir names of every COLLECTED commit-review round, from the archive."""
+#: The Stage-2 loop's own label, as the collector records it on each archived row.
+#: Filtering on it is load-bearing: a downstream or wave correction's repo review
+#: uses the SAME `commit-review-collect` collector under a DIFFERENT logical loop,
+#: and counting those as Stage-2 evaluations would demand a spurious L2 checkpoint
+#: the moment the combined total crossed a multiple of three.
+STAGE2_LOOP_PREFIX = "L2"
+
+
+def _collected_review_runs(loop_prefix=STAGE2_LOOP_PREFIX):
+    """Run-dir names of every COLLECTED commit-review round in ONE logical loop."""
     _header, runs = _archive_rows()
     return [
         row["durable_dir"].split("/")[-1]
         for row in runs
         if row.get("collector") == "commit-review-collect"
         and row.get("status") == "completed"
+        and str(row.get("logical_loop", "")).startswith(loop_prefix)
     ]
+
+
+def _stage2_table_runs():
+    """Run-dir names listed in the Stage-2 EVALUATION TABLE specifically.
+
+    Parsing the table rather than the whole file is the point. A whole-file
+    substring check is satisfied by the run's own FINDING row, so it passes while
+    the evaluation table silently loses an entry — measured: deleting round 2's
+    table row left all six assertions green. That is exactly the `L2R3-02`
+    accounting defect, so the guard that claims to prevent it must read the table
+    the cumulative count is displayed in.
+    """
+    rows = []
+    for line in LEDGER.read_text(encoding="utf-8").splitlines():
+        match = re.match(r"\|\s*\d+\s*\|\s*`(cdx(?:-gate)?-review\.[A-Za-z0-9_-]+)`", line)
+        if match:
+            rows.append(match.group(1))
+    return rows
 
 
 def test_the_archive_is_the_authority_and_is_not_empty():
@@ -66,18 +99,29 @@ def test_the_archive_is_the_authority_and_is_not_empty():
     assert _collected_review_runs(), "no collected review rounds in the archive"
 
 
-def test_every_archived_review_round_appears_in_the_ledger():
-    """`L2R3-02`'s defect, made unwritable.
+def test_every_archived_review_round_appears_in_the_stage2_table():
+    """`L2R3-02`'s defect, made unwritable — in the TABLE, not merely in the file.
 
     A round that was collected but never entered in the evaluation table corrupts
-    the cumulative count the checkpoint rule keys on — which is how a mandatory
+    the cumulative count the checkpoint rule keys on, which is how a mandatory
     third-evaluation checkpoint gets skipped without anyone noticing.
     """
-    text = LEDGER.read_text(encoding="utf-8")
-    missing = [name for name in _collected_review_runs() if name not in text]
+    listed = _stage2_table_runs()
+    assert listed, "the Stage-2 evaluation table parsed to nothing"
+    missing = [name for name in _collected_review_runs() if name not in listed]
     assert missing == [], (
-        "archived review rounds absent from the ledger: {0}".format(sorted(missing))
+        "archived Stage-2 rounds absent from the evaluation table: {0}".format(
+            sorted(missing)
+        )
     )
+
+
+def test_the_stage2_table_lists_no_round_the_loop_does_not_own():
+    """The table must not pad its own history either — a row for a run that is not
+    a collected Stage-2 round inflates the cumulative count just as badly."""
+    owned = set(_collected_review_runs())
+    extra = [name for name in _stage2_table_runs() if name not in owned]
+    assert extra == [], sorted(extra)
 
 
 def test_the_ledger_cites_no_review_round_the_archive_lacks():
@@ -150,11 +194,16 @@ def test_the_derivation_would_notice_a_missing_row():
     real = _collected_review_runs()
     assert real, "no runs to perturb"
 
+    listed = _stage2_table_runs()
     fabricated = real + ["cdx-review.NOTARCHIVED"]
-    missing = [name for name in fabricated if name not in text]
+    missing = [name for name in fabricated if name not in listed]
     assert missing == ["cdx-review.NOTARCHIVED"], (
-        "the citation check cannot detect an uncited round"
+        "the table check cannot detect a round missing from the evaluation table"
     )
+    # ...and the check reads the TABLE, not the whole file: a name that appears
+    # only in prose must NOT satisfy it. This is the precise weakness that made
+    # the first version of this guard pass while the defect it names recurred.
+    assert "L2R1-01" in text and "L2R1-01" not in listed
 
     # ...and the checkpoint obligation really does scale with the round count.
     assert (len(real) + CHECKPOINT_EVERY) // CHECKPOINT_EVERY > len(
