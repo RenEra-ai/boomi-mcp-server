@@ -135,3 +135,47 @@ input, so it caught the crash but not the pointer half. It now carries both docu
 was re-run against the re-applied mutant to confirm it still goes red, then restored.
 
 Restored byte-for-byte and re-run green: `7 passed in 0.13s`.
+
+## Invariant 1 — the served-code census (Stage-2 rounds 2–5 hardening)
+
+Guard: `tests/test_process_ir_served_text_enforcement.py::test_every_code_named_in_the_emitting_modules_is_served`.
+
+### Why this guard exists
+
+Stage-2 round 5 established that pinning a hand-listed "codes this site emits" tuple can go
+stale: change the code behind `_check_region_containment` and the pinned SITE identity does
+not move, so nothing keyed on the site notices. The census closes it without tracing a
+single value — a code the modules can raise must be NAMED in them.
+
+### Mutant — a diagnostic default changed to a brand-new unregistered code
+
+Edit: `src/boomi_mcp/compiler/process_ir/invariants.py`, the `code` parameter default of
+`_check_region_containment`, from `PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW` to the literal
+`"PROCESS_IR_SEMANTIC_TOTALLY_NEW_UNREGISTERED"`.
+
+Measured under the mutant, BEFORE the census was widened to code-shaped literals:
+
+```
+unresolved sites: 7 (identity unchanged -> a site-keyed guard sees nothing)
+10 passed
+```
+
+So the site-keyed guard alone was green on the defect, exactly as the reviewer said, and a
+census over KNOWN constants alone was green too — a brand-new literal is not yet a known
+constant. The census therefore matches on code SHAPE, with the families derived from the
+real code set rather than hand-typed.
+
+RED after widening, quoted verbatim:
+
+```
+E       AssertionError: [('PROCESS_IR_SEMANTIC_TOTALLY_NEW_UNREGISTERED', ['src/boomi_mcp/compiler/process_ir/invariants.py'])]
+```
+
+Restored byte-for-byte (`git diff --quiet` clean) and re-run green: `10 passed in 1.28s`.
+
+### The cost of matching on shape, recorded
+
+Two ordinary module constants (`LEGACY_ADAPTER_ALIAS_PREFIX`, `PROCESS_COMPONENT_TYPE`) look
+like codes and are pinned in `UNSERVED_BY_DESIGN` alongside the three real
+`legacy_adapters/**` namespace codes. That set is checked in BOTH directions: an entry that
+stops being named, or starts being served, fails the test rather than standing forever.

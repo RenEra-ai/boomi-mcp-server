@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 import sys
 from types import MappingProxyType
 
@@ -69,6 +70,7 @@ __all__ = [
     "PINNED_SINKS",
     "collect_emissions",
     "pinned_sink_definitions",
+    "referenced_codes",
     "verifier_issue_sites",
 ]
 
@@ -101,6 +103,9 @@ _SINK_NAMES = frozenset(name for _path, name in PINNED_SINKS)
 #: excluded from resolution so a registry cannot prove its own reachability; their KEYS are
 #: never collected at all, which is the same rule stated from the other side.
 _REGISTRY_TABLES = frozenset({"_MESSAGES", "_REMEDIATION"})
+
+#: What a diagnostic code looks like: SCREAMING_SNAKE with at least two segments.
+_CODE_SHAPE = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+){2,}$")
 
 #: Every public string constant in `boomi_mcp.errors`, which is where diagnostic codes live.
 _ERROR_CONSTANTS = MappingProxyType(
@@ -366,6 +371,50 @@ def _called_name(call):
     return getattr(func, "attr", None)
 
 
+def referenced_codes():
+    """Every diagnostic-code constant NAMED anywhere in the scanned modules.
+
+    This is the claim that makes a pinned site safe without reading data flow. A pinned
+    site says "a human states which codes reach here"; that statement can go stale when the
+    code behind it changes. But a code the modules can emit has to be NAMED in them — as a
+    `boomi_mcp.errors` constant or a literal — so requiring every named code to be served
+    catches the stale case without anyone tracing a value.
+
+    It is an over-approximation (a code named for another purpose is still required to be
+    served), which is the safe direction: it can demand a registration that was not strictly
+    needed, never miss one that was.
+    """
+    codes = set(_ERROR_CONSTANTS.values())
+    # Code-SHAPED literals count too, not only strings that already match a known constant.
+    # Measured: with only known constants, changing a diagnostic default to a brand-new
+    # literal was invisible to this census — the very staleness it exists to catch. The
+    # families are DERIVED from the real code set (the first two underscore-separated
+    # tokens of each), never hand-typed, so a new family cannot appear without a code in it.
+    families = {"_".join(code.split("_")[:2]) for code in codes}
+
+    def _is_code_shaped(value):
+        if not _CODE_SHAPE.match(value):
+            return False
+        return "_".join(value.split("_")[:2]) in families
+
+    referenced = {}
+    for path in _iter_files():
+        relative = str(path.relative_to(_ROOT))
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in _ERROR_CONSTANTS:
+                referenced.setdefault(_ERROR_CONSTANTS[node.id], set()).add(relative)
+            elif (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and (node.value in codes or _is_code_shaped(node.value))
+            ):
+                referenced.setdefault(node.value, set()).add(relative)
+    return MappingProxyType(
+        {code: frozenset(paths) for code, paths in sorted(referenced.items())}
+    )
+
+
 def collect_emissions():
     """`(by_producer, unresolved_sites)` read from `EMISSION_ROOTS`.
 
@@ -399,14 +448,15 @@ def collect_emissions():
                 bucket.update(resolved)
                 continue
 
-            # A call forwarding a registered SINK's own first parameter is that sink's
-            # definition body, not an emission: the sink's call sites are scanned instead,
-            # and they carry the codes. Every OTHER forward — any other parameter position,
-            # any other owner — falls through to the unresolved table, where the pinned
-            # entry names the authority that supplies its codes.
-            forward = scan.forwarded_parameter(node, argument)
-            if forward is not None and forward[0].name in scan.sinks and forward[1] == 0:
-                continue
+            # NOTHING is skipped. An earlier revision skipped a sink's own definition body
+            # by matching the argument's NAME to the sink's first parameter, which is
+            # fail-open the moment that parameter is rebound (`code = choose()`), and
+            # deciding "is this name rebound" means enumerating Python's binding forms —
+            # the same open-ended space that cost four review rounds. So every forward
+            # falls through to the unresolved table, and the handful of sink definitions
+            # are pinned there with a one-line reason. The reader models no Python
+            # semantics at all; the price is a longer pinned table, which is a price paid
+            # in review rather than in silent coverage loss.
 
             # The COMPLETE dump. Truncating it to 80 characters made two long
             # expressions sharing a prefix collide in the guard's site key, which is the

@@ -50,72 +50,80 @@ from boomi_mcp.models.process_ir import (  # noqa: E402
     process_ir_v1_parse_diagnostic_specs,
 )
 
-#: The ONLY sink calls whose code cannot be read from the source, keyed by FULL site
-#: identity — `(path, sink, code-expression)` — and mapped to the number of times that
-#: exact site occurs plus the reason it cannot be read.
+#: Every sink call whose code the reader does not attempt to read, keyed by FULL site
+#: identity — `(path, sink, code-expression)` — mapped to how many times that exact site
+#: occurs and WHY it cannot be read.
 #:
-#: The first version of this table keyed on `(path, sink)` alone. That is fail-open, and
-#: the Stage-2 reviewer was right about it: a SECOND unresolved `finding(...)` in
-#: `flow.py` would collapse onto the existing entry and the equality would stay green
-#: while a brand-new dynamic emission path escaped the gate entirely — contradicting this
-#: comment's own claim to pin file+sink+expression. The count is part of the key's value
-#: for the same reason: two calls with the SAME expression in the same file would
-#: otherwise be indistinguishable from one.
+#: Two earlier shapes of this table were fail-open and both were caught in review. Keying
+#: on `(path, sink)` alone let a SECOND unresolved call in the same file collapse onto the
+#: existing entry; and pinning a hand-listed tuple of "the codes this site emits" let that
+#: list go stale when the code behind it changed. The count closes the first. The second is
+#: closed by `test_every_code_named_in_the_emitting_modules_is_served` below, which needs no
+#: per-site list at all: a code the modules can raise has to be NAMED in them, so requiring
+#: every named code to be served catches a changed default without anyone tracing a value.
 #:
-#: Pinning SITES rather than exempting CODES keeps the code-set derivation total: an
-#: exempted code would be a hole in the invariant, whereas an exempted site is a hole in
-#: the READER, and each site names the authority that closes it.
+#: The table is longer than it was because the reader no longer skips a sink's own
+#: definition body. Skipping it meant deciding whether its first parameter had been
+#: rebound, and deciding that means enumerating Python's binding forms — the open-ended
+#: space that produced a finding in four consecutive rounds. A longer table is a cost paid
+#: in review; a reader that guesses is a cost paid in silent coverage loss.
 PINNED_DELEGATION_SITES = {
     (
         "src/boomi_mcp/models/process_ir.py",
         "_diagnostic",
         "Name(id='code', ctx=Load())",
-    ): (
-        1,
-        "the parse-error translator forwards a `code` it resolved from the routing map "
-        "`_CUSTOM_ERROR_CODES` earlier in the same function; those codes are collected "
-        "from that map, which is the authority for them",
-        (),
-    ),
+    ): (1, "the parse-error translator forwards a `code` it resolved from the routing map "
+           "`_CUSTOM_ERROR_CODES`, which the reader collects as an authority in its own right"),
     (
-        "src/boomi_mcp/compiler/process_ir/semantic_validation/flow.py",
-        "finding",
-        "Attribute(value=Name(id='item', ctx=Load()), attr='code', ctx=Load())",
-    ): (
-        1,
-        "re-serves `item.code` from a finding the semantic report already produced, so it "
-        "introduces no code of its own",
-        (),
-    ),
+        "src/boomi_mcp/compiler/process_ir/diagnostics.py",
+        "diagnostic",
+        "Name(id='code', ctx=Load())",
+    ): (1, "the definition body of the `diagnostic` sink itself"),
     (
-        "src/boomi_mcp/compiler/process_ir/semantic_validation/validation_policy.py",
-        "finding",
-        "Name(id='exemption', ctx=Load())",
-    ): (
-        1,
-        "raises the exemption code chosen by `LegacyValidationPolicyV1.exemption_for`; "
-        "the family is derived below from the policy registry, which owns it",
-        (),
-    ),
+        "src/boomi_mcp/compiler/process_ir/invariants.py",
+        "raise_compile_error",
+        "Name(id='code', ctx=Load())",
+    ): (1, "the definition body of the `_fail` wrapper, forwarding into `raise_compile_error`"),
     (
         "src/boomi_mcp/compiler/process_ir/invariants.py",
         "_fail",
         "Name(id='code', ctx=Load())",
-    ): (
-        1,
-        "`_check_region_containment` forwards its `code` parameter, which sits in SIXTH "
-        "position and carries a default. Two of its three call sites omit it and one "
-        "passes a literal, so the site can emit exactly the two codes listed here. That "
-        "list is human-stated ON PURPOSE: a revision of the reader tried to derive it "
-        "and was wrong in four consecutive review rounds, because Python's binding and "
-        "call syntax has no closed case set. The list is not taken on trust — the codes "
-        "are asserted served against the live registry below, so removing either "
-        "registration fails this file.",
-        (
-            "PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW",
-            "PROCESS_IR_COMPILE_ERROR_REGION_INVALID",
-        ),
-    ),
+    ): (1, "`_check_region_containment` forwards its `code` parameter, which sits in sixth "
+           "position and carries a default; two of its three call sites omit it"),
+    (
+        "src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py",
+        "finding",
+        "Name(id='code', ctx=Load())",
+    ): (1, "the definition body of `_report`, the local one-hop wrapper the lineage rules call"),
+    (
+        "src/boomi_mcp/compiler/process_ir/semantic_validation/flow.py",
+        "finding",
+        "Attribute(value=Name(id='item', ctx=Load()), attr='code', ctx=Load())",
+    ): (1, "re-serves `item.code` from a finding the semantic report already produced, so it "
+           "introduces no code of its own"),
+    (
+        "src/boomi_mcp/compiler/process_ir/semantic_validation/validation_policy.py",
+        "finding",
+        "Name(id='exemption', ctx=Load())",
+    ): (1, "raises the exemption code chosen by `LegacyValidationPolicyV1.exemption_for`; the "
+           "family is derived below from the policy registry, which owns it"),
+}
+
+#: Code-shaped names in the scanned modules that are deliberately NOT ProcessIR served
+#: diagnostics. Two real boundaries, not exemptions for something the reader cannot read —
+#: and the test below checks this set in BOTH directions, so an entry that stops being named
+#: or starts being served must be retired rather than left standing:
+#:
+#: * `legacy_adapters/**` is a separate error namespace with its own served surface;
+#: * the last two are ordinary module constants that merely LOOK like codes, which is the
+#:   cost of matching on shape — and matching on shape is what caught a diagnostic default
+#:   changed to a brand-new literal, which matching on known constants alone did not.
+UNSERVED_BY_DESIGN = {
+    "LEGACY_ADAPTER_OUTPUT_PARITY_FAILED",
+    "LEGACY_ADAPTER_SEMANTIC_LOSS",
+    "LEGACY_ADAPTER_UNSUPPORTED_KIND",
+    "LEGACY_ADAPTER_ALIAS_PREFIX",
+    "PROCESS_COMPONENT_TYPE",
 }
 
 
@@ -212,7 +220,7 @@ def test_the_only_unreadable_emission_sites_are_the_pinned_delegations():
         (path, sink, dump) for path, _lineno, sink, dump in unresolved
     )
     expected = collections.Counter(
-        {site: count for site, (count, _reason, _codes) in PINNED_DELEGATION_SITES.items()}
+        {site: count for site, (count, _reason) in PINNED_DELEGATION_SITES.items()}
     )
     assert observed == expected, {
         "unpinned (a new dynamic emission path)": sorted(
@@ -230,25 +238,10 @@ def test_the_only_unreadable_emission_sites_are_the_pinned_delegations():
     # Every pinned site states WHY it cannot be read. A blank reason is an unexplained
     # hole in the reader, which is what this table exists to prevent.
     blank = sorted(
-        site for site, (_count, reason, _codes) in PINNED_DELEGATION_SITES.items()
+        site for site, (_count, reason) in PINNED_DELEGATION_SITES.items()
         if not reason.strip()
     )
     assert blank == [], blank
-
-    # A pinned site that NAMES the codes it can emit has that claim checked, not taken on
-    # trust: each one must be served with complete text. This is what keeps a human-stated
-    # list honest — the alternative to a resolver that cannot converge is a short list a
-    # machine still verifies.
-    served = _served()
-    unserved = sorted(
-        (site, code)
-        for site, (_count, _reason, codes) in PINNED_DELEGATION_SITES.items()
-        for code in codes
-        if code not in served
-        or not (served[code].get("message") or "").strip()
-        or not (served[code].get("remediation") or "").strip()
-    )
-    assert unserved == [], unserved
 
 
 def test_every_emittable_process_ir_code_has_complete_served_text():
@@ -457,3 +450,46 @@ def emit():
     return finding("PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED", "error", "p", "/body")
 """
     assert sites(literal) == [(False, False)], sites(literal)
+
+
+def test_every_code_named_in_the_emitting_modules_is_served():
+    """The claim that makes a pinned site safe without reading data flow.
+
+    A pinned site records that a human, not the reader, accounts for the codes reaching it.
+    That account can go stale: change the default behind
+    `_check_region_containment` to a fresh unregistered code and the site's identity does
+    not move, so nothing that keys on the site would notice.
+
+    This closes that without tracing a single value. A code the scanned modules can raise
+    must be NAMED in them — as a `boomi_mcp.errors` constant or as a literal — so requiring
+    every named code to carry complete served text catches the changed default directly. It
+    over-approximates on purpose: a code named for some other reason is still required to be
+    served, which can demand a registration that was not strictly needed but can never miss
+    one that was.
+    """
+    from _process_ir_diagnostic_emissions import referenced_codes
+
+    referenced = referenced_codes()
+    assert referenced, "no codes named at all — this test would be vacuous"
+
+    served = _served()
+    unserved = sorted(
+        (code, sorted(paths))
+        for code, paths in referenced.items()
+        if code not in UNSERVED_BY_DESIGN
+        and (
+            code not in served
+            or not (served[code].get("message") or "").strip()
+            or not (served[code].get("remediation") or "").strip()
+        )
+    )
+    assert unserved == [], unserved
+
+    # The by-design set is checked in BOTH directions: an entry that stops being named, or
+    # starts being served, must be retired rather than left as a standing exemption.
+    stale = sorted(
+        code
+        for code in UNSERVED_BY_DESIGN
+        if code not in referenced or code in served
+    )
+    assert stale == [], stale
