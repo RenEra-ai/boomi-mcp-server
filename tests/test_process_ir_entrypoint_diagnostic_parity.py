@@ -270,26 +270,64 @@ def _build(context, mode, slot, kind, neighbor):
 
 
 def _observed_signature(ir, context, mode, slot):
-    """Read the (candidate, neighbour) pair back OUT of a constructed document.
+    """Read the (candidate, neighbour) pair back out of a constructed document.
 
-    The independent projection the plan requires. Comparing generated case IDs
-    against an expected ID set proves only that the LABELS are right — `_build`
-    composes the ID from its arguments, so a document that does not match its own
-    label is invisible. Measured by the round-3 reviewer: substituting the Branch
-    terminal `target` with `exception` inside `_build` while keeping the original
-    IDs left 40 cases labelled `opp=target` containing `exception`, and the
-    exact-product, partition, denied-cell, parity and safety tests all passed.
+    INDEPENDENT of `_build` on purpose. An earlier revision navigated with
+    `_body_of` — the same helper `_build` mutates through — which made the context
+    dimension self-validating: had `DECISION_FALSE_ARM` been routed to `true_arm`,
+    every false-arm case AND this check would have inspected the true arm together
+    and agreed. So the walk is done here from the root, and the control node's own
+    kind is asserted against the context that claims it.
 
-    So the signature is recovered from the MODEL and compared with what the ID
-    claims. The Try anchor is stripped first, on the same side `_anchored` adds it.
+    It is also COMPLETE where the earlier revision was partial: it discarded the
+    Try anchor without checking what it was and ignored anything past `steps[0]`,
+    so a malformed anchor or an extra step passed silently. Both are asserted.
     """
-    body = _body_of(ir, context, mode)
+    root = list(ir.body.steps)
+    expected_root = 2 if mode == "connector_above" else 1
+    assert len(root) == expected_root, (context, mode, len(root))
+    if mode == "connector_above":
+        assert root[0].kind == "connector_call", root[0].kind
+    node = root[1] if mode == "connector_above" else root[0]
+
+    if context == bc.BRANCH_LEG:
+        assert node.kind == "branch", node.kind
+        body = node.legs[0]
+    elif context == bc.DECISION_TRUE_ARM:
+        assert node.kind == "decision", node.kind
+        body = node.true_arm
+        assert body is not node.false_arm
+    elif context == bc.DECISION_FALSE_ARM:
+        assert node.kind == "decision", node.kind
+        body = node.false_arm
+        assert body is not node.true_arm
+    elif context == bc.TRY_BODY:
+        assert node.kind == "try_catch", node.kind
+        body = node.try_body
+    elif context == bc.CATCH_BODY:
+        assert node.kind == "try_catch", node.kind
+        body = node.catch_body
+    else:  # pragma: no cover
+        raise AssertionError(context)
+
     steps = list(body.steps)
-    if context == bc.TRY_BODY and steps:
-        steps = steps[:-1] if mode == "connector_above" else steps[1:]
+    if context == bc.TRY_BODY:
+        # The anchor's KIND and side are asserted, not assumed away.
+        assert steps, "the try anchor vanished"
+        if mode == "connector_above":
+            assert steps[-1].kind == "connector_call", steps[-1].kind
+            steps = steps[:-1]
+        else:
+            assert steps[0].kind == "connector_call", steps[0].kind
+            steps = steps[1:]
+
+    # Exactly one candidate-or-prefix, never more: an extra step would otherwise
+    # ride along invisibly behind `steps[0]`.
+    assert len(steps) <= 1, [s.kind for s in steps]
     terminal_kind = getattr(body.terminal, "kind", None)
     step_kind = steps[0].kind if steps else None
     if slot == bc.STEP_SLOT:
+        assert len(steps) == 1, "the candidate step vanished"
         return step_kind, terminal_kind
     return terminal_kind, step_kind
 

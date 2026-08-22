@@ -134,54 +134,70 @@ def _enforce_semantic_report(ir, cfg, symbols, policy, capabilities) -> None:
     raise ProcessIRCompileError([_restore(item) for item in report.errors])
 
 
-#: Builtin scalar types, most-derived first — ``bool`` before ``int`` because
-#: ``isinstance(True, int)`` is True and coercing a bool through ``int`` would
-#: change the document.
-_SCALAR_BUILTINS = (bool, int, float, str, bytes)
+#: The scalar types this layer normalises, most-derived first — ``bool`` before
+#: ``int`` because ``isinstance(True, int)`` is True and coercing a bool through
+#: ``int`` would change the document. This is an ENUMERATION, and it is
+#: deliberately not extended: `complex` and `bytearray` are builtin-derived and
+#: absent, which is accurate rather than an oversight — see the accepted
+#: limitation in the #178 ledger. Adding them would buy nothing, because the same
+#: capability is already reachable through any non-builtin carrier.
+_NORMALISED_SCALARS = (bool, int, float, str, bytes)
+
+
+class _NotNormalisable(Exception):
+    """A scalar that cannot be reduced to its exact builtin. Never escapes."""
 
 
 def _plain_scalar(value: Any) -> Any:
-    """A builtin SUBCLASS replaced by the exact builtin; anything else untouched.
+    """A ``str``/``int``/``float``/``bool``/``bytes`` subclass replaced by the
+    EXACT builtin; every other object passed through unchanged.
 
-    A subclass carries the caller's own dunders. `str` is the one that matters:
-    ``parse_process_ir_v1`` compares ``payload.get("version")`` against the
-    version literal BEFORE any validation, so a ``str`` subclass overriding
-    ``__ne__`` runs caller code inside the parser and can raise a forged
-    diagnostic bearing a real parser code. Measured. Replacing it with a plain
-    ``str`` of the same content removes the hooks and changes no value.
+    The exact-type check is load-bearing, not belt and braces. ``builtin(value)``
+    dispatches an overridable conversion — ``str(x)`` calls ``x.__str__()`` — and
+    a subclass can return ANOTHER subclass from it, so the coercion alone can hand
+    back an object still carrying caller dunders. Measured: a ``str`` subclass
+    whose ``__str__`` returns a second subclass whose ``__ne__`` raises forged a
+    real-coded diagnostic straight through the normalisation that was supposed to
+    prevent it. So the result is verified, and a value that will not reduce is
+    refused rather than trusted.
 
-    Non-builtin objects are deliberately left alone: a ``datetime`` in a ``str``
-    field must still reach the parser as a ``datetime`` so it is REFUSED rather
-    than repaired, which is the hole this whole issue exists to close.
+    Non-builtin objects are left alone BY DESIGN: a ``datetime`` in a ``str``
+    field must reach the parser wrong-typed so it is refused rather than repaired,
+    which is the hole this whole issue exists to close.
     """
     if value is None:
         return None
-    for builtin in _SCALAR_BUILTINS:
+    for builtin in _NORMALISED_SCALARS:
         if isinstance(value, builtin):
-            return value if type(value) is builtin else builtin(value)
+            if type(value) is builtin:
+                return value
+            reduced = builtin(value)
+            if type(reduced) is not builtin:
+                raise _NotNormalisable(builtin.__name__)
+            return reduced
     return value
 
 
 def _inert_payload(payload: Any) -> Any:
-    """Rebuild a dumped payload out of PLAIN containers and scalars before parsing.
+    """Rebuild a dumped payload out of plain containers and scalars before parsing.
 
-    WHAT THIS GUARANTEES, stated narrowly because an earlier docstring claimed
-    more than it delivered: every mapping, sequence, dict KEY and builtin-derived
-    scalar reaching the parser is a plain builtin, so none of them carries a
-    caller-defined dunder. The hooks that do exist run HERE, once, inside the
-    caller's guard — after which a ``ProcessIRValidationError`` raised during the
-    parse really was authored by the parser.
+    WHAT THIS GUARANTEES, stated narrowly because two earlier revisions of this
+    docstring claimed more than the code delivered: every mapping, sequence and
+    dict key, and every ``str``/``int``/``float``/``bool``/``bytes`` scalar, is
+    rebuilt as an EXACT builtin — verified, not merely coerced. None of those can
+    carry a caller-defined dunder into the parser, so the hooks that exist run
+    HERE, once, inside the caller's guard, and a ``ProcessIRValidationError``
+    raised during the parse really was authored by the parser.
 
-    WHAT IT DOES NOT GUARANTEE: an object that is not derived from a builtin —
-    ``datetime`` being the obvious one — is passed through unchanged BY DESIGN,
-    because the parser must see it wrong-typed in order to refuse it. Such an
-    object still carries its own dunders, and the parser's pre-validation version
-    comparison will invoke one. That residue is a recorded, accepted limitation
-    (see the #178 ledger): reaching it requires in-process Python that subclasses
-    an exported model, and a caller with that much access can monkeypatch this
-    module outright, so it is not a boundary this layer can defend. Five variants
-    of the same mechanism were found by three independent gates before that was
-    acknowledged rather than patched again.
+    WHAT IT DOES NOT GUARANTEE: any OTHER object — ``complex`` and ``bytearray``
+    as much as ``datetime`` or a bare instance — is passed through unchanged by
+    design, still carrying its own dunders, and the parser's pre-validation
+    version comparison will invoke one. That residue is a demonstrated, accepted
+    limitation recorded in the #178 ledger: reaching it needs in-process Python
+    that subclasses an exported model, and such a caller can already monkeypatch
+    this module, the guard it funnels into, and the logging handler — measured, so
+    the forgery path grants nothing new. Five variants were patched individually
+    before that was acknowledged instead of patched a sixth time.
     """
     if isinstance(payload, dict):
         return {
