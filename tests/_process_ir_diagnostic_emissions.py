@@ -498,9 +498,19 @@ def runtime_forward_defaults():
         for node in ast.walk(scan.tree):
             if not isinstance(node, ast.Call) or _called_name(node) not in scan.sinks:
                 continue
-            if not node.args:
+            # Positional OR `code=` keyword — the same two forms the emission scan reads. A
+            # positional-only scan skipped keyword-form factories such as
+            # `diagnostic` -> `CompilerDiagnostic(code=code)`, so an assembled default on one
+            # of them would have been invisible to this check as well as to the source census.
+            argument = node.args[0] if node.args else None
+            if argument is None:
+                for keyword in node.keywords:
+                    if keyword.arg == "code":
+                        argument = keyword.value
+                        break
+            if argument is None:
                 continue
-            forward = scan.forwarded_parameter(node, node.args[0])
+            forward = scan.forwarded_parameter(node, argument)
             if forward is None:
                 continue
             owner, _index, param = forward
@@ -571,6 +581,14 @@ def unresolvable_forward_arguments():
             if name not in owners:
                 continue
             index, param = owners[name]
+            # Unpacking makes position and keyword identity unknowable, so such a call is an
+            # OFFENDER rather than an omission — treating it as omitted silently fell back to
+            # the default while `**{"code": <assembled>}` supplied something else entirely.
+            if any(isinstance(a, ast.Starred) for a in node.args) or any(
+                k.arg is None for k in node.keywords
+            ):
+                offenders.append((relative, node.lineno, name, "<unpacked arguments>"))
+                continue
             supplied = node.args[index] if len(node.args) > index else None
             if supplied is None:
                 for keyword in node.keywords:

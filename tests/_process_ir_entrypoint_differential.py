@@ -112,6 +112,12 @@ def measure_entrypoints(ir, *, mode="grammar", symbols=None, capabilities=None):
         parser = ("ACCEPTED",)
     except ProcessIRValidationError as exc:
         parser = ("REFUSED",) + diagnostic_vector(exc)
+    except Exception as exc:  # noqa: BLE001 - reported structurally, never re-raised raw
+        # The parser side needs the same normalisation as the compiler side. Catching only
+        # `ProcessIRValidationError` here let an unexpected parser exception escape BEFORE
+        # either compiler-side handler ran, so the differential gate crashed instead of
+        # reporting the failure — the documented outcome existed on one path only.
+        parser = ("INTERNAL-FAILURE", type(exc).__name__)
 
     if mode == "full":
         try:

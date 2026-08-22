@@ -184,6 +184,24 @@ def _allowed_unserved(code, path):
     return allowed is not None and path.startswith(allowed)
 
 
+#: Parse-layer codes the COMPILER table registers on purpose, because public compile
+#: re-parses through the parser (#178) and these two are what a caller receives from the
+#: compile path.
+#:
+#: Admitting EVERY parser code was too blanket: a parser-only code such as
+#: `PROCESS_IR_REFERENCE_INVALID_FORMAT` inserted into the compiler registry was then
+#: "accounted for" while the projection advertised bogus compiler attribution for it. There
+#: is no rule separating the two legitimate rows from the rest — it is a per-code design
+#: decision — so they are named, and the test checks the set in BOTH directions so a row
+#: that stops being registered has to be retired here rather than left standing.
+COMPILER_REGISTERED_PARSE_CODES = frozenset(
+    {
+        "PROCESS_IR_SCHEMA_BRANCH_CARDINALITY",
+        "PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED",
+    }
+)
+
+
 def _policy_exemption_codes():
     """Every exemption code any registered policy can raise — from the registry itself.
 
@@ -366,12 +384,7 @@ def test_the_served_code_set_is_exactly_what_the_authorities_account_for():
         emitted = set(by_producer[producer])
         accounted = emitted | exemptions | non_emittable
         if producer == "compiler":
-            # Public compile RE-PARSES through the parser (#178), so every parser code is
-            # reachable on the compile path and the compiler table may legitimately register
-            # it — `_diagnostic_entries` encodes the same containment when it files parse
-            # codes under both the `plan` and `compile` stages. Two codes are in that
-            # position today; this states the RULE rather than naming them.
-            accounted |= set(by_producer["parser"])
+            accounted |= COMPILER_REGISTERED_PARSE_CODES
         if producer == "semantic":
             # A semantic module may legitimately re-serve a COMPILER-owned code verbatim,
             # but that code belongs in the compiler's table, not in this one. So the
@@ -381,6 +394,15 @@ def test_the_served_code_set_is_exactly_what_the_authorities_account_for():
         if extra:
             unaccounted[producer] = extra
     assert unaccounted == {}, unaccounted
+
+    # Both directions on the named allowance: an entry that stops being registered in the
+    # compiler table, or that the compiler starts emitting itself, must be retired here.
+    stale_allowance = sorted(
+        code
+        for code in COMPILER_REGISTERED_PARSE_CODES
+        if code not in layers["compiler"] or code in by_producer["compiler"]
+    )
+    assert stale_allowance == [], stale_allowance
 
     # ...and nothing served anywhere is unaccounted for across all three.
     served = set(_served())

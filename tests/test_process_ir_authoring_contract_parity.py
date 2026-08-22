@@ -1093,6 +1093,11 @@ def _parse_capability_states(doc):
         )
     section = after[: boundary.start()]
 
+    # The TABLE must be live Markdown too, not only the heading. Leaving §8's heading
+    # visible and wrapping just the table block in `<!-- -->` removed the capability table
+    # from the rendered document while the heading check passed and the raw-line parser
+    # returned all 27 rows.
+    _assert_not_commented_out(doc, _CAPABILITY_TABLE_HEADER)
     if section.count(_CAPABILITY_TABLE_HEADER) != 1:
         raise AssertionError(
             "expected exactly one {0!r} row, found {1}".format(
