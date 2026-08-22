@@ -1032,13 +1032,18 @@ _CAPABILITY_DOC_STATES = {
 }
 
 
-def _assert_not_commented_out(doc, marker):
-    """Refuse a marker that sits inside an HTML comment.
+def _assert_not_commented_out(doc, offset, marker):
+    """Refuse the marker AT `offset` if it sits inside an HTML comment.
 
-    Counted by delimiter parity: a marker preceded by more `<!--` than `-->` is inside an
-    open comment and renders as nothing at all.
+    Counted by delimiter parity: more `<!--` than `-->` before it means an open comment, so
+    it renders as nothing at all.
+
+    The offset is required rather than searched. Splitting on the first textual occurrence
+    checked whatever came first in the document — a fenced example, say — so the REAL §8
+    table could be commented out while an unrelated earlier line was inspected and the guard
+    stayed green. The caller has already located the authority; this checks that one.
     """
-    head = doc.split(marker, 1)[0]
+    head = doc[:offset]
     if head.count("<!--") > head.count("-->"):
         raise AssertionError(
             "{0!r} is inside an HTML comment — the authority is not rendered".format(marker)
@@ -1070,7 +1075,6 @@ def _parse_capability_states(doc):
     # removes the authority from the rendered document entirely while every raw-line check
     # still matched, so a structurally removed §8 left the guard green — the same failure
     # the raw-line fix was made to close, one level up.
-    _assert_not_commented_out(doc, _CAPABILITY_HEADING)
     heads = [i for i, line in enumerate(lines) if line == _CAPABILITY_HEADING]
     if len(heads) != 1:
         raise AssertionError(
@@ -1078,7 +1082,11 @@ def _parse_capability_states(doc):
                 _CAPABILITY_HEADING, len(heads)
             )
         )
+    # The heading must be LIVE Markdown, checked at the position actually located.
+    heading_offset = sum(len(line) + 1 for line in lines[: heads[0]])
+    _assert_not_commented_out(doc, heading_offset, _CAPABILITY_HEADING)
     after = "\n".join(lines[heads[0] + 1 :])
+    section_offset = heading_offset + len(_CAPABILITY_HEADING) + 1
 
     # The section ENDS at the next level-2 heading, and that heading is pinned:
     # if §9 is renamed or §8 is moved, this fails instead of silently swallowing
@@ -1093,11 +1101,6 @@ def _parse_capability_states(doc):
         )
     section = after[: boundary.start()]
 
-    # The TABLE must be live Markdown too, not only the heading. Leaving §8's heading
-    # visible and wrapping just the table block in `<!-- -->` removed the capability table
-    # from the rendered document while the heading check passed and the raw-line parser
-    # returned all 27 rows.
-    _assert_not_commented_out(doc, _CAPABILITY_TABLE_HEADER)
     if section.count(_CAPABILITY_TABLE_HEADER) != 1:
         raise AssertionError(
             "expected exactly one {0!r} row, found {1}".format(
@@ -1114,6 +1117,15 @@ def _parse_capability_states(doc):
             )
         )
     start = header_at[0]
+    # The TABLE must be live Markdown too, not only the heading — and checked at ITS own
+    # located position. Leaving §8's heading visible and wrapping just the table block in
+    # `<!-- -->` removed the capability table from the rendered document while the heading
+    # check passed and the raw-line parser returned all 27 rows.
+    _assert_not_commented_out(
+        doc,
+        section_offset + sum(len(line) + 1 for line in lines[:start]),
+        _CAPABILITY_TABLE_HEADER,
+    )
     if start + 1 >= len(lines) or lines[start + 1] != _CAPABILITY_TABLE_DELIMITER:
         raise AssertionError(
             "expected {0!r} immediately after the header, found {1!r}".format(
