@@ -203,7 +203,7 @@ def test_every_witness_records_its_fixture_provenance():
         PROVENANCE_KINDS,
         PROVENANCE_SYNTHETIC_CFG,
         loaded_fixtures,
-        parsed_digests,
+        compiled_digests,
         reset_loaded_fixtures,
     )
 
@@ -260,9 +260,10 @@ def test_every_witness_records_its_fixture_provenance():
             if unopened:
                 bad.append((key, "claims a frozen fixture its run never loaded", unopened))
                 continue
-            # ...and the fixture's CONTENT is what reached the parser. Opening a file and
-            # then compiling something else would otherwise satisfy the claim.
-            compiled = set(parsed_digests())
+            # ...and the fixture's CONTENT is what reached the COMPILER. Opening a file, or
+            # parsing it as a throwaway, and then compiling something else would otherwise
+            # satisfy the claim.
+            compiled = set(compiled_digests())
             uncompiled = [rel for rel in named if opened[rel] not in compiled]
             if uncompiled:
                 bad.append(

@@ -29,17 +29,41 @@ _LEDGER = (
 _EXCLUDED_PREFIX = "INH-"
 
 
+#: A row's cells, split on unescaped pipes only. A verbatim summary may legally contain a
+#: Markdown-escaped pipe, and a naive `split("|")` then shifts every later cell — the defect
+#: class stops being `cells[5]` and the row is silently DROPPED, which would let someone
+#: append such a row and leave the table stale with this check still green.
+_UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
+
+
+def _cells(line):
+    body = line.strip()
+    if body.startswith("|"):
+        body = body[1:]
+    if body.endswith("|") and not body.endswith("\\|"):
+        body = body[:-1]
+    return [cell.strip() for cell in _UNESCAPED_PIPE.split(body)]
+
+
 def _finding_rows(text):
-    """Every finding row as `(id, defect_class)`, read from the one contiguous table."""
+    """Every finding row as `(id, defect_class)`, read from the one contiguous table.
+
+    Rows dispositioned `finding-refuted` are EXCLUDED, because the ledger's own derivation
+    rule excludes them: a refuted finding is not an instance of anything. Reading only the
+    id and class would have counted them and forced a wrong published total the first time
+    a refutation landed.
+    """
     rows = []
     for line in text.splitlines():
-        if not line.startswith("| ") or line.count("|") < 9:
+        if not line.startswith("| "):
             continue
-        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        cells = _cells(line)
         if len(cells) < 9 or cells[0] in {"ID", "---"}:
             continue
         match = re.search(r"DC-177-[A-Z]", cells[5])
         if match is None:
+            continue
+        if cells[8].startswith("`finding-refuted`"):
             continue
         rows.append((cells[0], match.group(0)))
     return rows
@@ -51,7 +75,7 @@ def _published_table(text):
     for line in text.splitlines():
         if not line.startswith("| **DC-177-"):
             continue
-        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        cells = _cells(line)
         name = re.search(r"DC-177-[A-Z]", cells[0]).group(0)
         count = re.search(r"\*\*(\d+) rows\*\*", cells[3])
         assert count is not None, cells[3]
@@ -87,9 +111,25 @@ def test_the_defect_class_table_matches_the_rows_it_is_derived_from():
     )
     assert wrong_counts == [], wrong_counts
 
-    missing_ids = sorted(
-        (cls, sorted(set(derived[cls]) - set(published[cls][1])))
+    # EXACT multisets, both directions. A one-way subtraction let a class row keep the right
+    # count while publishing an extra or duplicated ID, so the enumeration could disagree
+    # with the rows and still pass.
+    import collections
+
+    mismatched = sorted(
+        (
+            cls,
+            sorted((collections.Counter(published[cls][1]) - collections.Counter(derived[cls])).elements()),
+            sorted((collections.Counter(derived[cls]) - collections.Counter(published[cls][1])).elements()),
+        )
         for cls in derived
-        if set(derived[cls]) - set(published[cls][1])
+        if collections.Counter(published[cls][1]) != collections.Counter(derived[cls])
     )
-    assert missing_ids == [], missing_ids
+    assert mismatched == [], mismatched
+
+    duplicated = sorted(
+        (cls, sorted(i for i, n in collections.Counter(published[cls][1]).items() if n > 1))
+        for cls in published
+        if any(n > 1 for n in collections.Counter(published[cls][1]).values())
+    )
+    assert duplicated == [], duplicated

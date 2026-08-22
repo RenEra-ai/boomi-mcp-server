@@ -127,14 +127,14 @@ class UnsupportedDisposition:
 
 
 #: `{fixture path: content digest}` for every fixture `_fixture()` has read, and the digest
-#: of every document that actually reached `_parse`, since the last reset.
+#: of every document that actually reached the COMPILER, since the last reset.
 #:
 #: Recording file OPENS alone was not enough: a witness could open the claimed fixture,
 #: discard it, and compile something else entirely, and the claim still looked honest. What
 #: makes a frozen claim true is that the fixture's CONTENT is what was compiled, so both
 #: sides are recorded and compared.
 _LOADED_FIXTURES = {}
-_PARSED_DIGESTS = []
+_COMPILED_DIGESTS = []
 
 
 def _digest(document):
@@ -145,15 +145,15 @@ def _digest(document):
 
 def reset_loaded_fixtures():
     _LOADED_FIXTURES.clear()
-    del _PARSED_DIGESTS[:]
+    del _COMPILED_DIGESTS[:]
 
 
 def loaded_fixtures():
     return dict(_LOADED_FIXTURES)
 
 
-def parsed_digests():
-    return tuple(_PARSED_DIGESTS)
+def compiled_digests():
+    return tuple(_COMPILED_DIGESTS)
 
 
 def _fixture(relative):
@@ -210,9 +210,6 @@ def _connector_scope(
 def _parse(doc):
     from boomi_mcp.models.process_ir import parse_process_ir_v1
 
-    # Record what actually flows into the parser, so a frozen-fixture claim is checked
-    # against the document that was COMPILED rather than one that was merely opened.
-    _PARSED_DIGESTS.append(_digest(doc))
     return parse_process_ir_v1(copy.deepcopy(doc))
 
 
@@ -255,6 +252,11 @@ def _compile_refusal(doc, symbols, capabilities=None):
 def _compiles(doc, symbols, capabilities=None):
     from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
 
+    # Recorded at the COMPILE boundary. Recording every PARSE was too weak: a witness could
+    # parse its claimed fixture as a throwaway and then compile an inline document, and both
+    # digests would be present, so the claim looked honest. What the provenance gate needs
+    # to know is which document reached the compiler.
+    _COMPILED_DIGESTS.append(_digest(doc))
     return compile_process_ir_v1(_parse(doc), symbols, capabilities=capabilities)
 
 
@@ -265,7 +267,7 @@ def _rich_compiles(relative):
     # recorded here — otherwise the content binding could not see the document that was
     # actually compiled and would report a true claim as false.
     document = _fixture(relative)
-    _PARSED_DIGESTS.append(_digest(document))
+    _COMPILED_DIGESTS.append(_digest(document))
     return rich_compile_doc(document)
 
 
