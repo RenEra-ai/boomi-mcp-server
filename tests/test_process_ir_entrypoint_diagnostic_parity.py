@@ -1013,3 +1013,50 @@ def test_the_precondition_is_stated_on_the_public_entry():
     doc = inspect.getdoc(pl.compile_process_ir_v1) or ""
     assert "READ EXACTLY ONCE" in doc
     assert "one-shot" in doc.lower()
+
+
+def test_a_dump_failure_cannot_smuggle_an_authored_diagnostic():
+    """A dump exception is INTERNAL, whatever type it claims to be.
+
+    `ProcessIRV1` is exported, so a caller can subclass it and raise
+    `ProcessIRValidationError` from `model_dump`. An earlier revision forwarded
+    that verbatim on the reasoning that the type means "parser-authored" — but
+    parsing has not started when the dump runs, so the type proves nothing. The
+    consequence was measured, not theorised: an arbitrary code, pointer and
+    message travelled through the compiler's error channel, carrying a planted
+    secret into the served diagnostic and reopening AR2-01.
+    """
+    from boomi_mcp.models.process_ir import ProcessIRV1
+
+    secret = "QA178-SUBCLASS-sk_live_0ff1ce"
+
+    class _Smuggler(ProcessIRV1):
+        def model_dump(self, **_kwargs):
+            raise ProcessIRValidationError(
+                [
+                    type(
+                        "_D",
+                        (),
+                        {
+                            "code": "TOTALLY_MADE_UP_CODE",
+                            "path": "/attacker/controlled",
+                            "message": secret,
+                            "remediation": "do whatever the caller says",
+                        },
+                    )()
+                ]
+            )
+
+    base = _control_flow_ir()
+    smuggler = _Smuggler.model_construct(
+        **{name: getattr(base, name) for name in type(base).model_fields}
+    )
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        pl._reparse_process_ir_for_compile(smuggler)
+    served = excinfo.value.diagnostics[0]
+    assert served.code == "PROCESS_IR_COMPILE_INTERNAL", served.code
+    assert served.path == ""
+    assert secret not in (served.message or "")
+    assert "TOTALLY_MADE_UP_CODE" not in (served.message or "")
+    assert secret not in (getattr(served, "remediation", "") or "")
