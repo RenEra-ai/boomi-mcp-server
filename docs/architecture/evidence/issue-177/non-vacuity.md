@@ -179,3 +179,27 @@ Two ordinary module constants (`LEGACY_ADAPTER_ALIAS_PREFIX`, `PROCESS_COMPONENT
 like codes and are pinned in `UNSERVED_BY_DESIGN` alongside the three real
 `legacy_adapters/**` namespace codes. That set is checked in BOTH directions: an entry that
 stops being named, or starts being served, fails the test rather than standing forever.
+
+### Exemption staleness — the served direction (Stage-2 round 7)
+
+Guard: the `stale` half of `test_every_code_named_in_the_emitting_modules_is_served`.
+
+Mutant: register `PROCESS_COMPONENT_TYPE` — an `UNSERVED_BY_DESIGN` entry — in
+`semantic_validation/findings.py`'s `_MESSAGES` and `_REMEDIATION`, so it becomes served by
+its own producer while remaining named at its allowed path.
+
+RED, quoted verbatim:
+
+```
+E       AssertionError: [('PROCESS_COMPONENT_TYPE', "now served for its own producer at ['src/boomi_mcp/compiler/process_ir/semantic_validation/references.py']")]
+```
+
+**The first attempt at this mutant was INERT and reported a false pass.** The anchor used
+was `_MESSAGES = {`, while the real declaration is `_MESSAGES: Dict[str, str] = {`, so the
+edit never applied and the guard was green for the wrong reason. This is the same trap the
+Stage-1 QA round recorded in its harness notes. The live mutant was confirmed by asserting
+the code actually reached the served table (`code now in finding_specs: True`) BEFORE
+reading the guard's result — a mutant is not a witness until it is shown to have taken
+effect.
+
+Restored byte-for-byte and re-run green: `10 passed in 1.29s`.

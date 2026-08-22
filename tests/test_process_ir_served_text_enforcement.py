@@ -516,15 +516,21 @@ def test_every_code_named_in_the_emitting_modules_is_served():
     )
     assert unserved == [], unserved
 
-    # The by-design set is checked in BOTH directions and PER PATH: an entry that stops
-    # being named where it is allowed, or starts being served, must be retired rather than
-    # left standing — and a reference from anywhere ELSE is not covered by it at all.
-    stale = sorted(
-        code
-        for code, allowed in UNSERVED_BY_DESIGN.items()
-        if not any(
-            path.startswith(allowed)
-            for path in referenced.get(code, ())
+    # The by-design set is checked in BOTH directions and PER PATH. Two ways an entry goes
+    # stale, and both must fail: it stops being NAMED where it is allowed, or it starts
+    # being SERVED there. The served half was briefly dropped when this check gained path
+    # scoping — while the comment above it still claimed both directions — which would have
+    # let a later registration hide behind a standing exemption. A reference from anywhere
+    # ELSE is not covered by this set at all; those are caught by `unserved` above.
+    stale = []
+    for code, allowed in UNSERVED_BY_DESIGN.items():
+        at_allowed = [path for path in referenced.get(code, ()) if path.startswith(allowed)]
+        if not at_allowed:
+            stale.append((code, "no longer named under " + allowed))
+            continue
+        now_served = sorted(
+            path for path in at_allowed if _complete_for(code, producer_of(path))
         )
-    )
-    assert stale == [], stale
+        if now_served:
+            stale.append((code, "now served for its own producer at " + str(now_served)))
+    assert sorted(stale) == [], sorted(stale)
