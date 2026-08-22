@@ -269,6 +269,31 @@ def _build(context, mode, slot, kind, neighbor):
     return ir
 
 
+def _observed_signature(ir, context, mode, slot):
+    """Read the (candidate, neighbour) pair back OUT of a constructed document.
+
+    The independent projection the plan requires. Comparing generated case IDs
+    against an expected ID set proves only that the LABELS are right — `_build`
+    composes the ID from its arguments, so a document that does not match its own
+    label is invisible. Measured by the round-3 reviewer: substituting the Branch
+    terminal `target` with `exception` inside `_build` while keeping the original
+    IDs left 40 cases labelled `opp=target` containing `exception`, and the
+    exact-product, partition, denied-cell, parity and safety tests all passed.
+
+    So the signature is recovered from the MODEL and compared with what the ID
+    claims. The Try anchor is stripped first, on the same side `_anchored` adds it.
+    """
+    body = _body_of(ir, context, mode)
+    steps = list(body.steps)
+    if context == bc.TRY_BODY and steps:
+        steps = steps[:-1] if mode == "connector_above" else steps[1:]
+    terminal_kind = getattr(body.terminal, "kind", None)
+    step_kind = steps[0].kind if steps else None
+    if slot == bc.STEP_SLOT:
+        return step_kind, terminal_kind
+    return terminal_kind, step_kind
+
+
 def _neighbours(context, slot):
     """The opposite slot's legal vocabulary, read from the matrix.
 
@@ -464,7 +489,30 @@ def test_the_generated_count_equals_the_runtime_product():
         "missing": sorted(expected_ids - generated_ids)[:20],
         "unexpected": sorted(generated_ids - expected_ids)[:20],
     }
-    assert len({cid for cid, _ir in cases}) == len(cases), "case ids collide"
+    assert len(generated_ids) == len(cases), "case ids collide"
+
+
+def test_every_document_matches_the_signature_its_id_claims():
+    """Labels are not evidence. Each constructed document is projected back to its
+    `(candidate, neighbour)` signature and compared with its own ID, so a case
+    that is mislabelled fails here rather than silently covering the wrong cell.
+    """
+    mismatched = []
+    for cid, ir in _measured()["cases"]:
+        if cid.startswith("root/"):
+            continue
+        context, rest = cid.split("/", 1)
+        slot_kind, opp, _mode = rest.split("/", 2)
+        slot, kind = slot_kind.split("=", 1)
+        claimed_neighbor = opp.split("=", 1)[1]
+        mode = _mode.split("=", 1)[1]
+        observed_kind, observed_neighbor = _observed_signature(ir, context, mode, slot)
+        expected_neighbor = None if claimed_neighbor == "EMPTY" else claimed_neighbor
+        if observed_kind != kind or observed_neighbor != expected_neighbor:
+            mismatched.append(
+                (cid, observed_kind, observed_neighbor)
+            )
+    assert mismatched == [], mismatched[:20]
 
 
 def test_both_partitions_are_populated():

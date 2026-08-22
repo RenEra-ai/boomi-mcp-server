@@ -124,6 +124,8 @@ escalation with this issue left open.
 | QA-178-r6-02 | Stage-1 QA loop, round 6, same run | "`_parse_payload_for_compile` has `except ProcessIRCompileError: raise`" — a forged compile error raised from inside the parse bypasses the guarded translation entirely with no allowlist, serving a caller-chosen code and pointer with the canary in message and remediation; the arm is dead for its stated purpose, since nothing under `models/` raises that type and all eight real refusals raise `ProcessIRValidationError` | **High** | machine-served schemas/contracts (secondary: secrets — AR2-01) | DC-178-G | **Critical — anchor: source gate labeled High.** | `39e4f6d` -> this batch | `fixed` by DELETING the arm. It is the same shape as the arm deleted one boundary earlier at `77ed08a`, surviving one boundary over — which is the observation that turned this from a fourth instance patch into the root fix. |
 | L2R10-01 | Stage-2 repo Codex review, round 10 (support review for the §6 loop), run dir `cdx-review.5Nd1lG`, base `ca5d778ef11bfe4751e849eb67273f5c4649fe74`, head `39e4f6d92d6500438713d6a69377d7e5717021b2`, dirty=false, `STATUS: completed` | "[P1] Reject forged text for allowlisted parser codes" — when `model_dump` returns a dict subclass whose `items()` raises a forged `ProcessIRValidationError` using a real parser code, the checks pass because they validate only code membership and string types, and the caller-controlled path, message and remediation are copied into the served and logged error | **P1** | machine-served schemas/contracts | DC-178-G | **Critical — anchor: source label P1.** Same defect as `QA-178-r6-01`; one distinct defect, two raw findings. | `39e4f6d` -> this batch | `fixed`. Both gates reached the same conclusion independently and the reviewer named the remedy precisely: *"normalize the diagnostic from trusted parser data or otherwise establish actual parser provenance"*. Provenance is what was established — by making the parse input inert — because normalising the text would have destroyed the specific per-instance messages this slice exists to preserve. |
 | L2R10-02 | Stage-2 repo Codex review, round 10, same run dir `cdx-review.5Nd1lG` | "[P2] Assert the exact generated product rather than only its size" — when `_neighbours` returns the correct NUMBER of entries but substitutes the wrong vocabulary, `expected_body` still matches because it checks only cardinality; replacing the Branch STEP neighbour `target` with `exception` leaves the count, uniqueness, partition, denied-cell, parity, safety and killed-reparse checks green while removing all 40 required `opp=target` cases | **P2** | machine-served schemas/contracts | DC-178-F | Standard — anchor: source label P2; no critical class or anchor. | `39e4f6d` -> this batch | `fixed` — the product is now compared as an exact ID SET derived from `MATRIX`, not a count, and the substitution mutant was hand-run: it fails where it previously passed everything. This is the SECOND distinct way this coverage guard was weaker than it claimed (round 2 found the shared-helper form), and both are now closed by comparing against the authority instead of against itself. |
+| L3R3-01 | §6 architect implementation review, round 3, run dir `cdx-gate-review.MrjQv5`, base `ca5d778ef11bfe4751e849eb67273f5c4649fe74`, head `6ac2b5d45b14ee056aeb584a1e0b966229fba21e`, `parsedVerdict: ISSUES FOUND`, attested against the plan bytes | "CRITICAL — the payload is not fully inert" — `_inert_payload` preserves scalar objects and dict keys, so a `str` subclass placed in `version` can override `__ne__`, which the parser invokes during the pre-validation version comparison; reproduced raising a forged `ProcessIRValidationError` with a REAL parser code, serving the caller-chosen path, message, remediation and canary verbatim. *"Thus this is another instance patch, not a root fix."* | **CRITICAL** | machine-served schemas/contracts (secondary: secrets — AR2-01) | DC-178-G | **Critical — anchor: source gate labeled it CRITICAL.** | `6ac2b5d` -> this batch | `fixed` for the demonstrated vector AND the class is CLOSED by an accepted limitation, recorded above with the five-variant table. The reviewer is right that my previous fix was the fifth instance patch, and it offered the exit conditionally: the limitation is accepted, the hardening stops, and the `_inert_payload` contract is NARROWED to what it delivers — which is the part that makes the acceptance honest rather than a silent downgrade. Builtin-derived scalars and dict keys are now normalised, closing variants 1–5; the non-builtin residue is stated in the docstring and in the ledger. |
+| L3R3-02 | §6 architect implementation review, round 3, same run dir `cdx-gate-review.MrjQv5` | "STANDARD — the exact-product assertion validates labels, not constructed documents" — `_build` composes the ID from its own arguments while the assertion compares only IDs, so substituting the Branch terminal `target` with `exception` inside `_build` while retaining the original IDs left 40 cases labelled `opp=target` containing `exception`, with the exact-product, partition, denied-cell, parity and safety tests all passing; the missing plan requirement is an independent projection from each constructed document back to its claimed signature | **STANDARD** | machine-served schemas/contracts | DC-178-F | Standard — anchor: source label STANDARD; no critical class or anchor. | `6ac2b5d` -> this batch | `fixed` — `_observed_signature` now reads the `(candidate, neighbour)` pair back OUT of every constructed model, stripping the Try anchor on the side `_anchored` adds it, and compares it against what the ID claims. Hand-run with the reviewer's exact mutation: the projection test fails where the whole suite previously passed. **This is the FOURTH distinct way this one guard was weaker than it claimed** (too small; shared helper; cardinality only; labels not documents) — each found by a different gate, and each closed by comparing against the authority rather than against itself. |
 
 Dispositions: `fixed` · `finding-refuted` · `severity-refuted` · `not-validated` · `deferred`
 (issue, reason class, placement). `inherited-open` is used only for a seeded `INH-*` row before
@@ -349,6 +351,8 @@ correction is the behaviour the ONE-correction-pass rule exists to prevent.
 | --- | --- | --- | --- | --- |
 | 1 | `cdx-gate-review.CX1MhW` | `cdd7a3bf8e2e7ae6773f6ec4250844e5c2e8cf8f` -> `aedca45344ea9215f77deede343f6724fa264a09` | `ISSUES FOUND` — five findings (`L3R1-01`..`L3R1-05`) | `docs/architecture/evidence/issue-178/architect-reviews/cdx-gate-review.CX1MhW/` |
 | 2 | `cdx-gate-review.FrQAIh` | `aedca45344ea9215f77deede343f6724fa264a09` -> `ca5d778ef11bfe4751e849eb67273f5c4649fe74` | `ISSUES FOUND` — one **CRITICAL** (`L3R2-01`), one Standard (`L3R2-02`), one Low (`L3R2-03`) | `docs/architecture/evidence/issue-178/architect-reviews/cdx-gate-review.FrQAIh/` |
+| — | `cdx-gate-review.GPK3M5` | — | **TECHNICALLY FAILED**, not an evaluation: both the send and its one sanctioned retry ended `status:"failed"` with no review text (turn 1 truncated mid-preamble, turn 2 empty after ~13 min of healthy streaming). Collected `--outcome failed`; the collector REFUSED to attest (`declared_failed`), wrote `refusal.json` and confirmed teardown. A gate that produced no decision-bearing result is not an evaluation, so it does not consume the owner-fixed window. | `docs/architecture/evidence/issue-178/architect-reviews/cdx-gate-review.GPK3M5/` — the `refusal.json` and `start.json` ONLY. Archived as a failure record, not as a round: it carries no attestation and no review, which is precisely what makes citing it honest. My own derived guard forced this — naming a run the archive did not hold failed `test_no_ledger_cites_a_review_run_its_archive_lacks`. |
+| 3 | `cdx-gate-review.MrjQv5` | `ca5d778ef11bfe4751e849eb67273f5c4649fe74` -> `6ac2b5d45b14ee056aeb584a1e0b966229fba21e` | `ISSUES FOUND` — one **CRITICAL** (`L3R3-01`), one Standard (`L3R3-02`) | `docs/architecture/evidence/issue-178/architect-reviews/cdx-gate-review.MrjQv5/` |
 
 **Owner-fixed window: 3 evaluations** (see *Owner decision* above). This is evaluation 1.
 
@@ -359,6 +363,54 @@ is invisible to it. `L3R1-01` is the clearest case: the derived case set was a R
 own count assertion recomputed the reduced formula, so it agreed with itself while generating 400
 body cases instead of 3,000, and the missing neighbour dimension is exactly the shape of corpus
 row 1. Nothing in a delta review would ever have surfaced that.
+
+## Accepted limitation — forged diagnostics from an in-process caller (DC-178-G, closed)
+
+**Decision: the hardening loop STOPS here, and the residue is an accepted, recorded limitation
+rather than a sixth patch.** Recorded because the alternative was to keep going, and the evidence
+says that would not converge.
+
+**The mechanism.** An exception was repeatedly treated as evidence of who authored it. Five variants
+were found by THREE independent gates across four rounds, and every fix bought exactly one round:
+
+| # | Variant | Found by | Answer |
+| --- | --- | --- | --- |
+| 1 | `model_dump` RAISES a parser-typed error | QA r4 + Stage-2 r8 | deleted the arm |
+| 2 | dump RETURNS a hostile `items()`, code outside the allowlist | §6 r2 | code allowlist |
+| 3 | same, with a REAL parser code | QA r6 + Stage-2 r10 | inert container rebuild |
+| 4 | forged `ProcessIRCompileError` raised inside the parse | QA r6 | deleted the dead arm |
+| 5 | `str` SUBCLASS in `version` overriding `__ne__`, invoked by the pre-validation version check | §6 r3 | scalar + key normalisation |
+
+Variants 1–4 were each described at the time as closing the class. Each was an instance patch. That
+is this repo's own recorded signature — *a finite artifact binding an unbounded space* — and Python
+supplies an unbounded supply of dunders on an unbounded supply of types, so the enumeration cannot
+be completed by widening it again.
+
+**Why the residue is accepted rather than fixed.** Every variant requires in-process Python that
+subclasses the EXPORTED `ProcessIRV1`. A caller with that capability can already monkeypatch
+`compile_process_ir_v1`, `parse_process_ir_v1`, or the logging handler directly — so no security
+boundary is being crossed, and nothing this layer does can defend one. The property genuinely worth
+protecting is the AR2-01 value-free contract, which exists to stop authored values leaking into logs
+by ACCIDENT, not to defend against a caller deliberately forging diagnostics about their own data.
+Both the §6 round-3 reviewer and live QA reached this independently and both offered it as the
+correct engineering answer; the §6 reviewer stated the condition precisely — *"If such callers are
+outside the trust boundary, that limitation should be explicitly accepted and this hardening loop
+should stop; under the currently claimed contract, it remains Critical."* The contract has therefore
+been narrowed to what the code actually delivers, which is what makes the acceptance honest rather
+than a downgrade.
+
+**Precedent.** #145 reached the same conclusion for a hostile REGISTERED input model and recorded it
+as an accepted limit: *when a review series stops converging, ask whether the threat is inside the
+trust boundary at all.*
+
+**What still ships, because it was cheap and complete for its own case:** every mapping, sequence,
+dict key and builtin-derived scalar reaching the parser is a plain builtin, so variants 1–5 are all
+closed. **What is knowingly NOT closed:** a non-builtin object — a `datetime` subclass being the
+obvious one — is passed through unchanged BY DESIGN so the parser can refuse it wrong-typed, and it
+still carries its own dunders which the pre-validation version comparison will invoke. The
+`_inert_payload` docstring states this precisely rather than claiming inertness it does not have. No
+follow-up issue is filed: this is an accepted limitation, not debt, and minting an issue for a
+non-boundary would be the debt-minting the workflow warns against.
 
 ## Structural-fix record (second-instance trigger, DC-178-B)
 

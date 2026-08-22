@@ -134,35 +134,63 @@ def _enforce_semantic_report(ir, cfg, symbols, policy, capabilities) -> None:
     raise ProcessIRCompileError([_restore(item) for item in report.errors])
 
 
+#: Builtin scalar types, most-derived first — ``bool`` before ``int`` because
+#: ``isinstance(True, int)`` is True and coercing a bool through ``int`` would
+#: change the document.
+_SCALAR_BUILTINS = (bool, int, float, str, bytes)
+
+
+def _plain_scalar(value: Any) -> Any:
+    """A builtin SUBCLASS replaced by the exact builtin; anything else untouched.
+
+    A subclass carries the caller's own dunders. `str` is the one that matters:
+    ``parse_process_ir_v1`` compares ``payload.get("version")`` against the
+    version literal BEFORE any validation, so a ``str`` subclass overriding
+    ``__ne__`` runs caller code inside the parser and can raise a forged
+    diagnostic bearing a real parser code. Measured. Replacing it with a plain
+    ``str`` of the same content removes the hooks and changes no value.
+
+    Non-builtin objects are deliberately left alone: a ``datetime`` in a ``str``
+    field must still reach the parser as a ``datetime`` so it is REFUSED rather
+    than repaired, which is the hole this whole issue exists to close.
+    """
+    if value is None:
+        return None
+    for builtin in _SCALAR_BUILTINS:
+        if isinstance(value, builtin):
+            return value if type(value) is builtin else builtin(value)
+    return value
+
+
 def _inert_payload(payload: Any) -> Any:
-    """Rebuild a dumped payload out of PLAIN containers before it is parsed.
+    """Rebuild a dumped payload out of PLAIN containers and scalars before parsing.
 
-    THE ROOT FIX for a mechanism that recurred three times (#178): an exception
-    was repeatedly treated as evidence of who authored it. Each earlier round
-    hardened the place the forged error came OUT of — the dump raise, then the
-    translation — and a further variant was found each time, because a caller who
-    can subclass the exported ``ProcessIRV1`` can make ``model_dump`` RETURN a
-    hostile container whose ``items()`` runs their code INSIDE
-    ``parse_process_ir_v1`` (the secret pre-scan walks the payload) and raise a
-    diagnostic the parser never wrote.
+    WHAT THIS GUARANTEES, stated narrowly because an earlier docstring claimed
+    more than it delivered: every mapping, sequence, dict KEY and builtin-derived
+    scalar reaching the parser is a plain builtin, so none of them carries a
+    caller-defined dunder. The hooks that do exist run HERE, once, inside the
+    caller's guard — after which a ``ProcessIRValidationError`` raised during the
+    parse really was authored by the parser.
 
-    Sanitising the OUTPUT cannot win that race: with a real parser code attached,
-    forged text is indistinguishable from authored text by inspection. So the
-    input is made inert instead. Every mapping and sequence is rebuilt as a plain
-    ``dict``/``list``, so the only hooks that ever run are run HERE, once, inside
-    the caller's guard — and after this the parser walks builtins, which means a
-    ``ProcessIRValidationError`` raised beyond this point really is the parser's.
-
-    Scalars are deliberately passed through UNCHANGED. Coercing them would
-    re-open the hole #178 exists to close: a ``datetime`` in a ``str`` field must
-    still reach the parser as a ``datetime`` so it is refused rather than
-    silently repaired into an ISO string.
+    WHAT IT DOES NOT GUARANTEE: an object that is not derived from a builtin —
+    ``datetime`` being the obvious one — is passed through unchanged BY DESIGN,
+    because the parser must see it wrong-typed in order to refuse it. Such an
+    object still carries its own dunders, and the parser's pre-validation version
+    comparison will invoke one. That residue is a recorded, accepted limitation
+    (see the #178 ledger): reaching it requires in-process Python that subclasses
+    an exported model, and a caller with that much access can monkeypatch this
+    module outright, so it is not a boundary this layer can defend. Five variants
+    of the same mechanism were found by three independent gates before that was
+    acknowledged rather than patched again.
     """
     if isinstance(payload, dict):
-        return {key: _inert_payload(value) for key, value in payload.items()}
+        return {
+            _plain_scalar(key): _inert_payload(value)
+            for key, value in payload.items()
+        }
     if isinstance(payload, (list, tuple)):
         return [_inert_payload(value) for value in payload]
-    return payload
+    return _plain_scalar(payload)
 
 
 def _internal_compile_error() -> ProcessIRCompileError:

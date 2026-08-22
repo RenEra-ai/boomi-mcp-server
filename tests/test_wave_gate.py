@@ -5907,6 +5907,22 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
     # No wildcard and no generic "legacy" skip: a new non-completed row must be
     # added here with its reason, or it fails.
     expected_not_completed = {
+        # #178 §6 evaluation 3, FIRST attempt: both the gate `send` and its one
+        # sanctioned in-session retry ended `status:"failed"` with NO review text
+        # — turn 1 truncated mid-preamble after ~2 minutes, turn 2 returned empty
+        # after ~13 minutes of healthy streaming (eventCount climbed 944 -> 1908,
+        # `lastEventAgoMs` never above 9s, never parked on a question or
+        # approval). Not a wedge and not a hash rejection: both sends returned
+        # `{"ok":true,"status":"running"}`. Collected `--outcome failed`; the
+        # collector refused to attest (`declared_failed`) and confirmed teardown,
+        # and the round was re-run from scratch as cdx-gate-review.MrjQv5.
+        #
+        # It carries refusal.json + start.json and NOTHING else, which is the
+        # point: a gate that produced no decision-bearing result is not an
+        # evaluation and does not consume the owner-fixed §6 window. It is
+        # archived so the ledger can name it without naming something the archive
+        # does not hold.
+        "architect-reviews/cdx-gate-review.GPK3M5": "failed",
         # failed run, replaced by cdx-review.Kkf8n6 over the same scope
         "commit-reviews/cdx-review.kXfU2v": "failed",
         # #153 L2 round 26: STUCK — 58 events, then 18 minutes of total silence.
