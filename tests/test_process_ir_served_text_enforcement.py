@@ -50,24 +50,59 @@ from boomi_mcp.models.process_ir import (  # noqa: E402
     process_ir_v1_parse_diagnostic_specs,
 )
 
-#: The ONLY sink calls whose code cannot be read from the source, each with the reason it
-#: cannot and the authority that supplies its codes instead. This is a closed table
-#: compared with `==`, not a filter: a NEW dynamic emission path fails this file rather
-#: than disappearing from its coverage. Pinning SITES (file + line + sink) rather than
-#: exempting CODES keeps the code-set derivation total — an exempted code would be a hole
-#: in the invariant; an exempted site is a hole in the *reader*, and the site's own
-#: authority closes it below.
+#: The ONLY sink calls whose code cannot be read from the source, keyed by FULL site
+#: identity — `(path, sink, code-expression)` — and mapped to the number of times that
+#: exact site occurs plus the reason it cannot be read.
+#:
+#: The first version of this table keyed on `(path, sink)` alone. That is fail-open, and
+#: the Stage-2 reviewer was right about it: a SECOND unresolved `finding(...)` in
+#: `flow.py` would collapse onto the existing entry and the equality would stay green
+#: while a brand-new dynamic emission path escaped the gate entirely — contradicting this
+#: comment's own claim to pin file+sink+expression. The count is part of the key's value
+#: for the same reason: two calls with the SAME expression in the same file would
+#: otherwise be indistinguishable from one.
+#:
+#: Pinning SITES rather than exempting CODES keeps the code-set derivation total: an
+#: exempted code would be a hole in the invariant, whereas an exempted site is a hole in
+#: the READER, and each site names the authority that closes it.
 PINNED_DELEGATION_SITES = {
+    (
+        "src/boomi_mcp/models/process_ir.py",
+        "_diagnostic",
+        "Name(id='code', ctx=Load())",
+    ): (
+        1,
+        "the parse-error translator forwards a `code` it resolved from the routing map "
+        "`_CUSTOM_ERROR_CODES` earlier in the same function; those codes are collected "
+        "from that map, which is the authority for them",
+    ),
+    (
+        "src/boomi_mcp/compiler/process_ir/invariants.py",
+        "_fail",
+        "Name(id='code', ctx=Load())",
+    ): (
+        1,
+        "a reachability helper forwards a `code` parameter that is not its FIRST "
+        "parameter; every caller passes a literal already collected at its own call site",
+    ),
     (
         "src/boomi_mcp/compiler/process_ir/semantic_validation/flow.py",
         "finding",
-    ): "re-serves `item.code` from a finding the semantic report already produced, so it "
-    "introduces no code of its own",
+        "Attribute(value=Name(id='item', ctx=Load()), attr='code', ctx=Load())",
+    ): (
+        1,
+        "re-serves `item.code` from a finding the semantic report already produced, so it "
+        "introduces no code of its own",
+    ),
     (
         "src/boomi_mcp/compiler/process_ir/semantic_validation/validation_policy.py",
         "finding",
-    ): "raises the exemption code chosen by `LegacyValidationPolicyV1.exemption_for`; the "
-    "family is derived below from the policy registry, which owns it",
+        "Name(id='exemption', ctx=Load())",
+    ): (
+        1,
+        "raises the exemption code chosen by `LegacyValidationPolicyV1.exemption_for`; "
+        "the family is derived below from the policy registry, which owns it",
+    ),
 }
 
 
@@ -153,16 +188,39 @@ def test_the_only_unreadable_emission_sites_are_the_pinned_delegations():
     price of that decision is paid here: every call it cannot read is named, and the set is
     compared whole.
     """
+    import collections
+
     _by_producer, unresolved = collect_emissions()
-    observed = {(path, sink) for path, _lineno, sink, _dump in unresolved}
-    assert observed == set(PINNED_DELEGATION_SITES), {
+    # FULL identity, plus how many times each site occurs. Line numbers are deliberately
+    # excluded from the key — they churn on any edit above — but the expression is not,
+    # so a genuinely NEW dynamic call cannot hide behind an existing entry, and a second
+    # copy of an existing one shows up as a count change.
+    observed = collections.Counter(
+        (path, sink, dump) for path, _lineno, sink, dump in unresolved
+    )
+    expected = collections.Counter(
+        {site: count for site, (count, _reason) in PINNED_DELEGATION_SITES.items()}
+    )
+    assert observed == expected, {
         "unpinned (a new dynamic emission path)": sorted(
-            observed - set(PINNED_DELEGATION_SITES)
+            site for site in observed if site not in expected
         ),
         "pinned but gone (retire the entry)": sorted(
-            set(PINNED_DELEGATION_SITES) - observed
+            site for site in expected if site not in observed
+        ),
+        "count changed (a second call at a pinned site)": sorted(
+            (site, expected[site], observed[site])
+            for site in set(observed) & set(expected)
+            if observed[site] != expected[site]
         ),
     }
+    # Every pinned site states WHY it cannot be read. A blank reason is an unexplained
+    # hole in the reader, which is what this table exists to prevent.
+    blank = sorted(
+        site for site, (_count, reason) in PINNED_DELEGATION_SITES.items()
+        if not reason.strip()
+    )
+    assert blank == [], blank
 
 
 def test_every_emittable_process_ir_code_has_complete_served_text():

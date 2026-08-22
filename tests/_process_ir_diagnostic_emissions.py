@@ -202,13 +202,41 @@ class _ModuleScan:
                     ):
                         self.sinks.add(node.name)
 
-        # The parameter names of every function, so a forwarding call can be told apart
-        # from an unresolvable one.
-        self.parameters = set()
-        for node in ast.walk(self.tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                for arg in list(node.args.args) + list(node.args.kwonlyargs):
-                    self.parameters.add(arg.arg)
+        # Which function ENCLOSES each call, innermost first. A module-wide set of every
+        # parameter name was the first cut and it is fail-open: a local variable named
+        # `code` inside a function that forwards nothing at all was skipped as though it
+        # were a wrapper's forwarded parameter, so the call was neither resolved nor
+        # reported. The skip is now scoped to the one function the call is actually in.
+        self.enclosing = {}
+        self._map_enclosing(self.tree, None)
+
+    def _map_enclosing(self, node, current):
+        """Record the innermost enclosing function for every Call in the tree."""
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self._map_enclosing(child, child)
+                continue
+            if isinstance(child, ast.Call):
+                self.enclosing[id(child)] = current
+            self._map_enclosing(child, current)
+
+    def is_wrapper_forward(self, call, argument):
+        """True only for a WRAPPER body forwarding its own first parameter into a sink.
+
+        Three conditions, all required: the call sits inside a function; that function is
+        itself a registered sink (so its own call sites are scanned and supply the codes);
+        and the argument is precisely that function's first parameter. Anything looser
+        drops real emissions silently — which is exactly what the module-wide parameter
+        set did.
+        """
+        if not isinstance(argument, ast.Name):
+            return False
+        owner = self.enclosing.get(id(call))
+        if owner is None or owner.name not in self.sinks:
+            return False
+        if not owner.args.args:
+            return False
+        return argument.id == owner.args.args[0].arg
 
     def _simple(self, node):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -356,11 +384,11 @@ def collect_emissions():
                 bucket.update(resolved)
                 continue
 
-            # A call that forwards the ENCLOSING function's own parameter is a wrapper
-            # body, not an emission: the wrapper is itself in `scan.sinks`, so its call
-            # sites are what supply the codes. Recording it as unresolved would pin a
+            # A call that forwards the ENCLOSING function's own first parameter is a
+            # wrapper body, not an emission: the wrapper is itself in `scan.sinks`, so its
+            # call sites are what supply the codes. Recording it as unresolved would pin a
             # dozen definition sites that carry no information.
-            if isinstance(argument, ast.Name) and argument.id in scan.parameters:
+            if scan.is_wrapper_forward(node, argument):
                 continue
 
             unresolved.append(

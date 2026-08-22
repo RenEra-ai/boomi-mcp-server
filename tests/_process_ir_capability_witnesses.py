@@ -366,10 +366,10 @@ def _w_bounded_retry():
     doc = _connector_scope(retry={"count": 5})
 
     def run():
-        cfg, _plan = _compiles(doc, error_symbols())
-        return cfg
+        return _compiles(doc, error_symbols())
 
-    def observe(cfg):
+    def observe(result):
+        cfg, plan = result
         counts = [
             node.semantic.retry_count
             for node in cfg.nodes
@@ -378,6 +378,18 @@ def _w_bounded_retry():
         # 5 is the top of the platform's own 0-5 bound: the boundary value, so a
         # narrowed bound fails here rather than passing on a mid-range count.
         assert counts == [5], counts
+
+        # ...and the LOWERED value, which is the one that reaches the emitter. The CFG
+        # semantic record is derived straight from the authored input, so inspecting it
+        # alone would still pass if lowering hardcoded zero or dropped the value — the
+        # capability the manifest advertises is the retry the compiler EMITS, not the
+        # retry the caller typed.
+        lowered = [
+            node.emitter_input.retry_count
+            for node in plan.nodes
+            if type(getattr(node, "emitter_input", None)).__name__ == "CatchErrorsInputV1"
+        ]
+        assert lowered == [5], lowered
 
     return CapabilityWitness(
         "bounded_retry", "admits", "inline document (boundary value 5)", run, observe
@@ -441,24 +453,59 @@ def _w_typed_idempotency_evidence():
 # ---------------------------------------------------------------------------
 
 
-def _parser_gated(key, doc, code, path, provenance="inline document"):
+def _parser_gated(key, doc, code, path, provenance="inline document", mutate=None):
     """A capability the GRAMMAR refuses, asserted at the owning entry point.
 
-    Only the parser is measured. The document does not parse, so there is no model to
-    hand to `compile_process_ir_v1` — reaching the compile path would mean constructing
-    the refused shape through `model_construct` and mutating it, which is exactly the
-    derived product #178 already runs over the WHOLE placement matrix. Restating it once
-    per capability would be a second record of one claim; #178 owns cross-entry identity,
-    this owns "the gated capability is refused, with the code and pointer it serves".
+    `mutate` closes the compile-side half where the construct is REACHABLE on a validated
+    model. `ProcessIRV1` is exported and mutable and assignment is not re-validated, so a
+    caller can parse a legal document, set a gated field, and hand the model straight to
+    `compile_process_ir_v1` — the exact premise #178 is built on. Where that is possible,
+    `mutate` builds the valid model, sets the field, and this asserts the compiler refuses
+    it too.
+
+    Where it is NOT possible, `mutate` is None and that is a measured fact, not an excuse:
+
+    * `catch_all` is an EXTRA key with no field on `TryCatchNodeV1` (measured:
+      `"catch_all" in model_fields` is False), so no validated model can carry it;
+    * `definedparameter` has no member class in the `PropertySourceV1` union (measured:
+      the union is Static/Current/Profile/Ddp/Dpp), so no validated model can carry it.
+
+    For those two the parser is the ONLY reachable enforcement point, and there is no
+    compile-path case to write. #178's derived product does not cover either: it varies
+    node KINDS and PLACEMENTS from `BODY_CAPABILITIES_V1`, never field VALUES.
     """
 
     def run():
-        return _parser_refusal(doc)
+        refusal = _parser_refusal(doc)
+        compiled = None
+        if mutate is not None:
+            model, clean, expected = mutate()
+            # The unmutated model must COMPILE, so the refusal below is attributable to
+            # the gated field and not to some unrelated defect in the carrier document.
+            assert clean == (), ("carrier does not compile clean", clean)
+            compiled = (_compile_refusal_for_model(model), expected)
+        return refusal, compiled
 
-    def observe(refusal):
+    def observe(result):
+        refusal, compiled = result
         assert refusal == ((code, path),), refusal
+        if mutate is not None:
+            observed, expected = compiled
+            assert observed == expected, (observed, expected)
 
     return CapabilityWitness(key, "refuses", provenance, run, observe)
+
+
+def _compile_refusal_for_model(model, symbols=None):
+    """Refusal observed at the COMPILE entry point on an already-built model."""
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+
+    try:
+        compile_process_ir_v1(model, symbols or error_symbols())
+    except ProcessIRCompileError as exc:
+        return tuple((d.code, d.path) for d in exc.diagnostics)
+    return ()
 
 
 def _w_process_call_connector_mixing():
@@ -558,11 +605,23 @@ def _w_catch_failure_trigger_selection():
 
 
 def _w_listener_error_scope():
+    def mutate():
+        # A VALID process-scope document, parsed, then the scope field set to the gated
+        # literal — the model-to-compiler path a caller can actually take.
+        carrier = _parse(_process_scope())
+        clean = _compile_refusal_for_model(carrier)
+        model = _parse(_process_scope())
+        model.body.steps[0].scope = "listener"
+        return model, clean, (
+            ("PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED", "/body/steps/0/scope"),
+        )
+
     return _parser_gated(
         "listener_error_scope",
         _process_scope(scope="listener"),
         "PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED",
         "/body/steps/0/scope",
+        mutate=mutate,
     )
 
 
@@ -600,6 +659,35 @@ def _w_nested_try_catch():
 
 
 def _w_keyed_cache():
+    def _carrier():
+        # A cleanly COMPILING document: the `cache_put` upstream satisfies the cache-writer
+        # rule, so the only thing the mutation changes is the gated field.
+        return _doc(
+            [
+                {
+                    "kind": "source",
+                    "connection_ref": "$ref:CONN",
+                    "operation_ref": "$ref:GETOP",
+                },
+                {"kind": "cache_put", "cache_ref": "$ref:CACHE"},
+                {"kind": "document_cache_retrieve", "cache_ref": "$ref:CACHE"},
+                {
+                    "kind": "target",
+                    "connection_ref": "$ref:DBCONN",
+                    "operation_ref": "$ref:DBSEND",
+                },
+                {"kind": "stop"},
+            ]
+        )
+
+    def mutate():
+        clean = _compile_refusal_for_model(_parse(_carrier()))
+        model = _parse(_carrier())
+        model.body.steps[2].load_all_documents = False
+        return model, clean, (
+            ("PROCESS_IR_CAPABILITY_UNSUPPORTED", "/body/steps/2/load_all_documents"),
+        )
+
     return _parser_gated(
         "keyed_cache",
         _doc(
@@ -614,6 +702,7 @@ def _w_keyed_cache():
         ),
         "PROCESS_IR_CAPABILITY_UNSUPPORTED",
         "/body/steps/0/load_all_documents",
+        mutate=mutate,
     )
 
 
