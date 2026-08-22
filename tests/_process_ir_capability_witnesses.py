@@ -49,6 +49,7 @@ What remains inline, and why each is acceptable:
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import sys
 from dataclasses import dataclass
@@ -125,24 +126,41 @@ class UnsupportedDisposition:
     reason: str
 
 
-#: Every fixture path `_fixture()` has read since the last `reset_loaded_fixtures()`.
-#: A provenance STRING can claim any inventory path; this records what the witness's `run`
-#: actually opened, so the claim can be checked against execution instead of text.
-_LOADED_FIXTURES = []
+#: `{fixture path: content digest}` for every fixture `_fixture()` has read, and the digest
+#: of every document that actually reached `_parse`, since the last reset.
+#:
+#: Recording file OPENS alone was not enough: a witness could open the claimed fixture,
+#: discard it, and compile something else entirely, and the claim still looked honest. What
+#: makes a frozen claim true is that the fixture's CONTENT is what was compiled, so both
+#: sides are recorded and compared.
+_LOADED_FIXTURES = {}
+_PARSED_DIGESTS = []
+
+
+def _digest(document):
+    return hashlib.sha256(
+        json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def reset_loaded_fixtures():
     _LOADED_FIXTURES.clear()
+    del _PARSED_DIGESTS[:]
 
 
 def loaded_fixtures():
-    return tuple(_LOADED_FIXTURES)
+    return dict(_LOADED_FIXTURES)
+
+
+def parsed_digests():
+    return tuple(_PARSED_DIGESTS)
 
 
 def _fixture(relative):
     assert relative in FIXTURE_PROVENANCE, relative
-    _LOADED_FIXTURES.append(relative)
-    return json.loads((_FIXTURES / relative).read_text(encoding="utf-8"))
+    document = json.loads((_FIXTURES / relative).read_text(encoding="utf-8"))
+    _LOADED_FIXTURES[relative] = _digest(document)
+    return document
 
 
 def _doc(steps):
@@ -192,6 +210,9 @@ def _connector_scope(
 def _parse(doc):
     from boomi_mcp.models.process_ir import parse_process_ir_v1
 
+    # Record what actually flows into the parser, so a frozen-fixture claim is checked
+    # against the document that was COMPILED rather than one that was merely opened.
+    _PARSED_DIGESTS.append(_digest(doc))
     return parse_process_ir_v1(copy.deepcopy(doc))
 
 
@@ -240,7 +261,12 @@ def _compiles(doc, symbols, capabilities=None):
 def _rich_compiles(relative):
     from _wave_gate_golden_corpus import rich_compile_doc
 
-    return rich_compile_doc(_fixture(relative))
+    # `rich_compile_doc` parses internally rather than through `_parse`, so the digest is
+    # recorded here — otherwise the content binding could not see the document that was
+    # actually compiled and would report a true claim as false.
+    document = _fixture(relative)
+    _PARSED_DIGESTS.append(_digest(document))
+    return rich_compile_doc(document)
 
 
 def _emitter_kinds(plan):

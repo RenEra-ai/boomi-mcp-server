@@ -203,6 +203,7 @@ def test_every_witness_records_its_fixture_provenance():
         PROVENANCE_KINDS,
         PROVENANCE_SYNTHETIC_CFG,
         loaded_fixtures,
+        parsed_digests,
         reset_loaded_fixtures,
     )
 
@@ -254,10 +255,19 @@ def test_every_witness_records_its_fixture_provenance():
             except Exception as exc:  # noqa: BLE001 - the run itself is graded elsewhere
                 bad.append((key, "run failed while checking provenance", repr(exc)))
                 continue
-            opened = set(loaded_fixtures())
+            opened = loaded_fixtures()
             unopened = [rel for rel in named if rel not in opened]
             if unopened:
                 bad.append((key, "claims a frozen fixture its run never loaded", unopened))
+                continue
+            # ...and the fixture's CONTENT is what reached the parser. Opening a file and
+            # then compiling something else would otherwise satisfy the claim.
+            compiled = set(parsed_digests())
+            uncompiled = [rel for rel in named if opened[rel] not in compiled]
+            if uncompiled:
+                bad.append(
+                    (key, "opened a frozen fixture but compiled something else", uncompiled)
+                )
                 continue
             frozen.append(key)
 
