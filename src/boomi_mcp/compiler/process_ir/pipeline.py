@@ -134,14 +134,21 @@ def _enforce_semantic_report(ir, cfg, symbols, policy, capabilities) -> None:
     raise ProcessIRCompileError([_restore(item) for item in report.errors])
 
 
-#: The scalar types this layer normalises, most-derived first — ``bool`` before
-#: ``int`` because ``isinstance(True, int)`` is True and coercing a bool through
-#: ``int`` would change the document. This is an ENUMERATION, and it is
-#: deliberately not extended: `complex` and `bytearray` are builtin-derived and
-#: absent, which is accurate rather than an oversight — see the accepted
-#: limitation in the #178 ledger. Adding them would buy nothing, because the same
-#: capability is already reachable through any non-builtin carrier.
-_NORMALISED_SCALARS = (bool, int, float, str, bytes)
+#: How to recover a scalar's UNDERLYING builtin value without dispatching an
+#: overridable conversion. `bool` is absent because it cannot be subclassed at
+#: all ("type 'bool' is not an acceptable base type"), so a bool is always exactly
+#: a bool. This is an ENUMERATION, and it is deliberately not extended: `complex`
+#: and `bytearray` are builtin-derived and absent, which is accurate rather than
+#: an oversight — see the accepted limitation in the #178 ledger. Adding them
+#: would buy nothing, because the same capability is already reachable through
+#: any non-builtin carrier.
+_SCALAR_SLOTS = (
+    (bool, None),
+    (int, int.__int__),
+    (float, float.__float__),
+    (str, str.__str__),
+    (bytes, lambda value: bytes.__getnewargs__(value)[0]),
+)
 
 
 class _NotNormalisable(Exception):
@@ -149,17 +156,21 @@ class _NotNormalisable(Exception):
 
 
 def _plain_scalar(value: Any) -> Any:
-    """A ``str``/``int``/``float``/``bool``/``bytes`` subclass replaced by the
-    EXACT builtin; every other object passed through unchanged.
+    """A scalar subclass replaced by the EXACT builtin carrying the SAME value.
 
-    The exact-type check is load-bearing, not belt and braces. ``builtin(value)``
-    dispatches an overridable conversion — ``str(x)`` calls ``x.__str__()`` — and
-    a subclass can return ANOTHER subclass from it, so the coercion alone can hand
-    back an object still carrying caller dunders. Measured: a ``str`` subclass
-    whose ``__str__`` returns a second subclass whose ``__ne__`` raises forged a
-    real-coded diagnostic straight through the normalisation that was supposed to
-    prevent it. So the result is verified, and a value that will not reduce is
-    refused rather than trusted.
+    Two properties, and both were learned from a defect.
+
+    STRIP THE HOOKS. ``builtin(value)`` is not enough on its own — it dispatches
+    an overridable conversion, and a ``str`` subclass whose ``__str__`` returns a
+    second subclass hands back an object still carrying caller dunders. So the
+    result's type is verified, and a value that will not reduce is refused.
+
+    PRESERVE THE VALUE. ``builtin(value)`` is also not SAFE: for
+    ``class V(str, Enum): ONE = "1"`` it yields ``"V.ONE"``, which would make the
+    compile entry refuse a version the parser ACCEPTS — a parity break in the
+    accept direction, introduced by the very hardening meant to establish parity.
+    Measured. The base-class slot (``str.__str__``, ``int.__int__``, …) bypasses
+    the override AND returns the underlying value, so it does both jobs at once.
 
     Non-builtin objects are left alone BY DESIGN: a ``datetime`` in a ``str``
     field must reach the parser wrong-typed so it is refused rather than repaired,
@@ -167,11 +178,13 @@ def _plain_scalar(value: Any) -> Any:
     """
     if value is None:
         return None
-    for builtin in _NORMALISED_SCALARS:
+    for builtin, slot in _SCALAR_SLOTS:
         if isinstance(value, builtin):
             if type(value) is builtin:
                 return value
-            reduced = builtin(value)
+            if slot is None:  # pragma: no cover - bool cannot be subclassed
+                raise _NotNormalisable(builtin.__name__)
+            reduced = slot(value)
             if type(reduced) is not builtin:
                 raise _NotNormalisable(builtin.__name__)
             return reduced

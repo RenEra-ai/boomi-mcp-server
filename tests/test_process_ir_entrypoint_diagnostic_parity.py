@@ -1315,3 +1315,59 @@ def test_the_inert_rebuild_keeps_scalars_and_flattens_containers():
     # the scalar is untouched, by design
     assert inert["when"] == _dt.datetime(2020, 1, 1)
     assert isinstance(inert["when"], _dt.datetime)
+
+
+def test_scalar_normalisation_preserves_the_value_it_normalises():
+    """Stripping hooks must not CHANGE the document.
+
+    `builtin(value)` does both jobs badly: it dispatches an overridable
+    conversion, and for `class V(str, Enum): ONE = "1"` it yields `"V.ONE"` — so
+    the compile entry would refuse a version the parser ACCEPTS. That is a parity
+    break in the accept direction, introduced by the hardening meant to establish
+    parity. The base-class slot bypasses the override AND preserves the value.
+    """
+    from enum import Enum
+
+    class _V(str, Enum):
+        ONE = "1"
+
+    class _IE(int, Enum):
+        TWO = 2
+
+    assert pl._plain_scalar(_V.ONE) == "1"
+    assert type(pl._plain_scalar(_V.ONE)) is str
+    assert pl._plain_scalar(_IE.TWO) == 2
+    assert type(pl._plain_scalar(_IE.TWO)) is int
+
+    # ...and end to end: a str-Enum version must still COMPILE, not be refused.
+    from boomi_mcp.models.process_ir import ProcessIRV1
+
+    base = _control_flow_ir()
+
+    class _Sub(ProcessIRV1):
+        def model_dump(self, **_kwargs):
+            payload = base.model_dump(mode="python", warnings=False)
+            payload["version"] = _V.ONE
+            return payload
+
+    smuggler = _Sub.model_construct(
+        **{name: getattr(base, name) for name in ProcessIRV1.model_fields}
+    )
+    revalidated = pl._reparse_process_ir_for_compile(smuggler)
+    assert revalidated.version == "1"
+    assert type(revalidated.version) is str
+
+
+def test_hook_stripping_and_value_preservation_hold_together():
+    """The two properties are not in tension, and both are asserted on ONE value.
+
+    A fix that stripped hooks by corrupting the value, or preserved the value by
+    keeping the hooks, would satisfy one of these tests and fail the other.
+    """
+    class _Sneaky(str):
+        def __str__(self):
+            return "CHANGED"
+
+    reduced = pl._plain_scalar(_Sneaky("kept"))
+    assert reduced == "kept", reduced          # value preserved
+    assert type(reduced) is str                # hooks stripped
