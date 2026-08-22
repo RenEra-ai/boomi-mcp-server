@@ -71,6 +71,12 @@ condition explicitly: the third round's fix must come back CLEAN from the Stage-
 review, and the issue is then closed and pushed to `dev` rather than being given a fourth §6
 evaluation.
 
+**Promoted to a STANDING repo rule on the same day** (owner instruction): the cap now lives in
+`CLAUDE.md` and `AGENTS.md` beside the rest of the completion workflow, so it governs every slice
+rather than this one. The rationale recorded there is this slice's own evidence — the architect gate
+reviews the guards as well as the code, and a guard is always hardenable, so the loop has no natural
+fixed point; the commit review closes instead because it judges a finite delta.
+
 Recorded here rather than applied silently, because it changes a roster gate's window and the
 repo's default is a severity-aware checkpoint rather than a fixed cap. What it does NOT change:
 the correction applied in each round still gets its owed validation unconditionally, the
