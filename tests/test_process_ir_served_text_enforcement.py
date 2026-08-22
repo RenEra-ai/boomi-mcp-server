@@ -75,6 +75,7 @@ PINNED_DELEGATION_SITES = {
         "the parse-error translator forwards a `code` it resolved from the routing map "
         "`_CUSTOM_ERROR_CODES` earlier in the same function; those codes are collected "
         "from that map, which is the authority for them",
+        (),
     ),
     (
         "src/boomi_mcp/compiler/process_ir/semantic_validation/flow.py",
@@ -84,6 +85,7 @@ PINNED_DELEGATION_SITES = {
         1,
         "re-serves `item.code` from a finding the semantic report already produced, so it "
         "introduces no code of its own",
+        (),
     ),
     (
         "src/boomi_mcp/compiler/process_ir/semantic_validation/validation_policy.py",
@@ -93,6 +95,26 @@ PINNED_DELEGATION_SITES = {
         1,
         "raises the exemption code chosen by `LegacyValidationPolicyV1.exemption_for`; "
         "the family is derived below from the policy registry, which owns it",
+        (),
+    ),
+    (
+        "src/boomi_mcp/compiler/process_ir/invariants.py",
+        "_fail",
+        "Name(id='code', ctx=Load())",
+    ): (
+        1,
+        "`_check_region_containment` forwards its `code` parameter, which sits in SIXTH "
+        "position and carries a default. Two of its three call sites omit it and one "
+        "passes a literal, so the site can emit exactly the two codes listed here. That "
+        "list is human-stated ON PURPOSE: a revision of the reader tried to derive it "
+        "and was wrong in four consecutive review rounds, because Python's binding and "
+        "call syntax has no closed case set. The list is not taken on trust — the codes "
+        "are asserted served against the live registry below, so removing either "
+        "registration fails this file.",
+        (
+            "PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW",
+            "PROCESS_IR_COMPILE_ERROR_REGION_INVALID",
+        ),
     ),
 }
 
@@ -190,7 +212,7 @@ def test_the_only_unreadable_emission_sites_are_the_pinned_delegations():
         (path, sink, dump) for path, _lineno, sink, dump in unresolved
     )
     expected = collections.Counter(
-        {site: count for site, (count, _reason) in PINNED_DELEGATION_SITES.items()}
+        {site: count for site, (count, _reason, _codes) in PINNED_DELEGATION_SITES.items()}
     )
     assert observed == expected, {
         "unpinned (a new dynamic emission path)": sorted(
@@ -208,10 +230,25 @@ def test_the_only_unreadable_emission_sites_are_the_pinned_delegations():
     # Every pinned site states WHY it cannot be read. A blank reason is an unexplained
     # hole in the reader, which is what this table exists to prevent.
     blank = sorted(
-        site for site, (_count, reason) in PINNED_DELEGATION_SITES.items()
+        site for site, (_count, reason, _codes) in PINNED_DELEGATION_SITES.items()
         if not reason.strip()
     )
     assert blank == [], blank
+
+    # A pinned site that NAMES the codes it can emit has that claim checked, not taken on
+    # trust: each one must be served with complete text. This is what keeps a human-stated
+    # list honest — the alternative to a resolver that cannot converge is a short list a
+    # machine still verifies.
+    served = _served()
+    unserved = sorted(
+        (site, code)
+        for site, (_count, _reason, codes) in PINNED_DELEGATION_SITES.items()
+        for code in codes
+        if code not in served
+        or not (served[code].get("message") or "").strip()
+        or not (served[code].get("remediation") or "").strip()
+    )
+    assert unserved == [], unserved
 
 
 def test_every_emittable_process_ir_code_has_complete_served_text():
@@ -353,90 +390,70 @@ def test_the_guard_fails_when_a_registration_is_removed(monkeypatch):
     assert code in str(caught.value)
 
 
-def test_the_forward_resolver_fails_closed_on_every_shape_it_does_not_model():
-    """The whitelist is real: each rejected Python form must yield NO resolution.
+def test_a_forwarded_code_parameter_is_reported_rather_than_resolved():
+    """The convergent property, after four rounds of trying to resolve instead.
 
-    Three consecutive Stage-2 rounds found a further call form the resolver mis-read, each
-    time because it resolved by default and special-cased surprises. Python call syntax is
-    not a closed set, so that direction cannot converge — the resolver now accepts a small
-    stated shape and everything else becomes an unresolved site a human must justify.
+    A revision of the reader tried to work out which codes could reach a forwarded
+    parameter, by reading its default and the owner's call sites. Every round of review
+    found another Python form it read wrongly — unpacked arguments, a rebound parameter, an
+    unreachable default, an aliased call, and bindings (`case x`, `import ... as x`, a
+    nested `def x`) that carry no `Name(Store)` node at all. Each fix was right and the
+    next round found another form: Python's binding and call syntax has no closed case set,
+    so a reader over it cannot make the coverage claim the structural-fix rule requires.
 
-    This control is executable rather than hand-run: `_ModuleScan` takes source text, so
-    each shape is a real parse, not a description of one. A control that only asserted the
-    accepted shape would pass on a resolver that accepted everything.
+    So the reader no longer tries. It reports the SHAPE, and the two outcomes below are the
+    whole contract:
+
+    * a forward into a registered sink's OWN first parameter is the sink's definition body
+      — skipped, because that sink's call sites are scanned instead;
+    * every other forward is UNRESOLVED, and must be pinned with a human-stated authority.
+
+    Asserted on real parsed source, in both directions, so a reader that resolved
+    everything and a reader that skipped everything both fail.
     """
     import ast as _ast
 
     from _process_ir_diagnostic_emissions import _ModuleScan, _called_name
 
-    def resolve(source):
+    def sites(source):
         scan = _ModuleScan("<synthetic>", source)
+        out = []
         for node in _ast.walk(scan.tree):
-            if isinstance(node, _ast.Call) and _called_name(node) == "finding" and node.args:
-                forward = scan.forwarded_parameter(node, node.args[0])
-                if forward is None:
-                    return None
-                return scan.resolve_forward(forward)
-        raise AssertionError("no finding() call found in the synthetic module")
+            if not isinstance(node, _ast.Call) or _called_name(node) != "finding":
+                continue
+            if not node.args:
+                continue
+            forward = scan.forwarded_parameter(node, node.args[0])
+            skipped = (
+                forward is not None
+                and forward[0].name in scan.sinks
+                and forward[1] == 0
+            )
+            out.append((forward is not None, skipped))
+        return out
 
-    accepted = '''
-def helper(code="PROCESS_IR_SEMANTIC_NESTING_LIMIT"):
+    # A first-parameter wrapper: recognised as a forward AND skipped.
+    wrapper = """
+def finding(code, severity, phase, path):
+    return code
+
+def report(code, node):
     return finding(code, "error", "p", "/body")
+"""
+    assert sites(wrapper) == [(True, True)], sites(wrapper)
 
-def a(): helper()
-def b(): helper("PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED")
-'''
-    # CONTROL: the shape the resolver DOES model resolves to both codes, so a resolver
-    # that rejected everything would fail here rather than passing the whole test.
-    assert resolve(accepted) == (
-        "PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED",
-        "PROCESS_IR_SEMANTIC_NESTING_LIMIT",
-    ), resolve(accepted)
-
-    rejected = {
-        "keyword unpacking hides the parameter": '''
-def helper(code="PROCESS_IR_SEMANTIC_NESTING_LIMIT"):
+    # Any OTHER parameter position: a forward, but NOT skipped — it must reach the
+    # unresolved table. This is the case the deleted resolver used to swallow.
+    sixth = """
+def helper(edge, prefix, by_id, outbound, node, code="X"):
     return finding(code, "error", "p", "/body")
+"""
+    assert sites(sixth) == [(True, False)], sites(sixth)
 
-def a(): helper(**{"code": "SOMETHING_ELSE"})
-''',
-        "star-args make positions meaningless": '''
-def helper(code="PROCESS_IR_SEMANTIC_NESTING_LIMIT"):
-    return finding(code, "error", "p", "/body")
-
-def a(): helper(*args)
-''',
-        "a rebound parameter is not a forward": '''
-def helper(code="PROCESS_IR_SEMANTIC_NESTING_LIMIT"):
-    code = choose()
-    return finding(code, "error", "p", "/body")
-
-def a(): helper()
-''',
-        "a helper nobody calls emits nothing": '''
-def helper(code="PROCESS_IR_SEMANTIC_NESTING_LIMIT"):
-    return finding(code, "error", "p", "/body")
-''',
-        "an unreadable argument": '''
-def helper(code="PROCESS_IR_SEMANTIC_NESTING_LIMIT"):
-    return finding(code, "error", "p", "/body")
-
-def a(): helper(pick_one())
-''',
-    }
-    survived = sorted(name for name, source in rejected.items() if resolve(source) is not None)
-    assert survived == [], survived
-
-    # An UNREACHABLE default is a different case from a rejected shape: when every call
-    # supplies the parameter, the forward still resolves — to the supplied code ALONE. The
-    # default must not appear, or a served registration could survive for a code no
-    # execution path can raise. Asserted as an equality, not as "does not crash".
-    every_call_overrides = '''
-def helper(code="PROCESS_IR_SEMANTIC_NESTING_LIMIT"):
-    return finding(code, "error", "p", "/body")
-
-def a(): helper("PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED")
-'''
-    assert resolve(every_call_overrides) == ("PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED",), (
-        resolve(every_call_overrides)
-    )
+    # A literal is not a forward at all, and must resolve normally rather than being
+    # reported — otherwise the pinned table would fill with ordinary emissions.
+    literal = """
+def emit():
+    return finding("PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED", "error", "p", "/body")
+"""
+    assert sites(literal) == [(False, False)], sites(literal)

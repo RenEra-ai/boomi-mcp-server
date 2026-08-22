@@ -34,9 +34,19 @@ Python control flow. An AST resolver that tries to follow arbitrary data flow is
 implementation of the interpreter, and #175's four-round prose-scanner failure is the
 recorded cost of a checker that models an open-ended space. Resolution covers exactly the
 closed forms this tree uses — literal, module constant, `boomi_mcp.errors` constant,
-routing-map value, conditional between two resolvable codes, a local helper whose every
-return is a resolvable code, and one-hop parameter forwarding — and everything else is a
-pinned site with a stated reason.
+routing-map value, conditional between two resolvable codes, and a local helper whose every
+return is a resolvable code — and everything else is a pinned site with a stated reason.
+
+A revision of this module DID try to resolve codes reaching a forwarded parameter, by
+reading that parameter's default and the owner's call sites. It was wrong in four
+consecutive review rounds — unpacked arguments, a rebound parameter, an unreachable
+default, an aliased call, and bindings (`case x`, `import ... as x`, a nested `def x`) that
+carry no `Name(Store)` node at all. Each fix was correct and the next round found another
+form, because Python's binding and call syntax has no closed case set — the same shape as
+this repo's prose scanner, which was wrong four rounds running for the same reason. The
+resolver is GONE rather than extended: such a forward is now reported unresolved, and the
+one site that has one is pinned with the authority for its codes stated by a human and
+asserted against the live registry.
 """
 
 from __future__ import annotations
@@ -223,16 +233,15 @@ class _ModuleScan:
     def forwarded_parameter(self, call, argument):
         """`(owner, index, name)` when the code argument is the enclosing function's own parameter.
 
-        The first version required the FIRST parameter, which silently mis-handled
-        `_check_region_containment(..., code=..., message=...)`: its code parameter sits in
-        sixth position and carries a DEFAULT, and two of its three call sites omit it — so
-        the code that default names was emitted by a path the reader could not see. Any
-        parameter position now counts.
-
-        A parameter that is REBOUND inside the owner is not a forward at all: matching the
-        identifier would then read the signature while the sink receives something else
-        entirely. Such a call is reported unresolved rather than resolved from the wrong
-        source.
+        This reports the SHAPE only. It deliberately does not try to say which codes can
+        reach that parameter — see the module docstring: an earlier revision did, and four
+        consecutive review rounds each found a further Python form it read wrongly
+        (unpacked arguments, a rebound parameter, an unreachable default, an aliased call,
+        bindings that carry no `Name(Store)` node at all). Python's binding and call syntax
+        is not a closed set, so a reader that resolves it cannot make the coverage claim
+        the structural-fix rule requires. A forward whose owner is not itself a
+        first-parameter sink is therefore reported UNRESOLVED, and lands in the caller's
+        pinned table where a human states the authority.
         """
         if not isinstance(argument, ast.Name):
             return None
@@ -240,94 +249,9 @@ class _ModuleScan:
         if owner is None:
             return None
         for index, arg in enumerate(owner.args.args):
-            if arg.arg != argument.id:
-                continue
-            if self._is_rebound(owner, argument.id):
-                return None
-            return (owner, index, arg.arg)
+            if arg.arg == argument.id:
+                return (owner, index, arg.arg)
         return None
-
-    @staticmethod
-    def _is_rebound(owner, name):
-        """True if `name` is assigned anywhere in `owner` — a store, `for` target, `with`
-        binding, walrus, comprehension target or `except ... as`."""
-        for node in ast.walk(owner):
-            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == name:
-                return True
-            if isinstance(node, ast.ExceptHandler) and node.name == name:
-                return True
-        return False
-
-    def resolve_forward(self, forward):
-        """Every code that can reach a forwarded parameter, or None if ANY path is opaque.
-
-        This is a WHITELIST, and deliberately so. Three consecutive review rounds found a
-        further Python form the previous shape mis-read — unpacked arguments, a rebound
-        parameter, a default nothing can reach — because it resolved by default and
-        special-cased the surprises. Python's call syntax is not a closed set, so that
-        direction cannot converge; this repo has the same lesson recorded for a prose
-        scanner that was wrong four rounds running.
-
-        So the shape it accepts is small and stated, and EVERYTHING else returns None and
-        lands in the pinned unresolved table where a human must justify it:
-
-        * the owner is called at least once (a helper nobody calls emits nothing);
-        * no call to the owner uses `*args` or `**kwargs` — positional indices and keyword
-          names are meaningless under unpacking;
-        * every explicitly supplied argument at that position resolves to a code;
-        * the parameter's DEFAULT is counted only if some call actually omits it.
-        """
-        owner, index, param = forward
-        codes = set()
-        omitted = False
-        seen_call = False
-
-        for node in ast.walk(self.tree):
-            if not isinstance(node, ast.Call) or _called_name(node) != owner.name:
-                continue
-            seen_call = True
-
-            # Unpacking makes position and keyword identity unknowable. Fail closed.
-            if any(isinstance(arg, ast.Starred) for arg in node.args):
-                return None
-            if any(kw.arg is None for kw in node.keywords):
-                return None
-
-            supplied = None
-            if len(node.args) > index:
-                supplied = node.args[index]
-            else:
-                for kw in node.keywords:
-                    if kw.arg == param:
-                        supplied = kw.value
-                        break
-            if supplied is None:
-                omitted = True
-                continue
-            resolved = self._simple(supplied)
-            if resolved is None:
-                return None
-            codes.add(resolved)
-
-        if not seen_call:
-            return None
-
-        # The default is REACHABLE only if some call omits the parameter. Counting it
-        # unconditionally would let a served registration survive for a code no execution
-        # path can raise — the exact drift the served-code equality exists to catch.
-        if omitted:
-            defaults = owner.args.defaults
-            offset = len(owner.args.args) - len(defaults)
-            if not defaults or index < offset:
-                return None
-            resolved = self._simple(defaults[index - offset])
-            if resolved is None:
-                return None
-            codes.add(resolved)
-
-        if not codes:
-            return None
-        return tuple(sorted(codes))
 
     def _simple(self, node):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -475,19 +399,14 @@ def collect_emissions():
                 bucket.update(resolved)
                 continue
 
-            # A call forwarding the ENCLOSING function's own parameter is a wrapper body,
-            # not an emission of its own. Where the wrapper is itself a registered sink its
-            # call sites are already scanned; otherwise the codes are resolved here from the
-            # parameter's default and the owning function's call sites. Only a forward whose
-            # sources cannot all be read falls through to the unresolved table.
+            # A call forwarding a registered SINK's own first parameter is that sink's
+            # definition body, not an emission: the sink's call sites are scanned instead,
+            # and they carry the codes. Every OTHER forward — any other parameter position,
+            # any other owner — falls through to the unresolved table, where the pinned
+            # entry names the authority that supplies its codes.
             forward = scan.forwarded_parameter(node, argument)
-            if forward is not None:
-                if forward[0].name in scan.sinks and forward[1] == 0:
-                    continue
-                forwarded = scan.resolve_forward(forward)
-                if forwarded is not None:
-                    bucket.update(forwarded)
-                    continue
+            if forward is not None and forward[0].name in scan.sinks and forward[1] == 0:
+                continue
 
             # The COMPLETE dump. Truncating it to 80 characters made two long
             # expressions sharing a prefix collide in the guard's site key, which is the

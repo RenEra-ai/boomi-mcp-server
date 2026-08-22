@@ -10306,4 +10306,4 @@
 {"kind":"test","id":"pytest-010305","node_id":"tests/test_process_ir_served_text_enforcement.py::test_the_non_emittable_declaration_is_proven_not_merely_declared","state":"active"}
 {"kind":"test","id":"pytest-010306","node_id":"tests/test_process_ir_served_text_enforcement.py::test_the_only_unreadable_emission_sites_are_the_pinned_delegations","state":"active"}
 {"kind":"test","id":"pytest-010307","node_id":"tests/test_process_ir_served_text_enforcement.py::test_the_served_code_set_is_exactly_what_the_authorities_account_for","state":"active"}
-{"kind":"test","id":"pytest-010308","node_id":"tests/test_process_ir_served_text_enforcement.py::test_the_forward_resolver_fails_closed_on_every_shape_it_does_not_model","state":"active"}
+{"kind":"test","id":"pytest-010308","node_id":"tests/test_process_ir_served_text_enforcement.py::test_a_forwarded_code_parameter_is_reported_rather_than_resolved","state":"active"}
