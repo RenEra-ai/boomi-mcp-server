@@ -71,9 +71,12 @@ condition explicitly: the third round's fix must come back CLEAN from the Stage-
 review, and the issue is then closed and pushed to `dev` rather than being given a fourth §6
 evaluation.
 
-**Promoted to a STANDING repo rule on the same day** (owner instruction): the cap now lives in
-`CLAUDE.md` and `AGENTS.md` beside the rest of the completion workflow, so it governs every slice
-rather than this one. The rationale recorded there is this slice's own evidence — the architect gate
+**Promoted to a STANDING repo rule on the same day** (owner instruction). It lives in
+`docs/architecture/COMPLETION_WORKFLOW_RULES.md`, which is TRACKED; `CLAUDE.md` and `AGENTS.md` cite
+it. Writing it only into those two files was the first attempt and it was WRONG — both are gitignored
+(`.gitignore:100-101`), so the "standing rule" existed in one working copy and no clone would ever
+have seen it. The Stage-2 commit review caught it, which is the same defect class this whole slice is
+about: a durable claim with nothing behind it. The rationale recorded there is this slice's own evidence — the architect gate
 reviews the guards as well as the code, and a guard is always hardenable, so the loop has no natural
 fixed point; the commit review closes instead because it judges a finite delta.
 

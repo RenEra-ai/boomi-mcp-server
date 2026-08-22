@@ -1777,6 +1777,10 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     # is exactly what happened when #171's arrived.
     "AUDIT_LEDGER_TEMPLATE",
     "ENDGAME_VERIFICATION_GATE",
+    # The tracked home for standing completion-workflow amendments. `CLAUDE.md` and
+    # `AGENTS.md` are gitignored, so a rule meant to govern future slices lives here and
+    # a ledger recording its adoption has to be able to name it.
+    "COMPLETION_WORKFLOW_RULES",
     # Actions default variables. The #171 ledger names them when recording the
     # checkout binding and the workflow's two routes — environment variables the
     # gate CONSUMES, never diagnostics it can emit.
