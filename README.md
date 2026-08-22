@@ -12,6 +12,22 @@ A production-ready Model Context Protocol (MCP) server that enables Claude Code 
 
 ---
 
+## Contributing: the completion workflow
+
+Development in this repository follows a QA + code-review completion workflow whose per-slice
+mechanics live in `CLAUDE.md` / `AGENTS.md`. **Those two files are gitignored**, so a fresh clone
+does not receive them — they are provisioned locally.
+
+Standing amendments that must govern EVERY slice, in every checkout, are therefore tracked here:
+
+- **[`docs/architecture/COMPLETION_WORKFLOW_RULES.md`](docs/architecture/COMPLETION_WORKFLOW_RULES.md)**
+  — currently: the architect implementation review is capped at three evaluations, and the closing
+  gate is a clean Stage-2 commit review over the third round's correction.
+
+If you are setting up a local `CLAUDE.md` or `AGENTS.md`, it must cite that file;
+`tests/test_completion_workflow_rules_are_discoverable.py` enforces the citation whenever those
+files are present.
+
 ## Features
 
 - 🔐 **Google OAuth 2.0** - Secure authentication with consent screen

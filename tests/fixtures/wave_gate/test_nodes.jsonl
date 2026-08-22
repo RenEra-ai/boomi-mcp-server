@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10278,"minimum_collected":10278,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10281,"minimum_collected":10281,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -10314,3 +10314,6 @@
 {"kind":"test","id":"pytest-010313","node_id":"tests/test_issue_177_ledger_class_table_is_derived.py::test_the_defect_class_table_matches_the_rows_it_is_derived_from","state":"active"}
 {"kind":"test","id":"pytest-010314","node_id":"tests/test_process_ir_served_text_enforcement.py::test_no_forwarding_call_site_builds_its_code_at_runtime","state":"active"}
 {"kind":"test","id":"pytest-010315","node_id":"tests/test_process_ir_served_text_enforcement.py::test_the_legacy_adapter_boundary_raises_no_canonical_diagnostic","state":"active"}
+{"kind":"test","id":"pytest-010316","node_id":"tests/test_completion_workflow_rules_are_discoverable.py::test_any_local_instruction_file_cites_the_tracked_rules","state":"active"}
+{"kind":"test","id":"pytest-010317","node_id":"tests/test_completion_workflow_rules_are_discoverable.py::test_the_tracked_readme_names_the_rules_document","state":"active"}
+{"kind":"test","id":"pytest-010318","node_id":"tests/test_completion_workflow_rules_are_discoverable.py::test_the_tracked_rules_document_exists_and_carries_the_rule","state":"active"}

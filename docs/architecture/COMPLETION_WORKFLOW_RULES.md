@@ -8,6 +8,15 @@ and the local instruction files cite it.
 This file holds standing amendments to the completion workflow. It does not restate the workflow —
 `CLAUDE.md` does that — only the rules that were adopted later and must survive a clone.
 
+**How a fresh clone reaches this file, and the limit of that.** The tracked `README.md` names it
+under *Contributing: the completion workflow*, and
+`tests/test_completion_workflow_rules_are_discoverable.py` asserts three things: this document
+exists and still carries its rule, the README still points at it, and any local `CLAUDE.md` /
+`AGENTS.md` that is PRESENT cites it. What no tracked artifact can do is make an ignored file appear
+in a clone — so an agent that is handed a `CLAUDE.md` without the citation is caught by the test,
+while an agent working in a clone with no instruction file at all has the README as its entry point.
+That is the honest ceiling of this arrangement while the instruction files stay gitignored.
+
 ---
 
 ## The architect implementation review is capped at THREE evaluations
