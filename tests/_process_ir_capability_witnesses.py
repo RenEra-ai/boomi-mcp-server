@@ -242,6 +242,10 @@ def _compile_refusal(doc, symbols, capabilities=None):
     from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
     from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
 
+    # Instrumented like `_compiles`: a frozen `refuses` witness reaches the compiler through
+    # here, and recording in only some helpers would leave `compiled_digests()` empty for it
+    # — rejecting a VALID witness rather than admitting an invalid one.
+    _COMPILED_DIGESTS.append(_digest(doc))
     try:
         compile_process_ir_v1(_parse(doc), symbols, capabilities=capabilities)
     except ProcessIRCompileError as exc:

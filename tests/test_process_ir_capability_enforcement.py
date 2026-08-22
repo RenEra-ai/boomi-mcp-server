@@ -260,15 +260,22 @@ def test_every_witness_records_its_fixture_provenance():
             if unopened:
                 bad.append((key, "claims a frozen fixture its run never loaded", unopened))
                 continue
-            # ...and the fixture's CONTENT is what reached the COMPILER. Opening a file, or
-            # parsing it as a throwaway, and then compiling something else would otherwise
-            # satisfy the claim.
+            # ...and the fixture's CONTENT is the ONLY thing that reached the compiler.
+            # Membership alone was still fail-open: a witness could compile the claimed
+            # fixture as a throwaway and return the result of compiling an inline document,
+            # so the digest was present but the observed proof came from elsewhere. Set
+            # EQUALITY binds the claim to what the witness actually demonstrated.
             compiled = set(compiled_digests())
-            uncompiled = [rel for rel in named if opened[rel] not in compiled]
-            if uncompiled:
-                bad.append(
-                    (key, "opened a frozen fixture but compiled something else", uncompiled)
-                )
+            claimed = {opened[rel] for rel in named}
+            if compiled != claimed:
+                bad.append((
+                    key,
+                    "frozen claim not bound to what was compiled",
+                    {"claimed": sorted(named),
+                     "unclaimed compiles": len(compiled - claimed),
+                     "claimed but never compiled": sorted(
+                         rel for rel in named if opened[rel] not in compiled)},
+                ))
                 continue
             frozen.append(key)
 

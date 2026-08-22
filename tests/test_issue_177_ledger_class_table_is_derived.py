@@ -33,16 +33,28 @@ _EXCLUDED_PREFIX = "INH-"
 #: Markdown-escaped pipe, and a naive `split("|")` then shifts every later cell — the defect
 #: class stops being `cells[5]` and the row is silently DROPPED, which would let someone
 #: append such a row and leave the table stale with this check still green.
-_UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
+#: A pipe is a DELIMITER when the backslash run immediately before it is even — `\\|` is a
+#: literal backslash followed by a real separator, while `\|` is an escaped pipe. A negative
+#: lookbehind cannot tell those apart, so the run is counted modulo two.
+_PIPE_RUN = re.compile(r"(\\*)\|")
 
 
 def _cells(line):
     body = line.strip()
     if body.startswith("|"):
         body = body[1:]
-    if body.endswith("|") and not body.endswith("\\|"):
-        body = body[:-1]
-    return [cell.strip() for cell in _UNESCAPED_PIPE.split(body)]
+    cells, start, last = [], 0, 0
+    for match in _PIPE_RUN.finditer(body):
+        if len(match.group(1)) % 2:
+            continue  # odd run -> the pipe is escaped, not a delimiter
+        cells.append(body[start : match.end() - 1])
+        start = match.end()
+        last = match.end()
+    tail = body[start:]
+    # A trailing delimiter leaves an empty tail, which is not a cell.
+    if tail.strip() or not last:
+        cells.append(tail)
+    return [cell.strip() for cell in cells]
 
 
 def _finding_rows(text):
