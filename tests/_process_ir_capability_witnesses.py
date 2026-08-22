@@ -125,8 +125,23 @@ class UnsupportedDisposition:
     reason: str
 
 
+#: Every fixture path `_fixture()` has read since the last `reset_loaded_fixtures()`.
+#: A provenance STRING can claim any inventory path; this records what the witness's `run`
+#: actually opened, so the claim can be checked against execution instead of text.
+_LOADED_FIXTURES = []
+
+
+def reset_loaded_fixtures():
+    _LOADED_FIXTURES.clear()
+
+
+def loaded_fixtures():
+    return tuple(_LOADED_FIXTURES)
+
+
 def _fixture(relative):
     assert relative in FIXTURE_PROVENANCE, relative
+    _LOADED_FIXTURES.append(relative)
     return json.loads((_FIXTURES / relative).read_text(encoding="utf-8"))
 
 
@@ -398,10 +413,11 @@ def _w_rich_branch_decision_bodies():
 
 def _w_scoped_try_catch():
     relative = "error_handling/scoped_try_catch_process_retry0_exception.json"
-    doc = _fixture(relative)
 
     def run():
-        return _compiles(doc, error_symbols())
+        # Read INSIDE the run: the provenance gate binds a frozen claim to what the run
+        # actually loaded, and an import-time read is invisible to it.
+        return _compiles(_fixture(relative), error_symbols())
 
     def observe(result):
         cfg, plan = result
@@ -424,10 +440,9 @@ def _w_scoped_try_catch():
 
 def _w_bounded_retry():
     relative = "error_handling/scoped_try_catch_connector_read_retry5_cache_catch.json"
-    doc = _fixture(relative)
 
     def run():
-        return _compiles(doc, error_symbols())
+        return _compiles(_fixture(relative), error_symbols())
 
     def observe(result):
         cfg, plan = result

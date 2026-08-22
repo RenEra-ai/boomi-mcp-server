@@ -138,11 +138,16 @@ UNSERVED_BY_DESIGN = {
 #: A nested function is not reachable through `getattr`, so `inspect.signature` cannot read
 #: its default — the one case where neither the source census nor the runtime check can
 #: speak, and therefore the one case a human must.
+#: The fourth element is `has_default`, read from the AST — and it must be FALSE. A pinned
+#: disposition that merely SAID "there is no default to read" was fail-open: the owner could
+#: gain a constructed default, the tuple identity would not move, and the source census
+#: cannot see an assembled value. The claim is now a checked fact.
 UNREADABLE_DEFAULTS = {
     (
         "src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py",
         "_report",
         "code",
+        False,
     ): (
         "a closure inside `collect_lineage_findings`; it takes `code` as a required "
         "parameter with NO default (verified in source), so there is no default value to "
@@ -605,3 +610,8 @@ def test_every_runtime_forward_default_is_served():
     assert unaccounted == [], unaccounted
     stale = sorted(set(UNREADABLE_DEFAULTS) - set(unreadable))
     assert stale == [], stale
+    # No pinned unreadable owner may carry a default. If one gains a default its
+    # `has_default` flips True, the tuple stops matching, and it lands in `unaccounted`
+    # above — but this states the invariant directly so the reason cannot be misread.
+    with_defaults = sorted(row for row in unreadable if row[3])
+    assert with_defaults == [], with_defaults

@@ -384,6 +384,24 @@ def _has_literal_text(node):
     return False
 
 
+def _has_default(owner, param):
+    """Does `param` carry a default in `owner`'s signature? Read from the AST.
+
+    Positional defaults align to the TAIL of `posonlyargs + args`; keyword-only defaults
+    align element-wise with `kwonlyargs` and may be `None` for a required one.
+    """
+    positional = list(owner.args.posonlyargs) + list(owner.args.args)
+    defaults = list(owner.args.defaults)
+    offset = len(positional) - len(defaults)
+    for index, arg in enumerate(positional):
+        if arg.arg == param:
+            return index >= offset
+    for arg, default in zip(owner.args.kwonlyargs, owner.args.kw_defaults):
+        if arg.arg == param:
+            return default is not None
+    return False
+
+
 def _called_name(call):
     func = call.func
     if isinstance(func, ast.Name):
@@ -476,12 +494,21 @@ def runtime_forward_defaults():
                 module = importlib.import_module(dotted)
             function = getattr(module, owner.name, None)
             if function is None or not callable(function):
-                unreadable.append((relative, owner.name, param))
+                # Not introspectable (a closure is not reachable through `getattr`), so the
+                # AST is asked the one question that still has a definite answer: does this
+                # parameter carry a DEFAULT at all? A pinned disposition saying "there is no
+                # default to read" is then a checked fact rather than prose — without it,
+                # the owner could gain a constructed default and this tuple would not move.
+                unreadable.append(
+                    (relative, owner.name, param, _has_default(owner, param))
+                )
                 continue
             try:
                 default = inspect.signature(function).parameters[param].default
             except (TypeError, ValueError, KeyError):
-                unreadable.append((relative, owner.name, param))
+                unreadable.append(
+                    (relative, owner.name, param, _has_default(owner, param))
+                )
                 continue
             if isinstance(default, str) and default:
                 defaults[(relative, owner.name, param)] = default

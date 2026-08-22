@@ -202,6 +202,8 @@ def test_every_witness_records_its_fixture_provenance():
         PROVENANCE_INLINE_REFUSAL,
         PROVENANCE_KINDS,
         PROVENANCE_SYNTHETIC_CFG,
+        loaded_fixtures,
+        reset_loaded_fixtures,
     )
 
     # A closed set was the first shape and it is still fail-open: it validates only the
@@ -240,6 +242,22 @@ def test_every_witness_records_its_fixture_provenance():
             missing = [rel for rel in named if not (_FIXTURES / rel).is_file()]
             if missing:
                 bad.append((key, "claims a frozen fixture that does not exist", missing))
+                continue
+            # BOUND TO EXECUTION, not to the string. Checking only that the inventory
+            # contains the named path let an inline witness label itself with a real
+            # fixture it never opened — and such a false claim also counted toward the
+            # non-vacuity floor below, making the floor read stronger the more it was
+            # lied to. The witness is RUN and the loader records what it actually read.
+            reset_loaded_fixtures()
+            try:
+                entry.run()
+            except Exception as exc:  # noqa: BLE001 - the run itself is graded elsewhere
+                bad.append((key, "run failed while checking provenance", repr(exc)))
+                continue
+            opened = set(loaded_fixtures())
+            unopened = [rel for rel in named if rel not in opened]
+            if unopened:
+                bad.append((key, "claims a frozen fixture its run never loaded", unopened))
                 continue
             frozen.append(key)
 

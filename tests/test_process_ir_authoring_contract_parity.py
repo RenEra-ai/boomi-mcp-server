@@ -438,7 +438,12 @@ def test_a_blank_diagnostic_field_from_any_producer_is_refused():
         field: sorted(spec["code"] for spec in getattr(live, field))[0]
         for field in ("compiler_specs", "parse_specs", "finding_specs")
     }
-    assert len(set(producers.values())) == 3, producers
+    # NOT required to be distinct. `_diagnostic_entries` explicitly supports one code
+    # emitted by several producers, and the live registries already contain such codes, so
+    # demanding three different sample codes would fail this test on a valid registry
+    # change that has nothing to do with blank fields. Each source is perturbed
+    # independently, which needs no uniqueness at all.
+    assert len(producers) == 3, producers
     canary = "CANARY-AUTHORED-CONTENT-DO-NOT-SERVE"
     for source_field, code in producers.items():
         for blank in ("", "   ", None):

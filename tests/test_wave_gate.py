@@ -1876,6 +1876,8 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "UNREADABLE_DEFAULTS",
     "PROCESS_IR_",
     "SEMANTIC_TOTALLY_NEW_UNREGISTERED",
+    "SEMANTIC_ASSEMBLED_UNREGISTERED",
+    "PROCESS_IR_SEMANTIC_ASSEMBLED_UNREGISTERED",
     "PROCESS_IR_SEMANTIC_TOTALLY_NEW_UNREGISTERED",
     # The #149 inventory's route table — a durable production constant any later
     # ledger classifying a component-XML write route would name, not a code.
