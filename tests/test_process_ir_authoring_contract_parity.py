@@ -1047,16 +1047,22 @@ def _assert_not_fenced(doc, offset, marker):
     open_char = None
     open_len = 0
     for line in doc[:offset].splitlines():
-        stripped = line.lstrip()
-        if not stripped or stripped[0] not in "`~":
+        stripped = line.lstrip(" ")
+        indent = len(line) - len(stripped)
+        # Python-Markdown treats a marker indented FOUR or more spaces as code, not a fence.
+        if indent >= 4 or not stripped or stripped[0] not in "`~":
             continue
         char = stripped[0]
         run = len(stripped) - len(stripped.lstrip(char))
         if run < 3:
             continue
+        remainder = stripped[run:].strip()
         if open_char is None:
             open_char, open_len = char, run
-        elif char == open_char and run >= open_len:
+        elif char == open_char and run >= open_len and not remainder:
+            # A CLOSING fence carries nothing after its run; a line with trailing text is an
+            # info string, which opens rather than closes. Treating it as a close let §8 sit
+            # inside rendered code with parity reporting balanced.
             open_char, open_len = None, 0
     if open_char is not None:
         raise AssertionError(

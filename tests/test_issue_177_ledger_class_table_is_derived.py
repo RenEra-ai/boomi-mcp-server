@@ -79,12 +79,22 @@ def _finding_rows(text):
         None,
     )
     assert header is not None, "no finding-table header found"
+    # The table ends at a BLANK line, which is the real boundary. Stopping on "too few
+    # cells" meant a row that omitted one cell — an undispositioned finding, say — was read
+    # as the end of the table and silently vanished, leaving the derived totals green. A
+    # non-blank row of the wrong shape is now a FAILURE, which is the whole point: this
+    # check exists to make an unaccounted finding impossible to hide.
     body = []
+    malformed = []
     for line in lines[header + 1 :]:
+        if not line.strip():
+            break
         cells = _cells(line)
         if len(cells) < 9:
-            break
+            malformed.append(line)
+            continue
         body.append(cells)
+    assert malformed == [], malformed
 
     rows = []
     for cells in body:

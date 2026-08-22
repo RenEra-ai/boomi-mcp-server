@@ -239,7 +239,8 @@ class _ModuleScan:
         # ALIASES are sinks. `d = diagnostic` then `d(<assembled code>, ...)` reached the
         # canonical factory while the reader matched only the original name — a rename away
         # from the whole scan. Resolved to a fixpoint so an alias of an alias counts too.
-        for _pass in range(3):
+        while True:
+            before = len(self.sinks)
             for node in ast.walk(self.tree):
                 if (
                     isinstance(node, ast.Assign)
@@ -256,6 +257,8 @@ class _ModuleScan:
                     and isinstance(node.target, ast.Name)
                 ):
                     self.sinks.add(node.target.id)
+            if len(self.sinks) == before:
+                break
         for _pass in range(3):
             for node in ast.walk(self.tree):
                 if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -421,7 +424,12 @@ def verifier_issue_call_count():
     path = _ROOT / "src/boomi_mcp/categories/components/process_graph_verifier.py"
     tree = ast.parse(path.read_text())
     aliases = {"_issue"}
-    for _pass in range(3):
+    # TRUE fixpoint, not a fixed pass count. `ast.walk` yields assignments in tree order,
+    # which need not be dependency order, so a long alias chain could be discovered one link
+    # per pass and a fixed three passes would stop short — leaving the count and the sites
+    # list BOTH at one and the equality quiet.
+    while True:
+        before = len(aliases)
         for node in ast.walk(tree):
             # Plain AND annotated bindings: `issue: Callable = _issue` is an `AnnAssign`, so
             # an alias declared with a type hint was invisible and the count collapsed to the
@@ -439,6 +447,8 @@ def verifier_issue_call_count():
                 and isinstance(node.target, ast.Name)
             ):
                 aliases.add(node.target.id)
+        if len(aliases) == before:
+            break
     return sum(
         1
         for node in ast.walk(tree)
