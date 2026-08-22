@@ -118,13 +118,25 @@ PINNED_DELEGATION_SITES = {
 #: * the last two are ordinary module constants that merely LOOK like codes, which is the
 #:   cost of matching on shape — and matching on shape is what caught a diagnostic default
 #:   changed to a brand-new literal, which matching on known constants alone did not.
+#: Each entry is `code -> the path prefix it is allowed to appear under`. Scoping to the
+#: SOURCE BOUNDARY is the point: keyed by code alone, a compiler forward that started using
+#: `LEGACY_ADAPTER_SEMANTIC_LOSS` would be skipped here and the compiler would emit an
+#: unregistered code with every guard green.
 UNSERVED_BY_DESIGN = {
-    "LEGACY_ADAPTER_OUTPUT_PARITY_FAILED",
-    "LEGACY_ADAPTER_SEMANTIC_LOSS",
-    "LEGACY_ADAPTER_UNSUPPORTED_KIND",
-    "LEGACY_ADAPTER_ALIAS_PREFIX",
-    "PROCESS_COMPONENT_TYPE",
+    "LEGACY_ADAPTER_OUTPUT_PARITY_FAILED": "src/boomi_mcp/compiler/process_ir/legacy_adapters/",
+    "LEGACY_ADAPTER_SEMANTIC_LOSS": "src/boomi_mcp/compiler/process_ir/legacy_adapters/",
+    "LEGACY_ADAPTER_UNSUPPORTED_KIND": "src/boomi_mcp/compiler/process_ir/legacy_adapters/",
+    "LEGACY_ADAPTER_ALIAS_PREFIX": "src/boomi_mcp/compiler/process_ir/legacy_adapters/",
+    "PROCESS_COMPONENT_TYPE": (
+        "src/boomi_mcp/compiler/process_ir/semantic_validation/references.py"
+    ),
 }
+
+
+def _allowed_unserved(code, path):
+    """True only where this exact code is allowed to be named unserved."""
+    allowed = UNSERVED_BY_DESIGN.get(code)
+    return allowed is not None and path.startswith(allowed)
 
 
 def _policy_exemption_codes():
@@ -472,24 +484,47 @@ def test_every_code_named_in_the_emitting_modules_is_served():
     referenced = referenced_codes()
     assert referenced, "no codes named at all — this test would be vacuous"
 
-    served = _served()
+    from _process_ir_diagnostic_emissions import producer_of
+
+    layers = _by_layer()
+
+    def _complete_for(code, producer):
+        """Is `code` served by a table that PRODUCER's own emissions may draw on?
+
+        Per producer, never against the merged union. Checking the union here would
+        recreate exactly the cross-layer masking the producer-aware equality above exists
+        to stop: a compiler module naming a parser-only code would look served while
+        `compiler_diagnostic_specs()` omits it and the compiler falls back to generic prose.
+        """
+        for table in _SATISFYING_TABLES.get(producer, ()):
+            spec = layers[table].get(code)
+            if (
+                spec
+                and (spec.get("message") or "").strip()
+                and (spec.get("remediation") or "").strip()
+            ):
+                return True
+        return False
+
     unserved = sorted(
-        (code, sorted(paths))
+        (code, path)
         for code, paths in referenced.items()
-        if code not in UNSERVED_BY_DESIGN
-        and (
-            code not in served
-            or not (served[code].get("message") or "").strip()
-            or not (served[code].get("remediation") or "").strip()
-        )
+        for path in sorted(paths)
+        if not _allowed_unserved(code, path)
+        and producer_of(path) in _SATISFYING_TABLES
+        and not _complete_for(code, producer_of(path))
     )
     assert unserved == [], unserved
 
-    # The by-design set is checked in BOTH directions: an entry that stops being named, or
-    # starts being served, must be retired rather than left as a standing exemption.
+    # The by-design set is checked in BOTH directions and PER PATH: an entry that stops
+    # being named where it is allowed, or starts being served, must be retired rather than
+    # left standing — and a reference from anywhere ELSE is not covered by it at all.
     stale = sorted(
         code
-        for code in UNSERVED_BY_DESIGN
-        if code not in referenced or code in served
+        for code, allowed in UNSERVED_BY_DESIGN.items()
+        if not any(
+            path.startswith(allowed)
+            for path in referenced.get(code, ())
+        )
     )
     assert stale == [], stale

@@ -70,6 +70,7 @@ __all__ = [
     "PINNED_SINKS",
     "collect_emissions",
     "pinned_sink_definitions",
+    "producer_of",
     "referenced_codes",
     "verifier_issue_sites",
 ]
@@ -126,6 +127,16 @@ def _producer(relative):
     if "/semantic_validation/" in text:
         return "semantic"
     return "compiler"
+
+
+def producer_of(relative):
+    """Which layer a scanned path belongs to — the census needs it per REFERENCE.
+
+    Exported because a code named in a compiler module must be checked against the
+    COMPILER's own table: checking it against the merged union recreates the cross-layer
+    masking this whole file exists to prevent.
+    """
+    return _producer(relative)
 
 
 def _iter_files():
