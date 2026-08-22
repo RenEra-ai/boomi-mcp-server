@@ -67,7 +67,12 @@ def _finding_rows(text):
     """
     rows = []
     for line in text.splitlines():
-        if not line.startswith("| "):
+        # `| ` required a space after the delimiter, so a compact row (`|A6-10|...|`) —
+        # valid Markdown that renders in the same table — was silently ignored, and the
+        # derived-class guard stayed green for a finding it never saw. Silent omission is
+        # the worst failure mode for this check, because omission is what lets the table go
+        # stale.
+        if not line.startswith("|"):
             continue
         cells = _cells(line)
         if len(cells) < 9 or cells[0] in {"ID", "---"}:
@@ -91,7 +96,13 @@ def _published_table(text):
         name = re.search(r"DC-177-[A-Z]", cells[0]).group(0)
         count = re.search(r"\*\*(\d+) rows\*\*", cells[3])
         assert count is not None, cells[3]
-        ids = re.findall(r"\b((?:QA|A6|L2|INH)-[A-Za-z0-9-]+)", cells[3])
+        # The ID list is parsed the way it is GENERATED — the text after the em dash, split
+        # on commas — not by matching known prefixes. A prefix pattern silently dropped every
+        # `A6b-*` id, so the published cell disagreed with the rows while this check passed:
+        # the same silent-omission failure the row reader already had to fix twice.
+        tail = cells[3].split("—", 1)
+        ids = [i.strip() for i in tail[1].split(",")] if len(tail) > 1 else []
+        ids = [i for i in ids if i]
         published[name] = (int(count.group(1)), ids)
     return published
 

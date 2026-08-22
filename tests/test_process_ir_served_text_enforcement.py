@@ -69,44 +69,65 @@ from boomi_mcp.models.process_ir import (  # noqa: E402
 #: in review; a reader that guesses is a cost paid in silent coverage loss.
 PINNED_DELEGATION_SITES = {
     (
-        "src/boomi_mcp/models/process_ir.py",
-        "_diagnostic",
+        "src/boomi_mcp/compiler/process_ir/diagnostics.py",
+        "CompilerDiagnostic",
         "Name(id='code', ctx=Load())",
-    ): (1, "the parse-error translator forwards a `code` it resolved from the routing map "
-           "`_CUSTOM_ERROR_CODES`, which the reader collects as an authority in its own right"),
+    ): (1, "the body of the `diagnostic` factory, constructing the model from its own `code` parameter"),
     (
         "src/boomi_mcp/compiler/process_ir/diagnostics.py",
         "diagnostic",
         "Name(id='code', ctx=Load())",
-    ): (1, "the definition body of the `diagnostic` sink itself"),
-    (
-        "src/boomi_mcp/compiler/process_ir/invariants.py",
-        "raise_compile_error",
-        "Name(id='code', ctx=Load())",
-    ): (1, "the definition body of the `_fail` wrapper, forwarding into `raise_compile_error`"),
+    ): (1, "the body of `raise_compile_error`, forwarding into the `diagnostic` factory"),
     (
         "src/boomi_mcp/compiler/process_ir/invariants.py",
         "_fail",
         "Name(id='code', ctx=Load())",
-    ): (1, "`_check_region_containment` forwards its `code` parameter, which sits in sixth "
-           "position and carries a default; two of its three call sites omit it"),
+    ): (1, "`_check_region_containment` forwards its `code` parameter, which sits in sixth position and carries a default; two of its three call sites omit it, and the default is read at RUNTIME by `runtime_forward_defaults()`"),
     (
-        "src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py",
-        "finding",
+        "src/boomi_mcp/compiler/process_ir/invariants.py",
+        "raise_compile_error",
         "Name(id='code', ctx=Load())",
-    ): (1, "the definition body of `_report`, the local one-hop wrapper the lineage rules call"),
+    ): (1, "the body of the `_fail` wrapper, forwarding into `raise_compile_error`"),
+    (
+        "src/boomi_mcp/compiler/process_ir/pipeline.py",
+        "CompilerDiagnostic",
+        "Attribute(value=Name(id='item', ctx=Load()), attr='code', ctx=Load())",
+    ): (1, "`_compile_error_from_validation` re-serves a code carried by an already-validated finding. Both sites are checkable rather than trusted: the one at `:274` REFUSES any code absent from the parser's own served set (`code not in authored`, `pipeline.py:267`) before constructing, and the one at `:124` forwards `item.code` from a report the parser produced"),
+    (
+        "src/boomi_mcp/compiler/process_ir/pipeline.py",
+        "CompilerDiagnostic",
+        "Name(id='code', ctx=Load())",
+    ): (1, "`_compile_error_from_validation` re-serves a code carried by an already-validated finding. Both sites are checkable rather than trusted: the one at `:274` REFUSES any code absent from the parser's own served set (`code not in authored`, `pipeline.py:267`) before constructing, and the one at `:124` forwards `item.code` from a report the parser produced"),
+    (
+        "src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py",
+        "ValidationDiagnosticV1",
+        "Name(id='code', ctx=Load())",
+    ): (1, "the body of the `finding` factory, constructing the model from its own `code` parameter"),
     (
         "src/boomi_mcp/compiler/process_ir/semantic_validation/flow.py",
         "finding",
         "Attribute(value=Name(id='item', ctx=Load()), attr='code', ctx=Load())",
-    ): (1, "re-serves `item.code` from a finding the semantic report already produced, so it "
-           "introduces no code of its own"),
+    ): (1, "re-serves `item.code` from a finding the semantic report already produced, so it introduces no code of its own"),
+    (
+        "src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py",
+        "finding",
+        "Name(id='code', ctx=Load())",
+    ): (1, "the body of `_report`, the local one-hop wrapper the lineage rules call; its `code` parameter has NO default, checked from the AST"),
     (
         "src/boomi_mcp/compiler/process_ir/semantic_validation/validation_policy.py",
         "finding",
         "Name(id='exemption', ctx=Load())",
-    ): (1, "raises the exemption code chosen by `LegacyValidationPolicyV1.exemption_for`; the "
-           "family is derived below from the policy registry, which owns it"),
+    ): (1, "raises the exemption code chosen by `LegacyValidationPolicyV1.exemption_for`; the family is derived from the policy registry, which owns it"),
+    (
+        "src/boomi_mcp/models/process_ir.py",
+        "ProcessIRDiagnostic",
+        "Name(id='code', ctx=Load())",
+    ): (1, "the body of the `_diagnostic` factory, constructing the model from its own `code` parameter"),
+    (
+        "src/boomi_mcp/models/process_ir.py",
+        "_diagnostic",
+        "Name(id='code', ctx=Load())",
+    ): (1, "the parse-error translator forwards a `code` it resolved from the routing map `_CUSTOM_ERROR_CODES`, which the reader collects as an authority in its own right"),
 }
 
 #: Code-shaped names in the scanned modules that are deliberately NOT ProcessIR served
@@ -327,20 +348,49 @@ def test_the_served_code_set_is_exactly_what_the_authorities_account_for():
     * the codes production declares non-emittable, proven below.
     """
     by_producer, _unresolved = collect_emissions()
-    served = set(_served())
+    layers = _by_layer()
 
+    # PER PRODUCER, not over the merged union. Merging was the same cross-layer masking the
+    # forward direction already avoids: a compiler-owned delegated code added to the
+    # SEMANTIC registry was accounted for by the union, and the projection then advertised
+    # bogus semantic-validator attribution for it. Each table must be justified by the layer
+    # that owns it.
+    exemptions = _policy_exemption_codes()
+    non_emittable = set(non_emittable_registered_codes())
+
+    unaccounted = {}
+    for producer, tables in _SATISFYING_TABLES.items():
+        # A layer's OWN table is the one it must account for; `_SATISFYING_TABLES` lists the
+        # tables its emissions may draw on, and the first entry is always its own.
+        own = layers[tables[0]]
+        emitted = set(by_producer[producer])
+        accounted = emitted | exemptions | non_emittable
+        if producer == "compiler":
+            # Public compile RE-PARSES through the parser (#178), so every parser code is
+            # reachable on the compile path and the compiler table may legitimately register
+            # it — `_diagnostic_entries` encodes the same containment when it files parse
+            # codes under both the `plan` and `compile` stages. Two codes are in that
+            # position today; this states the RULE rather than naming them.
+            accounted |= set(by_producer["parser"])
+        if producer == "semantic":
+            # A semantic module may legitimately re-serve a COMPILER-owned code verbatim,
+            # but that code belongs in the compiler's table, not in this one. So the
+            # semantic table is accounted for by semantic emissions only.
+            accounted = (set(by_producer["semantic"]) & set(own)) | exemptions | non_emittable
+        extra = sorted(set(own) - accounted)
+        if extra:
+            unaccounted[producer] = extra
+    assert unaccounted == {}, unaccounted
+
+    # ...and nothing served anywhere is unaccounted for across all three.
+    served = set(_served())
     statically_emitted = set().union(
         by_producer["parser"], by_producer["compiler"], by_producer["semantic"]
     )
-    accounted = (
-        statically_emitted
-        | _policy_exemption_codes()
-        | set(non_emittable_registered_codes())
-    )
-
-    assert served == accounted, {
-        "served but unaccounted": sorted(served - accounted),
-        "accounted but not served": sorted(accounted - served),
+    accounted_all = statically_emitted | exemptions | non_emittable
+    assert served == accounted_all, {
+        "served but unaccounted": sorted(served - accounted_all),
+        "accounted but not served": sorted(accounted_all - served),
     }
 
 
@@ -615,3 +665,32 @@ def test_every_runtime_forward_default_is_served():
     # above — but this states the invariant directly so the reason cannot be misread.
     with_defaults = sorted(row for row in unreadable if row[3])
     assert with_defaults == [], with_defaults
+
+
+def test_no_forwarding_call_site_builds_its_code_at_runtime():
+    """A pinned forwarding owner must be handed a plain constant.
+
+    Its code arrives either as a DEFAULT — read as an evaluated value by
+    `runtime_forward_defaults()` — or EXPLICITLY at a call site. An explicit argument built
+    at runtime can be read by neither the source census nor the runtime default check, and
+    the architect review demonstrated exactly that: replacing the real
+    `PROCESS_IR_COMPILE_ERROR_REGION_INVALID` at a `_check_region_containment` call site with
+    a concatenated unregistered value changed the emitted diagnostic while every guard stayed
+    green.
+
+    Evaluating such expressions means modelling concatenation, f-strings and `.format` — the
+    space that produced a finding in four consecutive rounds. Banning them at these few
+    sites is closed instead, and costs nothing: every real site already passes a constant.
+    """
+    from _process_ir_diagnostic_emissions import unresolvable_forward_arguments
+
+    # A site already carried by `PINNED_DELEGATION_SITES` is not banned twice: that table
+    # states the authority its codes come from, and the pinned-site test above compares it
+    # whole, so such a site is accounted for rather than unread. Anything ELSE that hands a
+    # forwarding owner an unreadable code fails here.
+    pinned = {(path, sink, dump) for path, sink, dump in PINNED_DELEGATION_SITES}
+    offenders = sorted(
+        row for row in unresolvable_forward_arguments()
+        if (row[0], row[2], row[3]) not in pinned
+    )
+    assert offenders == [], offenders

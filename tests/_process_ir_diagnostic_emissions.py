@@ -66,12 +66,14 @@ for _p in (str(_ROOT), str(_SRC)):
 from boomi_mcp import errors as _errors  # noqa: E402
 
 __all__ = [
+    "DIAGNOSTIC_CONSTRUCTORS",
     "EMISSION_ROOTS",
     "PINNED_SINKS",
     "collect_emissions",
     "pinned_sink_definitions",
     "producer_of",
     "referenced_codes",
+    "unresolvable_forward_arguments",
     "runtime_forward_defaults",
     "verifier_issue_sites",
 ]
@@ -99,7 +101,19 @@ PINNED_SINKS = (
     ("src/boomi_mcp/categories/components/process_graph_verifier.py", "_issue"),
 )
 
-_SINK_NAMES = frozenset(name for _path, name in PINNED_SINKS)
+#: Diagnostic MODELS that may be constructed directly. Their constructors are sinks too:
+#: `pipeline._compile_error_from_validation` builds a `CompilerDiagnostic` itself rather than
+#: going through `diagnostic()`, and that site was invisible while only the factory
+#: FUNCTIONS were pinned.
+DIAGNOSTIC_CONSTRUCTORS = (
+    "CompilerDiagnostic",
+    "ProcessIRDiagnostic",
+    "ValidationDiagnosticV1",
+)
+
+_SINK_NAMES = frozenset(
+    [name for _path, name in PINNED_SINKS] + list(DIAGNOSTIC_CONSTRUCTORS)
+)
 
 #: Registry tables whose contents describe codes rather than raise them. Their VALUES are
 #: excluded from resolution so a registry cannot prove its own reachability; their KEYS are
@@ -515,6 +529,68 @@ def runtime_forward_defaults():
     return MappingProxyType(defaults), tuple(sorted(unreadable))
 
 
+def unresolvable_forward_arguments():
+    """Call sites that hand a pinned forwarding owner a code it cannot read.
+
+    A forwarding owner's code can arrive two ways: as its DEFAULT, which
+    `runtime_forward_defaults()` reads as an evaluated value, or EXPLICITLY at a call site.
+    An explicit argument built at runtime (`"PROCESS_IR_" + "..."`, an f-string, `.format`)
+    cannot be read from source, and evaluating it would mean modelling the open-ended space
+    this module refuses to model.
+
+    So it is BANNED rather than evaluated: at these few sites the code must be a plain
+    constant. That is a closed requirement — a constructed argument fails here and its
+    author must either write a constant or justify a new pin — and it costs nothing, because
+    every real site already passes one.
+    """
+    offenders = []
+    for path in _iter_files():
+        relative = str(path.relative_to(_ROOT))
+        scan = _ModuleScan(path, path.read_text())
+        owners = {}
+        for node in ast.walk(scan.tree):
+            if not isinstance(node, ast.Call) or _called_name(node) not in scan.sinks:
+                continue
+            argument = node.args[0] if node.args else None
+            if argument is None:
+                for keyword in node.keywords:
+                    if keyword.arg == "code":
+                        argument = keyword.value
+                        break
+            if argument is None:
+                continue
+            forward = scan.forwarded_parameter(node, argument)
+            if forward is not None:
+                owner, index, param = forward
+                owners[owner.name] = (index, param)
+
+        for node in ast.walk(scan.tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _called_name(node)
+            if name not in owners:
+                continue
+            index, param = owners[name]
+            supplied = node.args[index] if len(node.args) > index else None
+            if supplied is None:
+                for keyword in node.keywords:
+                    if keyword.arg == param:
+                        supplied = keyword.value
+                        break
+            if supplied is None:
+                continue  # omitted -> the default is read at runtime instead
+            # A body that FORWARDS its own parameter onward is not a call site supplying a
+            # code; it is another link in the same chain, and its own callers are checked.
+            if scan.forwarded_parameter(node, supplied) is not None:
+                continue
+            # `resolve` — not `_simple` — so the closed forms this module already reads
+            # (a conditional between two codes, a helper whose every return is a code)
+            # stay legal. Only genuinely unreadable expressions are banned.
+            if scan.resolve(supplied) is None:
+                offenders.append((relative, node.lineno, name, ast.dump(supplied)))
+    return tuple(sorted(offenders))
+
+
 def collect_emissions():
     """`(by_producer, unresolved_sites)` read from `EMISSION_ROOTS`.
 
@@ -537,9 +613,20 @@ def collect_emissions():
             if not isinstance(node, ast.Call):
                 continue
             name = _called_name(node)
-            if name not in scan.sinks or not node.args:
+            if name not in scan.sinks:
                 continue
-            argument = node.args[0]
+            # The code may be the first POSITIONAL argument or the `code=` KEYWORD. Reading
+            # only positionals made every keyword-form call invisible — including the direct
+            # `CompilerDiagnostic(code=..., ...)` construction in `pipeline.py`, which is a
+            # real emission the scan silently skipped.
+            argument = node.args[0] if node.args else None
+            if argument is None:
+                for keyword in node.keywords:
+                    if keyword.arg == "code":
+                        argument = keyword.value
+                        break
+            if argument is None:
+                continue
             if id(argument) in scan.excluded:
                 continue
 

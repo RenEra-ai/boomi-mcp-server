@@ -358,6 +358,13 @@ def _w_generalized_connector_call():
 
 
 def _w_mixed_connector_execution():
+    # RECORDED SUBSTITUTION: the design plan named a REST GET -> map -> SOAP EXECUTE case.
+    # `error_symbols()` registers REST and DATABASE families and no SOAP action, and adding
+    # one would mean inventing a symbol table rather than reusing the corpus's. REST -> DB
+    # exercises the property the manifest row actually states — two connector calls of
+    # DIFFERENT families on one root-to-leaf path — and the observer below pins both
+    # families AND both emitter forms. The map step is dropped with it: it carries no
+    # connector family and so contributes nothing to this row.
     doc = _doc(
         [
             {"kind": "connector_call", "operation_ref": "$ref:GETOP"},
@@ -371,8 +378,11 @@ def _w_mixed_connector_execution():
 
     def observe(result):
         cfg, plan = result
-        emitted = [k for k in _emitter_kinds(plan) if k.startswith("connectoraction_")]
-        assert len(emitted) == 2, _emitter_kinds(plan)
+        # DISTINCT emitter FORMS, not just two connector actions. Counting alone passed a
+        # mutant that emitted the DB target as a second `connectoraction_source`, which is
+        # not the construct this manifest row names.
+        emitted = sorted(k for k in _emitter_kinds(plan) if k.startswith("connectoraction_"))
+        assert emitted == ["connectoraction_source", "connectoraction_target"], emitted
         # TWO connector calls of DIFFERENT families on ONE root-to-leaf path — the
         # construct the manifest row names, not just "a connector call compiled".
         kinds = _semantic_kinds(cfg)
@@ -579,13 +589,19 @@ def _w_typed_idempotency_evidence():
         cfg, plan = result
         kinds = _emitter_kinds(plan)
         assert "catcherrors" in kinds and "connectoraction_target" in kinds, kinds
-        protected = [
-            node
+        # EXACT authored evidence, not merely "something non-null". Proving only that the
+        # field is populated passed a mutant that injected an invented `contract_ref` during
+        # lowering — the capability is that the AUTHORED evidence is preserved.
+        evidence = [
+            node.semantic.idempotency.model_dump(mode="json", warnings=False)
             for node in cfg.nodes
             if type(node.semantic).__name__ == "ConnectorCallSemanticV1"
             and getattr(node.semantic, "idempotency", None) is not None
         ]
-        assert protected, _semantic_kinds(cfg)
+        # The model expands the union's optional fields, so the authored evidence appears as
+        # `{"kind": "verified_action", "contract_ref": None}` — asserted whole rather than
+        # trimmed, so an INVENTED `contract_ref` fails here instead of being normalised away.
+        assert evidence == [{"kind": "verified_action", "contract_ref": None}], evidence
 
     return CapabilityWitness(
         "typed_idempotency_evidence",

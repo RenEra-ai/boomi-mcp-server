@@ -1032,6 +1032,19 @@ _CAPABILITY_DOC_STATES = {
 }
 
 
+def _assert_not_commented_out(doc, marker):
+    """Refuse a marker that sits inside an HTML comment.
+
+    Counted by delimiter parity: a marker preceded by more `<!--` than `-->` is inside an
+    open comment and renders as nothing at all.
+    """
+    head = doc.split(marker, 1)[0]
+    if head.count("<!--") > head.count("-->"):
+        raise AssertionError(
+            "{0!r} is inside an HTML comment — the authority is not rendered".format(marker)
+        )
+
+
 def _parse_capability_states(doc):
     """§8's table as a `{key: runtime_state}` mapping, or a hard failure.
 
@@ -1053,6 +1066,11 @@ def _parse_capability_states(doc):
     # still matches and this parser happily returns the same table. That is a structurally
     # removed authority leaving the guard green, which is the exact failure acceptance
     # criterion 1 names.
+    # The heading must be LIVE Markdown, not commented out. Wrapping §8 in `<!-- -->`
+    # removes the authority from the rendered document entirely while every raw-line check
+    # still matched, so a structurally removed §8 left the guard green — the same failure
+    # the raw-line fix was made to close, one level up.
+    _assert_not_commented_out(doc, _CAPABILITY_HEADING)
     heads = [i for i, line in enumerate(lines) if line == _CAPABILITY_HEADING]
     if len(heads) != 1:
         raise AssertionError(

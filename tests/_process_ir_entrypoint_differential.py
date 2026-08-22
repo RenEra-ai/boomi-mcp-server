@@ -92,8 +92,16 @@ def measure_entrypoints(ir, *, mode="grammar", symbols=None, capabilities=None):
     report `ACCEPTED` and prove nothing.
 
     Outcomes are one of `("ACCEPTED",)`, `("REFUSED",) + diagnostic_vector(exc)`,
-    or — grammar mode only — `("REACHED-NO-BOUNDARY",)`, which means the boundary
-    was never reached and is always a defect in the harness or the pipeline.
+    `("INTERNAL-FAILURE", <exception type name>)`, or — grammar mode only —
+    `("REACHED-NO-BOUNDARY",)`, which means the boundary was never reached and is always a
+    defect in the harness or the pipeline.
+
+    `INTERNAL-FAILURE` is the design plan's structured internal-failure outcome. Without it
+    an exception outside the `ProcessIRCompileError` family escaped this helper raw, so a
+    caller could not tell "the compiler refused" from "the compiler broke" — and a
+    substituted compiler raising `RuntimeError` propagated as itself. It carries the type
+    NAME only: an exception's message can contain authored content, and this value is
+    compared and reported.
     """
     if mode not in ("grammar", "full"):
         raise ValueError("unknown mode {0!r}".format(mode))
@@ -111,6 +119,8 @@ def measure_entrypoints(ir, *, mode="grammar", symbols=None, capabilities=None):
             compiler = ("ACCEPTED",)
         except ProcessIRCompileError as exc:
             compiler = ("REFUSED",) + diagnostic_vector(exc)
+        except Exception as exc:  # noqa: BLE001 - reported structurally, never re-raised raw
+            compiler = ("INTERNAL-FAILURE", type(exc).__name__)
         return parser, compiler
 
     real = pl.lower_process_ir_to_cfg
@@ -126,6 +136,8 @@ def measure_entrypoints(ir, *, mode="grammar", symbols=None, capabilities=None):
         compiler = ("ACCEPTED",)
     except ProcessIRCompileError as exc:
         compiler = ("REFUSED",) + diagnostic_vector(exc)
+    except Exception as exc:  # noqa: BLE001 - reported structurally, never re-raised raw
+        compiler = ("INTERNAL-FAILURE", type(exc).__name__)
     finally:
         pl.lower_process_ir_to_cfg = real
     return parser, compiler
