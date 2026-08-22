@@ -131,6 +131,10 @@ escalation with this issue left open.
 | L2R11-02 | Stage-2 repo Codex review, round 11, same run dir `cdx-review.z0Xhup` | "[P2] Make the case projection independent and complete" — `_build` already uses `_body_of` to choose the mutation target, so using the same helper in the projection makes the context dimension self-validating (a `decision_false_arm` routed to `true_arm` would be inspected as the true arm by both, with count, signature, partition, parity and safety all green); the projection also ignored steps past `steps[0]` and discarded the Try anchor without checking its kind | **P2** | machine-served schemas/contracts | DC-178-F | Standard — anchor: source label P2. | `d399c89` -> this batch | `fixed` — the projection now walks from the ROOT independently, asserts the control node's own kind against the context claiming it, asserts decision-arm identity, asserts the Try anchor's kind and side rather than discarding it, and bounds step cardinality. Hand-run against both mutations the old form would have missed — routing `false_arm` to `true_arm`, and smuggling an extra step into every body — and it fails on each. **This is the FIFTH distinct weakness found in this one guard**, and the third caused by sharing a helper with the thing under test. |
 | INH-L3R3-01a | revision of INH-L3R3-01 (terminal disposition at #178 closure) | supersedes INH-L3R3-01's DISPOSITION only; its original text, original **P2** source label and inherited lineage are retained above unedited | *(inherits INH-L3R3-01 — the source label is immutable)* | machine-served schemas/contracts | *(inherits DC-178-A)* | Standard — unchanged from the original derivation; no critical class or anchor. | `594aaf89eee6ffaa2b7286911b560a63f2ced78a` | **`fixed`** — both halves discharged and MEASURED. `[branch, process_call]`: both entry points now serve one triple, pinned as corpus row `root-branch-then-process-call`. `[process_call, source]`: the half #175 could NOT construct is reproduced here — it needed a `source` carrying BOTH `connection_ref` and `operation_ref`, which is exactly what defeated the earlier probe — and is pinned as `root-process-call-then-source`. The original row's own criticism, that the #175 fail-closed test *"only asserts that SOME nonempty code exists"*, is answered rather than restated: every corpus row pins the full `(code, pointer, message)` triple measured at the step-0 baseline, and the derived gate compares complete ordered vectors including `remediation` across **3,420 generated cases with zero mismatches**. `window-exhausted` was spent at #175 and was not needed. |
 | INH-L3R3-02a | revision of INH-L3R3-02 (terminal disposition at #178 closure) | supersedes INH-L3R3-02's DISPOSITION only; its original text, original **P2** source label and inherited lineage are retained above unedited | *(inherits INH-L3R3-02 — the source label is immutable)* | machine-served schemas/contracts | *(inherits DC-178-A)* | Standard — unchanged from the original derivation. | `594aaf89eee6ffaa2b7286911b560a63f2ced78a` | **`fixed`** — all three cases discharged. The `cache_put` case is pinned as `branch-cache-prefix-process-call-terminal` and the `try_body` case as `process-try-process-call-first-step`. The ancestor-message case, carried by #175 as reviewer-reported and never independently reproduced there, was reproduced — and its #175 wording turned out to be AMBIGUOUS: with no leg prefix it is a MESSAGE-only divergence, with a prefix it is a CODE divergence. Both readings are pinned as SEPARATE corpus rows rather than collapsed, because collapsing them would have discharged one defect while leaving the other unmeasured. |
+| L4-01 | Composite wave gate, integration-level review of the WHOLE slice delta, run dir `cdx-review.AwKUua`, base `cdd7a3bf8e2e7ae6773f6ec4250844e5c2e8cf8f`, head `98506189fd3d2ea8e37b3dc2464233f70c82d87c`, dirty=false, `STATUS: completed` | "[P2] Preserve scalar subclass values during normalization" — for `class V(str, Enum): ONE = "1"` assigned to `ir.version`, `parse_process_ir_v1(raw_process_ir_payload(ir))` accepts version `"1"` but `_plain_scalar` calls `str(V.ONE)` and produces `"V.ONE"`, so `compile_process_ir_v1` falsely raises `PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED`; the exact-type check strips subclass hooks but does not ensure value preservation | **P2** | runtime behavior | DC-178-F | Standard — anchor: source label P2; no critical class or anchor. | `98506189` -> `8cc8cfa` | `fixed`, and it is the single most important finding of the endgame: **a correctness regression introduced BY my own hardening, pointing the opposite way from every security finding — my fix made the compile entry REFUSE a version the parser ACCEPTS**, which is a parity break in the accept direction created by the change meant to establish parity. Reproduced (`str(V.ONE)` -> `'V.ONE'`) before fixing. `_plain_scalar` now recovers the value through the base-class SLOT (`str.__str__`, `int.__int__`, `float.__float__`, `bytes.__getnewargs__`), which bypasses the override AND preserves the value, so hook-stripping and value-preservation hold together — asserted on the same carriers by a test a one-sided fix would fail. **Only the whole-slice gate could find this**: eleven delta-scoped reviews each compared a fix against the fix before it. |
+| QA-178-wave-01 | Composite wave gate, live component, attested `98506189fd3d2ea8e37b3dc2464233f70c82d87c`; evidence `docs/architecture/evidence/issue-178/qa-wave.md` | "`orchestrate_deploy` deploys the wrong component on a typed-authoring build, and reports success" — given a build whose spec has a `reference_only` child, it resolved to the CHILD and deployed that, returning `_success: true` with `component_summary.total_components: 1` listing only the reused child, so the authored root was never deployed and `execute_process` refused it | **Medium** | runtime behavior | *(no #178 defect class — the slice never touched this tool)* | Standard — anchor: source label Medium; no critical class or anchor. | pre-existing at `cdd7a3b`, unchanged by this slice | `deferred` — OUT OF SLICE. `git diff cdd7a3b..HEAD -- src/` does not touch `orchestrate_deploy`; the finding surfaced only because establishing execution truth required a real deploy. Reason class `out-of-scope-by-design`; it is real and worth its own issue, and is recorded here rather than filed from inside this slice per the standing rule that a NEW issue is minted only when it blocks the current one. |
+| QA-178-wave-02 | Composite wave gate, live component, same run | "I changed shared account state" — the `orchestrate_deploy` call above deployed `_QA_FIXTURE_noop` at **version 3** (it previously had v1 and v2); no licence consumed and the single process/env attachment unchanged | **Low** | *(shared test-account state — not one of the eight blocking classes)* | *(n/a)* | Standard — anchor: source label Low. | live account, not the tree | `fixed` — QA disclosed it unprompted rather than leaving it quiet, and re-verified the fixture afterwards: `_QA_FIXTURE_noop` at v3 still executes **COMPLETE with 0 error documents**, confirmed again at the wave-2 round. Recorded because the fixture is shared and the change was ours. |
+| QA-178-wave-03 | Composite wave gate, live component, same run | "C10, the direct `intent_kind=recipe` arm" — all 8 registered descriptors refuse every constructible input (`RECIPE_INPUT_INVALID` / `RECIPE_REQUEST_INVALID`); `SyncRecipeInputV1` and `ComposeDbRestFanoutInputV1` require `component_slots`/`targets` resolving against `base_components` and a resolving set could not be assembled from the served schemas | **Low** | *(live coverage gap — the CHANGED code is covered)* | *(n/a)* | Standard — anchor: source label Low. | `98506189` | `deferred` — recorded gap, precisely bounded and NOT a silent pass. QA's own census shows `compose_archetypes` and `build_from_archetype` both drive `recipes/engine.py::_compile_processes` and `composer._compose_process_roots`, so **the code this slice changed IS covered live**; what is unreached is the MCP arm reaching a SUCCESSFUL recipe run. Reason class `out-of-scope-by-design` — it is a contract-assembly limitation of the recipe input schemas, not a missing fixture and not a licence ceiling, so the standing "provision it" rule does not apply. |
 
 Dispositions: `fixed` · `finding-refuted` · `severity-refuted` · `not-validated` · `deferred`
 (issue, reason class, placement). `inherited-open` is used only for a seeded `INH-*` row before
@@ -232,6 +236,8 @@ witness that it is not vacuous.
 | 5 | `77ed08a9dd887023c1a0a442b372bc874a2e4aea` | **CLEAN** — `QA-178-r4-01` closed; 8/8 `Exception` types normalised with no leak, 4/4 `BaseException` types correctly escape; sixth consecutive identical digest set; one Low self-correction (`QA-178-r5-01`) | `docs/architecture/evidence/issue-178/qa-round-5.md` |
 | 6 | `39e4f6d92d6500438713d6a69377d7e5717021b2` | fix works for its own case and does not damage the legitimate path (8/8 real refusals verbatim), but **two forged-diagnostic root causes remain open** (`QA-178-r6-01`, `QA-178-r6-02`); seventh consecutive identical digest set | `docs/architecture/evidence/issue-178/qa-round-6.md` |
 | 7 | `d399c89db9d885e66888ffe50957badc905de99a` | variant 5 closed **and all four round-6 breaches closed with it**; accepted limitation CONFIRMED real by construction and the dominance argument MEASURED; one Low claim-accuracy finding (`QA-178-r7-01`); eighth consecutive identical digest set | `docs/architecture/evidence/issue-178/qa-round-7.md` |
+| 8 (wave) | `98506189fd3d2ea8e37b3dc2464233f70c82d87c` | **WAVE-GATE live component** — 9 capability classes enumerated by QA independently, 8 covered live, 1 recorded gap (`QA-178-wave-03`); **EXECUTION TRUTH established**; two pre-existing findings out of slice (`QA-178-wave-01`, `-02`) | `docs/architecture/evidence/issue-178/qa-wave.md` |
+| 9 (wave-2) | `8cc8cfafca55b27af936a1203247fa1c2edcfb9c` | **CLEAN** — dual-property battery 9/9, forgery battery 0 breaches across 11 attacks, escape battery 0 problems, ninth consecutive identical digest set; closure verdict *land it* | `docs/architecture/evidence/issue-178/qa-wave-2.md` |
 
 Suite spent once at HEAD: **10209 passed, 17 skipped, 0 failed** — *measured here*. Account and repo
 tree byte-identical after the round; every provisioned component deleted.
@@ -436,6 +442,35 @@ still carries its own dunders which the pre-validation version comparison will i
 follow-up issue is filed: this is an accepted limitation, not debt, and minting an issue for a
 non-boundary would be the debt-minting the workflow warns against.
 
+## Composite wave gate (loop 4)
+
+ONE composite evaluation, not five loops. Re-run IN FULL on the final tree rather than reusing the
+earlier pass: the integration-level review found a correction, so the earlier wave evidence described
+a tree that no longer exists, and citing it would have been evidence for the wrong SHA.
+
+| Component | Result | Evidence |
+| --- | --- | --- |
+| Full non-KB suite | **10236 passed, 17 skipped** (cap 30) | scripted `wave_gate.py wave`, re-run at `8cc8cfafca55b27af936a1203247fa1c2edcfb9c` |
+| Active goldens | **61, deterministic and byte-exact** | same run |
+| Determinism / plan fingerprint | checked, 2 cases | same run |
+| Manifests | ok — **10253 required nodes**, floors derived from measured collection | reconciled TWICE; the first reconciliation went stale when the integration review forced two more tests, which is DC-175-D behaving exactly as recorded |
+| One live scenario per changed capability class | **9 classes enumerated by QA independently, 8 covered live, 1 recorded gap** (`QA-178-wave-03`) | `docs/architecture/evidence/issue-178/qa-wave.md` |
+| Execution truth | typed-authored root ran **COMPLETE, 29s, 1 inbound document, 0 error documents**, behind a runtime control | same |
+| Integration-level review of the wave delta | one **P2** (`L4-01`), fixed | `cdx-review.AwKUua` |
+| Fix-only review of the wave correction | **zero findings** | `cdx-review.L37xIm` |
+
+**QA corrected my capability enumeration, and the correction mattered.** I had not named `flow_sequence`
+as a distinct legacy dialect, and QA's models-layer census showed the `models/process_ir.py` change has
+a WIDER blast radius than the compile entry — six consuming layers no delta round had bound, including
+the MCP intake parse `parse_authoring_request_v1`. The enumeration used above is QA's, not mine.
+
+**What this gate found that eleven delta-scoped reviews could not.** `L4-01` is a correctness
+regression introduced by my own hardening, and it points the OPPOSITE way from every security finding
+in the slice: the fix made the compile entry refuse a version the parser accepts. A delta-scoped
+review compares a fix against the fix before it; only a whole-slice gate compares the result against
+the contract. Eight rounds of security pressure produced exactly one correctness regression, and this
+is the gate that caught it.
+
 ## Structural-fix record (second-instance trigger, DC-178-B)
 
 **DC-178-B** — *a coercive projection stands in for the raw state the authority must judge*.
@@ -527,7 +562,55 @@ DC-178-D and mechanically preventable.
 the authored value into a serializer warning*. Runtime authority: the AR2-01 rule. One instance
 (`QA-178-r2-02`, pre-existing) plus three siblings found by the same sweep and fixed with it.
 
-## Final-tree validation (filled at close; every roster gate current on the FINAL sha)
+## Final-tree validation (every roster gate current on the FINAL sha)
 
-| Gate | Evidence (quoted output / run URL / archived round) | SHA |
+**Final tree: `8cc8cfafca55b27af936a1203247fa1c2edcfb9c`.** Every row below was measured AT this SHA,
+not inherited from an earlier one. Where a gate had passed on an earlier tree and the tree then moved,
+it was RE-RUN rather than cited — an earlier pass is evidence for the tree it ran on.
+
+| Gate | Evidence (quoted output / archived round) | SHA |
 | --- | --- | --- |
+| Stage-1 QA (loop 1) | 9 evaluations. Final: wave-2 **CLEAN** — dual-property battery 9/9, forgery battery **0 breaches across 11 attacks**, escape battery 0 problems, 8/8 real refusals verbatim, five emitted-XML digests exact for the ninth consecutive round, both frozen M8 oracles byte-for-byte, apply matrix green, `B1`/`B2` inventory 22->22 with `mutation_performed:false` against five real creates. Verdict: *land it*. | `8cc8cfa` |
+| Stage-2 repo Codex review (loop 2) | 13 evaluations, every round COLLECTED (never read from `wait`). Closed CLOSE-CLEAN at 3/9; later rounds are support reviews billed to the §6 and wave loops. Final fix-only review: **zero findings** — *"No actionable regressions were identified."* | `8cc8cfa` |
+| §6 architect implementation review (loop 3) | 3 evaluations, the owner-fixed window, plus one TECHNICALLY FAILED round correctly excluded (no decision-bearing result, collector refused to attest). 10 findings, all dispositioned. | `6ac2b5d` reviewed; all findings fixed and re-validated at `8cc8cfa` |
+| Composite wave gate (loop 4) | Re-run IN FULL at the final tree: suite **10236 passed / 17 skipped** (cap 30), **61 goldens deterministic and byte-exact**, plan fingerprint 2 cases, manifests **10253** required nodes; 8 of 9 capability classes covered live; **execution truth COMPLETE, 0 error documents**; integration review's one P2 fixed; fix-only review clean. | `8cc8cfa` |
+| Terminal correction loop | NOT opened — no roster-addition checkpoint was needed. | — |
+
+### Closure statement
+
+**Zero unresolved findings at any tier.** Every raw finding carries exactly one disposition. Two
+`deferred` rows are recorded and neither is critical: `QA-178-wave-01` (a pre-existing
+`orchestrate_deploy` defect the slice never touched — `git diff cdd7a3b..HEAD -- src/` does not
+reach it) and `QA-178-wave-03` (a live-coverage gap whose CHANGED code is covered; only the direct
+`intent_kind=recipe` arm is unreached). Both are `out-of-scope-by-design`.
+
+**The two inherited findings this slice existed to discharge are closed** — `INH-L3R3-01a` and
+`INH-L3R3-02a`, both `fixed`, neither needing the `window-exhausted` allowance that #175 had already
+spent. The half #175 could not reproduce is reproduced and pinned; the ambiguity in its ancestor-message
+wording was found and both readings pinned separately rather than collapsed.
+
+**One accepted limitation, demonstrated rather than assumed**, with a reopening condition: forged
+diagnostics remain reachable by in-process Python that subclasses the exported `ProcessIRV1`. Six
+variants were patched individually before that was acknowledged. The dominance argument was MEASURED —
+the same caller can monkeypatch the public entry, monkeypatch the guard every fix funnels into, and
+read the AR2-01-protected log stream — so the forgery path grants nothing new. **Reopen if a
+deserialisation or plugin-loading path ever instantiates caller-named classes**, because the argument
+rests entirely on `ProcessIRV1` being reachable only by in-process construction.
+
+### What the record shows about how this was validated
+
+Kept because the slice's history is the evidence that its final state was validated rather than
+asserted, and because three of these are defects in MY OWN claims that a gate had to find:
+
+- A stated QA baseline contained three corrections it did not name (`QA-178-r3-02`), so three applied
+  fixes reached a committed baseline without a QA round of their own.
+- The worktree was edited while a gate was reading it (`QA-178-r4-02`) — a hazard this repo had
+  already recorded, and knowing it did not prevent it.
+- QA withdrew one of its own salvage arguments as unsound (`QA-178-r5-01`) after the implementer had
+  already acted on the report that contained it.
+- The derived parity gate was found weaker than claimed **five separate times**, by four different
+  gates — too small a product; a count that recomputed its own formula; cardinality instead of the
+  exact set; labels instead of documents; and a projection sharing a helper with the thing it checked.
+- The audit-record guard written in this slice caught its own author **six times**, including the
+  round it forced a checkpoint for and the mislabelling of these very wave reviews.
+
