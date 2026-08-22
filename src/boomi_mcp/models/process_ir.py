@@ -2796,13 +2796,16 @@ def raw_process_ir_payload(ir: "ProcessIRV1") -> Any:
     the parser an already-valid document, which is how a mutated model slipped
     past the compile-entry re-parse. ``warnings=False`` keeps the serializer from
     interpolating the authored value into a warning (AR2-01).
+
+    A dump failure is NOT caught here, and that is deliberate. It is not a
+    document defect the parser could name — it is an unexpected internal failure,
+    and the caller is the layer that knows how to classify it. An earlier revision
+    converted every dump exception into ``PROCESS_IR_SCHEMA_INVALID``, so the
+    compile entry then served it as an ordinary parser refusal and a caller could
+    not tell "your document is wrong" from "we broke". The compile entry now wraps
+    this call and raises the value-free ``PROCESS_IR_COMPILE_INTERNAL`` instead.
     """
-    try:
-        return ir.model_dump(mode="python", warnings=False)
-    except Exception:
-        raise ProcessIRValidationError(
-            [_diagnostic(PROCESS_IR_SCHEMA_INVALID, ())]
-        ) from None
+    return ir.model_dump(mode="python", warnings=False)
 
 
 def parse_process_ir_v1(payload: Any) -> ProcessIRV1:

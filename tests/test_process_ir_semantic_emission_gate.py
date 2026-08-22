@@ -723,3 +723,136 @@ def test_a_missing_map_symbol_keeps_the_specialized_code_first():
     codes = [f.code for f in report.errors]
     assert codes, "expected the mis-referenced map to be rejected"
     assert "PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND" not in codes, codes
+
+
+def _policy_required_specimen():
+    """A document that ONLY compiles under a registered legacy exemption.
+
+    It reads a DPP nothing ever writes, which strict semantics refuse with
+    `PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE` — one of exactly four
+    codes `flow_sequence`'s policy may downgrade.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    doc = {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                {
+                    "kind": "source",
+                    "connection_ref": "$ref:conn",
+                    "operation_ref": "$ref:op",
+                },
+                {
+                    "kind": "set_dpp",
+                    "name": "OUT",
+                    "source_values": [
+                        {"value_type": "dpp", "property_name": "NEVER_WRITTEN"}
+                    ],
+                },
+                {
+                    "kind": "target",
+                    "connection_ref": "$ref:tconn",
+                    "operation_ref": "$ref:top",
+                },
+                {"kind": "stop"},
+            ],
+        },
+    }
+    # The operation symbols carry derived connector metadata, so this specimen
+    # reaches emission planning and the exemption's effect is observable as a
+    # COMPLETED compile rather than as "a different failure".
+    symbols = SymbolTableV1(
+        symbols=(
+            ComponentSymbolV1(
+                ref="$ref:conn",
+                component_id="id-conn",
+                component_type="connector-settings",
+                connector_type="http",
+            ),
+            ComponentSymbolV1(
+                ref="$ref:op",
+                component_id="id-op",
+                component_type="connector-action",
+                connector_type="http",
+                action_type="GET",
+                connection_ref="$ref:conn",
+            ),
+            ComponentSymbolV1(
+                ref="$ref:tconn",
+                component_id="id-tconn",
+                component_type="connector-settings",
+                connector_type="http",
+            ),
+            ComponentSymbolV1(
+                ref="$ref:top",
+                component_id="id-top",
+                component_type="connector-action",
+                connector_type="http",
+                action_type="SEND",
+                connection_ref="$ref:tconn",
+            ),
+        )
+    )
+    return parse_process_ir_v1(doc), symbols
+
+
+def test_a_policy_bearing_compile_survives_the_reparse_but_gains_no_grammar_bypass():
+    """#178: the four-part behavioural regression the design plan mandated.
+
+    The compile entry re-validates through the parser UNCONDITIONALLY, including
+    when a legacy policy is supplied. That is only sound if two things hold at
+    once, and a code-level disjointness assertion proves neither of them
+    behaviourally: an exempt document must still compile THROUGH the new re-parse,
+    and a policy must buy no relief from the parser's grammar.
+
+    Without this, a future "skip the re-parse when a policy is present"
+    optimisation would pass every other test in this file.
+    """
+    import copy
+
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.semantic_validation.validation_policy import (
+        lookup_policy,
+    )
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    ir, symbols = _policy_required_specimen()
+    policy = lookup_policy("flow_sequence")
+
+    # (i) + (iii) STRICT refuses it, on the lineage code the policy covers.
+    with pytest.raises(ProcessIRCompileError) as strict:
+        compiler_pipeline.compile_process_ir_v1(ir, symbols)
+    assert "PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE" in [
+        d.code for d in strict.value.diagnostics
+    ]
+
+    # (ii) WITH the policy it compiles — so the re-parse did not break the
+    # exemption path. This is the half the disjointness argument predicts and
+    # nothing else measured.
+    cfg, plan = compiler_pipeline.compile_process_ir_v1(
+        ir, symbols, validation_policy=policy
+    )
+    assert cfg is not None and plan is not None
+
+    # (iv) A GRAMMAR-invalid mutation is refused even WITH the policy supplied.
+    # `version` is the sharpest probe: no compiler stage reads it, so before #178
+    # this compiled clean, and no exemption can reach a parser code.
+    mutated = copy.deepcopy(ir)
+    mutated.version = "2"
+    with pytest.raises(ProcessIRCompileError) as exempted:
+        compiler_pipeline.compile_process_ir_v1(
+            mutated, symbols, validation_policy=policy
+        )
+    served = exempted.value.diagnostics[0]
+    assert served.code == "PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED", [
+        (d.code, d.path) for d in exempted.value.diagnostics
+    ]
+    assert served.phase == "schema"
+
+    # ...and the clean specimen still round-trips, so (ii) above is not an
+    # artefact of a compile that silently stopped early.
+    reparsed = parse_process_ir_v1(ir.model_dump(mode="python", warnings=False))
+    assert reparsed.version == "1"

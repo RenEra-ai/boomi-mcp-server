@@ -214,6 +214,62 @@ def _body_of(ir, context, mode):
 MODES = ("clean", "connector_above")
 
 
+def _anchored(context, mode, prefix_nodes, candidate_at_end=None):
+    """Steps for a body, preserving the Try-body's mandatory connector anchor.
+
+    A process-scoped try body must BEGIN with the connector_call that produces
+    the flow's documents; a connector-scoped one must END with the call it
+    protects. Overwriting `steps` wholesale — which an earlier revision did —
+    violates the anchor in every try-body case, so each one collapsed onto the
+    same scope diagnostic and the slot-admission rule underneath was never
+    reached. The candidate is placed AROUND the anchor instead.
+    """
+    nodes = list(prefix_nodes)
+    if candidate_at_end is not None:
+        nodes.append(candidate_at_end)
+    if context not in (bc.TRY_BODY,):
+        return nodes
+    anchor = NODE.validate_python(copy.deepcopy(_atom("connector_call")))
+    return nodes + [anchor] if mode == "connector_above" else [anchor] + nodes
+
+
+def _build(context, mode, slot, kind, neighbor):
+    """One generated document: `kind` in the target slot, `neighbor` opposite it.
+
+    The NEIGHBOUR is the dimension the first revision of this generator dropped,
+    and it is not decorative: corpus row 1 is precisely a (prefix `cache_put`,
+    terminal `process_call`) INTERACTION, which no single-slot product can
+    produce. The plan crosses every STEP candidate with every legal terminal, and
+    every TERMINAL candidate with the empty prefix and every legal step.
+    """
+    ir = parse_process_ir_v1(copy.deepcopy(_carrier(context, mode)))
+    body = _body_of(ir, context, mode)
+    candidate = NODE.validate_python(copy.deepcopy(_atom(kind)))
+    if slot == bc.STEP_SLOT:
+        body.steps = _anchored(context, mode, [candidate])
+        body.terminal = NODE.validate_python(copy.deepcopy(_atom(neighbor)))
+    else:
+        prefix = (
+            []
+            if neighbor is None
+            else [NODE.validate_python(copy.deepcopy(_atom(neighbor)))]
+        )
+        body.steps = _anchored(context, mode, prefix)
+        body.terminal = candidate
+    return ir
+
+
+def _neighbours(context, slot):
+    """The opposite slot's legal vocabulary, read from the matrix.
+
+    For a TERMINAL candidate the empty prefix is included as `None`: "no steps at
+    all" is a distinct authored shape, and it is the one corpus row 5 turns on.
+    """
+    if slot == bc.STEP_SLOT:
+        return sorted(MATRIX[(context, bc.TERMINAL_SLOT)])
+    return [None] + sorted(MATRIX[(context, bc.STEP_SLOT)])
+
+
 def _generate():
     """The derived product. Returns (cases, carrier_failures)."""
     cases = []
@@ -227,16 +283,15 @@ def _generate():
                 carrier_failures.append((context, slot, mode, str(exc)[:160]))
                 continue
             for kind in KINDS:
-                ir = parse_process_ir_v1(copy.deepcopy(base))
-                body = _body_of(ir, context, mode)
-                node = NODE.validate_python(copy.deepcopy(_atom(kind)))
-                if slot == bc.STEP_SLOT:
-                    body.steps = [node]
-                else:
-                    body.terminal = node
-                cases.append(
-                    ("{0}/{1}={2}/mode={3}".format(context, slot, kind, mode), ir)
-                )
+                for neighbor in _neighbours(context, slot):
+                    cases.append(
+                        (
+                            "{0}/{1}={2}/opp={3}/mode={4}".format(
+                                context, slot, kind, neighbor or "EMPTY", mode
+                            ),
+                            _build(context, mode, slot, kind, neighbor),
+                        )
+                    )
     # ROOT product — the matrix has no root row, and root precedence is exactly
     # where two rules collide (corpus rows 2 and 3).
     parse_process_ir_v1(copy.deepcopy(_ROOT_CARRIER))
@@ -358,7 +413,14 @@ def test_the_generated_count_equals_the_runtime_product():
     """Derived, never hard-coded. A generator that stopped early — or a matrix row
     that vanished — changes this equality instead of shrinking coverage
     silently."""
-    expected_body = len(MATRIX) * len(MODES) * len(KINDS)
+    # The PLAN's product, recomputed from the authorities — a candidate in each
+    # slot crossed with the OPPOSITE slot's legal vocabulary. An earlier revision
+    # asserted `len(MATRIX) * modes * kinds`, which recomputed its own reduced
+    # formula and so agreed with itself while generating 400 body cases instead
+    # of 3000. A count derived from the wrong formula is not a derived count.
+    expected_body = sum(
+        len(_neighbours(context, slot)) for context, slot in MATRIX
+    ) * len(MODES) * len(KINDS)
     expected_root = len(KINDS) + len(KINDS) * len(KINDS)
     cases = _measured()["cases"]
     assert len(cases) == expected_body + expected_root, len(cases)
@@ -516,7 +578,10 @@ def test_the_gate_fails_when_the_structural_fix_is_removed(monkeypatch):
     # is the ACCEPT-DIRECTION hole: the parser refuses a trailing `cache_put` in a
     # Branch leg and the unfixed compiler models no such rule, so it accepts and
     # compiles the document.
-    probe = "branch_leg/step=cache_put/mode=clean"
+    # The accept-direction hole, now carrying its NEIGHBOUR: a trailing
+    # `cache_put` before a `stop` terminal. The parser refuses it; the unfixed
+    # compiler models no such rule and compiles it into a real emission plan.
+    probe = "branch_leg/step=cache_put/opp=stop/mode=clean"
     cases = _measured()["cases"]
     assert any(cid == probe for cid, _ir in cases), "the probe case vanished"
 
@@ -611,47 +676,65 @@ CORPUS = [
         _corpus_branch_cache_prefix_call,
         "PROCESS_IR_SCHEMA_INVALID_CARDINALITY",
         "/body/steps/0/legs/0",
+        (
+            "a trailing cache_put belongs in the leg terminal (target-less staging leg), not in steps"
+        ),
     ),
     (
         "root-branch-then-process-call",
         _corpus_root_branch_then_call,
         "PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED",
         "/body",
+        (
+            "no step may follow a branch or decision — control nodes are terminal fan-out in ProcessIR v1 (continuation_after_branch_or_decision is gated)"
+        ),
     ),
     (
         "root-process-call-then-source",
         _corpus_root_call_then_source,
         "PROCESS_IR_SCHEMA_INVALID_CARDINALITY",
         "/body",
+        (
+            "source may appear only as the first step"
+        ),
     ),
     (
         "process-try-process-call-first-step",
         _corpus_process_try_call_first_step,
         "PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY",
         "/body/steps/0/try_body/steps/0",
+        (
+            "this node kind is not admitted in this control-body slot"
+        ),
     ),
     (
         "root-connector-branch-process-call-terminal",
         _corpus_connector_above_leg_terminal_call,
         "PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY",
         "/body/steps/1/legs/0/terminal",
+        (
+            "a process_call may not share a root-to-leaf path with a connector step — a connector runs upstream of this body (process_call_connector_mixing is gated)"
+        ),
     ),
     (
         "root-connector-branch-process-call-terminal-with-prefix",
         _corpus_connector_above_leg_prefix_terminal_call,
         "PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED",
         "/body/steps/1/legs/0/terminal",
+        (
+            "a process_call branch leg terminal admits no preceding steps — a call whose child returns no documents ends the path it is on, and a prefix before it is not attested"
+        ),
     ),
 ]
 
 
 @pytest.mark.parametrize(
-    "case_id,build,expected_code,expected_path",
+    "case_id,build,expected_code,expected_path,expected_message",
     CORPUS,
     ids=[row[0] for row in CORPUS],
 )
 def test_the_inherited_divergences_are_pinned(
-    case_id, build, expected_code, expected_path
+    case_id, build, expected_code, expected_path, expected_message
 ):
     """#175 ledger rows `L3R3-01` and `L3R3-02`, discharged.
 
@@ -667,7 +750,17 @@ def test_the_inherited_divergences_are_pinned(
     with pytest.raises(ProcessIRValidationError) as parser_exc:
         parse_process_ir_v1(ir.model_dump(mode="json", warnings=False))
     parser_first = parser_exc.value.diagnostics[0]
-    assert (parser_first.code, parser_first.path) == (expected_code, expected_path)
+    # The MEASURED baseline triple, hard-pinned. Taking the message from the live
+    # parser and comparing compile against THAT would pass if both paths drifted
+    # together — which is precisely the failure mode #178 exists to prevent, since
+    # the two paths drifting in step is what "identical diagnostics" would look
+    # like from the inside. These strings are the ones recorded at `cdd7a3b` in
+    # `docs/architecture/evidence/issue-178/baseline-corpus-characterization.md`.
+    assert (parser_first.code, parser_first.path, parser_first.message) == (
+        expected_code,
+        expected_path,
+        expected_message,
+    )
 
     with pytest.raises(ProcessIRCompileError) as compile_exc:
         pl.compile_process_ir_v1(ir, None)

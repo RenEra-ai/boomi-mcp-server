@@ -1,0 +1,305 @@
+You are performing an ARCHITECT IMPLEMENTATION REVIEW for GitHub issue #178 in the repository at /Users/gleb/Documents/Projects/Renera/boomi-mcp-server.
+
+Your job is NARROW and specific: judge whether the IMPLEMENTATION faithfully realizes the ARCHITECT DESIGN PLAN reproduced verbatim below, and whether it meets the issue's acceptance criteria. This is NOT a general code review — the repository's own Codex review gate has already run seven rounds over this change and closed; do not re-litigate style, naming, or defects it already dispositioned. Judge intent-vs-implementation.
+
+Read the repository yourself. Do not trust this brief's summary over what the code says.
+
+## What changed
+
+Baseline `cdd7a3bf8e2e7ae6773f6ec4250844e5c2e8cf8f` -> HEAD `aedca45344ea9215f77deede343f6724fa264a09`.
+
+Production (5 files):
+- `src/boomi_mcp/compiler/process_ir/pipeline.py`
+- `src/boomi_mcp/models/process_ir.py`
+- `src/boomi_mcp/authoring/workflow.py`
+- `src/boomi_mcp/recipes/engine.py`
+- `src/boomi_mcp/recipes/composer.py`
+
+Tests (10 files), of which the central new one is:
+- `tests/test_process_ir_entrypoint_diagnostic_parity.py` (new, the derived gate)
+- `tests/test_issue_178_ledger_is_derived_from_its_archive.py` (new, audit-record invariant)
+- updated: `test_process_ir_rich_control_bodies.py`, `test_process_ir_semantic_emission_gate.py`, `test_m12_11_authoring_compile.py`, `test_process_ir_authoring_contract.py`, `test_recipe_validation_gate.py`, `test_process_materialization_plan.py`, `test_canonical_process_apply.py`, and the rebaselined `tests/fixtures/m12_12/legacy_reachability_inventory.json`
+
+The audit record lives in `docs/architecture/ISSUE_178_AUDIT_LEDGER.md` with evidence under `docs/architecture/evidence/issue-178/`.
+
+## What the implementation actually does
+
+`compile_process_ir_v1` now re-validates the caller-supplied `ProcessIRV1` through `parse_process_ir_v1` before any compile stage, making the PARSER the single authority for grammar diagnostics. The re-validation performs exactly ONE `model_dump(mode="python", warnings=False)` and parses it. A private `_compile_parsed_process_ir_v1` holds the ordered stages; `parse_and_compile_process_ir_v1` calls it directly; a new public `compile_process_ir_model_v1` returns the re-validated model so callers stop dumping by hand.
+
+## The specific questions I want judged
+
+1. **Faithfulness.** Does the implementation realize the plan's decisions, or has it drifted? The plan chose "phase-separated validation": keep `parse_process_ir_v1` policy-free, re-parse unconditionally at the compile entry including for policy-bearing legacy callers. Verify that is what the code does.
+
+2. **The plan's own design question.** The plan resolved `validation_policy` by arguing the four legacy exemptions are post-lowering semantic codes, disjoint from the parser's raisable set. Verify that argument still holds in the code, and that the disjointness is pinned by a test rather than asserted in prose.
+
+3. **Deviations from the plan, and whether each is justified.** The implementation deviates in at least these ways — judge each:
+   - The plan specified `model_dump(mode="json", warnings=False)`. The implementation uses `mode="python"`. Reason recorded: a json dump COERCES a wrong-typed value (a `datetime` in a `str` field renders as an ISO string) and hands the parser an already-repaired document, defeating the re-parse.
+   - The plan did not anticipate the catch-terminal branch change in `models/process_ir.py`. Reason recorded: a re-parse degraded `PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED` to the generic `PROCESS_IR_SCHEMA_INVALID`.
+   - The plan did not include `compile_process_ir_model_v1` or the `composer.py` changes.
+   Are these faithful extensions of the plan's intent, or scope creep?
+
+4. **Acceptance criterion 2 — the coverage claim.** The plan requires coverage DERIVED from the grammar's own case set, never a hand-listed sample. Read `tests/test_process_ir_entrypoint_diagnostic_parity.py` and judge whether the derivation is genuine: is the case set actually a product over the runtime authorities, are the counts recomputed rather than hard-coded, and would the gate fail if it enumerated nothing? Say plainly if you think the derivation is weaker than claimed.
+
+5. **Acceptance criterion 4 — the safety property.** The issue asserts the property ALREADY HOLDS and merely needs a test. The implementation's audit record claims that premise is FALSE and that measurement shows the compiler accepting documents the parser refuses. Judge that claim against the code: is it correct, and does the implementation handle it appropriately?
+
+6. **Anything the plan required that is MISSING.** This is the most valuable thing you can find. The plan named specific tests and behaviours; check them off against the tree.
+
+## Verdict
+
+END your reply with a verdict on its OWN FINAL LINE, exactly one of:
+
+VERDICT: NO ISSUES
+
+VERDICT: ISSUES FOUND
+
+Before that line, list any findings with a severity and a concrete file:line reference. If you find nothing substantive, say so plainly rather than inventing minor notes.
+
+
+=== ARCHITECT DESIGN PLAN (verbatim) ===
+# Issue #178 — ProcessIR entry-point diagnostic parity
+
+## Decision record
+
+### 1. Validation policy: unconditional parser revalidation, policy remains semantic-only
+
+Choose the third option: phase-separated validation.
+
+- Keep `parse_process_ir_v1(payload: Any) -> ProcessIRV1` unchanged. Do not add `validation_policy`.
+- Every direct `compile_process_ir_v1(...)` call, including policy-bearing legacy calls, must first serialize the supplied mutable model with `model_dump(mode="json", warnings=False)` and reparse it strictly.
+- `LegacyValidationPolicyV1` continues to apply only after CFG lowering, when `_enforce_semantic_report` reclassifies named semantic findings.
+- A parser-invalid legacy model is therefore refused with the parser’s diagnostic even when a legacy policy is supplied. Legacy callers retain their deliberate semantic exemptions, but no longer retain divergent grammar diagnostics.
+
+Evidence:
+
+- ProcessIR models are mutable because `_ProcessIRBase` forbids extras but is not frozen: [process_ir.py](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/models/process_ir.py:190), lines 190–194.
+- The parser’s complete gate—payload shape, secret scan, version, Pydantic grammar, and whole-document rules—is [parse_process_ir_v1](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/models/process_ir.py:2743), lines 2743–2784.
+- Policies are explicitly adapter-owned and unavailable to general validation: [validation_policy.py](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/validation_policy.py:18), lines 18–29.
+- The four policy mappings are post-lowering semantic codes only, at lines 53–69; `apply_policy` merely reclassifies `ValidationReportV1.errors`, at lines 158–192.
+- Policy is currently applied after `validate_lowered_process_ir`: [pipeline.py](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/pipeline.py:82), lines 82–133.
+- All shipped adapters already construct their IR through strict parsing: `_process_ir_compat.py` lines 676–759 and 850–893, `sync_pipeline.py` lines 404–425, and `wrapper_subprocess.py` lines 103–133.
+- A read-only probe over 27 committed legacy specimens found 27 strict dump/reparse successes with exact JSON equality; three still required their semantic policy to compile. This demonstrates that strict grammar validation and legacy semantic exemption coexist.
+
+Rejected alternatives:
+
+- Adding policy to the parser would broaden an adapter-only exemption surface without any parser diagnostic that the policy can currently exempt.
+- Skipping the reparse when `validation_policy is not None` would preserve the mutable-model hole this issue is meant to close.
+- Extracting a shared compiler-wide precedence chain is unnecessary for #178 and remains a possible part of #154’s matrix derivation work.
+
+### 2. Diagnostic authority: the parser
+
+The parser is authoritative for diagnostic identity whenever the serialized model is parser-refused.
+
+Public contract:
+
+- `parse_process_ir_v1` continues to raise `ProcessIRValidationError`.
+- `compile_process_ir_v1` converts the same parser findings to `ProcessIRCompileError`, preserving the complete ordered `(code, JSON pointer, message)` vector verbatim. Preserve remediation too; set `phase="schema"` and derive `node_identity` from the pointer.
+- Compiler stages consume the fresh reparsed model, not the caller-owned model that was merely checked.
+- Parser refusal happens before `validate_body_capabilities`, lowering, invariants, semantic validation, or emission.
+- Unexpected dump/parser failures become the existing value-free `PROCESS_IR_COMPILE_INTERNAL` schema diagnostic.
+
+The parser owns authored grammar and whole-document ordering; the compiler still owns parser-accepted documents’ CFG, references, lineage, and emission diagnostics. “Acceptance symmetry” in this slice therefore means grammar acceptance at the compile entry, not that the schema parser promises to accept every document that may later fail symbol-aware semantic compilation.
+
+No `src/` consumer branches on the superseded compiler diagnostic for these malformed documents; the only intentional pin is the test discussed below.
+
+### 3. Regression corpus characterization
+
+All five rows were independently reproduced read-only at the required baseline `cdd7a3bf8e2e7ae6773f6ec4250844e5c2e8cf8f`:
+
+| Stable case ID | Parser today | Full compiler today |
+| --- | --- | --- |
+| `branch-cache-prefix-process-call-terminal` | `PROCESS_IR_SCHEMA_INVALID_CARDINALITY` at `/body/steps/0/legs/0`; trailing `cache_put` belongs in the terminal | `PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED` at `/body/steps/0/legs/0/terminal` |
+| `root-branch-then-process-call` | `PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED` at `/body` | `PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW` at `/body/steps/0` |
+| `root-process-call-then-source` | `PROCESS_IR_SCHEMA_INVALID_CARDINALITY` at `/body` | `PROCESS_IR_CAPABILITY_UNSUPPORTED` at `/body` |
+| `process-try-process-call-first-step` | `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` at `/body/steps/0/try_body/steps/0` | `PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED` at `/body/steps/0/try_body/steps` |
+| `root-connector-branch-process-call-terminal` | `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` at `/body/steps/1/legs/0/terminal`, with the upstream-connector clause | Same code/pointer, but message omits the clause |
+
+The previously failed root probe needed both `connection_ref` and `operation_ref`, as required by [SourceEndpointV1](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/models/process_ir.py:696), lines 696–703.
+
+Before implementation, repeat this characterization at the literal baseline and archive the full strings. If any row does not reproduce, retain its stable case ID:
+
+- If both paths already agree, record a technical `finding-refuted` disposition and retain it as an equality regression.
+- If the fixture was malformed, record the fixture defect and corrected construction.
+- If a different divergence appears, record the measured replacement triples.
+- Never delete, skip, or silently reduce the five-row corpus.
+
+### 4. Superseded compiler diagnostic
+
+Keep the existing pytest node name `test_the_root_verdict_yields_to_the_control_continuation_rule` at [test_process_ir_rich_control_bodies.py](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/test_process_ir_rich_control_bodies.py:1610), lines 1610–1654.
+
+Rewrite its contract as follows:
+
+- Retain the direct `validate_body_capabilities(ir)` assertion proving that the local process-call verdict yields.
+- Replace the public full-compile expectation of `PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW` with the parser-authoritative `PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED` triple at `/body`.
+- Explicitly assert that the public result is neither `PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW` nor the process-call return-path code.
+- Retain the `[branch, set_dpp]` peer and assert it receives the same continuation diagnostic.
+- Add a “#178 supersession” docstring paragraph and record the old→new public contract in the #178 ledger. Keeping the function name preserves manifest identity `pytest-010233`.
+
+### 5. Call-site and performance decisions
+
+| Call site | Decision |
+| --- | --- |
+| `authoring/workflow.py::_reparsed_unit`, lines 359–407 | Retain. It establishes server ownership before semantic hashing and other consumers; it is not merely compile validation. |
+| `authoring/workflow.py::build_artifact_descriptors`, lines 1942–2000 | Replace explicit parse + direct compile with `parse_and_compile_process_ir_v1`; fingerprint the returned parsed model. This preserves one parse at this boundary without double parsing. |
+| `recipes/engine.py::_compile_processes`, lines 1711–1760 | Remove its explicit parser call and pass `root` directly to public compile. Keep `validation_policy=None` explicit. |
+| `process_materialization.py::build_materialization_plan`, lines 590–655 | Leave the direct compile call. It gains centralized revalidation; relocatability still runs first. |
+| `canonical_process_apply.py::materialize_canonical_process_xml`, lines 201–263 | Leave fingerprint verification first and direct compilation second. The centralized reparse runs before emission or mutation. |
+| `legacy_adapters/emission.py::emit_legacy_result`, lines 53–94 | Keep the policy-bearing direct compile call. Clarify that policy affects semantic findings only and follows strict parser validation. |
+
+Measured on Python 3.12.13/arm64 at the baseline:
+
+- Committed legacy specimens: median added dump/reparse cost `0.017 ms`; slowest specimen `0.072 ms`.
+- A 103-node/5.1 KB synthetic document: `0.213 ms` median.
+- A 1,003-node/49.2 KB document: `2.10 ms` median.
+- Small current compiles measured about `0.138 ms`, so the relative CPU increase is roughly 15–17%, while the absolute committed-case cost remains below `0.1 ms`.
+
+The operation is O(nodes + serialized bytes) in time and temporary memory. There is no fixed maximum because root `steps` is unbounded, although Branch legs and control depth are bounded. This is acceptable for materialization and apply; both gain one sub-millisecond pass for production-shaped inputs and apply remains dominated by external operations. Do not add timing assertions; add parser call-count tests to prevent accidental immediate double parsing.
+
+## File-by-file plan
+
+### Production
+
+- [pipeline.py](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/pipeline.py:136)
+  - Extract `_parse_payload_for_compile(payload)` from the current wrapper’s parser-error translation.
+  - Add `_reparse_process_ir_for_compile(ir)`, which performs the warning-suppressed JSON dump and calls the translation helper.
+  - Move the current ordered compile stages into non-exported `_compile_parsed_process_ir_v1(...)`.
+  - Make public `compile_process_ir_v1` reparse unconditionally and pass the fresh model to the private core.
+  - Make `parse_and_compile_process_ir_v1` parse once and call the private core directly, avoiding an immediate second dump/reparse.
+  - Keep all public signatures and `__all__` unchanged; the private core must never be exported.
+
+- [process_ir.py](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/models/process_ir.py:2743)
+  - No code change. Its parser signature and strict policy-free contract remain authoritative.
+
+- [body_capabilities.py](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/body_capabilities.py:117)
+  - No production change. Preserve the independent defensive checks; expose no new restated registry. Tests consume `BODY_CAPABILITIES_V1` directly.
+
+- [workflow.py](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/authoring/workflow.py:359)
+  - Retain `_reparsed_unit`.
+  - In `build_artifact_descriptors`, switch to `parse_and_compile_process_ir_v1(ir.model_dump(..., warnings=False), symbols)`.
+  - Use the returned parsed model for `canonical_process_ir_json` and remove the now-unused local parser import.
+
+- [engine.py](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/recipes/engine.py:1711)
+  - Remove the local `parse_process_ir_v1` import and explicit reparse.
+  - Compile `root` directly with explicit `validation_policy=None`.
+
+- [emission.py](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/legacy_adapters/emission.py:53)
+  - Leave behavior unchanged; update the policy comment to document strict grammar first, semantic exemptions second.
+
+- [process_materialization.py](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/authoring/process_materialization.py:590) and [canonical_process_apply.py](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/components/canonical_process_apply.py:201)
+  - No source edits. Their direct calls intentionally exercise the new centralized boundary.
+
+### Tests and records
+
+- Add `tests/test_process_ir_entrypoint_diagnostic_parity.py` for the derived grammar gate, separate safety gate, killed-reparse witness, and five-case regression corpus.
+- Update `tests/test_process_ir_rich_control_bodies.py` only for the explicit supersession described above; retain the existing hand cases as local `validate_body_capabilities` unit tests, not as the global coverage claim.
+- Update `tests/test_process_ir_semantic_emission_gate.py`:
+  - Inspect stage ordering in `_compile_parsed_process_ir_v1` rather than the now-thin public wrapper.
+  - Pin public compile’s reparse-before-core ordering.
+  - Assert direct compile and `parse_and_compile_process_ir_v1` each invoke the parser exactly once.
+  - Pin that parser has no `validation_policy`.
+  - Add a policy-required specimen that passes strict reparse plus policy compile, fails strict semantic compile, and cannot use policy to exempt a grammar-invalid mutation.
+- Update `tests/test_recipe_validation_gate.py` so the ordering spy observes compile-entry → internal reparse → emit, while retaining the explicit `validation_policy=None` assertion.
+- Update `tests/test_m12_11_authoring_compile.py` to count `_compile_parsed_process_ir_v1` invocations rather than only public wrapper calls; both artifact compilation and materialization compilation must remain present and strict.
+- Add a mutated-model refusal to `tests/test_process_materialization_plan.py`; assert the parser-authoritative compile diagnostic is raised before a plan is constructed.
+- Add an apply-path case to `tests/test_canonical_process_apply.py`: create a fingerprint-consistent plan containing a grammar-invalid mutable IR, then assert recompile refuses before `emit_process` or materialization. Preserve the existing fingerprint-mismatch-first contract for an ordinary forged plan.
+- Reconcile `tests/fixtures/wave_gate/test_nodes.jsonl` using the repository’s manifest tooling. Append fresh IDs for new nodes, update floors from actual collection, and retain `pytest-010233` because the superseded test is not renamed.
+- Add `docs/architecture/ISSUE_178_AUDIT_LEDGER.md`, seeded with inherited #175 rows `L3R3-01` and `L3R3-02`, their P2/Standard labels, `blocked-by-mechanism` lineage, original placement, later re-slot, baseline characterization, policy decision, performance measurement, and contract supersession. Do not edit the append-only #175 ledger.
+- Create `docs/architecture/evidence/issue-178/index.jsonl` and `SHA256SUMS` with the ledger’s Stage-1.5 baseline commit, then archive QA/review artifacts there as required by the [ledger template](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/docs/architecture/templates/AUDIT_LEDGER_TEMPLATE.md:103).
+
+## Test plan
+
+### Grammar-derived case set
+
+Let:
+
+- `K = set(process_ir_v1_node_kinds()) - {"sequence"}`: the parser’s complete authorable node vocabulary.
+- `R = BODY_CAPABILITIES_V1`: the compiler’s authoritative `(context, slot) -> allowed kinds` matrix.
+- Ancestor modes be `clean` and `connector_above`, matching the boolean state computed by the parser/compiler walkers. A process-call ancestor cannot reach another body in valid V1 because process calls terminalize their path; illegal root sequencing is covered by the root pair product.
+
+Generate the corrected product:
+
+1. For every STEP row `(context, STEP_SLOT)`, every candidate `k ∈ K`, both ancestor modes, and every legal terminal from `R[(context, TERMINAL_SLOT)]`, place `k` as the target step.
+2. For every TERMINAL row `(context, TERMINAL_SLOT)`, every candidate `k ∈ K`, both ancestor modes, and each prefix in `{EMPTY} ∪ R[(context, STEP_SLOT)]`, place `k` as the target terminal.
+3. Because the body matrix has no root row, separately generate every root singleton `K` and every ordered root pair `K × K`. This derives `[branch, process_call]`, `[process_call, source]`, and future two-rule precedence collisions without hand-listing them.
+
+Current derived size is 3,000 body cases plus 420 root cases, but no test may hard-code either number. Assert:
+
+- Every matrix context has exactly STEP and TERMINAL rows.
+- Palette keys equal `K`.
+- Carrier-factory keys equal the matrix’s context set.
+- Case IDs are unique.
+- The generated count equals the runtime product formula.
+- Projection covers every `(context, slot, candidate kind)`.
+- `len(body_cases) >= sum(len(kinds) for kinds in R.values())`.
+- Every matrix-denied `(context, slot, kind)` has at least one parser-refused generated case.
+- Parser-accepted and parser-refused partitions are both non-empty.
+
+Keep the suite runnable by looping and aggregating mismatches inside a few pytest nodes rather than parametrizing 3,420 manifest nodes. Bound roots at arity two, generate only one target plus one legal opposite-slot neighbor, and stop successful compiler cases immediately after the grammar boundary.
+
+### Construction
+
+- Maintain one minimal, internally valid node atom per `K`, keyed by kind and validated through `TypeAdapter(ProcessNodeV1)`. These are grammar atoms, not hand-authored cases; exact key-set equality makes a new kind fail closed.
+- Maintain one carrier factory per runtime matrix context:
+  - Branch/Decision clean carriers use a control-only root.
+  - Their ancestor carriers use `[connector_call, control]`.
+  - Try/Catch clean carriers use a process-scoped Try/Catch.
+  - Ancestor carriers use `[connector_call, connector-scoped try_catch]`.
+- Preserve mandatory Try-body anchors:
+  - Process scope: `[connector_call_anchor, candidate]`.
+  - Connector scope: `[candidate, connector_call_anchor]`.
+  - For terminal targets, retain the required anchor and insert the derived optional prefix in the scope-valid position.
+- Parse and validate every untouched carrier first.
+- Deep-copy the carrier and node atoms, mutate the selected slot, and produce the parser payload only from that same model’s warning-suppressed JSON dump. Assert that dump is exactly the document being compared.
+
+### Differential identity
+
+Patch `pipeline.lower_process_ir_to_cfg` to raise a unique test-only `ProcessIRCompileError` sentinel. Public compile must still execute its new reparse and `validate_body_capabilities`; the sentinel marks successful passage through the compile-side grammar boundary without introducing symbol/semantic failures.
+
+For every parser-refused generated case:
+
+- Capture the parser’s complete ordered diagnostic vector.
+- Capture public compile’s complete ordered vector.
+- Assert exact `(code, path, message)` equality.
+- Assert compile’s translated parser diagnostics use `phase="schema"`.
+
+### Separate safety property
+
+In a separate test over all generated cases, compare only acceptance booleans:
+
+- Parser acceptance means `parse_process_ir_v1` returns.
+- Compile-entry grammar acceptance means public compile reaches the post-body-capability sentinel.
+- Assert `parser_accepted == compiler_grammar_accepted` for every case.
+
+Do not derive this result from diagnostic equality or filter to paired failures.
+
+### Non-vacuity mutation control
+
+Select the derived `branch_leg / terminal=process_call / prefix=cache_put / clean` case and assert its ID is present.
+
+- With normal production code, both paths must refuse with the parser’s cardinality triple.
+- Then monkeypatch `_reparse_process_ir_for_compile` for one invocation to return the caller-owned mutated model, simulating deletion/bypass of the structural fix.
+- Run the same mismatch collector used by the real gate and assert it reports this exact case because the compiler falls back to its return-path diagnostic.
+
+This witness, exact count, coverage projection, and denied-cell floor jointly prevent an empty or tautological gate.
+
+### Regression and integration validation
+
+- Parameterize the five stable corpus IDs and hard-pin each parser baseline triple; then assert full public compile returns that same triple.
+- Run the legacy policy-required specimens both strict and policy-enabled.
+- Run focused call-site tests, the complete non-KB suite, active goldens, deterministic compile/fingerprint checks, and wave-manifest validation.
+- Treat this as behavior-affecting for Stage-1 QA: exercise the affected ProcessIR authoring/materialization boundary through the public MCP tool path and verify invalid input causes no apply mutation; then perform the required detached repo review on the QA-validated commit.
+
+## Risks / open questions
+
+- No blocking design question remains.
+- The safety test is intentionally scoped to parser-owned grammar. Full compilation may legitimately reject a parser-valid document for symbol, CFG, lineage, or capability reasons.
+- The node palette is manually constructed once per grammar kind, but exact equality with the parser-derived vocabulary prevents silent drift; cases themselves are fully generated.
+- `BODY_CAPABILITIES_V1` remains a manually maintained authority. This plan tests all of it but does not derive it from model unions; #154 item 6 owns that change.
+- Linear root length is unbounded, so no absolute performance ceiling can be claimed. The implementation should record the measured linear bound and call counts, not add a brittle latency threshold.
+- The private compile core is a potential internal bypass if later reused incorrectly. Keep it non-exported, call it only immediately after `_parse_payload_for_compile`, and pin that every public direct compile reaches `_reparse_process_ir_for_compile`.
+
+
+=== ISSUE ACCEPTANCE CRITERIA ===
+1. A documented decision on which of the two entry points is authoritative for diagnostic identity, and why.
+2. Coverage derived from the grammar own case set, not a hand-listed sample.
+3. The five divergences are a regression corpus: each, reintroduced, must fail.
+4. The safety property is pinned separately and explicitly: no document may be accepted by one entry point and refused by the other.

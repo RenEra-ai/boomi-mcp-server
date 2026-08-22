@@ -234,7 +234,16 @@ def _reparse_process_ir_for_compile(ir: ProcessIRV1) -> ProcessIRV1:
     try:
         payload = raw_process_ir_payload(ir)
     except ProcessIRValidationError as exc:
+        # A refusal the PARSER authored travels verbatim.
         raise _compile_error_from_validation(exc) from None
+    except Exception:  # noqa: BLE001 - deliberate: never leak internals
+        # An unexpected SERIALIZER failure is not a document defect and must not
+        # be served as one: the caller cannot act on "your document is invalid"
+        # when the truth is that the dump broke. Value-free, like every other
+        # unexpected failure in this module.
+        raise ProcessIRCompileError(
+            [diagnostic(PROCESS_IR_COMPILE_INTERNAL, "schema", "")]
+        ) from None
     return _parse_payload_for_compile(payload)
 
 
