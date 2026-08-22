@@ -1860,6 +1860,12 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     # `& gate.DIAGNOSTIC_CODES == set()` assertion below enforces.
     "PROCESS_IR_V1",
     "PROCESS_IR_V1_CAPABILITIES",
+    # #177's guard constant, and a PLACEHOLDER inside a verbatim reviewer quote
+    # (`**{"code": "NEW_CODE"}`). A finding row quotes its source verbatim, so a
+    # placeholder the reviewer invented to describe a shape cannot be edited out of
+    # the row without breaking the property that makes the row auditable.
+    "UNSERVED_BY_DESIGN",
+    "NEW_CODE",
     # The #149 inventory's route table — a durable production constant any later
     # ledger classifying a component-XML write route would name, not a code.
     "WRITE_ROUTES",
