@@ -1808,6 +1808,11 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "CAPABILITY_PROCESS_IR_V1",
     "DELETION_ROUTES",
     "M12_COMPATIBILITY_INVENTORY",
+    # #147's tracked-limitation identifier. A deferral row has to be able to name
+    # the limitation it defers TO, and #177 defers the doc-prose half of DC-175-D
+    # to it. Like the inventory stem above, this is a single durable identifier,
+    # not a code and not a per-slice name.
+    "M12_CAPABILITY_DOC_DRIFT",
     "PROCESS_FLOW_BUILDERS",
     "PROCESS_KIND",
     "RECIPE_LAYER_MODULES",
@@ -1845,6 +1850,16 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "PROCESS_PRESERVATION_POLICY",
     "AUTHORING_CAPABILITY_REGISTRY",
     "DEFAULT_PROCESS_OPTIONS",
+    # #177 (M12 served-text/enforcement gate). The published capability manifest
+    # and the architecture document that mirrors it: a slice whose whole subject is
+    # "the manifest and the doc table must agree" cannot record a finding without
+    # naming both. `PROCESS_IR_V1` is the document stem (`PROCESS_IR_V1.md`), which
+    # is a FIXED filename like the two stems above; `PROCESS_IR_V1_CAPABILITIES` is
+    # the production constant in `models/process_ir.py`. Neither grows one per
+    # slice, and neither is a code this gate can emit — which the
+    # `& gate.DIAGNOSTIC_CODES == set()` assertion below enforces.
+    "PROCESS_IR_V1",
+    "PROCESS_IR_V1_CAPABILITIES",
     # The #149 inventory's route table — a durable production constant any later
     # ledger classifying a component-XML write route would name, not a code.
     "WRITE_ROUTES",

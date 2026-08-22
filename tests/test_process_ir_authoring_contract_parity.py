@@ -785,17 +785,40 @@ def test_every_producer_s_message_AND_remediation_is_findable_in_its_entry():
             by_code.setdefault(spec["code"], []).append(spec)
 
     projected = {e.subject: e for e in entries() if e.entry_type == "diagnostic"}
-    multi = 0
+    # #177: BOTH fields are required for every producer. The `if spec.get(field)`
+    # skip this replaces meant an empty field was not a failure but an exemption,
+    # so the seven codes that carried a remediation and no message satisfied this
+    # pin while serving half a diagnostic.
+    blank = sorted(
+        (code, field)
+        for code, specs in by_code.items()
+        for spec in specs
+        for field in ("message", "remediation")
+        if not (spec.get(field) or "").strip()
+    )
+    assert blank == [], blank
+
+    multi = set()
+    covered = 0
     for code, specs in by_code.items():
         entry = projected[code]
         published = entry.summary + " " + " ".join(entry.ordering_facts)
         for spec in specs:
             for field in ("message", "remediation"):
-                if spec.get(field):
-                    assert spec[field] in published, (code, field, spec[field][:60])
+                assert spec[field] in published, (code, field, spec[field][:60])
+        covered += 1
         if len({(s["message"], s["remediation"]) for s in specs}) > 1:
-            multi += 1
-    assert multi >= 5, f"only {multi} multi-producer codes — the pin is weak"
+            multi.add(code)
+
+    # NON-VACUITY, replacing the hand-typed `multi >= 5` floor — a number that had
+    # to be bumped whenever a producer's wording changed (the trap #165 closed).
+    # Two properties, both derived, neither a count to maintain: the loop visited
+    # EVERY merged code, and at least one code really is served with different text
+    # by different producers — which is the only case in which "each producer's own
+    # text is findable" says more than "the entry has some text".
+    assert by_code, "no diagnostic specs at all — the loop would be vacuous"
+    assert covered == len(by_code), (covered, len(by_code))
+    assert multi, "no code differs across its producers — the pin would be vacuous"
 
 
 def test_an_unmapped_cache_state_fails_loudly_instead_of_becoming_unsupported():
@@ -923,8 +946,126 @@ def test_rewriting_the_label_legend_moves_the_revision():
     assert committed["diagnostic_label_legend"] == DIAGNOSTIC_LABEL_LEGEND
 
 
+#: §8's own table syntax, pinned. The parser below refuses the document unless
+#: every one of these is present EXACTLY as written — which is the bidirectional
+#: half: rewording the authority's table must FAIL the guard, never quietly
+#: reduce it to a comparison against nothing. This repo has shipped a guard that
+#: enumerated nothing and therefore passed everything five separate times.
+_CAPABILITY_HEADING = "## 8. Capability states"
+_CAPABILITY_NEXT_HEADING = "## 9. Ownership boundaries (#137\u2013#143)"
+_CAPABILITY_TABLE_HEADER = "| Capability | State | Owner |"
+_CAPABILITY_TABLE_DELIMITER = "|---|---|---|"
+
+#: The document renders a state with markdown emphasis and spells the permanent
+#: form long-hand; the runtime manifest carries neither. Normalisation is EXACT
+#: and total: anything not a key here is a parse failure, not a skipped row, so a
+#: new state cannot enter the doc without a deliberate change here.
+_CAPABILITY_DOC_STATES = {
+    "supported": "supported",
+    "gated": "gated",
+    "unsupported": "unsupported",
+    "unsupported (permanent)": "unsupported",
+}
+
+
+def _parse_capability_states(doc):
+    """§8's table as a `{key: runtime_state}` mapping, or a hard failure.
+
+    #177 invariant 3. The predecessor of this parser compared KEYS only and
+    skipped any line it could not match, so a state that drifted from the
+    manifest was invisible and a restructured table degraded to an empty set
+    guarded by a hand-typed `>= 25` floor. Both halves are gone: states are
+    compared, and every structural expectation below raises rather than yields
+    fewer rows.
+    """
+    import re
+
+    if doc.count(_CAPABILITY_HEADING) != 1:
+        raise AssertionError(
+            "expected exactly one {0!r} heading, found {1}".format(
+                _CAPABILITY_HEADING, doc.count(_CAPABILITY_HEADING)
+            )
+        )
+    after = doc.split(_CAPABILITY_HEADING, 1)[1]
+
+    # The section ENDS at the next level-2 heading, and that heading is pinned:
+    # if §9 is renamed or §8 is moved, this fails instead of silently swallowing
+    # the rest of the document into the section.
+    boundary = re.search(r"^## .*$", after, re.M)
+    if boundary is None or boundary.group(0) != _CAPABILITY_NEXT_HEADING:
+        raise AssertionError(
+            "expected the next level-2 heading to be {0!r}, found {1!r}".format(
+                _CAPABILITY_NEXT_HEADING,
+                None if boundary is None else boundary.group(0),
+            )
+        )
+    section = after[: boundary.start()]
+
+    if section.count(_CAPABILITY_TABLE_HEADER) != 1:
+        raise AssertionError(
+            "expected exactly one {0!r} row, found {1}".format(
+                _CAPABILITY_TABLE_HEADER, section.count(_CAPABILITY_TABLE_HEADER)
+            )
+        )
+
+    lines = section.splitlines()
+    pipes = [i for i, line in enumerate(lines) if line.startswith("|")]
+    if not pipes:
+        raise AssertionError("§8 contains no table rows at all")
+    # ONE contiguous block: a stray table row elsewhere in the section is a
+    # structural surprise, and a parser that quietly ignored it would be reading
+    # a different table than the one a human sees.
+    if pipes != list(range(pipes[0], pipes[0] + len(pipes))):
+        raise AssertionError(
+            "§8's table rows are not one contiguous block: line offsets {0}".format(pipes)
+        )
+    block = lines[pipes[0] : pipes[0] + len(pipes)]
+
+    if block[0] != _CAPABILITY_TABLE_HEADER:
+        raise AssertionError("first table line is {0!r}".format(block[0]))
+    if len(block) < 2 or block[1] != _CAPABILITY_TABLE_DELIMITER:
+        raise AssertionError(
+            "expected {0!r} immediately after the header, found {1!r}".format(
+                _CAPABILITY_TABLE_DELIMITER, block[1] if len(block) > 1 else None
+            )
+        )
+    rows = block[2:]
+    if not rows:
+        raise AssertionError("§8's table has a header but no rows")
+
+    parsed = {}
+    for line in rows:
+        cells = line.split("|")
+        if len(cells) != 5 or cells[0] != "" or cells[4] != "":
+            raise AssertionError("malformed §8 row: {0!r}".format(line))
+        key_match = re.match(r"^ `([a-z0-9_]+)`", cells[1])
+        if key_match is None:
+            raise AssertionError(
+                "§8 row does not open with a backticked snake_case key: {0!r}".format(line)
+            )
+        key = key_match.group(1)
+        if key in parsed:
+            raise AssertionError("§8 lists {0!r} twice".format(key))
+        if not cells[3].strip():
+            raise AssertionError("§8 row {0!r} has a blank Owner".format(key))
+
+        state = cells[2].strip()
+        # Exactly ONE balanced outer emphasis span is removed. Not a general
+        # markdown strip: `**gated` (unbalanced) must fail, because a half-written
+        # cell is a defect in the authority, not something to normalise away.
+        if state.startswith("**") and state.endswith("**") and len(state) > 4:
+            state = state[2:-2].strip()
+        if state not in _CAPABILITY_DOC_STATES:
+            raise AssertionError(
+                "§8 row {0!r} carries an unknown state {1!r}".format(key, cells[2])
+            )
+        parsed[key] = _CAPABILITY_DOC_STATES[state]
+
+    return parsed
+
+
 def test_the_published_capability_table_matches_the_registry_exactly():
-    """#146 F4. The §8 table went stale for the fourth consecutive slice.
+    """#146 F4, extended by #177 to compare STATE as well as key.
 
     `PROCESS_IR_V1.md` §8 calls itself "the immutable
     `PROCESS_IR_V1_CAPABILITIES` manifest" and every slice (#140/#141/#142/#146)
@@ -933,38 +1074,103 @@ def test_the_published_capability_table_matches_the_registry_exactly():
     silent — while a two-way parity test for the PROJECTION had existed all
     along. This extends the same discipline to the document.
 
-    The four prose-grouped rows were split one-per-key so the comparison is
-    literally key-for-key and needs no alias map to go stale in turn.
+    #177: comparing keys left the STATE unpinned, so a row could advertise
+    `supported` for a capability the manifest still gates — which is DC-175-D's
+    mechanism exactly, a served description of a capability the enforcement does
+    not grant. The mapping is now compared whole.
     """
-    import re
-
-    from boomi_mcp.models.process_ir import PROCESS_IR_V1_CAPABILITIES
-
     doc = (
         Path(__file__).resolve().parents[1]
         / "docs"
         / "architecture"
         / "PROCESS_IR_V1.md"
     ).read_text()
-    section = doc.split("## 8. Capability states", 1)[1].split("\n## 9.", 1)[0]
 
-    published = set()
-    for line in section.splitlines():
-        if not line.startswith("| `"):
-            continue
-        published.add(re.match(r"\| `([a-z0-9_]+)`", line).group(1))
+    from boomi_mcp.models.process_ir import PROCESS_IR_V1_CAPABILITIES
 
-    assert published == set(PROCESS_IR_V1_CAPABILITIES), {
-        "in the doc only": sorted(published - set(PROCESS_IR_V1_CAPABILITIES)),
-        "in the registry only": sorted(set(PROCESS_IR_V1_CAPABILITIES) - published),
+    published = _parse_capability_states(doc)
+
+    assert published == dict(PROCESS_IR_V1_CAPABILITIES), {
+        "in the doc only": sorted(set(published) - set(PROCESS_IR_V1_CAPABILITIES)),
+        "in the registry only": sorted(set(PROCESS_IR_V1_CAPABILITIES) - set(published)),
+        "state disagrees": sorted(
+            (key, published[key], PROCESS_IR_V1_CAPABILITIES[key])
+            for key in set(published) & set(PROCESS_IR_V1_CAPABILITIES)
+            if published[key] != PROCESS_IR_V1_CAPABILITIES[key]
+        ),
     }
-    # NON-VACUITY, not a pin: the set equality above is the real assertion, and
-    # it already fails if the doc gains, loses or renames a row. This line exists
-    # only so a regex that matched NOTHING cannot make that comparison trivially
-    # true against an empty set. A floor says exactly that and cannot go stale;
-    # the exact count it replaced (25) had to be hand-edited on every capability
-    # addition, which is the hand-typed-count trap #165 closed elsewhere.
-    assert len(published) >= 25, len(published)
+    # NON-VACUITY is now STRUCTURAL, not a floor. The old test guarded an empty
+    # parse with `len(published) >= 25`, a hand-typed count that had to be edited
+    # on every capability addition — the trap #165 closed elsewhere. The parser
+    # above raises on an empty or restructured table, so an empty mapping can
+    # never reach the equality; the two controls below prove both directions.
+
+
+def test_the_capability_table_guard_sees_a_state_that_drifts():
+    """The real DC-175-D shape: a doc row advertising a state the runtime gates.
+
+    Mutated IN MEMORY from the real document, so the control cannot go stale
+    against a rewritten table — and mutating the state ALONE proves the state
+    half is load-bearing, since the key set is untouched and the predecessor
+    key-only guard passes this exact input.
+    """
+    doc = (
+        Path(__file__).resolve().parents[1]
+        / "docs"
+        / "architecture"
+        / "PROCESS_IR_V1.md"
+    ).read_text()
+
+    real = _parse_capability_states(doc)
+    gated = sorted(key for key, state in real.items() if state == "gated")
+    assert gated, "no gated row to mutate — the control would be vacuous"
+    victim = gated[0]
+
+    # Rewritten CELL-WISE, the same way the parser reads a row, so the mutation
+    # cannot drift from what the parser considers a row.
+    lines = doc.splitlines()
+    count = 0
+    for index, line in enumerate(lines):
+        if not line.startswith("| `" + victim + "`"):
+            continue
+        cells = line.split("|")
+        assert len(cells) == 5, line
+        cells[2] = " **supported** "
+        lines[index] = "|".join(cells)
+        count += 1
+    assert count == 1, (victim, count)
+    mutated = "\n".join(lines) + "\n"
+
+    drifted = _parse_capability_states(mutated)
+    # The KEY SET is identical — which is exactly why the predecessor guard could
+    # not see this defect.
+    assert set(drifted) == set(real)
+    assert drifted[victim] == "supported"
+    assert drifted != real
+
+
+def test_the_capability_table_guard_fails_closed_on_a_restructured_table():
+    """A renamed authority must FAIL the guard, not quietly disarm it.
+
+    Renaming the `State` column is the disarming move: a lenient parser matches
+    zero rows and compares an empty set, which passes trivially. This asserts the
+    parser raises BEFORE row extraction.
+    """
+    doc = (
+        Path(__file__).resolve().parents[1]
+        / "docs"
+        / "architecture"
+        / "PROCESS_IR_V1.md"
+    ).read_text()
+
+    renamed = doc.replace(
+        _CAPABILITY_TABLE_HEADER, "| Capability | Status | Owner |", 1
+    )
+    assert renamed != doc
+
+    with pytest.raises(AssertionError) as caught:
+        _parse_capability_states(renamed)
+    assert _CAPABILITY_TABLE_HEADER in str(caught.value)
 
 
 def test_every_semantic_rule_names_the_authority_it_states_a_fact_about():

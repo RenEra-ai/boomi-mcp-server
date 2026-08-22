@@ -2905,22 +2905,59 @@ def process_ir_v1_node_kinds() -> Tuple[str, ...]:
     return tuple(sorted(_NODE_KIND_TAGS | {"sequence"}))
 
 
+def _complete_spec_rows(messages, remediation, layer):
+    """(code, message, remediation) rows, or a hard failure — never a blank field.
+
+    #177 invariant 1. Every one of these three accessors used
+    ``_MESSAGES.get(code, "")`` and served a blank field when a code was
+    registered in one table and not the other, on the reasoning that "a caller
+    comparing the served set against the codes they actually receive has to be
+    able to see the gap". Seven compiler codes sat in that gap for four slices
+    and nobody looked; three of them reached the authoring projection's summary
+    slot carrying their remediation instead of a description.
+
+    Failing closed is safe here in a way that raising from ``diagnostic()`` is
+    NOT: this is the SERVING path, and its caller
+    (``collect_projection_sources``) is deliberately unguarded so a source
+    failure degrades to a selector reported ``unavailable`` one layer up. An
+    honest "unavailable" beats a served blank. The error names offending CODES
+    only — never authored content.
+    """
+    missing_message = sorted(set(remediation) - set(messages))
+    missing_remediation = sorted(set(messages) - set(remediation))
+    if missing_message or missing_remediation:
+        raise ValueError(
+            "{0} diagnostic registry is asymmetric: no message for {1}, "
+            "no remediation for {2}".format(layer, missing_message, missing_remediation)
+        )
+    blank = sorted(
+        code
+        for code in messages
+        if not (messages[code] or "").strip() or not (remediation[code] or "").strip()
+    )
+    if blank:
+        raise ValueError(
+            "{0} diagnostic registry serves a blank message or remediation "
+            "for {1}".format(layer, blank)
+        )
+    return tuple(
+        MappingProxyType(
+            {
+                "code": code,
+                "message": messages[code],
+                "remediation": remediation[code],
+            }
+        )
+        for code in sorted(messages)
+    )
+
+
 def process_ir_v1_parse_diagnostic_specs() -> Tuple[Mapping[str, str], ...]:
     """(code, message, remediation) for every parse diagnostic, sorted by code.
 
     The messages and remediations here are STATIC strings selected by code —
     nothing is interpolated from an authored payload — which is what makes them
-    safe to publish. A code with no remediation entry is reported with an empty
-    string rather than omitted: a caller comparing the served set against the
-    codes they actually receive must see the gap.
+    safe to publish. Since #177 a code registered in one table and not the other
+    is a hard failure rather than a served blank; see ``_complete_spec_rows``.
     """
-    return tuple(
-        MappingProxyType(
-            {
-                "code": code,
-                "message": _MESSAGES.get(code, ""),
-                "remediation": _REMEDIATION.get(code, ""),
-            }
-        )
-        for code in sorted(set(_MESSAGES) | set(_REMEDIATION))
-    )
+    return _complete_spec_rows(_MESSAGES, _REMEDIATION, "parse")

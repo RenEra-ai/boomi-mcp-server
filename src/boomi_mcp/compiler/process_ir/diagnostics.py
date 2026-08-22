@@ -126,7 +126,7 @@ _REMEDIATION = {
         "get_schema_template(schema_name='process_ir_authoring', category='capability')."
     ),
     PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID: (
-        "This is a compiler defect: derived branch/decision wiring (count, order, "
+        "This is a compiler defect: derived control-node wiring (count, order, "
         "labels, or target) is wrong. Please report it with the authored path."
     ),
     PROCESS_IR_SEMANTIC_UNREACHABLE: (
@@ -242,6 +242,39 @@ _REMEDIATION = {
 }
 
 _MESSAGES = {
+    # #177 invariant 1. These seven codes carried a REMEDIATION but no message, so
+    # `compiler_diagnostic_specs()` served them with an empty `message` — a served
+    # row advertising a diagnostic whose "what is wrong" half does not exist. Three
+    # of them reached the authoring projection's summary slot carrying their
+    # remediation instead (the other four are also parser codes, and the merge
+    # filled them from the parser's table), so the gap was invisible from the
+    # projection alone.
+    #
+    # The text is the COMPILER LAYER'S OWN, not a copy of the parser's: this table
+    # is the authority for compiler-served text, and the repo deliberately keeps
+    # per-layer remediations distinct and attributes each to its producer. Where
+    # the fact is genuinely identical at both layers the wording is identical too;
+    # where the compiler's scope is broader (placement AND path composition, below)
+    # the wording says so rather than under-describing what the compiler rejects.
+    PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY: (
+        "node placement or path composition is not admitted in this control body"
+    ),
+    PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID: (
+        "compiler-derived control-node wiring is invalid"
+    ),
+    PROCESS_IR_SCHEMA_BRANCH_CARDINALITY: "branch leg count is outside the 2-25 bound",
+    PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED: (
+        "continuation after a branch or decision is not supported"
+    ),
+    PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED: (
+        "ProcessIR v1 emits no join: a node has more than one predecessor"
+    ),
+    PROCESS_IR_SEMANTIC_NESTING_LIMIT: (
+        "control nesting exceeds the ProcessIR v1 depth bound"
+    ),
+    PROCESS_IR_SEMANTIC_UNTERMINATED_PATH: (
+        "a divergent control path reaches no terminal"
+    ),
     PROCESS_IR_SEMANTIC_UNREACHABLE: "node is not reachable from the control-flow entry",
     PROCESS_IR_SEMANTIC_MISSING_TERMINAL: "control-flow path does not reach a valid terminal",
     PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW: "control flow is ambiguous",
@@ -437,24 +470,26 @@ def sorted_diagnostics(
 #: A shared shape for the #146 authoring projection: (code, message,
 #: remediation), sorted by code. Every string is STATIC and selected by code —
 #: nothing is interpolated from an authored payload — which is what makes the
-#: table safe to serve. A code carrying one of the two texts but not the other
-#: is emitted with an empty string rather than skipped: a caller comparing the
-#: served set against the codes they actually receive has to be able to see the
-#: gap.
+#: table safe to serve. Since #177 a code carrying one of the two texts but not
+#: the other cannot exist: `compiler_diagnostic_specs()` below refuses to serve an
+#: asymmetric or blank registry, and `tests/test_process_ir_served_text_enforcement.py`
+#: proves from the emitting modules that every code this compiler can raise is
+#: registered here. The previous behaviour — emitting an empty string so a caller
+#: "could see the gap" — served seven such rows for four slices and nothing ever
+#: looked.
 
 
 def compiler_diagnostic_specs() -> Tuple[Mapping[str, str], ...]:
-    """Static (code, message, remediation) for every compiler diagnostic code."""
-    return tuple(
-        MappingProxyType(
-            {
-                "code": code,
-                "message": _MESSAGES.get(code, ""),
-                "remediation": _REMEDIATION.get(code, ""),
-            }
-        )
-        for code in sorted(set(_MESSAGES) | set(_REMEDIATION))
-    )
+    """Static (code, message, remediation) for every compiler diagnostic code.
+
+    Fails closed since #177: an asymmetric or blank registry raises rather than
+    serving an empty field. See ``_complete_spec_rows`` in
+    ``boomi_mcp.models.process_ir`` for why that is safe on this path and why
+    ``diagnostic()`` deliberately does NOT do the same.
+    """
+    from ...models.process_ir import _complete_spec_rows
+
+    return _complete_spec_rows(_MESSAGES, _REMEDIATION, "compiler")
 
 
 __all__: List[str] = [

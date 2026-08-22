@@ -3125,58 +3125,58 @@ def test_the_public_projection_constants_are_exported():
     assert sorted(process_ir_projection.__all__) == list(process_ir_projection.__all__)
 
 
-def test_exactly_the_expected_codes_fall_back_to_their_remediation():
-    """#501. The docstring's own claim, measured rather than asserted in prose.
+def test_no_compiler_diagnostic_falls_back_to_its_remediation():
+    """#501, closed by #177: the fallback set is now EMPTY, and derived.
 
-    An earlier version of it said "seven codes", counting every compiler spec
-    with an empty `message`. Four of those seven are ALSO raised by the parse
-    layer, which supplies one, so the merge gives them a real "what is wrong"
-    and only three actually reach the fallback. A claim about behaviour that
-    nothing measures is the defect class this whole contract exists to remove —
-    including when it is my claim about my own code.
+    This node replaces `test_exactly_the_expected_codes_fall_back_to_their_remediation`
+    (tombstoned in the wave-gate manifest, not deleted). That test measured a real
+    defect honestly — seven compiler codes carried a remediation but no message, and
+    the three the parse layer does not also raise reached the projection's summary
+    slot carrying their remediation — but it FROZE it: `== 7` and a hand-listed
+    three-code set meant registering the missing text would fail the suite.
+
+    #177 registers all seven, so both sets are empty. The assertions below are
+    derived from `collect_projection_sources()` and name any offender, so a code
+    added later WITHOUT static text fails here rather than being counted.
     """
-    from boomi_mcp.authoring.process_ir_projection import collect_projection_sources
+    from boomi_mcp.authoring.process_ir_projection import (
+        _public_code_token,
+        collect_projection_sources,
+    )
 
     sources = collect_projection_sources()
 
-    # The docstring's OTHER two counts, measured. "Seven" and "four" were prose
-    # for a round — in the same change that deleted that pattern from three
-    # other places — so a legitimate-looking edit plus the fixture regeneration
-    # the failing snapshot prescribes returned the suite to green while reality
-    # was six and three.
     no_static_message = {
         str(spec["code"])
         for spec in sources.compiler_specs
         if not (spec.get("message") or "").strip()
     }
-    assert len(no_static_message) == 7, sorted(no_static_message)
+    assert no_static_message == set(), sorted(no_static_message)
 
-    parse_messages = {
-        str(spec["code"]): (spec.get("message") or "").strip()
-        for spec in sources.parse_specs
-    }
-    fell_back = {
+    no_static_remediation = {
         str(spec["code"])
         for spec in sources.compiler_specs
-        if not (spec.get("message") or "").strip()
-        and not parse_messages.get(str(spec["code"]), "")
+        if not (spec.get("remediation") or "").strip()
     }
-    assert fell_back == {
-        "PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID",
-        "PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED",
-        "PROCESS_IR_SEMANTIC_UNTERMINATED_PATH",
-    }, sorted(fell_back)
-    assert len(no_static_message - fell_back) == 4, sorted(no_static_message - fell_back)
+    assert no_static_remediation == set(), sorted(no_static_remediation)
 
-    # ...and those three DO serve the remediation, byte for byte.
+    # The projection-side consequence, stated as the property rather than as a
+    # code list: no compiler code may reach the summary slot carrying its own
+    # remediation, which is what "falling back" looked like to a caller.
+    # The contract id is derived through `_public_code_token`, the projection's own
+    # authority, not by hand-lowercasing the code: one code carries a documented
+    # substitution (`emitter_input` -> `emission_input`, because the lowercased form
+    # contains a reserved compiler identifier the served surface may not carry), and
+    # hand-lowercasing silently missed it. Coverage is TOTAL — every compiler code
+    # has an entry, which this lookup now proves by raising if one does not.
     by_id = {e.contract_entry_id: e for e in build_process_ir_authoring_entries()}
-    remediation = {
-        str(spec["code"]): (spec.get("remediation") or "").strip()
+    fell_back = sorted(
+        str(spec["code"])
         for spec in sources.compiler_specs
-    }
-    for code in fell_back:
-        entry = by_id["diagnostic." + code.lower()]
-        assert entry.summary == remediation[code], code
+        if by_id["diagnostic." + _public_code_token(str(spec["code"]))].summary
+        == (spec.get("remediation") or "").strip()
+    )
+    assert fell_back == [], fell_back
 
 
 def test_the_budget_scope_sentence_names_exactly_the_envelope_fields():
@@ -4065,15 +4065,21 @@ def test_a_compile_diagnostic_serves_the_message_its_authority_wrote():
             self.code = code
             self.message = message
 
-    # Every code the compiler can raise WITH a message of its own is served
-    # with that message, not the generic headline.
+    # EVERY code the compiler can raise is served with its own message, not the
+    # generic headline. #177 removed the two escapes this loop used to carry: the
+    # `if not message: continue` skip (which meant a code with no static text was
+    # silently uncovered — seven of them were, for four slices) and the hand-typed
+    # `covered >= 20` floor (a count that had to be edited on every registration,
+    # the trap #165 closed elsewhere). The coverage claim is now the authority's
+    # own size, so it cannot go stale and cannot be satisfied by a subset.
+    blank = sorted(code for code, message in authored.items() if not message)
+    assert blank == [], blank
+
     covered = 0
     for code, message in authored.items():
-        if not message:
-            continue
         assert _compile_message(_Diagnostic(code, message)) == message, code
         covered += 1
-    assert covered >= 20, covered
+    assert covered == len(authored), (covered, len(authored))
 
     # ...and the generic headline survives exactly where it is correct: a
     # diagnostic that names no message of its own.

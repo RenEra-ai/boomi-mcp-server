@@ -210,24 +210,49 @@ def registered_codes() -> Tuple[str, ...]:
 #: A shared shape for the #146 authoring projection: (code, message,
 #: remediation), sorted by code. Every string is STATIC and selected by code —
 #: nothing is interpolated from an authored payload — which is what makes the
-#: table safe to serve. A code carrying one of the two texts but not the other
-#: is emitted with an empty string rather than skipped: a caller comparing the
-#: served set against the codes they actually receive has to be able to see the
-#: gap.
+#: table safe to serve. Since #177 a code carrying one of the two texts but not
+#: the other cannot be served at all: ``finding_specs()`` below refuses an
+#: asymmetric or blank registry rather than emitting an empty string. The old
+#: rationale — emit the blank "so a caller comparing the served set against the
+#: codes they actually receive has to be able to see the gap" — was measured and
+#: found false in practice: seven such rows were served for four slices and no
+#: caller ever looked, which is why the gap is now a hard failure here instead of
+#: a burden on the reader.
 
 
 def finding_specs() -> Tuple[Mapping[str, str], ...]:
-    """Static (code, message, remediation) for every semantic-validation code."""
-    return tuple(
-        MappingProxyType(
-            {
-                "code": code,
-                "message": _MESSAGES.get(code, ""),
-                "remediation": _REMEDIATION.get(code, ""),
-            }
-        )
-        for code in sorted(set(_MESSAGES) | set(_REMEDIATION))
-    )
+    """Static (code, message, remediation) for every semantic-validation code.
+
+    Fails closed since #177; see ``_complete_spec_rows`` in
+    ``boomi_mcp.models.process_ir``.
+    """
+    from ....models.process_ir import _complete_spec_rows
+
+    return _complete_spec_rows(_MESSAGES, _REMEDIATION, "semantic-validation")
 
 
-__all__: List[str] = ["finding", "finding_specs", "registered_codes"]
+def non_emittable_registered_codes() -> Tuple[str, ...]:
+    """Codes registered here that NOTHING can currently raise.
+
+    #177 invariant 1 compares the served code set against the set the emitting
+    modules actually raise. A registered-but-unreachable code would look like a
+    guard failure, so the one deliberate case is declared here rather than
+    allowlisted inside the test — the declaration is production metadata, and the
+    guard PROVES it by asserting the source scan finds zero emissions of each
+    member (a declaration nobody checks is how a served fact goes stale).
+
+    ``PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE`` is registered against
+    the convergence analysis documented at
+    ``docs/architecture/PROCESS_IR_SEMANTIC_VALIDATION_V1.md``; ProcessIR v1
+    emits no join, so no node has two writers to disambiguate and the rule has no
+    reachable case yet.
+    """
+    return (PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE,)
+
+
+__all__: List[str] = [
+    "finding",
+    "finding_specs",
+    "non_emittable_registered_codes",
+    "registered_codes",
+]

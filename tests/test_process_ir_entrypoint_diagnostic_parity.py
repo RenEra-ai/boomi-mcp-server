@@ -75,6 +75,12 @@ from boomi_mcp.models.process_ir import (  # noqa: E402
     process_ir_v1_parse_diagnostic_specs,
 )
 
+from _process_ir_entrypoint_differential import (  # noqa: E402
+    GrammarBoundary,
+    diagnostic_vector,
+    measure_entrypoints,
+)
+
 NODE = TypeAdapter(ProcessNodeV1)
 
 #: The parser's own vocabulary, minus the body wrapper. `sequence` is the BODY,
@@ -382,61 +388,15 @@ def _generate():
     return cases, carrier_failures
 
 
-class _GrammarBoundary(ProcessIRCompileError):
-    """Marks passage through the compile-side GRAMMAR boundary.
-
-    It must SUBCLASS `ProcessIRCompileError`: `_guarded` re-raises that family
-    untouched but converts anything else into a value-free
-    `PROCESS_IR_COMPILE_INTERNAL` — measured, and it made every parser-accepted
-    case look like a mismatch until the sentinel was given the right base.
-
-    Raised in place of CFG lowering, so a case that reaches it passed the
-    re-parse and `validate_body_capabilities` without being judged on symbol or
-    semantic grounds the parser could not possibly reach.
-    """
-
-    def __init__(self):
-        super().__init__([])
-
-
-def _vector(exc):
-    """The full served identity, not just the code.
-
-    `remediation` is compared too: it is served machine-facing text and was
-    MEASURED to diverge between the two paths on corpus row 1, so a
-    (code, path, message) assertion would leave a real divergence unpinned.
-    """
-    return tuple(
-        (d.code, d.path, d.message, getattr(d, "remediation", None))
-        for d in exc.diagnostics
-    )
-
-
-def _measure(ir):
-    """(parser_outcome, compiler_outcome) for one already-built model."""
-    payload = ir.model_dump(mode="json", warnings=False)
-    try:
-        parse_process_ir_v1(copy.deepcopy(payload))
-        parser = ("ACCEPTED",)
-    except ProcessIRValidationError as exc:
-        parser = ("REFUSED",) + _vector(exc)
-
-    real = pl.lower_process_ir_to_cfg
-
-    def _boundary(*_a, **_k):
-        raise _GrammarBoundary()
-
-    pl.lower_process_ir_to_cfg = _boundary
-    try:
-        pl.compile_process_ir_v1(ir, None)
-        compiler = ("REACHED-NO-BOUNDARY",)
-    except _GrammarBoundary:
-        compiler = ("ACCEPTED",)
-    except ProcessIRCompileError as exc:
-        compiler = ("REFUSED",) + _vector(exc)
-    finally:
-        pl.lower_process_ir_to_cfg = real
-    return parser, compiler
+# #177 extracted this driver to `tests/_process_ir_entrypoint_differential.py` so
+# the capability-enforcement gate can measure the SAME two entry points over a
+# different case set. The issue's own instruction was to share it by IMPORT rather
+# than by merge — copying it would have created a second record of one fact inside
+# the machinery built to detect exactly that. The aliases below keep this module's
+# call sites and its historical mutant test unchanged.
+_GrammarBoundary = GrammarBoundary
+_vector = diagnostic_vector
+_measure = measure_entrypoints
 
 
 _CACHE = {}

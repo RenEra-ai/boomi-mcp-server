@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10253,"minimum_collected":10253,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10270,"minimum_collected":10270,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -4847,7 +4847,7 @@
 {"kind":"test","id":"pytest-004846","node_id":"tests/test_process_ir_authoring_contract.py::test_every_generated_recipe_selector_is_actually_fetchable","state":"active"}
 {"kind":"test","id":"pytest-004847","node_id":"tests/test_process_ir_authoring_contract.py::test_every_page_a_caller_can_fetch_carries_the_page_rules","state":"active"}
 {"kind":"test","id":"pytest-004848","node_id":"tests/test_process_ir_authoring_contract.py::test_every_planning_gap_state_matches_the_contract_entry_it_names","state":"active"}
-{"kind":"test","id":"pytest-004849","node_id":"tests/test_process_ir_authoring_contract.py::test_exactly_the_expected_codes_fall_back_to_their_remediation","state":"active"}
+{"kind":"test","id":"pytest-004849","node_id":"tests/test_process_ir_authoring_contract.py::test_exactly_the_expected_codes_fall_back_to_their_remediation","state":"tombstone"}
 {"kind":"test","id":"pytest-004850","node_id":"tests/test_process_ir_authoring_contract.py::test_filters_are_rejected_on_every_other_selector[IntegrationSpecV1]","state":"active"}
 {"kind":"test","id":"pytest-004851","node_id":"tests/test_process_ir_authoring_contract.py::test_filters_are_rejected_on_every_other_selector[ProcessIRV1]","state":"active"}
 {"kind":"test","id":"pytest-004852","node_id":"tests/test_process_ir_authoring_contract.py::test_filters_are_rejected_on_every_other_selector[authoring_workflow]","state":"active"}
@@ -10288,3 +10288,21 @@
 {"kind":"test","id":"pytest-010287","node_id":"tests/test_process_materialization_plan.py::test_the_unmutated_control_still_builds_a_plan","state":"active"}
 {"kind":"test","id":"pytest-010288","node_id":"tests/test_process_ir_entrypoint_diagnostic_parity.py::test_hook_stripping_and_value_preservation_hold_together","state":"active"}
 {"kind":"test","id":"pytest-010289","node_id":"tests/test_process_ir_entrypoint_diagnostic_parity.py::test_scalar_normalisation_preserves_the_value_it_normalises","state":"active"}
+{"kind":"test","id":"pytest-010290","node_id":"tests/test_process_ir_authoring_contract.py::test_no_compiler_diagnostic_falls_back_to_its_remediation","state":"active"}
+{"kind":"test","id":"pytest-010291","node_id":"tests/test_process_ir_authoring_contract_parity.py::test_the_capability_table_guard_fails_closed_on_a_restructured_table","state":"active"}
+{"kind":"test","id":"pytest-010292","node_id":"tests/test_process_ir_authoring_contract_parity.py::test_the_capability_table_guard_sees_a_state_that_drifts","state":"active"}
+{"kind":"test","id":"pytest-010293","node_id":"tests/test_process_ir_capability_enforcement.py::test_every_gated_capability_is_refused","state":"active"}
+{"kind":"test","id":"pytest-010294","node_id":"tests/test_process_ir_capability_enforcement.py::test_every_manifest_capability_has_a_witness_and_vice_versa","state":"active"}
+{"kind":"test","id":"pytest-010295","node_id":"tests/test_process_ir_capability_enforcement.py::test_every_supported_capability_is_reachable","state":"active"}
+{"kind":"test","id":"pytest-010296","node_id":"tests/test_process_ir_capability_enforcement.py::test_every_unsupported_capability_carries_an_explicit_disposition","state":"active"}
+{"kind":"test","id":"pytest-010297","node_id":"tests/test_process_ir_capability_enforcement.py::test_every_witness_kind_matches_the_live_manifest_state","state":"active"}
+{"kind":"test","id":"pytest-010298","node_id":"tests/test_process_ir_capability_enforcement.py::test_every_witness_records_its_fixture_provenance","state":"active"}
+{"kind":"test","id":"pytest-010299","node_id":"tests/test_process_ir_capability_enforcement.py::test_the_three_partitions_account_for_every_manifest_key","state":"active"}
+{"kind":"test","id":"pytest-010300","node_id":"tests/test_process_ir_served_text_enforcement.py::test_every_emittable_process_ir_code_has_complete_served_text","state":"active"}
+{"kind":"test","id":"pytest-010301","node_id":"tests/test_process_ir_served_text_enforcement.py::test_every_graph_verifier_issue_carries_its_own_text","state":"active"}
+{"kind":"test","id":"pytest-010302","node_id":"tests/test_process_ir_served_text_enforcement.py::test_every_pinned_diagnostic_sink_still_exists","state":"active"}
+{"kind":"test","id":"pytest-010303","node_id":"tests/test_process_ir_served_text_enforcement.py::test_the_emission_scan_finds_every_producer","state":"active"}
+{"kind":"test","id":"pytest-010304","node_id":"tests/test_process_ir_served_text_enforcement.py::test_the_guard_fails_when_a_registration_is_removed","state":"active"}
+{"kind":"test","id":"pytest-010305","node_id":"tests/test_process_ir_served_text_enforcement.py::test_the_non_emittable_declaration_is_proven_not_merely_declared","state":"active"}
+{"kind":"test","id":"pytest-010306","node_id":"tests/test_process_ir_served_text_enforcement.py::test_the_only_unreadable_emission_sites_are_the_pinned_delegations","state":"active"}
+{"kind":"test","id":"pytest-010307","node_id":"tests/test_process_ir_served_text_enforcement.py::test_the_served_code_set_is_exactly_what_the_authorities_account_for","state":"active"}

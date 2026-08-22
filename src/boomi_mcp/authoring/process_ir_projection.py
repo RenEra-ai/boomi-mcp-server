@@ -1382,32 +1382,31 @@ def _page_envelope_fields() -> Tuple[str, ...]:
 def _diagnostic_summary(row: MutableMapping[str, Any]) -> str:
     """The one-line orientation for a diagnostic code.
 
-    Seven compiler codes have no entry in the static ``_MESSAGES`` table. That
-    is a property of the registry, and it is the only part of this worth
-    stating: WHICH modules raise those codes, and how they pass their text, is
-    a fact this file cannot check, and three successive attempts to write it
-    down here were each wrong in a different way. The observable behaviour is
-    below, and every count in this docstring — the seven, the four and the
-    three — is measured by
-    ``test_exactly_the_expected_codes_fall_back_to_their_remediation`` rather
-    than asserted here. Two of them were unmeasured for one round, in the very
-    change whose sibling fix removed exactly that pattern from three other
-    places.
+    Every served diagnostic now carries a static ``message``, so the fallback
+    below is unreachable by construction: the three spec accessors refuse an
+    asymmetric or blank registry (``_complete_spec_rows`` in
+    ``boomi_mcp.models.process_ir``), and ``tests/test_process_ir_served_text_enforcement.py``
+    proves from the emitting modules that every code any layer can raise is
+    registered with both texts.
 
-    FOUR of those seven are also raised by the parse layer, which does supply a
-    short message, and the merge picks it up — so they carry a real "what is
-    wrong" and nothing here applies to them. Only THREE reach this fallback:
-    ``PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID``,
+    It is retained as an honest degradation path rather than deleted, and it is
+    PINNED: ``test_no_compiler_diagnostic_falls_back_to_its_remediation`` asserts
+    the fallback set is empty, so a code that ever reached it would fail there
+    rather than quietly serving a "how to fix" where a "what is wrong" belongs.
+
+    History, because the shape of the old defect is the reason the pin exists.
+    Seven compiler codes carried a remediation and no message. FOUR of them are
+    also raised by the parse layer, which supplies a short message that the merge
+    picked up, so they read correctly and the gap was invisible from here. The
+    remaining THREE — ``PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID``,
     ``PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED`` and
-    ``PROCESS_IR_SEMANTIC_UNTERMINATED_PATH``. The projection cannot reach a
-    raise-site literal, so for those three the only authored sentence available
-    is the remediation — which makes their summary a "how to fix" rather than a
-    "what is wrong". Worth stating plainly: it is the strongest claim the
-    authority supports, not a summary in the sense the other entries carry.
-
-    Reading ``message`` alone instead served those three BLANK, which is
-    strictly worse — no orientation at all on codes a failing compile really
-    returns.
+    ``PROCESS_IR_SEMANTIC_UNTERMINATED_PATH`` — reached this fallback and served
+    their remediation as their summary. #177 registered canonical compiler
+    messages for all seven; measured after that change, every one of those counts
+    is now zero. The node that used to measure them,
+    ``test_exactly_the_expected_codes_fall_back_to_their_remediation``, FROZE the
+    defect (it asserted the count was exactly seven) and was tombstoned by the
+    same slice that closed it.
     """
     message = (row["message"] or "").strip()
     if message:

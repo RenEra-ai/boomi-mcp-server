@@ -1252,7 +1252,7 @@ def check_emission_plan_invariants(
 
         kind = node.emitter_input.emitter_kind
         # #141: control WIRING defects get their own code. Every failure below is
-        # about compiler-derived branch/decision wiring — count, order, labels,
+        # about compiler-derived control-node wiring — count, order, labels,
         # target row — which is a strictly narrower claim than "the plan is
         # invalid", and the one a reader needs to localise the defect. Non-control
         # plan defects keep PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID.
