@@ -463,16 +463,24 @@ def _parser_gated(key, doc, code, path, provenance="inline document", mutate=Non
     `mutate` builds the valid model, sets the field, and this asserts the compiler refuses
     it too.
 
-    Where it is NOT possible, `mutate` is None and that is a measured fact, not an excuse:
+    Where it is NOT possible, `mutate` is None and that is a MEASURED fact, not an excuse.
+    Exactly one gated capability is in that position:
 
-    * `catch_all` is an EXTRA key with no field on `TryCatchNodeV1` (measured:
-      `"catch_all" in model_fields` is False), so no validated model can carry it;
-    * `definedparameter` has no member class in the `PropertySourceV1` union (measured:
-      the union is Static/Current/Profile/Ddp/Dpp), so no validated model can carry it.
+    * `catch_all` is an EXTRA key with no field on `TryCatchNodeV1`, so assignment raises
+      before any model can carry it — measured verbatim:
+      `ValueError: "TryCatchNodeV1" object has no field "catch_all"`.
 
-    For those two the parser is the ONLY reachable enforcement point, and there is no
-    compile-path case to write. #178's derived product does not cover either: it varies
-    node KINDS and PLACEMENTS from `BODY_CAPABILITIES_V1`, never field VALUES.
+    An earlier version of this docstring made the same claim for `definedparameter`, on the
+    grounds that the `PropertySourceV1` union has no member class for it. That reasoning was
+    WRONG and the Stage-2 reviewer caught it: `source_values` is an ordinary mutable list, so
+    a caller can parse a legal `set_dpp` and assign the raw dict into `source_values[0]`
+    without any union member existing. Measured: the compiler then refuses with
+    `PROCESS_IR_CAPABILITY_UNSUPPORTED` at `/body/steps/1/source_values/0`. That path now has
+    its own `mutate`, because a real enforcement nothing pins is a real enforcement that can
+    regress.
+
+    #178's derived product does not cover any of these: it varies node KINDS and PLACEMENTS
+    from `BODY_CAPABILITIES_V1`, never field VALUES.
     """
 
     def run():
@@ -707,6 +715,42 @@ def _w_keyed_cache():
 
 
 def _w_definedparameter_property_source():
+    def _carrier():
+        return _doc(
+            [
+                {
+                    "kind": "source",
+                    "connection_ref": "$ref:CONN",
+                    "operation_ref": "$ref:GETOP",
+                },
+                {
+                    "kind": "set_dpp",
+                    "name": "X",
+                    "source_values": [{"value_type": "static", "value": "v"}],
+                },
+                {
+                    "kind": "target",
+                    "connection_ref": "$ref:DBCONN",
+                    "operation_ref": "$ref:DBSEND",
+                },
+                {"kind": "stop"},
+            ]
+        )
+
+    def mutate():
+        clean = _compile_refusal_for_model(_parse(_carrier()))
+        model = _parse(_carrier())
+        # `source_values` is an ordinary list: no union member class is needed to get the
+        # gated shape onto a validated model.
+        model.body.steps[1].source_values[0] = {
+            "value_type": "definedparameter",
+            "component_id": "c",
+            "property_key": "k",
+        }
+        return model, clean, (
+            ("PROCESS_IR_CAPABILITY_UNSUPPORTED", "/body/steps/1/source_values/0"),
+        )
+
     return _parser_gated(
         "definedparameter_property_source",
         _doc(
@@ -727,6 +771,7 @@ def _w_definedparameter_property_source():
         ),
         "PROCESS_IR_CAPABILITY_UNSUPPORTED",
         "/body/steps/0/source_values/0",
+        mutate=mutate,
     )
 
 

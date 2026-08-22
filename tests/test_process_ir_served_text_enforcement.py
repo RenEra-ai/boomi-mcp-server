@@ -77,15 +77,6 @@ PINNED_DELEGATION_SITES = {
         "from that map, which is the authority for them",
     ),
     (
-        "src/boomi_mcp/compiler/process_ir/invariants.py",
-        "_fail",
-        "Name(id='code', ctx=Load())",
-    ): (
-        1,
-        "a reachability helper forwards a `code` parameter that is not its FIRST "
-        "parameter; every caller passes a literal already collected at its own call site",
-    ),
-    (
         "src/boomi_mcp/compiler/process_ir/semantic_validation/flow.py",
         "finding",
         "Attribute(value=Name(id='item', ctx=Load()), attr='code', ctx=Load())",

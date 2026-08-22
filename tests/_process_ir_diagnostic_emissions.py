@@ -220,23 +220,70 @@ class _ModuleScan:
                 self.enclosing[id(child)] = current
             self._map_enclosing(child, current)
 
-    def is_wrapper_forward(self, call, argument):
-        """True only for a WRAPPER body forwarding its own first parameter into a sink.
+    def forwarded_parameter(self, call, argument):
+        """`(owner, index, name)` when the code argument is the enclosing function's own parameter.
 
-        Three conditions, all required: the call sits inside a function; that function is
-        itself a registered sink (so its own call sites are scanned and supply the codes);
-        and the argument is precisely that function's first parameter. Anything looser
-        drops real emissions silently — which is exactly what the module-wide parameter
-        set did.
+        The first version required the FIRST parameter, which silently mis-handled
+        `_check_region_containment(..., code=..., message=...)`: its code parameter sits in
+        sixth position and carries a DEFAULT, and two of its three call sites omit it — so
+        the code that default names was emitted by a path the reader could not see.
+
+        Any parameter position now counts, and `resolve_forward` below reads both the
+        default and the actual arguments at that function's call sites, so the emission is
+        accounted for instead of pinned as unreadable.
         """
         if not isinstance(argument, ast.Name):
-            return False
+            return None
         owner = self.enclosing.get(id(call))
-        if owner is None or owner.name not in self.sinks:
-            return False
-        if not owner.args.args:
-            return False
-        return argument.id == owner.args.args[0].arg
+        if owner is None:
+            return None
+        for index, arg in enumerate(owner.args.args):
+            if arg.arg == argument.id:
+                return (owner, index, arg.arg)
+        return None
+
+    def resolve_forward(self, forward):
+        """Every code that can reach a forwarded parameter, or None if any path is opaque.
+
+        Two sources, both closed: the parameter's DEFAULT, and the argument supplied at each
+        call site of the owning function (positional or keyword). A call site this cannot
+        read makes the whole forward unresolved, so an opaque path is reported rather than
+        assumed empty.
+        """
+        owner, index, param = forward
+        codes = set()
+
+        defaults = owner.args.defaults
+        offset = len(owner.args.args) - len(defaults)
+        if defaults and index >= offset:
+            resolved = self._simple(defaults[index - offset])
+            if resolved is None:
+                return None
+            codes.add(resolved)
+
+        seen_call = False
+        for node in ast.walk(self.tree):
+            if not isinstance(node, ast.Call) or _called_name(node) != owner.name:
+                continue
+            seen_call = True
+            supplied = None
+            if len(node.args) > index:
+                supplied = node.args[index]
+            else:
+                for kw in node.keywords:
+                    if kw.arg == param:
+                        supplied = kw.value
+                        break
+            if supplied is None:
+                continue  # omitted -> the default above covers it
+            resolved = self._simple(supplied)
+            if resolved is None:
+                return None
+            codes.add(resolved)
+
+        if not seen_call and not codes:
+            return None
+        return tuple(sorted(codes))
 
     def _simple(self, node):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -384,16 +431,25 @@ def collect_emissions():
                 bucket.update(resolved)
                 continue
 
-            # A call that forwards the ENCLOSING function's own first parameter is a
-            # wrapper body, not an emission: the wrapper is itself in `scan.sinks`, so its
-            # call sites are what supply the codes. Recording it as unresolved would pin a
-            # dozen definition sites that carry no information.
-            if scan.is_wrapper_forward(node, argument):
-                continue
+            # A call forwarding the ENCLOSING function's own parameter is a wrapper body,
+            # not an emission of its own. Where the wrapper is itself a registered sink its
+            # call sites are already scanned; otherwise the codes are resolved here from the
+            # parameter's default and the owning function's call sites. Only a forward whose
+            # sources cannot all be read falls through to the unresolved table.
+            forward = scan.forwarded_parameter(node, argument)
+            if forward is not None:
+                if forward[0].name in scan.sinks and forward[1] == 0:
+                    continue
+                forwarded = scan.resolve_forward(forward)
+                if forwarded is not None:
+                    bucket.update(forwarded)
+                    continue
 
-            unresolved.append(
-                (relative, node.lineno, name, ast.dump(argument)[:80])
-            )
+            # The COMPLETE dump. Truncating it to 80 characters made two long
+            # expressions sharing a prefix collide in the guard's site key, which is the
+            # same fail-open shape — an identity coarser than the property it pins — that
+            # the pinned-site table itself was introduced to fix.
+            unresolved.append((relative, node.lineno, name, ast.dump(argument)))
 
     return (
         MappingProxyType(
