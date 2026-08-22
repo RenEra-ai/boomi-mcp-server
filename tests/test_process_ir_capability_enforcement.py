@@ -34,6 +34,8 @@ from _process_ir_capability_witnesses import (  # noqa: E402
 )
 from boomi_mcp.models.process_ir import PROCESS_IR_V1_CAPABILITIES  # noqa: E402
 
+_FIXTURES = _ROOT / "tests" / "fixtures" / "process_ir"
+
 #: Which witness kind each manifest state requires. Deriving the partition from the LIVE
 #: manifest — rather than storing a state beside each witness — is what makes a capability
 #: flip fail here instead of passing against a stale copy.
@@ -193,25 +195,55 @@ def test_every_witness_records_its_fixture_provenance():
     inputs. Every executable witness names where its document came from, so a reviewer can
     tell a frozen pre-baseline capture from a refusal input built here.
     """
-    from _process_ir_capability_witnesses import PROVENANCE_KINDS
-
-    undeclared = sorted(
-        (key, entry.provenance)
-        for key, entry in CAPABILITY_WITNESSES.items()
-        if isinstance(entry, CapabilityWitness)
-        and not any(entry.provenance.startswith(kind) for kind in PROVENANCE_KINDS)
+    from _process_ir_capability_witnesses import (
+        FIXTURE_PROVENANCE,
+        PROVENANCE_FROZEN_FIXTURE,
+        PROVENANCE_INLINE_ADMISSION,
+        PROVENANCE_INLINE_REFUSAL,
+        PROVENANCE_KINDS,
+        PROVENANCE_SYNTHETIC_CFG,
     )
-    # A CLOSED set, not "any non-blank string" — the previous check accepted anything,
-    # including a description that overstated where the document came from, which is how a
-    # provenance note drifts from what the file actually does.
-    assert undeclared == [], undeclared
 
-    # Non-vacuity: the strongest kind must actually be in use, or the classification would
-    # be a formality satisfied entirely by the weakest label.
-    frozen = sorted(
-        key
-        for key, entry in CAPABILITY_WITNESSES.items()
-        if isinstance(entry, CapabilityWitness)
-        and entry.provenance.startswith("frozen fixture")
-    )
+    # A closed set was the first shape and it is still fail-open: it validates only the
+    # PREFIX, so an admission witness mislabelled `inline refusal document`, or an inline
+    # document claiming `frozen fixture nonexistent.json`, both pass — and the mislabel can
+    # even make the frozen-count floor look stronger. Provenance is now checked against the
+    # witness's own MODE and, for a frozen claim, against the real fixture inventory.
+    _ALLOWED_BY_KIND = {
+        "admits": {PROVENANCE_FROZEN_FIXTURE, PROVENANCE_INLINE_ADMISSION},
+        "refuses": {
+            PROVENANCE_FROZEN_FIXTURE,
+            PROVENANCE_INLINE_REFUSAL,
+            PROVENANCE_SYNTHETIC_CFG,
+        },
+    }
+
+    bad = []
+    frozen = []
+    for key, entry in sorted(CAPABILITY_WITNESSES.items()):
+        if not isinstance(entry, CapabilityWitness):
+            continue
+        kind = next(
+            (k for k in PROVENANCE_KINDS if entry.provenance.startswith(k)), None
+        )
+        if kind is None:
+            bad.append((key, "undeclared provenance", entry.provenance))
+            continue
+        if kind not in _ALLOWED_BY_KIND[entry.kind]:
+            bad.append((key, "provenance not allowed for a %r witness" % entry.kind, kind))
+            continue
+        if kind is PROVENANCE_FROZEN_FIXTURE:
+            named = [rel for rel in FIXTURE_PROVENANCE if rel in entry.provenance]
+            if not named:
+                bad.append((key, "claims a frozen fixture not in the inventory", entry.provenance))
+                continue
+            missing = [rel for rel in named if not (_FIXTURES / rel).is_file()]
+            if missing:
+                bad.append((key, "claims a frozen fixture that does not exist", missing))
+                continue
+            frozen.append(key)
+
+    assert bad == [], bad
+    # Non-vacuity: the strongest kind must really be in use, or the classification would be
+    # a formality satisfied entirely by the weakest label.
     assert len(frozen) >= 5, frozen

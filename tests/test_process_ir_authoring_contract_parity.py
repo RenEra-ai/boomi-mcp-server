@@ -416,6 +416,65 @@ def _perturbed(**overrides):
     return collect_projection_sources()._replace(**overrides)
 
 
+def test_a_blank_diagnostic_field_from_any_producer_is_refused():
+    """#177 QA-177-r2-01. The blank-field guard had NO test at all.
+
+    Five surgical mutants against it all SURVIVED the affected node set — delete the guard,
+    drop the `remediation` half, accept `""` and `"   "` by testing `is None`, or
+    interpolate the whole authored row into the error — because nothing asserted it raises.
+    The three PRODUCTION accessors already refuse a blank registry, so the guard's entire
+    reachable domain is INJECTED snapshots, which is exactly the shape a "remove unused
+    branch" cleanup deletes with nothing failing.
+
+    Both halves of the promise are pinned here: it refuses every blank form from every
+    producer, and the error names the CODE and nothing else.
+    """
+    import pytest as _pytest
+
+    # The code is DERIVED from each table rather than typed, so a registry that gains or
+    # loses rows cannot leave this test pinning a code its producer no longer serves.
+    live = collect_projection_sources()
+    producers = {
+        field: sorted(spec["code"] for spec in getattr(live, field))[0]
+        for field in ("compiler_specs", "parse_specs", "finding_specs")
+    }
+    assert len(set(producers.values())) == 3, producers
+    canary = "CANARY-AUTHORED-CONTENT-DO-NOT-SERVE"
+    for source_field, code in producers.items():
+        for blank in ("", "   ", None):
+            for field in ("message", "remediation"):
+                rows = tuple(
+                    dict(spec, **{field: blank, "remediation": spec["remediation"] + canary})
+                    if spec["code"] == code and field == "message"
+                    else (dict(spec, **{field: blank}) if spec["code"] == code else dict(spec))
+                    for spec in getattr(collect_projection_sources(), source_field)
+                )
+                with _pytest.raises(ValueError) as caught:
+                    build_process_ir_authoring_entries(_perturbed(**{source_field: rows}))
+                message = str(caught.value)
+                assert code in message, (source_field, field, blank, message)
+                # The error carries the CODE and no authored content.
+                assert canary not in message, message
+
+
+def test_the_blank_field_guard_names_no_authored_content():
+    """A non-string row must still fail CLOSED, and with the honest named error.
+
+    `.strip()` on a non-string raised `AttributeError` — fail-closed and correctly served as
+    `unavailable`, but it tells the caller nothing about which code is at fault.
+    """
+    import pytest as _pytest
+
+    code = "PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID"
+    rows = tuple(
+        dict(spec, message=object()) if spec["code"] == code else dict(spec)
+        for spec in collect_projection_sources().compiler_specs
+    )
+    with _pytest.raises(ValueError) as caught:
+        build_process_ir_authoring_entries(_perturbed(compiler_specs=rows))
+    assert code in str(caught.value)
+
+
 def test_drift_control_flipping_a_capability_state_changes_the_contract():
     rows = dict(PROCESS_IR_V1_CAPABILITIES)
     assert rows["joins"] == "gated"
@@ -984,7 +1043,12 @@ def _parse_capability_states(doc):
     # satisfied by `## 8. Capability states (normative)` — a reworded authority that left
     # the guard green, which is precisely what acceptance criterion 1 forbids.
     lines = doc.splitlines()
-    heads = [i for i, line in enumerate(lines) if line.strip() == _CAPABILITY_HEADING]
+    # RAW line, not `.strip()`. Indent a heading by four spaces and Python-Markdown renders
+    # it as a CODE BLOCK — §8 stops being a section at all — while a stripped comparison
+    # still matches and this parser happily returns the same table. That is a structurally
+    # removed authority leaving the guard green, which is the exact failure acceptance
+    # criterion 1 names.
+    heads = [i for i, line in enumerate(lines) if line == _CAPABILITY_HEADING]
     if len(heads) != 1:
         raise AssertionError(
             "expected exactly one line equal to {0!r}, found {1}".format(
@@ -1014,7 +1078,7 @@ def _parse_capability_states(doc):
         )
 
     lines = section.splitlines()
-    header_at = [i for i, line in enumerate(lines) if line.strip() == _CAPABILITY_TABLE_HEADER]
+    header_at = [i for i, line in enumerate(lines) if line == _CAPABILITY_TABLE_HEADER]
     if len(header_at) != 1:
         raise AssertionError(
             "expected exactly one {0!r} row, found {1}".format(
@@ -1022,7 +1086,7 @@ def _parse_capability_states(doc):
             )
         )
     start = header_at[0]
-    if start + 1 >= len(lines) or lines[start + 1].strip() != _CAPABILITY_TABLE_DELIMITER:
+    if start + 1 >= len(lines) or lines[start + 1] != _CAPABILITY_TABLE_DELIMITER:
         raise AssertionError(
             "expected {0!r} immediately after the header, found {1!r}".format(
                 _CAPABILITY_TABLE_DELIMITER,

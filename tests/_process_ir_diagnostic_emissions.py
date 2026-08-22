@@ -265,7 +265,15 @@ class _ModuleScan:
         owner = self.enclosing.get(id(call))
         if owner is None:
             return None
-        for index, arg in enumerate(owner.args.args):
+        # EVERY parameter kind. Reading only `owner.args.args` skipped keyword-only and
+        # positional-only parameters, so refactoring a forwarding helper to
+        # `def helper(*, code=...)` removed it from this reader without changing the pinned
+        # inner call's identity. Python's parameter kinds are a CLOSED set of three —
+        # unlike the call and binding syntax this module deliberately refuses to model —
+        # so enumerating them converges.
+        for index, arg in enumerate(
+            list(owner.args.posonlyargs) + list(owner.args.args) + list(owner.args.kwonlyargs)
+        ):
             if arg.arg == argument.id:
                 return (owner, index, arg.arg)
         return None

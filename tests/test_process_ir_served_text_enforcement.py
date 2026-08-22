@@ -133,6 +133,25 @@ UNSERVED_BY_DESIGN = {
 }
 
 
+#: Forwarding owners Python cannot introspect, keyed by EXACT
+#: `(path, function, parameter)` and mapped to the reason its default is accounted for.
+#: A nested function is not reachable through `getattr`, so `inspect.signature` cannot read
+#: its default — the one case where neither the source census nor the runtime check can
+#: speak, and therefore the one case a human must.
+UNREADABLE_DEFAULTS = {
+    (
+        "src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py",
+        "_report",
+        "code",
+    ): (
+        "a closure inside `collect_lineage_findings`; it takes `code` as a required "
+        "parameter with NO default (verified in source), so there is no default value to "
+        "read and every code it serves arrives from one of its call sites, each of which "
+        "passes a literal the census already collects"
+    ),
+}
+
+
 def _allowed_unserved(code, path):
     """True only where this exact code is allowed to be named unserved."""
     allowed = UNSERVED_BY_DESIGN.get(code)
@@ -577,10 +596,12 @@ def test_every_runtime_forward_default_is_served():
     assert unserved == [], unserved
 
     # An owner Python cannot introspect (a nested function is not reachable through
-    # `getattr`) is REPORTED, never assumed empty — and must be one of the pinned sites, so
-    # it carries a human-stated authority rather than escaping both checks.
-    pinned_paths = {site[0] for site in PINNED_DELEGATION_SITES}
-    unaccounted = sorted(
-        row for row in unreadable if row[0] not in pinned_paths
-    )
+    # `getattr`) is REPORTED, never assumed empty, and is dispositioned by EXACT
+    # `(path, function, parameter)`. Accepting it because some delegation in the same FILE
+    # was pinned was fail-open: `_report` could gain a concatenated default while the
+    # unrelated pin in its file kept this green and the source census, which cannot see an
+    # assembled value, stayed silent.
+    unaccounted = sorted(row for row in unreadable if row not in UNREADABLE_DEFAULTS)
     assert unaccounted == [], unaccounted
+    stale = sorted(set(UNREADABLE_DEFAULTS) - set(unreadable))
+    assert stale == [], stale

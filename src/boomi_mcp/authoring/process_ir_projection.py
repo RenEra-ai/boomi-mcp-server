@@ -1151,7 +1151,13 @@ def _diagnostic_entries(
             # slice. Validating at the merge closes the bypass for every source, injected
             # or not, and names CODES only — never authored content.
             for field in ("message", "remediation"):
-                if not (spec.get(field) or "").strip():
+                # TYPE and emptiness. `(spec.get(field) or "").strip()` raised
+                # `AttributeError` on a non-string, and wrapping it in `str()` was worse:
+                # `str(object())` is a non-empty string, so a non-string row PASSED the
+                # guard and failed further downstream. Both were fail-closed; neither told
+                # the caller which code was at fault.
+                value = spec.get(field)
+                if not isinstance(value, str) or not value.strip():
                     raise ValueError(
                         "{0} diagnostic source serves a blank {1} for {2}".format(
                             stage_label, field, code

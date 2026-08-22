@@ -1872,6 +1872,8 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     # code the source never spells as one token. Tokenizing the quote yields the halves and
     # the joined form, none of which any gate can emit.
     "PROVENANCE_KINDS",
+    "FIXTURE_PROVENANCE",
+    "UNREADABLE_DEFAULTS",
     "PROCESS_IR_",
     "SEMANTIC_TOTALLY_NEW_UNREGISTERED",
     "PROCESS_IR_SEMANTIC_TOTALLY_NEW_UNREGISTERED",
