@@ -193,9 +193,25 @@ def test_every_witness_records_its_fixture_provenance():
     inputs. Every executable witness names where its document came from, so a reviewer can
     tell a frozen pre-baseline capture from a refusal input built here.
     """
-    blank = sorted(
+    from _process_ir_capability_witnesses import PROVENANCE_KINDS
+
+    undeclared = sorted(
+        (key, entry.provenance)
+        for key, entry in CAPABILITY_WITNESSES.items()
+        if isinstance(entry, CapabilityWitness)
+        and not any(entry.provenance.startswith(kind) for kind in PROVENANCE_KINDS)
+    )
+    # A CLOSED set, not "any non-blank string" — the previous check accepted anything,
+    # including a description that overstated where the document came from, which is how a
+    # provenance note drifts from what the file actually does.
+    assert undeclared == [], undeclared
+
+    # Non-vacuity: the strongest kind must actually be in use, or the classification would
+    # be a formality satisfied entirely by the weakest label.
+    frozen = sorted(
         key
         for key, entry in CAPABILITY_WITNESSES.items()
-        if isinstance(entry, CapabilityWitness) and not entry.provenance.strip()
+        if isinstance(entry, CapabilityWitness)
+        and entry.provenance.startswith("frozen fixture")
     )
-    assert blank == [], blank
+    assert len(frozen) >= 5, frozen

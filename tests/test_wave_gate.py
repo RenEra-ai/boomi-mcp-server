@@ -1866,6 +1866,15 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     # the row without breaking the property that makes the row auditable.
     "UNSERVED_BY_DESIGN",
     "NEW_CODE",
+    # #177's provenance-kind constant, and the SYNTHETIC code a mutant introduced. The
+    # A6-01 row quotes the reviewer's mutant verbatim — `"PROCESS_IR_" +
+    # "SEMANTIC_TOTALLY_NEW_UNREGISTERED"` — which is the whole point of that finding: a
+    # code the source never spells as one token. Tokenizing the quote yields the halves and
+    # the joined form, none of which any gate can emit.
+    "PROVENANCE_KINDS",
+    "PROCESS_IR_",
+    "SEMANTIC_TOTALLY_NEW_UNREGISTERED",
+    "PROCESS_IR_SEMANTIC_TOTALLY_NEW_UNREGISTERED",
     # The #149 inventory's route table — a durable production constant any later
     # ledger classifying a component-XML write route would name, not a code.
     "WRITE_ROUTES",

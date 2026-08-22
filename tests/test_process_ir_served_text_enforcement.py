@@ -484,7 +484,7 @@ def test_every_code_named_in_the_emitting_modules_is_served():
     referenced = referenced_codes()
     assert referenced, "no codes named at all — this test would be vacuous"
 
-    from _process_ir_diagnostic_emissions import producer_of
+    from _process_ir_diagnostic_emissions import producer_of, runtime_forward_defaults
 
     layers = _by_layer()
 
@@ -534,3 +534,53 @@ def test_every_code_named_in_the_emitting_modules_is_served():
         if now_served:
             stale.append((code, "now served for its own producer at " + str(now_served)))
     assert sorted(stale) == [], sorted(stale)
+
+
+def test_every_runtime_forward_default_is_served():
+    """The half a source reader cannot cover: the default's evaluated VALUE.
+
+    The census above reads source, so it recognises a code written as a whole literal or a
+    known constant. A default written `"PROCESS_IR_" + "SEMANTIC_TOTALLY_NEW_UNREGISTERED"`
+    is neither — and the architect review demonstrated exactly that: a genuinely emittable
+    unregistered code with every source-reading guard green.
+
+    Reading such expressions means modelling concatenation, f-strings, `.format`, `.join`
+    and whatever comes next — the open-ended space that produced a finding in four
+    consecutive Stage-2 rounds. This asks PYTHON for the value instead. However the author
+    wrote it, the value is the value, and a value has no syntax to enumerate.
+    """
+    from _process_ir_diagnostic_emissions import producer_of, runtime_forward_defaults
+
+    defaults, unreadable = runtime_forward_defaults()
+    assert defaults, "no forwarded defaults found — this test would be vacuous"
+
+    layers = _by_layer()
+
+    def _complete_for(code, producer):
+        for table in _SATISFYING_TABLES.get(producer, ()):
+            spec = layers[table].get(code)
+            if (
+                spec
+                and (spec.get("message") or "").strip()
+                and (spec.get("remediation") or "").strip()
+            ):
+                return True
+        return False
+
+    unserved = sorted(
+        (path, function, param, default)
+        for (path, function, param), default in defaults.items()
+        if not _allowed_unserved(default, path)
+        and producer_of(path) in _SATISFYING_TABLES
+        and not _complete_for(default, producer_of(path))
+    )
+    assert unserved == [], unserved
+
+    # An owner Python cannot introspect (a nested function is not reachable through
+    # `getattr`) is REPORTED, never assumed empty — and must be one of the pinned sites, so
+    # it carries a human-stated authority rather than escaping both checks.
+    pinned_paths = {site[0] for site in PINNED_DELEGATION_SITES}
+    unaccounted = sorted(
+        row for row in unreadable if row[0] not in pinned_paths
+    )
+    assert unaccounted == [], unaccounted

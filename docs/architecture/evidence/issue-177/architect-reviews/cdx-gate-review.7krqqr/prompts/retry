@@ -1,0 +1,45 @@
+Approvals are unavailable in this read-only review session — there is no human to answer a
+clarifying question, and no tool call of yours will be approved. Do not ask anything and do not wait.
+
+Emit your FULL review NOW, based on what you have already read of the tree.
+
+You are reviewing the implementation of GitHub issue #177 in `boomi-mcp-server` (branch
+`codex/issue-177`, baseline `6f26caff7481356119fee5b36a1730cec0fb5df2`..HEAD) **against the
+architect design plan reproduced in the original prompt**, not as a general code review — the repo's
+own Codex gate already ran eight rounds on this delta and is clean.
+
+Judge, specifically:
+
+1. Whether the three shipped invariants realize the plan — (a) every emittable diagnostic code
+   carries a served message AND remediation, derived from the emitting modules; (b) a manifest-keyed
+   two-directional capability pin over all 27 `PROCESS_IR_V1_CAPABILITIES` keys; (c) key-AND-state
+   equality between that manifest and `PROCESS_IR_V1.md` §8.
+2. Whether each carries a real BIDIRECTIONAL pin (a reworded or renamed authority FAILS the guard
+   rather than disarming it), a NON-VACUITY witness against the real historical defect, and a
+   COVERAGE claim over the authority's FULL case set rather than a sample.
+3. Whether the five recorded deviations from the plan are sound: `diagnostic()` left total while the
+   three spec accessors fail closed; compiler-served text treated as the compiler's own authority
+   with no cross-producer identity assertion; the AST reader NOT resolving forwarded parameters
+   (resolver deleted after four rounds, replaced by a pinned-site table plus a code census);
+   capability witnesses not restating #178's cross-entry vector equality.
+4. Whether scope discipline held — the issue WITHDREW its item 4 (a predicate over English prose),
+   and nothing belonging to #147, #154, #155, #156, #158 or #176 may have been built here.
+
+Files to look at: `tests/_process_ir_diagnostic_emissions.py`,
+`tests/_process_ir_capability_witnesses.py`, `tests/_process_ir_entrypoint_differential.py`,
+`tests/test_process_ir_served_text_enforcement.py`,
+`tests/test_process_ir_capability_enforcement.py`,
+`tests/test_process_ir_authoring_contract_parity.py`, `tests/test_process_ir_authoring_contract.py`,
+and the production changes in `src/boomi_mcp/compiler/process_ir/diagnostics.py`,
+`src/boomi_mcp/compiler/process_ir/invariants.py`,
+`src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py`,
+`src/boomi_mcp/models/process_ir.py`, `src/boomi_mcp/authoring/process_ir_projection.py`.
+The audit record is `docs/architecture/ISSUE_177_AUDIT_LEDGER.md` with evidence under
+`docs/architecture/evidence/issue-177/`.
+
+Plain text output only. Write no files.
+
+END your reply with a verdict on its OWN FINAL line, exactly one of:
+
+VERDICT: NO ISSUES
+VERDICT: ISSUES FOUND

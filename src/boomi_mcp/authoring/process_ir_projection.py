@@ -1142,6 +1142,21 @@ def _diagnostic_entries(
     ):
         for spec in specs:
             code = str(spec["code"])
+            # #177: the three PRODUCTION accessors fail closed on a blank or asymmetric
+            # registry, but a `ProjectionSourcesV1` may be INJECTED — that is the whole
+            # point of the snapshot, so drift controls can perturb one source without
+            # monkeypatching a production mapping. An injected row therefore reaches this
+            # merge without having passed `_complete_spec_rows`, and a blank message here
+            # is served as a remediation-shaped summary exactly as it was before this
+            # slice. Validating at the merge closes the bypass for every source, injected
+            # or not, and names CODES only — never authored content.
+            for field in ("message", "remediation"):
+                if not (spec.get(field) or "").strip():
+                    raise ValueError(
+                        "{0} diagnostic source serves a blank {1} for {2}".format(
+                            stage_label, field, code
+                        )
+                    )
             row = merged.setdefault(
                 code,
                 {
@@ -1382,12 +1397,21 @@ def _page_envelope_fields() -> Tuple[str, ...]:
 def _diagnostic_summary(row: MutableMapping[str, Any]) -> str:
     """The one-line orientation for a diagnostic code.
 
-    Every served diagnostic now carries a static ``message``, so the fallback
-    below is unreachable by construction: the three spec accessors refuse an
-    asymmetric or blank registry (``_complete_spec_rows`` in
-    ``boomi_mcp.models.process_ir``), and ``tests/test_process_ir_served_text_enforcement.py``
-    proves from the emitting modules that every code any layer can raise is
-    registered with both texts.
+    Every diagnostic served through THESE THREE REGISTRIES now carries a static
+    ``message``, so the fallback below has no reachable case among them: the
+    three spec accessors refuse an asymmetric or blank registry
+    (``_complete_spec_rows`` in ``boomi_mcp.models.process_ir``), the merge above
+    refuses a blank field from an INJECTED source as well, and
+    ``tests/test_process_ir_served_text_enforcement.py`` proves from the emitting
+    modules that every code those layers can raise is registered with both texts.
+
+    Two limits, stated rather than implied — an earlier version of this note said
+    "unreachable by construction" flatly and was wrong twice over. The native
+    process-graph verifier serves its own ``(code, message, remediation)`` result
+    and is deliberately OUTSIDE these registries, so nothing here speaks for it.
+    And "by construction" was false while an injected ``ProjectionSourcesV1``
+    could carry a blank field straight past the accessors; that hole is closed at
+    the merge now, which is what makes the claim true rather than aspirational.
 
     It is retained as an honest degradation path rather than deleted, and it is
     PINNED: ``test_no_compiler_diagnostic_falls_back_to_its_remediation`` asserts

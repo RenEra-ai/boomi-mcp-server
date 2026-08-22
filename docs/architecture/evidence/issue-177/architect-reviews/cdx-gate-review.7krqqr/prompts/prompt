@@ -1,0 +1,712 @@
+You are reviewing an IMPLEMENTATION against the ARCHITECT DESIGN PLAN that was written for it,
+in the repository `boomi-mcp-server`. This is NOT a general code review — the repo's own Codex
+review gate already ran to completion on this delta across eight rounds and came back CLEAN, and
+those findings are already fixed. Your job is the different one: **does the implementation
+faithfully realize the design plan and the issue's acceptance criteria, and where it deliberately
+deviates, is the deviation sound and recorded?**
+
+The plan is reproduced verbatim below, followed by the issue's acceptance criteria under their own
+header. Read the actual tree — do not take any claim in the plan or in this brief on trust.
+
+## Scope
+
+Baseline `6f26caff7481356119fee5b36a1730cec0fb5df2` .. HEAD, on branch `codex/issue-177`.
+
+Production files changed:
+
+- `src/boomi_mcp/compiler/process_ir/diagnostics.py`
+- `src/boomi_mcp/compiler/process_ir/invariants.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py`
+- `src/boomi_mcp/models/process_ir.py`
+- `src/boomi_mcp/authoring/process_ir_projection.py`
+
+New test helpers and guards:
+
+- `tests/_process_ir_diagnostic_emissions.py` (AST reader over the emitting modules)
+- `tests/_process_ir_capability_witnesses.py` (manifest-keyed capability witness registry)
+- `tests/_process_ir_entrypoint_differential.py` (#178's driver, extracted for reuse)
+- `tests/test_process_ir_served_text_enforcement.py` (invariant 1)
+- `tests/test_process_ir_capability_enforcement.py` (invariant 2)
+
+Modified tests and frozen artifacts:
+
+- `tests/test_process_ir_authoring_contract.py`, `tests/test_process_ir_authoring_contract_parity.py`
+  (invariant 3 lives in the second one), `tests/test_process_ir_entrypoint_diagnostic_parity.py`,
+  `tests/test_wave_gate.py`
+- `tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json`
+- `tests/fixtures/m12_12/legacy_reachability_inventory.json`
+- `tests/fixtures/wave_gate/test_nodes.jsonl`
+
+Audit record: `docs/architecture/ISSUE_177_AUDIT_LEDGER.md` and
+`docs/architecture/evidence/issue-177/`.
+
+## Recorded deviations from the plan — judge each one
+
+The implementer recorded these in the ledger under *Recorded design decisions* and in the checkpoint
+rows. Say for each whether it is sound, and whether the reasoning holds against the tree:
+
+1. **`diagnostic()` was NOT made to raise on an unregistered code**, contrary to the design plan.
+   Reason given: it is called from inside the handlers that exist to stop a raw escape
+   (`pipeline._guarded`, `emitter_registry`), and every production handler catches only
+   `ProcessIRCompileError`, so raising would convert a registration gap into an unhandled error on a
+   live MCP tool. Fail-closed lives in the guard instead. Verify the call graph claim.
+2. **The other three spec accessors DO fail closed** via `_complete_spec_rows` in
+   `models/process_ir.py`, imported by the compiler and semantic layers. Judge whether that
+   private cross-package import and its degradation path are acceptable.
+3. **The compiler's served text is treated as the compiler layer's own authority**, not derived from
+   the parser's, even where the wording is identical for three codes. No cross-producer text-identity
+   assertion was added. Judge whether that is right for this contract.
+4. **The AST reader does NOT resolve which codes reach a forwarded parameter.** An earlier revision
+   did; four consecutive review rounds each found a further Python form it read wrongly, so the
+   resolver was deleted and such sites are pinned in a table with human-stated reasons, backed by a
+   census requiring every code NAMED in the scanned modules to be served. Judge whether the census
+   plus the pinned table together make a coverage claim strong enough for acceptance criterion 3,
+   or whether deleting the resolver lost something the pins do not recover.
+5. **Capability witnesses do not restate #178's cross-entry vector equality.** For grammar-level
+   gates only the parser is measured; for field-level gates that are reachable on a validated model
+   (`scope`, `load_all_documents`, `definedparameter` via list mutation) a compile-path half was
+   added. `catch_all` has no model field at all. Judge whether the coverage is honest.
+
+## What to check hardest
+
+- **Acceptance criterion 1 — bidirectional pins.** For each of the three invariants, does a
+  reworded, renamed or restructured AUTHORITY actually FAIL the guard rather than silently disarm
+  it? Try to find a rewording that leaves a guard green.
+- **Acceptance criterion 3 — coverage from the authority's FULL case set.** Is any case set secretly
+  a sample? Look specifically at: the AST reader's roots and its pinned-site table; the 27-key
+  capability registry; the §8 table parser.
+- **Non-vacuity.** `docs/architecture/evidence/issue-177/non-vacuity.md` records hand-run mutants.
+  Are the recorded mutants the REAL historical defects, and do the guards named actually fail on
+  them? One recorded case is a mutant that reported a FALSE PASS because its anchor did not match
+  the real declaration — check whether any other recorded witness has the same problem.
+- **Scope discipline.** The issue WITHDREW its scope item 4 (a predicate over English prose). Confirm
+  nothing of that kind was built. Confirm nothing belonging to #147, #154, #155, #156, #158 or #176
+  was built here.
+- **The two QA findings** (`QA-177-r1-01`, `QA-177-r1-02`) were prose corrections. Confirm the
+  corrected prose is now TRUE against the code it describes.
+
+## Verdict
+
+END your reply with a verdict on its OWN FINAL line, exactly one of:
+
+VERDICT: NO ISSUES
+VERDICT: ISSUES FOUND
+
+Before that line, list any findings with a severity marker and the file and line each refers to.
+
+
+=== ARCHITECT DESIGN PLAN (verbatim) ===
+# Issue #177 — Served-text/enforcement consistency gates
+
+## 1. Findings from reading the tree
+
+- Verified clean HEAD: `6f26caff7481356119fee5b36a1730cec0fb5df2`.
+- Package root is `src/boomi_mcp/`; tests run from `tests/` with `PYTHONPATH=src`.
+- The structural-fix requirements are at `CLAUDE.md:475-491`: sibling sweep, bidirectional pin, real non-vacuity mutant, and full authority-derived coverage.
+- Endgame test floors live in `tests/fixtures/wave_gate/test_nodes.jsonl:1`; the format and update rules are documented at `docs/architecture/ENDGAME_VERIFICATION_GATE.md:34-60,138-150`.
+
+### Diagnostic authorities
+
+- `src/boomi_mcp/compiler/process_ir/diagnostics.py`
+  - `_REMEDIATION`: `:91-242`
+  - `_MESSAGES`: `:244-301`
+  - `CompilerDiagnostic`: `:329`
+  - `diagnostic()`: `:346`
+  - `raise_compile_error()`: `:397`
+  - `compiler_diagnostic_specs()`: `:446-457`
+  - The fail-open lookups are exactly `:452-453`.
+
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py`
+  - Static maps: `:42-165`
+  - `finding()`: `:168`
+  - `registered_codes()`: `:203-205`
+  - `finding_specs()`: `:219-230`
+  - `registered_codes()` has zero callers at HEAD.
+  - `ValidationDiagnosticV1` is defined at `semantic_validation/contracts.py:218`.
+
+- Parser diagnostics are in `src/boomi_mcp/models/process_ir.py`
+  - `ProcessIRDiagnostic`: `:146`
+  - `_diagnostic()`: `:2454`
+  - `process_ir_v1_parse_diagnostic_specs()`: `:2908`
+  - The parser factory already indexes its text maps strictly, but its served accessor still uses empty-string fallbacks.
+
+- Native process-graph verifier findings are emitted by `_issue()` at
+  `src/boomi_mcp/categories/components/process_graph_verifier.py:111`, with 19 distinct call sites at `:199-645`. All currently supply nonempty message and remediation expressions. When invoked during compilation, those native codes are collapsed to `PROCESS_IR_COMPILE_INTERNAL` or `PROCESS_IR_COMPILE_VERIFIER_FAILED` at `compiler/process_ir/emitter_registry.py:842-854`; direct verifier callers still receive the native rows.
+
+### Re-measured diagnostic census
+
+At HEAD:
+
+| Producer | Rows | Empty messages | Empty remediations |
+|---|---:|---:|---:|
+| Parser specs | 15 | 0 | 0 |
+| Compiler specs | 33 | 7 | 0 |
+| Semantic finding specs | 17 | 0 | 0 |
+| Distinct three-table union | 57 | — | — |
+
+The seven empty compiler messages are still exactly:
+
+1. `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY`
+2. `PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID`
+3. `PROCESS_IR_SCHEMA_BRANCH_CARDINALITY`
+4. `PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED`
+5. `PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED`
+6. `PROCESS_IR_SEMANTIC_NESTING_LIMIT`
+7. `PROCESS_IR_SEMANTIC_UNTERMINATED_PATH`
+
+The source-derived canonical emitter union currently has 56 distinct reachable codes. The 57th served row, `PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE`, is deliberately registered but non-emittable until convergence exists, as documented at `docs/architecture/PROCESS_IR_SEMANTIC_VALIDATION_V1.md:275-305,342`.
+
+### Existing near-miss tests
+
+- `tests/test_process_ir_authoring_contract_parity.py:198-208` compares only the union of registered codes.
+- `tests/test_process_ir_authoring_contract_parity.py:768-798` skips a blank field at `:794`.
+- `tests/test_process_ir_authoring_contract.py:3128-3179` explicitly freezes the current seven blank compiler messages and three remediation-as-summary fallbacks.
+- `tests/test_process_ir_authoring_contract.py:4041-4083` skips blank compiler messages at `:4072`.
+- Frozen served contract: `tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json:1`.
+
+### Capability authority
+
+- Served immutable manifest: `src/boomi_mcp/models/process_ir.py:2125-2222`.
+- Current full case set: 27 keys:
+  - 8 `supported`
+  - 11 `gated`
+  - 8 `unsupported`
+- The runtime state domain is only `supported | gated | unsupported`, pinned at `tests/test_process_ir_models.py:1333-1337`.
+- `unsupported (permanent)` is documentation presentation, not a fourth runtime value.
+
+The supported keys are:
+
+`generalized_connector_call`, `mixed_connector_execution`, `connector_call_in_control_body`, `terminal_process_call`, `rich_branch_decision_bodies`, `scoped_try_catch`, `bounded_retry`, `typed_idempotency_evidence`.
+
+The gated keys are:
+
+`process_call_connector_mixing`, `process_call_return_path_binding`, `continuation_after_branch_or_decision`, `catch_failure_trigger_selection`, `verified_write_replay_safety`, `listener_error_scope`, `nested_try_catch`, `keyed_cache`, `definedparameter_property_source`, `joins`, `loops`.
+
+The unsupported keys are:
+
+`catch_error_type_lists`, `retry_backoff_authoring`, `queue_topology`, `caller_authored_cfg_edges`, `xml_or_layout_or_shape_ids`, `secret_values`, `parallel_branch_execution`, `flow_control_parallel_chunks`.
+
+Relevant enforcement authorities include:
+
+- Body placements: `compiler/process_ir/body_capabilities.py:95-158`
+- Root Process Call placement: `models/process_ir.py:1251-1304`
+- Compiler consumer of Process Call placement: `body_capabilities.py:518-550`
+- Join/cycle checks: `compiler/process_ir/invariants.py:287-337`
+
+### Issue #178 shared driver
+
+The driver is not yet an importable helper. It is embedded in `tests/test_process_ir_entrypoint_diagnostic_parity.py`:
+
+- Product generator: `:346-382`
+- `_GrammarBoundary`: `:385-400`
+- Diagnostic vector: `:402-412`
+- `_measure()`: `:415-439`
+- Main parity gate: `:589-600`
+- Non-vacuity witness: `:694-741`
+
+Invariant 2 should import this machinery after it is extracted into a private helper. It should not import the collected `test_*.py` module and should not copy the implementation.
+
+Existing private-helper precedents are:
+
+- `tests/_wave_gate_golden_corpus.py`, including `render_golden_case()` at `:1542`
+- `tests/_m12_12_legacy_inventory.py`, including `build_inventory()` at `:4027`
+
+### Documentation authority
+
+- `docs/architecture/PROCESS_IR_V1.md` §8: `:370-406`
+- Table rows: `:376-402`
+- Following §9 boundary: `:413`
+- Existing key-only pin: `tests/test_process_ir_authoring_contract_parity.py:926-967`
+- That pin silently skips malformed rows, compares only keys, and retains a stale `>=25` non-vacuity floor.
+
+## 2. Design decisions
+
+### Invariant 1: the seven empty compiler messages are defects
+
+A call-site message override is legitimate for a more precise runtime diagnosis, but it must not substitute for a canonical, nonempty code-level registration. The served registry is queried without an offending payload and therefore needs complete standalone text.
+
+Add these canonical compiler messages:
+
+| Code | Canonical message |
+|---|---|
+| `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` | `node placement or path composition is not supported in this control body` |
+| `PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID` | `compiler-derived control-node wiring is invalid` |
+| `PROCESS_IR_SCHEMA_BRANCH_CARDINALITY` | `branch leg count is outside the 2-25 bound` |
+| `PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED` | `continuation after a branch or decision is not supported` |
+| `PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED` | `ProcessIR v1 emits no join: a node has more than one predecessor` |
+| `PROCESS_IR_SEMANTIC_NESTING_LIMIT` | `control nesting exceeds the ProcessIR v1 depth bound` |
+| `PROCESS_IR_SEMANTIC_UNTERMINATED_PATH` | `a divergent control path reaches no terminal` |
+
+The control-wiring remediation should say “control-node wiring” rather than “branch/decision wiring”, because the code also covers Try/Catch wiring.
+
+The guard’s principled rule is:
+
+- Every reachable parser, compiler, semantic-validator, or graph-verifier code has both nonblank fields.
+- Every native compiler emitter has a compiler registration even when another producer uses the same code.
+- Call-site overrides may refine the canonical message but never bypass registration.
+- No seven-code allowlist exists.
+
+Rejected alternatives:
+
+- Allowlisting the seven blanks would freeze the current defect.
+- Treating any `message=` call-site argument as sufficient would leave the served registry incomplete.
+- Removing call-site overrides would discard useful pointer-specific and invariant-specific diagnoses.
+
+### Emitter enumeration and bidirectional pin
+
+Create an AST-based collector rather than a hand-maintained code list.
+
+It will:
+
+- Scan the parser module, canonical `compiler/process_ir/**/*.py`, semantic validation modules, and the graph verifier.
+- Exclude only `_MESSAGES`/`_REMEDIATION` assignment values so a registry cannot prove its own reachability.
+- Resolve imported `boomi_mcp.errors` constants, routing maps, conditional/helper returns such as `_wiring_code`, and the exact delegated `finding(item.code)` path.
+- Recognize the pinned sinks `_diagnostic`, `diagnostic`, `raise_compile_error`, `_fail`, `finding`, direct diagnostic constructors, and graph-verifier `_issue`.
+- Fail on an unresolved code expression instead of skipping it.
+- Pin the expected factory definitions and source modules so a rename or restructure cannot turn the scan into an empty success.
+- Assert the internal `legacy_adapters/**` boundary imports/calls none of the canonical served sinks; if that changes, the guard fails and the boundary must be reclassified.
+
+The bidirectional equations are:
+
+- Parser emissions equal parser spec codes.
+- Direct compiler emissions are a subset of compiler spec codes; compiler-only registered rows must be reachable either directly or through parser translation.
+- Semantic emissions equal `registered_codes()` minus explicitly marked non-emittable registrations, with delegated compiler codes resolved to their owning compiler specs.
+- The full emitted union plus the explicit non-emittable registration set equals the full served three-table union.
+- Native graph-verifier `_issue` calls are a separate complete set: every call has one nonempty literal code plus message/remediation expressions with a nonempty literal skeleton.
+
+`PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` will be marked in production metadata as deliberately registered/non-emittable. This is not a test allowlist: it is the runtime registry’s explicit status for the already-documented convergence-dependent row.
+
+### Invariant 2: manifest-keyed witness registry
+
+A capability witness is an immutable executable case descriptor containing:
+
+- A fresh payload/model or CFG builder
+- Required symbol/capability setup
+- The enforcement boundary to invoke
+- Expected admission/refusal mode, without duplicating the manifest state
+- A feature-specific observer proving that the intended capability—not merely an unrelated valid document—was admitted or refused
+
+The registry will live in `tests/_process_ir_capability_witnesses.py`. The collected guard will live separately in `tests/test_process_ir_capability_enforcement.py`.
+
+The first assertion is exact:
+
+`set(CAPABILITY_WITNESSES) == set(PROCESS_IR_V1_CAPABILITIES)`
+
+The live manifest value selects the required record behavior:
+
+- `supported` → executable admission witness
+- `gated` → executable refusal witness
+- `unsupported` → explicit `UnsupportedDisposition`
+- Unknown state → fail closed
+
+Thus a new or renamed manifest key with no witness fails, a removed key leaves a stale witness and fails, and a state flip fails until the witness type and observed behavior are deliberately updated.
+
+Unsupported entries are not silently skipped, but neither are invented refusal semantics imposed on them. Their typed disposition records why no admission/refusal execution contract is claimed. “Unsupported” means outside this authoring contract; it does not universally promise one stable error path.
+
+### Per-key capability witnesses
+
+| Manifest key | Witness and feature-specific observation |
+|---|---|
+| `generalized_connector_call` | Compile/emit `connector_call(op_rest_get) -> stop`; prove connector-call CFG semantics and a connector-action emission node. |
+| `mixed_connector_execution` | Compile REST GET → map → SOAP EXECUTE → stop; prove two distinct connector families occur on one CFG path and both emitter forms exist. |
+| `connector_call_in_control_body` | Use frozen `rich_control/branch_mixed_connectors.json`; prove connector provenance is under `/legs/` and survives emission. |
+| `terminal_process_call` | Use frozen `rich_control/branch_process_call.json`; prove the call is a CFG exit and emitted `processcall` has no outgoing transition. |
+| `rich_branch_decision_bodies` | Use `decision_nested_bare_false_stop.json`; prove nested Decision nodes and the bare false Stop survive compile/emission. |
+| `scoped_try_catch` | Use `scoped_try_catch_process_retry0_exception.json`; prove Try/Catch CFG semantics and a `catcherrors` emitter. |
+| `bounded_retry` | Use the retry-5 cache-catch fixture; prove semantic count 5 and emitted `retryCount="5"`. |
+| `typed_idempotency_evidence` | Reuse the established controlled connector-capability override to mark REST PATCH `idempotent_write`; supply exact `{"kind":"verified_action"}` and prove the protected-call semantic record carries it. |
+| `process_call_connector_mixing` | Put connector execution and a Process Call on one root-to-leaf path; both entry points must return the same full diagnostic vector naming the capability. |
+| `process_call_return_path_binding` | Use exact root `[process_call(a), process_call(b)]`; both entry points must return `PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED` at `/body/steps/1`. |
+| `continuation_after_branch_or_decision` | Put a valid Branch before a Message; both paths must refuse with `PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED` at `/body`. |
+| `catch_failure_trigger_selection` | Add exact `catch_all: false` to a valid Try/Catch; both paths must refuse at that field. |
+| `verified_write_replay_safety` | Retry a production-unverified PATCH with authored verified evidence; grammar admits it, full compilation must still refuse with `PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE`. |
+| `listener_error_scope` | Set a valid handler’s scope to `listener`; both paths must refuse with `PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED`. |
+| `nested_try_catch` | Put a complete Try/Catch inside another try body; both paths must refuse at the nested node with `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY`. |
+| `keyed_cache` | Use `document_cache_retrieve` with exact `load_all_documents: false`; both paths must return `PROCESS_IR_CAPABILITY_UNSUPPORTED` at the field. |
+| `definedparameter_property_source` | Use exact `definedparameter` source shape; both paths must return `PROCESS_IR_CAPABILITY_UNSUPPORTED` at the source item. |
+| `joins` | Feed `check_cfg_invariants` a real CFG where two Branch legs converge on one Stop; require `PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED`. |
+| `loops` | Feed `check_cfg_invariants` the real two-node cycle; require the current first refusal, `PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW`. |
+| `catch_error_type_lists` | `UnsupportedDisposition`: no wire representation. |
+| `retry_backoff_authoring` | `UnsupportedDisposition`: platform-owned schedule, no authorable field. |
+| `queue_topology` | `UnsupportedDisposition`: no queue component is modeled; topology creation is out of scope. |
+| `caller_authored_cfg_edges` | `UnsupportedDisposition`: edges are compiler-derived and have no authored input shape. |
+| `xml_or_layout_or_shape_ids` | `UnsupportedDisposition`: identifiers/layout are compiler-owned. |
+| `secret_values` | `UnsupportedDisposition`: secret material is excluded from the contract; existing secret scans are extra defense, not the capability witness. |
+| `parallel_branch_execution` | `UnsupportedDisposition`: Branch semantics are deliberately sequential. |
+| `flow_control_parallel_chunks` | `UnsupportedDisposition`: no caller-configurable parallel field exists. |
+
+`typed_idempotency_evidence` is executable only with the existing controlled capability-row precondition because no production write row is currently classified replay-safe. That limitation must be recorded rather than hidden.
+
+`joins` and `loops` use the CFG invariant boundary because caller-authored CFG edges are intentionally unsupported. They must not fabricate authorable edge syntax merely to use the dual-entry driver.
+
+### #178 import decision
+
+Extract reusable outcome normalization and dual-entry measurement into:
+
+`tests/_process_ir_entrypoint_differential.py`
+
+Expose one `measure_entrypoints(...)` API with:
+
+- Grammar-boundary mode preserving #178’s current behavior
+- Full-compile mode accepting symbols/capabilities
+- Normalized outcomes carrying full `(code, path, message, remediation)` vectors
+
+Both the existing #178 test and the new capability guard import this helper. The #178 product generator remains in its own collected test module and keeps its existing case set and assertions.
+
+Rejected alternatives:
+
+- Importing `test_process_ir_entrypoint_diagnostic_parity.py` would import a collected test module and its entire corpus.
+- Copying `_measure` would recreate the dual-authority defect.
+- Enumerating the placement matrix would make #154 rewrite the gate alongside the matrix it is meant to police.
+
+### Invariant 3: strict key-and-state equality
+
+Keep the existing test node but replace its permissive parser.
+
+Require:
+
+1. Exactly one `## 8. Capability states` heading.
+2. The next level-two boundary to be exactly `## 9. Ownership boundaries (#137–#143)`.
+3. Exactly one header `| Capability | State | Owner |`.
+4. The exact delimiter `|---|---|---|` immediately after it.
+5. One contiguous, nonempty row block.
+6. Anchored three-column rows with a backticked lowercase-snake-case key.
+7. No duplicate keys, malformed rows, blank owners, stray table rows, or zero-row result.
+
+State normalization is exact:
+
+- Trim surrounding whitespace.
+- Remove exactly one balanced outer `**...**`.
+- Accept only `supported`, `gated`, `unsupported`, or `unsupported (permanent)`.
+- Canonicalize only `unsupported (permanent)` to runtime `unsupported`.
+- Do not lowercase, fuzzy-match, or strip arbitrary Markdown.
+
+Finally compare:
+
+`parsed_doc_mapping == dict(PROCESS_IR_V1_CAPABILITIES)`
+
+This catches doc-only keys, manifest-only keys, and state drift. Remove the stale `>=25` floor; strict nonempty parsing plus exact mapping equality is the non-vacuity control.
+
+No edit to `docs/architecture/PROCESS_IR_V1.md` is currently required because its normalized 27-row mapping already matches the runtime manifest.
+
+### Public/interface impact
+
+- No MCP request schema, capability state, grammar, or compiler output shape changes.
+- Seven served diagnostic entries gain canonical compiler messages.
+- Incomplete diagnostic spec registries become authority failures instead of serving empty strings.
+- The ProcessIR authoring compiler revision/fingerprint changes because served diagnostic content changes.
+- New witness/result dataclasses and emitter collectors are private test helpers only.
+
+## 3. File-by-file plan
+
+### Production files to modify
+
+`src/boomi_mcp/compiler/process_ir/diagnostics.py`
+
+- Add the seven canonical `_MESSAGES` entries above.
+- Broaden the control-wiring remediation to cover every control node, including Try/Catch.
+- Make `diagnostic()` resolve canonical message and remediation before honoring a call-site override; an unregistered code must fail rather than use generic text.
+- Make `compiler_diagnostic_specs()` validate exact message/remediation key equality and nonblank values, then index both maps directly.
+- Update comments/docstrings that currently describe empty-string rows as normal.
+
+`src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py`
+
+- Keep `registered_codes()` as the semantic registration authority and make the new invariant call it.
+- Add `non_emittable_registered_codes()` returning the explicit convergence-dependent registration.
+- Make `finding_specs()` fail closed on unequal or blank maps and index complete rows directly.
+- Retain `finding()`’s delegated-code behavior because semantic flow intentionally preserves compiler-owned diagnostics verbatim; the AST guard distinguishes native registrations from proven delegation.
+- Export the new status accessor through this internal module’s `__all__`.
+
+`src/boomi_mcp/models/process_ir.py`
+
+- Make `process_ir_v1_parse_diagnostic_specs()` fail closed on unequal/blank registries and use direct indexing.
+- Leave parser behavior, manifest values, grammar, and §8 capability states unchanged.
+
+`src/boomi_mcp/authoring/process_ir_projection.py`
+
+- Delete the stale “seven/four/three” fallback explanation from `_diagnostic_summary`.
+- Require a nonblank producer message instead of treating remediation as an ordinary summary fallback.
+- Validate injected `ProjectionSourcesV1` diagnostic rows before merge so test overlays cannot bypass the production accessor checks.
+- Preserve multi-producer attribution and call-site-specific ordering facts.
+
+### New private test helpers
+
+`tests/_process_ir_diagnostic_emissions.py`
+
+- Implement the fail-closed AST collector and producer classification.
+- Pin factory definitions, routing/delegation shapes, source roots, legacy-adapter exclusion, and graph-verifier `_issue` structure.
+- Return immutable parser/compiler/semantic/native-verifier case sets and unresolved-sink diagnostics.
+
+`tests/_process_ir_entrypoint_differential.py`
+
+- Extract #178’s grammar boundary and diagnostic-vector normalization.
+- Provide grammar-boundary and full-compile measurement through the shared `measure_entrypoints(...)` API.
+- Always restore monkeypatched boundaries and return structured accepted/refused/internal-failure outcomes.
+
+`tests/_process_ir_capability_witnesses.py`
+
+- Define immutable executable witness and `UnsupportedDisposition` types.
+- Define fresh fixture/model/CFG builders and feature-specific observers.
+- Build the exact 27-key `CAPABILITY_WITNESSES` registry without storing a duplicate manifest state.
+- Reuse `_wave_gate_golden_corpus.py` symbols and committed pre-baseline fixtures; do not import builders from collected `test_*.py` modules.
+
+### New collected tests
+
+`tests/test_process_ir_served_text_enforcement.py`
+
+- Assert pinned factories and nonempty discovery sets.
+- Assert the producer-aware bidirectional set equations.
+- Assert every served spec row is unique and carries nonblank message/remediation.
+- Assert all 19 native graph-verifier `_issue` sites have a literal code and structurally nonempty message/remediation.
+- Add an in-memory registration-removal meta-test for the L3-04 code, alongside the required hand-run source mutant.
+
+`tests/test_process_ir_capability_enforcement.py`
+
+- Assert exact manifest/registry key equality before running anything.
+- Derive state partitions from the live manifest.
+- Execute all supported and gated witnesses, aggregate failures by manifest key, and assert exact observed coverage.
+- Assert unsupported disposition keys equal the live unsupported partition.
+- Assert the successful execution/disposition union equals every manifest key.
+- Fail closed on unknown manifest states or mismatched witness types.
+
+### Existing tests to modify
+
+`tests/test_process_ir_entrypoint_diagnostic_parity.py`
+
+- Import `measure_entrypoints` from `_process_ir_entrypoint_differential`.
+- Remove the local `_GrammarBoundary`, vector, and measurement implementations.
+- Keep the #178 generator, case IDs, parity gate, safety directions, and historical non-vacuity behavior unchanged.
+
+`tests/test_process_ir_authoring_contract_parity.py`
+
+- Change the producer-text pin at `:768-798` to require both fields for every producer; remove the `if spec.get(field)` skip.
+- Replace the key-only §8 parser at `:926-967` with the strict key/state parser.
+- Add in-memory negative controls for a state mutation and a restructured header.
+- Keep the existing §8 test function name so its registered wave-gate node remains stable.
+
+`tests/test_process_ir_authoring_contract.py`
+
+- Replace `test_exactly_the_expected_codes_fall_back_to_their_remediation` with an authority-derived zero-fallback assertion.
+- Require every compiler row in `test_a_compile_diagnostic_serves_the_message_its_authority_wrote`; remove the blank-message `continue` and hand floor.
+- Retain the synthetic unknown diagnostic test for the authoring envelope’s generic fallback; it is not a registered production code.
+
+### Generated fixtures and manifests to update
+
+`tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json`
+
+- Regenerate from `process_ir_authoring_revision_payload()` using the existing canonical JSON serialization.
+- Review all seven affected diagnostic rows: three gain real summaries and the overlapping parser/compiler rows gain compiler message attribution.
+
+`tests/fixtures/m12_12/legacy_reachability_inventory.json`
+
+- Regenerate with `_m12_12_legacy_inventory.py` because the served `process_ir_authoring` artifact and compiler revision change.
+- The generated §11 Markdown tables are expected to remain unchanged because they freeze artifact IDs, not payload hashes. Verify this; do not edit `M12_COMPATIBILITY_INVENTORY.md` unless the generator proves an actual table delta.
+
+`tests/fixtures/wave_gate/test_nodes.jsonl`
+
+- Append every newly collected pytest node with stable IDs.
+- Raise `minimum_active` and `minimum_collected` by the exact measured collection delta; never copy a predicted count into the manifest.
+- Leave `maximum_skipped` unchanged unless the measured full run requires a justified change.
+
+### Audit artifacts to create
+
+`docs/architecture/ISSUE_177_AUDIT_LEDGER.md`
+
+- Instantiate from the repository template.
+- Record the literal implementation-start baseline SHA, loop roster, fixture provenance, defect classes, findings, checkpoint decisions, exact coverage sets/counts, and final-tree gate status.
+- Record the three hand-run mutants before claiming each invariant structural.
+
+`docs/architecture/evidence/issue-177/`
+
+- Create `non-vacuity.md`, `index.jsonl`, and `SHA256SUMS`.
+- Archive targeted/full QA summaries, live MCP evidence, wave evidence, and every detached review collector directory under mechanically derived run IDs.
+- Index and hash only artifacts that actually exist; do not pre-invent review filenames.
+
+### Files explicitly left unchanged
+
+- `docs/architecture/PROCESS_IR_V1.md`
+- `docs/architecture/M12_COMPATIBILITY_INVENTORY.md`, unless its generator reports a real table delta
+- `tests/test_process_ir_models.py`
+- Capability manifest values and ordering
+- Placement matrix and grammar unions
+- Golden XML corpus and `goldens.jsonl`
+
+### Validation sequence
+
+- Run targeted diagnostic, capability, #178 parity, authoring-contract, graph-verifier, inventory, and wave-manifest tests.
+- Regenerate and verify both frozen JSON artifacts.
+- Run the full non-KB suite with `PYTHONPATH=src .venv/bin/python -m pytest tests --ignore=tests/kb -p no:cacheprovider`.
+- Exercise the served diagnostic contract and a representative admitted/refused capability through live MCP QA.
+- Run the composite wave gate and deterministic compile/fingerprint checks.
+- Complete the repository’s QA-first, commit-boundary, detached Codex-review workflow and archive attestations.
+
+## 4. Non-vacuity witnesses
+
+### Invariant 1 — real L3-04 registration loss
+
+Temporarily remove both compiler registry entries for:
+
+`PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED`
+
+Specifically remove its `_MESSAGES` entry and `_REMEDIATION` entry in `diagnostics.py`, leaving the real emissions in `body_capabilities.py:288-293,548-552`.
+
+Expected failure:
+
+`test_every_emittable_process_ir_code_has_complete_served_text`
+
+must fail naming that exact direct compiler code as absent from compiler specs. The parser also registers the code, so a union-only guard would pass; this proves the producer-aware direction is load-bearing.
+
+Record the red run, restore the exact entries, and record the green run.
+
+### Invariant 2 — real L2-r6-01 crash
+
+In `models/process_ir.py:1296-1297`, temporarily replace:
+
+```python
+first_call = kinds.index("process_call")
+offending = next(i for i in range(len(kinds)) if i != first_call)
+```
+
+with the historical implementation:
+
+```python
+offending = next(
+    i for i, kind in enumerate(kinds) if kind != "process_call"
+)
+```
+
+Run the manifest witness with the exact historical inputs:
+
+```python
+[
+    {"kind": "process_call", "process_ref": "a"},
+    {"kind": "process_call", "process_ref": "b"},
+]
+```
+
+and its companion:
+
+```python
+[
+    {"kind": "process_call", "process_ref": "a"},
+    {"kind": "process_call", "process_ref": "b"},
+    {"kind": "stop"},
+]
+```
+
+Expected failures:
+
+- The two-call case leaks `StopIteration` instead of a typed refusal.
+- The three-element case points at the trailing Stop instead of the second Process Call.
+
+The `process_call_return_path_binding` witness must fail both deviations.
+
+### Invariant 3 — real state drift and parser disarmament
+
+State mutant:
+
+- Change the real `process_call_return_path_binding` row at `PROCESS_IR_V1.md:380` from `gated` to `**supported**`.
+- Leave runtime manifest state `gated`.
+- The old key-only test would pass; the new equality guard must fail with doc=`supported`, runtime=`gated`.
+
+Fail-closed parser mutant:
+
+- Change `| Capability | State | Owner |` to `| Capability | Status | Owner |`.
+- The guard must fail before extracting rows, rather than compare an empty set.
+
+Record both red runs and the restored-green result.
+
+## 5. Coverage claims
+
+### Invariant 1
+
+- Authority: all pinned emitting modules and factory call sites.
+- Current derived cases:
+  - 15 parser codes
+  - 31 direct canonical compiler codes
+  - Semantic validator native/delegated emissions
+  - 56 distinct reachable canonical ProcessIR codes overall
+  - 1 explicit registered/non-emittable convergence code
+  - 19 native graph-verifier `_issue` codes
+- Assertion:
+  - Exact producer-aware set equations
+  - Full served union equals emitted union plus explicit non-emittable metadata
+  - Every row has both nonblank fields
+  - Every unresolved sink, renamed factory, empty family, or verifier call of unsupported shape fails
+
+No observed count is hard-coded into the guard.
+
+### Invariant 2
+
+- Authority: all keys and states from `PROCESS_IR_V1_CAPABILITIES`.
+- Current full case set: 27/27.
+- Computation:
+  - Derive `supported`, `gated`, and `unsupported` partitions from the manifest.
+  - Compare registry keys exactly with manifest keys.
+  - Execute every supported/gated record and collect successful keys.
+  - Collect every explicit unsupported disposition.
+- Assertions:
+  - Executed supported keys equal the supported partition.
+  - Executed gated keys equal the gated partition.
+  - Disposed keys equal the unsupported partition.
+  - Their union equals every manifest key.
+- Current expected report: 8 admitted, 11 refused, 8 explicitly unsupported.
+
+The counts are reported from runtime results, not embedded as acceptance constants.
+
+### Invariant 3
+
+- Authority: the complete runtime capability mapping.
+- Full case set: every manifest key and its state.
+- Computation: strict parsing produces a normalized `dict`; compare it directly to `dict(PROCESS_IR_V1_CAPABILITIES)`.
+- Current expected report: 27/27 keys and 27/27 states.
+- No sample, hard count, or separately maintained state map remains.
+
+## 6. Regression-corpus mapping
+
+| Row | Disposition |
+|---|---|
+| `L3-02` | **Not caught.** This was a diagnostic promising pointer precision its check did not establish. Invariant 1 proves presence, not semantic truth; the selected capability witnesses do not encode this separate pointer claim. |
+| `L3-04` | **Caught by invariant 1.** Its real emitted capability code loses both compiler message/remediation registration and the producer-aware guard fails. |
+| `L3-07` | **Not caught.** Primitive emitter attribution and a placement note are arbitrary prose outside the diagnostic registries and §8 state table. |
+| `L2-r6-01` | **Caught by invariant 2.** The exact all-Process-Call root witness requires a typed refusal from both entry points, so restored `StopIteration` or wrong offending index fails. |
+| `L3R-04` | **Not caught.** The stale records were external GitHub issue descriptions, outside the closed runtime authorities. |
+| `L3R-05` | **Not caught.** This repeated arbitrary documentation/comment drift from `L3-07`; item 4 is withdrawn. |
+| `L3R2-04` | **Not caught.** It was a module/test comment asserting a deliberately withdrawn verifier rule. Invariants 1–3 do not evaluate arbitrary English semantics. |
+
+## 7. Risks and explicit non-goals
+
+- The #178 helper extraction must be behavior-preserving. Its existing generated case set, parity result, and historical mutant remain the acceptance pins.
+- The `typed_idempotency_evidence` positive path currently needs a controlled capability-row override. The guard must disclose that no production write row activates it today.
+- `joins` and `loops` use the CFG boundary because authoring edge syntax does not exist. This must not be described as public authored reachability.
+- Unsupported dispositions are accounting records, not claims that every invented payload receives one specific diagnostic.
+- Canonical compiler text changes the served contract and compiler revision; frozen artifacts and live callers that pin revisions must observe the change.
+- The AST collector must reject unresolved dynamic code flow. Expanding a sink pattern is an explicit maintenance action, never a silent skip.
+- Item 4 remains withdrawn. Do not create a general prose scanner or attempt to prove that English text states only facts computed by a check.
+- #147 owns final documentation/examples, the full capability matrix, `M12_CAPABILITY_DOC_DRIFT`, deployed-schema parity, and final live closeout.
+- #154 owns grammar/effect widening and the union-derived placement matrix. Do not enumerate or rewrite that matrix here.
+- #155 owns dynamic-path bindings, connector action rows, replay evidence, and related capability flips.
+- #156 owns Notify/recovery nodes, diagnostic identity, catch placement, and recovery semantics.
+- #158 owns listener entry, registry/capability additions, lowering, and deployment reachability.
+- #176 owns populated Process Call return-path/dragpoint binding and the eventual `process_call_return_path_binding` state flip.
+- Do not add diagnostic codes, manifest keys, grammar fields, emitter behavior, capability support, late binding, queue topology, listener behavior, or placement changes in #177.
+
+## 8. Assumptions
+
+- Implementation begins from the verified clean HEAD `6f26caff7481356119fee5b36a1730cec0fb5df2`; if HEAD moves, Stage-1 records the new literal baseline before edits.
+- “Verifier” includes both semantic-validation findings and the native process-graph verifier. Native graph codes remain direct verifier output and are not falsely inserted into compiler diagnostic specs.
+- `unsupported (permanent)` remains a Markdown annotation normalized to runtime `unsupported`; no fourth runtime state is introduced.
+- Existing committed rich-control/error-handling fixtures predate the implementation baseline and are acceptable independent witness sources when their provenance is recorded.
+- Bare imports from underscore-prefixed test helpers remain the repository convention; no `tests/__init__.py` package conversion is introduced.
+- Exact review/QA archive subpaths are generated from actual run IDs and then indexed; the design does not fabricate them in advance.
+
+
+=== ISSUE ACCEPTANCE CRITERIA ===
+## Acceptance criteria
+
+1. Each shipped invariant derives its expectation from the runtime authority, never from a restatement of it, and carries a **bidirectional pin** so a reworded authority fails the guard rather than silently disarming it.
+2. Each carries a **non-vacuity witness**: a mutant that reintroduces the real historical defect must fail the guard, hand-run and recorded. (#175 shipped a guard that passed its own witness *and* the restored defect because it excluded newlines — the witness must be the real text, not a paraphrase.)
+3. A **coverage claim derived from the authority's full case set** — e.g. every emittable code, every capability entry — not a sample.
+4. The #175 instances above are used as the regression corpus: each one, reintroduced, must be caught.
+
+## Lineage

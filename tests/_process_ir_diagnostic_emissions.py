@@ -72,6 +72,7 @@ __all__ = [
     "pinned_sink_definitions",
     "producer_of",
     "referenced_codes",
+    "runtime_forward_defaults",
     "verifier_issue_sites",
 ]
 
@@ -424,6 +425,59 @@ def referenced_codes():
     return MappingProxyType(
         {code: frozenset(paths) for code, paths in sorted(referenced.items())}
     )
+
+
+def runtime_forward_defaults():
+    """Runtime default VALUES of every parameter that a sink call forwards.
+
+    The census reads source, so it sees a code only when it is written as a whole literal
+    or a known constant. A default written as `"PROCESS_IR_" + "SEMANTIC_..."` is neither,
+    and it produced a genuinely emittable unregistered code that every source-reading guard
+    missed — demonstrated by the architect review.
+
+    Chasing that in source means reading concatenation, f-strings, `.format`, `.join` and
+    whatever comes next: the open-ended space that already cost four review rounds. So this
+    does not read the expression at all. It IMPORTS the module and asks Python for the
+    evaluated default. However the author wrote it, the value is the value.
+
+    Returns `(defaults, unreadable)`: `defaults` maps `(module, function, parameter)` to the
+    runtime string default; `unreadable` lists forwards whose owner cannot be introspected
+    (a nested function is not reachable through `getattr`), so the caller can require them
+    to be pinned rather than assume they are empty.
+    """
+    import importlib
+    import inspect
+
+    defaults = {}
+    unreadable = []
+    for path in _iter_files():
+        relative = str(path.relative_to(_ROOT))
+        scan = _ModuleScan(path, path.read_text())
+        dotted = relative[len("src/") :].removesuffix(".py").replace("/", ".")
+        module = None
+        for node in ast.walk(scan.tree):
+            if not isinstance(node, ast.Call) or _called_name(node) not in scan.sinks:
+                continue
+            if not node.args:
+                continue
+            forward = scan.forwarded_parameter(node, node.args[0])
+            if forward is None:
+                continue
+            owner, _index, param = forward
+            if module is None:
+                module = importlib.import_module(dotted)
+            function = getattr(module, owner.name, None)
+            if function is None or not callable(function):
+                unreadable.append((relative, owner.name, param))
+                continue
+            try:
+                default = inspect.signature(function).parameters[param].default
+            except (TypeError, ValueError, KeyError):
+                unreadable.append((relative, owner.name, param))
+                continue
+            if isinstance(default, str) and default:
+                defaults[(relative, owner.name, param)] = default
+    return MappingProxyType(defaults), tuple(sorted(unreadable))
 
 
 def collect_emissions():

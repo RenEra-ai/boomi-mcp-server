@@ -980,13 +980,18 @@ def _parse_capability_states(doc):
     """
     import re
 
-    if doc.count(_CAPABILITY_HEADING) != 1:
+    # EXACT LINE, not a substring. `doc.count(heading)` was the first shape and it is
+    # satisfied by `## 8. Capability states (normative)` — a reworded authority that left
+    # the guard green, which is precisely what acceptance criterion 1 forbids.
+    lines = doc.splitlines()
+    heads = [i for i, line in enumerate(lines) if line.strip() == _CAPABILITY_HEADING]
+    if len(heads) != 1:
         raise AssertionError(
-            "expected exactly one {0!r} heading, found {1}".format(
-                _CAPABILITY_HEADING, doc.count(_CAPABILITY_HEADING)
+            "expected exactly one line equal to {0!r}, found {1}".format(
+                _CAPABILITY_HEADING, len(heads)
             )
         )
-    after = doc.split(_CAPABILITY_HEADING, 1)[1]
+    after = "\n".join(lines[heads[0] + 1 :])
 
     # The section ENDS at the next level-2 heading, and that heading is pinned:
     # if §9 is renamed or §8 is moved, this fails instead of silently swallowing
@@ -1009,36 +1014,60 @@ def _parse_capability_states(doc):
         )
 
     lines = section.splitlines()
-    pipes = [i for i, line in enumerate(lines) if line.startswith("|")]
-    if not pipes:
-        raise AssertionError("§8 contains no table rows at all")
-    # ONE contiguous block: a stray table row elsewhere in the section is a
-    # structural surprise, and a parser that quietly ignored it would be reading
-    # a different table than the one a human sees.
-    if pipes != list(range(pipes[0], pipes[0] + len(pipes))):
+    header_at = [i for i, line in enumerate(lines) if line.strip() == _CAPABILITY_TABLE_HEADER]
+    if len(header_at) != 1:
         raise AssertionError(
-            "§8's table rows are not one contiguous block: line offsets {0}".format(pipes)
-        )
-    block = lines[pipes[0] : pipes[0] + len(pipes)]
-
-    if block[0] != _CAPABILITY_TABLE_HEADER:
-        raise AssertionError("first table line is {0!r}".format(block[0]))
-    if len(block) < 2 or block[1] != _CAPABILITY_TABLE_DELIMITER:
-        raise AssertionError(
-            "expected {0!r} immediately after the header, found {1!r}".format(
-                _CAPABILITY_TABLE_DELIMITER, block[1] if len(block) > 1 else None
+            "expected exactly one {0!r} row, found {1}".format(
+                _CAPABILITY_TABLE_HEADER, len(header_at)
             )
         )
-    rows = block[2:]
+    start = header_at[0]
+    if start + 1 >= len(lines) or lines[start + 1].strip() != _CAPABILITY_TABLE_DELIMITER:
+        raise AssertionError(
+            "expected {0!r} immediately after the header, found {1!r}".format(
+                _CAPABILITY_TABLE_DELIMITER,
+                lines[start + 1] if start + 1 < len(lines) else None,
+            )
+        )
+    # The table runs to the first BLANK line, and every non-blank line in it is a row —
+    # the way Python-Markdown reads one. Selecting rows by `startswith("|")` was the first
+    # shape, and Markdown does not require the outer pipes: a legal row written
+    # ``key` | gated | #999` was invisible to it, so a doc-only capability could be added
+    # while the 27/27 equality stayed green. Selecting by POSITION cannot miss a row.
+    end = start + 2
+    while end < len(lines) and lines[end].strip():
+        end += 1
+    rows = [line for line in lines[start + 2 : end]]
     if not rows:
         raise AssertionError("§8's table has a header but no rows")
 
+    # A table row anywhere ELSE in the section is a structural surprise; a parser that
+    # ignored it would be reading a different table than a human sees.
+    stray = [
+        line
+        for index, line in enumerate(lines)
+        if not (start <= index < end) and line.count("|") >= 2 and line.strip()
+    ]
+    if stray:
+        raise AssertionError("§8 has table rows outside its one block: {0!r}".format(stray))
+
     parsed = {}
     for line in rows:
-        cells = line.split("|")
-        if len(cells) != 5 or cells[0] != "" or cells[4] != "":
+        body = line.strip()
+        # Outer pipes are OPTIONAL in Markdown; normalise before splitting so a row is
+        # read the same way whether or not the author wrote them.
+        if body.startswith("|"):
+            body = body[1:]
+        if body.endswith("|"):
+            body = body[:-1]
+        cells = [""] + body.split("|") + [""]
+        if len(cells) != 5:
             raise AssertionError("malformed §8 row: {0!r}".format(line))
-        key_match = re.match(r"^ `([a-z0-9_]+)`", cells[1])
+        # Whitespace-tolerant: Markdown does not require a space after the pipe, and a row
+        # written without outer pipes has none. Being strict here reported a doc-only
+        # capability as a MALFORMED row, which sends the reader to fix the wrong thing —
+        # the accurate diagnosis is the key-set equality below.
+        key_match = re.match(r"^\s*`([a-z0-9_]+)`", cells[1])
         if key_match is None:
             raise AssertionError(
                 "§8 row does not open with a backticked snake_case key: {0!r}".format(line)

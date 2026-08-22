@@ -24,11 +24,26 @@ witness KIND to match it, so a flip fails until the witness is deliberately rewr
 
 FIXTURE PROVENANCE
 ------------------
-The five committed ProcessIR documents used below were all frozen BEFORE this slice's
-step-0 baseline `6f26caff7481356119fee5b36a1730cec0fb5df2` (latest is `3c07ad2`,
-2026-08-20), so they are causally independent of the code under test. Documents built
-inline here are REFUSAL inputs: their job is to be rejected, so they carry no served field
-names the implementation could have taught me.
+All five committed ProcessIR documents used below were frozen BEFORE this slice's step-0
+baseline `6f26caff7481356119fee5b36a1730cec0fb5df2` (latest is `3c07ad2`, 2026-08-20), so
+they are causally independent of the code under test.
+
+An earlier version of this note said inline documents are only REFUSAL inputs. That was not
+true of the file it sat in — five ADMISSION witnesses were inline, and two of the frozen
+fixtures listed here were never loaded at all. The architect review caught it. Both are
+fixed: `scoped_try_catch` and `bounded_retry` now load their frozen anchors, so every
+admission witness that has a frozen fixture available uses it.
+
+What remains inline, and why each is acceptable:
+
+* REFUSAL inputs. Their job is to be rejected, so they carry no served field names the
+  implementation could have taught me — a wrong guess produces the wrong diagnostic and the
+  witness fails.
+* Three ADMISSION inputs — `generalized_connector_call`, `mixed_connector_execution` and
+  `typed_idempotency_evidence` — for which no frozen fixture exists. These are declared
+  `PROVENANCE_INLINE_ADMISSION` rather than described as something stronger, and the
+  enforcement gate checks that declaration against a closed set instead of accepting any
+  non-blank string.
 """
 
 from __future__ import annotations
@@ -62,6 +77,22 @@ FIXTURE_PROVENANCE = {
 }
 
 EXCEPTION_TERMINAL = {"kind": "exception", "message_template": "caught {1}"}
+
+#: The closed set of provenance kinds a witness may declare. The enforcement gate compares
+#: against this rather than merely requiring a non-blank string, so "a fixture you wrote is
+#: not evidence" is a check instead of a sentence.
+PROVENANCE_FROZEN_FIXTURE = "frozen fixture"
+PROVENANCE_INLINE_ADMISSION = "inline admission document (no frozen fixture exists)"
+PROVENANCE_INLINE_REFUSAL = "inline refusal document"
+PROVENANCE_SYNTHETIC_CFG = "synthetic CFG (not authorable)"
+PROVENANCE_KINDS = frozenset(
+    {
+        PROVENANCE_FROZEN_FIXTURE,
+        PROVENANCE_INLINE_ADMISSION,
+        PROVENANCE_INLINE_REFUSAL,
+        PROVENANCE_SYNTHETIC_CFG,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -197,6 +228,17 @@ def _rich_compiles(relative):
     return rich_compile_doc(_fixture(relative))
 
 
+def _emitter_kinds(plan):
+    """The emitter kinds the plan will render.
+
+    #177 architect review: seven of eight admission witnesses inspected only the CFG or the
+    authored model, both derived straight from the input, so a compiler that produced a
+    correct CFG and no emission plan left them green. A capability the manifest advertises
+    is one the compiler EMITS, so the plan is asserted too.
+    """
+    return [node.emitter_input.emitter_kind for node in plan.nodes]
+
+
 def _semantic_kinds(cfg):
     return [type(node.semantic).__name__ for node in cfg.nodes]
 
@@ -216,17 +258,18 @@ def _w_generalized_connector_call():
     )
 
     def run():
-        cfg, _plan = _compiles(doc, error_symbols())
-        return cfg, _measure(doc, error_symbols())
+        cfg, plan = _compiles(doc, error_symbols())
+        return cfg, plan, _measure(doc, error_symbols())
 
     def observe(result):
-        cfg, (parser, compiler) = result
+        cfg, plan, (parser, compiler) = result
         assert parser[0] == "ACCEPTED", parser
         assert compiler[0] == "ACCEPTED", compiler
         assert "ConnectorCallSemanticV1" in _semantic_kinds(cfg), _semantic_kinds(cfg)
+        assert "connectoraction_source" in _emitter_kinds(plan), _emitter_kinds(plan)
 
     return CapabilityWitness(
-        "generalized_connector_call", "admits", "inline document", run, observe
+        "generalized_connector_call", "admits", PROVENANCE_INLINE_ADMISSION, run, observe
     )
 
 
@@ -240,10 +283,12 @@ def _w_mixed_connector_execution():
     )
 
     def run():
-        cfg, _plan = _compiles(doc, error_symbols())
-        return cfg
+        return _compiles(doc, error_symbols())
 
-    def observe(cfg):
+    def observe(result):
+        cfg, plan = result
+        emitted = [k for k in _emitter_kinds(plan) if k.startswith("connectoraction_")]
+        assert len(emitted) == 2, _emitter_kinds(plan)
         # TWO connector calls of DIFFERENT families on ONE root-to-leaf path — the
         # construct the manifest row names, not just "a connector call compiled".
         kinds = _semantic_kinds(cfg)
@@ -259,7 +304,7 @@ def _w_mixed_connector_execution():
         assert len(families) == 2, families
 
     return CapabilityWitness(
-        "mixed_connector_execution", "admits", "inline document", run, observe
+        "mixed_connector_execution", "admits", PROVENANCE_INLINE_ADMISSION, run, observe
     )
 
 
@@ -267,10 +312,13 @@ def _w_connector_call_in_control_body():
     relative = "rich_control/branch_mixed_connectors.json"
 
     def run():
-        (cfg, _plan), _table = _rich_compiles(relative)
-        return cfg
+        (cfg, plan), _table = _rich_compiles(relative)
+        return cfg, plan
 
-    def observe(cfg):
+    def observe(result):
+        cfg, plan = result
+        kinds = _emitter_kinds(plan)
+        assert "branch" in kinds and kinds.count("connectoraction_target") >= 2, kinds
         inside = [
             node
             for node in cfg.nodes
@@ -282,7 +330,7 @@ def _w_connector_call_in_control_body():
     return CapabilityWitness(
         "connector_call_in_control_body",
         "admits",
-        "frozen fixture " + relative + " (" + FIXTURE_PROVENANCE[relative] + ")",
+        PROVENANCE_FROZEN_FIXTURE + " " + relative + " (" + FIXTURE_PROVENANCE[relative] + ")",
         run,
         observe,
     )
@@ -292,10 +340,12 @@ def _w_terminal_process_call():
     relative = "rich_control/branch_process_call.json"
 
     def run():
-        (cfg, _plan), _table = _rich_compiles(relative)
-        return cfg
+        (cfg, plan), _table = _rich_compiles(relative)
+        return cfg, plan
 
-    def observe(cfg):
+    def observe(result):
+        cfg, plan = result
+        assert _emitter_kinds(plan).count("processcall") == 2, _emitter_kinds(plan)
         calls = [
             node
             for node in cfg.nodes
@@ -313,7 +363,7 @@ def _w_terminal_process_call():
     return CapabilityWitness(
         "terminal_process_call",
         "admits",
-        "frozen fixture " + relative + " (" + FIXTURE_PROVENANCE[relative] + ")",
+        PROVENANCE_FROZEN_FIXTURE + " " + relative + " (" + FIXTURE_PROVENANCE[relative] + ")",
         run,
         observe,
     )
@@ -323,47 +373,58 @@ def _w_rich_branch_decision_bodies():
     relative = "rich_control/decision_nested_bare_false_stop.json"
 
     def run():
-        (cfg, _plan), _table = _rich_compiles(relative)
-        return cfg
+        (cfg, plan), _table = _rich_compiles(relative)
+        return cfg, plan
 
-    def observe(cfg):
+    def observe(result):
+        cfg, plan = result
         kinds = _semantic_kinds(cfg)
         # NESTED decision — one Decision inside another's arm — plus the bare false
         # Stop. A single Decision would not witness the "rich bodies" row.
         assert kinds.count("DecisionSemanticV1") >= 2, kinds
         assert "StopSemanticV1" in kinds, kinds
+        emitted = _emitter_kinds(plan)
+        assert emitted.count("decision") >= 2, emitted
+        assert "stop" in emitted, emitted
 
     return CapabilityWitness(
         "rich_branch_decision_bodies",
         "admits",
-        "frozen fixture " + relative + " (" + FIXTURE_PROVENANCE[relative] + ")",
+        PROVENANCE_FROZEN_FIXTURE + " " + relative + " (" + FIXTURE_PROVENANCE[relative] + ")",
         run,
         observe,
     )
 
 
 def _w_scoped_try_catch():
-    doc = _process_scope()
+    relative = "error_handling/scoped_try_catch_process_retry0_exception.json"
+    doc = _fixture(relative)
 
     def run():
-        cfg, _plan = _compiles(doc, error_symbols())
-        return cfg
+        return _compiles(doc, error_symbols())
 
-    def observe(cfg):
+    def observe(result):
+        cfg, plan = result
         scopes = [
             node.semantic.scope
             for node in cfg.nodes
             if type(node.semantic).__name__ == "TryCatchSemanticV1"
         ]
         assert scopes == ["process"], scopes
+        assert "catcherrors" in _emitter_kinds(plan), _emitter_kinds(plan)
 
     return CapabilityWitness(
-        "scoped_try_catch", "admits", "inline document", run, observe
+        "scoped_try_catch",
+        "admits",
+        PROVENANCE_FROZEN_FIXTURE + " " + relative + " (" + FIXTURE_PROVENANCE[relative] + ")",
+        run,
+        observe,
     )
 
 
 def _w_bounded_retry():
-    doc = _connector_scope(retry={"count": 5})
+    relative = "error_handling/scoped_try_catch_connector_read_retry5_cache_catch.json"
+    doc = _fixture(relative)
 
     def run():
         return _compiles(doc, error_symbols())
@@ -392,7 +453,11 @@ def _w_bounded_retry():
         assert lowered == [5], lowered
 
     return CapabilityWitness(
-        "bounded_retry", "admits", "inline document (boundary value 5)", run, observe
+        "bounded_retry",
+        "admits",
+        PROVENANCE_FROZEN_FIXTURE + " " + relative + " (" + FIXTURE_PROVENANCE[relative] + ")",
+        run,
+        observe,
     )
 
 
@@ -421,12 +486,15 @@ def _w_typed_idempotency_evidence():
         table[key] = table[key].model_copy(update={"retry_safety": "idempotent_write"})
         CC.CONNECTOR_CALL_CAPABILITIES_V1 = table
         try:
-            cfg, _plan = _compiles(doc, error_symbols())
+            cfg, plan = _compiles(doc, error_symbols())
         finally:
             CC.CONNECTOR_CALL_CAPABILITIES_V1 = original
-        return cfg
+        return cfg, plan
 
-    def observe(cfg):
+    def observe(result):
+        cfg, plan = result
+        kinds = _emitter_kinds(plan)
+        assert "catcherrors" in kinds and "connectoraction_target" in kinds, kinds
         protected = [
             node
             for node in cfg.nodes
@@ -438,7 +506,7 @@ def _w_typed_idempotency_evidence():
     return CapabilityWitness(
         "typed_idempotency_evidence",
         "admits",
-        "inline document + synthetic replay-safe capability row (disclosed)",
+        PROVENANCE_INLINE_ADMISSION,
         run,
         observe,
     )
@@ -453,7 +521,7 @@ def _w_typed_idempotency_evidence():
 # ---------------------------------------------------------------------------
 
 
-def _parser_gated(key, doc, code, path, provenance="inline document", mutate=None):
+def _parser_gated(key, doc, code, path, provenance=PROVENANCE_INLINE_REFUSAL, mutate=None):
     """A capability the GRAMMAR refuses, asserted at the owning entry point.
 
     `mutate` closes the compile-side half where the construct is REACHABLE on a validated
@@ -571,7 +639,7 @@ def _w_process_call_return_path_binding():
     return CapabilityWitness(
         "process_call_return_path_binding",
         "refuses",
-        "inline documents — the verbatim L2-r6-01 crash and pointer inputs",
+        PROVENANCE_INLINE_REFUSAL,
         run,
         observe,
     )
@@ -799,7 +867,7 @@ def _w_verified_write_replay_safety():
     return CapabilityWitness(
         "verified_write_replay_safety",
         "refuses",
-        "inline document (grammar-admitted, compile-refused)",
+        PROVENANCE_INLINE_REFUSAL,
         run,
         observe,
     )
@@ -828,7 +896,7 @@ def _cfg_gated(key, build, code):
     def observe(refusal):
         assert refusal and refusal[0][0] == code, refusal
 
-    return CapabilityWitness(key, "refuses", "synthetic CFG (not authorable)", run, observe)
+    return CapabilityWitness(key, "refuses", PROVENANCE_SYNTHETIC_CFG, run, observe)
 
 
 def _cfg_node(ordinal, semantic=None, path=None, exit_role=None):
