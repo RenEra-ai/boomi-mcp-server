@@ -428,22 +428,42 @@ def test_the_generated_count_equals_the_runtime_product():
     # asserted `len(MATRIX) * modes * kinds`, which recomputed its own reduced
     # formula and so agreed with itself while generating 400 body cases instead
     # of 3000. A count derived from the wrong formula is not a derived count.
-    # Computed from the MATRIX directly, NOT via `_neighbours` — the helper the
-    # generator itself uses. Sharing it made the assertion agree with the
-    # generator instead of with the plan: shrinking `_neighbours` shrank both, and
-    # the old 820-case product came back with the count, partition, denied-cell,
-    # parity and safety tests all still green. An expectation that moves with the
-    # thing it checks is not an expectation.
-    expected_body = 0
+    # The exact expected ID SET, built from `MATRIX` directly — not via
+    # `_neighbours`, the helper the generator itself uses, and not as a count.
+    #
+    # Two rounds of this gate found two different ways a weaker check passes.
+    # Sharing `_neighbours` made the expectation move with the generator, so
+    # shrinking it restored the old 820-case product with everything green.
+    # Comparing only CARDINALITY then let the vocabulary be substituted:
+    # swapping the Branch STEP neighbour `target` for `exception` keeps the count
+    # identical while removing all 40 required `opp=target` cases, and the count,
+    # uniqueness, partition, denied-cell, parity, safety and killed-reparse checks
+    # all stayed green. Only comparing the SET catches that.
+    expected_ids = set()
     for context, slot in MATRIX:
         if slot == bc.STEP_SLOT:
-            opposite = len(MATRIX[(context, bc.TERMINAL_SLOT)])
+            opposite = sorted(MATRIX[(context, bc.TERMINAL_SLOT)])
         else:
-            opposite = 1 + len(MATRIX[(context, bc.STEP_SLOT)])
-        expected_body += opposite * len(MODES) * len(KINDS)
-    expected_root = len(KINDS) + len(KINDS) * len(KINDS)
+            opposite = [None] + sorted(MATRIX[(context, bc.STEP_SLOT)])
+        for kind in KINDS:
+            for neighbor in opposite:
+                for mode in MODES:
+                    expected_ids.add(
+                        "{0}/{1}={2}/opp={3}/mode={4}".format(
+                            context, slot, kind, neighbor or "EMPTY", mode
+                        )
+                    )
+    for first in KINDS:
+        expected_ids.add("root/[{0}]".format(first))
+        for second in KINDS:
+            expected_ids.add("root/[{0},{1}]".format(first, second))
+
     cases = _measured()["cases"]
-    assert len(cases) == expected_body + expected_root, len(cases)
+    generated_ids = {cid for cid, _ir in cases}
+    assert generated_ids == expected_ids, {
+        "missing": sorted(expected_ids - generated_ids)[:20],
+        "unexpected": sorted(generated_ids - expected_ids)[:20],
+    }
     assert len({cid for cid, _ir in cases}) == len(cases), "case ids collide"
 
 
@@ -1091,3 +1111,121 @@ def test_a_dump_failure_cannot_smuggle_an_authored_diagnostic():
     assert secret not in (served.message or "")
     assert "TOTALLY_MADE_UP_CODE" not in (served.message or "")
     assert secret not in (getattr(served, "remediation", "") or "")
+
+
+def _forging_subclass(raise_from_items):
+    """A caller-supplied model whose dump RETURNS a hostile container.
+
+    This is the vector three separate rounds kept re-finding: the dump does not
+    raise, it hands back a mapping whose `items()` runs caller code inside
+    `parse_process_ir_v1` — the secret pre-scan walks the payload — and raises a
+    diagnostic the parser never authored.
+    """
+    from boomi_mcp.models.process_ir import ProcessIRV1
+
+    base = _control_flow_ir()
+
+    class _Hostile(dict):
+        def items(self):
+            raise raise_from_items()
+
+    class _Sub(ProcessIRV1):
+        def model_dump(self, **_kwargs):
+            return _Hostile(base.model_dump(mode="python", warnings=False))
+
+    return _Sub.model_construct(
+        **{name: getattr(base, name) for name in ProcessIRV1.model_fields}
+    )
+
+
+CANARY = "PARITY-FORGE-CANARY-sk_live_c0ffee"
+
+
+def test_a_forged_diagnostic_with_a_REAL_parser_code_cannot_serve_its_text():
+    """The variant an allowlist cannot catch, closed at the input instead.
+
+    Checking the served diagnostic could never win this: with a genuine parser
+    code attached, forged `path`/`message`/`remediation` are indistinguishable
+    from authored ones by inspection. The payload is made inert BEFORE parsing, so
+    caller code never runs inside the parser and the forged error is never raised
+    at all.
+    """
+    def _forge():
+        return ProcessIRValidationError(
+            [
+                type(
+                    "_D",
+                    (),
+                    {
+                        "code": "PROCESS_IR_SCHEMA_INVALID",  # a REAL parser code
+                        "path": "/forged",
+                        "message": "forged message " + CANARY,
+                        "remediation": "forged remediation " + CANARY,
+                    },
+                )()
+            ]
+        )
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        pl._reparse_process_ir_for_compile(_forging_subclass(_forge))
+    served = excinfo.value.diagnostics[0]
+    assert served.code == "PROCESS_IR_COMPILE_INTERNAL", served.code
+    assert served.path == ""
+    assert CANARY not in (served.message or "")
+    assert CANARY not in (getattr(served, "remediation", "") or "")
+
+
+def test_a_forged_compile_error_from_inside_the_parse_cannot_pass_through():
+    """The deleted passthrough arm, pinned.
+
+    `_parse_payload_for_compile` used to carry `except ProcessIRCompileError:
+    raise`, which forwarded a forged compile error with no allowlist at all. It
+    was dead for its stated purpose — nothing under `models/` raises that type —
+    and it is the same shape as the arm deleted one boundary earlier.
+    """
+    def _forge():
+        from boomi_mcp.compiler.process_ir.diagnostics import CompilerDiagnostic
+
+        return ProcessIRCompileError(
+            [
+                CompilerDiagnostic(
+                    code="FORGED_COMPILE_CODE",
+                    phase="schema",
+                    path="/forged/compile",
+                    node_identity="",
+                    message="forged " + CANARY,
+                    remediation="forged " + CANARY,
+                )
+            ]
+        )
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        pl._reparse_process_ir_for_compile(_forging_subclass(_forge))
+    served = excinfo.value.diagnostics[0]
+    assert served.code == "PROCESS_IR_COMPILE_INTERNAL", served.code
+    assert CANARY not in (served.message or "")
+    assert "FORGED_COMPILE_CODE" not in (served.message or "")
+
+
+def test_the_inert_rebuild_keeps_scalars_and_flattens_containers():
+    """The rebuild must not become a coercion.
+
+    Flattening containers is the whole defence; coercing SCALARS would re-open the
+    `datetime` -> ISO-string repair that #178 exists to close, so a wrong-typed
+    scalar must still arrive at the parser wrong-typed.
+    """
+    import datetime as _dt
+
+    class _HostileDict(dict):
+        pass
+
+    payload = _HostileDict(
+        {"a": _HostileDict({"b": (1, 2)}), "when": _dt.datetime(2020, 1, 1)}
+    )
+    inert = pl._inert_payload(payload)
+    assert type(inert) is dict
+    assert type(inert["a"]) is dict
+    assert type(inert["a"]["b"]) is list
+    # the scalar is untouched, by design
+    assert inert["when"] == _dt.datetime(2020, 1, 1)
+    assert isinstance(inert["when"], _dt.datetime)

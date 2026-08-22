@@ -134,6 +134,37 @@ def _enforce_semantic_report(ir, cfg, symbols, policy, capabilities) -> None:
     raise ProcessIRCompileError([_restore(item) for item in report.errors])
 
 
+def _inert_payload(payload: Any) -> Any:
+    """Rebuild a dumped payload out of PLAIN containers before it is parsed.
+
+    THE ROOT FIX for a mechanism that recurred three times (#178): an exception
+    was repeatedly treated as evidence of who authored it. Each earlier round
+    hardened the place the forged error came OUT of — the dump raise, then the
+    translation — and a further variant was found each time, because a caller who
+    can subclass the exported ``ProcessIRV1`` can make ``model_dump`` RETURN a
+    hostile container whose ``items()`` runs their code INSIDE
+    ``parse_process_ir_v1`` (the secret pre-scan walks the payload) and raise a
+    diagnostic the parser never wrote.
+
+    Sanitising the OUTPUT cannot win that race: with a real parser code attached,
+    forged text is indistinguishable from authored text by inspection. So the
+    input is made inert instead. Every mapping and sequence is rebuilt as a plain
+    ``dict``/``list``, so the only hooks that ever run are run HERE, once, inside
+    the caller's guard — and after this the parser walks builtins, which means a
+    ``ProcessIRValidationError`` raised beyond this point really is the parser's.
+
+    Scalars are deliberately passed through UNCHANGED. Coercing them would
+    re-open the hole #178 exists to close: a ``datetime`` in a ``str`` field must
+    still reach the parser as a ``datetime`` so it is refused rather than
+    silently repaired into an ISO string.
+    """
+    if isinstance(payload, dict):
+        return {key: _inert_payload(value) for key, value in payload.items()}
+    if isinstance(payload, (list, tuple)):
+        return [_inert_payload(value) for value in payload]
+    return payload
+
+
 def _internal_compile_error() -> ProcessIRCompileError:
     """The value-free refusal every unexpected failure in this module serves."""
     return ProcessIRCompileError(
@@ -226,12 +257,18 @@ def _parse_payload_for_compile(payload: Any) -> ProcessIRV1:
         return parse_process_ir_v1(payload)
     except ProcessIRValidationError as exc:
         raise _compile_error_from_validation(exc) from None
-    except ProcessIRCompileError:
-        raise
     except Exception:  # noqa: BLE001 - deliberate: never leak internals
         # An UNEXPECTED parser failure must not escape carrying its text: the
         # message can echo authored values, and diagnostics get logged. The
         # compile stages are already guarded this way; parse was not.
+        #
+        # There is deliberately NO `except ProcessIRCompileError: raise` arm. It
+        # was dead for its stated purpose — nothing under `models/` raises that
+        # type, and all eight real refusals raise `ProcessIRValidationError` — and
+        # live as a hazard: a forged compile error raised from inside the parse
+        # bypassed the guarded translation entirely, with no allowlist at all.
+        # Same shape as the arm deleted one boundary earlier, surviving one
+        # boundary over. Measured.
         raise ProcessIRCompileError(
             [diagnostic(PROCESS_IR_COMPILE_INTERNAL, "schema", "")]
         ) from None
@@ -278,7 +315,7 @@ def _reparse_process_ir_for_compile(ir: ProcessIRV1) -> ProcessIRV1:
     mode instead of sequencing around it.
     """
     try:
-        payload = raw_process_ir_payload(ir)
+        payload = _inert_payload(raw_process_ir_payload(ir))
     except Exception:  # noqa: BLE001 - deliberate: never leak internals
         # EVERY dump exception is internal, with no `ProcessIRValidationError`
         # special case. Parsing has not started at this point, so an exception of
