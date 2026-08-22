@@ -202,8 +202,10 @@ def test_every_witness_records_its_fixture_provenance():
         PROVENANCE_INLINE_REFUSAL,
         PROVENANCE_KINDS,
         PROVENANCE_SYNTHETIC_CFG,
-        loaded_fixtures,
         compiled_digests,
+        expected_model_digest,
+        loaded_fixtures,
+        record_compiles,
         reset_loaded_fixtures,
     )
 
@@ -251,7 +253,8 @@ def test_every_witness_records_its_fixture_provenance():
             # lied to. The witness is RUN and the loader records what it actually read.
             reset_loaded_fixtures()
             try:
-                entry.run()
+                with record_compiles():
+                    entry.run()
             except Exception as exc:  # noqa: BLE001 - the run itself is graded elsewhere
                 bad.append((key, "run failed while checking provenance", repr(exc)))
                 continue
@@ -266,7 +269,7 @@ def test_every_witness_records_its_fixture_provenance():
             # so the digest was present but the observed proof came from elsewhere. Set
             # EQUALITY binds the claim to what the witness actually demonstrated.
             compiled = set(compiled_digests())
-            claimed = {opened[rel] for rel in named}
+            claimed = {expected_model_digest(rel) for rel in named}
             if compiled != claimed:
                 bad.append((
                     key,

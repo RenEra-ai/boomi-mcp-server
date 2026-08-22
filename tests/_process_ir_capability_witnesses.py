@@ -126,15 +126,18 @@ class UnsupportedDisposition:
     reason: str
 
 
-#: `{fixture path: content digest}` for every fixture `_fixture()` has read, and the digest
-#: of every document that actually reached the COMPILER, since the last reset.
+#: Which fixtures `_fixture()` has read, and which MODELS actually reached the compiler.
 #:
-#: Recording file OPENS alone was not enough: a witness could open the claimed fixture,
-#: discard it, and compile something else entirely, and the claim still looked honest. What
-#: makes a frozen claim true is that the fixture's CONTENT is what was compiled, so both
-#: sides are recorded and compared.
+#: This binding moved four times, each time because the weaker form admitted a witness that
+#: satisfied the letter of its claim: file opens, then parses, then compiles recorded in the
+#: two obvious helpers, then set equality over those. The last version was still fail-open
+#: because other helpers (`_measure`, `_compile_refusal_for_model`) call
+#: `compile_process_ir_v1` DIRECTLY and were not instrumented — and instrumenting helpers
+#: one at a time is the same whack-a-mole this slice already paid four rounds for with an
+#: AST resolver. So the recording happens at the ONE compiler boundary every helper goes
+#: through, and no helper can be forgotten because none of them is the thing instrumented.
 _LOADED_FIXTURES = {}
-_COMPILED_DIGESTS = []
+_COMPILED_MODELS = []
 
 
 def _digest(document):
@@ -143,9 +146,43 @@ def _digest(document):
     ).hexdigest()
 
 
+def _model_digest(ir):
+    """Digest of the MODEL the compiler received, so every path is comparable.
+
+    A fixture's raw JSON and the model built from it differ (the parser expands defaults),
+    so the claimed side is put through the same parse before digesting.
+    """
+    return _digest(ir.model_dump(mode="json", warnings=False))
+
+
+def expected_model_digest(relative):
+    return _model_digest(_parse(_fixture(relative)))
+
+
+class record_compiles:
+    """Record every model reaching `compile_process_ir_v1`, whatever helper called it."""
+
+    def __enter__(self):
+        from boomi_mcp.compiler.process_ir import pipeline
+
+        self._pipeline = pipeline
+        self._real = pipeline.compile_process_ir_v1
+
+        def _recording(ir, symbols, **kwargs):
+            _COMPILED_MODELS.append(_model_digest(ir))
+            return self._real(ir, symbols, **kwargs)
+
+        pipeline.compile_process_ir_v1 = _recording
+        return self
+
+    def __exit__(self, *exc):
+        self._pipeline.compile_process_ir_v1 = self._real
+        return False
+
+
 def reset_loaded_fixtures():
     _LOADED_FIXTURES.clear()
-    del _COMPILED_DIGESTS[:]
+    del _COMPILED_MODELS[:]
 
 
 def loaded_fixtures():
@@ -153,7 +190,7 @@ def loaded_fixtures():
 
 
 def compiled_digests():
-    return tuple(_COMPILED_DIGESTS)
+    return tuple(_COMPILED_MODELS)
 
 
 def _fixture(relative):
@@ -242,10 +279,6 @@ def _compile_refusal(doc, symbols, capabilities=None):
     from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
     from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
 
-    # Instrumented like `_compiles`: a frozen `refuses` witness reaches the compiler through
-    # here, and recording in only some helpers would leave `compiled_digests()` empty for it
-    # — rejecting a VALID witness rather than admitting an invalid one.
-    _COMPILED_DIGESTS.append(_digest(doc))
     try:
         compile_process_ir_v1(_parse(doc), symbols, capabilities=capabilities)
     except ProcessIRCompileError as exc:
@@ -256,11 +289,6 @@ def _compile_refusal(doc, symbols, capabilities=None):
 def _compiles(doc, symbols, capabilities=None):
     from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
 
-    # Recorded at the COMPILE boundary. Recording every PARSE was too weak: a witness could
-    # parse its claimed fixture as a throwaway and then compile an inline document, and both
-    # digests would be present, so the claim looked honest. What the provenance gate needs
-    # to know is which document reached the compiler.
-    _COMPILED_DIGESTS.append(_digest(doc))
     return compile_process_ir_v1(_parse(doc), symbols, capabilities=capabilities)
 
 
@@ -270,9 +298,7 @@ def _rich_compiles(relative):
     # `rich_compile_doc` parses internally rather than through `_parse`, so the digest is
     # recorded here — otherwise the content binding could not see the document that was
     # actually compiled and would report a true claim as false.
-    document = _fixture(relative)
-    _COMPILED_DIGESTS.append(_digest(document))
-    return rich_compile_doc(document)
+    return rich_compile_doc(_fixture(relative))
 
 
 def _emitter_kinds(plan):
