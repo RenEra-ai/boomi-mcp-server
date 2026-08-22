@@ -775,7 +775,14 @@ def test_the_legacy_adapter_boundary_raises_no_canonical_diagnostic():
                     if alias.name not in scan.sinks:
                         continue
                     allowed = _LEGACY_ADAPTER_TYPE_ONLY_IMPORTERS.get(relative, ())
-                    if alias.name not in allowed:
+                    # A RENAMED import does not inherit the allowance: `import X as CD`
+                    # keeps `alias.name == "X"` while every call reads `CD`, so the module
+                    # could construct a canonical diagnostic under a name the scan and this
+                    # allowance both miss.
+                    if alias.asname is not None:
+                        offenders.append(
+                            (relative, node.lineno, "aliased import " + alias.name))
+                    elif alias.name not in allowed:
                         offenders.append((relative, node.lineno, "import " + alias.name))
     assert offenders == [], offenders
 

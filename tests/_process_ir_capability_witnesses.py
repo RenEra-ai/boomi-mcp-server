@@ -501,6 +501,15 @@ def _w_rich_branch_decision_bodies():
         # Stop — and the bare false arm is the construct this manifest row names.
         expected = nested[0] + "/false_arm/terminal"
         assert expected in stops, (expected, sorted(stops))
+        # ...and it reaches EMISSION. The CFG record is derived from the input, so lowering
+        # could drop or mis-emit this Stop while the CFG still carried the right node.
+        emitted_stops = {
+            node.cfg_node_id: node.emitter_input.emitter_kind for node in plan.nodes
+        }
+        by_id = {node.node_id: node for node in cfg.nodes}
+        target = next(n for n in cfg.nodes if n.source_path == expected)
+        assert emitted_stops.get(target.node_id) == "stop", (
+            expected, emitted_stops.get(target.node_id))
 
     return CapabilityWitness(
         "rich_branch_decision_bodies",

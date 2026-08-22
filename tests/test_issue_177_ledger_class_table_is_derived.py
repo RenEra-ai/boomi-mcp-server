@@ -65,21 +65,30 @@ def _finding_rows(text):
     id and class would have counted them and forced a wrong published total the first time
     a refutation landed.
     """
-    rows = []
-    for line in text.splitlines():
-        # `| ` required a space after the delimiter, so a compact row (`|A6-10|...|`) —
-        # valid Markdown that renders in the same table — was silently ignored, and the
-        # derived-class guard stayed green for a finding it never saw. Silent omission is
-        # the worst failure mode for this check, because omission is what lets the table go
-        # stale.
-        # A row need not carry OUTER pipes at all — Markdown renders
-        # `` `A6-10` | src | ... `` in the same table. Requiring a leading `|` silently
-        # skipped such a row, and a skipped row is what lets the derived table go stale.
-        # A line is a candidate if it splits into the right number of cells.
+    # Only the CONTIGUOUS finding table. Considering every line in the document meant a
+    # nine-cell example in prose — or inside a fenced block — counted as a real finding,
+    # which can both fail the totals falsely and MASK a removed real row. The table is
+    # located by its own header and read to the first line that is not a row.
+    #
+    # Outer pipes stay OPTIONAL and a compact row (`|A6-10|...|`) still counts: both were
+    # earlier fixes for rows this reader silently skipped, and silent omission is the one
+    # failure mode that defeats it entirely.
+    lines = text.splitlines()
+    header = next(
+        (i for i, line in enumerate(lines) if _cells(line)[:1] == ["ID"]),
+        None,
+    )
+    assert header is not None, "no finding-table header found"
+    body = []
+    for line in lines[header + 1 :]:
         cells = _cells(line)
         if len(cells) < 9:
-            continue
-        if cells[0] in {"ID", "---"}:
+            break
+        body.append(cells)
+
+    rows = []
+    for cells in body:
+        if cells[0] in {"ID", "---"} or set(cells[0]) <= {"-", " "}:
             continue
         match = re.search(r"DC-177-[A-Z]", cells[5])
         if match is None:

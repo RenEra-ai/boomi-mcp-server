@@ -1040,11 +1040,25 @@ def _assert_not_fenced(doc, offset, marker):
     keys — while the rendered document contains neither a heading nor a table. Counted by
     fence parity, the same way the comment check counts delimiters.
     """
-    fences = 0
+    # Markdown fence rules, not "starts with three backticks": a fence opens with three or
+    # more `` ` `` or `~`, and CLOSES only on the same character with at least the opening
+    # run length. Counting backtick-prefixed lines missed `~~~` entirely, and treated a
+    # short ``` line inside a longer ```` fence as a close.
+    open_char = None
+    open_len = 0
     for line in doc[:offset].splitlines():
-        if line.lstrip().startswith("```"):
-            fences += 1
-    if fences % 2:
+        stripped = line.lstrip()
+        if not stripped or stripped[0] not in "`~":
+            continue
+        char = stripped[0]
+        run = len(stripped) - len(stripped.lstrip(char))
+        if run < 3:
+            continue
+        if open_char is None:
+            open_char, open_len = char, run
+        elif char == open_char and run >= open_len:
+            open_char, open_len = None, 0
+    if open_char is not None:
         raise AssertionError(
             "{0!r} is inside a fenced code block — the authority is not rendered".format(marker)
         )

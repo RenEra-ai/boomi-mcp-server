@@ -249,6 +249,13 @@ class _ModuleScan:
                     for target in node.targets:
                         if isinstance(target, ast.Name):
                             self.sinks.add(target.id)
+                elif (
+                    isinstance(node, ast.AnnAssign)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id in self.sinks
+                    and isinstance(node.target, ast.Name)
+                ):
+                    self.sinks.add(node.target.id)
         for _pass in range(3):
             for node in ast.walk(self.tree):
                 if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -414,12 +421,24 @@ def verifier_issue_call_count():
     path = _ROOT / "src/boomi_mcp/categories/components/process_graph_verifier.py"
     tree = ast.parse(path.read_text())
     aliases = {"_issue"}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Name):
-            if node.value.id in aliases:
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        aliases.add(target.id)
+    for _pass in range(3):
+        for node in ast.walk(tree):
+            # Plain AND annotated bindings: `issue: Callable = _issue` is an `AnnAssign`, so
+            # an alias declared with a type hint was invisible and the count collapsed to the
+            # one remaining direct call while the sites list did the same — both sides moving
+            # together is precisely how an equality goes quiet.
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Name):
+                if node.value.id in aliases:
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            aliases.add(target.id)
+            elif (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.value, ast.Name)
+                and node.value.id in aliases
+                and isinstance(node.target, ast.Name)
+            ):
+                aliases.add(node.target.id)
     return sum(
         1
         for node in ast.walk(tree)
