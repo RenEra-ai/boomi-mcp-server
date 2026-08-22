@@ -351,3 +351,92 @@ def test_the_guard_fails_when_a_registration_is_removed(monkeypatch):
     with pytest.raises(AssertionError) as caught:
         test_every_emittable_process_ir_code_has_complete_served_text()
     assert code in str(caught.value)
+
+
+def test_the_forward_resolver_fails_closed_on_every_shape_it_does_not_model():
+    """The whitelist is real: each rejected Python form must yield NO resolution.
+
+    Three consecutive Stage-2 rounds found a further call form the resolver mis-read, each
+    time because it resolved by default and special-cased surprises. Python call syntax is
+    not a closed set, so that direction cannot converge — the resolver now accepts a small
+    stated shape and everything else becomes an unresolved site a human must justify.
+
+    This control is executable rather than hand-run: `_ModuleScan` takes source text, so
+    each shape is a real parse, not a description of one. A control that only asserted the
+    accepted shape would pass on a resolver that accepted everything.
+    """
+    import ast as _ast
+
+    from _process_ir_diagnostic_emissions import _ModuleScan, _called_name
+
+    def resolve(source):
+        scan = _ModuleScan("<synthetic>", source)
+        for node in _ast.walk(scan.tree):
+            if isinstance(node, _ast.Call) and _called_name(node) == "finding" and node.args:
+                forward = scan.forwarded_parameter(node, node.args[0])
+                if forward is None:
+                    return None
+                return scan.resolve_forward(forward)
+        raise AssertionError("no finding() call found in the synthetic module")
+
+    accepted = '''
+def helper(code="PROCESS_IR_SEMANTIC_NESTING_LIMIT"):
+    return finding(code, "error", "p", "/body")
+
+def a(): helper()
+def b(): helper("PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED")
+'''
+    # CONTROL: the shape the resolver DOES model resolves to both codes, so a resolver
+    # that rejected everything would fail here rather than passing the whole test.
+    assert resolve(accepted) == (
+        "PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED",
+        "PROCESS_IR_SEMANTIC_NESTING_LIMIT",
+    ), resolve(accepted)
+
+    rejected = {
+        "keyword unpacking hides the parameter": '''
+def helper(code="PROCESS_IR_SEMANTIC_NESTING_LIMIT"):
+    return finding(code, "error", "p", "/body")
+
+def a(): helper(**{"code": "SOMETHING_ELSE"})
+''',
+        "star-args make positions meaningless": '''
+def helper(code="PROCESS_IR_SEMANTIC_NESTING_LIMIT"):
+    return finding(code, "error", "p", "/body")
+
+def a(): helper(*args)
+''',
+        "a rebound parameter is not a forward": '''
+def helper(code="PROCESS_IR_SEMANTIC_NESTING_LIMIT"):
+    code = choose()
+    return finding(code, "error", "p", "/body")
+
+def a(): helper()
+''',
+        "a helper nobody calls emits nothing": '''
+def helper(code="PROCESS_IR_SEMANTIC_NESTING_LIMIT"):
+    return finding(code, "error", "p", "/body")
+''',
+        "an unreadable argument": '''
+def helper(code="PROCESS_IR_SEMANTIC_NESTING_LIMIT"):
+    return finding(code, "error", "p", "/body")
+
+def a(): helper(pick_one())
+''',
+    }
+    survived = sorted(name for name, source in rejected.items() if resolve(source) is not None)
+    assert survived == [], survived
+
+    # An UNREACHABLE default is a different case from a rejected shape: when every call
+    # supplies the parameter, the forward still resolves — to the supplied code ALONE. The
+    # default must not appear, or a served registration could survive for a code no
+    # execution path can raise. Asserted as an equality, not as "does not crash".
+    every_call_overrides = '''
+def helper(code="PROCESS_IR_SEMANTIC_NESTING_LIMIT"):
+    return finding(code, "error", "p", "/body")
+
+def a(): helper("PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED")
+'''
+    assert resolve(every_call_overrides) == ("PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED",), (
+        resolve(every_call_overrides)
+    )

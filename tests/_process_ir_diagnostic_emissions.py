@@ -226,11 +226,13 @@ class _ModuleScan:
         The first version required the FIRST parameter, which silently mis-handled
         `_check_region_containment(..., code=..., message=...)`: its code parameter sits in
         sixth position and carries a DEFAULT, and two of its three call sites omit it — so
-        the code that default names was emitted by a path the reader could not see.
+        the code that default names was emitted by a path the reader could not see. Any
+        parameter position now counts.
 
-        Any parameter position now counts, and `resolve_forward` below reads both the
-        default and the actual arguments at that function's call sites, so the emission is
-        accounted for instead of pinned as unreadable.
+        A parameter that is REBOUND inside the owner is not a forward at all: matching the
+        identifier would then read the signature while the sink receives something else
+        entirely. Such a call is reported unresolved rather than resolved from the wrong
+        source.
         """
         if not isinstance(argument, ast.Name):
             return None
@@ -238,34 +240,59 @@ class _ModuleScan:
         if owner is None:
             return None
         for index, arg in enumerate(owner.args.args):
-            if arg.arg == argument.id:
-                return (owner, index, arg.arg)
+            if arg.arg != argument.id:
+                continue
+            if self._is_rebound(owner, argument.id):
+                return None
+            return (owner, index, arg.arg)
         return None
 
-    def resolve_forward(self, forward):
-        """Every code that can reach a forwarded parameter, or None if any path is opaque.
+    @staticmethod
+    def _is_rebound(owner, name):
+        """True if `name` is assigned anywhere in `owner` — a store, `for` target, `with`
+        binding, walrus, comprehension target or `except ... as`."""
+        for node in ast.walk(owner):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == name:
+                return True
+            if isinstance(node, ast.ExceptHandler) and node.name == name:
+                return True
+        return False
 
-        Two sources, both closed: the parameter's DEFAULT, and the argument supplied at each
-        call site of the owning function (positional or keyword). A call site this cannot
-        read makes the whole forward unresolved, so an opaque path is reported rather than
-        assumed empty.
+    def resolve_forward(self, forward):
+        """Every code that can reach a forwarded parameter, or None if ANY path is opaque.
+
+        This is a WHITELIST, and deliberately so. Three consecutive review rounds found a
+        further Python form the previous shape mis-read — unpacked arguments, a rebound
+        parameter, a default nothing can reach — because it resolved by default and
+        special-cased the surprises. Python's call syntax is not a closed set, so that
+        direction cannot converge; this repo has the same lesson recorded for a prose
+        scanner that was wrong four rounds running.
+
+        So the shape it accepts is small and stated, and EVERYTHING else returns None and
+        lands in the pinned unresolved table where a human must justify it:
+
+        * the owner is called at least once (a helper nobody calls emits nothing);
+        * no call to the owner uses `*args` or `**kwargs` — positional indices and keyword
+          names are meaningless under unpacking;
+        * every explicitly supplied argument at that position resolves to a code;
+        * the parameter's DEFAULT is counted only if some call actually omits it.
         """
         owner, index, param = forward
         codes = set()
-
-        defaults = owner.args.defaults
-        offset = len(owner.args.args) - len(defaults)
-        if defaults and index >= offset:
-            resolved = self._simple(defaults[index - offset])
-            if resolved is None:
-                return None
-            codes.add(resolved)
-
+        omitted = False
         seen_call = False
+
         for node in ast.walk(self.tree):
             if not isinstance(node, ast.Call) or _called_name(node) != owner.name:
                 continue
             seen_call = True
+
+            # Unpacking makes position and keyword identity unknowable. Fail closed.
+            if any(isinstance(arg, ast.Starred) for arg in node.args):
+                return None
+            if any(kw.arg is None for kw in node.keywords):
+                return None
+
             supplied = None
             if len(node.args) > index:
                 supplied = node.args[index]
@@ -275,13 +302,30 @@ class _ModuleScan:
                         supplied = kw.value
                         break
             if supplied is None:
-                continue  # omitted -> the default above covers it
+                omitted = True
+                continue
             resolved = self._simple(supplied)
             if resolved is None:
                 return None
             codes.add(resolved)
 
-        if not seen_call and not codes:
+        if not seen_call:
+            return None
+
+        # The default is REACHABLE only if some call omits the parameter. Counting it
+        # unconditionally would let a served registration survive for a code no execution
+        # path can raise — the exact drift the served-code equality exists to catch.
+        if omitted:
+            defaults = owner.args.defaults
+            offset = len(owner.args.args) - len(defaults)
+            if not defaults or index < offset:
+                return None
+            resolved = self._simple(defaults[index - offset])
+            if resolved is None:
+                return None
+            codes.add(resolved)
+
+        if not codes:
             return None
         return tuple(sorted(codes))
 

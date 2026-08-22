@@ -1,4 +1,4 @@
-{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10270,"minimum_collected":10270,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind":"manifest","schema_version":1,"manifest":"pytest-nodes","minimum_active":10271,"minimum_collected":10271,"maximum_skipped":30,"bootstrap_base":"9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -10306,3 +10306,4 @@
 {"kind":"test","id":"pytest-010305","node_id":"tests/test_process_ir_served_text_enforcement.py::test_the_non_emittable_declaration_is_proven_not_merely_declared","state":"active"}
 {"kind":"test","id":"pytest-010306","node_id":"tests/test_process_ir_served_text_enforcement.py::test_the_only_unreadable_emission_sites_are_the_pinned_delegations","state":"active"}
 {"kind":"test","id":"pytest-010307","node_id":"tests/test_process_ir_served_text_enforcement.py::test_the_served_code_set_is_exactly_what_the_authorities_account_for","state":"active"}
+{"kind":"test","id":"pytest-010308","node_id":"tests/test_process_ir_served_text_enforcement.py::test_the_forward_resolver_fails_closed_on_every_shape_it_does_not_model","state":"active"}
