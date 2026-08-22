@@ -1,0 +1,21 @@
+Approvals are unavailable in this read-only review session — no tool approval, no clarifying-question round-trip, and no interactive follow-up will ever be granted. Do not wait for one, do not ask a question and stop, and do not request permission to run anything.
+
+Emit your FULL implementation review NOW, in this turn, based on whatever you have already read from the repository. Where you could not verify something read-only, say so explicitly and state what evidence would settle it — then continue. An unresolved question is not a reason to withhold the review.
+
+Judge the implementation at HEAD `aedca45344ea9215f77deede343f6724fa264a09` against the ARCHITECT DESIGN PLAN that was supplied verbatim in the original prompt, and against the issue's acceptance criteria. Cover, at minimum:
+
+1. Faithfulness of the implementation to the plan's decisions, especially the phase-separated `validation_policy` resolution and the unconditional re-parse at the compile entry.
+2. Each deviation from the plan — `mode="python"` instead of `mode="json"`, the catch-terminal branch widening in `models/process_ir.py`, the new public `compile_process_ir_model_v1`, and the `recipes/composer.py` changes — and whether each is a faithful extension of the plan's intent or scope creep.
+3. Acceptance criterion 2: whether the case set in `tests/test_process_ir_entrypoint_diagnostic_parity.py` is genuinely DERIVED from the runtime authorities rather than hand-listed, whether its counts are recomputed rather than hard-coded, and whether the gate would fail if it enumerated nothing.
+4. Acceptance criterion 4: whether the recorded claim that the safety property did NOT hold at baseline is correct, and whether the implementation handles it appropriately.
+5. Anything the plan required that is MISSING from the tree — the most valuable finding you can produce.
+
+Give each finding a severity and a concrete `file:line` reference. If nothing substantive is wrong, say that plainly rather than manufacturing minor notes.
+
+END your reply with a verdict on its OWN FINAL LINE, exactly one of:
+
+VERDICT: NO ISSUES
+
+VERDICT: ISSUES FOUND
+
+Output plain markdown text directly in your reply. Do not write files, do not propose to run commands, do not summarise what you would produce — produce it.

@@ -134,6 +134,13 @@ def _enforce_semantic_report(ir, cfg, symbols, policy, capabilities) -> None:
     raise ProcessIRCompileError([_restore(item) for item in report.errors])
 
 
+def _internal_compile_error() -> ProcessIRCompileError:
+    """The value-free refusal every unexpected failure in this module serves."""
+    return ProcessIRCompileError(
+        [diagnostic(PROCESS_IR_COMPILE_INTERNAL, "schema", "")]
+    )
+
+
 def _compile_error_from_validation(
     exc: ProcessIRValidationError,
 ) -> ProcessIRCompileError:
@@ -142,20 +149,59 @@ def _compile_error_from_validation(
     ``code``/``path``/``message``/``remediation`` are preserved VERBATIM
     (ADR-001 §7: later introducers add codes, never rename them); ``phase`` is
     ``"schema"`` and ``node_identity`` is derived from the pointer.
+
+    EXCEPTION TYPE IS NOT PROVENANCE, and this function is where that stopped
+    being assumed. A caller can subclass the exported ``ProcessIRV1`` and have
+    ``model_dump`` RETURN a hostile mapping — a ``dict`` subclass whose
+    ``items()`` raises — so arbitrary code runs INSIDE ``parse_process_ir_v1``
+    (the secret pre-scan walks the payload) and raises a
+    ``ProcessIRValidationError`` the parser never authored. Forwarding it
+    verbatim served a caller-chosen code, pointer, message and remediation
+    through the compiler's own channel, carrying planted secret text. Measured;
+    an earlier revision closed only the variant where the DUMP raises, which is
+    the same trust one boundary earlier.
+
+    So each diagnostic is checked against the parser's OWN served code set before
+    it is believed. A code outside that set was not authored by the parser, no
+    matter what type carried it, and the whole error degrades to the value-free
+    internal refusal rather than being partially trusted.
     """
-    return ProcessIRCompileError(
-        [
-            CompilerDiagnostic(
-                code=item.code,
-                phase="schema",
-                path=item.path,
-                node_identity=node_identity_for(item.path),
-                message=item.message,
-                remediation=item.remediation,
+    try:
+        from ...models.process_ir import process_ir_v1_parse_diagnostic_specs
+
+        authored = {spec["code"] for spec in process_ir_v1_parse_diagnostic_specs()}
+        translated = []
+        for item in exc.diagnostics:
+            code = getattr(item, "code", None)
+            path = getattr(item, "path", None)
+            message = getattr(item, "message", None)
+            remediation = getattr(item, "remediation", None)
+            if not isinstance(code, str) or code not in authored:
+                return _internal_compile_error()
+            if not isinstance(path, str) or not isinstance(message, str):
+                return _internal_compile_error()
+            if remediation is not None and not isinstance(remediation, str):
+                return _internal_compile_error()
+            translated.append(
+                CompilerDiagnostic(
+                    code=code,
+                    phase="schema",
+                    path=path,
+                    node_identity=node_identity_for(path),
+                    message=message,
+                    remediation=remediation,
+                )
             )
-            for item in exc.diagnostics
-        ]
-    )
+        if not translated:
+            return _internal_compile_error()
+        return ProcessIRCompileError(translated)
+    except ProcessIRCompileError:
+        raise
+    except Exception:  # noqa: BLE001 - a malformed diagnostic must not escape raw
+        # Without this, a forged diagnostic whose attributes misbehave made the
+        # TRANSLATION raise — escaping as a bare RuntimeError past every handler,
+        # all of which catch only ProcessIRCompileError.
+        return _internal_compile_error()
 
 
 def _parse_payload_for_compile(payload: Any) -> ProcessIRV1:

@@ -182,11 +182,16 @@ _ROOT_CARRIER = {
 
 def _carrier(context, mode):
     """An untouched, LEGAL document holding the target body."""
+    # EXACT routing. A catch-all `else` sent any unrecognised context down the
+    # try/catch branch, so a matrix row added later would silently be exercised
+    # against `catch_body` and its family would look covered while testing the
+    # wrong slot. Unknown contexts must fail loudly instead.
+    assert context in CONTEXTS, "unrecognised body context: {0}".format(context)
     if context == bc.BRANCH_LEG:
         control = _atom("branch")
     elif context in (bc.DECISION_TRUE_ARM, bc.DECISION_FALSE_ARM):
         control = _atom("decision")
-    else:
+    elif context in (bc.TRY_BODY, bc.CATCH_BODY):
         control = copy.deepcopy(_atom("try_catch"))
         if mode == "connector_above":
             # The ancestor mode is NOT free for try/catch: a connector scope must
@@ -194,11 +199,14 @@ def _carrier(context, mode):
             # with the mode rather than a connector merely being prepended.
             control["scope"] = "connector"
             control["try_body"] = {"steps": [dict(_CONN)], "terminal": dict(_STOP)}
+    else:  # pragma: no cover - the assertion above forbids reaching this
+        raise AssertionError(context)
     steps = [dict(_CONN), control] if mode == "connector_above" else [control]
     return {"version": "1", "body": {"kind": "sequence", "steps": steps}}
 
 
 def _body_of(ir, context, mode):
+    """The target body. Exact, for the same reason `_carrier` is."""
     node = ir.body.steps[1] if mode == "connector_above" else ir.body.steps[0]
     if context == bc.BRANCH_LEG:
         return node.legs[0]
@@ -208,7 +216,9 @@ def _body_of(ir, context, mode):
         return node.false_arm
     if context == bc.TRY_BODY:
         return node.try_body
-    return node.catch_body
+    if context == bc.CATCH_BODY:
+        return node.catch_body
+    raise AssertionError("unrecognised body context: {0}".format(context))
 
 
 MODES = ("clean", "connector_above")
@@ -418,9 +428,19 @@ def test_the_generated_count_equals_the_runtime_product():
     # asserted `len(MATRIX) * modes * kinds`, which recomputed its own reduced
     # formula and so agreed with itself while generating 400 body cases instead
     # of 3000. A count derived from the wrong formula is not a derived count.
-    expected_body = sum(
-        len(_neighbours(context, slot)) for context, slot in MATRIX
-    ) * len(MODES) * len(KINDS)
+    # Computed from the MATRIX directly, NOT via `_neighbours` — the helper the
+    # generator itself uses. Sharing it made the assertion agree with the
+    # generator instead of with the plan: shrinking `_neighbours` shrank both, and
+    # the old 820-case product came back with the count, partition, denied-cell,
+    # parity and safety tests all still green. An expectation that moves with the
+    # thing it checks is not an expectation.
+    expected_body = 0
+    for context, slot in MATRIX:
+        if slot == bc.STEP_SLOT:
+            opposite = len(MATRIX[(context, bc.TERMINAL_SLOT)])
+        else:
+            opposite = 1 + len(MATRIX[(context, bc.STEP_SLOT)])
+        expected_body += opposite * len(MODES) * len(KINDS)
     expected_root = len(KINDS) + len(KINDS) * len(KINDS)
     cases = _measured()["cases"]
     assert len(cases) == expected_body + expected_root, len(cases)
@@ -578,10 +598,12 @@ def test_the_gate_fails_when_the_structural_fix_is_removed(monkeypatch):
     # is the ACCEPT-DIRECTION hole: the parser refuses a trailing `cache_put` in a
     # Branch leg and the unfixed compiler models no such rule, so it accepts and
     # compiles the document.
-    # The accept-direction hole, now carrying its NEIGHBOUR: a trailing
-    # `cache_put` before a `stop` terminal. The parser refuses it; the unfixed
-    # compiler models no such rule and compiles it into a real emission plan.
-    probe = "branch_leg/step=cache_put/opp=stop/mode=clean"
+    # Corpus row 1's ACTUAL shape: a `process_call` TERMINAL whose leg carries a
+    # `cache_put` prefix. That interaction is the one #175 deferred and the one a
+    # single-slot product cannot generate, so it is the case the witness must
+    # pin — an earlier revision pinned `step=cache_put/opp=stop`, which diverges
+    # too but is not the mandated interaction.
+    probe = "branch_leg/terminal=process_call/opp=cache_put/mode=clean"
     cases = _measured()["cases"]
     assert any(cid == probe for cid, _ir in cases), "the probe case vanished"
 
@@ -596,8 +618,17 @@ def test_the_gate_fails_when_the_structural_fix_is_removed(monkeypatch):
     assert mismatches, "removing the re-parse changed nothing — the gate is vacuous"
     assert probe in mismatches, sorted(mismatches)[:20]
     parser, compiler = mismatches[probe]
-    assert parser[0] == "REFUSED" and compiler[0] == "ACCEPTED", (parser, compiler)
+    # Corpus row 1 is a DIAGNOSTIC-IDENTITY divergence: both paths refuse, and
+    # they disagree on which rule owns the document. That is the shape #175
+    # deferred, so the witness asserts it precisely rather than settling for
+    # "these differ somehow".
+    assert parser[0] == "REFUSED" and compiler[0] == "REFUSED", (parser, compiler)
     assert parser[1][0] == "PROCESS_IR_SCHEMA_INVALID_CARDINALITY", parser
+    assert (
+        compiler[1][0]
+        == "PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED"
+    ), compiler
+    assert parser[1][0] != compiler[1][0]
     # The witness must be BROAD, not a single lucky cell: the unfixed compiler
     # diverges across the grammar, which is why a verdict function per rule could
     # never close this class.
