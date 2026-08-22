@@ -1032,6 +1032,24 @@ _CAPABILITY_DOC_STATES = {
 }
 
 
+def _assert_not_fenced(doc, offset, marker):
+    """Refuse the marker AT `offset` if it sits inside a fenced code block.
+
+    A comment is not the only way to stop Markdown rendering an authority: wrapping §8's
+    heading and table in ``` leaves every raw line intact — and the parser returned all 27
+    keys — while the rendered document contains neither a heading nor a table. Counted by
+    fence parity, the same way the comment check counts delimiters.
+    """
+    fences = 0
+    for line in doc[:offset].splitlines():
+        if line.lstrip().startswith("```"):
+            fences += 1
+    if fences % 2:
+        raise AssertionError(
+            "{0!r} is inside a fenced code block — the authority is not rendered".format(marker)
+        )
+
+
 def _assert_not_commented_out(doc, offset, marker):
     """Refuse the marker AT `offset` if it sits inside an HTML comment.
 
@@ -1085,6 +1103,7 @@ def _parse_capability_states(doc):
     # The heading must be LIVE Markdown, checked at the position actually located.
     heading_offset = sum(len(line) + 1 for line in lines[: heads[0]])
     _assert_not_commented_out(doc, heading_offset, _CAPABILITY_HEADING)
+    _assert_not_fenced(doc, heading_offset, _CAPABILITY_HEADING)
     after = "\n".join(lines[heads[0] + 1 :])
     section_offset = heading_offset + len(_CAPABILITY_HEADING) + 1
 
@@ -1122,6 +1141,11 @@ def _parse_capability_states(doc):
     # `<!-- -->` removed the capability table from the rendered document while the heading
     # check passed and the raw-line parser returned all 27 rows.
     _assert_not_commented_out(
+        doc,
+        section_offset + sum(len(line) + 1 for line in lines[:start]),
+        _CAPABILITY_TABLE_HEADER,
+    )
+    _assert_not_fenced(
         doc,
         section_offset + sum(len(line) + 1 for line in lines[:start]),
         _CAPABILITY_TABLE_HEADER,

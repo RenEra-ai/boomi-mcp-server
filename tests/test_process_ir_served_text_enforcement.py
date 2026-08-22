@@ -373,8 +373,13 @@ def test_the_served_code_set_is_exactly_what_the_authorities_account_for():
     # SEMANTIC registry was accounted for by the union, and the projection then advertised
     # bogus semantic-validator attribution for it. Each table must be justified by the layer
     # that owns it.
-    exemptions = _policy_exemption_codes()
-    non_emittable = set(non_emittable_registered_codes())
+    # Both of these are SEMANTIC-registry facts: the policy exemptions are raised through
+    # `finding()`, and `non_emittable_registered_codes()` is declared beside `registered_codes()`.
+    # Applying them to every producer let a compiler-owned code sit in the semantic registry,
+    # and the semantic non-emittable code sit in the compiler registry, both "accounted for".
+    semantic_only = _policy_exemption_codes() | set(non_emittable_registered_codes())
+    exemptions = set()
+    non_emittable = set()
 
     unaccounted = {}
     for producer, tables in _SATISFYING_TABLES.items():
@@ -382,14 +387,14 @@ def test_the_served_code_set_is_exactly_what_the_authorities_account_for():
         # tables its emissions may draw on, and the first entry is always its own.
         own = layers[tables[0]]
         emitted = set(by_producer[producer])
-        accounted = emitted | exemptions | non_emittable
+        accounted = emitted | (semantic_only if producer == "semantic" else set())
         if producer == "compiler":
             accounted |= COMPILER_REGISTERED_PARSE_CODES
         if producer == "semantic":
             # A semantic module may legitimately re-serve a COMPILER-owned code verbatim,
             # but that code belongs in the compiler's table, not in this one. So the
             # semantic table is accounted for by semantic emissions only.
-            accounted = (set(by_producer["semantic"]) & set(own)) | exemptions | non_emittable
+            accounted = (set(by_producer["semantic"]) & set(own)) | semantic_only
         extra = sorted(set(own) - accounted)
         if extra:
             unaccounted[producer] = extra
@@ -409,7 +414,7 @@ def test_the_served_code_set_is_exactly_what_the_authorities_account_for():
     statically_emitted = set().union(
         by_producer["parser"], by_producer["compiler"], by_producer["semantic"]
     )
-    accounted_all = statically_emitted | exemptions | non_emittable
+    accounted_all = statically_emitted | semantic_only
     assert served == accounted_all, {
         "served but unaccounted": sorted(served - accounted_all),
         "accounted but not served": sorted(accounted_all - served),
@@ -445,6 +450,13 @@ def test_every_graph_verifier_issue_carries_its_own_text():
     """
     sites = verifier_issue_sites()
     assert sites, "no _issue calls found — the scan would be vacuous"
+    # The FULL derived case set, not a floor. Requiring only non-emptiness made this
+    # sampleable: aliasing `_issue` and moving all but one call to the alias left the scan
+    # reporting a single site and the guard green, which fails both the bidirectional-pin
+    # and full-case-set criteria. The count is derived from the module, never typed.
+    from _process_ir_diagnostic_emissions import verifier_issue_call_count
+
+    assert len(sites) == verifier_issue_call_count(), (len(sites), verifier_issue_call_count())
 
     defective = [
         (path, lineno, code, has_message, has_remediation)
@@ -716,3 +728,63 @@ def test_no_forwarding_call_site_builds_its_code_at_runtime():
         if (row[0], row[2], row[3]) not in pinned
     )
     assert offenders == [], offenders
+
+
+#: The legacy-adapter subtree serves its own error namespace (`LEGACY_ADAPTER_*`) and must
+#: not raise a CANONICAL ProcessIR diagnostic. The design plan called for this boundary
+#: assertion and it was dropped when the reader stopped excluding the subtree — the reader
+#: scanning it is not the same as the boundary being enforced.
+_LEGACY_ADAPTER_ROOT = "src/boomi_mcp/compiler/process_ir/legacy_adapters/"
+
+#: `emission.py` imports `CompilerDiagnostic` to TYPE-CHECK diagnostics it re-raises from the
+#: canonical compiler, not to construct one. Pinned by exact module so a new importer has to
+#: be justified here rather than joining a blanket allowance.
+_LEGACY_ADAPTER_TYPE_ONLY_IMPORTERS = {
+    "src/boomi_mcp/compiler/process_ir/legacy_adapters/emission.py": ("CompilerDiagnostic",),
+}
+
+
+def test_the_legacy_adapter_boundary_raises_no_canonical_diagnostic():
+    """`legacy_adapters/**` may not emit a canonical ProcessIR diagnostic.
+
+    Its codes are a separate served namespace, which is why they sit in
+    `UNSERVED_BY_DESIGN`. If a module there started raising a canonical code, that code would
+    be served by the ProcessIR registries while its emitter lived outside every producer this
+    file accounts for.
+    """
+    import ast as _ast
+
+    from _process_ir_diagnostic_emissions import (
+        _ModuleScan,
+        _called_name,
+        _iter_files,
+        _ROOT,
+    )
+
+    offenders = []
+    for path in _iter_files():
+        relative = str(path.relative_to(_ROOT))
+        if not relative.startswith(_LEGACY_ADAPTER_ROOT):
+            continue
+        scan = _ModuleScan(path, path.read_text())
+        for node in _ast.walk(scan.tree):
+            if isinstance(node, _ast.Call) and _called_name(node) in scan.sinks:
+                offenders.append((relative, node.lineno, _called_name(node)))
+            elif isinstance(node, (_ast.Import, _ast.ImportFrom)):
+                for alias in node.names:
+                    if alias.name not in scan.sinks:
+                        continue
+                    allowed = _LEGACY_ADAPTER_TYPE_ONLY_IMPORTERS.get(relative, ())
+                    if alias.name not in allowed:
+                        offenders.append((relative, node.lineno, "import " + alias.name))
+    assert offenders == [], offenders
+
+    # Both directions on the type-only allowance: an importer that stops importing must be
+    # retired here rather than left standing as a blanket permission.
+    stale = []
+    for relative, names in _LEGACY_ADAPTER_TYPE_ONLY_IMPORTERS.items():
+        source = (_ROOT / relative).read_text()
+        for name in names:
+            if name not in source:
+                stale.append((relative, name))
+    assert stale == [], stale

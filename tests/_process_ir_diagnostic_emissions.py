@@ -75,6 +75,7 @@ __all__ = [
     "referenced_codes",
     "unresolvable_forward_arguments",
     "runtime_forward_defaults",
+    "verifier_issue_call_count",
     "verifier_issue_sites",
 ]
 
@@ -186,15 +187,24 @@ class _ModuleScan:
         self.path = path
         self.tree = ast.parse(source)
         self.constants = {}
+        rebound = set()
         for node in ast.walk(self.tree):
-            if (
-                isinstance(node, ast.Assign)
-                and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)
-                and isinstance(node.value, ast.Constant)
-                and isinstance(node.value.value, str)
-            ):
-                self.constants[node.targets[0].id] = node.value.value
+            if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            if not isinstance(target, ast.Name):
+                continue
+            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                if target.id in self.constants and self.constants[target.id] != node.value.value:
+                    rebound.add(target.id)
+                self.constants.setdefault(target.id, node.value.value)
+            else:
+                # Assigned to something that is NOT a plain string: the name is no longer a
+                # constant anywhere the reader can trust. Resolving it from an earlier literal
+                # would report a code the runtime never emits — and hide the one it does.
+                rebound.add(target.id)
+        for name in rebound:
+            self.constants.pop(name, None)
 
         # Everything reachable from a registry table's value expression.
         self.excluded = set()
@@ -226,6 +236,19 @@ class _ModuleScan:
         # `lineage._report` is the real instance. The wrapper's own body is a FORWARD, not
         # an emission; its call sites carry the codes, so the wrapper joins the sink set.
         self.sinks = set(_SINK_NAMES)
+        # ALIASES are sinks. `d = diagnostic` then `d(<assembled code>, ...)` reached the
+        # canonical factory while the reader matched only the original name — a rename away
+        # from the whole scan. Resolved to a fixpoint so an alias of an alias counts too.
+        for _pass in range(3):
+            for node in ast.walk(self.tree):
+                if (
+                    isinstance(node, ast.Assign)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id in self.sinks
+                ):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            self.sinks.add(target.id)
         for _pass in range(3):
             for node in ast.walk(self.tree):
                 if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -378,6 +401,30 @@ def verifier_issue_sites():
             )
         )
     return tuple(sorted(sites, key=lambda row: row[1]))
+
+
+def verifier_issue_call_count():
+    """How many calls the verifier makes to its diagnostic sink, by ANY binding.
+
+    `verifier_issue_sites()` matches the name `_issue`. Counting calls to whatever that name
+    is currently bound to — including aliases — gives the case set an independent size, so
+    moving calls onto an alias shrinks the sites list while this count stays put and the
+    comparison fails.
+    """
+    path = _ROOT / "src/boomi_mcp/categories/components/process_graph_verifier.py"
+    tree = ast.parse(path.read_text())
+    aliases = {"_issue"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Name):
+            if node.value.id in aliases:
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        aliases.add(target.id)
+    return sum(
+        1
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and _called_name(node) in aliases
+    )
 
 
 def _has_literal_text(node):

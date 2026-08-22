@@ -476,10 +476,31 @@ def _w_rich_branch_decision_bodies():
         # NESTED decision — one Decision inside another's arm — plus the bare false
         # Stop. A single Decision would not witness the "rich bodies" row.
         assert kinds.count("DecisionSemanticV1") >= 2, kinds
-        assert "StopSemanticV1" in kinds, kinds
         emitted = _emitter_kinds(plan)
         assert emitted.count("decision") >= 2, emitted
-        assert "stop" in emitted, emitted
+        # The bare false-arm Stop, by POSITION. `"StopSemanticV1" in kinds` was satisfied by
+        # any Stop anywhere, so replacing the NESTED decision's false-arm Stop with an
+        # Exception left the witness green on an unrelated outer Stop — the construct this
+        # manifest row names is precisely that bare false arm.
+        decisions = sorted(
+            node.source_path
+            for node in cfg.nodes
+            if type(node.semantic).__name__ == "DecisionSemanticV1"
+        )
+        # The NESTED decision is the one whose path lies under another decision's arm.
+        nested = [d for d in decisions if any(d.startswith(o + "/") for o in decisions)]
+        assert nested, decisions
+        stops = {
+            node.source_path
+            for node in cfg.nodes
+            if type(node.semantic).__name__ == "StopSemanticV1"
+        }
+        # Its false arm terminates in a BARE Stop, asserted by exact position. Set
+        # membership (`"StopSemanticV1" in kinds`) was satisfied by any Stop anywhere, so
+        # replacing this one with an Exception left the witness green on the OUTER decision's
+        # Stop — and the bare false arm is the construct this manifest row names.
+        expected = nested[0] + "/false_arm/terminal"
+        assert expected in stops, (expected, sorted(stops))
 
     return CapabilityWitness(
         "rich_branch_decision_bodies",

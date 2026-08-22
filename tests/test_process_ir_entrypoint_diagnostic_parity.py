@@ -550,9 +550,24 @@ def test_both_entry_points_serve_one_diagnostic_identity():
     """THE GATE. For every generated document the two entry points must agree on
     the complete ordered diagnostic vector — code, JSON pointer, message and
     remediation — not merely on whether they refuse."""
+    rows = _measured()["rows"]
+
+    # An INTERNAL-FAILURE is never parity, however symmetric. #177 gave the shared driver a
+    # structured internal-failure outcome so an unexpected exception is reported instead of
+    # escaping raw — but equality alone then turned a crash on BOTH paths into a matching,
+    # passing row. A previously-failing raw crash must not become green by being mutual.
+    broken = [
+        (cid, parser, compiler)
+        for cid, _ir, parser, compiler in rows
+        if parser[0] == "INTERNAL-FAILURE" or compiler[0] == "INTERNAL-FAILURE"
+    ]
+    assert broken == [], "\n".join(
+        "{0}\n  parser  : {1}\n  compiler: {2}".format(*b) for b in broken[:20]
+    )
+
     mismatches = [
         (cid, parser, compiler)
-        for cid, _ir, parser, compiler in _measured()["rows"]
+        for cid, _ir, parser, compiler in rows
         if parser != compiler
     ]
     assert mismatches == [], "\n".join(

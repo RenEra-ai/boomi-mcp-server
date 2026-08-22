@@ -72,10 +72,14 @@ def _finding_rows(text):
         # derived-class guard stayed green for a finding it never saw. Silent omission is
         # the worst failure mode for this check, because omission is what lets the table go
         # stale.
-        if not line.startswith("|"):
-            continue
+        # A row need not carry OUTER pipes at all — Markdown renders
+        # `` `A6-10` | src | ... `` in the same table. Requiring a leading `|` silently
+        # skipped such a row, and a skipped row is what lets the derived table go stale.
+        # A line is a candidate if it splits into the right number of cells.
         cells = _cells(line)
-        if len(cells) < 9 or cells[0] in {"ID", "---"}:
+        if len(cells) < 9:
+            continue
+        if cells[0] in {"ID", "---"}:
             continue
         match = re.search(r"DC-177-[A-Z]", cells[5])
         if match is None:
