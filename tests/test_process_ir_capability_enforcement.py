@@ -276,8 +276,12 @@ def test_every_witness_records_its_fixture_provenance():
                     "frozen claim not bound to what was compiled",
                     {"claimed": sorted(named),
                      "unclaimed compiles": len(compiled - claimed),
+                     # Same DOMAIN as `compiled`: model digests. Comparing the fixture's
+                     # raw-JSON digest here reported every fixture as never-compiled on any
+                     # mixed failure, hiding which one was actually missing.
                      "claimed but never compiled": sorted(
-                         rel for rel in named if opened[rel] not in compiled)},
+                         rel for rel in named
+                         if expected_model_digest(rel) not in compiled)},
                 ))
                 continue
             frozen.append(key)

@@ -160,23 +160,34 @@ def expected_model_digest(relative):
 
 
 class record_compiles:
-    """Record every model reaching `compile_process_ir_v1`, whatever helper called it."""
+    """Record every model reaching the shared compile CORE.
+
+    Patching `pipeline.compile_process_ir_v1` was not enough: the package re-exports that
+    name as its own alias (`boomi_mcp.compiler.process_ir.compile_process_ir_v1`), which
+    keeps pointing at the original, and `parse_and_compile_process_ir_v1` is a second public
+    entry point entirely. Patching each binding is the same open-ended chase that the AST
+    resolver and the per-helper recording both lost.
+
+    `_compile_parsed_process_ir_v1` is the one function BOTH public entry points call
+    (`pipeline.py:434`, `:461`, `:571`), so instrumenting it covers every binding, present
+    or future, including aliases this module has never heard of.
+    """
 
     def __enter__(self):
         from boomi_mcp.compiler.process_ir import pipeline
 
         self._pipeline = pipeline
-        self._real = pipeline.compile_process_ir_v1
+        self._real = pipeline._compile_parsed_process_ir_v1
 
-        def _recording(ir, symbols, **kwargs):
+        def _recording(ir, *args, **kwargs):
             _COMPILED_MODELS.append(_model_digest(ir))
-            return self._real(ir, symbols, **kwargs)
+            return self._real(ir, *args, **kwargs)
 
-        pipeline.compile_process_ir_v1 = _recording
+        pipeline._compile_parsed_process_ir_v1 = _recording
         return self
 
     def __exit__(self, *exc):
-        self._pipeline.compile_process_ir_v1 = self._real
+        self._pipeline._compile_parsed_process_ir_v1 = self._real
         return False
 
 
