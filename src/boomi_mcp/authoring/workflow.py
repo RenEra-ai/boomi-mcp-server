@@ -1292,6 +1292,7 @@ _EFFECT_DECLARATION_REMEDIATIONS = {
 def _validate_processes(
     normalized: _NormalizedIntent,
     declarations: Any = None,
+    conflict_policy: str = "reuse",
 ) -> Tuple[ValidationReportSummaryV1, Tuple[AuthoringDiagnosticV1, ...], Any, Any]:
     """Run the unified #143 semantic validator over every authored process.
 
@@ -1335,6 +1336,7 @@ def _validate_processes(
         child_roots={
             "$ref:" + key: root for key, root in normalized.process_roots
         },
+        conflict_policy=conflict_policy,
     )
     for finding in resolution.findings:
         errors += 1
@@ -1703,7 +1705,7 @@ def plan_authoring_request_v1(
 
     normalized = _normalize_intent(request)
     validation, validation_diagnostics, symbols, effect_capabilities = _validate_processes(
-        normalized, request.effect_declarations
+        normalized, request.effect_declarations, request.intent.conflict_policy
     )
     topology_diagnostics = _validate_topology(request, normalized, profile)
     decisions, decision_diagnostics = _evaluate_decisions(request, normalized)

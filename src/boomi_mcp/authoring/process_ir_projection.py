@@ -422,10 +422,17 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
     "cache_put": {
         "category": "state",
         "title": "Cache put (add to cache)",
+        # The POSITION-INDEPENDENT half only. The trailing-step rule differs by
+        # body and is DERIVED into an ordering fact
+        # (`_derived_trailing_cache_put_fact`); stating it here as well produced a
+        # served entry that contradicted its own ordering fact for the bodies
+        # #154 widened. A summary that restates a rule it does not own is the same
+        # duplicate-authority defect in prose form.
         "summary": (
-            "Writes the stream into a document cache and CONSUMES it: a cache_put "
-            "in a step position must be followed immediately by a stream-"
-            "replacing cache read."
+            "Writes the stream into a document cache and CONSUMES it. A cache_put "
+            "in a MID-LIST step position must be followed immediately by a "
+            "stream-replacing cache read; as the last step the rule depends on "
+            "the body's terminal — see this entry's ordering facts."
         ),
         _ORDERING: (),
         _DOCS: ("required", "consumed", "all_documents"),
@@ -994,13 +1001,14 @@ def _derived_trailing_cache_put_fact(kind: str) -> Tuple[str, ...]:
     )
     if not tolerated:
         return (
-            "A cache_put in a step position must be followed by a stream-replacing "
-            "cache read; no body tolerates it as the last step.",
+            "A cache_put in a MID-LIST step position must be followed immediately "
+            "by a stream-replacing cache read; no body tolerates it as the last "
+            "step.",
         )
     return (
-        "A cache_put in a step position must be followed by a stream-replacing "
-        "cache read. As the LAST step it is tolerated only where the terminal "
-        "cannot need the stream: {0}.".format(", ".join(tolerated)),
+        "A cache_put in a MID-LIST step position must be followed immediately by "
+        "a stream-replacing cache read. As the LAST step it is tolerated only "
+        "where the terminal cannot need the stream: {0}.".format(", ".join(tolerated)),
     )
 
 

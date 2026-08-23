@@ -51,7 +51,7 @@ authored name, ref, digest, script body or property value.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 from ..errors import PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID
 
@@ -171,6 +171,22 @@ def _symbol(symbols: Any, ref: str):
     return None
 
 
+def _may_be_substituted(spec: Any, conflict_policy: str) -> bool:
+    """Whether the plan may bind an EXISTING artifact instead of this config.
+
+    Effects must describe the artifact that will EXECUTE. Under the ``reuse``
+    policy a ``create`` may resolve to a component already in the account, whose
+    live content this server has not read and is not version-bound to — so the
+    config in hand is a candidate, not the map. Opaque.
+
+    An ``update`` is different: its config IS applied to the named component, so
+    the content is established by the same request that declares it.
+    """
+    if getattr(spec, "action", None) == "update":
+        return False
+    return conflict_policy == "reuse"
+
+
 def _component(components: Sequence[Any], ref: str):
     """The authored spec for a ``$ref:key`` token, if this request carries one."""
     key = ref[len("$ref:"):] if ref.startswith("$ref:") else ref
@@ -180,24 +196,50 @@ def _component(components: Sequence[Any], ref: str):
     return None
 
 
-def derive_map_effect(config: Mapping[str, Any]) -> Optional[Tuple[tuple, tuple, bool]]:
+#: Map forms whose content is fully established by the authored config.
+#:
+#: An EXPLICIT membership test, not a default. The first version treated a missing
+#: ``map_type`` as "direct, therefore pure and replay-safe" — which made a
+#: REFERENCE-ONLY component (whose config carries no map fields at all) derive as
+#: a pure map, even though apply binds an arbitrary live map nobody inspected.
+#: Absence of a map body is absence of evidence, and this system reads absence as
+#: denial everywhere else.
+_DERIVABLE_MAP_TYPES: FrozenSet[str] = frozenset({"function", "direct", "profile"})
+
+
+def derive_map_effect(
+    config: Mapping[str, Any],
+    *,
+    substitutable: bool = False,
+) -> Optional[Tuple[tuple, tuple, bool]]:
     """``(reads, writes, replay_safe)`` for a map, or None when it is OPAQUE.
 
-    A map is derivable only when EVERY function in it is annotated. Partial
-    knowledge is never promoted to a complete effect: a map with one unknown
-    function could read or write anything, and reporting the known half as the
-    whole would be worse than reporting nothing.
-    """
-    from ..categories.components.builders.map_function_registry import FUNCTION_FAMILIES
+    Three independent ways to be opaque, and each closes a way of being wrong:
 
-    if not isinstance(config, Mapping):
+    * ``substitutable`` — the plan may bind an EXISTING live artifact instead of
+      creating this one, so the config in hand is not the map that will execute.
+      Its live content has not been inspected and is not version-bound, so
+      nothing about it may be established.
+    * an unrecognised or absent ``map_type`` — the config does not positively say
+      what the map is.
+    * any function whose effect is unannotated. Partial knowledge is never
+      promoted to a complete effect: a map with one unknown function could read or
+      write anything, and reporting the known half as the whole is worse than
+      reporting nothing.
+    """
+    from ..categories.components.builders.map_function_registry import (
+        get_function_family,
+    )
+
+    if substitutable or not isinstance(config, Mapping):
+        return None
+    map_type = config.get("map_type")
+    if map_type not in _DERIVABLE_MAP_TYPES:
         return None
     mappings = config.get("function_mappings")
     if mappings is None:
         # A direct profile-to-profile map moves fields; it touches no process state.
-        if config.get("map_type") in (None, "direct", "profile"):
-            return ((), (), True)
-        return None
+        return ((), (), True)
     if not isinstance(mappings, (list, tuple)):
         return None
 
@@ -207,7 +249,13 @@ def derive_map_effect(config: Mapping[str, Any]) -> Optional[Tuple[tuple, tuple,
     for mapping in mappings:
         if not isinstance(mapping, Mapping):
             return None
-        family = FUNCTION_FAMILIES.get(mapping.get("function_type"))
+        # THE BUILDER'S OWN LOOKUP, not a second copy of it. `get_function_family`
+        # strips and lowercases; a raw dict lookup does neither, so a mapping the
+        # builder happily emits (`" SEQUENTIAL_VALUE "`) would be unknown here.
+        # The divergence fails closed — an unknown family makes the whole map
+        # opaque — but two spellings of one lookup rule is the duplicate-authority
+        # defect regardless, and the safe direction is not a reason to keep it.
+        family = get_function_family(mapping.get("function_type"))
         if family is None or family.effect_kind is None:
             return None  # unknown or unannotated -> the whole map is opaque
         if family.effect_kind == "pure":
@@ -222,7 +270,15 @@ def derive_map_effect(config: Mapping[str, Any]) -> Optional[Tuple[tuple, tuple,
         if not isinstance(name, str) or not name:
             return None
         if family.effect_kind == "property_get":
-            reads.append((family.effect_scope, name))
+            # A DEFAULTED read cannot fail: the default establishes the value, so
+            # the property needs no prior writer. A contract read carries no
+            # has-default flag — `StateEffectV1.reads` is bare `(scope, name)` —
+            # and lineage treats every contracted read as strict. Recording this
+            # one would therefore turn a correct declaration into a false
+            # PROPERTY_READ_BEFORE_WRITE on a flow that runs fine. Omitting it
+            # establishes less, which is the safe direction.
+            if parameters.get("default_value") is None:
+                reads.append((family.effect_scope, name))
         elif family.effect_kind == "property_set":
             writes.append((family.effect_scope, name))
         else:  # pragma: no cover - closed vocabulary
@@ -304,6 +360,7 @@ def resolve_process_ir_effect_declarations(
     components: Sequence[Any] = (),
     child_roots: Optional[Mapping[str, Any]] = None,
     script_registry: Optional[Mapping] = None,
+    conflict_policy: str = "reuse",
 ) -> EffectResolutionV1:
     """Verify identity, derive content server-side, and build per-root context.
 
@@ -341,7 +398,14 @@ def resolve_process_ir_effect_declarations(
             findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "unresolved-or-wrong-type"))
             continue
         spec = _component(components, item.map_ref)
-        derived = derive_map_effect(getattr(spec, "config", None) or {}) if spec else None
+        derived = (
+            derive_map_effect(
+                getattr(spec, "config", None) or {},
+                substitutable=_may_be_substituted(spec, conflict_policy),
+            )
+            if spec
+            else None
+        )
         if derived is None:
             inert.append(pointer)
             continue

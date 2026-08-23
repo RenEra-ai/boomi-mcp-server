@@ -161,7 +161,8 @@ def test_a_matching_map_declaration_is_accepted_and_bound_to_its_root():
     ))
     components = [_map_component([
         {"function_type": "dynamic_process_property_set", "parameters": {"property_name": "OUT"}}])]
-    resolution = resolve_process_ir_effect_declarations(roots, declarations, _symbols(), components)
+    resolution = resolve_process_ir_effect_declarations(
+        roots, declarations, _symbols(), components, conflict_policy="fail")
     assert resolution.ok, resolution.findings
     capabilities = resolution.capabilities_by_root["p"]
     assert capabilities.map_effect("$ref:MAP").writes == (("dpp", "OUT"),)
@@ -176,7 +177,8 @@ def test_a_forged_map_declaration_is_rejected_rather_than_believed():
     ))
     components = [_map_component([
         {"function_type": "dynamic_process_property_set", "parameters": {"property_name": "OUT"}}])]
-    resolution = resolve_process_ir_effect_declarations(roots, declarations, _symbols(), components)
+    resolution = resolve_process_ir_effect_declarations(
+        roots, declarations, _symbols(), components, conflict_policy="fail")
     assert not resolution.ok
     assert resolution.findings[0].reason == "content-mismatch"
     assert resolution.capabilities_by_root["p"] is None
@@ -317,7 +319,8 @@ def test_capabilities_are_partitioned_per_root():
             map_ref="$ref:MAP", effect=_effect(writes=[("dpp", "OUT")], replay_safe=True)),))
     components = [_map_component([
         {"function_type": "dynamic_process_property_set", "parameters": {"property_name": "OUT"}}])]
-    resolution = resolve_process_ir_effect_declarations(roots, declarations, _symbols(), components)
+    resolution = resolve_process_ir_effect_declarations(
+        roots, declarations, _symbols(), components, conflict_policy="fail")
     assert resolution.ok, resolution.findings
     assert len(resolution.capabilities_by_root["with_map"].map_effects) == 1
     assert resolution.capabilities_by_root["without_map"].map_effects == ()
@@ -340,7 +343,8 @@ def test_the_public_declaration_object_never_becomes_the_compiler_context():
             map_ref="$ref:MAP", effect=_effect(writes=[("dpp", "OUT")], replay_safe=True)),))
     components = [_map_component([
         {"function_type": "dynamic_process_property_set", "parameters": {"property_name": "OUT"}}])]
-    resolution = resolve_process_ir_effect_declarations(roots, declarations, _symbols(), components)
+    resolution = resolve_process_ir_effect_declarations(
+        roots, declarations, _symbols(), components, conflict_policy="fail")
     capabilities = resolution.capabilities_by_root["p"]
     assert isinstance(capabilities, ProcessIRValidationCapabilitiesV1)
     assert InternalMap is not ProcessIRMapEffectDeclarationV1
@@ -361,7 +365,8 @@ def test_one_bad_declaration_withholds_the_whole_context():
     )
     components = [_map_component([
         {"function_type": "dynamic_process_property_set", "parameters": {"property_name": "OUT"}}])]
-    resolution = resolve_process_ir_effect_declarations(roots, declarations, _symbols(), components)
+    resolution = resolve_process_ir_effect_declarations(
+        roots, declarations, _symbols(), components, conflict_policy="fail")
     assert not resolution.ok
     assert resolution.capabilities_by_root["p"] is None
 
@@ -385,7 +390,8 @@ def test_findings_are_value_free():
     declarations = ProcessIREffectDeclarationsV1(map_effects=(
         ProcessIRMapEffectDeclarationV1(
             map_ref="$ref:MAP", effect=_effect(writes=[("dpp", "OTHER")])),))
-    resolution = resolve_process_ir_effect_declarations(roots, declarations, _symbols(), components)
+    resolution = resolve_process_ir_effect_declarations(
+        roots, declarations, _symbols(), components, conflict_policy="fail")
     assert resolution.findings
     blob = " ".join(f.code + f.path + f.reason for f in resolution.findings)
     assert canary not in blob, blob
@@ -838,3 +844,83 @@ def test_an_exception_carrying_no_diagnostics_still_falls_back_to_its_class():
         pass
 
     assert _cause_codes_for(_Bare()) == ("_Bare",)
+
+
+# ---------------------------------------------------------------------------
+# Codex P1: effects must describe the artifact that will EXECUTE
+# ---------------------------------------------------------------------------
+
+
+def test_a_reference_only_map_is_opaque_not_pure():
+    """The hole this closed.
+
+    A reference-only component carries no map fields at all. Reading that as
+    "direct, therefore pure and replay-safe" let an arbitrary live map — never
+    inspected, not version-bound — be established as touching no process state,
+    which could suppress a real retry-safety or lineage error.
+    """
+    assert derive_map_effect({}) is None
+    assert derive_map_effect({"component_id": "some-live-map"}) is None
+    # ...and the control: a config that DOES say what it is still derives.
+    assert derive_map_effect({"map_type": "direct"}) == ((), (), True)
+
+
+def test_a_create_under_reuse_is_opaque_because_the_plan_may_substitute_it():
+    roots = [("p", _root_with_map())]
+    declarations = ProcessIREffectDeclarationsV1(map_effects=(
+        ProcessIRMapEffectDeclarationV1(
+            map_ref="$ref:MAP", effect=_effect(writes=[("dpp", "OUT")], replay_safe=True)),))
+    components = [_map_component([
+        {"function_type": "dynamic_process_property_set", "parameters": {"property_name": "OUT"}}])]
+
+    reuse = resolve_process_ir_effect_declarations(
+        roots, declarations, _symbols(), components, conflict_policy="reuse")
+    assert reuse.ok, reuse.findings
+    assert reuse.inert == ("/effect_declarations/map_effects/0",)
+    assert reuse.capabilities_by_root["p"].map_effects == ()
+
+    # CONTROL: the identical request under a policy that really creates it.
+    fail = resolve_process_ir_effect_declarations(
+        roots, declarations, _symbols(), components, conflict_policy="fail")
+    assert fail.ok and len(fail.capabilities_by_root["p"].map_effects) == 1
+
+
+def test_an_update_is_not_substitutable_even_under_reuse():
+    """An update's config IS applied to the named component."""
+    from boomi_mcp.authoring.process_ir_effects import _may_be_substituted
+
+    create = IntegrationComponentSpec(key="MAP", type="transform.map", action="create", config={})
+    update = IntegrationComponentSpec(
+        key="MAP", type="transform.map", action="update", component_id="live-1", config={})
+    assert _may_be_substituted(create, "reuse") is True
+    assert _may_be_substituted(create, "fail") is False
+    assert _may_be_substituted(update, "reuse") is False
+
+
+def test_the_function_lookup_is_the_builders_own():
+    """A padded, upper-cased family name the builder accepts must not read as
+    unknown here — two spellings of one lookup rule is the duplicate-authority
+    defect even when the divergence happens to fail closed."""
+    from boomi_mcp.categories.components.builders.map_function_registry import (
+        get_function_family,
+    )
+
+    assert get_function_family("  SEQUENTIAL_VALUE  ") is not None
+    derived = derive_map_effect({"map_type": "function", "function_mappings": [
+        {"function_type": "  SEQUENTIAL_VALUE  ", "parameters": {}}]})
+    assert derived == ((), (), False), derived
+
+
+def test_a_defaulted_property_get_records_no_strict_read():
+    """A contract read carries no has-default flag and lineage treats every one
+    as strict, so recording a defaulted read would fail a flow that runs fine."""
+    defaulted = derive_map_effect({"map_type": "function", "function_mappings": [
+        {"function_type": "dynamic_process_property_get",
+         "parameters": {"property_name": "P", "default_value": "fallback"}}]})
+    assert defaulted == ((), (), True), defaulted
+    # CONTROL: without the default it IS a read, so the omission is about the
+    # default rather than about the derivation never recording reads.
+    plain = derive_map_effect({"map_type": "function", "function_mappings": [
+        {"function_type": "dynamic_process_property_get",
+         "parameters": {"property_name": "P"}}]})
+    assert plain == ((("dpp", "P"),), (), True), plain

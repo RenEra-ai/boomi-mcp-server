@@ -1512,3 +1512,21 @@ def test_every_allowlisted_sentence_is_still_present_somewhere():
     for kind, sentences in pr._REVIEWED_PLACEMENT_PROSE.items():
         for sentence in sentences:
             assert sentence in served, (kind, sentence)
+
+
+def test_the_cache_put_summary_does_not_contradict_its_ordering_facts():
+    """#154 Codex P2: the entry said BOTH that every step-position cache_put
+    needs an immediate read AND that a trailing one is allowed in two bodies.
+
+    A served entry that contradicts itself is worse than either half alone — a
+    caller cannot tell which sentence to believe, and the machine-readable
+    ordering fact is the one that matches enforcement.
+    """
+    entry = _node_entries_by_id()["node.cache_put"]
+    # the summary must scope its unconditional claim to MID-LIST
+    assert "MID-LIST" in entry.summary
+    # ...and must not restate the trailing rule it does not own
+    assert "Branch path terminal" not in entry.summary
+    trailing = [f for f in entry.ordering_facts if "LAST step" in f]
+    assert len(trailing) == 1, entry.ordering_facts
+    assert "MID-LIST" in trailing[0]
