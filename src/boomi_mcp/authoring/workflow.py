@@ -483,10 +483,14 @@ def _normalize_intent(request: AuthoringRequestV1) -> _NormalizedIntent:
         )
 
     # kind == "recipe"
-    return _normalize_recipe_intent(intent, request.effect_declarations)
+    return _normalize_recipe_intent(
+        intent, request.effect_declarations, intent.conflict_policy
+    )
 
 
-def _normalize_recipe_intent(intent, effect_declarations=None) -> _NormalizedIntent:
+def _normalize_recipe_intent(
+    intent, effect_declarations=None, conflict_policy: str = "reuse"
+) -> _NormalizedIntent:
     """Run the registered recipes and take their assembled output.
 
     Composition is NOT re-implemented here: ``run_recipes`` owns descriptor
@@ -521,6 +525,7 @@ def _normalize_recipe_intent(intent, effect_declarations=None) -> _NormalizedInt
             catalog=MaterializationCatalog(catalog_entries),
             connector_metadata=connector_metadata,
             effect_declarations=effect_declarations,
+            conflict_policy=conflict_policy,
         )
     except RecipeError as exc:
         # The recipe layer's own codes are carried VALUE-FREE as causatives; the

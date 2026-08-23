@@ -153,12 +153,38 @@ def test_compile_is_always_called_with_no_validation_policy(monkeypatch):
     assert all(policy is None for policy in seen), seen
 
 
+#: Parameters whose name contains "policy" but which cannot carry a validation
+#: exemption. Each entry is a REVIEWED exception, not a loophole.
+#:
+#: `conflict_policy` (#154) selects create / clone / fail / reuse materialization
+#: behaviour. The recipe path forwards it to ONE place — the effect resolver's
+#: substitutability decision, which is about whether the plan may bind an
+#: existing artifact instead of the authored config. It reaches no validation
+#: gate, and `validation_policy=None` stays pinned at both compile call sites,
+#: which the source assertions below check independently of this list.
+_REVIEWED_POLICY_PARAMETERS = frozenset({"conflict_policy"})
+
+
 def test_run_recipes_exposes_no_seam_for_a_validation_policy():
-    """Structural: there is no parameter through which one could be passed."""
+    """Structural: there is no parameter through which one could be passed.
+
+    The name test is a TRIP, not the guarantee. Its teeth are the source
+    assertions below — `validation_policy=None` pinned, no other assignment
+    anywhere, and no import of the legacy policy registry (next test). A new
+    `*_policy` parameter must be reviewed and added to the list above, which is
+    what stops the trip from being widened by habit.
+    """
     signature = inspect.signature(run_recipes)
     for name in signature.parameters:
+        if name in _REVIEWED_POLICY_PARAMETERS:
+            continue
         assert "policy" not in name, name
         assert "exempt" not in name, name
+
+    # The exception list may not name a parameter that no longer exists, or it
+    # would silently pre-approve a future one that reuses the name.
+    for reviewed in _REVIEWED_POLICY_PARAMETERS:
+        assert reviewed in signature.parameters, reviewed
 
     source = Path(engine_module.__file__).read_text()
     assert "validation_policy=None" in source

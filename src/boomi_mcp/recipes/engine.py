@@ -1580,6 +1580,7 @@ def run_recipes(
     topology_context: Any = None,
     resolver=placeholder_component_id,
     effect_declarations: Any = None,
+    conflict_policy: str = "reuse",
 ) -> RecipeRunResultV1:
     """Run, compose, and canonically validate a set of recipe requests.
 
@@ -1679,7 +1680,8 @@ def run_recipes(
 
     components = _resolve_components(composed, catalog)
     process_artifacts = _compile_processes(
-        composed, components, connector_metadata, resolver, effect_declarations
+        composed, components, connector_metadata, resolver, effect_declarations,
+        conflict_policy,
     )
     topology_plans = _plan_topologies(composed, components, topology_context)
     _evaluate_constraints(composed, components, active)
@@ -1729,6 +1731,7 @@ def _compile_processes(
     connector_metadata: Optional[Mapping[str, Tuple[Optional[str], Optional[str]]]],
     resolver,
     effect_declarations: Any = None,
+    conflict_policy: str = "reuse",
 ) -> List[Tuple[str, Any]]:
     """The canonical chain, per assembled process. No exemption is reachable."""
     from ..compiler.process_ir.diagnostics import ProcessIRCompileError
@@ -1750,6 +1753,12 @@ def _compile_processes(
         symbols,
         components,
         child_roots={"$ref:" + key: root for key, root in composed.process_roots},
+        # #154 (QA-154-r2-02). Pinning this to the default made a recipe intent's
+        # DECLARED policy invisible to substitutability. The direction was
+        # conservative — `reuse` is the strictest — but a policy that is ignored
+        # rather than applied is the same omission shape as the compile site that
+        # silently dropped the whole context.
+        conflict_policy=conflict_policy,
     )
     if resolution.findings:
         raise RecipeError(

@@ -174,15 +174,39 @@ def _symbol(symbols: Any, ref: str):
 def _may_be_substituted(spec: Any, conflict_policy: str) -> bool:
     """Whether the plan may bind an EXISTING artifact instead of this config.
 
-    Effects must describe the artifact that will EXECUTE. Under the ``reuse``
-    policy a ``create`` may resolve to a component already in the account, whose
-    live content this server has not read and is not version-bound to — so the
-    config in hand is a candidate, not the map. Opaque.
+    Effects must describe the artifact that will EXECUTE, so a component the plan
+    RESOLVES rather than writes is opaque: its live content has not been read and
+    is not version-bound.
 
-    An ``update`` is different: its config IS applied to the named component, so
-    the content is established by the same request that declares it.
+    ``component_materialization_mode`` is the authority for which of those a spec
+    is, and it is ASKED rather than re-derived. The first version of this function
+    re-implemented it as "update is safe, otherwise depends on the policy" and
+    drifted immediately: it missed ``reference_only``, which that function checks
+    BEFORE ``action`` and which resolves to a reuse **independent of
+    conflict_policy** (``integration_builder`` says so in as many words). So a
+    ``{reference_only: true, map_type: "direct"}`` spec derived a pure,
+    replay-safe effect for a component nobody had read.
+
+    The policy overlay is the one thing that function does not model: a plain
+    ``create`` may still COLLIDE and be reused, and only the request's
+    ``conflict_policy`` decides that. ``clone`` writes a suffixed new component
+    and ``fail`` refuses, so both leave the config authoritative.
     """
-    if getattr(spec, "action", None) == "update":
+    # The module's OWN constants, imported rather than re-typed. The first
+    # attempt at this fix compared against the literal "reuse" while the constant
+    # is "reuse_reference", so it matched nothing and changed nothing — a
+    # hand-copied vocabulary failing exactly the way the hand-copied RULE just
+    # had. Two spellings of one value is the same defect at a smaller scale.
+    from ..recipes.materialization import (
+        _REUSE,
+        _UPDATE,
+        component_materialization_mode,
+    )
+
+    mode = component_materialization_mode(spec)
+    if mode == _REUSE:
+        return True
+    if mode == _UPDATE:
         return False
     return conflict_policy == "reuse"
 

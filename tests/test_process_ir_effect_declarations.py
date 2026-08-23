@@ -632,21 +632,25 @@ def test_the_materialization_compile_actually_receives_the_context(monkeypatch):
     assert seen and all(item is None for item in seen), seen
 
 
-def test_the_recipe_intent_forwards_declarations_to_the_engine():
+def test_the_recipe_intent_forwards_declarations_and_policy_to_the_engine():
     """A recipe-kind intent compiles INSIDE normalization, before validation.
 
     So if the declarations do not reach `run_recipes` at that point, that intent
-    kind can never use the channel however well the later sites are wired.
+    kind can never use the channel however well the later sites are wired. The
+    conflict policy travels the same way (QA-154-r2-02): pinning it to the
+    default made a declared policy invisible to substitutability.
     """
     import inspect
 
     from boomi_mcp.authoring import workflow as _workflow
+    from boomi_mcp.recipes.engine import _compile_processes, run_recipes
 
-    source = inspect.getsource(_workflow._normalize_recipe_intent)
-    assert "effect_declarations=effect_declarations" in source, source
-    # ...and the caller supplies it from the request rather than defaulting.
-    normalize = inspect.getsource(_workflow._normalize_intent)
-    assert "_normalize_recipe_intent(intent, request.effect_declarations)" in normalize
+    assert "effect_declarations" in inspect.signature(run_recipes).parameters
+    assert "conflict_policy" in inspect.signature(run_recipes).parameters
+    assert "effect_declarations" in inspect.signature(_compile_processes).parameters
+    assert "conflict_policy" in inspect.signature(_compile_processes).parameters
+    forwarded = inspect.signature(_workflow._normalize_recipe_intent).parameters
+    assert "effect_declarations" in forwarded and "conflict_policy" in forwarded
 
 
 # ---------------------------------------------------------------------------
@@ -924,3 +928,147 @@ def test_a_defaulted_property_get_records_no_strict_read():
         {"function_type": "dynamic_process_property_get",
          "parameters": {"property_name": "P"}}]})
     assert plain == ((("dpp", "P"),), (), True), plain
+
+
+# ---------------------------------------------------------------------------
+# QA-154-r2-03: pin the CALL SITE, not only the callee
+# ---------------------------------------------------------------------------
+
+
+def _drive_compile_watching_materialization(monkeypatch, drop_argument):
+    """Compile a fixture request and record what the call site handed onward.
+
+    The resolver is replaced with one that returns a KNOWN context for every
+    root, so the test does not depend on the fixture plan carrying a bindable
+    cache — the subject is the THREADING from resolver to call site to callee,
+    which is exactly what QA's mutant severed.
+    """
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _support = str(_Path(__file__).resolve().parent)
+    if _support not in _sys.path:
+        _sys.path.insert(0, _support)
+    from _m12_11_support import MutationSpy, process_ir_request
+
+    from boomi_mcp.authoring import process_ir_effects as _effects
+    from boomi_mcp.authoring import process_materialization as _pm
+    from boomi_mcp.authoring import workflow as _workflow
+    from boomi_mcp.compiler.process_ir.semantic_validation.contracts import (
+        ProcessIRValidationCapabilitiesV1,
+    )
+
+    MutationSpy().install(monkeypatch)
+    sentinel = ProcessIRValidationCapabilitiesV1()
+
+    def fake_resolve(process_roots, declarations, symbols, components=(), **kwargs):
+        return _effects.EffectResolutionV1(
+            {key: sentinel for key, _ir in process_roots}, (), ()
+        )
+
+    monkeypatch.setattr(_effects, "resolve_process_ir_effect_declarations", fake_resolve)
+
+    seen = []
+    real = _pm.build_materialization_plan
+
+    def watcher(**kwargs):
+        if drop_argument:
+            kwargs.pop("capabilities", None)
+        seen.append(kwargs.get("capabilities"))
+        return real(**kwargs)
+
+    monkeypatch.setattr(_pm, "build_materialization_plan", watcher)
+    try:
+        _workflow.compile_authoring_request_v1(
+            process_ir_request(), profile="qa_profile", account_id="qa_account"
+        )
+    except Exception:
+        pass
+    return seen, sentinel
+
+
+def test_the_compile_path_hands_the_resolved_context_to_materialization(monkeypatch):
+    """Pin the CALL SITE, not only the callee.
+
+    Both earlier tests targeted `build_materialization_plan` itself, so deleting
+    `(effect_capabilities or {}).get(component_key)` at its call site in
+    `build_artifact_descriptors` left the suite green while the external-writer
+    compile failed again — QA measured 4041 tests green under that mutant. A
+    callee that accepts a parameter nobody passes is not a fix.
+    """
+    seen, sentinel = _drive_compile_watching_materialization(monkeypatch, drop_argument=False)
+    assert seen, "build_materialization_plan was never called — the pin is vacuous"
+    assert all(item is sentinel for item in seen), seen
+
+
+def test_the_call_site_pin_fails_when_the_argument_is_dropped(monkeypatch):
+    """CONTROL: reproduce QA's mutant and prove the pin above discriminates."""
+    seen, _sentinel = _drive_compile_watching_materialization(monkeypatch, drop_argument=True)
+    assert seen, "the mutant harness never fired — the control is vacuous"
+    assert all(item is None for item in seen), seen
+
+
+# ---------------------------------------------------------------------------
+# QA-154-r2-01: reference_only resolves to a reuse INDEPENDENT of the policy
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("policy", ["reuse", "clone", "fail"])
+def test_a_reference_only_component_is_substitutable_under_every_policy(policy):
+    """`component_materialization_mode` checks `reference_only` BEFORE `action`,
+    and the builder resolves it to a reuse independent of `conflict_policy`.
+
+    The first version of `_may_be_substituted` re-derived that rule as "update is
+    safe, otherwise ask the policy" and missed this case entirely, so a
+    `{reference_only: true, map_type: "direct"}` spec derived a pure,
+    replay-safe effect for a component nobody had read.
+    """
+    from boomi_mcp.authoring.process_ir_effects import _may_be_substituted
+
+    spec = IntegrationComponentSpec(
+        key="MAP", type="transform.map", action="create",
+        config={"reference_only": True, "map_type": "direct"},
+    )
+    assert _may_be_substituted(spec, policy) is True
+    # ...and the QA reproduction derives nothing rather than a pure effect
+    assert derive_map_effect(spec.config, substitutable=True) is None
+
+
+def test_substitutability_uses_the_materialization_authority_not_a_copy():
+    """The rule is ASKED of `component_materialization_mode`, and the constants
+    are imported rather than re-typed.
+
+    Both halves were defects in turn: the rule was re-derived and missed
+    `reference_only`, then the first fix compared against the literal `"reuse"`
+    while the constant is `"reuse_reference"` — so it matched nothing and changed
+    nothing.
+    """
+    from boomi_mcp.recipes.materialization import _REUSE, component_materialization_mode
+
+    assert _REUSE != "reuse", "the literal and the constant differ — that was the bug"
+    spec = IntegrationComponentSpec(
+        key="MAP", type="transform.map", action="create",
+        config={"reference_only": True},
+    )
+    assert component_materialization_mode(spec) == _REUSE
+
+
+@pytest.mark.parametrize(
+    "action,config,policy,expected",
+    [
+        ("create", {}, "reuse", True),    # may collide and be reused
+        ("create", {}, "clone", False),   # writes a suffixed NEW component
+        ("create", {}, "fail", False),    # refuses on collision
+        ("update", {}, "reuse", False),   # the config IS applied
+    ],
+)
+def test_the_policy_overlay_is_the_part_the_authority_does_not_model(
+    action, config, policy, expected
+):
+    from boomi_mcp.authoring.process_ir_effects import _may_be_substituted
+
+    spec = IntegrationComponentSpec(
+        key="MAP", type="transform.map", action=action,
+        component_id="live-1" if action == "update" else None, config=config,
+    )
+    assert _may_be_substituted(spec, policy) is expected
