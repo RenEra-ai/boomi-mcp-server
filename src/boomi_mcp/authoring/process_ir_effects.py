@@ -220,15 +220,32 @@ def _component(components: Sequence[Any], ref: str):
     return None
 
 
-#: Map forms whose content is fully established by the authored config.
-#:
-#: An EXPLICIT membership test, not a default. The first version treated a missing
-#: ``map_type`` as "direct, therefore pure and replay-safe" — which made a
-#: REFERENCE-ONLY component (whose config carries no map fields at all) derive as
-#: a pure map, even though apply binds an arbitrary live map nobody inspected.
-#: Absence of a map body is absence of evidence, and this system reads absence as
-#: denial everywhere else.
-_DERIVABLE_MAP_TYPES: FrozenSet[str] = frozenset({"function", "direct", "profile"})
+def _map_type_vocabularies() -> Tuple[FrozenSet[str], FrozenSet[str]]:
+    """``(function-map types, direct-map types)`` — ASKED of the builders.
+
+    Hand-listing these was wrong in BOTH directions: the list omitted
+    ``map_function`` (a supported alias, so a valid declaration went silently
+    inert and an impure family inside a retry region lost its replay-unsafe
+    effect) and invented ``profile``, which no builder supports at all. Two
+    spellings of one vocabulary is the same duplicate-authority defect as two
+    spellings of one rule, and this was its fourth appearance in this slice —
+    so the vocabulary is derived rather than corrected.
+
+    ``MapScriptBuilder`` is DELIBERATELY absent. A script map's effect depends on
+    what its embedded scripts do, and the only authority for that is the vetted
+    registry; inspecting the map config would establish nothing. Script maps are
+    therefore opaque by falling through, which is the correct answer rather than
+    an omission.
+    """
+    from ..categories.components.builders.map_builder import (
+        DirectMapBuilder,
+        MapFunctionBuilder,
+    )
+
+    return (
+        frozenset(MapFunctionBuilder.SUPPORTED_MAP_TYPES),
+        frozenset(DirectMapBuilder.SUPPORTED_MAP_TYPES),
+    )
 
 
 def derive_map_effect(
@@ -257,12 +274,17 @@ def derive_map_effect(
 
     if substitutable or not isinstance(config, Mapping):
         return None
+    function_types, direct_types = _map_type_vocabularies()
     map_type = config.get("map_type")
-    if map_type not in _DERIVABLE_MAP_TYPES:
+    if map_type in direct_types:
+        # A direct profile-to-profile map moves fields; it touches no process state.
+        return ((), (), True)
+    if map_type not in function_types:
+        # Unrecognised, absent, or a form whose content this cannot establish
+        # (a script map). Opaque.
         return None
     mappings = config.get("function_mappings")
     if mappings is None:
-        # A direct profile-to-profile map moves fields; it touches no process state.
         return ((), (), True)
     if not isinstance(mappings, (list, tuple)):
         return None

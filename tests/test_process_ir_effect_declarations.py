@@ -1072,3 +1072,88 @@ def test_the_policy_overlay_is_the_part_the_authority_does_not_model(
         component_id="live-1" if action == "update" else None, config=config,
     )
     assert _may_be_substituted(spec, policy) is expected
+
+
+# ---------------------------------------------------------------------------
+# Codex round 2 P1: the map-type vocabulary is the builders', not a copy
+# ---------------------------------------------------------------------------
+
+
+def test_every_function_map_alias_the_builder_supports_is_derivable():
+    """`map_function` is a supported alias, and the hand-written list omitted it.
+
+    A declaration on such a map went silently INERT, so legitimate writes could
+    not satisfy lineage and an impure family inside a retry region lost its
+    `replay_safe=False` — a retry-safety ERROR degraded to a non-blocking
+    opaque-effect warning.
+    """
+    from boomi_mcp.categories.components.builders.map_builder import MapFunctionBuilder
+
+    impure = [{"function_type": "sequential_value", "parameters": {}}]
+    assert MapFunctionBuilder.SUPPORTED_MAP_TYPES, "no aliases — the test would be vacuous"
+    for alias in MapFunctionBuilder.SUPPORTED_MAP_TYPES:
+        derived = derive_map_effect({"map_type": alias, "function_mappings": impure})
+        assert derived == ((), (), False), (alias, derived)
+
+
+def test_every_direct_map_type_the_builder_supports_is_pure():
+    from boomi_mcp.categories.components.builders.map_builder import DirectMapBuilder
+
+    assert DirectMapBuilder.SUPPORTED_MAP_TYPES
+    for alias in DirectMapBuilder.SUPPORTED_MAP_TYPES:
+        assert derive_map_effect({"map_type": alias}) == ((), (), True), alias
+
+
+def test_a_script_map_is_opaque_because_its_authority_is_the_registry():
+    """`MapScriptBuilder`'s types are deliberately absent from the derivation.
+
+    A script map's effect depends on what its embedded scripts do, and the only
+    authority for that is the vetted registry. Inspecting the map config would
+    establish nothing, so falling through to opaque is the correct answer rather
+    than a gap.
+    """
+    from boomi_mcp.categories.components.builders.map_builder import MapScriptBuilder
+
+    assert MapScriptBuilder.SUPPORTED_MAP_TYPES
+    for alias in MapScriptBuilder.SUPPORTED_MAP_TYPES:
+        assert derive_map_effect({"map_type": alias}) is None, alias
+
+
+def test_the_vocabulary_is_read_from_the_builders_not_restated():
+    """NON-VACUITY WITNESS.
+
+    Narrows a builder's supported types and proves the derivation follows. A
+    hand-written copy would keep deriving the removed alias, which is exactly how
+    the original list drifted in both directions at once.
+    """
+    from boomi_mcp.categories.components.builders import map_builder as mb
+
+    original = mb.MapFunctionBuilder.SUPPORTED_MAP_TYPES
+    assert "map_function" in original
+    try:
+        mb.MapFunctionBuilder.SUPPORTED_MAP_TYPES = ("function",)
+        assert "map_function" not in mb.MapFunctionBuilder.SUPPORTED_MAP_TYPES
+        assert derive_map_effect({"map_type": "map_function", "function_mappings": []}) is None
+        # CONTROL: the alias that remains still derives, so the None above is
+        # about the narrowing rather than about the derivation breaking.
+        assert derive_map_effect({"map_type": "function", "function_mappings": []}) == ((), (), True)
+    finally:
+        mb.MapFunctionBuilder.SUPPORTED_MAP_TYPES = original
+    assert derive_map_effect({"map_type": "map_function", "function_mappings": []}) == ((), (), True)
+
+
+def test_a_map_type_no_builder_supports_is_opaque():
+    """`profile` was in the hand-written list and is supported by nothing."""
+    from boomi_mcp.categories.components.builders.map_builder import (
+        DirectMapBuilder,
+        MapFunctionBuilder,
+        MapScriptBuilder,
+    )
+
+    known = (
+        set(DirectMapBuilder.SUPPORTED_MAP_TYPES)
+        | set(MapFunctionBuilder.SUPPORTED_MAP_TYPES)
+        | set(MapScriptBuilder.SUPPORTED_MAP_TYPES)
+    )
+    assert "profile" not in known
+    assert derive_map_effect({"map_type": "profile"}) is None
