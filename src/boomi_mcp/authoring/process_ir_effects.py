@@ -274,6 +274,14 @@ def derive_map_effect(
 
     if substitutable or not isinstance(config, Mapping):
         return None
+    # THE RAW-XML ESCAPE HATCH. `integration_builder` treats a config carrying
+    # `xml` as "bypasses the structured builder entirely" and emits those bytes
+    # verbatim, so `map_type` and `function_mappings` describe something that will
+    # not run. Deriving from them would be the slice's recurring defect in its
+    # purest form: an effect that describes an artifact other than the one that
+    # executes. The bytes themselves are not inspectable here, so opaque.
+    if config.get("xml"):
+        return None
     function_types, direct_types = _map_type_vocabularies()
     map_type = config.get("map_type")
     # An authored value need not be hashable. `["direct"]` is a perfectly

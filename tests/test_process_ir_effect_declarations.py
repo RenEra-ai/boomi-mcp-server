@@ -1241,3 +1241,40 @@ def test_a_non_string_map_type_survives_the_whole_resolver():
     # INERT, not a crash and not a false agreement.
     assert resolution.ok, resolution.findings
     assert resolution.inert == ("/effect_declarations/map_effects/0",)
+
+
+def test_a_raw_xml_map_is_opaque_whatever_its_structured_fields_say():
+    """Codex round 3 P2. The raw-XML escape hatch bypasses the structured
+    builder entirely, so the emitted bytes are `config["xml"]` and the
+    structured fields alongside it never run.
+
+    Deriving from them would let a matching declaration describe content the
+    server never inspected — the slice's recurring defect in its purest form.
+    """
+    structured = [{"function_type": "dynamic_process_property_set",
+                   "parameters": {"property_name": "OUT"}}]
+    # CONTROL: without the raw XML this config DOES derive, so the None below is
+    # about the escape hatch rather than about the mappings being unreadable.
+    assert derive_map_effect(
+        {"map_type": "map_function", "function_mappings": structured}
+    ) == ((), (("dpp", "OUT"),), True)
+    assert derive_map_effect(
+        {"map_type": "map_function", "xml": "<Map/>", "function_mappings": structured}
+    ) is None
+    # ...and a direct map carrying raw XML is opaque for the same reason.
+    assert derive_map_effect({"map_type": "direct", "xml": "<Map/>"}) is None
+
+
+def test_the_raw_xml_bypass_matches_the_builder_predicate():
+    """The builder's condition is a TRUTHY check on `xml`, not a presence check.
+
+    Asserted behaviourally at both ends so the two cannot drift into disagreeing
+    about an empty string.
+    """
+    from boomi_mcp.categories.integration_builder import _resolve_preservation_policy
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    comp = IntegrationComponentSpec(key="MAP", type="transform.map", config={})
+    assert _resolve_preservation_policy(comp, {"xml": "<Map/>"}) is None
+    # an EMPTY xml is falsy for the builder, and must be falsy here too
+    assert derive_map_effect({"map_type": "direct", "xml": ""}) == ((), (), True)
