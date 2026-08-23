@@ -50,8 +50,20 @@ internal. No CFG edge, node id, layout coordinate, shape id, or XML is projected
 
 from __future__ import annotations
 
+import collections.abc
 from types import MappingProxyType
-from typing import Any, Dict, FrozenSet, List, Mapping, Tuple
+from typing import (
+    Annotated,
+    Any,
+    Dict,
+    FrozenSet,
+    List,
+    Mapping,
+    Tuple,
+    Union,
+    get_args,
+    get_origin,
+)
 
 from ...errors import (
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
@@ -63,13 +75,16 @@ from ...errors import (
 )
 from ...models.process_ir import (
     _CONNECTOR_KINDS,
-    LINEAR_BODY_KINDS,
     PLACEMENT_CONNECTOR_MIXING,
     PLACEMENT_ROOT_CONNECTOR_MIXING,
     PROCESS_CALL_PLACEMENT_CONTEXT_LABELS,
     PROCESS_IR_V1_MAX_CONTROL_DEPTH,
-    TRY_CATCH_BODY_KINDS,
+    BranchLegV1,
+    DecisionFalseArmV1,
+    DecisionTrueArmV1,
     ProcessIRV1,
+    TryCatchCatchBodyV1,
+    TryCatchTryBodyV1,
     process_call_placement_verdict,
     process_call_root_verdict,
 )
@@ -88,9 +103,6 @@ CATCH_BODY = "catch_body"
 
 STEP_SLOT = "step"
 TERMINAL_SLOT = "terminal"
-
-_LINEAR = frozenset(LINEAR_BODY_KINDS)
-_TRY_CATCH = frozenset(TRY_CATCH_BODY_KINDS)
 
 #: The closed matrix. Keyed by ``(context, slot)``; the value is the exact set of
 #: admitted ``kind`` discriminators.
@@ -114,43 +126,144 @@ _TRY_CATCH = frozenset(TRY_CATCH_BODY_KINDS)
 #: * bare ``stop`` terminals -> §2.1 proves a Decision FALSE outcome may route
 #:   straight to a Stop. The model additionally requires a Branch leg / TRUE arm
 #:   to do some work first (the empty-leg question is UNPROVEN, capture §2.4).
-BODY_CAPABILITIES_V1: Mapping[Tuple[str, str], FrozenSet[str]] = MappingProxyType(
+#: The SLOT AUTHORITY TABLE. Maps each ``(context, slot)`` to the pydantic field
+#: that DEFINES what the slot admits. It carries no node kinds at all — that is
+#: the point: the kinds live in the model unions, and this table only names which
+#: field is the authority for which slot.
+#:
+#: #154 introduced it because the matrix below used to hand-list its rows. Five
+#: of them were literal kind sets, and one of those five —
+#: ``(TRY_BODY, TERMINAL_SLOT) = {"stop"}`` — was the row the issue had to widen.
+#: A hand-copy of a fact whose authority is a model field is the duplicate-authority
+#: defect class ADR-001 §6 removes, and it had already produced one drift (the
+#: Try/Catch step vocabulary silently lacking ``flow_control``/``data_process``).
+#: Deriving the matrix means a kind added to a union CANNOT silently lack a
+#: placement row.
+BODY_SLOT_AUTHORITIES_V1: Mapping[Tuple[str, str], Tuple[Any, str]] = MappingProxyType(
     {
-        (BRANCH_LEG, STEP_SLOT): _LINEAR | {"connector_call"},
-        (BRANCH_LEG, TERMINAL_SLOT): frozenset(
-            {"target", "cache_put", "stop", "process_call", "decision"}
-        ),
-        (DECISION_TRUE_ARM, STEP_SLOT): _LINEAR | {"connector_call"},
-        (DECISION_TRUE_ARM, TERMINAL_SLOT): frozenset(
-            {"target", "stop", "exception", "process_call", "branch", "decision"}
-        ),
-        (DECISION_FALSE_ARM, STEP_SLOT): _LINEAR | {"connector_call"},
-        (DECISION_FALSE_ARM, TERMINAL_SLOT): frozenset(
-            {"stop", "exception", "branch", "decision"}
-        ),
-        # #142 M12.7. Both Try/Catch bodies share ONE step vocabulary — a caught
-        # document is an ordinary document. The TERMINAL sets differ, and that
-        # asymmetry is the design:
-        #
-        # * a Try body ends only on ``stop``. An ``exception`` raised inside a
-        #   protected path would be caught by that same path's own handler, and
-        #   no evidence covers that loop; a staging ``cache_put`` is a recovery
-        #   shape, not a success one.
-        # * a Catch body ends on ``stop``, ``exception``, or a staging
-        #   ``cache_put`` — stop the document, raise it explicitly, or hand it to
-        #   a downstream sink.
-        #
-        # No control kind appears in either set: nesting is gated (a composed
-        # handler silently rewrites the outer one's effective error selection —
-        # `.codex/plans/issue-142-live-captures.md` §G6), and ``process_call``,
-        # ``flow_control``, ``data_process``, ``target`` and ``return_documents``
-        # are absent for want of evidence. All of them are rejected by ABSENCE.
-        (TRY_BODY, STEP_SLOT): _TRY_CATCH,
-        (TRY_BODY, TERMINAL_SLOT): frozenset({"stop"}),
-        (CATCH_BODY, STEP_SLOT): _TRY_CATCH,
-        (CATCH_BODY, TERMINAL_SLOT): frozenset({"stop", "exception", "cache_put"}),
+        (BRANCH_LEG, STEP_SLOT): (BranchLegV1, "steps"),
+        (BRANCH_LEG, TERMINAL_SLOT): (BranchLegV1, "terminal"),
+        (DECISION_TRUE_ARM, STEP_SLOT): (DecisionTrueArmV1, "steps"),
+        (DECISION_TRUE_ARM, TERMINAL_SLOT): (DecisionTrueArmV1, "terminal"),
+        (DECISION_FALSE_ARM, STEP_SLOT): (DecisionFalseArmV1, "steps"),
+        (DECISION_FALSE_ARM, TERMINAL_SLOT): (DecisionFalseArmV1, "terminal"),
+        (TRY_BODY, STEP_SLOT): (TryCatchTryBodyV1, "steps"),
+        (TRY_BODY, TERMINAL_SLOT): (TryCatchTryBodyV1, "terminal"),
+        (CATCH_BODY, STEP_SLOT): (TryCatchCatchBodyV1, "steps"),
+        (CATCH_BODY, TERMINAL_SLOT): (TryCatchCatchBodyV1, "terminal"),
     }
 )
+
+
+def _kinds_from_annotation(annotation: Any) -> FrozenSet[str]:
+    """Every ``kind`` discriminator reachable from a slot's field annotation.
+
+    Deliberately NOT ``models.process_ir._kinds_of``. That helper assumes the
+    exact shape ``Annotated[Union[...], FieldInfo]`` and indexes into it
+    positionally, which raises ``IndexError`` on the two shapes this table must
+    read:
+
+    * ``List[ControlBodyStepV1]`` — a step slot is a list, so the union sits one
+      container deeper;
+    * ``Annotated[Union[StopNodeV1], ...]`` — pydantic collapses a single-member
+      ``Union`` to the bare class and strips the ``Annotated``, so the try-body
+      terminal annotation is literally ``StopNodeV1``.
+
+    The second case is why this walks the annotation instead of pattern-matching
+    it. A terminal union that happens to hold exactly one member is not a special
+    case to remember; it is just a union with one member, and a reader that
+    handles the general shape never has to know which slots are currently
+    single-membered.
+    """
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return _kinds_from_annotation(get_args(annotation)[0])
+    if origin is Union:
+        out: set = set()
+        for member in get_args(annotation):
+            out |= _kinds_from_annotation(member)
+        return frozenset(out)
+    if origin in (list, tuple, set, frozenset, collections.abc.Sequence):
+        args = get_args(annotation)
+        return _kinds_from_annotation(args[0]) if args else frozenset()
+    field = getattr(annotation, "model_fields", {}).get("kind")
+    if field is None:
+        return frozenset()
+    literals = get_args(field.annotation)
+    return frozenset(literals[:1])
+
+
+def derive_body_capabilities_v1(
+    authorities: Mapping[Tuple[str, str], Tuple[Any, str]] = None,
+) -> Mapping[Tuple[str, str], FrozenSet[str]]:
+    """Build the placement matrix by READING the model fields.
+
+    Fail-closed twice over: an authority whose field yields no kinds at all is a
+    derivation that silently denies everything, so it raises here rather than
+    shipping an empty row that ``is_allowed`` would read as "nothing allowed".
+    """
+    table = BODY_SLOT_AUTHORITIES_V1 if authorities is None else authorities
+    derived = {}
+    for key, (model, field_name) in table.items():
+        field = model.model_fields.get(field_name)
+        if field is None:
+            raise RuntimeError(
+                "body slot authority {0!r} names no field {1!r} on {2}".format(
+                    key, field_name, model.__name__
+                )
+            )
+        kinds = _kinds_from_annotation(field.annotation)
+        if not kinds:
+            raise RuntimeError(
+                "body slot authority {0!r} derived an EMPTY kind set from {1}.{2} — "
+                "an empty row denies every placement".format(key, model.__name__, field_name)
+            )
+        derived[key] = kinds
+    return MappingProxyType(derived)
+
+
+#: The closed matrix. Keyed by ``(context, slot)``; the value is the exact set of
+#: admitted ``kind`` discriminators — DERIVED from the model fields named in
+#: :data:`BODY_SLOT_AUTHORITIES_V1`, never hand-listed.
+#:
+#: Live evidence (`.codex/plans/issue-141-live-captures.md`), retained because it
+#: is the audit trail for why each union member is admitted at all:
+#:
+#: * ``connector_call`` in every body  -> capability ``connector_call_in_control_body``.
+#: * ``process_call`` as a Branch-leg TERMINAL -> §2.2, seven Branch legs whose
+#:   bodies run process calls. #141 read those as ProcessCall STEPS ending in a
+#:   ``stop``; #175 corrected that: the capture attests the control edge landing
+#:   ON the call, and the platform projects a call's outbound connection from the
+#:   CALLED process's return-document shapes — four of the five captured calls
+#:   have none and no outgoing edge at all. So the call IS the end of the leg.
+#: * ``process_call`` as a TRUE-arm TERMINAL -> §2.2, ``decision ->true->
+#:   processcall``, twice. Absent from the FALSE arm in BOTH slots: the capture
+#:   attests TRUE outcomes only.
+#: * ``decision`` as a Branch-leg terminal -> §2.1, leg 2 routes into a Decision.
+#: * ``branch`` as a Branch-leg terminal   -> DELIBERATELY ABSENT. It appears
+#:   nowhere in either captured process, and fail-closed is the rule for an
+#:   unproven placement.
+#: * bare ``stop`` terminals -> §2.1 proves a Decision FALSE outcome may route
+#:   straight to a Stop. The model additionally requires a Branch leg / TRUE arm
+#:   to do some work first (the empty-leg question is UNPROVEN, capture §2.4).
+#:
+#: #142 M12.7, amended by #154. Both Try/Catch bodies share ONE step vocabulary —
+#: a caught document is an ordinary document. The TERMINAL sets differ, and that
+#: asymmetry is the design:
+#:
+#: * a Try body ends on ``stop``, or on ``return_documents`` (#154: the legacy
+#:   builder's Return Documents terminal is inside the wrapped flow). An
+#:   ``exception`` raised inside a protected path would be caught by that same
+#:   path's own handler, and no evidence covers that loop; a staging ``cache_put``
+#:   is a recovery shape, not a success one.
+#: * a Catch body ends on ``stop``, ``exception``, or a staging ``cache_put`` —
+#:   stop the document, raise it explicitly, or hand it to a downstream sink.
+#:
+#: No control kind appears in either terminal set: nesting is gated (a composed
+#: handler silently rewrites the outer one's effective error selection —
+#: `.codex/plans/issue-142-live-captures.md` §G6), and ``process_call`` and
+#: ``target`` are absent for want of evidence. All of them are rejected by ABSENCE.
+BODY_CAPABILITIES_V1: Mapping[Tuple[str, str], FrozenSet[str]] = derive_body_capabilities_v1()
 
 
 def is_allowed(context: str, slot: str, kind: str) -> bool:

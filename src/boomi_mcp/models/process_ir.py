@@ -1111,12 +1111,21 @@ def _kinds_of(union_alias: Any) -> Tuple[str, ...]:
 #: The exact kind set of :data:`LinearNodeV1`, shared by every control body.
 LINEAR_BODY_KINDS: Tuple[str, ...] = _kinds_of(LinearNodeV1)
 
-# #141 M12.6, amended by #175. The step vocabularies inside a control body. Both
-# admit the linear set plus ``connector_call`` (capability
+# #141 M12.6, amended by #175 and #154. The ONE step vocabulary shared by every
+# control body: the linear set plus ``connector_call`` (capability
 # ``connector_call_in_control_body``).
 #
-# ``process_call`` is deliberately ABSENT from both step sets. #141 admitted it
-# as a STEP and required the body to end in a ``stop``, but that generalised past
+# #154 collapsed FOUR hand-written copies of this union — Branch leg, Decision
+# TRUE arm, Decision FALSE arm, Try/Catch body — onto this single alias. Three of
+# them were byte-identical; the fourth (Try/Catch) had DRIFTED, silently lacking
+# ``flow_control`` and ``data_process`` even though the legacy builder wraps both
+# inside a process-scoped try body. That drift is the defect class the collapse
+# removes: a hand-copy of a fact whose authority is ``LinearNodeV1`` +
+# ``ConnectorCallNodeV1``. Adding a linear kind now propagates to every control
+# body at once instead of to three of four.
+#
+# ``process_call`` is deliberately ABSENT from the step set. #141 admitted it as
+# a STEP and required the body to end in a ``stop``, but that generalised past
 # the evidence: the captures attest a control edge landing ON a Process Call, not
 # a Process Call wired onward to a Stop. The platform keys a call's outbound
 # connection on the CALLED process's return-document shapes, so a call whose
@@ -1126,7 +1135,7 @@ LINEAR_BODY_KINDS: Tuple[str, ...] = _kinds_of(LinearNodeV1)
 # Nested control is a TERMINAL, never a step: a step is by definition followed by
 # something on the same path, and a control node terminalizes its path. A
 # ``process_call`` is terminal for the same structural reason.
-BranchLegStepV1 = Annotated[
+ControlBodyStepV1 = Annotated[
     Union[
         FlowControlNodeV1,
         MessageNodeV1,
@@ -1143,27 +1152,16 @@ BranchLegStepV1 = Annotated[
     Field(discriminator="kind"),
 ]
 
-# The TRUE arm shares the Branch leg's step vocabulary; the FALSE arm is the
-# reject route and admits no ProcessCall in EITHER slot (capture §2.2 attests
-# ``decision ->true-> processcall`` only).
-DecisionTrueArmStepV1 = BranchLegStepV1
+#: The exact kind set of :data:`ControlBodyStepV1`, shared by every control body.
+CONTROL_BODY_KINDS: Tuple[str, ...] = _kinds_of(ControlBodyStepV1)
 
-DecisionFalseArmStepV1 = Annotated[
-    Union[
-        FlowControlNodeV1,
-        MessageNodeV1,
-        MapRefNodeV1,
-        DataProcessNodeV1,
-        CachePutNodeV1,
-        DocumentCacheRetrieveNodeV1,
-        CacheGetNodeV1,
-        CacheRemoveNodeV1,
-        SetDdpNodeV1,
-        SetDppNodeV1,
-        ConnectorCallNodeV1,
-    ],
-    Field(discriminator="kind"),
-]
+# Every control-body step slot IS the shared vocabulary. These names are kept as
+# aliases because the placement matrix, the served projection and the diagnostic
+# pointers all speak in slot terms; the aliases carry the slot's identity while
+# the union above carries its content.
+BranchLegStepV1 = ControlBodyStepV1
+DecisionTrueArmStepV1 = ControlBodyStepV1
+DecisionFalseArmStepV1 = ControlBodyStepV1
 
 _CACHE_READ_KINDS = ("cache_get", "document_cache_retrieve")
 
@@ -1641,30 +1639,31 @@ del _model
 # document is an ordinary document, so anything legal on the protected path is
 # legal on the recovery path.
 #
+# #154 made that union THE shared control-body vocabulary rather than a fourth
+# hand-written copy of it. Until then this list omitted ``flow_control`` and
+# ``data_process`` "for want of evidence" — but the evidence exists and always
+# did: ``process_flow_builder`` hands its COMPLETE linear flow list to
+# ``_emit_try_catch_shapes``, and that list carries a ``flowcontrol`` entry
+# whenever ``flow_control`` is enabled and a ``dataprocess`` entry whenever the
+# transform mode selects one. The legacy builder has therefore been wrapping both
+# kinds inside a process-scoped try body all along; the omission was drift in a
+# hand-copy, not a fail-closed decision. Both bodies gain the two kinds together,
+# because the shared-vocabulary rule above is what decides the recovery path.
+#
 # ABSENT ON PURPOSE (fail-closed, each for its own reason):
 #   * ``branch``/``decision``/``process_call``/nested ``try_catch`` — composing
 #     two Try/Catch steps silently rewrites the OUTER step's effective error
 #     selection, and the rule differs depending on whether they are adjacent
 #     (capture §G6). A single deterministic semantic cannot be derived from the
 #     authored fields, so nesting stays out.
-#   * ``flow_control``/``data_process`` — no evidence for either placement inside
-#     a protected scope.
 #   * ``target``/``source``/``return_documents`` — legacy position-bound
-#     placeholders that have no meaning inside an error scope.
-TryCatchBodyStepV1 = Annotated[
-    Union[
-        MessageNodeV1,
-        MapRefNodeV1,
-        CachePutNodeV1,
-        DocumentCacheRetrieveNodeV1,
-        CacheGetNodeV1,
-        CacheRemoveNodeV1,
-        SetDdpNodeV1,
-        SetDppNodeV1,
-        ConnectorCallNodeV1,
-    ],
-    Field(discriminator="kind"),
-]
+#     placeholders that have no meaning inside an error scope. (``return_documents``
+#     is admitted as a try TERMINAL by #154, which is a different slot.)
+#
+# The connector-SCOPED try body narrows this vocabulary further in
+# ``body_capabilities`` — that restriction is a scope rule, not a step-union one,
+# and is unaffected by the collapse.
+TryCatchBodyStepV1 = ControlBodyStepV1
 
 #: The exact kind set of :data:`TryCatchBodyStepV1`, shared by both bodies.
 TRY_CATCH_BODY_KINDS: Tuple[str, ...] = _kinds_of(TryCatchBodyStepV1)
@@ -1866,20 +1865,12 @@ ProcessNodeV1 = Annotated[
 # Try/Catch reaches the root only through the two placements its own rules
 # define (control-only root, or terminal of a connector_call sequence).
 _ROOT_CONTROL_TERMINAL_KINDS = frozenset({"branch", "decision", "exception"})
-_ROOT_LINEAR_KINDS = frozenset(
-    {
-        "flow_control",
-        "message",
-        "map_ref",
-        "data_process",
-        "cache_put",
-        "document_cache_retrieve",
-        "cache_get",
-        "cache_remove",
-        "set_ddp",
-        "set_dpp",
-    }
-)
+#: The root sequence's linear vocabulary. DERIVED from :data:`LinearNodeV1`, not
+#: hand-listed (#154): the two were byte-identical, which made this a second copy
+#: of a fact whose authority is the union — the same duplicate-authority defect
+#: class ADR-001 §6 exists to remove. A linear kind added to ``LinearNodeV1`` now
+#: reaches the root sequence automatically instead of silently lacking a row.
+_ROOT_LINEAR_KINDS = frozenset(LINEAR_BODY_KINDS)
 
 
 class SequenceNodeV1(_ProcessIRBase):

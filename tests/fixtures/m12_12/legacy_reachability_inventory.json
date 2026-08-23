@@ -7292,7 +7292,7 @@
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "031c576bcc99ab83e58ea271038c256b5105ac6314589534d39f8e9adaa3eefb",
+      "sha256": "703185bc7b1ebd60b6e1a05d89f62f8da2210c3406071051293ba5b00be7f36b",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7397,11 +7397,11 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:c08021bc5c4003d49b3637fd9395a7d4fdb3a04e8ca45cb27d2c2131eef6f14c",
+          "actual_capability_revision": "sha256:33b4df9225c885aca3fc47afc63dd44e78886dcac8824c9afef462c6ad4e938a",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:c08021bc5c4003d49b3637fd9395a7d4fdb3a04e8ca45cb27d2c2131eef6f14c",
-        "compiler_revision": "sha256:fe235787e4749ac90c45d4382e00890ac3ef6fffe596f7d238a407d1a7ec95b5",
+        "capability_revision": "sha256:33b4df9225c885aca3fc47afc63dd44e78886dcac8824c9afef462c6ad4e938a",
+        "compiler_revision": "sha256:7ffed1a0352a91a172f57bb4c81abf653191256941ded048da34515d74b1603a",
         "contract_version": "2",
         "intent_kinds": [
           "integration_spec",
@@ -7638,7 +7638,7 @@
           "schema_version": "1",
           "source_version": "0.1.0"
         },
-        "schema_revision": "sha256:86c59e6ed37f4036cd9a06427d14b1809f1f3bb587be520d3b2255d69152e2c7",
+        "schema_revision": "sha256:c49384f25d40d14e205794c5ae8ac7b4c68cf691cfe78476a8664402d6ce6f3d",
         "schemas": [
           {
             "owned_by_authoring_contract": true,
@@ -7650,21 +7650,21 @@
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:334b539b10c4ae66794c32febbdbd0462c87129ee5d84a246d373150a9ba1384",
+            "schema_hash": "sha256:f2ae36106067672364201106584a89063d11a69198f18463b16e41b7d9b032ab",
             "schema_version": "2",
             "selector": "AuthoringCompileResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:051ae59475d3f9d87d4a1fddc6a7ddd85c5c735689108f88f55f5e235ccdcc4d",
+            "schema_hash": "sha256:26af1ce97f8b9a2469e7f52e7ec935eb8bbae52eed5b7efd36404d0f3bb337ed",
             "schema_version": "2",
             "selector": "AuthoringPlanResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:741fac168e35e39adc253d04bdfebba35828c8d07f22cde77aa99ffebc02021e",
+            "schema_hash": "sha256:06f31b44bcee3496b0c7746099e52dbd661f15be618f0df92e5f018380424f4d",
             "schema_version": "2",
             "selector": "AuthoringRequestV1"
           },
@@ -7678,13 +7678,13 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:b28c18b6d106146d76e19361d5b4299b3e7d69b0348fd133e41a1fd861e380c3",
+            "schema_hash": "sha256:8e9a2becc35bc82155bf4e0626e7ba1ff57a48360cb3c7dc8edec24c91c6f13d",
             "selector": "IntegrationSpecV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:724d26bb2a61ad8e647ce874294396d5116a8a66b698e2cf3f5cddc3aa2a7662",
+            "schema_hash": "sha256:3166d340038b6fe843645e319879d17f15d0ddf9235b48ea5bf5b472aa657a41",
             "schema_version": "1",
             "selector": "ProcessIRV1"
           },
@@ -7753,7 +7753,7 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:f081a2988d09dde7314192f61c2996c8122fcab7644f13cd070ab353787d2732",
+            "schema_hash": "sha256:9fbd84094648704f1b30fc769c6f09588da85ee4696f63f376c50b1ed83f472d",
             "selector": "recipe_contributions"
           },
           {
@@ -13844,14 +13844,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringCompileResultV1",
-      "canonical_length": 75529,
+      "canonical_length": 75849,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "7576a991a3af9efb1752cff7e21b855c0abb060ff5c9c0382a13b0659b98ea7f",
+      "sha256": "48a27548d47ea448133104516b9bce9e3a56ea068556b2aad5aebdc6cb08886c",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -16643,7 +16643,9 @@
                         "cache_put": "#/$defs/CachePutNodeV1",
                         "cache_remove": "#/$defs/CacheRemoveNodeV1",
                         "connector_call": "#/$defs/ConnectorCallNodeV1",
+                        "data_process": "#/$defs/DataProcessNodeV1",
                         "document_cache_retrieve": "#/$defs/DocumentCacheRetrieveNodeV1",
+                        "flow_control": "#/$defs/FlowControlNodeV1",
                         "map_ref": "#/$defs/MapRefNodeV1",
                         "message": "#/$defs/MessageNodeV1",
                         "set_ddp": "#/$defs/SetDdpNodeV1",
@@ -16653,10 +16655,16 @@
                     },
                     "oneOf": [
                       {
+                        "$ref": "#/$defs/FlowControlNodeV1"
+                      },
+                      {
                         "$ref": "#/$defs/MessageNodeV1"
                       },
                       {
                         "$ref": "#/$defs/MapRefNodeV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DataProcessNodeV1"
                       },
                       {
                         "$ref": "#/$defs/CachePutNodeV1"
@@ -16781,7 +16789,9 @@
                         "cache_put": "#/$defs/CachePutNodeV1",
                         "cache_remove": "#/$defs/CacheRemoveNodeV1",
                         "connector_call": "#/$defs/ConnectorCallNodeV1",
+                        "data_process": "#/$defs/DataProcessNodeV1",
                         "document_cache_retrieve": "#/$defs/DocumentCacheRetrieveNodeV1",
+                        "flow_control": "#/$defs/FlowControlNodeV1",
                         "map_ref": "#/$defs/MapRefNodeV1",
                         "message": "#/$defs/MessageNodeV1",
                         "set_ddp": "#/$defs/SetDdpNodeV1",
@@ -16791,10 +16801,16 @@
                     },
                     "oneOf": [
                       {
+                        "$ref": "#/$defs/FlowControlNodeV1"
+                      },
+                      {
                         "$ref": "#/$defs/MessageNodeV1"
                       },
                       {
                         "$ref": "#/$defs/MapRefNodeV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DataProcessNodeV1"
                       },
                       {
                         "$ref": "#/$defs/CachePutNodeV1"
@@ -17038,12 +17054,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:c08021bc5c4003d49b3637fd9395a7d4fdb3a04e8ca45cb27d2c2131eef6f14c",
-          "compiler_revision": "sha256:fe235787e4749ac90c45d4382e00890ac3ef6fffe596f7d238a407d1a7ec95b5",
+          "capability_revision": "sha256:33b4df9225c885aca3fc47afc63dd44e78886dcac8824c9afef462c6ad4e938a",
+          "compiler_revision": "sha256:7ffed1a0352a91a172f57bb4c81abf653191256941ded048da34515d74b1603a",
           "contract_version": "2",
-          "schema_revision": "sha256:86c59e6ed37f4036cd9a06427d14b1809f1f3bb587be520d3b2255d69152e2c7"
+          "schema_revision": "sha256:c49384f25d40d14e205794c5ae8ac7b4c68cf691cfe78476a8664402d6ce6f3d"
         },
-        "schema_hash": "sha256:334b539b10c4ae66794c32febbdbd0462c87129ee5d84a246d373150a9ba1384",
+        "schema_hash": "sha256:f2ae36106067672364201106584a89063d11a69198f18463b16e41b7d9b032ab",
         "schema_name": "AuthoringCompileResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -17052,14 +17068,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringPlanResultV1",
-      "canonical_length": 74203,
+      "canonical_length": 74523,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "f54901ed8566056b7e1bf3a2bee47c673e26e2c875bd62926becf9c2fd1f6af5",
+      "sha256": "8889415ada63af1a6f5cdfe861011c785f2954bfff04efa7ded264bdc36f4b43",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -19802,7 +19818,9 @@
                         "cache_put": "#/$defs/CachePutNodeV1",
                         "cache_remove": "#/$defs/CacheRemoveNodeV1",
                         "connector_call": "#/$defs/ConnectorCallNodeV1",
+                        "data_process": "#/$defs/DataProcessNodeV1",
                         "document_cache_retrieve": "#/$defs/DocumentCacheRetrieveNodeV1",
+                        "flow_control": "#/$defs/FlowControlNodeV1",
                         "map_ref": "#/$defs/MapRefNodeV1",
                         "message": "#/$defs/MessageNodeV1",
                         "set_ddp": "#/$defs/SetDdpNodeV1",
@@ -19812,10 +19830,16 @@
                     },
                     "oneOf": [
                       {
+                        "$ref": "#/$defs/FlowControlNodeV1"
+                      },
+                      {
                         "$ref": "#/$defs/MessageNodeV1"
                       },
                       {
                         "$ref": "#/$defs/MapRefNodeV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DataProcessNodeV1"
                       },
                       {
                         "$ref": "#/$defs/CachePutNodeV1"
@@ -19940,7 +19964,9 @@
                         "cache_put": "#/$defs/CachePutNodeV1",
                         "cache_remove": "#/$defs/CacheRemoveNodeV1",
                         "connector_call": "#/$defs/ConnectorCallNodeV1",
+                        "data_process": "#/$defs/DataProcessNodeV1",
                         "document_cache_retrieve": "#/$defs/DocumentCacheRetrieveNodeV1",
+                        "flow_control": "#/$defs/FlowControlNodeV1",
                         "map_ref": "#/$defs/MapRefNodeV1",
                         "message": "#/$defs/MessageNodeV1",
                         "set_ddp": "#/$defs/SetDdpNodeV1",
@@ -19950,10 +19976,16 @@
                     },
                     "oneOf": [
                       {
+                        "$ref": "#/$defs/FlowControlNodeV1"
+                      },
+                      {
                         "$ref": "#/$defs/MessageNodeV1"
                       },
                       {
                         "$ref": "#/$defs/MapRefNodeV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DataProcessNodeV1"
                       },
                       {
                         "$ref": "#/$defs/CachePutNodeV1"
@@ -20176,12 +20208,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:c08021bc5c4003d49b3637fd9395a7d4fdb3a04e8ca45cb27d2c2131eef6f14c",
-          "compiler_revision": "sha256:fe235787e4749ac90c45d4382e00890ac3ef6fffe596f7d238a407d1a7ec95b5",
+          "capability_revision": "sha256:33b4df9225c885aca3fc47afc63dd44e78886dcac8824c9afef462c6ad4e938a",
+          "compiler_revision": "sha256:7ffed1a0352a91a172f57bb4c81abf653191256941ded048da34515d74b1603a",
           "contract_version": "2",
-          "schema_revision": "sha256:86c59e6ed37f4036cd9a06427d14b1809f1f3bb587be520d3b2255d69152e2c7"
+          "schema_revision": "sha256:c49384f25d40d14e205794c5ae8ac7b4c68cf691cfe78476a8664402d6ce6f3d"
         },
-        "schema_hash": "sha256:051ae59475d3f9d87d4a1fddc6a7ddd85c5c735689108f88f55f5e235ccdcc4d",
+        "schema_hash": "sha256:26af1ce97f8b9a2469e7f52e7ec935eb8bbae52eed5b7efd36404d0f3bb337ed",
         "schema_name": "AuthoringPlanResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -20190,7 +20222,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringRequestV1",
-      "canonical_length": 86343,
+      "canonical_length": 86663,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
@@ -20198,7 +20230,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "e7f6f9265e5d7bac38583e5a15bfdeb0cb90406249828ce99ae2e402beb32ab7",
+      "sha256": "86f8e51c14ab90692f385913ca05a0a40d62f9164303e30b98928425bbf05ea4",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -23380,7 +23412,9 @@
                         "cache_put": "#/$defs/CachePutNodeV1",
                         "cache_remove": "#/$defs/CacheRemoveNodeV1",
                         "connector_call": "#/$defs/ConnectorCallNodeV1",
+                        "data_process": "#/$defs/DataProcessNodeV1",
                         "document_cache_retrieve": "#/$defs/DocumentCacheRetrieveNodeV1",
+                        "flow_control": "#/$defs/FlowControlNodeV1",
                         "map_ref": "#/$defs/MapRefNodeV1",
                         "message": "#/$defs/MessageNodeV1",
                         "set_ddp": "#/$defs/SetDdpNodeV1",
@@ -23390,10 +23424,16 @@
                     },
                     "oneOf": [
                       {
+                        "$ref": "#/$defs/FlowControlNodeV1"
+                      },
+                      {
                         "$ref": "#/$defs/MessageNodeV1"
                       },
                       {
                         "$ref": "#/$defs/MapRefNodeV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DataProcessNodeV1"
                       },
                       {
                         "$ref": "#/$defs/CachePutNodeV1"
@@ -23518,7 +23558,9 @@
                         "cache_put": "#/$defs/CachePutNodeV1",
                         "cache_remove": "#/$defs/CacheRemoveNodeV1",
                         "connector_call": "#/$defs/ConnectorCallNodeV1",
+                        "data_process": "#/$defs/DataProcessNodeV1",
                         "document_cache_retrieve": "#/$defs/DocumentCacheRetrieveNodeV1",
+                        "flow_control": "#/$defs/FlowControlNodeV1",
                         "map_ref": "#/$defs/MapRefNodeV1",
                         "message": "#/$defs/MessageNodeV1",
                         "set_ddp": "#/$defs/SetDdpNodeV1",
@@ -23528,10 +23570,16 @@
                     },
                     "oneOf": [
                       {
+                        "$ref": "#/$defs/FlowControlNodeV1"
+                      },
+                      {
                         "$ref": "#/$defs/MessageNodeV1"
                       },
                       {
                         "$ref": "#/$defs/MapRefNodeV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DataProcessNodeV1"
                       },
                       {
                         "$ref": "#/$defs/CachePutNodeV1"
@@ -23698,12 +23746,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:c08021bc5c4003d49b3637fd9395a7d4fdb3a04e8ca45cb27d2c2131eef6f14c",
-          "compiler_revision": "sha256:fe235787e4749ac90c45d4382e00890ac3ef6fffe596f7d238a407d1a7ec95b5",
+          "capability_revision": "sha256:33b4df9225c885aca3fc47afc63dd44e78886dcac8824c9afef462c6ad4e938a",
+          "compiler_revision": "sha256:7ffed1a0352a91a172f57bb4c81abf653191256941ded048da34515d74b1603a",
           "contract_version": "2",
-          "schema_revision": "sha256:86c59e6ed37f4036cd9a06427d14b1809f1f3bb587be520d3b2255d69152e2c7"
+          "schema_revision": "sha256:c49384f25d40d14e205794c5ae8ac7b4c68cf691cfe78476a8664402d6ce6f3d"
         },
-        "schema_hash": "sha256:741fac168e35e39adc253d04bdfebba35828c8d07f22cde77aa99ffebc02021e",
+        "schema_hash": "sha256:06f31b44bcee3496b0c7746099e52dbd661f15be618f0df92e5f018380424f4d",
         "schema_name": "AuthoringRequestV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -23712,14 +23760,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=IntegrationSpecV1",
-      "canonical_length": 63641,
+      "canonical_length": 63961,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=IntegrationSpecV1",
-      "sha256": "909de68bc563ae3d219308db97e4ba089e31fe53aa8e4d655ddb4c59c05035ee",
+      "sha256": "f4cd1ce1e779209e9fafdc12310cc4a44a44eca67094ca706a2469038f7a10e0",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -25912,7 +25960,9 @@
                         "cache_put": "#/$defs/CachePutNodeV1",
                         "cache_remove": "#/$defs/CacheRemoveNodeV1",
                         "connector_call": "#/$defs/ConnectorCallNodeV1",
+                        "data_process": "#/$defs/DataProcessNodeV1",
                         "document_cache_retrieve": "#/$defs/DocumentCacheRetrieveNodeV1",
+                        "flow_control": "#/$defs/FlowControlNodeV1",
                         "map_ref": "#/$defs/MapRefNodeV1",
                         "message": "#/$defs/MessageNodeV1",
                         "set_ddp": "#/$defs/SetDdpNodeV1",
@@ -25922,10 +25972,16 @@
                     },
                     "oneOf": [
                       {
+                        "$ref": "#/$defs/FlowControlNodeV1"
+                      },
+                      {
                         "$ref": "#/$defs/MessageNodeV1"
                       },
                       {
                         "$ref": "#/$defs/MapRefNodeV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DataProcessNodeV1"
                       },
                       {
                         "$ref": "#/$defs/CachePutNodeV1"
@@ -26050,7 +26106,9 @@
                         "cache_put": "#/$defs/CachePutNodeV1",
                         "cache_remove": "#/$defs/CacheRemoveNodeV1",
                         "connector_call": "#/$defs/ConnectorCallNodeV1",
+                        "data_process": "#/$defs/DataProcessNodeV1",
                         "document_cache_retrieve": "#/$defs/DocumentCacheRetrieveNodeV1",
+                        "flow_control": "#/$defs/FlowControlNodeV1",
                         "map_ref": "#/$defs/MapRefNodeV1",
                         "message": "#/$defs/MessageNodeV1",
                         "set_ddp": "#/$defs/SetDdpNodeV1",
@@ -26060,10 +26118,16 @@
                     },
                     "oneOf": [
                       {
+                        "$ref": "#/$defs/FlowControlNodeV1"
+                      },
+                      {
                         "$ref": "#/$defs/MessageNodeV1"
                       },
                       {
                         "$ref": "#/$defs/MapRefNodeV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DataProcessNodeV1"
                       },
                       {
                         "$ref": "#/$defs/CachePutNodeV1"
@@ -33563,13 +33627,13 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=recipe_contributions",
-      "canonical_length": 79508,
+      "canonical_length": 79828,
       "legacy_excerpt": {
         "authoring_note": "These are the ONLY values a registered recipe may return. They carry opaque references and closed enumerations — never configuration, credentials, headers, SQL, raw XML, executable code, JSON pointers, or caller-authored graph edges. Recipe output is validated exactly as direct ProcessIR/topology/component authoring and cannot be exempted."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=recipe_contributions",
-      "sha256": "38aad162f17e0c4b428dd1403da70d0473bf785c23f6cd26dce4139a1d58d4af",
+      "sha256": "df4e9151bd714067cdea5a5789091b3d0d9bccce15d9ca5f1d3d5443d0b5e303",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -36615,7 +36679,9 @@
                         "cache_put": "#/$defs/CachePutNodeV1",
                         "cache_remove": "#/$defs/CacheRemoveNodeV1",
                         "connector_call": "#/$defs/ConnectorCallNodeV1",
+                        "data_process": "#/$defs/DataProcessNodeV1",
                         "document_cache_retrieve": "#/$defs/DocumentCacheRetrieveNodeV1",
+                        "flow_control": "#/$defs/FlowControlNodeV1",
                         "map_ref": "#/$defs/MapRefNodeV1",
                         "message": "#/$defs/MessageNodeV1",
                         "set_ddp": "#/$defs/SetDdpNodeV1",
@@ -36625,10 +36691,16 @@
                     },
                     "oneOf": [
                       {
+                        "$ref": "#/$defs/FlowControlNodeV1"
+                      },
+                      {
                         "$ref": "#/$defs/MessageNodeV1"
                       },
                       {
                         "$ref": "#/$defs/MapRefNodeV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DataProcessNodeV1"
                       },
                       {
                         "$ref": "#/$defs/CachePutNodeV1"
@@ -36753,7 +36825,9 @@
                         "cache_put": "#/$defs/CachePutNodeV1",
                         "cache_remove": "#/$defs/CacheRemoveNodeV1",
                         "connector_call": "#/$defs/ConnectorCallNodeV1",
+                        "data_process": "#/$defs/DataProcessNodeV1",
                         "document_cache_retrieve": "#/$defs/DocumentCacheRetrieveNodeV1",
+                        "flow_control": "#/$defs/FlowControlNodeV1",
                         "map_ref": "#/$defs/MapRefNodeV1",
                         "message": "#/$defs/MessageNodeV1",
                         "set_ddp": "#/$defs/SetDdpNodeV1",
@@ -36763,10 +36837,16 @@
                     },
                     "oneOf": [
                       {
+                        "$ref": "#/$defs/FlowControlNodeV1"
+                      },
+                      {
                         "$ref": "#/$defs/MessageNodeV1"
                       },
                       {
                         "$ref": "#/$defs/MapRefNodeV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DataProcessNodeV1"
                       },
                       {
                         "$ref": "#/$defs/CachePutNodeV1"
@@ -37140,7 +37220,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "183b451794c3650f2484b30761de6cbc5a0449d6619bd028f498830d1875cb7f",
+      "sha256": "e7f5aa3fe014ac28a705216b3aad9b546651a4c0e56c0a5644d53d9d52317f8c",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "8327243ec482fa1641f49265c87694e33616f12db015b3f234dc73db9ed8057c",
@@ -37422,14 +37502,14 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "50c05722347796f45a78f2b8dc88e85e9a472d11a803aa661bf0ecd00f4dadc5",
-        "schema_name=AuthoringCompileResultV1": "7576a991a3af9efb1752cff7e21b855c0abb060ff5c9c0382a13b0659b98ea7f",
-        "schema_name=AuthoringPlanResultV1": "f54901ed8566056b7e1bf3a2bee47c673e26e2c875bd62926becf9c2fd1f6af5",
-        "schema_name=AuthoringRequestV1": "e7f6f9265e5d7bac38583e5a15bfdeb0cb90406249828ce99ae2e402beb32ab7",
-        "schema_name=AuthoringRevisionBindingV1": "b87fcea4ab3a41c3f67619ca564d0141e28a68d7ed8b3319b38bd115651fa6d4",
-        "schema_name=IntegrationSpecV1": "909de68bc563ae3d219308db97e4ba089e31fe53aa8e4d655ddb4c59c05035ee",
-        "schema_name=ProcessIRV1": "d8fd80c399bd7e356d6ab0d3dd273222db20166453e852d3421d637baa7c9eb3",
-        "schema_name=SystemTopologySpecV1": "c6504e795c6e9cc4e78cf95cc92bbcd2e81c5860e7b5573eae58428dd5171584",
+        "schema_name=AuthoringBuildProvenanceV1": "1283bf1fb516d5aa0a4cb1a2628966cec6d102736701866058b40a97850f2038",
+        "schema_name=AuthoringCompileResultV1": "48a27548d47ea448133104516b9bce9e3a56ea068556b2aad5aebdc6cb08886c",
+        "schema_name=AuthoringPlanResultV1": "8889415ada63af1a6f5cdfe861011c785f2954bfff04efa7ded264bdc36f4b43",
+        "schema_name=AuthoringRequestV1": "86f8e51c14ab90692f385913ca05a0a40d62f9164303e30b98928425bbf05ea4",
+        "schema_name=AuthoringRevisionBindingV1": "bb8c9df2167af1c7f9cafd0635e7a97fa51d11aeb04fbb982407fa7cc5430e7a",
+        "schema_name=IntegrationSpecV1": "f4cd1ce1e779209e9fafdc12310cc4a44a44eca67094ca706a2469038f7a10e0",
+        "schema_name=ProcessIRV1": "c436dea1d54bc8943c2be423628d1bce6b6f455d0790d24dbef7ea0c99872d98",
+        "schema_name=SystemTopologySpecV1": "cd0f30d11a2b6263f271103b9381b36fc69ffbd772511ef15531fcd50f761427",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
@@ -37438,7 +37518,7 @@
         "schema_name=archetype:http_listener_to_db": "b21d41d870324ce66e872957fa09126dc641354753a0d7681d14d3489f7dcf3f",
         "schema_name=archetype:http_listener_to_rest": "cdd6c9c6fb51cd8afda5c7245a2ef37548939610c1c5235cd9abe1ed9deac3d9",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "41a423a9bb418424414b0924084d309913084fc85084a2fa783b09cb194f5b28",
+        "schema_name=authoring_workflow": "a1449cb13c0195450c9b71ecdd6bb782c14b976d3c6f92c0580c2264e33e84b0",
         "schema_name=cache_property_authoring": "ccce138186570a6e4d8091aa1a05eb471d8e82f39b6394551f8f24f3f964d083",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "b47bc0062bf52054609a4b81b8ea98dd5b363c716b079ed0413c1f89bee08a7b",
@@ -37501,7 +37581,7 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "ca1931e678d90a986a1de68ffc5aa271b4f80fd20366693e7b223b1e53b324c9",
+        "schema_name=process_ir_authoring": "36aaed1b6d6b400c18f87aeb08e706dbe6c658e19b8b01fa744e6ca0472b2635",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
         "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "839b47b749b07d644aaa1d1d42b98f349efec5e21cf6cb7b6d14c983f94d63ff",
         "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "1040561e60dce5fd9120e535e6783649ed6c96496370680b37f3e57afe9b40db",
@@ -37511,11 +37591,11 @@
         "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "8757220727edcb7a039406bd988e1128e408ab360758cdacf88f5bd9b3279cea",
         "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "023724e841819a843933da0f07685ed602eeff4ea193b23149be5b1a35db7a61",
         "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "15e08ce338135818b0a8665b08da51f7991affa9ed2cddf270ef7a2f2c59636c",
-        "schema_name=recipe_contributions": "38aad162f17e0c4b428dd1403da70d0473bf785c23f6cd26dce4139a1d58d4af",
+        "schema_name=recipe_contributions": "df4e9151bd714067cdea5a5789091b3d0d9bccce15d9ca5f1d3d5443d0b5e303",
         "schema_name=recipe_registry": "6da0dd13875b0d41a63b2bb301ad8b7af65ea5b403b679fecb0264f304d1fe57",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "09c53881036aa6829959d62f3b7c91aa5200b4c81f82824139542c2b44b49d10",
+        "schema_name=validation_report": "2a2d9850f1aa1f091c834eb7125adece908f22b419141115b1b70a403096bddf",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",

@@ -526,6 +526,10 @@ def _union_kinds(alias):
         (bodycaps.BRANCH_LEG, bodycaps.STEP_SLOT, "BranchLegStepV1"),
         (bodycaps.DECISION_TRUE_ARM, bodycaps.STEP_SLOT, "DecisionTrueArmStepV1"),
         (bodycaps.DECISION_FALSE_ARM, bodycaps.STEP_SLOT, "DecisionFalseArmStepV1"),
+        # #154 brought the Try/Catch bodies under the same pin. They were the
+        # slots that had DRIFTED while unpinned.
+        (bodycaps.TRY_BODY, bodycaps.STEP_SLOT, "TryCatchBodyStepV1"),
+        (bodycaps.CATCH_BODY, bodycaps.STEP_SLOT, "TryCatchBodyStepV1"),
     ],
 )
 def test_registry_step_rows_match_the_model_unions(context, slot, alias_name):
@@ -540,21 +544,241 @@ def test_registry_step_rows_match_the_model_unions(context, slot, alias_name):
     )
 
 
-def test_registry_terminal_rows_are_the_shipped_matrix():
-    # #175 moved `process_call` from the STEP row into these two TERMINAL rows.
-    assert bodycaps.BODY_CAPABILITIES_V1[(bodycaps.BRANCH_LEG, bodycaps.TERMINAL_SLOT)] == {
-        "target",
-        "cache_put",
-        "stop",
-        "process_call",
-        "decision",
-    }
-    assert bodycaps.BODY_CAPABILITIES_V1[
-        (bodycaps.DECISION_TRUE_ARM, bodycaps.TERMINAL_SLOT)
-    ] == {"target", "stop", "exception", "process_call", "branch", "decision"}
-    assert bodycaps.BODY_CAPABILITIES_V1[
-        (bodycaps.DECISION_FALSE_ARM, bodycaps.TERMINAL_SLOT)
-    ] == {"stop", "exception", "branch", "decision"}
+#: The matrix this slice ships, spelled out. This is a REVIEW TRIPWIRE, not a
+#: second authority, and the distinction is what makes it safe to write down.
+#:
+#: Before #154 the production matrix ALSO hand-listed these sets, so a union and
+#: its registry row could drift together and no test could tell — which is how
+#: ``(try_body, terminal)`` stayed ``{"stop"}`` and the Try/Catch step vocabulary
+#: silently lost ``flow_control``/``data_process``. Production now DERIVES every
+#: row from the model field (``derive_body_capabilities_v1``), so drift of that
+#: kind is no longer expressible. What remains worth having is a diff: a union
+#: edit that widens a placement should not be able to reach callers without a
+#: human seeing the widened row in a reviewable change. That is the same argument
+#: ``test_the_whole_contract_is_frozen_in_a_committed_snapshot`` makes for served
+#: prose, and it is why this list may be written by hand while the production one
+#: may not.
+_SHIPPED_MATRIX_V1 = {
+    (bodycaps.BRANCH_LEG, bodycaps.STEP_SLOT): {
+        "cache_get", "cache_put", "cache_remove", "connector_call", "data_process",
+        "document_cache_retrieve", "flow_control", "map_ref", "message", "set_ddp", "set_dpp",
+    },
+    # #175 moved `process_call` from the STEP row into the TERMINAL rows.
+    (bodycaps.BRANCH_LEG, bodycaps.TERMINAL_SLOT): {
+        "target", "cache_put", "stop", "process_call", "decision",
+    },
+    (bodycaps.DECISION_TRUE_ARM, bodycaps.STEP_SLOT): {
+        "cache_get", "cache_put", "cache_remove", "connector_call", "data_process",
+        "document_cache_retrieve", "flow_control", "map_ref", "message", "set_ddp", "set_dpp",
+    },
+    (bodycaps.DECISION_TRUE_ARM, bodycaps.TERMINAL_SLOT): {
+        "target", "stop", "exception", "process_call", "branch", "decision",
+    },
+    (bodycaps.DECISION_FALSE_ARM, bodycaps.STEP_SLOT): {
+        "cache_get", "cache_put", "cache_remove", "connector_call", "data_process",
+        "document_cache_retrieve", "flow_control", "map_ref", "message", "set_ddp", "set_dpp",
+    },
+    (bodycaps.DECISION_FALSE_ARM, bodycaps.TERMINAL_SLOT): {
+        "stop", "exception", "branch", "decision",
+    },
+    (bodycaps.TRY_BODY, bodycaps.STEP_SLOT): {
+        "cache_get", "cache_put", "cache_remove", "connector_call", "data_process",
+        "document_cache_retrieve", "flow_control", "map_ref", "message", "set_ddp", "set_dpp",
+    },
+    (bodycaps.TRY_BODY, bodycaps.TERMINAL_SLOT): {"stop"},
+    (bodycaps.CATCH_BODY, bodycaps.STEP_SLOT): {
+        "cache_get", "cache_put", "cache_remove", "connector_call", "data_process",
+        "document_cache_retrieve", "flow_control", "map_ref", "message", "set_ddp", "set_dpp",
+    },
+    (bodycaps.CATCH_BODY, bodycaps.TERMINAL_SLOT): {"stop", "exception", "cache_put"},
+}
+
+
+def test_shipped_matrix_review_tripwire():
+    """Every widened row lands in a diff a reviewer must approve."""
+    assert dict(bodycaps.BODY_CAPABILITIES_V1) == _SHIPPED_MATRIX_V1
+
+
+def _independent_kinds(annotation):
+    """A SECOND reader of a slot annotation, written independently of production.
+
+    Deliberately not ``bodycaps._kinds_from_annotation``. An expectation computed
+    by the helper it is meant to verify agrees with that helper by construction
+    and proves nothing — the exact vacuity #149 recorded. This walker is written
+    against ``typing`` directly so the two implementations can DISAGREE, which is
+    the only way the comparison carries information.
+    """
+    import typing
+
+    origin = typing.get_origin(annotation)
+    if origin is not None and str(origin).endswith("Annotated"):
+        return _independent_kinds(typing.get_args(annotation)[0])
+    args = typing.get_args(annotation)
+    if origin in (list, tuple, set, frozenset) and args:
+        return _independent_kinds(args[0])
+    if origin is typing.Union:
+        out = set()
+        for member in args:
+            out |= _independent_kinds(member)
+        return out
+    if hasattr(annotation, "model_fields") and "kind" in annotation.model_fields:
+        return {typing.get_args(annotation.model_fields["kind"].annotation)[0]}
+    # Annotated[X, FieldInfo] where get_origin() did not report Annotated.
+    if args:
+        return _independent_kinds(args[0])
+    return set()
+
+
+@pytest.mark.parametrize("key", sorted(bodycaps.BODY_SLOT_AUTHORITIES_V1))
+def test_every_matrix_row_is_derived_from_its_slot_authority(key):
+    """BOTH directions, for all TEN slots, via an independent reader.
+
+    #154. Before this, only the three Branch/Decision step rows and the three
+    Branch/Decision terminal rows were pinned to their unions; the Try/Catch rows
+    were pinned to nothing, which is why they were the ones that drifted.
+    """
+    model, field_name = bodycaps.BODY_SLOT_AUTHORITIES_V1[key]
+    expected = _independent_kinds(model.model_fields[field_name].annotation)
+    assert expected, f"independent reader found no kinds for {key} — the test would be vacuous"
+    assert set(bodycaps.BODY_CAPABILITIES_V1[key]) == expected
+
+
+def test_authority_table_covers_every_body_model_in_the_schema():
+    """A NEW body context cannot silently lack placement rows.
+
+    The authority is the model set itself: every ProcessIR model carrying BOTH a
+    ``steps`` and a ``terminal`` field is a control body, and every control body
+    owes two rows. Enumerating the models we happen to remember would re-create
+    the omission this test exists to catch.
+    """
+    bodies = set()
+    stack, seen = [ir_module.ProcessIRV1], set()
+    while stack:
+        model = stack.pop()
+        if model in seen:
+            continue
+        seen.add(model)
+        fields = getattr(model, "model_fields", {})
+        if "steps" in fields and "terminal" in fields:
+            bodies.add(model)
+        for field in fields.values():
+            for nested in _reachable_models(field.annotation):
+                if nested not in seen:
+                    stack.append(nested)
+    assert bodies, "model walk found no control bodies — the test would be vacuous"
+    covered = {model for model, _field in bodycaps.BODY_SLOT_AUTHORITIES_V1.values()}
+    assert covered == bodies, (
+        "every control body owes a step row and a terminal row; "
+        f"uncovered={sorted(m.__name__ for m in bodies - covered)} "
+        f"unknown={sorted(m.__name__ for m in covered - bodies)}"
+    )
+    for model in bodies:
+        slots = {field for m, field in bodycaps.BODY_SLOT_AUTHORITIES_V1.values() if m is model}
+        assert slots == {"steps", "terminal"}, model.__name__
+
+
+def _reachable_models(annotation):
+    import typing
+
+    out = []
+    stack = [annotation]
+    while stack:
+        current = stack.pop()
+        if hasattr(current, "model_fields"):
+            out.append(current)
+            continue
+        stack.extend(typing.get_args(current))
+    return out
+
+
+def test_no_derived_row_is_empty():
+    """An empty row denies every placement — fail LOUD, never ship it."""
+    for key, kinds in bodycaps.BODY_CAPABILITIES_V1.items():
+        assert kinds, key
+
+
+# --- non-vacuity witnesses: prove the derivation actually tracks the models ---
+
+
+def test_mutant_terminal_union_moves_the_derived_row():
+    """The witness for the row #154 had to widen.
+
+    Constructs a try-body model whose terminal union additionally admits
+    ``exception``, PROVES the mutant took effect, then proves the derived row
+    follows it — so a matrix that had stayed ``{"stop"}`` would be caught.
+    """
+    import typing
+    from typing import Annotated, Union
+    from pydantic import Field, create_model
+
+    mutant = create_model(
+        "MutantTryBodyV1",
+        steps=(ir_module.TryCatchTryBodyV1.model_fields["steps"].annotation, ...),
+        terminal=(
+            Annotated[
+                Union[ir_module.StopNodeV1, ir_module.ExceptionNodeV1],
+                Field(discriminator="kind"),
+            ],
+            ...,
+        ),
+    )
+    # The mutation took effect: the model really does admit `exception` now.
+    assert "exception" in _independent_kinds(mutant.model_fields["terminal"].annotation)
+
+    derived = bodycaps.derive_body_capabilities_v1(
+        {(bodycaps.TRY_BODY, bodycaps.TERMINAL_SLOT): (mutant, "terminal")}
+    )
+    assert derived[(bodycaps.TRY_BODY, bodycaps.TERMINAL_SLOT)] == {"stop", "exception"}
+    # ...and the shipped row would therefore no longer match the tripwire.
+    assert derived[(bodycaps.TRY_BODY, bodycaps.TERMINAL_SLOT)] != _SHIPPED_MATRIX_V1[
+        (bodycaps.TRY_BODY, bodycaps.TERMINAL_SLOT)
+    ]
+
+
+def test_mutant_step_union_moves_the_derived_row():
+    """Same witness in the STEP slot — the drift #154 actually found."""
+    from typing import Annotated, List, Union
+    from pydantic import Field, create_model
+
+    narrowed = Annotated[
+        Union[ir_module.MessageNodeV1, ir_module.MapRefNodeV1], Field(discriminator="kind")
+    ]
+    mutant = create_model(
+        "MutantBodyV1",
+        steps=(List[narrowed], ...),
+        terminal=(ir_module.TryCatchTryBodyV1.model_fields["terminal"].annotation, ...),
+    )
+    assert _independent_kinds(mutant.model_fields["steps"].annotation) == {"message", "map_ref"}
+
+    derived = bodycaps.derive_body_capabilities_v1(
+        {(bodycaps.TRY_BODY, bodycaps.STEP_SLOT): (mutant, "steps")}
+    )
+    assert derived[(bodycaps.TRY_BODY, bodycaps.STEP_SLOT)] == {"message", "map_ref"}
+    assert "flow_control" not in derived[(bodycaps.TRY_BODY, bodycaps.STEP_SLOT)]
+
+
+def test_derivation_refuses_an_empty_row_rather_than_denying_everything():
+    """A slot whose annotation yields nothing must RAISE, not ship {}.
+
+    ``is_allowed`` reads absence as denial, so an empty derived row would silently
+    reject every placement in that slot — a fail-closed-looking result produced by
+    a broken derivation rather than by a decision.
+    """
+    from pydantic import create_model
+
+    mutant = create_model("NoKindBodyV1", steps=(list, ...), terminal=(int, ...))
+    assert _independent_kinds(mutant.model_fields["terminal"].annotation) == set()
+    with pytest.raises(RuntimeError, match="EMPTY kind set"):
+        bodycaps.derive_body_capabilities_v1(
+            {(bodycaps.TRY_BODY, bodycaps.TERMINAL_SLOT): (mutant, "terminal")}
+        )
+
+
+def test_derivation_refuses_an_authority_naming_a_missing_field():
+    with pytest.raises(RuntimeError, match="names no field"):
+        bodycaps.derive_body_capabilities_v1(
+            {(bodycaps.TRY_BODY, bodycaps.TERMINAL_SLOT): (ir_module.TryCatchTryBodyV1, "nope")}
+        )
 
 
 def test_registry_lookup_is_absence_as_denial():
