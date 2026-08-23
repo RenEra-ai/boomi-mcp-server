@@ -1157,3 +1157,87 @@ def test_a_map_type_no_builder_supports_is_opaque():
     )
     assert "profile" not in known
     assert derive_map_effect({"map_type": "profile"}) is None
+
+
+# ---------------------------------------------------------------------------
+# QA-154-r3-01/-02/-04: the direct branch is pinned too, and both vocabularies
+# ---------------------------------------------------------------------------
+
+
+def test_a_direct_map_carrying_function_mappings_is_opaque_not_pure():
+    """QA-154-r3-01. Deciding `direct` before looking at the config turned a
+    REFUSED declaration into an AGREED one.
+
+    `{map_type: "direct", function_mappings: [sequential_value]}` derived
+    `((), (), True)` — pure and replay-safe — where the previous tree derived
+    `replay_safe=False`. That is the mirror of the defect that motivated deriving
+    the vocabulary, and worse in kind: it agreed silently instead of warning.
+    """
+    impure = [{"function_type": "sequential_value", "parameters": {}}]
+    assert derive_map_effect({"map_type": "direct", "function_mappings": impure}) is None
+    # CONTROL: a well-formed direct map still derives, so the None above is about
+    # the rejected key rather than about `direct` having stopped working.
+    assert derive_map_effect({"map_type": "direct"}) == ((), (), True)
+
+
+def test_every_direct_reject_key_makes_a_direct_map_opaque():
+    """SIBLING SWEEP, read off the builder's own table rather than enumerated.
+
+    `function_mappings` is one of six keys a direct map may not carry; fixing only
+    the one QA reported would leave the same hole under five other spellings.
+    """
+    from boomi_mcp.categories.components.builders.map_builder import (
+        _DIRECT_ONLY_REJECT_KEYS,
+    )
+
+    assert _DIRECT_ONLY_REJECT_KEYS, "no reject keys — the sweep would be vacuous"
+    for key in _DIRECT_ONLY_REJECT_KEYS:
+        assert derive_map_effect({"map_type": "direct", key: ["anything"]}) is None, key
+
+
+def test_the_direct_vocabulary_is_read_from_its_builder_too(monkeypatch):
+    """QA-154-r3-02. The first witness narrowed only the FUNCTION vocabulary, so
+    hand-copying the DIRECT one back survived the affected file and the full
+    suite — a hole exactly one mutation wide.
+    """
+    from boomi_mcp.categories.components.builders import map_builder as mb
+
+    original = mb.DirectMapBuilder.SUPPORTED_MAP_TYPES
+    assert "direct" in original
+    try:
+        mb.DirectMapBuilder.SUPPORTED_MAP_TYPES = ()
+        assert "direct" not in mb.DirectMapBuilder.SUPPORTED_MAP_TYPES
+        assert derive_map_effect({"map_type": "direct"}) is None
+        # CONTROL: the function vocabulary is untouched and still derives, so the
+        # None above is about the narrowing rather than a wholesale break.
+        assert derive_map_effect({"map_type": "function", "function_mappings": []}) == ((), (), True)
+    finally:
+        mb.DirectMapBuilder.SUPPORTED_MAP_TYPES = original
+    assert derive_map_effect({"map_type": "direct"}) == ((), (), True)
+
+
+@pytest.mark.parametrize("bad", [["direct"], {"a": 1}, {"direct"}, 3, None])
+def test_a_non_string_map_type_is_opaque_and_does_not_crash(bad):
+    """QA-154-r3-04. An authored `map_type` need not be hashable.
+
+    `["direct"]` raised `TypeError: unhashable type` straight out of the tool
+    with `error_code: None` and no machine code at all — a caller learned nothing
+    from a value they had supplied.
+    """
+    assert derive_map_effect({"map_type": bad, "function_mappings": []}) is None
+
+
+def test_a_non_string_map_type_survives_the_whole_resolver():
+    """The crash reached the tool, so the guard is asserted at that level too."""
+    spec = IntegrationComponentSpec(
+        key="MAP", type="transform.map", action="create",
+        config={"map_type": ["direct"], "function_mappings": []},
+    )
+    declarations = ProcessIREffectDeclarationsV1(map_effects=(
+        ProcessIRMapEffectDeclarationV1(map_ref="$ref:MAP", effect=_effect()),))
+    resolution = resolve_process_ir_effect_declarations(
+        [("p", _root_with_map())], declarations, _symbols(), [spec],
+        conflict_policy="fail")
+    # INERT, not a crash and not a false agreement.
+    assert resolution.ok, resolution.findings
+    assert resolution.inert == ("/effect_declarations/map_effects/0",)

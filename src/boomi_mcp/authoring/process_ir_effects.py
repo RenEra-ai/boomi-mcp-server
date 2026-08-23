@@ -276,8 +276,30 @@ def derive_map_effect(
         return None
     function_types, direct_types = _map_type_vocabularies()
     map_type = config.get("map_type")
+    # An authored value need not be hashable. `["direct"]` is a perfectly
+    # possible thing for a caller to send, and a membership test on it raised
+    # `TypeError: unhashable type` straight out of the tool with no machine code
+    # at all. A non-string is simply not a recognised map type.
+    if not isinstance(map_type, str):
+        return None
     if map_type in direct_types:
-        # A direct profile-to-profile map moves fields; it touches no process state.
+        # A direct profile-to-profile map moves fields and touches no process
+        # state — but ONLY if it really is one. `_DIRECT_ONLY_REJECT_KEYS` is the
+        # builder's own statement of what a direct map may not carry, and a config
+        # holding any of those keys is not a direct map the builder would accept.
+        #
+        # This branch previously answered before looking, which turned
+        # `{map_type: "direct", function_mappings: [sequential_value]}` from a
+        # refused declaration into an AGREED "pure and replay-safe" one — the
+        # mirror of the defect that motivated deriving the vocabulary in the first
+        # place, and worse in kind, because it agreed silently instead of warning.
+        # So the reject keys are ASKED too, rather than assumed.
+        from ..categories.components.builders.map_builder import (
+            _DIRECT_ONLY_REJECT_KEYS,
+        )
+
+        if any(key in config for key in _DIRECT_ONLY_REJECT_KEYS):
+            return None
         return ((), (), True)
     if map_type not in function_types:
         # Unrecognised, absent, or a form whose content this cannot establish
