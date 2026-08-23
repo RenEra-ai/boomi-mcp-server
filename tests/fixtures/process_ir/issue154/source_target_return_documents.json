@@ -1,0 +1,21 @@
+{
+ "body": {
+  "kind": "sequence",
+  "steps": [
+   {
+    "connection_ref": "$ref:CONN",
+    "kind": "source",
+    "operation_ref": "$ref:GETOP"
+   },
+   {
+    "connection_ref": "$ref:CONN",
+    "kind": "target",
+    "operation_ref": "$ref:PATCHOP"
+   },
+   {
+    "kind": "return_documents"
+   }
+  ]
+ },
+ "version": "1"
+}

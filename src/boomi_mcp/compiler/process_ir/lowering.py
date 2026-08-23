@@ -627,6 +627,18 @@ def lower_process_ir_to_cfg(ir: ProcessIRV1) -> SemanticCfgV1:
     steps = list(ir.body.steps)
     base = "/body"
 
+    # #154. The connector ENTRY is the first call on the ROOT SPINE, which is no
+    # longer necessarily step 0: a linear prefix (Set Properties before the read)
+    # is now authorable. The entry role selects the ``connectoraction_source``
+    # emitter key, so deriving it from position 0 would silently emit the flow's
+    # first call as a downstream TARGET the moment anything preceded it. Derived
+    # once, here, so the loop below has a single fact to consult; nested-body
+    # calls never qualify, because they are lowered through ``_lower_linear_run``
+    # which does not pass ``entry`` at all.
+    first_root_call = next(
+        (i for i, step in enumerate(steps) if step.kind == "connector_call"), None
+    )
+
     previous: Optional[str] = None
     for index, step in enumerate(steps):
         path = _join(base, "steps", index)
@@ -660,7 +672,7 @@ def lower_process_ir_to_cfg(ir: ProcessIRV1) -> SemanticCfgV1:
         # an exit — the stop is. Only leg/arm targets are routed.
         exit_role = _EXIT_KINDS.get(kind)
         node_id = builder.add_node(
-            _semantic_for(step, entry=index == 0), path, exit_role
+            _semantic_for(step, entry=index == first_root_call), path, exit_role
         )
         if previous is not None:
             builder.add_edge(

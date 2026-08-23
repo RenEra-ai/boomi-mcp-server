@@ -75,6 +75,11 @@ _SEMANTIC_PHASE = "semantic_lowering"
 #: vocabulary constructs a `downstream` entry — a graph this invariant rejects,
 #: so a change confined to that unreachable shape would rotate a caller's
 #: binding for no behavioural reason (L2 round 45). One declaration, two readers.
+#: A ROOT-sequence step path: ``/body/steps/<n>`` and nothing deeper. Anything
+#: nested inside a Branch leg, Decision arm or Try/Catch body carries a longer
+#: path, so this is what separates the root spine from every control body.
+_ROOT_STEP_PATH = re.compile(r"/body/steps/\d+")
+
 ENTRY_CALL_ROLE = "entry"
 
 #: Per semantic kind, the roles a node may carry AT THE ENTRY POSITION when the
@@ -429,28 +434,48 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
     # role selects the ``connectoraction_source`` emitter key, so it must be
     # carried by exactly the node that IS the control-flow entry, and by nothing
     # else. Stated that way it covers both shapes.
+    #
+    # #154 RE-ANCHORED this from the CFG entry NODE to the ROOT SPINE. A linear
+    # prefix is now authorable, so the CFG entry may be a ``set_dpp`` while the
+    # flow's connector entry is the call behind it. Under the old rule that shape
+    # computed ``expected = 0``, which means a lowering that assigned NO entry
+    # role would have passed the invariant while emitting the flow's first call
+    # with the downstream-target emitter key — the check would have been
+    # satisfied by exactly the bug it exists to catch. The property that actually
+    # holds is about the ROOT SEQUENCE: the first call on the root spine is the
+    # connector entry, and nothing else may claim that role.
     calls = [
         node for node in nodes if node.semantic.semantic_kind == "connector_call"
     ]
     if calls:
         entries = [node for node in calls if node.semantic.role == ENTRY_CALL_ROLE]
-        entry_node = by_id[cfg.entry_node_id]
-        entry_is_call = entry_node.semantic.semantic_kind == "connector_call"
-        expected = 1 if entry_is_call else 0
-        if len(entries) != expected:
+        root_calls = [node for node in calls if _ROOT_STEP_PATH.fullmatch(node.source_path)]
+        expected_entry = root_calls[0] if root_calls else None
+        if expected_entry is None:
+            # Every call is nested in a control body: no call is the flow's
+            # connector entry, so no call may carry the role.
+            if entries:
+                raise _fail(
+                    PROCESS_IR_COMPILE_INTERNAL,
+                    _SEMANTIC_PHASE,
+                    entries[0].source_path,
+                    "only a root-sequence connector call may carry the entry call role",
+                    entries[0].node_id,
+                )
+        elif len(entries) != 1:
             raise _fail(
                 PROCESS_IR_COMPILE_INTERNAL,
                 _SEMANTIC_PHASE,
-                (entries[0] if entries else calls[0]).source_path,
-                "exactly the control-flow entry node may carry the entry call role",
-                (entries[0] if entries else calls[0]).node_id,
+                (entries[0] if entries else expected_entry).source_path,
+                "exactly one connector call may carry the entry call role",
+                (entries[0] if entries else expected_entry).node_id,
             )
-        if entry_is_call and entries[0].node_id != cfg.entry_node_id:
+        elif entries[0].node_id != expected_entry.node_id:
             raise _fail(
                 PROCESS_IR_COMPILE_INTERNAL,
                 _SEMANTIC_PHASE,
                 entries[0].source_path,
-                "the entry connector call is not the control-flow entry node",
+                "the entry connector call is not the first call on the root sequence",
                 entries[0].node_id,
             )
 

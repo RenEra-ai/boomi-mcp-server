@@ -220,9 +220,32 @@ def test_linear_return_documents_is_a_standalone_terminal():
     assert ir.body.steps[-1].kind == "return_documents"
 
 
-def test_target_followed_by_return_documents_rejected():
-    err = parse_error(doc(source(), message(), target(), {"kind": "return_documents"}))
-    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY
+def test_target_followed_by_return_documents_is_a_terminal_suffix():
+    """#154 item 3. The legacy builder goldens ``return_documents_terminal``
+    with a routed target ahead of it, so ``target + return_documents`` is a
+    terminal PAIR exactly as ``target + stop`` is."""
+    ir = parse_process_ir_v1(doc(source(), message(), target(), {"kind": "return_documents"}))
+    assert [step.kind for step in ir.body.steps] == [
+        "source", "message", "target", "return_documents",
+    ]
+    # the bare form keeps working too
+    assert parse_process_ir_v1(doc(source(), target(), {"kind": "return_documents"}))
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        # target is a TERMINAL suffix, not a freely movable linear step: it may
+        # only sit immediately before its stop/return_documents.
+        (source(), target(), message(), {"kind": "return_documents"}),
+        (source(), target(), target(), {"kind": "return_documents"}),
+        (source(), message(), {"kind": "return_documents"}, target()),
+        (source(), target()),
+    ],
+)
+def test_target_keeps_its_positional_meaning(steps):
+    err = parse_error(doc(*steps))
+    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY, codes_of(err)
 
 
 def test_defaults_expand_to_current_parity_values():
@@ -820,15 +843,53 @@ def test_connector_call_return_documents_terminal_is_allowed():
         # process_call mixing stays gated (that is what mixed_connector_execution names)
         ([call(), {"kind": "process_call", "process_ref": "p"}, {"kind": "stop"}],
          PROCESS_IR_CAPABILITY_UNSUPPORTED),
-        # every other linear kind stays out of a connector_call sequence for now
-        ([call(), message(), call(), {"kind": "stop"}], PROCESS_IR_CAPABILITY_UNSUPPORTED),
+        # #154 item 5 admits the LINEAR vocabulary between calls, but the
+        # sequence must still end ON a call: steps after the last call would run
+        # on documents no further call consumes.
+        ([call(), call(), message(), {"kind": "stop"}], PROCESS_IR_CAPABILITY_UNSUPPORTED),
+        ([{"kind": "set_dpp", "name": "p",
+           "source_values": [{"value_type": "static", "value": "v"}]},
+          {"kind": "stop"}],
+         PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
+        # cache_put is admitted into the vocabulary, so its ADJACENCY rule has to
+        # reach this branch too — it did not before #154.
         ([call(), {"kind": "cache_put", "cache_ref": "$ref:c"}, call(), {"kind": "stop"}],
-         PROCESS_IR_CAPABILITY_UNSUPPORTED),
+         PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
+        # a map still needs a call on BOTH sides; with a linear prefix admitted,
+        # the predecessor half is no longer implied by "step 0 is a call".
+        ([{"kind": "set_dpp", "name": "p",
+           "source_values": [{"value_type": "static", "value": "v"}]},
+          {"kind": "map_ref", "map_ref": "$ref:m"}, call(), {"kind": "stop"}],
+         PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
     ],
 )
 def test_connector_call_sequence_rules(steps, expect_code):
     err = parse_error(doc(*steps))
     assert err.diagnostics[0].code == expect_code, codes_of(err)
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        # the issue's own probe shape
+        (call(), {"kind": "set_ddp", "name": "d",
+                  "source_values": [{"value_type": "static", "value": "v"}]},
+         call(), {"kind": "stop"}),
+        # a linear PREFIX: property preparation before the entry read
+        ({"kind": "set_dpp", "name": "p",
+          "source_values": [{"value_type": "static", "value": "v"}]},
+         call(), call(), {"kind": "stop"}),
+        (call(), message(), call(), {"kind": "stop"}),
+        # cache_put admitted, with its adjacency rule satisfied
+        (call(), {"kind": "cache_put", "cache_ref": "$ref:c"},
+         {"kind": "cache_get", "cache_ref": "$ref:c"}, call(), {"kind": "stop"}),
+    ],
+)
+def test_linear_steps_are_admitted_before_and_between_connector_calls(steps):
+    """#154 item 5. The legacy builder emits Set Properties around its reads;
+    a generalized call sequence could not express that at all before this."""
+    ir = parse_process_ir_v1(doc(*steps))
+    assert ir.body.steps[-1].kind == "stop"
 
 
 @pytest.mark.parametrize("control", ["branch", "decision"])

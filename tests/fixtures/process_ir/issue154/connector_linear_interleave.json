@@ -1,0 +1,39 @@
+{
+ "body": {
+  "kind": "sequence",
+  "steps": [
+   {
+    "kind": "set_dpp",
+    "name": "prep",
+    "source_values": [
+     {
+      "value": "v",
+      "value_type": "static"
+     }
+    ]
+   },
+   {
+    "kind": "connector_call",
+    "operation_ref": "$ref:GETOP"
+   },
+   {
+    "kind": "set_ddp",
+    "name": "hand_off",
+    "source_values": [
+     {
+      "value": "v",
+      "value_type": "static"
+     }
+    ]
+   },
+   {
+    "kind": "connector_call",
+    "operation_ref": "$ref:GETOP2"
+   },
+   {
+    "kind": "stop"
+   }
+  ]
+ },
+ "version": "1"
+}

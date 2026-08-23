@@ -46,7 +46,17 @@ from __future__ import annotations
 
 import json
 from types import MappingProxyType
-from typing import Any, List, Literal, Mapping, Optional, Tuple, Union, get_args
+from typing import (
+    Any,
+    FrozenSet,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+    get_args,
+)
 
 from pydantic import (
     AfterValidator,
@@ -877,7 +887,19 @@ class CachePutNodeV1(_ProcessIRBase):
 
 
 class DocumentCacheRetrieveNodeV1(_ProcessIRBase):
-    """Legacy all-document Document Cache Retrieve (M10.5 parity node)."""
+    """Legacy all-document Document Cache Retrieve (M10.5 parity node).
+
+    Carries NO ``external_writer`` flag, and that is a recorded decision (#154
+    item 9) rather than an omission: ``cache_get`` is the canonical spelling for
+    a cache this process does not write. Authoring ``external_writer`` here is
+    rejected as an unknown field.
+
+    The two nodes lower through the same cache-retrieve emitter, so a second flag
+    would buy no new emitted shape — only a second spelling of one assertion, and
+    two spellings of the same fact must then be kept in step forever. This node
+    exists for exact legacy parity; ``cache_get`` is the authored vocabulary, and
+    it already owns the flag.
+    """
 
     kind: Literal["document_cache_retrieve"]
     cache_ref: ComponentRefV1
@@ -887,8 +909,20 @@ class DocumentCacheRetrieveNodeV1(_ProcessIRBase):
 
 
 class CacheGetNodeV1(_ProcessIRBase):
-    """Authored all-document cache read; ``external_writer`` carries the
-    authored lineage assertion (cache populated outside this process)."""
+    """Authored all-document cache read, and the CANONICAL spelling for reading a
+    cache this process does not write (#154 item 9).
+
+    ``external_writer`` carries the authored lineage assertion that the cache is
+    populated outside this process. It is an ASSERTION, not evidence: an outside
+    writer is not present in the artifact, so nothing the compiler can inspect
+    could confirm or refute it. Setting it therefore never establishes cache
+    state — at most it converts the blocking "no writer for this cache" finding
+    into a named warning, so the assumption stays visible in the served record
+    instead of passing silently.
+
+    ``document_cache_retrieve`` is the legacy parity spelling and deliberately has
+    no such flag.
+    """
 
     kind: Literal["cache_get"]
     cache_ref: ComponentRefV1
@@ -1036,8 +1070,9 @@ class ReturnDocumentsNodeV1(_ProcessIRBase):
     process uses to hand its results back; a plain ``stop`` ends the path
     without returning anything.
 
-    It is a ROOT-sequence terminal only: it is not admitted in a Branch leg, a
-    Decision arm, or a Try/Catch body.
+    It terminates a ROOT sequence or the protected path of a Try/Catch. It is not
+    admitted in a Branch leg, a Decision arm, or a Try/Catch CATCH body: a
+    recovery path hands nothing back to the caller.
     """
 
     kind: Literal["return_documents"]
@@ -1176,6 +1211,37 @@ def _check_cache_put_followed_by_read(steps: List[Any], *, context: str) -> None
                     f"cache_put in {context} must be immediately followed by "
                     "cache_get or document_cache_retrieve (Add to Cache consumes the documents)"
                 )
+
+
+def _check_trailing_cache_put(
+    steps: List[Any], terminal: Any, *, allowed_terminals: FrozenSet[str], message: str
+) -> None:
+    """A trailing ``cache_put`` hands the TERMINAL an emptied stream.
+
+    ONE authority for a rule that had five hand-written copies (#154). Add to
+    Cache consumes the documents, so a ``cache_put`` in the last STEP position is
+    only meaningful when the terminal does not need a stream to do its job —
+    which is a property of the terminal KIND, not of the body. Every body
+    therefore states the same rule and differs only in which terminals qualify:
+
+    * Branch leg, Decision TRUE arm, Try body — no terminal qualifies. Each ends
+      on something that consumes documents (a routed ``target``, a
+      ``return_documents``, a ``stop`` that must have work to stop).
+    * Decision FALSE arm — ``stop``: the reject route deliberately drops the
+      documents it staged.
+    * Catch body — ``stop`` or ``exception``: staging a caught document and THEN
+      ending the path is the recovery shape the legacy builder emits (DLQ write
+      followed by stop, or by an explicit throw).
+
+    ``_check_cache_put_followed_by_read`` owns the complementary MID-list rule and
+    deliberately ignores the last element, so the two guards partition the
+    positions between them with no overlap and no gap.
+    """
+    if not steps or getattr(steps[-1], "kind", None) != "cache_put":
+        return
+    if getattr(terminal, "kind", None) in allowed_terminals:
+        return
+    raise _cardinality_error(message)
 
 
 def _check_process_call_terminal_form(
@@ -1442,10 +1508,11 @@ class BranchLegV1(_ProcessIRBase):
     @model_validator(mode="after")
     def _leg_rules(self) -> "BranchLegV1":
         _check_cache_put_followed_by_read(self.steps, context="branch leg steps")
-        if self.steps and self.steps[-1].kind == "cache_put":
-            raise _cardinality_error(
-                "a trailing cache_put belongs in the leg terminal (target-less staging leg), not in steps"
-            )
+        _check_trailing_cache_put(
+            self.steps, self.terminal,
+            allowed_terminals=frozenset(),
+            message="a trailing cache_put belongs in the leg terminal (target-less staging leg), not in steps",
+        )
         _check_process_call_terminal_form(
             self.steps, self.terminal,
             context=PROCESS_CALL_PLACEMENT_CONTEXT_LABELS["branch_leg"],
@@ -1522,10 +1589,11 @@ class DecisionTrueArmV1(_ProcessIRBase):
     @model_validator(mode="after")
     def _arm_rules(self) -> "DecisionTrueArmV1":
         _check_cache_put_followed_by_read(self.steps, context="decision true-arm steps")
-        if self.steps and self.steps[-1].kind == "cache_put":
-            raise _cardinality_error(
-                "decision true-arm steps must not end in cache_put — the arm terminal would receive an empty stream"
-            )
+        _check_trailing_cache_put(
+            self.steps, self.terminal,
+            allowed_terminals=frozenset(),
+            message="decision true-arm steps must not end in cache_put — the arm terminal would receive an empty stream",
+        )
         _check_process_call_terminal_form(
             self.steps, self.terminal,
             context=PROCESS_CALL_PLACEMENT_CONTEXT_LABELS["decision_true_arm"],
@@ -1565,14 +1633,11 @@ class DecisionFalseArmV1(_ProcessIRBase):
     @model_validator(mode="after")
     def _arm_rules(self) -> "DecisionFalseArmV1":
         _check_cache_put_followed_by_read(self.steps, context="decision false-arm steps")
-        if (
-            self.steps
-            and self.steps[-1].kind == "cache_put"
-            and self.terminal.kind != "stop"
-        ):
-            raise _cardinality_error(
-                "decision false-arm steps may end in cache_put only when the arm terminal is a stop"
-            )
+        _check_trailing_cache_put(
+            self.steps, self.terminal,
+            allowed_terminals=frozenset({"stop"}),
+            message="decision false-arm steps may end in cache_put only when the arm terminal is a stop",
+        )
         return self
 
 
@@ -1699,22 +1764,29 @@ ErrorScopeV1 = Literal["process", "connector"]
 class TryCatchTryBodyV1(_ProcessIRBase):
     """The protected path.
 
-    Terminates on a plain ``stop`` only. An ``exception`` here would be caught by
-    this very scope's own recovery path, and no evidence covers that loop; a
-    staging ``cache_put`` terminal is a recovery-path shape, not a success one.
+    Terminates on a plain ``stop``, or on ``return_documents`` when the protected
+    flow is a subprocess that hands its results back to its caller. An
+    ``exception`` here would be caught by this very scope's own recovery path, and
+    no evidence covers that loop; a staging ``cache_put`` terminal is a
+    recovery-path shape, not a success one.
     """
 
     steps: List[TryCatchBodyStepV1] = Field(..., min_length=1)
-    terminal: Annotated[Union[StopNodeV1], Field(discriminator="kind")]
+    terminal: Annotated[
+        Union[StopNodeV1, ReturnDocumentsNodeV1], Field(discriminator="kind")
+    ]
 
     @model_validator(mode="after")
     def _try_body_rules(self) -> "TryCatchTryBodyV1":
         _check_cache_put_followed_by_read(self.steps, context="try body steps")
-        if self.steps and self.steps[-1].kind == "cache_put":
-            raise _cardinality_error(
+        _check_trailing_cache_put(
+            self.steps, self.terminal,
+            allowed_terminals=frozenset(),
+            message=(
                 "a trailing cache_put in a try body must be followed by a "
                 "stream-replacing cache read, not by the terminal"
-            )
+            ),
+        )
         return self
 
 
@@ -1739,10 +1811,20 @@ class TryCatchCatchBodyV1(_ProcessIRBase):
     @model_validator(mode="after")
     def _catch_body_rules(self) -> "TryCatchCatchBodyV1":
         _check_cache_put_followed_by_read(self.steps, context="catch body steps")
-        if self.steps and self.steps[-1].kind == "cache_put":
-            raise _cardinality_error(
-                "a trailing cache_put belongs in the catch terminal (staging sink), not in steps"
-            )
+        # #154. The recovery shape the legacy builder emits is "stage the caught
+        # document, then end the path" — a DLQ write followed by a stop, or by an
+        # explicit throw. Both were unauthorable: a lone `[cache_put]` was
+        # rejected outright, so the write had to be moved into the terminal, which
+        # cannot express the write-THEN-exception ordering at all.
+        _check_trailing_cache_put(
+            self.steps, self.terminal,
+            allowed_terminals=frozenset({"stop", "exception"}),
+            message=(
+                "catch body steps may end in cache_put only when the catch terminal "
+                "is a stop or an exception — any other terminal would receive an "
+                "empty stream"
+            ),
+        )
         _check_stop_terminal_has_work(self.steps, self.terminal, context="catch body")
         return self
 
@@ -1876,10 +1958,17 @@ _ROOT_LINEAR_KINDS = frozenset(LINEAR_BODY_KINDS)
 class SequenceNodeV1(_ProcessIRBase):
     """Ordered root sequence. Local structural rules mirror today's builder:
 
-    - a connector flow starts with ``source`` and ends in exactly one of
-      ``target``+``stop``, a standalone ``return_documents`` terminal (the
-      legacy Return Documents path never emits the target), or a terminal
-      control (``branch``/``decision``/``exception``);
+    - a LEGACY connector flow starts with ``source`` and ends in exactly one of
+      ``target``+``stop``, ``target``+``return_documents``, a standalone
+      ``return_documents`` terminal, or a terminal control
+      (``branch``/``decision``/``exception``). ``target`` is part of the terminal
+      SUFFIX, not a movable step: it may appear only immediately before its
+      ``stop`` or ``return_documents``;
+    - a GENERALIZED ``connector_call`` flow may carry linear steps before and
+      between its calls, must contain at least one call, and must end ON a call
+      before its terminal — linear work after the last call is unsupported. Each
+      ``map_ref`` must be bracketed by calls on BOTH sides. The flow's connector
+      entry is its FIRST call, wherever that call sits;
     - a process-call root is EXACTLY one ``process_call`` and nothing else: the
       call ends its own path, so no trailing ``stop``/``return_documents`` and no
       second call may follow it (mixed connector execution stays
@@ -1969,10 +2058,14 @@ class SequenceNodeV1(_ProcessIRBase):
                     "a connector_call sequence may not also author the legacy source/target "
                     "endpoint placeholders — author every call as a connector_call"
                 )
-            if kinds[0] != "connector_call":
-                raise _cardinality_error(
-                    "a connector_call sequence must start with a connector_call"
-                )
+            # #154 removed "the first step must BE the call". A linear prefix is
+            # ordinary legacy shape — the builder emits Set Properties before the
+            # source read, and the flow's first CALL is still its connector entry
+            # regardless of how many property steps precede it. What must stay
+            # true is that the sequence CONTAINS a call and does not trail off
+            # into linear work after the last one; both are checked below, and the
+            # entry role is derived from the first call's position rather than
+            # from index 0 (``lowering``/``invariants``).
             # #141 widened this terminal set with ``branch``/``decision``. The
             # legacy connector flow below has ALWAYS admitted a terminal control,
             # and without the same allowance here the issue's own acceptance
@@ -2011,15 +2104,26 @@ class SequenceNodeV1(_ProcessIRBase):
                 )
             body = kinds[:-1]
             for kind in body:
-                if kind not in ("connector_call", "map_ref"):
+                if kind not in _ROOT_LINEAR_KINDS and kind != "connector_call":
                     raise _capability_error(
-                        "a connector_call sequence may contain only connector_call and "
-                        "map_ref steps before its terminal"
+                        "a connector_call sequence may contain only connector_call "
+                        "and linear steps before its terminal"
                     )
+            if "connector_call" not in body:
+                raise _cardinality_error(
+                    "a connector_call sequence must contain at least one connector_call"
+                )
             # Every map must be BRACKETED by calls. A trailing or doubled map has
             # no following call, so the map's destination profile could not be
             # checked against anything — and an unbounded-on-one-side map is
             # exactly the profile-continuity hole this node kind exists to close.
+            #
+            # #154 made the PREDECESSOR half explicit. It used to be implied by
+            # two now-relaxed facts — that step 0 was a call and that the only
+            # other admitted kind was ``map_ref`` — so with a linear prefix
+            # admitted, ``[set_dpp, map_ref, connector_call]`` would otherwise
+            # satisfy the follower rule with nothing bracketing the map's source
+            # side.
             for i, kind in enumerate(body):
                 if kind != "map_ref":
                     continue
@@ -2028,6 +2132,43 @@ class SequenceNodeV1(_ProcessIRBase):
                         "a map_ref in a connector_call sequence must be immediately "
                         "followed by a connector_call"
                     )
+                if i == 0 or body[i - 1] != "connector_call":
+                    raise _cardinality_error(
+                        "a map_ref in a connector_call sequence must be immediately "
+                        "preceded by a connector_call"
+                    )
+            # The sequence must END on a call (before its terminal). #154 admits a
+            # linear PREFIX and linear steps BETWEEN calls, but not a linear
+            # SUFFIX: the steps after the last call would run on documents no
+            # further call consumes, and no evidence covers that shape.
+            #
+            # ORDERED AFTER the map rules deliberately. ``[call, map_ref, stop]``
+            # is a trailing MAP, and it was rejected before this issue with
+            # PROCESS_IR_SCHEMA_INVALID_CARDINALITY. It is also, incidentally, a
+            # sequence that does not end on a call — so a suffix check placed
+            # first would answer for it and silently change a shipped diagnostic
+            # for a shape #154 does not widen.
+            if body[-1] != "connector_call":
+                raise _capability_error(
+                    "a connector_call sequence must end on a connector_call before "
+                    "its terminal — linear steps after the last call are unsupported"
+                )
+            # #154: the mid-list consume guard never reached this branch, because
+            # it returns before the legacy source/target branch that calls it. A
+            # ``cache_put`` was previously unauthorable here (not a permitted
+            # kind), so admitting the linear vocabulary admits it with no
+            # adjacency rule at all unless it is checked here too.
+            _check_cache_put_followed_by_read(
+                self.steps, context="connector_call sequence steps"
+            )
+            _check_trailing_cache_put(
+                self.steps[:-1], self.steps[-1],
+                allowed_terminals=frozenset(),
+                message=(
+                    "a trailing cache_put in a connector_call sequence must be "
+                    "followed by a stream-replacing cache read, not by the terminal"
+                ),
+            )
             return self
 
         # Connector flow: source first.
@@ -2053,7 +2194,19 @@ class SequenceNodeV1(_ProcessIRBase):
                     "a stop terminal must be immediately preceded by the target endpoint"
                 )
             linear = body[:-2]
-        elif body[-1] == "return_documents" or body[-1] in _ROOT_CONTROL_TERMINAL_KINDS:
+        elif body[-1] == "return_documents":
+            # #154. Return Documents is a terminal in BOTH legacy target shapes:
+            # on its own (the builder emits only ``returndocuments`` and the
+            # configured target is dead), and immediately after a routed
+            # ``target`` — the goldened ``return_documents_terminal`` case. The
+            # target keeps its positional meaning either way; it is admitted HERE,
+            # in the terminal suffix, rather than by adding it to
+            # ``_ROOT_LINEAR_KINDS``, which would make it a freely movable step
+            # and silently legalise a target in the middle of a flow.
+            linear = body[:-2] if len(body) >= 2 and body[-2] == "target" else body[:-1]
+        elif body[-1] in _ROOT_CONTROL_TERMINAL_KINDS:
+            # A terminal control is NOT preceded by a target: the control routes
+            # its own paths, and each leg carries its own endpoint.
             linear = body[:-1]
         elif body[-1] == "target":
             raise _cardinality_error(

@@ -2089,3 +2089,124 @@ def test_the_entry_call_must_be_the_control_flow_entry_node():
     with pytest.raises(ProcessIRCompileError) as excinfo:
         check_cfg_invariants(cfg)
     assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_INTERNAL
+
+
+# ---------------------------------------------------------------------------
+# #154: the entry call role is anchored to the ROOT SPINE, not the CFG entry node
+# ---------------------------------------------------------------------------
+
+
+def _prefixed_call_cfg():
+    """``[set_dpp, connector_call, connector_call, stop]`` — the shape #154 admits.
+
+    Its CFG entry is the ``set_dpp``, so the flow's connector entry is NOT the
+    control-flow entry node. That divergence is the whole point of these tests.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _wave_gate_golden_corpus import error_symbols  # noqa: F401  (symbol parity)
+    from boomi_mcp.compiler.process_ir.lowering import lower_process_ir_to_cfg
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    doc = {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                {"kind": "set_dpp", "name": "p",
+                 "source_values": [{"value_type": "static", "value": "v"}]},
+                {"kind": "connector_call", "operation_ref": "$ref:GETOP"},
+                {"kind": "connector_call", "operation_ref": "$ref:GETOP2"},
+                {"kind": "stop"},
+            ],
+        },
+    }
+    return lower_process_ir_to_cfg(parse_process_ir_v1(doc))
+
+
+def _call_roles(cfg):
+    return {
+        node.node_id: getattr(node.semantic, "role", None)
+        for node in cfg.nodes
+        if node.semantic.semantic_kind == "connector_call"
+    }
+
+
+def _with_roles(cfg, updates):
+    nodes = []
+    for node in cfg.nodes:
+        if node.node_id in updates and node.semantic.semantic_kind == "connector_call":
+            node = node.model_copy(
+                update={"semantic": node.semantic.model_copy(update={"role": updates[node.node_id]})}
+            )
+        nodes.append(node)
+    return cfg.model_copy(update={"nodes": tuple(nodes)})
+
+
+def test_a_linear_prefix_puts_the_entry_role_on_the_first_call_not_the_cfg_entry():
+    from boomi_mcp.compiler.process_ir.invariants import check_cfg_invariants
+
+    cfg = _prefixed_call_cfg()
+    by_id = {node.node_id: node for node in cfg.nodes}
+    # The premise these tests rest on: the CFG entry is NOT a call.
+    assert by_id[cfg.entry_node_id].semantic.semantic_kind == "set_property"
+    roles = _call_roles(cfg)
+    first_call = min(roles)
+    assert roles[first_call] == "entry", roles
+    assert all(v == "downstream" for k, v in roles.items() if k != first_call), roles
+    check_cfg_invariants(cfg)
+
+
+@pytest.mark.parametrize(
+    "updates,fragment",
+    [
+        # the role on the SECOND call — the shape that emits the flow's first
+        # read with the downstream-target emitter key
+        ({"n2": "downstream", "n3": "entry"}, "not the first call on the root sequence"),
+        # NO call carries it. The pre-#154 invariant computed `expected = 0` for
+        # this shape (its CFG entry is not a call) and therefore ACCEPTED it —
+        # the check was satisfied by exactly the defect it exists to catch.
+        ({"n2": "downstream"}, "exactly one connector call"),
+        # two claimants
+        ({"n3": "entry"}, "exactly one connector call"),
+    ],
+)
+def test_a_corrupted_entry_role_is_rejected(updates, fragment):
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError as _Err
+    from boomi_mcp.compiler.process_ir.invariants import check_cfg_invariants
+
+    cfg = _prefixed_call_cfg()
+    mutant = _with_roles(cfg, updates)
+    # PROVE THE MUTATION TOOK EFFECT before asserting anything about the guard —
+    # a no-op mutant that "passes" would report the invariant as sound.
+    assert _call_roles(mutant) != _call_roles(cfg), (updates, _call_roles(mutant))
+
+    with pytest.raises(_Err) as excinfo:
+        check_cfg_invariants(mutant)
+    diagnostic = excinfo.value.diagnostics[0]
+    assert diagnostic.code == "PROCESS_IR_COMPILE_INTERNAL", diagnostic.code
+    assert fragment in diagnostic.message, diagnostic.message
+
+
+def test_a_control_only_root_has_no_entry_call_at_all():
+    """Every call nested in a control body: no call is the connector entry."""
+    from boomi_mcp.compiler.process_ir.invariants import check_cfg_invariants
+    from boomi_mcp.compiler.process_ir.lowering import lower_process_ir_to_cfg
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    doc = {
+        "version": "1",
+        "body": {"kind": "sequence", "steps": [{
+            "kind": "decision", "label": "d", "comparison": "equals",
+            "left": {"value_type": "static", "static_value": "a"},
+            "right": {"value_type": "static", "static_value": "b"},
+            "true_arm": {
+                "steps": [{"kind": "connector_call", "operation_ref": "$ref:GETOP"}],
+                "terminal": {"kind": "stop"},
+            },
+            "false_arm": {"steps": [], "terminal": {"kind": "stop"}},
+        }]},
+    }
+    cfg = lower_process_ir_to_cfg(parse_process_ir_v1(doc))
+    roles = _call_roles(cfg)
+    assert roles and all(role != "entry" for role in roles.values()), roles
+    check_cfg_invariants(cfg)

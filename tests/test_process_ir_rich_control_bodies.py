@@ -585,7 +585,9 @@ _SHIPPED_MATRIX_V1 = {
         "cache_get", "cache_put", "cache_remove", "connector_call", "data_process",
         "document_cache_retrieve", "flow_control", "map_ref", "message", "set_ddp", "set_dpp",
     },
-    (bodycaps.TRY_BODY, bodycaps.TERMINAL_SLOT): {"stop"},
+    # #154 item 2: the legacy builder wraps a Return Documents terminal inside
+    # its process-scoped Try/Catch, so the protected path may end on one.
+    (bodycaps.TRY_BODY, bodycaps.TERMINAL_SLOT): {"stop", "return_documents"},
     (bodycaps.CATCH_BODY, bodycaps.STEP_SLOT): {
         "cache_get", "cache_put", "cache_remove", "connector_call", "data_process",
         "document_cache_retrieve", "flow_control", "map_ref", "message", "set_ddp", "set_dpp",

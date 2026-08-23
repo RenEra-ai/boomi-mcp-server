@@ -1,0 +1,38 @@
+{
+ "body": {
+  "kind": "sequence",
+  "steps": [
+   {
+    "catch_body": {
+     "steps": [
+      {
+       "cache_ref": "$ref:CACHE",
+       "kind": "cache_put"
+      }
+     ],
+     "terminal": {
+      "kind": "exception",
+      "message_template": "staged then raised: {1}"
+     }
+    },
+    "kind": "try_catch",
+    "retry": {
+     "count": 0
+    },
+    "scope": "process",
+    "try_body": {
+     "steps": [
+      {
+       "kind": "connector_call",
+       "operation_ref": "$ref:GETOP"
+      }
+     ],
+     "terminal": {
+      "kind": "stop"
+     }
+    }
+   }
+  ]
+ },
+ "version": "1"
+}

@@ -1133,6 +1133,26 @@ def error_compile(doc, symbols=None):
     return compile_process_ir_v1(parse_process_ir_v1(doc), symbols or error_symbols())
 
 
+#: #154 M12.16 — the six grammar shapes this slice makes expressible. The case
+#: documents live in ``tests/fixtures/process_ir/issue154/*.json`` and their
+#: per-shape oracle provenance is recorded in
+#: ``tests/fixtures/process_ir/issue154/PROVENANCE.md``. They reuse
+#: ``error_symbols`` because every shape is a connector flow with an
+#: error-handling or terminal variation, which is exactly that table's subject.
+def _issue154_case(name):
+    def render():
+        from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+
+        doc = json.loads(
+            (_HERE / "fixtures" / "process_ir" / "issue154" / (name + ".json"))
+            .read_text(encoding="utf-8")
+        )
+        symbols = error_symbols()
+        _cfg, plan = error_compile(doc, symbols)
+        return emit_process(plan, symbols).process_xml
+    return render
+
+
 def _error_case(anchor):
     def render():
         from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
@@ -1504,6 +1524,13 @@ def _build_registry():
         "process_ir_error:process_retry0_exception": ("process-xml-v1", _error_case("scoped_try_catch_process_retry0_exception")),
         "process_ir_error:connector_read_retry5_cache_catch": ("process-xml-v1", _error_case("scoped_try_catch_connector_read_retry5_cache_catch")),
         "process_ir_error:connector_read_to_connector_catch": ("process-xml-v1", _error_case("scoped_try_catch_connector_read_to_connector_catch")),
+        # H2 — #154 M12.16 grammar widenings
+        "issue154:try_flow_control": ("process-xml-v1", _issue154_case("try_flow_control")),
+        "issue154:try_data_process": ("process-xml-v1", _issue154_case("try_data_process")),
+        "issue154:try_return_documents": ("process-xml-v1", _issue154_case("try_return_documents")),
+        "issue154:source_target_return_documents": ("process-xml-v1", _issue154_case("source_target_return_documents")),
+        "issue154:catch_cache_put_exception": ("process-xml-v1", _issue154_case("catch_cache_put_exception")),
+        "issue154:connector_linear_interleave": ("process-xml-v1", _issue154_case("connector_linear_interleave")),
         # I — typed recipe arms
         "recipe:compose_stream": ("process-xml-v1", _recipe_case("compose_stream")),
         "recipe:compose_all_cache": ("process-xml-v1", _recipe_case("compose_all_cache")),
