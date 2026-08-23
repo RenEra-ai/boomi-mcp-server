@@ -248,39 +248,44 @@ def _map_type_vocabularies() -> Tuple[FrozenSet[str], FrozenSet[str]]:
     )
 
 
-def _builder_rejects_this_route(config: Mapping[str, Any]) -> bool:
-    """Whether the map builder that owns this ``map_type`` says these structured
-    fields are not what this route executes.
+def _builder_would_build_this(config: Mapping[str, Any]) -> bool:
+    """Whether the map builder that owns this ``map_type`` accepts this config.
 
     Asked, not modelled. Three separate corrections in this slice each pinned ONE
-    more fact about what a map builder accepts — the supported map types, then the
-    direct-only reject keys — and each round found another table that had not been
-    asked. There are FOUR route-class tables and ``validate_config`` consults them
-    in an order this could not reproduce without becoming a copy of it. So the
-    question goes to the builder, routed through the builders' own dispatch table.
+    more fact about what a map builder accepts, and each round found another
+    table that had not been asked. So the question goes to the builder, routed
+    through the builders' own dispatch table.
 
-    Scoped to ROUTE-CLASS refusals (``UNSUPPORTED_TRANSFORM_ROUTE``) on purpose. A
-    config can also be refused for being incomplete — a missing name, a malformed
-    field mapping — and that says nothing about whether the fields present are the
-    ones this route would run. Treating every refusal as a route bypass would tie
-    effect derivation to every unrelated validation rule the builder ever gains.
+    ACCEPTANCE, not "the first error is route-class". An earlier version read the
+    error CODE and treated only a route-class refusal as disqualifying, so that
+    structured fields could still be trusted for a config refused merely for
+    being incomplete. That was order-dependent and leaked: every map builder runs
+    a deep secret-shaped-key scan BEFORE its route tables, so a route violation
+    accompanied by a secret-shaped key answered with the secret code and the
+    effect was trusted anyway.
 
-    Conservative on error: an unanswerable question is a rejection, so an
-    exception here can never become an accidental trust.
+    The narrower rule was chosen to keep an incomplete config diagnosable rather
+    than silently inert. That reason turned out not to exist: an incomplete map
+    config has its step refused at plan time and a forced apply executes nothing,
+    so the declaration going inert hides no diagnostic a caller would otherwise
+    see. With the justification gone, the simpler property is also the safer one —
+    derive only from a config the builder will actually build.
+
+    Conservative on error: an unanswerable question is a rejection, so nothing
+    here can become an accidental trust.
     """
     from ..categories.components.builders.map_builder import MAP_BUILDERS
 
     map_type = config.get("map_type")
     if not isinstance(map_type, str):
-        return True
+        return False
     builder = MAP_BUILDERS.get(("transform.map", map_type))
     if builder is None:
-        return True
+        return False
     try:
-        error = builder.validate_config(dict(config))
+        return builder.validate_config(dict(config)) is None
     except Exception:  # noqa: BLE001 - an unanswerable question is a rejection
-        return True
-    return getattr(error, "error_code", None) == "UNSUPPORTED_TRANSFORM_ROUTE"
+        return False
 
 
 def derive_map_effect(
@@ -315,9 +320,9 @@ def derive_map_effect(
     # not run. The bytes themselves are not inspectable here, so opaque.
     if config.get("xml"):
         return None
-    # Does the builder that owns this route say these structured fields are not
-    # what it would run? All four route-class tables, asked rather than modelled.
-    if _builder_rejects_this_route(config):
+    # Would the builder actually build this config? All four route-class tables
+    # and every other rule it applies, asked rather than modelled.
+    if not _builder_would_build_this(config):
         return None
     function_types, direct_types = _map_type_vocabularies()
     map_type = config.get("map_type")
