@@ -272,6 +272,170 @@ AUTHORING_INTENT_KINDS: Tuple[str, ...] = tuple(
 )
 
 
+# ---------------------------------------------------------------------------
+# effect declarations (#154 M12.16)
+# ---------------------------------------------------------------------------
+#
+# WHY THESE ARE SEPARATE TYPES FROM THE COMPILER'S OWN CONTRACTS
+#
+# ``compiler.process_ir.semantic_validation.contracts`` already defines
+# ``MapEffectContractV1``, ``ScriptEffectContractV1``, ``SubprocessSummaryV1`` and
+# ``ExternalWriterContractV1``. Those are the TRUSTED context a validation run is
+# given: whatever they say about reads, writes and replay safety is taken as
+# established fact.
+#
+# The models below are a caller's CLAIM. They are the same information at a
+# different trust level, and #154's whole point is that the two must not be
+# confused — a declaration establishes nothing until a server-side authority
+# vouches for its CONTENT. Giving them the compiler's names would have made the
+# "the caller's object is never forwarded into the compiler" test unable to tell
+# the two apart by type, which is precisely the property it exists to check. So
+# the public spelling is ``...DeclarationV1`` throughout, and the issue's literal
+# names stay with the internal contracts that already own them.
+#
+# The digest spelling differs too, deliberately: public is the repo-wide
+# ``sha256:<hex>`` ``DigestString``, internal is bare hex. The boundary converts
+# once, after an equality check, so a mismatch cannot survive as a coincidence of
+# formatting.
+
+
+class ProcessIRStateReferenceV1(_AuthoringModel):
+    """One piece of process state an effect touches.
+
+    ``(scope, name)`` mirrors the compiler's internal pair exactly. A richer
+    public shape would have to be flattened at the boundary, and a lossy
+    conversion in the middle of a trust check is not worth the ergonomics.
+
+    ``processproperty`` is deliberately absent from the scopes: the lineage
+    analysis does not track defined Process Properties, so a declaration naming
+    one could never be cross-checked and would be an assertion masquerading as a
+    scope.
+    """
+
+    scope: Literal["ddp", "dpp", "cache"]
+    name: NonEmptyString
+
+
+class ProcessIRStateEffectDeclarationV1(_AuthoringModel):
+    """A claimed read/write set plus a claimed replay-safety flag.
+
+    Ordering is not meaningful and duplicates are not meaningful, so both are
+    normalised at construction — two declarations that differ only in spelling
+    must compare equal to the server's derived effect, or the equality check
+    below would fail for a reason that is not about effects at all.
+    """
+
+    reads: Tuple[ProcessIRStateReferenceV1, ...] = ()
+    writes: Tuple[ProcessIRStateReferenceV1, ...] = ()
+    replay_safe: bool = False
+
+    @field_validator("reads", "writes")
+    @classmethod
+    def _canonical(cls, value):
+        return tuple(sorted(set(value), key=lambda ref: (ref.scope, ref.name)))
+
+
+class ProcessIRMapEffectDeclarationV1(_AuthoringModel):
+    """A claim about what a map step does to process state.
+
+    CONTENT AUTHORITY: server-side inspection of the resolved map component. The
+    declaration is checked for equality against what inspection derives; it never
+    substitutes for it.
+    """
+
+    map_ref: NonEmptyString
+    effect: ProcessIRStateEffectDeclarationV1
+
+
+class ProcessIRScriptEffectDeclarationV1(_AuthoringModel):
+    """A claim about what a script does to process state.
+
+    CONTENT AUTHORITY: a server-owned vetted-contract registry keyed by
+    ``(language, digest)``, where the digest is RECOMPUTED from the resolved
+    script source. ``source_sha256`` here is only ever checked for equality with
+    that recomputation — a caller-supplied digest is never the thing looked up,
+    because then a caller could name any script it liked.
+
+    A declaration whose digest matches but has no registry entry is INERT: the
+    server knows WHICH script it is and still has no authority for what it does.
+    """
+
+    language: NonEmptyString
+    source_sha256: DigestString
+    effect: ProcessIRStateEffectDeclarationV1
+
+
+class ProcessIRSubprocessEffectDeclarationV1(_AuthoringModel):
+    """A claim about what a called child process does to process state.
+
+    CONTENT AUTHORITY: server-side inspection of the resolved child ProcessIR. A
+    child that is a bare reference — resolvable as a component but with no
+    authored root in this request — cannot be inspected, so such a declaration is
+    INERT rather than trusted.
+    """
+
+    process_ref: NonEmptyString
+    effect: ProcessIRStateEffectDeclarationV1
+
+
+class ProcessIRExternalWriterDeclarationV1(_AuthoringModel):
+    """The ONE declaration with no server-side content authority, by nature.
+
+    An outside writer is not in the artifact, so nothing the compiler can read
+    could confirm or refute it. It therefore carries no effect payload at all —
+    there is nothing here that could be mistaken for evidence.
+
+    What it can do is bounded: combined with an authored ``cache_get`` whose
+    ``external_writer`` flag is set, it converts the blocking "no writer for this
+    cache" error into the ``EXTERNAL_WRITER_ASSUMED`` warning, so the assumption
+    stays named in the served record. It never establishes a cache write.
+    """
+
+    cache_ref: NonEmptyString
+
+
+class ProcessIREffectDeclarationsV1(_AuthoringModel):
+    """The optional effect-declaration envelope on an authoring request.
+
+    Absent or empty behaves exactly as before #154: no trusted context is built,
+    every map and script stays opaque, and every strict finding stands.
+    """
+
+    map_effects: Tuple[ProcessIRMapEffectDeclarationV1, ...] = ()
+    script_effects: Tuple[ProcessIRScriptEffectDeclarationV1, ...] = ()
+    subprocess_effects: Tuple[ProcessIRSubprocessEffectDeclarationV1, ...] = ()
+    external_writers: Tuple[ProcessIRExternalWriterDeclarationV1, ...] = ()
+
+    @model_validator(mode="after")
+    def _binding_keys_are_unique(self) -> "ProcessIREffectDeclarationsV1":
+        """Two declarations bound to the same thing make the result order-dependent.
+
+        The internal contract model rejects this for the same reason; rejecting it
+        here as well means a caller learns about it at the boundary they wrote,
+        with a pointer into their own payload.
+        """
+        for field, key in (
+            ("map_effects", lambda item: item.map_ref),
+            ("script_effects", lambda item: (item.language, item.source_sha256)),
+            ("subprocess_effects", lambda item: item.process_ref),
+            ("external_writers", lambda item: item.cache_ref),
+        ):
+            keys = [key(item) for item in getattr(self, field)]
+            if len(set(keys)) != len(keys):
+                raise ValueError(
+                    "duplicate binding key in {0}".format(field)
+                )
+        return self
+
+    def is_empty(self) -> bool:
+        return not (
+            self.map_effects
+            or self.script_effects
+            or self.subprocess_effects
+            or self.external_writers
+        )
+
+
 class AuthoringRequestV1(_AuthoringModel):
     """The one typed request the authoring workflow accepts.
 
@@ -288,6 +452,17 @@ class AuthoringRequestV1(_AuthoringModel):
     expected_capability_revision: Optional[NonEmptyString] = None
     expected_plan_hash: Optional[DigestString] = None
     expected_compile_hash: Optional[DigestString] = None
+    #: #154. Optional, and OMITTED normalises to ``None`` rather than to an empty
+    #: envelope: an ``effect_declarations`` key present-but-empty in the
+    #: normalised payload would rotate every existing plan hash for a request
+    #: that declared nothing.
+    effect_declarations: Optional[ProcessIREffectDeclarationsV1] = None
+
+    @model_validator(mode="after")
+    def _empty_declarations_are_no_declarations(self) -> "AuthoringRequestV1":
+        if self.effect_declarations is not None and self.effect_declarations.is_empty():
+            object.__setattr__(self, "effect_declarations", None)
+        return self
 
 
 # ---------------------------------------------------------------------------

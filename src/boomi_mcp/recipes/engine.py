@@ -1579,8 +1579,21 @@ def run_recipes(
     connector_metadata: Optional[Mapping[str, Tuple[Optional[str], Optional[str]]]] = None,
     topology_context: Any = None,
     resolver=placeholder_component_id,
+    effect_declarations: Any = None,
 ) -> RecipeRunResultV1:
-    """Run, compose, and canonically validate a set of recipe requests."""
+    """Run, compose, and canonically validate a set of recipe requests.
+
+    ``effect_declarations`` (#154) is the SAME public envelope
+    ``AuthoringRequestV1`` carries, and it is resolved through the same
+    server-side authority: identity is verified against the resolved components
+    and effect CONTENT is derived, never taken from the declaration. Omitted is
+    the default and behaves exactly as before.
+
+    ``validation_policy`` remains pinned to ``None`` throughout: the legacy
+    dialect's exemptions stay unreachable from this path. Effect context is a
+    different mechanism entirely — a typed contract the server built, not a
+    dialect key.
+    """
     active = registry if registry is not None else production_registry()
 
     seen_invocations = set()
@@ -1665,7 +1678,9 @@ def run_recipes(
     composed = compose(attributed, descriptors)
 
     components = _resolve_components(composed, catalog)
-    process_artifacts = _compile_processes(composed, components, connector_metadata, resolver)
+    process_artifacts = _compile_processes(
+        composed, components, connector_metadata, resolver, effect_declarations
+    )
     topology_plans = _plan_topologies(composed, components, topology_context)
     _evaluate_constraints(composed, components, active)
 
@@ -1713,6 +1728,7 @@ def _compile_processes(
     components: Sequence[IntegrationComponentSpec],
     connector_metadata: Optional[Mapping[str, Tuple[Optional[str], Optional[str]]]],
     resolver,
+    effect_declarations: Any = None,
 ) -> List[Tuple[str, Any]]:
     """The canonical chain, per assembled process. No exemption is reachable."""
     from ..compiler.process_ir.diagnostics import ProcessIRCompileError
@@ -1722,6 +1738,31 @@ def _compile_processes(
     symbols = build_symbol_table(
         components, connector_metadata=connector_metadata, resolver=resolver
     )
+    # #154: resolve once, before any process compiles. A declaration that fails
+    # identity or contradicts the server's derivation stops the run rather than
+    # silently doing nothing — a caller who declared an effect and got the strict
+    # finding anyway would have no way to tell which of the two happened.
+    from ..authoring.process_ir_effects import resolve_process_ir_effect_declarations
+
+    resolution = resolve_process_ir_effect_declarations(
+        composed.process_roots,
+        effect_declarations,
+        symbols,
+        components,
+        child_roots={"$ref:" + key: root for key, root in composed.process_roots},
+    )
+    if resolution.findings:
+        raise RecipeError(
+            tuple(
+                recipe_diagnostic(
+                    RECIPE_CONSTRAINT_FAILED,
+                    phase="validation",
+                    target="effect_declarations",
+                    cause_codes=(finding.code,),
+                )
+                for finding in resolution.findings
+            )
+        )
     artifacts: List[Tuple[str, Any]] = []
     for process_key, root in composed.process_roots:
         try:
@@ -1740,7 +1781,15 @@ def _compile_processes(
             # validation_policy is NOT a parameter of run_recipes and is pinned
             # to None here. A legacy dialect's exemptions are unreachable from
             # the recipe path by construction.
-            _cfg, plan = compile_process_ir_v1(root, symbols, validation_policy=None)
+            root_capabilities = resolution.capabilities_by_root.get(process_key)
+            _cfg, plan = (
+                compile_process_ir_v1(
+                    root, symbols, validation_policy=None,
+                    capabilities=root_capabilities,
+                )
+                if root_capabilities is not None
+                else compile_process_ir_v1(root, symbols, validation_policy=None)
+            )
             artifacts.append((process_key, emit_process(plan, symbols)))
         except ProcessIRCompileError as exc:
             raise RecipeError(

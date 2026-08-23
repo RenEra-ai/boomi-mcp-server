@@ -1240,9 +1240,53 @@ def build_resolved_reference_summary(
     return sort_by_key(summaries)
 
 
+#: #154. Static, code-selected text for an effect-declaration rejection. No
+#: authored value is ever interpolated: a declaration names components, digests
+#: and property names, and none of those belong in a served diagnostic.
+_EFFECT_DECLARATION_MESSAGES = {
+    "unbound": (
+        "this effect declaration does not bind to anything in the request"
+    ),
+    "unresolved-or-wrong-type": (
+        "this effect declaration names a component that does not resolve, or "
+        "resolves to the wrong component type"
+    ),
+    "unbound-or-digest-mismatch": (
+        "this script effect declaration does not match any script in the "
+        "request: either no step carries it, or the recomputed digest differs"
+    ),
+    "content-mismatch": (
+        "this effect declaration disagrees with what the server derived from "
+        "the resolved component"
+    ),
+}
+
+_EFFECT_DECLARATION_REMEDIATIONS = {
+    "unbound": (
+        "Remove the declaration, or author the step it describes. An external "
+        "writer contract additionally requires the cache_get to set "
+        "external_writer."
+    ),
+    "unresolved-or-wrong-type": (
+        "Declare the component in the component plan and reference it by "
+        "logical key with '$ref:KEY'."
+    ),
+    "unbound-or-digest-mismatch": (
+        "Recompute source_sha256 from the exact script source in the request, "
+        "with no whitespace or newline normalization."
+    ),
+    "content-mismatch": (
+        "Effect content comes from server-side inspection and the vetted script "
+        "registry, never from the declaration. Match the derived effect, or omit "
+        "the declaration and accept the strict findings."
+    ),
+}
+
+
 def _validate_processes(
     normalized: _NormalizedIntent,
-) -> Tuple[ValidationReportSummaryV1, Tuple[AuthoringDiagnosticV1, ...], Any]:
+    declarations: Any = None,
+) -> Tuple[ValidationReportSummaryV1, Tuple[AuthoringDiagnosticV1, ...], Any, Any]:
     """Run the unified #143 semantic validator over every authored process.
 
     Uses ``validate_process_ir``, which REPORTS and does not raise on a bad
@@ -1270,8 +1314,47 @@ def _validate_processes(
     codes: List[str] = []
     diagnostics: List[AuthoringDiagnosticV1] = []
 
+    # #154. Effect declarations are resolved ONCE, here, before any root is
+    # validated: identity is checked against the symbol table, effect CONTENT is
+    # derived server-side, and each root gets only the contracts that bind inside
+    # it. When the caller declared nothing this returns `None` per root, which is
+    # the pre-#154 argument exactly.
+    from .process_ir_effects import resolve_process_ir_effect_declarations
+
+    resolution = resolve_process_ir_effect_declarations(
+        normalized.process_roots,
+        declarations,
+        symbols,
+        list(normalized.integration_spec.components),
+        child_roots={
+            "$ref:" + key: root for key, root in normalized.process_roots
+        },
+    )
+    for finding in resolution.findings:
+        errors += 1
+        codes.append(finding.code)
+        diagnostics.append(
+            _diag(
+                finding.code,
+                "error",
+                message=_EFFECT_DECLARATION_MESSAGES[finding.reason],
+                path=finding.path,
+                subject_kind="process",
+                subject_id="",
+                remediation=_EFFECT_DECLARATION_REMEDIATIONS[finding.reason],
+            )
+        )
+
     for component_key, ir in normalized.process_roots:
-        report = validate_process_ir(ir, symbols)
+        # Pass the keyword ONLY when this root actually has trusted context.
+        # `capabilities=None` would override the strict default rather than fall
+        # back to it, which is the opposite of fail-closed.
+        root_capabilities = resolution.capabilities_by_root.get(component_key)
+        report = (
+            validate_process_ir(ir, symbols, capabilities=root_capabilities)
+            if root_capabilities is not None
+            else validate_process_ir(ir, symbols)
+        )
         errors += len(report.errors)
         warnings += len(report.warnings)
         advisories += len(report.advisories)
@@ -1359,7 +1442,7 @@ def _validate_processes(
         advisory_count=advisories,
         codes=tuple(sorted(set(codes))),
     )
-    return summary, tuple(diagnostics), symbols
+    return summary, tuple(diagnostics), symbols, resolution.capabilities_by_root
 
 
 def _validate_topology(
@@ -1543,7 +1626,7 @@ def _normalized_payload(normalized: _NormalizedIntent, request: AuthoringRequest
     """
     from ..models.process_ir import canonical_process_ir_json
 
-    return {
+    payload = {
         "intent_kind": request.intent.intent_kind,
         "conflict_policy": request.intent.conflict_policy,
         "integration_spec": normalized.integration_spec.model_dump(mode="json"),
@@ -1564,6 +1647,15 @@ def _normalized_payload(normalized: _NormalizedIntent, request: AuthoringRequest
             key=lambda entry: (entry["decision_id"], entry["option_id"]),
         ),
     }
+    # #154. The key is ABSENT unless the caller actually declared something.
+    # Adding `"effect_declarations": None` unconditionally would change the
+    # canonical payload of every request ever made, rotating every existing
+    # semantic/plan/compile hash for a feature those requests do not use — and a
+    # binding that rotates for no behavioural reason forces a re-plan that
+    # establishes nothing.
+    if request.effect_declarations is not None:
+        payload["effect_declarations"] = request.effect_declarations.model_dump(mode="json")
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -1583,6 +1675,10 @@ class _PlanInternals:
     #: populated by compile, retained on the bundle, EXECUTED by apply. `None`
     #: before compile has run; an empty mapping means no canonical roots.
     materialization_plans: Optional[Mapping[str, Any]] = None
+    #: #154: the per-root trusted effect context PLAN resolved. Compile reuses
+    #: the resolution rather than redoing it, so the artifact cannot be compiled
+    #: under a different context than the one validation reported against.
+    effect_capabilities: Optional[Mapping[str, Any]] = None
 
 
 def plan_authoring_request_v1(
@@ -1600,7 +1696,9 @@ def plan_authoring_request_v1(
         )
 
     normalized = _normalize_intent(request)
-    validation, validation_diagnostics, symbols = _validate_processes(normalized)
+    validation, validation_diagnostics, symbols, effect_capabilities = _validate_processes(
+        normalized, request.effect_declarations
+    )
     topology_diagnostics = _validate_topology(request, normalized, profile)
     decisions, decision_diagnostics = _evaluate_decisions(request, normalized)
 
@@ -1823,6 +1921,7 @@ def plan_authoring_request_v1(
         symbols=symbols,
         semantic_hash=semantic_hash,
         plan_hash=plan_hash,
+        effect_capabilities=effect_capabilities,
     )
     return result, internals
 
@@ -1915,7 +2014,10 @@ def _cause_codes_for(exc) -> Tuple[str, ...]:
 
 
 def build_artifact_descriptors(
-    normalized: _NormalizedIntent, symbols: Any, conflict_policy: str = "reuse"
+    normalized: _NormalizedIntent,
+    symbols: Any,
+    conflict_policy: str = "reuse",
+    effect_capabilities: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[Tuple[ArtifactFingerprintV1, ...], Tuple[ProcessCfgSummaryV1, ...]]:
     """Compile every authored process and fingerprint what came out.
 
@@ -1965,7 +2067,14 @@ def build_artifact_descriptors(
             # raised `ProcessIRValidationError`, which the `except` below does NOT
             # catch (only `ProcessIRCompileError`), so a re-parse failure escaped
             # this module's error channel raw.
-            reparsed, cfg, plan = compile_process_ir_model_v1(ir, symbols)
+            # #154: the SAME per-root context plan validated under. Passed only
+            # when present, for the same fail-closed reason as the validate call.
+            root_capabilities = (effect_capabilities or {}).get(component_key)
+            reparsed, cfg, plan = (
+                compile_process_ir_model_v1(ir, symbols, capabilities=root_capabilities)
+                if root_capabilities is not None
+                else compile_process_ir_model_v1(ir, symbols)
+            )
         except ProcessIRCompileError as exc:
             raise AuthoringWorkflowError(
                 AUTHORING_COMPILE_BLOCKED,
@@ -2126,7 +2235,10 @@ def compile_authoring_request_v1(
         )
 
     fingerprints, cfg_summaries, materialization_plans = build_artifact_descriptors(
-        internals.normalized, internals.symbols, request.intent.conflict_policy
+        internals.normalized,
+        internals.symbols,
+        request.intent.conflict_policy,
+        internals.effect_capabilities,
     )
     # RETAINED on the internals (AR1-01), so the bundle — and therefore apply —
     # executes the very plans this compile fingerprinted, never a rebuild.

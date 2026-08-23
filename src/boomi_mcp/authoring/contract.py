@@ -876,6 +876,18 @@ def _compiler_revision() -> str:
         ),
         ("process_property_scope", _process_property_scope_payload),
         (
+            # #154. The EFFECT AUTHORITIES. A caller's declaration establishes
+            # nothing on its own, so what it CAN establish is entirely decided by two
+            # server-owned tables: the map-function effect annotations and the
+            # vetted-script registry. Both are compiler behaviour a caller binds
+            # to — re-annotating a function family, or vouching for a new script,
+            # changes which strict findings a declaration can silence. Leaving
+            # them out of the revision would let a binding survive exactly that
+            # change.
+            "effect_authority",
+            _effect_authority_payload,
+        ),
+        (
             # The EXECUTION-PROFILE derivation (§6 AR3-07). The served revision
             # is a manifest of the compiler behaviours a caller binds to, and
             # this one was missing: replacing the derivation left the revision
@@ -1280,6 +1292,24 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
     return {
         "profiles": sorted({module.SCHEDULED, module.LISTENER}),
         "cases": dict(sorted(cases.items())),
+    }
+
+
+def _effect_authority_payload():
+    """Map-function effect annotations + vetted-script rows, both sanitized.
+
+    Neither accessor emits an authored value: ``function_effect_rows`` carries
+    family names and a closed vocabulary, and ``vetted_script_revision_rows``
+    carries digests rather than sources.
+    """
+    from ..authoring.vetted_scripts import vetted_script_revision_rows
+    from ..categories.components.builders.map_function_registry import (
+        function_effect_rows,
+    )
+
+    return {
+        "map_function_effects": [list(row) for row in function_effect_rows()],
+        "vetted_scripts": [list(row) for row in vetted_script_revision_rows()],
     }
 
 

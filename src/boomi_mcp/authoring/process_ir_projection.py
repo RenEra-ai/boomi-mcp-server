@@ -758,6 +758,73 @@ _SEMANTIC_RULES: Tuple[Tuple[str, str, str, str, Tuple[str, ...], Tuple[str, ...
         (),
         ("node.connector_call", "node.map_ref", "node.process_call"),
     ),
+    (
+        "semantic_rule.effect.declaration_boundary",
+        "state",
+        "An effect declaration supplies identity, never effect content",
+        "A declared map, script or subprocess effect is checked for IDENTITY — "
+        "the reference must resolve to a component of the right type, and a "
+        "script digest is RECOMPUTED from the resolved source rather than taken "
+        "from the declaration. What the effect IS always comes from a "
+        "server-side authority. A declaration that disagrees with the derived "
+        "effect is rejected; one the server cannot corroborate is inert.",
+        (),
+        ("semantic_rule.effect.map_inspection",
+         "semantic_rule.effect.script_registry",
+         "semantic_rule.effect.subprocess_inspection",
+         "semantic_rule.effect.external_writer"),
+    ),
+    (
+        "semantic_rule.effect.map_inspection",
+        "state",
+        "Map effects are derived by inspecting the map",
+        "The reads and writes attributed to a map come from its own function "
+        "mappings, resolved through the map-function registry. A map containing "
+        "any function whose effect is unannotated is wholly opaque: partial "
+        "knowledge is never reported as a complete effect.",
+        ("map_ref",),
+        ("node.map_ref", "semantic_rule.effect.declaration_boundary"),
+    ),
+    (
+        "semantic_rule.effect.script_registry",
+        "state",
+        "Script effects come only from the vetted registry",
+        "Nothing in an authored artifact establishes what an arbitrary script "
+        "does, so a script effect is admitted only when the recomputed "
+        "(language, digest) matches a server-owned vetted contract. A script "
+        "whose digest matches no entry is inert — the server knows which script "
+        "it is and still has no authority for what it does, so every strict "
+        "finding stands.",
+        ("data_process",),
+        ("node.data_process", "semantic_rule.effect.declaration_boundary"),
+    ),
+    (
+        "semantic_rule.effect.subprocess_inspection",
+        "state",
+        "Subprocess effects are derived from the child's own definition",
+        "A called child's summary is derived by inspecting its authored process "
+        "definition. Only writes on the child's root sequence count as "
+        "established: a write inside one Branch path or Decision arm does not "
+        "happen on every exit. A child that is a bare reference cannot be "
+        "inspected and is inert.",
+        ("process_call",),
+        ("node.process_call", "semantic_rule.effect.declaration_boundary"),
+    ),
+    (
+        "semantic_rule.effect.external_writer",
+        "state",
+        "An external writer is an assumption, never established state",
+        "A cache populated outside this process cannot be observed from the "
+        "artifact, so an external-writer declaration never establishes a cache "
+        "write. Combined with a cache_get that authors external_writer, it "
+        "converts the blocking missing-writer error into a named warning, so the "
+        "assumption stays visible instead of passing silently. "
+        "document_cache_retrieve carries no such flag: cache_get is the "
+        "canonical spelling for a cache this process does not write.",
+        ("cache_get", "document_cache_retrieve"),
+        ("node.cache_get", "node.document_cache_retrieve",
+         "semantic_rule.effect.declaration_boundary"),
+    ),
 )
 
 
@@ -1309,6 +1376,13 @@ _SEMANTIC_RULE_SOURCES = {
     "semantic_rule.retry.replay_safety": (SOURCE_RETRY, SOURCE_CONNECTORS),
     "semantic_rule.documents.explicit_split_combine": (SOURCE_CAPABILITIES,),
     "semantic_rule.references.opaque": (SOURCE_MODELS,),
+    # #154. The effect rules are facts about the RESOLVER's authorities, not
+    # about the models — the models carry only the declaration shape.
+    "semantic_rule.effect.declaration_boundary": (SOURCE_MODELS,),
+    "semantic_rule.effect.map_inspection": (SOURCE_CAPABILITIES,),
+    "semantic_rule.effect.script_registry": (SOURCE_CAPABILITIES,),
+    "semantic_rule.effect.subprocess_inspection": (SOURCE_STATE,),
+    "semantic_rule.effect.external_writer": (SOURCE_STATE,),
 }
 
 

@@ -57,6 +57,7 @@ QA validates this assumption at the live-call layer.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Callable, Dict, List, Mapping, Optional, Tuple
 
 from .connector_builder import BuilderValidationError, _escape_xml
@@ -140,6 +141,37 @@ class FunctionFamily:
     # property families) + the required referenced component type.
     component_reference_parameter: Optional[str] = None
     component_reference_type: Optional[str] = None
+    # --- Effect metadata (#154 M12.16) -------------------------------------
+    #
+    # What this family does to PROCESS STATE, for the server-side map-effect
+    # derivation. It is emitter-irrelevant: nothing below reaches the XML.
+    #
+    # ``effect_kind`` defaults to ``None`` meaning OPAQUE, and that default is
+    # load-bearing. A family added later without an effect annotation must make
+    # the maps that use it UNDERIVABLE, not silently pure — a "pure" default
+    # would let a new side-effecting function establish state it never touches.
+    #
+    #   None              -- opaque; a map containing it derives nothing
+    #   "pure"            -- no process state, safe to replay
+    #   "impure_stateless"-- no tracked state, but NOT safe to replay
+    #   "property_get"    -- reads ``effect_scope`` named by ``effect_parameter``
+    #   "property_set"    -- writes ``effect_scope`` named by ``effect_parameter``
+    #
+    # The property families name their target with a PARAMETER, not a constant,
+    # so the derivation reads the authored parameter value; ``effect_parameter``
+    # says which one.
+    #
+    # PROVENANCE: these 20 rows are a hand-model of Boomi platform behaviour.
+    # The authority is the platform, which this repo cannot query for function
+    # semantics, so the hand-model IS the authority here (recorded on the #154
+    # ledger under the structural-fix rule's non-derivable-fact ground). What
+    # keeps it honest is the opaque default plus ``function_effect_rows()``,
+    # which puts every row into the served capability revision so a change to
+    # any of them moves a hash a caller can see.
+    effect_kind: Optional[str] = None
+    effect_scope: Optional[str] = None
+    effect_parameter: Optional[str] = None
+
     # Canonical canvas coordinates emitted in the FunctionStep open tag.
     x: str = "10.0"
     y: str = "10.0"
@@ -411,6 +443,7 @@ def _validate_math_precision(value: object) -> Optional[str]:
 
 # date_format
 _DATE_FORMAT = FunctionFamily(
+    effect_kind="pure",
     name="date_format",
     fn_type="DateFormat",
     category="Date",
@@ -429,6 +462,7 @@ _DATE_FORMAT = FunctionFamily(
 
 # default_value (pseudo-family — emits to <Defaults>, not <Functions>)
 _DEFAULT_VALUE = FunctionFamily(
+    effect_kind="pure",
     name="default_value",
     fn_type=_DEFAULT_VALUE_SENTINEL,
     category="",
@@ -444,6 +478,7 @@ _DEFAULT_VALUE = FunctionFamily(
 
 # trim (TrimWhitespace)
 _TRIM = FunctionFamily(
+    effect_kind="pure",
     name="trim",
     fn_type="TrimWhitespace",
     category="String",
@@ -459,6 +494,7 @@ _TRIM = FunctionFamily(
 
 # left_trim (LeftTrim)
 _LEFT_TRIM = FunctionFamily(
+    effect_kind="pure",
     name="left_trim",
     fn_type="LeftTrim",
     category="String",
@@ -474,6 +510,7 @@ _LEFT_TRIM = FunctionFamily(
 
 # right_trim (RightTrim)
 _RIGHT_TRIM = FunctionFamily(
+    effect_kind="pure",
     name="right_trim",
     fn_type="RightTrim",
     category="String",
@@ -489,6 +526,7 @@ _RIGHT_TRIM = FunctionFamily(
 
 # uppercase (StringToUpper)
 _UPPERCASE = FunctionFamily(
+    effect_kind="pure",
     name="uppercase",
     fn_type="StringToUpper",
     category="String",
@@ -504,6 +542,7 @@ _UPPERCASE = FunctionFamily(
 
 # lowercase (StringToLower)
 _LOWERCASE = FunctionFamily(
+    effect_kind="pure",
     name="lowercase",
     fn_type="StringToLower",
     category="String",
@@ -519,6 +558,7 @@ _LOWERCASE = FunctionFamily(
 
 # append (StringAppend) — docs note Append is symmetric with Prepend
 _APPEND = FunctionFamily(
+    effect_kind="pure",
     name="append",
     fn_type="StringAppend",
     category="String",
@@ -537,6 +577,7 @@ _APPEND = FunctionFamily(
 
 # prepend (StringPrepend)
 _PREPEND = FunctionFamily(
+    effect_kind="pure",
     name="prepend",
     fn_type="StringPrepend",
     category="String",
@@ -555,6 +596,7 @@ _PREPEND = FunctionFamily(
 
 # replace (StringReplace)
 _REPLACE = FunctionFamily(
+    effect_kind="pure",
     name="replace",
     fn_type="StringReplace",
     category="String",
@@ -573,6 +615,7 @@ _REPLACE = FunctionFamily(
 
 # remove (StringRemove)
 _REMOVE = FunctionFamily(
+    effect_kind="pure",
     name="remove",
     fn_type="StringRemove",
     category="String",
@@ -589,6 +632,7 @@ _REMOVE = FunctionFamily(
 # simple_lookup (SimpleLookup) — uses CrossRefTableObj wrapper in component XML.
 # Shape verified live 2026-05-26 by iterative Boomi schema probing.
 _SIMPLE_LOOKUP = FunctionFamily(
+    effect_kind="pure",
     name="simple_lookup",
     fn_type="SimpleLookup",
     category="Lookup",
@@ -615,6 +659,9 @@ _SIMPLE_LOOKUP = FunctionFamily(
 # builder always emits with default="" so the function increments per
 # source record.
 _SEQUENTIAL_VALUE = FunctionFamily(
+    # A generator: touches no tracked state, but two runs do not agree, so it
+    # is explicitly NOT replay safe.
+    effect_kind="impure_stateless",
     name="sequential_value",
     fn_type="SequentialValue",
     category="Sequential",
@@ -648,6 +695,7 @@ _SEQUENTIAL_VALUE = FunctionFamily(
 # component XML form (no live evidence of where Boomi places this in
 # <FunctionStep>). Accepting an unused parameter would silently no-op.
 _MATH = FunctionFamily(
+    effect_kind="pure",
     name="math",
     fn_type="",  # resolved per-call via parameters["operation"]
     category="Numeric",
@@ -679,6 +727,9 @@ _MATH = FunctionFamily(
 # Property. No mapped source input; the DPP name is the "Property Name" input
 # default; result flows to the target via output key 3.
 _DYNAMIC_PROCESS_PROPERTY_GET = FunctionFamily(
+    effect_kind="property_get",
+    effect_scope="dpp",
+    effect_parameter="property_name",
     name="dynamic_process_property_get",
     fn_type="PropertyGet",
     category="ProcessProperty",
@@ -703,6 +754,9 @@ _DYNAMIC_PROCESS_PROPERTY_GET = FunctionFamily(
 # Property. The DPP name is the "Property Name" input default; the mapped
 # source value flows into "Property Value" (input key 2); no output.
 _DYNAMIC_PROCESS_PROPERTY_SET = FunctionFamily(
+    effect_kind="property_set",
+    effect_scope="dpp",
+    effect_parameter="property_name",
     name="dynamic_process_property_set",
     fn_type="PropertySet",
     category="ProcessProperty",
@@ -725,6 +779,9 @@ _DYNAMIC_PROCESS_PROPERTY_SET = FunctionFamily(
 # Property. Empty inputs; the DDP is read into the output (key 3) whose name
 # is "Dynamic Document Property - <DDP>"; Configuration carries DocumentProperty.
 _DOCUMENT_PROPERTY_GET = FunctionFamily(
+    effect_kind="property_get",
+    effect_scope="ddp",
+    effect_parameter="document_property_name",
     name="document_property_get",
     fn_type="DocumentPropertyGet",
     category="ProcessProperty",
@@ -749,6 +806,9 @@ _DOCUMENT_PROPERTY_GET = FunctionFamily(
 # Property. The mapped source value flows into the single input named
 # "Dynamic Document Property - <DDP>" (key 1); no output; DocumentProperty config.
 _DOCUMENT_PROPERTY_SET = FunctionFamily(
+    effect_kind="property_set",
+    effect_scope="ddp",
+    effect_parameter="document_property_name",
     name="document_property_set",
     fn_type="DocumentPropertySet",
     category="ProcessProperty",
@@ -770,6 +830,11 @@ _DOCUMENT_PROPERTY_SET = FunctionFamily(
 # component-backed Process Property. Empty inputs; value read into output
 # (key 1) named after the property; references a Process Property component.
 _DEFINED_PROCESS_PROPERTY_GET = FunctionFamily(
+    # DELIBERATELY OPAQUE. A defined Process Property lives in a
+    # `processproperty` component, which is not one of the three tracked
+    # state scopes (ddp/dpp/cache) the lineage analysis models. Labelling it
+    # `dpp` would be wrong -- a defined property and a dynamic process
+    # property are different stores -- so it derives nothing.
     name="defined_process_property_get",
     fn_type="DefinedProcessPropertyGet",
     category="ProcessProperty",
@@ -803,6 +868,11 @@ _DEFINED_PROCESS_PROPERTY_GET = FunctionFamily(
 # single input named after the property (key 1); no output; references a
 # Process Property component.
 _DEFINED_PROCESS_PROPERTY_SET = FunctionFamily(
+    # DELIBERATELY OPAQUE. A defined Process Property lives in a
+    # `processproperty` component, which is not one of the three tracked
+    # state scopes (ddp/dpp/cache) the lineage analysis models. Labelling it
+    # `dpp` would be wrong -- a defined property and a dynamic process
+    # property are different stores -- so it derives nothing.
     name="defined_process_property_set",
     fn_type="DefinedProcessPropertySet",
     category="ProcessProperty",
@@ -857,6 +927,27 @@ FUNCTION_FAMILIES: Dict[str, FunctionFamily] = {
         _DEFINED_PROCESS_PROPERTY_SET,
     )
 }
+
+
+FUNCTION_FAMILIES = MappingProxyType(dict(FUNCTION_FAMILIES))
+
+
+def function_effect_rows() -> Tuple[Tuple[str, str, str, str], ...]:
+    """The effect annotation of every family, sorted, for the capability revision.
+
+    Sanitized by construction: it carries family names and the fixed vocabulary
+    above, never an authored parameter VALUE (a property name is caller text and
+    has no business in a served revision payload).
+    """
+    return tuple(
+        (
+            family.name,
+            family.effect_kind or "opaque",
+            family.effect_scope or "",
+            family.effect_parameter or "",
+        )
+        for family in sorted(FUNCTION_FAMILIES.values(), key=lambda item: item.name)
+    )
 
 
 SUPPORTED_FUNCTION_TYPES: Tuple[str, ...] = tuple(FUNCTION_FAMILIES)
