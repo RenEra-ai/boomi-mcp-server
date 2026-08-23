@@ -1633,12 +1633,17 @@ def test_the_deferred_branch_is_the_one_carrying_only_a_side_detail():
     without = validate_transform_map(dict(literal), depends_on, by_key)
     assert set((without.details or {})) == {"side"}, without.details
 
-    # POSITIVE CONTROL: supplying an index of the wrong type reaches the OTHER
-    # branch, which carries more than `side` — so the two really are distinct and
-    # the current predicate's reach is a property of this caller, not of the code.
+    # POSITIVE CONTROL, stated as an EXACT requirement rather than as "different".
+    # The first version accepted `None` and accepted any unrelated error whose
+    # detail keys merely differed, so a regression that stopped reaching the
+    # type-mismatch refusal at all would have left it green.
     with_index = validate_transform_map(
         dict(literal), depends_on, by_key,
         literal_indexes={"aaaaaaaa-1111-1111-1111-111111111111": {
             "profile_component_type": "profile.xml", "field_index_by_path": {"root/a": {}}}},
     )
-    assert with_index is None or set((with_index.details or {})) != {"side"}, with_index
+    assert with_index is not None, "the type-mismatch branch was not reached at all"
+    assert with_index.error_code == "MAP_PROFILE_INDEX_UNAVAILABLE", with_index.error_code
+    assert set((with_index.details or {})) == {"side", "index_type", "declared_type"}, (
+        with_index.details
+    )
