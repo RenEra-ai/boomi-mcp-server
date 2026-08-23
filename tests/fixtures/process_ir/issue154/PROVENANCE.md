@@ -30,7 +30,23 @@ legacy builder cannot express most of these flows, so no legacy-parity oracle ex
 | `try_data_process` | 1 | **Legacy shape evidence**, same mechanism: the `flow` list carries a `dataprocess` entry for that transform mode (`:1002-1012`) and is wrapped whole. | legacy-oracle parity capture (placement only) |
 | `try_return_documents` | 2 | **Legacy shape evidence.** The wrapped `flow` list's terminal entry is `_terminal_flow_entry(config)` (`:1168`), which emits `returndocuments` when `return_documents.enabled` is set — inside the same wrap. | legacy-oracle parity capture (placement only) |
 | `catch_cache_put_exception` | 4 | **Legacy shape evidence.** The DLQ catch leg writes to a document cache and then ends the path; `catch_exception` (issue #108, M10.4) makes that ending an explicit Throw instead of a bare Stop. Write-then-raise is the shape the relaxation makes authorable. | legacy-oracle parity capture (placement only) |
-| `connector_linear_interleave` | 5 | **NO legacy oracle.** This is the one widening with no legacy emission citation in the issue, and none was found at HEAD. It rests entirely on the three checks above plus the entry-role invariant: the role must sit on the FIRST ROOT CALL, which for this shape is not the CFG entry node. `tests/test_process_ir_compiler_invariants.py` proves that with three mutants. **Recorded limitation:** the emitted source-role connector shape at a non-zero position is not independently attested. A UI-authored or executed-green live capture would close this and is the right evidence to add if this shape is ever emitted to a live account. | UNATTESTED placement — recorded, not claimed |
+| `connector_linear_interleave` | 5 | **SPLIT — corrected by QA-154-r1-08.** The case has two halves and they do NOT have the same standing. The INTERLEAVE half (linear steps *between* two calls) **is** legacy-attested: `tests/fixtures/golden_xml/set_properties_ddp_dpp_flow_sequence.xml`, committed 2026-07-02 and therefore long before this slice's baseline, emits `[start, connectoraction, documentproperties, documentproperties, connectoraction, stop]` — measured. The PREFIX half (a linear step *before the first* call) is genuinely unattested: no pre-baseline golden places a non-`catcherrors` shape ahead of the first connector shape. The first draft of this row claimed no oracle for either half, which UNDERSTATED the evidence — a provenance record is wrong when it is too pessimistic as well as when it is too generous. | interleave: legacy-oracle parity capture · prefix: UNATTESTED, recorded |
+
+## The one placement this slice does not attest
+
+The linear PREFIX of `connector_linear_interleave` — a property step ahead of the flow's first
+connector call — has no independent oracle at this HEAD. What stands behind it:
+
+* the entry role is proven to sit on the first ROOT CALL rather than on the CFG entry node
+  (`tests/test_process_ir_compiler_invariants.py`, three mutants, each asserting the mutation took
+  effect first);
+* `verify_process_graph` accepts the emitted XML and the platform's own readback graph-verifies
+  clean;
+* the bytes are deterministic across isolated renders.
+
+What is NOT established is that the platform renders a source-role connector shape at a non-zero
+position the way this emission assumes. A UI-authored reference component, or an executed-green
+live capture, would close it. Recorded as a limitation rather than argued away.
 
 ## Why `error_symbols`
 

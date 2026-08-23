@@ -540,3 +540,301 @@ def test_an_unannotated_function_family_would_fail_closed():
             {"function_type": "unannotated_probe", "parameters": {}}]}) is None
     finally:
         reg.FUNCTION_FAMILIES = original
+
+
+# ---------------------------------------------------------------------------
+# QA-154-r1-01 regression: EVERY compile the authoring path runs gets the context
+# ---------------------------------------------------------------------------
+
+
+def test_the_materialization_compile_accepts_the_resolved_context():
+    """The site that was strict.
+
+    `build_materialization_plan` owns the THIRD compile of a root. While it took
+    no `capabilities` parameter, a declaration whose whole purpose is to turn a
+    blocking finding into a warning validated clean and then failed here — so
+    using the feature as documented left a caller strictly worse off than
+    omitting it.
+    """
+    import inspect
+
+    from boomi_mcp.authoring.process_materialization import build_materialization_plan
+
+    assert "capabilities" in inspect.signature(build_materialization_plan).parameters
+
+
+def test_the_materialization_compile_actually_receives_the_context(monkeypatch):
+    """BEHAVIOURAL, not structural.
+
+    Builds a real materialization plan and spies on the core compile every entry
+    funnels through. Before the fix this site called the strict two-argument form
+    and the spy would record ``None``.
+    """
+    import copy
+
+    from boomi_mcp.authoring import process_materialization as pm
+    from boomi_mcp.authoring.contract import get_authoring_revisions
+    from boomi_mcp.compiler.process_ir import pipeline as _pipeline
+    from boomi_mcp.compiler.process_ir.emitter_registry import emitter_revision
+    from boomi_mcp.compiler.process_ir.semantic_validation.contracts import (
+        ProcessIRValidationCapabilitiesV1,
+    )
+    from boomi_mcp.models.process_component import ProcessComponentEnvelopeV1
+
+    import test_process_materialization_plan as mp
+
+    seen = []
+    real = _pipeline._compile_parsed_process_ir_v1
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("capabilities"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(_pipeline, "_compile_parsed_process_ir_v1", spy)
+
+    # A DISTINCT empty instance. It binds nothing, so the compiler's
+    # unbound-contract check has nothing to reject — while still being a specific
+    # object the spy can identify, which is what makes the assertion below about
+    # THREADING rather than about equality with the default.
+    context = ProcessIRValidationCapabilitiesV1()
+    assert context is not None
+    pm.build_materialization_plan(
+        envelope=ProcessComponentEnvelopeV1(component_key="proc", name="P", action="create"),
+        process_ir=parse_process_ir_v1(copy.deepcopy(mp.VALID_IR_DOC)),
+        symbols=mp._symbols(None),
+        conflict_policy="reuse",
+        compiler_revision=get_authoring_revisions()["compiler_revision"],
+        emitter_revision=emitter_revision(),
+        materializer_revision="sha256:" + "a" * 64,
+        capabilities=context,
+    )
+    assert seen, "the spy never fired — the test would be vacuous"
+    assert all(item is context for item in seen), seen
+
+    # CONTROL: omitting the keyword must still reach the compile with None, so
+    # the assertion above is discriminating rather than always-true.
+    seen.clear()
+    pm.build_materialization_plan(
+        envelope=ProcessComponentEnvelopeV1(component_key="proc", name="P", action="create"),
+        process_ir=parse_process_ir_v1(copy.deepcopy(mp.VALID_IR_DOC)),
+        symbols=mp._symbols(None),
+        conflict_policy="reuse",
+        compiler_revision=get_authoring_revisions()["compiler_revision"],
+        emitter_revision=emitter_revision(),
+        materializer_revision="sha256:" + "a" * 64,
+    )
+    assert seen and all(item is None for item in seen), seen
+
+
+def test_the_recipe_intent_forwards_declarations_to_the_engine():
+    """A recipe-kind intent compiles INSIDE normalization, before validation.
+
+    So if the declarations do not reach `run_recipes` at that point, that intent
+    kind can never use the channel however well the later sites are wired.
+    """
+    import inspect
+
+    from boomi_mcp.authoring import workflow as _workflow
+
+    source = inspect.getsource(_workflow._normalize_recipe_intent)
+    assert "effect_declarations=effect_declarations" in source, source
+    # ...and the caller supplies it from the request rather than defaulting.
+    normalize = inspect.getsource(_workflow._normalize_intent)
+    assert "_normalize_recipe_intent(intent, request.effect_declarations)" in normalize
+
+
+# ---------------------------------------------------------------------------
+# QA-154-r1-07: the REAL opaque rows, covered directly
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "family", ["defined_process_property_get", "defined_process_property_set"]
+)
+def test_defined_process_property_families_are_opaque_on_purpose(family):
+    """A defined Process Property is NOT the `dpp` store lineage tracks.
+
+    Annotating these as `dpp` would let a map declaration establish a `dpp` write
+    that never happens — a false state claim reaching the lineage analysis. The
+    previous coverage passed coincidentally: it drove the family with a
+    parameters dict lacking the key an annotated version would read, so
+    `derive_map_effect` returned None for the wrong reason and the assertion held
+    either way (QA-154-r1-07).
+    """
+    from boomi_mcp.categories.components.builders.map_function_registry import (
+        FUNCTION_FAMILIES,
+    )
+
+    assert FUNCTION_FAMILIES[family].effect_kind is None
+    assert FUNCTION_FAMILIES[family].effect_scope is None
+
+
+@pytest.mark.parametrize(
+    "family,parameter",
+    [
+        ("defined_process_property_get", "property_name"),
+        ("defined_process_property_set", "property_name"),
+    ],
+)
+def test_annotating_a_defined_process_property_family_would_be_detected(family, parameter):
+    """The mutation witness the coincidental test lacked.
+
+    Annotates the REAL row as a `dpp` accessor and supplies the parameter such an
+    annotation would read — so `derive_map_effect` cannot fall through for a
+    missing-parameter reason. Under the mutant the map becomes DERIVABLE and
+    claims a `dpp` effect; that difference is what the assertion detects.
+    """
+    import dataclasses
+    from types import MappingProxyType
+
+    from boomi_mcp.categories.components.builders import map_function_registry as reg
+
+    mapping = {"function_type": family, "parameters": {parameter: "SOME_PROPERTY"}}
+    # Baseline: opaque, and NOT because the parameter is missing.
+    assert derive_map_effect({"map_type": "function", "function_mappings": [mapping]}) is None
+
+    kind = "property_get" if family.endswith("_get") else "property_set"
+    mutant = dataclasses.replace(
+        reg.FUNCTION_FAMILIES[family],
+        effect_kind=kind, effect_scope="dpp", effect_parameter=parameter,
+    )
+    assert mutant.effect_kind == kind  # the mutation took effect
+
+    patched = dict(reg.FUNCTION_FAMILIES)
+    patched[family] = mutant
+    original = reg.FUNCTION_FAMILIES
+    reg.FUNCTION_FAMILIES = MappingProxyType(patched)
+    try:
+        derived = derive_map_effect({"map_type": "function", "function_mappings": [mapping]})
+        # Under the mutant the map DOES derive, and claims dpp state.
+        assert derived is not None, "mutant had no effect — this witness is vacuous"
+        reads, writes, _replay = derived
+        assert ("dpp", "SOME_PROPERTY") in (reads + writes)
+    finally:
+        reg.FUNCTION_FAMILIES = original
+
+
+# ---------------------------------------------------------------------------
+# QA-154-r1-05: the canonical payload must not gain a key for an absent field
+# ---------------------------------------------------------------------------
+
+
+def test_effect_declarations_stay_out_of_the_canonical_payload_when_absent():
+    """An `effect_declarations: null` key would rotate every existing hash.
+
+    Nothing pinned this before (QA-154-r1-05): `_normalized_payload` was
+    referenced by zero test files, so the protection was load-bearing and
+    unwitnessed.
+    """
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _support = str(_Path(__file__).resolve().parent)
+    if _support not in _sys.path:
+        _sys.path.insert(0, _support)
+    from _m12_11_support import process_ir_request
+
+    from boomi_mcp.authoring.workflow import _normalize_intent, _normalized_payload
+
+    request = process_ir_request()
+    assert request.effect_declarations is None
+    payload = _normalized_payload(_normalize_intent(request), request)
+    assert "effect_declarations" not in payload, sorted(payload)
+
+
+def test_a_supplied_declaration_DOES_enter_the_canonical_payload():
+    """The control: the key is omitted because the field is absent, not because
+    the payload never carries it."""
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _support = str(_Path(__file__).resolve().parent)
+    if _support not in _sys.path:
+        _sys.path.insert(0, _support)
+    from _m12_11_support import process_ir_request
+
+    from boomi_mcp.authoring.workflow import _normalize_intent, _normalized_payload
+
+    declarations = ProcessIREffectDeclarationsV1(external_writers=(
+        ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:CACHE"),))
+    request = process_ir_request(effect_declarations=declarations)
+    assert request.effect_declarations is not None
+    payload = _normalized_payload(_normalize_intent(request), request)
+    assert "effect_declarations" in payload
+
+
+def test_an_empty_envelope_leaves_the_payload_untouched():
+    """Empty normalises to None on the request, so the payload cannot gain a key."""
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _support = str(_Path(__file__).resolve().parent)
+    if _support not in _sys.path:
+        _sys.path.insert(0, _support)
+    from _m12_11_support import process_ir_request
+
+    from boomi_mcp.authoring.workflow import _normalize_intent, _normalized_payload
+
+    request = process_ir_request(effect_declarations=ProcessIREffectDeclarationsV1())
+    assert request.effect_declarations is None
+    payload = _normalized_payload(_normalize_intent(request), request)
+    assert "effect_declarations" not in payload
+
+
+# ---------------------------------------------------------------------------
+# QA-154-r1-02: an exception's own registered codes, not its class name
+# ---------------------------------------------------------------------------
+
+
+def test_a_compile_error_serves_its_registered_codes_not_its_class_name():
+    """`ProcessIRCompileError` carries `diagnostics` whose `code` IS the answer.
+
+    Serving `"ProcessIRCompileError"` discarded it — the same pair QA-153-r16-01
+    closed for pydantic (an exception CLASS treated as provenance), recurring on
+    a different exception type.
+    """
+    from boomi_mcp.authoring.workflow import _cause_codes_for
+    from boomi_mcp.compiler.process_ir.diagnostics import (
+        CompilerDiagnostic,
+        ProcessIRCompileError,
+    )
+
+    exc = ProcessIRCompileError([
+        CompilerDiagnostic(
+            code="PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING",
+            phase="semantic_lowering", path="/body/steps/1",
+            node_identity="", message="m", remediation="r", internal_node_id="n1",
+        ),
+    ])
+    assert _cause_codes_for(exc) == ("PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING",)
+    assert "ProcessIRCompileError" not in _cause_codes_for(exc)
+
+
+def test_repeated_codes_are_reported_once_in_order():
+    from boomi_mcp.authoring.workflow import _cause_codes_for
+    from boomi_mcp.compiler.process_ir.diagnostics import (
+        CompilerDiagnostic,
+        ProcessIRCompileError,
+    )
+
+    def diag(code, path):
+        return CompilerDiagnostic(
+            code=code, phase="semantic_lowering", path=path, node_identity="",
+            message="m", remediation="r", internal_node_id="n",
+        )
+
+    exc = ProcessIRCompileError([
+        diag("CODE_A", "/a"), diag("CODE_B", "/b"), diag("CODE_A", "/c"),
+    ])
+    assert _cause_codes_for(exc) == ("CODE_A", "CODE_B")
+
+
+def test_an_exception_carrying_no_diagnostics_still_falls_back_to_its_class():
+    """The fallback is preserved — this widens what is reported, never what is
+    refused."""
+    from boomi_mcp.authoring.workflow import _cause_codes_for
+
+    class _Bare(Exception):
+        pass
+
+    assert _cause_codes_for(_Bare()) == ("_Bare",)

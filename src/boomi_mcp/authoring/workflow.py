@@ -483,10 +483,10 @@ def _normalize_intent(request: AuthoringRequestV1) -> _NormalizedIntent:
         )
 
     # kind == "recipe"
-    return _normalize_recipe_intent(intent)
+    return _normalize_recipe_intent(intent, request.effect_declarations)
 
 
-def _normalize_recipe_intent(intent) -> _NormalizedIntent:
+def _normalize_recipe_intent(intent, effect_declarations=None) -> _NormalizedIntent:
     """Run the registered recipes and take their assembled output.
 
     Composition is NOT re-implemented here: ``run_recipes`` owns descriptor
@@ -511,10 +511,16 @@ def _normalize_recipe_intent(intent) -> _NormalizedIntent:
     ]
     connector_metadata = _connector_metadata_from_components(intent.base_components)
     try:
+        # #154 (QA-154-r1-01, second half). A recipe-kind intent assembles AND
+        # compiles here, inside normalization — before `_validate_processes` has
+        # seen anything. So the declarations must reach the recipe engine at this
+        # point or that intent kind can never use the channel at all, no matter
+        # what the later sites do.
         result = run_recipes(
             requests,
             catalog=MaterializationCatalog(catalog_entries),
             connector_metadata=connector_metadata,
+            effect_declarations=effect_declarations,
         )
     except RecipeError as exc:
         # The recipe layer's own codes are carried VALUE-FREE as causatives; the
@@ -1931,7 +1937,7 @@ def plan_authoring_request_v1(
 # ---------------------------------------------------------------------------
 
 
-def _build_compile_time_plan(unit, symbols, conflict_policy):
+def _build_compile_time_plan(unit, symbols, conflict_policy, capabilities=None):
     """Build ONE root's materialization plan at COMPILE time, loudly.
 
     §6 review AR1-01: the previous version fingerprinted the plan and threw the
@@ -1961,6 +1967,7 @@ def _build_compile_time_plan(unit, symbols, conflict_policy):
             process_ir=unit.process_ir,
             symbols=symbols,
             conflict_policy=conflict_policy,
+            capabilities=capabilities,
             compiler_revision=get_authoring_revisions()["compiler_revision"],
             emitter_revision=emitter_revision(),
             materializer_revision=_materializer_revision(),
@@ -2007,10 +2014,35 @@ def _cause_codes_for(exc) -> Tuple[str, ...]:
     the answer for every failure that was not already named — this widens what
     is reported, never what is refused.
     """
+    #154 (QA-154-r1-02) closed the SAME defect for a second exception type.
+    # A `ProcessIRCompileError` carries `diagnostics`, and every one of those
+    # rows already holds a registered code — so serving `"ProcessIRCompileError"`
+    # threw away the authoritative answer the exception was carrying. That is the
+    # same pair QA-153-r16-01 closed for pydantic (an exception CLASS treated as
+    # provenance), recurring on a different class, so the rule is stated ONCE
+    # here rather than patched per type: ASK the exception for its own codes,
+    # in priority order, and fall back to the class name only when it has none.
     from ..categories.integration_builder import _named_error_code_from_validation
 
     named = _named_error_code_from_validation(exc)
-    return (named,) if named else (type(exc).__name__,)
+    if named:
+        return (named,)
+    carried = tuple(
+        code
+        for code in (
+            getattr(diagnostic, "code", None)
+            for diagnostic in getattr(exc, "diagnostics", ()) or ()
+        )
+        if isinstance(code, str) and code
+    )
+    if carried:
+        # Deduplicated, order preserved: a compile that failed on three nodes of
+        # one kind should not report that kind three times.
+        seen = {}
+        for code in carried:
+            seen.setdefault(code, None)
+        return tuple(seen)
+    return (type(exc).__name__,)
 
 
 def build_artifact_descriptors(
@@ -2163,7 +2195,8 @@ def build_artifact_descriptors(
         unit = units_by_key.get(component_key)
         if unit is not None:
             materialization_plan = _build_compile_time_plan(
-                unit, symbols, conflict_policy
+                unit, symbols, conflict_policy,
+                (effect_capabilities or {}).get(component_key),
             )
             materialization_plans[component_key] = materialization_plan
             fingerprints.append(

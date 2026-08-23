@@ -597,6 +597,7 @@ def build_materialization_plan(
     emitter_revision: str,
     materializer_revision: str,
     resolved_folder_id: Optional[str] = None,
+    capabilities=None,
 ) -> ProcessComponentMaterializationPlanV1:
     """Compile, derive, and fingerprint ONE root — the only supported constructor.
 
@@ -624,7 +625,22 @@ def build_materialization_plan(
         raise _not_relocatable_error(offenders)
 
     relocatable_symbols = placeholder_backed_symbols(symbols)
-    cfg, emission_plan = compile_process_ir_v1(process_ir, relocatable_symbols)
+    # #154 (QA-154-r1-01). This compile is the THIRD one the authoring path runs
+    # for a root, and it was the only one still strict. That made the effect
+    # channel worse than useless: a declaration whose entire purpose is to turn a
+    # blocking finding into a warning validated clean at plan and then failed
+    # here, so a caller who used the feature as documented was strictly worse off
+    # than one who omitted it.
+    #
+    # The context is INTERNAL and server-built — the same object
+    # `_validate_processes` resolved. Nothing a caller sends reaches it, so this
+    # is not a new trust surface; it is the existing one reaching the last site
+    # that needed it. `None` keeps the strict default rather than overriding it.
+    cfg, emission_plan = (
+        compile_process_ir_v1(process_ir, relocatable_symbols, capabilities=capabilities)
+        if capabilities is not None
+        else compile_process_ir_v1(process_ir, relocatable_symbols)
+    )
 
     covered: Dict[str, Any] = dict(
         envelope=envelope,

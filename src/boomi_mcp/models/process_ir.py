@@ -878,8 +878,19 @@ class DataProcessNodeV1(_ProcessIRBase):
 
 
 class CachePutNodeV1(_ProcessIRBase):
-    """Add to Cache write. CONSUMES the document stream — the containing
-    sequence rules require a stream-replacing cache read right after it."""
+    """Add to Cache write. CONSUMES the document stream.
+
+    A ``cache_put`` in a mid-list step position must be followed immediately by a
+    stream-replacing cache read, because whatever comes next would otherwise
+    receive nothing.
+
+    As the LAST step of a body the rule relaxes exactly where the terminal cannot
+    need the stream — a Decision false arm ending in ``stop``, and a Catch body
+    ending in ``stop`` or ``exception`` (#154 item 4: stage the caught document,
+    then end the path). Every other body still rejects it; the authoritative,
+    generated statement is the ``process_ir_authoring`` entry ``node.cache_put``,
+    derived from ``TRAILING_CACHE_PUT_TERMINALS`` rather than restated here.
+    """
 
     kind: Literal["cache_put"]
     cache_ref: ComponentRefV1
@@ -1213,6 +1224,27 @@ def _check_cache_put_followed_by_read(steps: List[Any], *, context: str) -> None
                 )
 
 
+#: Which body terminals tolerate a trailing ``cache_put`` in the STEP list.
+#:
+#: ONE authority (#154). The rule had five hand-written copies; collapsing them
+#: onto :func:`_check_trailing_cache_put` removed four, and this table removes the
+#: last duplicate — the served prose that described the rule in words. The
+#: projection derives its sentence from here, so a slot that gains or loses a
+#: tolerated terminal cannot leave a served sentence asserting the old rule.
+#:
+#: Keyed by the same context names ``body_capabilities`` uses, so the two tables
+#: are joinable rather than merely parallel.
+TRAILING_CACHE_PUT_TERMINALS: Mapping[str, FrozenSet[str]] = MappingProxyType(
+    {
+        "branch_leg": frozenset(),
+        "decision_true_arm": frozenset(),
+        "decision_false_arm": frozenset({"stop"}),
+        "try_body": frozenset(),
+        "catch_body": frozenset({"stop", "exception"}),
+    }
+)
+
+
 def _check_trailing_cache_put(
     steps: List[Any], terminal: Any, *, allowed_terminals: FrozenSet[str], message: str
 ) -> None:
@@ -1510,7 +1542,7 @@ class BranchLegV1(_ProcessIRBase):
         _check_cache_put_followed_by_read(self.steps, context="branch leg steps")
         _check_trailing_cache_put(
             self.steps, self.terminal,
-            allowed_terminals=frozenset(),
+            allowed_terminals=TRAILING_CACHE_PUT_TERMINALS["branch_leg"],
             message="a trailing cache_put belongs in the leg terminal (target-less staging leg), not in steps",
         )
         _check_process_call_terminal_form(
@@ -1591,7 +1623,7 @@ class DecisionTrueArmV1(_ProcessIRBase):
         _check_cache_put_followed_by_read(self.steps, context="decision true-arm steps")
         _check_trailing_cache_put(
             self.steps, self.terminal,
-            allowed_terminals=frozenset(),
+            allowed_terminals=TRAILING_CACHE_PUT_TERMINALS["decision_true_arm"],
             message="decision true-arm steps must not end in cache_put — the arm terminal would receive an empty stream",
         )
         _check_process_call_terminal_form(
@@ -1635,7 +1667,7 @@ class DecisionFalseArmV1(_ProcessIRBase):
         _check_cache_put_followed_by_read(self.steps, context="decision false-arm steps")
         _check_trailing_cache_put(
             self.steps, self.terminal,
-            allowed_terminals=frozenset({"stop"}),
+            allowed_terminals=TRAILING_CACHE_PUT_TERMINALS["decision_false_arm"],
             message="decision false-arm steps may end in cache_put only when the arm terminal is a stop",
         )
         return self
@@ -1781,7 +1813,7 @@ class TryCatchTryBodyV1(_ProcessIRBase):
         _check_cache_put_followed_by_read(self.steps, context="try body steps")
         _check_trailing_cache_put(
             self.steps, self.terminal,
-            allowed_terminals=frozenset(),
+            allowed_terminals=TRAILING_CACHE_PUT_TERMINALS["try_body"],
             message=(
                 "a trailing cache_put in a try body must be followed by a "
                 "stream-replacing cache read, not by the terminal"
@@ -1818,7 +1850,7 @@ class TryCatchCatchBodyV1(_ProcessIRBase):
         # cannot express the write-THEN-exception ordering at all.
         _check_trailing_cache_put(
             self.steps, self.terminal,
-            allowed_terminals=frozenset({"stop", "exception"}),
+            allowed_terminals=TRAILING_CACHE_PUT_TERMINALS["catch_body"],
             message=(
                 "catch body steps may end in cache_put only when the catch terminal "
                 "is a stop or an exception — any other terminal would receive an "
@@ -2109,10 +2141,6 @@ class SequenceNodeV1(_ProcessIRBase):
                         "a connector_call sequence may contain only connector_call "
                         "and linear steps before its terminal"
                     )
-            if "connector_call" not in body:
-                raise _cardinality_error(
-                    "a connector_call sequence must contain at least one connector_call"
-                )
             # Every map must be BRACKETED by calls. A trailing or doubled map has
             # no following call, so the map's destination profile could not be
             # checked against anything — and an unbounded-on-one-side map is
@@ -2137,6 +2165,13 @@ class SequenceNodeV1(_ProcessIRBase):
                         "a map_ref in a connector_call sequence must be immediately "
                         "preceded by a connector_call"
                     )
+            # No "contains at least one call" check appears here, and its absence
+            # is derived rather than forgotten (QA-154-r1-06): this branch is
+            # entered only when `connector_call` is in `kinds`, and the terminal
+            # allowlist above admits no `connector_call` — so a call in `kinds` is
+            # necessarily a call in `body`. A guard that cannot fire is not a
+            # guard; the terminal check is what actually rejects `[connector_call]`.
+            #
             # The sequence must END on a call (before its terminal). #154 admits a
             # linear PREFIX and linear steps BETWEEN calls, but not a linear
             # SUFFIX: the steps after the last call would run on documents no

@@ -1381,3 +1381,134 @@ def test_every_semantic_rule_names_the_authority_it_states_a_fact_about():
     # ...and they are not all the same source again, which is the state this
     # finding describes.
     assert len({ids for ids in served.values()}) >= 4, served
+
+
+# ---------------------------------------------------------------------------
+# #154 (QA-154-r1-03/-04): placement prose is DERIVED, never hand-written
+# ---------------------------------------------------------------------------
+
+
+def _node_entries_by_id():
+    from boomi_mcp.authoring.process_ir_projection import (
+        build_process_ir_authoring_entries,
+        reset_process_ir_authoring_cache,
+    )
+
+    reset_process_ir_authoring_cache()
+    return {
+        entry.contract_entry_id: entry
+        for entry in build_process_ir_authoring_entries()
+        if entry.contract_entry_id.startswith("node.")
+    }
+
+
+def test_every_node_entry_carries_a_derived_placement_fact():
+    entries = _node_entries_by_id()
+    assert entries, "no node entries — the test would be vacuous"
+    for entry_id, entry in entries.items():
+        placement = [f for f in entry.ordering_facts if f.startswith("Control-body placement:")]
+        assert len(placement) == 1, (entry_id, entry.ordering_facts)
+
+
+def test_the_derived_placement_fact_agrees_with_the_matrix():
+    """BOTH directions, per node, against the enforcement table itself."""
+    from boomi_mcp.compiler.process_ir import body_capabilities as bodycaps
+
+    expected = {}
+    for context, slot, kinds in bodycaps.body_placement_rows():
+        for kind in kinds:
+            expected.setdefault(kind, set()).add("{0} {1}".format(context, slot))
+
+    for entry_id, entry in _node_entries_by_id().items():
+        kind = entry_id[len("node."):]
+        fact = next(f for f in entry.ordering_facts if f.startswith("Control-body placement:"))
+        want = expected.get(kind, set())
+        if not want:
+            assert "none" in fact, (kind, fact)
+            continue
+        for slot in want:
+            assert slot in fact, (kind, slot, fact)
+        # ...and it claims nothing it does not hold
+        for other in {s for slots in expected.values() for s in slots} - want:
+            assert other not in fact, (kind, other, fact)
+
+
+def test_the_two_sentences_this_slice_falsified_are_gone():
+    """#154 widened the grammar and these stated the OLD rules.
+
+    One of them contradicted its own machine-readable ``placements`` list in the
+    same served object, and the contract rebase then froze both — so the suite was
+    pinning served text against a golden asserting the pre-widening grammar.
+    """
+    blob = " ".join(
+        " ".join(entry.ordering_facts) for entry in _node_entries_by_id().values()
+    )
+    assert "Admitted in the root sequence only" not in blob
+    assert "A trailing cache_put belongs in a Branch path terminal" not in blob
+    # the committed golden must not carry them either
+    committed = (_CONTRACT_FIXTURES / "process_ir_authoring_v1.contract.json").read_text()
+    assert "Admitted in the root sequence only" not in committed
+    assert "A trailing cache_put belongs in a Branch path terminal" not in committed
+
+
+def test_the_trailing_cache_put_sentence_derives_from_the_model_table():
+    from boomi_mcp.models.process_ir import TRAILING_CACHE_PUT_TERMINALS
+
+    fact = next(
+        f for f in _node_entries_by_id()["node.cache_put"].ordering_facts
+        if "tolerated only where" in f
+    )
+    tolerating = {c for c, t in TRAILING_CACHE_PUT_TERMINALS.items() if t}
+    assert tolerating, "no context tolerates it — the assertion would be vacuous"
+    for context in tolerating:
+        for terminal in TRAILING_CACHE_PUT_TERMINALS[context]:
+            assert terminal in fact, (context, terminal, fact)
+    # a context that tolerates NOTHING must not be advertised as tolerating
+    for context in set(TRAILING_CACHE_PUT_TERMINALS) - tolerating:
+        assert context not in fact, (context, fact)
+
+
+def test_an_unreviewed_placement_sentence_fails_the_build():
+    """NON-VACUITY WITNESS for the review trip.
+
+    Plants a sentence naming a placement slot on a node that has none allowlisted,
+    PROVES the plant is present, then proves the projection refuses to build.
+    """
+    import pytest as _pytest
+
+    from boomi_mcp.authoring import process_ir_projection as pr
+
+    kind = "message"
+    original = pr._NODE_FACTS[kind]
+    planted = dict(original)
+    planted[pr._ORDERING] = tuple(original.get(pr._ORDERING, ())) + (
+        "Admitted in a Try/Catch body only.",
+    )
+    assert any("try/catch body" in f.lower() for f in planted[pr._ORDERING])
+
+    patched = dict(pr._NODE_FACTS)
+    patched[kind] = planted
+    from types import MappingProxyType
+
+    saved = pr._NODE_FACTS
+    pr._NODE_FACTS = MappingProxyType(patched) if isinstance(saved, MappingProxyType) else patched
+    try:
+        pr.reset_process_ir_authoring_cache()
+        with _pytest.raises(ValueError, match="UNREVIEWED ordering fact"):
+            pr.build_process_ir_authoring_entries()
+    finally:
+        pr._NODE_FACTS = saved
+        pr.reset_process_ir_authoring_cache()
+
+
+def test_every_allowlisted_sentence_is_still_present_somewhere():
+    """An allowlist entry for a sentence nobody serves is dead weight that hides
+    the next real one."""
+    from boomi_mcp.authoring import process_ir_projection as pr
+
+    served = {
+        f for facts in (v.get(pr._ORDERING, ()) for v in pr._NODE_FACTS.values()) for f in facts
+    }
+    for kind, sentences in pr._REVIEWED_PLACEMENT_PROSE.items():
+        for sentence in sentences:
+            assert sentence in served, (kind, sentence)

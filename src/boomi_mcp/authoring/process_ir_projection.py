@@ -29,6 +29,7 @@ exists to remove.
 from __future__ import annotations
 
 import json
+from types import MappingProxyType
 from typing import (
     Any,
     Dict,
@@ -426,10 +427,7 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "in a step position must be followed immediately by a stream-"
             "replacing cache read."
         ),
-        _ORDERING: (
-            "A trailing cache_put belongs in a Branch path terminal (the staging "
-            "shape), not in the step list.",
-        ),
+        _ORDERING: (),
         _DOCS: ("required", "consumed", "all_documents"),
         _REFS: (("cache_ref", True),),
         _RELATED: ("state_visibility.cache",),
@@ -669,8 +667,6 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         ),
         _ORDERING: (
             "Returns and terminates; nothing may follow it.",
-            "Admitted in the root sequence only — not in a Branch path, a Decision "
-            "arm, or a Try/Catch body.",
         ),
         _DOCS: ("required", "documents", "all_documents"),
         _STAGES: ("author",),
@@ -864,6 +860,156 @@ def _schema_ref_for(kind: str, schema_defs: Mapping[str, Any]) -> Tuple[str, ...
     return tuple(sorted(refs))
 
 
+#: Tokens that make a PLACEMENT-ADMISSION claim in served prose.
+#:
+#: #154. Two served node entries stated the PRE-widening grammar, and one of them
+#: contradicted its own machine-readable ``placements`` list in the same object.
+#: That is the duplicate-authority defect class twice over: which slot admits
+#: which kind is decided by ``BODY_CAPABILITIES_V1``, and a hand-written sentence
+#: is a second copy of it that drifts the first time the matrix moves. The rebase
+#: of the contract golden then FROZE both falsehoods, so the suite was pinning
+#: served text against a golden that asserted the old grammar.
+#:
+#: The fix is structural rather than another correction: the placement sentence is
+#: now DERIVED (``_derived_placement_fact``), and the vocabulary below is REFUSED
+#: in a hand-written ordering fact. The claim this guard makes is bounded and
+#: checkable — the tokens are exactly the served context names plus the root
+#: sequence, which is the closed set a placement claim can be about.
+_PLACEMENT_CLAIM_TOKENS: Tuple[str, ...] = (
+    "branch path",
+    "branch leg",
+    "decision arm",
+    "decision true arm",
+    "decision false arm",
+    "try/catch body",
+    "try body",
+    "catch body",
+    "root sequence only",
+)
+
+
+def _derived_placement_fact(
+    kind: str, placements: List[ProcessIRAuthoringPlacementV1]
+) -> Tuple[str, ...]:
+    """The one sentence that states where a kind may appear, read off the matrix.
+
+    Absence is denial everywhere else in this system, so it is stated positively
+    here too: the sentence lists what IS admitted and says nothing about the rest.
+    A kind with no control-body placement gets the root-only sentence, which is
+    equally derived — from the ABSENCE of rows rather than from prose.
+    """
+    # SCOPED to what the authority actually decides. BODY_CAPABILITIES_V1 governs
+    # control-body slots and says nothing about the root sequence, whose rules
+    # live in SequenceNodeV1. A sentence that read "every slot not listed rejects
+    # it" would therefore assert something the matrix cannot support — and would
+    # be false for every root-admitted kind. Overclaiming here would repeat, in
+    # generated form, exactly the defect that made this function necessary.
+    if not placements:
+        return (
+            "Control-body placement: none — no Branch path, Decision arm or "
+            "Try/Catch body slot admits it. Root-sequence rules are separate.",
+        )
+    slots = sorted("{0} {1}".format(item.context, item.slot) for item in placements)
+    return (
+        "Control-body placement: admitted as {0}; no other control-body slot "
+        "admits it. Root-sequence rules are separate.".format(", ".join(slots)),
+    )
+
+
+#: Hand-written ordering facts that MENTION a placement context and have been
+#: reviewed against the matrix. Keyed by node kind; the value is the exact
+#: sentence.
+#:
+#: The guard below does NOT decide whether a sentence is true — a reader over
+#: English cannot make that claim, and pretending otherwise is how a checker ends
+#: up being the subject of its own findings. What it decides is bounded and
+#: total: a sentence that mentions a placement context is either on this list
+#: (someone compared it to the matrix) or it fails the build. The AUTHORITATIVE
+#: placement statement is the derived one, which every node entry carries; these
+#: are advisory prose that merely happen to name a slot.
+_REVIEWED_PLACEMENT_PROSE: Mapping[str, Tuple[str, ...]] = MappingProxyType({
+    # structuring advice; names no admission
+    "process_call": (
+        'To run several children, give each its own path — separate branch paths, or separate wrappers — rather than chaining calls.',
+    ),
+    # state-ordering semantics; names no admission
+    "set_dpp": (
+        'Per-execution state accumulates across Branch paths in the authored order, so a later path sees what an earlier one wrote.',
+    ),
+    # verified against _check_stop_terminal_has_work: leg/true-arm require work, false arm exempt
+    "stop": (
+        'A Branch path or Decision true arm ending in a stop must do some work first; a Decision false arm may stop with no steps at all.',
+    ),
+    # verified against BODY_CAPABILITIES_V1: admitted on branch_leg + decision_true_arm terminals, absent from decision_false_arm
+    "target": (
+        'A target is a legal terminal of a Branch path and of a Decision true arm; it is not admitted on a Decision false arm.',
+    ),
+})
+
+
+def _assert_no_hand_written_placement_claim(kind: str, facts: Tuple[str, ...]) -> None:
+    """A sentence naming a placement slot must have been reviewed against the matrix.
+
+    Deliberately NOT a truth check. It is a REVIEW TRIP: mentioning a context is
+    the signal that a sentence could go stale when the matrix moves, and the only
+    reliable response is that a person looked. #154 shipped two sentences that
+    stated the pre-widening grammar — one contradicting its own machine-readable
+    placements list — and the contract rebase then froze both.
+    """
+    reviewed = _REVIEWED_PLACEMENT_PROSE.get(kind, ())
+    for fact in facts:
+        lowered = fact.lower()
+        for token in _PLACEMENT_CLAIM_TOKENS:
+            if token not in lowered:
+                continue
+            if fact in reviewed:
+                break
+            raise ValueError(
+                "node {0!r} has an UNREVIEWED ordering fact naming a placement "
+                "slot ({1!r}): {2!r}. Placement itself is derived from "
+                "BODY_CAPABILITIES_V1 — delete the sentence, or compare it to the "
+                "matrix and add it to _REVIEWED_PLACEMENT_PROSE.".format(
+                    kind, token, fact
+                )
+            )
+
+
+def _derived_trailing_cache_put_fact(kind: str) -> Tuple[str, ...]:
+    """Where a trailing ``cache_put`` is tolerated, read off the model's table.
+
+    Same reason as the placement sentence: the rule lives in
+    ``TRAILING_CACHE_PUT_TERMINALS`` and a hand-written description of it is a
+    second copy that goes stale the first time a slot changes — which is exactly
+    what #154 item 4 did to the previous sentence.
+    """
+    if kind != "cache_put":
+        return ()
+    from ..models.process_ir import TRAILING_CACHE_PUT_TERMINALS
+    from ..compiler.process_ir.body_capabilities import PUBLIC_BODY_CONTEXTS
+
+    tolerated = sorted(
+        "{0} ({1})".format(PUBLIC_BODY_CONTEXTS[context], "/".join(sorted(terminals)))
+        for context, terminals in TRAILING_CACHE_PUT_TERMINALS.items()
+        if terminals
+    )
+    if not tolerated:
+        return (
+            "A cache_put in a step position must be followed by a stream-replacing "
+            "cache read; no body tolerates it as the last step.",
+        )
+    return (
+        "A cache_put in a step position must be followed by a stream-replacing "
+        "cache read. As the LAST step it is tolerated only where the terminal "
+        "cannot need the stream: {0}.".format(", ".join(tolerated)),
+    )
+
+
+def _hand_written_ordering(kind, facts) -> Tuple[str, ...]:
+    written = tuple(facts.get(_ORDERING, ()))
+    _assert_no_hand_written_placement_claim(kind, written)
+    return written
+
+
 def _node_entries(
     sources: ProjectionSourcesV1,
 ) -> List[ProcessIRAuthoringContractEntryV1]:
@@ -932,7 +1078,11 @@ def _node_entries(
                     if docs
                     else None
                 ),
-                ordering_facts=facts.get(_ORDERING, ()),
+                ordering_facts=(
+                    _hand_written_ordering(kind, facts)
+                    + _derived_trailing_cache_put_fact(kind)
+                    + _derived_placement_fact(kind, placements_by_kind.get(kind, []))
+                ),
                 required_references=tuple(
                     ProcessIRAuthoringReferenceV1(field=field, required=required)
                     for field, required in facts.get(_REFS, ())
