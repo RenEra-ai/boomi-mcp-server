@@ -1329,3 +1329,44 @@ def test_both_raw_xml_bypass_sites_use_the_same_predicate():
     # neither site strips, lowercases, or compares to a literal
     assert not re.search(r'\.get\("xml"\)\s*(?:\.strip\(\)|!=\s*""|==\s*""|is not None)', source)
     assert '"xml" in raw_config' not in source and '"xml" in payload' not in source
+
+
+def test_the_effective_config_includes_the_specs_top_level_name():
+    """Codex round 5 P2. `integration_builder` injects the spec's `name` as
+    `component_name` when the config omits it, and validates THAT.
+
+    Validating the raw config instead made a map that builds perfectly well go
+    inert — the same mistake as modelling a builder RULE, one level up: modelling
+    the builder's INPUT.
+    """
+    config = _valid_map_config("direct")
+    del config["component_name"]
+    # Without a name from either place the builder really would refuse it.
+    assert derive_map_effect(config) is None
+    # With the spec's top-level name — exactly what plan and apply supply — it builds.
+    assert derive_map_effect(config, name="M12.16 map") == ((), (), True)
+
+
+def test_the_resolver_passes_the_specs_name_through():
+    """End to end: a spec naming itself at the top level must not go inert."""
+    config = _valid_map_config("function", function_mappings=[
+        _accepted("dynamic_process_property_set")])
+    del config["component_name"]
+    spec = IntegrationComponentSpec(
+        key="MAP", type="transform.map", name="M12.16 map", action="create", config=config)
+    declarations = ProcessIREffectDeclarationsV1(map_effects=(
+        ProcessIRMapEffectDeclarationV1(
+            map_ref="$ref:MAP", effect=_effect(writes=[("dpp", "OUT")], replay_safe=True)),))
+    resolution = resolve_process_ir_effect_declarations(
+        [("p", _root_with_map())], declarations, _symbols(), [spec], conflict_policy="fail")
+    assert resolution.ok, resolution.findings
+    assert resolution.inert == (), resolution.inert
+    assert len(resolution.capabilities_by_root["p"].map_effects) == 1
+
+    # CONTROL: an UNNAMED spec has nothing to inject, so it is genuinely inert —
+    # the acceptance above is about the name arriving, not about the gate being off.
+    unnamed = IntegrationComponentSpec(
+        key="MAP", type="transform.map", action="create", config=config)
+    inert = resolve_process_ir_effect_declarations(
+        [("p", _root_with_map())], declarations, _symbols(), [unnamed], conflict_policy="fail")
+    assert inert.inert == ("/effect_declarations/map_effects/0",)

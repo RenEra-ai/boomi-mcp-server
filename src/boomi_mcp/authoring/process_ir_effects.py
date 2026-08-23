@@ -248,7 +248,23 @@ def _map_type_vocabularies() -> Tuple[FrozenSet[str], FrozenSet[str]]:
     )
 
 
-def _builder_would_build_this(config: Mapping[str, Any]) -> bool:
+def _effective_map_config(config: Mapping[str, Any], name: Optional[str]) -> dict:
+    """The config the BUILDER actually sees, not the one the caller typed.
+
+    `integration_builder` injects the spec's top-level `name` as `component_name`
+    when the config omits it, and validates THAT. Validating the raw config
+    instead made a map that builds perfectly well go inert — the same mistake as
+    modelling a builder rule, one level up: modelling the builder's INPUT.
+    """
+    effective = dict(config)
+    if name and not effective.get("component_name"):
+        effective["component_name"] = name
+    return effective
+
+
+def _builder_would_build_this(
+    config: Mapping[str, Any], name: Optional[str] = None
+) -> bool:
     """Whether the map builder that owns this ``map_type`` accepts this config.
 
     Asked, not modelled. Three separate corrections in this slice each pinned ONE
@@ -283,7 +299,7 @@ def _builder_would_build_this(config: Mapping[str, Any]) -> bool:
     if builder is None:
         return False
     try:
-        return builder.validate_config(dict(config)) is None
+        return builder.validate_config(_effective_map_config(config, name)) is None
     except Exception:  # noqa: BLE001 - an unanswerable question is a rejection
         return False
 
@@ -292,6 +308,7 @@ def derive_map_effect(
     config: Mapping[str, Any],
     *,
     substitutable: bool = False,
+    name: Optional[str] = None,
 ) -> Optional[Tuple[tuple, tuple, bool]]:
     """``(reads, writes, replay_safe)`` for a map, or None when it is OPAQUE.
 
@@ -322,7 +339,7 @@ def derive_map_effect(
         return None
     # Would the builder actually build this config? All four route-class tables
     # and every other rule it applies, asked rather than modelled.
-    if not _builder_would_build_this(config):
+    if not _builder_would_build_this(config, name):
         return None
     function_types, direct_types = _map_type_vocabularies()
     map_type = config.get("map_type")
@@ -520,6 +537,7 @@ def resolve_process_ir_effect_declarations(
             derive_map_effect(
                 getattr(spec, "config", None) or {},
                 substitutable=_may_be_substituted(spec, conflict_policy),
+                name=getattr(spec, "name", None),
             )
             if spec
             else None
