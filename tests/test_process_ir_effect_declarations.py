@@ -1570,18 +1570,75 @@ def test_declining_on_the_index_does_not_soften_any_other_refusal():
     assert _derive(dict(nameless, component_name=""), name="M12.16 spec name") is None
 
 
-@pytest.mark.parametrize("code_config", [
-    ("MAP_FIELD_NOT_FOUND", {"field_mappings": [{"source_path": "nope", "target_path": "root/a"}]}),
-])
-def test_other_profile_related_refusals_are_not_deferred(code_config):
-    """r6-02 made these two codes visible; deferring them would undo that."""
+@pytest.mark.parametrize(
+    "expected_code,override",
+    [
+        # r6-02 made these two visible; deferring either would undo that.
+        ("MAP_FIELD_NOT_FOUND",
+         {"field_mappings": [{"source_path": "nope", "target_path": "root/a"}]}),
+        ("MAP_PROFILE_REF_REQUIRED",
+         {"source_profile_id": "$ref:SP", "depends_on_override": []}),
+        # the code the deferred residue in #179 is built on
+        ("MAP_DOCUMENT_CACHE_JOINS_INVALID", {"document_cache_joins": "not-a-list"}),
+    ],
+)
+def test_other_profile_related_refusals_are_not_deferred(expected_code, override):
+    """QA-154-r8-02. The docstring said "these two codes" and the case list had one.
+
+    Waving `MAP_PROFILE_REF_REQUIRED` survived the whole 559-node reachable
+    universe, which left half of the round-7 disposition undischarged. The
+    document-cache-joins code is included because it is the one the deferred
+    residue in #179 is built on — if that ever became deferred here, the residue
+    would silently widen.
+    """
     from boomi_mcp.categories.components.builders.transform_map_validation import (
         validate_transform_map,
     )
 
-    expected_code, override = code_config
     depends_on, by_key = _plan_context()
+    override = dict(override)
+    if "depends_on_override" in override:
+        depends_on = override.pop("depends_on_override")
     config = dict(_valid_map_config("direct"), **override)
+
     error = validate_transform_map(dict(config), depends_on, by_key)
     assert getattr(error, "error_code", None) == expected_code, error
-    assert _derive(config) is None
+    assert _derive(config, depends_on=depends_on) is None
+
+
+def test_the_deferred_branch_is_the_one_carrying_only_a_side_detail():
+    """QA-154-r8-03, recorded rather than silently relied on.
+
+    The profile-index refusal has THREE branches. The literal index TYPE-mismatch
+    branch also carries no resolved-key detail, so the current predicate defers it
+    too — and that is harmless ONLY because it is unreachable from this caller,
+    which supplies no indexes. Proven here with a positive control rather than
+    asserted: the identical config WITH indexes reaches the type-mismatch branch,
+    WITHOUT them it reaches the literal branch.
+
+    This is why #179's acceptance criterion is worded against the exact detail set
+    rather than against the absence of a key: threading indexes makes the
+    type-mismatch branch reachable, and a predicate keyed on absence alone would
+    keep deferring it.
+    """
+    from boomi_mcp.categories.components.builders.transform_map_validation import (
+        validate_transform_map,
+    )
+
+    depends_on, by_key = _plan_context()
+    literal = dict(_valid_map_config("direct"),
+                   source_profile_id="aaaaaaaa-1111-1111-1111-111111111111",
+                   target_profile_id="bbbbbbbb-2222-2222-2222-222222222222")
+
+    without = validate_transform_map(dict(literal), depends_on, by_key)
+    assert set((without.details or {})) == {"side"}, without.details
+
+    # POSITIVE CONTROL: supplying an index of the wrong type reaches the OTHER
+    # branch, which carries more than `side` — so the two really are distinct and
+    # the current predicate's reach is a property of this caller, not of the code.
+    with_index = validate_transform_map(
+        dict(literal), depends_on, by_key,
+        literal_indexes={"aaaaaaaa-1111-1111-1111-111111111111": {
+            "profile_component_type": "profile.xml", "field_index_by_path": {"root/a": {}}}},
+    )
+    assert with_index is None or set((with_index.details or {})) != {"side"}, with_index
