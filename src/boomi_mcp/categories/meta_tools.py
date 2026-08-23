@@ -3043,7 +3043,16 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
         "component_type": "transform.map",
         "map_type": "direct",
     },
-    "supported_map_types": ["direct", "function", "map_function"],
+    # THIS TEMPLATE's map types, matching its two siblings (the function template
+    # lists its own pair, the script template lists its own pair). It previously
+    # advertised the function routes as well, which reads as a tool-level route
+    # list but is not one — it omits the two script routes, and the same payload's
+    # own `note` says "M2 is direct-only" while its `unsupported_routes` refuses
+    # the very key those routes require. Measured: building from this template's
+    # own `required` set and setting `map_type` to either function value is
+    # REFUSED. A caller obeying the served list inside the served contract got a
+    # refusal, which is what makes this served text wrong rather than merely terse.
+    "supported_map_types": ["direct"],
     "unsupported_routes": {
         "functions": (
             "Raw <Functions> XML is not accepted; switch to "

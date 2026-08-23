@@ -248,6 +248,41 @@ def _map_type_vocabularies() -> Tuple[FrozenSet[str], FrozenSet[str]]:
     )
 
 
+def _builder_rejects_this_route(config: Mapping[str, Any]) -> bool:
+    """Whether the map builder that owns this ``map_type`` says these structured
+    fields are not what this route executes.
+
+    Asked, not modelled. Three separate corrections in this slice each pinned ONE
+    more fact about what a map builder accepts — the supported map types, then the
+    direct-only reject keys — and each round found another table that had not been
+    asked. There are FOUR route-class tables and ``validate_config`` consults them
+    in an order this could not reproduce without becoming a copy of it. So the
+    question goes to the builder, routed through the builders' own dispatch table.
+
+    Scoped to ROUTE-CLASS refusals (``UNSUPPORTED_TRANSFORM_ROUTE``) on purpose. A
+    config can also be refused for being incomplete — a missing name, a malformed
+    field mapping — and that says nothing about whether the fields present are the
+    ones this route would run. Treating every refusal as a route bypass would tie
+    effect derivation to every unrelated validation rule the builder ever gains.
+
+    Conservative on error: an unanswerable question is a rejection, so an
+    exception here can never become an accidental trust.
+    """
+    from ..categories.components.builders.map_builder import MAP_BUILDERS
+
+    map_type = config.get("map_type")
+    if not isinstance(map_type, str):
+        return True
+    builder = MAP_BUILDERS.get(("transform.map", map_type))
+    if builder is None:
+        return True
+    try:
+        error = builder.validate_config(dict(config))
+    except Exception:  # noqa: BLE001 - an unanswerable question is a rejection
+        return True
+    return getattr(error, "error_code", None) == "UNSUPPORTED_TRANSFORM_ROUTE"
+
+
 def derive_map_effect(
     config: Mapping[str, Any],
     *,
@@ -277,10 +312,12 @@ def derive_map_effect(
     # THE RAW-XML ESCAPE HATCH. `integration_builder` treats a config carrying
     # `xml` as "bypasses the structured builder entirely" and emits those bytes
     # verbatim, so `map_type` and `function_mappings` describe something that will
-    # not run. Deriving from them would be the slice's recurring defect in its
-    # purest form: an effect that describes an artifact other than the one that
-    # executes. The bytes themselves are not inspectable here, so opaque.
+    # not run. The bytes themselves are not inspectable here, so opaque.
     if config.get("xml"):
+        return None
+    # Does the builder that owns this route say these structured fields are not
+    # what it would run? All four route-class tables, asked rather than modelled.
+    if _builder_rejects_this_route(config):
         return None
     function_types, direct_types = _map_type_vocabularies()
     map_type = config.get("map_type")

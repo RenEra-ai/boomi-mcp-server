@@ -57,10 +57,36 @@ def _symbols():
     ))
 
 
+#: A map config the BUILDER accepts. Effect derivation asks the builder whether
+#: it would build this config at all, so a fixture the builder refuses is opaque
+#: for a reason that has nothing to do with the effect under test — which is
+#: exactly how a test starts passing for the wrong reason.
+def _valid_map_config(map_type="direct", **overrides):
+    config = {
+        "component_name": "M12.16 map",
+        "map_type": map_type,
+        "source_profile_id": "aaaaaaaa-1111-1111-1111-111111111111",
+        "source_profile_type": "profile.json",
+        "target_profile_id": "bbbbbbbb-2222-2222-2222-222222222222",
+        "target_profile_type": "profile.json",
+    }
+    if map_type in ("direct",):
+        config["field_mappings"] = [{"source_path": "a", "target_path": "b"}]
+    config.update(overrides)
+    return config
+
+
+def _fn(function_type, parameters=None, **extra):
+    """One function mapping the builder accepts for `function_type`."""
+    mapping = {"function_type": function_type, "parameters": dict(parameters or {})}
+    mapping.update(extra)
+    return mapping
+
+
 def _map_component(function_mappings):
     return IntegrationComponentSpec(
         key="MAP", type="transform.map",
-        config={"map_type": "function", "function_mappings": function_mappings},
+        config=_valid_map_config("function", function_mappings=function_mappings),
     )
 
 
@@ -123,32 +149,33 @@ def test_an_empty_envelope_normalises_to_omitted_on_the_request():
 
 
 def test_map_effect_is_derived_from_the_function_registry():
-    derived = derive_map_effect({"map_type": "function", "function_mappings": [
-        {"function_type": "dynamic_process_property_set", "parameters": {"property_name": "OUT"}},
-        {"function_type": "uppercase", "parameters": {}},
-    ]})
+    derived = derive_map_effect(_valid_map_config("function", function_mappings=[
+        _fn("dynamic_process_property_set", {"property_name": "OUT"}),
+        _fn("uppercase", target_path="t"),
+    ]))
     assert derived == ((), (("dpp", "OUT"),), True)
 
 
 def test_a_map_with_one_unannotated_function_is_wholly_opaque():
     """Partial knowledge is never promoted to a complete effect."""
-    derived = derive_map_effect({"map_type": "function", "function_mappings": [
-        {"function_type": "dynamic_process_property_set", "parameters": {"property_name": "OUT"}},
-        {"function_type": "defined_process_property_get",
-         "parameters": {"process_property_component_id": "$ref:X"}},
-    ]})
+    derived = derive_map_effect(_valid_map_config("function", function_mappings=[
+        _fn("dynamic_process_property_set", {"property_name": "OUT"}),
+        _fn("defined_process_property_get",
+            {"process_property_component_id": "$ref:X", "property_name": "P"},
+            target_path="t"),
+    ]))
     assert derived is None
 
 
 def test_an_unknown_function_family_makes_the_map_opaque():
-    assert derive_map_effect({"map_type": "function", "function_mappings": [
-        {"function_type": "not_a_real_family", "parameters": {}}]}) is None
+    assert derive_map_effect(_valid_map_config(
+        "function", function_mappings=[_fn("not_a_real_family")])) is None
 
 
 def test_a_sequential_value_map_is_derivable_but_not_replay_safe():
-    reads, writes, replay_safe = derive_map_effect({
-        "map_type": "function",
-        "function_mappings": [{"function_type": "sequential_value", "parameters": {}}]})
+    reads, writes, replay_safe = derive_map_effect(_valid_map_config(
+        "function",
+        function_mappings=[_fn("sequential_value", {"key_name": "K"}, target_path="t")]))
     assert (reads, writes) == ((), ())
     assert replay_safe is False
 
@@ -701,7 +728,7 @@ def test_annotating_a_defined_process_property_family_would_be_detected(family, 
 
     mapping = {"function_type": family, "parameters": {parameter: "SOME_PROPERTY"}}
     # Baseline: opaque, and NOT because the parameter is missing.
-    assert derive_map_effect({"map_type": "function", "function_mappings": [mapping]}) is None
+    assert derive_map_effect(_valid_map_config("function", function_mappings=[mapping])) is None
 
     kind = "property_get" if family.endswith("_get") else "property_set"
     mutant = dataclasses.replace(
@@ -715,7 +742,7 @@ def test_annotating_a_defined_process_property_family_would_be_detected(family, 
     original = reg.FUNCTION_FAMILIES
     reg.FUNCTION_FAMILIES = MappingProxyType(patched)
     try:
-        derived = derive_map_effect({"map_type": "function", "function_mappings": [mapping]})
+        derived = derive_map_effect(_valid_map_config("function", function_mappings=[mapping]))
         # Under the mutant the map DOES derive, and claims dpp state.
         assert derived is not None, "mutant had no effect — this witness is vacuous"
         reads, writes, _replay = derived
@@ -866,7 +893,7 @@ def test_a_reference_only_map_is_opaque_not_pure():
     assert derive_map_effect({}) is None
     assert derive_map_effect({"component_id": "some-live-map"}) is None
     # ...and the control: a config that DOES say what it is still derives.
-    assert derive_map_effect({"map_type": "direct"}) == ((), (), True)
+    assert derive_map_effect(_valid_map_config("direct")) == ((), (), True)
 
 
 def test_a_create_under_reuse_is_opaque_because_the_plan_may_substitute_it():
@@ -1092,7 +1119,7 @@ def test_every_function_map_alias_the_builder_supports_is_derivable():
     impure = [{"function_type": "sequential_value", "parameters": {}}]
     assert MapFunctionBuilder.SUPPORTED_MAP_TYPES, "no aliases — the test would be vacuous"
     for alias in MapFunctionBuilder.SUPPORTED_MAP_TYPES:
-        derived = derive_map_effect({"map_type": alias, "function_mappings": impure})
+        derived = derive_map_effect(_valid_map_config(alias, function_mappings=impure))
         assert derived == ((), (), False), (alias, derived)
 
 
@@ -1101,7 +1128,7 @@ def test_every_direct_map_type_the_builder_supports_is_pure():
 
     assert DirectMapBuilder.SUPPORTED_MAP_TYPES
     for alias in DirectMapBuilder.SUPPORTED_MAP_TYPES:
-        assert derive_map_effect({"map_type": alias}) == ((), (), True), alias
+        assert derive_map_effect(_valid_map_config(alias)) == ((), (), True), alias
 
 
 def test_a_script_map_is_opaque_because_its_authority_is_the_registry():
@@ -1116,7 +1143,7 @@ def test_a_script_map_is_opaque_because_its_authority_is_the_registry():
 
     assert MapScriptBuilder.SUPPORTED_MAP_TYPES
     for alias in MapScriptBuilder.SUPPORTED_MAP_TYPES:
-        assert derive_map_effect({"map_type": alias}) is None, alias
+        assert derive_map_effect(_valid_map_config(alias)) is None, alias
 
 
 def test_the_vocabulary_is_read_from_the_builders_not_restated():
@@ -1133,13 +1160,13 @@ def test_the_vocabulary_is_read_from_the_builders_not_restated():
     try:
         mb.MapFunctionBuilder.SUPPORTED_MAP_TYPES = ("function",)
         assert "map_function" not in mb.MapFunctionBuilder.SUPPORTED_MAP_TYPES
-        assert derive_map_effect({"map_type": "map_function", "function_mappings": []}) is None
+        assert derive_map_effect(_valid_map_config("map_function", function_mappings=[])) is None
         # CONTROL: the alias that remains still derives, so the None above is
         # about the narrowing rather than about the derivation breaking.
-        assert derive_map_effect({"map_type": "function", "function_mappings": []}) == ((), (), True)
+        assert derive_map_effect(_valid_map_config("function", function_mappings=[])) == ((), (), True)
     finally:
         mb.MapFunctionBuilder.SUPPORTED_MAP_TYPES = original
-    assert derive_map_effect({"map_type": "map_function", "function_mappings": []}) == ((), (), True)
+    assert derive_map_effect(_valid_map_config("map_function", function_mappings=[])) == ((), (), True)
 
 
 def test_a_map_type_no_builder_supports_is_opaque():
@@ -1156,7 +1183,7 @@ def test_a_map_type_no_builder_supports_is_opaque():
         | set(MapScriptBuilder.SUPPORTED_MAP_TYPES)
     )
     assert "profile" not in known
-    assert derive_map_effect({"map_type": "profile"}) is None
+    assert derive_map_effect(_valid_map_config("profile")) is None
 
 
 # ---------------------------------------------------------------------------
@@ -1174,10 +1201,10 @@ def test_a_direct_map_carrying_function_mappings_is_opaque_not_pure():
     the vocabulary, and worse in kind: it agreed silently instead of warning.
     """
     impure = [{"function_type": "sequential_value", "parameters": {}}]
-    assert derive_map_effect({"map_type": "direct", "function_mappings": impure}) is None
+    assert derive_map_effect(_valid_map_config("direct", function_mappings=impure)) is None
     # CONTROL: a well-formed direct map still derives, so the None above is about
     # the rejected key rather than about `direct` having stopped working.
-    assert derive_map_effect({"map_type": "direct"}) == ((), (), True)
+    assert derive_map_effect(_valid_map_config("direct")) == ((), (), True)
 
 
 def test_every_direct_reject_key_makes_a_direct_map_opaque():
@@ -1192,7 +1219,7 @@ def test_every_direct_reject_key_makes_a_direct_map_opaque():
 
     assert _DIRECT_ONLY_REJECT_KEYS, "no reject keys — the sweep would be vacuous"
     for key in _DIRECT_ONLY_REJECT_KEYS:
-        assert derive_map_effect({"map_type": "direct", key: ["anything"]}) is None, key
+        assert derive_map_effect(_valid_map_config("direct", **{key: ["anything"]})) is None, key
 
 
 def test_the_direct_vocabulary_is_read_from_its_builder_too(monkeypatch):
@@ -1207,13 +1234,13 @@ def test_the_direct_vocabulary_is_read_from_its_builder_too(monkeypatch):
     try:
         mb.DirectMapBuilder.SUPPORTED_MAP_TYPES = ()
         assert "direct" not in mb.DirectMapBuilder.SUPPORTED_MAP_TYPES
-        assert derive_map_effect({"map_type": "direct"}) is None
+        assert derive_map_effect(_valid_map_config("direct")) is None
         # CONTROL: the function vocabulary is untouched and still derives, so the
         # None above is about the narrowing rather than a wholesale break.
-        assert derive_map_effect({"map_type": "function", "function_mappings": []}) == ((), (), True)
+        assert derive_map_effect(_valid_map_config("function", function_mappings=[])) == ((), (), True)
     finally:
         mb.DirectMapBuilder.SUPPORTED_MAP_TYPES = original
-    assert derive_map_effect({"map_type": "direct"}) == ((), (), True)
+    assert derive_map_effect(_valid_map_config("direct")) == ((), (), True)
 
 
 @pytest.mark.parametrize("bad", [["direct"], {"a": 1}, {"direct"}, 3, None])
@@ -1224,7 +1251,7 @@ def test_a_non_string_map_type_is_opaque_and_does_not_crash(bad):
     with `error_code: None` and no machine code at all — a caller learned nothing
     from a value they had supplied.
     """
-    assert derive_map_effect({"map_type": bad, "function_mappings": []}) is None
+    assert derive_map_effect(_valid_map_config(bad, function_mappings=[])) is None
 
 
 def test_a_non_string_map_type_survives_the_whole_resolver():
@@ -1256,13 +1283,13 @@ def test_a_raw_xml_map_is_opaque_whatever_its_structured_fields_say():
     # CONTROL: without the raw XML this config DOES derive, so the None below is
     # about the escape hatch rather than about the mappings being unreadable.
     assert derive_map_effect(
-        {"map_type": "map_function", "function_mappings": structured}
+        _valid_map_config("map_function", function_mappings=structured)
     ) == ((), (("dpp", "OUT"),), True)
     assert derive_map_effect(
-        {"map_type": "map_function", "xml": "<Map/>", "function_mappings": structured}
+        _valid_map_config("map_function", xml="<Map/>", function_mappings=structured)
     ) is None
     # ...and a direct map carrying raw XML is opaque for the same reason.
-    assert derive_map_effect({"map_type": "direct", "xml": "<Map/>"}) is None
+    assert derive_map_effect(_valid_map_config("direct", xml="<Map/>")) is None
 
 
 def test_the_raw_xml_bypass_matches_the_builder_predicate():
@@ -1277,4 +1304,116 @@ def test_the_raw_xml_bypass_matches_the_builder_predicate():
     comp = IntegrationComponentSpec(key="MAP", type="transform.map", config={})
     assert _resolve_preservation_policy(comp, {"xml": "<Map/>"}) is None
     # an EMPTY xml is falsy for the builder, and must be falsy here too
-    assert derive_map_effect({"map_type": "direct", "xml": ""}) == ((), (), True)
+    assert derive_map_effect(_valid_map_config("direct", xml="")) == ((), (), True)
+
+
+# ---------------------------------------------------------------------------
+# QA-154-r4-01: all FOUR route-class tables, asked rather than modelled
+# ---------------------------------------------------------------------------
+
+
+def _all_route_class_keys():
+    from boomi_mcp.categories.components.builders import map_builder as mb
+
+    return {
+        "raw_xml": set(mb._RAW_XML_REJECT_KEYS),
+        "direct_only": set(mb._DIRECT_ONLY_REJECT_KEYS),
+        "function_builder": set(mb._FUNCTION_BUILDER_REJECT_KEYS),
+        "script_builder": set(mb._SCRIPT_BUILDER_REJECT_KEYS),
+    }
+
+
+def test_the_route_class_question_covers_every_table_not_just_one():
+    """QA-154-r4-01. The sibling sweep pinned ONE of four tables.
+
+    `DirectMapBuilder.validate_config` consults the raw-XML table BEFORE the
+    direct-only one, so 34 of 40 `(map_type, key)` pairs derived a TRUSTED effect
+    for a config the builder refuses. Enumerating a second table would have been
+    the same defect one table wider; the question now goes to the builder.
+    """
+    tables = _all_route_class_keys()
+    assert all(tables.values()), tables
+    for table, keys in tables.items():
+        for key in sorted(keys):
+            for map_type in ("direct", "function", "map_function"):
+                config = {"map_type": map_type, key: ["v"]}
+                if map_type != "direct":
+                    config.setdefault("function_mappings", [])
+                derived = derive_map_effect(config)
+                if _route_is_rejected(config):
+                    assert derived is None, (table, key, map_type, derived)
+
+
+def _route_is_rejected(config):
+    from boomi_mcp.authoring.process_ir_effects import _builder_rejects_this_route
+
+    return _builder_rejects_this_route(config)
+
+
+def test_a_route_class_rejection_is_what_makes_a_map_opaque_not_incompleteness():
+    """Scoped deliberately.
+
+    A config can be refused for being INCOMPLETE — a missing name, a malformed
+    field mapping — and that says nothing about whether the fields present are
+    the ones this route would run. Tying derivation to every unrelated validation
+    rule would make an ordinary authoring slip silently inert instead of
+    diagnosed.
+    """
+    from boomi_mcp.categories.components.builders.map_builder import MAP_BUILDERS
+
+    builder = MAP_BUILDERS[("transform.map", "direct")]
+    incomplete = {"map_type": "direct"}
+    error = builder.validate_config(dict(incomplete))
+    assert error is not None and error.error_code != "UNSUPPORTED_TRANSFORM_ROUTE"
+    assert derive_map_effect(incomplete) == ((), (), True)
+
+    route = {"map_type": "direct", "xslt": "x"}
+    assert builder.validate_config(dict(route)).error_code == "UNSUPPORTED_TRANSFORM_ROUTE"
+    assert derive_map_effect(route) is None
+
+
+def test_a_map_type_with_no_builder_route_is_opaque():
+    from boomi_mcp.categories.components.builders.map_builder import MAP_BUILDERS
+
+    assert ("transform.map", "profile") not in MAP_BUILDERS
+    assert derive_map_effect({"map_type": "profile"}) is None
+
+
+# ---------------------------------------------------------------------------
+# QA-154-r4-02: witness the shapes where the two predicates could DIVERGE
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "value,bypassed",
+    [
+        ("", False),        # falsy for both -- the builder RUNS
+        ("<Map/>", True),
+        ("   ", True),      # truthy whitespace: a strip-based predicate would differ
+        (1, True),          # non-string truthy: a presence/str predicate would differ
+        (0, False),         # falsy non-string
+        ([], False),        # falsy container
+        (["<Map/>"], True), # truthy container
+    ],
+)
+def test_the_raw_xml_predicate_matches_the_builder_on_divergent_shapes(value, bypassed):
+    """QA-154-r4-02. The first witness pinned only `""` — the ONE shape where a
+    strip-based and a truthiness-based predicate agree.
+
+    A mutant using `.strip()`, or `in config` instead of truthiness, survived
+    the whole suite. These are the shapes that tell them apart.
+    """
+    from boomi_mcp.categories.components.builders.map_builder import MAP_BUILDERS
+    from boomi_mcp.categories.integration_builder import _resolve_preservation_policy
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    comp = IntegrationComponentSpec(key="MAP", type="transform.map", config={})
+    builder_bypasses = _resolve_preservation_policy(comp, {"xml": value}) is None
+    assert builder_bypasses is bypassed, (value, builder_bypasses)
+
+    derived = derive_map_effect({"map_type": "direct", "xml": value})
+    if bypassed:
+        assert derived is None, (value, derived)
+    else:
+        assert derived == ((), (), True), (value, derived)
+    assert MAP_BUILDERS  # the routing table is real, not an empty stand-in

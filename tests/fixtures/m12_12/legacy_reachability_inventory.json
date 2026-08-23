@@ -235,7 +235,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 5864,
+      "evidence_line": 5873,
       "form": "svc.send_request(...)",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "WR-ff78566d",
@@ -1900,7 +1900,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 7692,
+      "evidence_line": 7701,
       "form": "dict-literal process_kind='database_to_api_sync'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-afb1406e",
@@ -1909,7 +1909,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 8554,
+      "evidence_line": 8563,
       "form": "dict-literal process_kind='sync_pipeline'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-9797a75e",
@@ -1918,7 +1918,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 8423,
+      "evidence_line": 8432,
       "form": "dict-literal process_kind='wrapper_subprocess'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-67bfa71b",
@@ -2944,7 +2944,7 @@
     {
       "census": "unclassified_reference",
       "count": 5,
-      "evidence_line": 8008,
+      "evidence_line": 8017,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "UR-10de511e",
@@ -4194,7 +4194,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-raw-api-component: ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check.",
-      "evidence_line": 5864,
+      "evidence_line": 5873,
       "forms": [
         "svc.send_request(...)"
       ],
@@ -5507,7 +5507,7 @@
     {
       "census": "process_kind_producer",
       "disposition": "retract the served legacy guidance / guard the raw route",
-      "evidence_line": 7692,
+      "evidence_line": 7701,
       "forms": [
         "dict-literal process_kind='database_to_api_sync'",
         "dict-literal process_kind='sync_pipeline'",
@@ -6295,7 +6295,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "retract the served legacy guidance / guard the raw route",
-      "evidence_line": 8008,
+      "evidence_line": 8017,
       "forms": [
         "'process_kind' (unclassified selector literal)"
       ],
@@ -12675,10 +12675,10 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=transform.map",
-      "canonical_length": 7927,
+      "canonical_length": 7901,
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=transform.map",
-      "sha256": "858a968646318e8403d6ffe18a4252c61415a579842058569eaf7e93fdab32b6",
+      "sha256": "ddae1918dee249e0a49a99440ad8b89b4c9f17a9df70522f9d28cc4503f606ee",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -12771,9 +12771,7 @@
         ],
         "resource_type": "component",
         "supported_map_types": [
-          "direct",
-          "function",
-          "map_function"
+          "direct"
         ],
         "template": {
           "component_name": "<<map name>>",
@@ -37428,7 +37426,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "692f41bb3f2cafa4b598db4828bb49aa789294d3d3a0f51c0a63dd91bce67471",
+      "sha256": "a7d58db916e49eb53655bd50e54028b83290edb19eb40b5c6763fc769a7a5b2b",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "8327243ec482fa1641f49265c87694e33616f12db015b3f234dc73db9ed8057c",
@@ -37557,7 +37555,7 @@
         "resource_type=component|operation=create|component_type=tporganization": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=tradingpartner": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=transform.function": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
-        "resource_type=component|operation=create|component_type=transform.map": "858a968646318e8403d6ffe18a4252c61415a579842058569eaf7e93fdab32b6",
+        "resource_type=component|operation=create|component_type=transform.map": "ddae1918dee249e0a49a99440ad8b89b4c9f17a9df70522f9d28cc4503f606ee",
         "resource_type=component|operation=create|component_type=webservice": "e900809c1f3a0609e127e60d68291513ad047fdf69a28791e0367c84355aa3c6",
         "resource_type=component|operation=create|component_type=webservice.external": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=xslt": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
