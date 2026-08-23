@@ -298,13 +298,28 @@ def _plan_would_build_this(
     )
 
     try:
-        return validate_transform_map(
+        error = validate_transform_map(
             _effective_map_config(config, name),
             depends_on or [],
             dict(components_by_key or {}),
-        ) is None
+        )
     except Exception:  # noqa: BLE001 - an unanswerable question is a refusal
         return False
+    if error is None:
+        return True
+    # A PROFILE-INDEX refusal is a statement about THIS call, not about the
+    # config. The plan supplies caller-provided or live-discovered indexes for a
+    # literal existing-profile UUID; this resolver has none, so asking here
+    # returns "unavailable" for maps the plan builds perfectly well.
+    #
+    # And inertness is NOT uniformly the safe direction, which is why this is not
+    # simply left to fail closed. For a claimed WRITE, inert establishes nothing
+    # and is conservative. For REPLAY SAFETY it is the opposite: a derived
+    # `replay_safe=False` produces a retry-safety ERROR, while an opaque map
+    # produces only a non-blocking opaque-effect warning — so treating an
+    # unavailable index as a refusal can LOSE an error. Declining to answer on a
+    # question this call cannot ask keeps the verdict with the plan, which can.
+    return getattr(error, "error_code", None) == "MAP_PROFILE_INDEX_UNAVAILABLE"
 
 
 def derive_map_effect(

@@ -1473,3 +1473,51 @@ def test_the_resolver_passes_the_specs_name_through():
     inert = resolve_process_ir_effect_declarations(
         [("p", _root_with_map())], declarations, _symbols(), _components(unnamed), conflict_policy="fail")
     assert inert.inert == ("/effect_declarations/map_effects/0",)
+
+
+def test_a_literal_profile_map_is_not_refused_for_an_index_this_call_cannot_supply():
+    """Codex round 6 P1.
+
+    `validate_transform_map` resolves a LITERAL existing-profile UUID only from
+    `literal_indexes`, which the plan supplies from caller-provided or
+    live-discovered indexes and this resolver has none of. Treating that as a
+    refusal made every literal-profile map inert even when the plan builds it.
+
+    Inertness is NOT uniformly the safe direction, which is why this is not left
+    to fail closed: for a claimed WRITE inert establishes nothing and is
+    conservative, but for REPLAY SAFETY a derived `replay_safe=False` produces a
+    retry-safety ERROR while an opaque map produces only a non-blocking warning —
+    so treating an unavailable index as a refusal can LOSE an error.
+    """
+    from boomi_mcp.categories.components.builders.transform_map_validation import (
+        validate_transform_map,
+    )
+
+    depends_on, by_key = _plan_context()
+    literal = dict(_valid_map_config("direct"),
+                   source_profile_id="aaaaaaaa-1111-1111-1111-111111111111",
+                   target_profile_id="bbbbbbbb-2222-2222-2222-222222222222")
+    # The premise: asking from here really does return the index error.
+    error = validate_transform_map(dict(literal), depends_on, by_key)
+    assert getattr(error, "error_code", None) == "MAP_PROFILE_INDEX_UNAVAILABLE"
+    # ...and derivation declines to treat that as the plan's verdict.
+    assert _derive(literal) == ((), (), True)
+
+
+def test_declining_on_the_index_does_not_soften_any_other_refusal():
+    """CONTROL: only the index question is deferred.
+
+    Every other refusal still makes the map opaque, so the exception above is
+    scoped to the one question this call cannot ask rather than being a general
+    loosening.
+    """
+    impure = [_accepted("sequential_value")]
+    literal_base = dict(_valid_map_config("function", function_mappings=impure),
+                        source_profile_id="aaaaaaaa-1111-1111-1111-111111111111",
+                        target_profile_id="bbbbbbbb-2222-2222-2222-222222222222")
+    # a literal-profile impure map still derives, and keeps replay_safe=False
+    assert _derive(literal_base) == ((), (), False)
+    # ...but a route violation on the same literal-profile map is still opaque
+    assert _derive(dict(literal_base, xslt=["v"])) is None
+    # ...and so is a missing name
+    assert _derive({k: v for k, v in literal_base.items() if k != "component_name"}) is None
