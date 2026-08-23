@@ -1504,20 +1504,84 @@ def test_a_literal_profile_map_is_not_refused_for_an_index_this_call_cannot_supp
     assert _derive(literal) == ((), (), True)
 
 
-def test_declining_on_the_index_does_not_soften_any_other_refusal():
-    """CONTROL: only the index question is deferred.
+def test_only_the_undecidable_profile_index_branch_is_deferred():
+    """QA-154-r7-01 / r7-02. The profile-index refusal has THREE sources and only
+    one is a question this call cannot ask.
 
-    Every other refusal still makes the map opaque, so the exception above is
-    scoped to the one question this call cannot ask rather than being a general
-    loosening.
+    The `$ref` branch reports the key it could not resolve and is fully decidable
+    from the `components_by_key` this call already supplies; deferring it let a
+    map naming a CONNECTION as its profile derive a trusted, pure, replay-safe
+    effect. The literal existing-profile branch reports no key because there is
+    nothing here to resolve it against.
+
+    Pins the SCOPE, not just the direction: a broader predicate (defer on the code
+    alone) and a narrower one (never defer) both fail here.
     """
+    from boomi_mcp.categories.components.builders.transform_map_validation import (
+        validate_transform_map,
+    )
+
+    depends_on, by_key = _plan_context()
+    base = _valid_map_config("direct")
+    deps = depends_on + ["NOPE", "MAP"]
+
+    literal = dict(base, source_profile_id="aaaaaaaa-1111-1111-1111-111111111111",
+                   target_profile_id="bbbbbbbb-2222-2222-2222-222222222222")
+    missing_ref = dict(base, source_profile_id="$ref:NOPE")
+
+    # Both refuse with the SAME code — the code alone cannot separate them.
+    for config in (literal, missing_ref):
+        error = validate_transform_map(dict(config), deps, by_key)
+        assert getattr(error, "error_code", None) == "MAP_PROFILE_INDEX_UNAVAILABLE"
+    # ...and only the `$ref` one carries the key that makes it decidable.
+    assert "ref_key" in (validate_transform_map(dict(missing_ref), deps, by_key).details or {})
+    assert "ref_key" not in (validate_transform_map(dict(literal), deps, by_key).details or {})
+
+    # DEFERRED: nothing here could answer it.
+    assert _derive(literal, depends_on=deps) == ((), (), True)
+    # NOT deferred: this call had everything it needed to answer.
+    assert _derive(missing_ref, depends_on=deps) is None
+    # ...including a `$ref` that resolves to something that is not a profile.
+    assert _derive(dict(base, source_profile_id="$ref:MAP"), depends_on=deps) is None
+    # CONTROL: the ordinary valid map still derives.
+    assert _derive(base) == ((), (), True)
+
+
+def test_declining_on_the_index_does_not_soften_any_other_refusal():
+    """CONTROL: only the profile-index question is deferred.
+
+    Every other refusal still makes the map opaque, so the exception is scoped to
+    one question rather than being a general loosening.
+    """
+    depends_on, _by_key = _plan_context()
     impure = [_accepted("sequential_value")]
     literal_base = dict(_valid_map_config("function", function_mappings=impure),
                         source_profile_id="aaaaaaaa-1111-1111-1111-111111111111",
                         target_profile_id="bbbbbbbb-2222-2222-2222-222222222222")
-    # a literal-profile impure map still derives, and keeps replay_safe=False
+    # a literal-profile impure map derives, and KEEPS replay_safe=False
     assert _derive(literal_base) == ((), (), False)
-    # ...but a route violation on the same literal-profile map is still opaque
+    # ...but a route violation on the same map is still opaque
     assert _derive(dict(literal_base, xslt=["v"])) is None
-    # ...and so is a missing name
-    assert _derive({k: v for k, v in literal_base.items() if k != "component_name"}) is None
+    # ...and so is a missing name. Asserted WITH a spec name supplied, because
+    # `_derive` alone passes none — so the earlier version of this leg passed for
+    # a reason unrelated to the refusal it claimed to check (QA-154-r7-03).
+    nameless = {k: v for k, v in literal_base.items() if k != "component_name"}
+    assert _derive(nameless, name="M12.16 spec name") is not None  # the name IS injected
+    assert _derive(dict(nameless, component_name=""), name="M12.16 spec name") is None
+
+
+@pytest.mark.parametrize("code_config", [
+    ("MAP_FIELD_NOT_FOUND", {"field_mappings": [{"source_path": "nope", "target_path": "root/a"}]}),
+])
+def test_other_profile_related_refusals_are_not_deferred(code_config):
+    """r6-02 made these two codes visible; deferring them would undo that."""
+    from boomi_mcp.categories.components.builders.transform_map_validation import (
+        validate_transform_map,
+    )
+
+    expected_code, override = code_config
+    depends_on, by_key = _plan_context()
+    config = dict(_valid_map_config("direct"), **override)
+    error = validate_transform_map(dict(config), depends_on, by_key)
+    assert getattr(error, "error_code", None) == expected_code, error
+    assert _derive(config) is None

@@ -307,19 +307,30 @@ def _plan_would_build_this(
         return False
     if error is None:
         return True
-    # A PROFILE-INDEX refusal is a statement about THIS call, not about the
-    # config. The plan supplies caller-provided or live-discovered indexes for a
-    # literal existing-profile UUID; this resolver has none, so asking here
-    # returns "unavailable" for maps the plan builds perfectly well.
+    if getattr(error, "error_code", None) != "MAP_PROFILE_INDEX_UNAVAILABLE":
+        return False
+    # A profile-index refusal has THREE sources and only one is a question this
+    # call cannot ask.
     #
-    # And inertness is NOT uniformly the safe direction, which is why this is not
-    # simply left to fail closed. For a claimed WRITE, inert establishes nothing
-    # and is conservative. For REPLAY SAFETY it is the opposite: a derived
-    # `replay_safe=False` produces a retry-safety ERROR, while an opaque map
-    # produces only a non-blocking opaque-effect warning — so treating an
-    # unavailable index as a refusal can LOSE an error. Declining to answer on a
-    # question this call cannot ask keeps the verdict with the plan, which can.
-    return getattr(error, "error_code", None) == "MAP_PROFILE_INDEX_UNAVAILABLE"
+    # The `$ref` branch reports the key it could not resolve, and that branch is
+    # fully decidable from the `components_by_key` this call already supplies —
+    # "the referenced component is missing, malformed, or not a profile" is an
+    # answer, not an absence. Waving it through let a map naming a connection as
+    # its profile derive a trusted, pure, replay-safe effect.
+    #
+    # The LITERAL existing-profile UUID branch reports no key, because there is
+    # nothing here to resolve it against: the plan supplies caller-provided or
+    # live-discovered indexes and this resolver has none. That one is deferred.
+    #
+    # Deferring rather than failing closed is deliberate, and it is not a
+    # fail-open preference — it is accuracy. Inertness is NOT uniformly the safe
+    # direction: for a claimed WRITE it establishes nothing and is conservative,
+    # but a derived `replay_safe=False` raises a retry-safety ERROR where an
+    # opaque map raises only a non-blocking warning, and a declared READ
+    # disappears entirely from the strict classifiers, which iterate the trusted
+    # set. Two of the three axes LOSE an error when a map goes inert.
+    details = getattr(error, "details", None) or {}
+    return "ref_key" not in details
 
 
 def derive_map_effect(
