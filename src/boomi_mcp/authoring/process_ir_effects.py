@@ -249,58 +249,61 @@ def _map_type_vocabularies() -> Tuple[FrozenSet[str], FrozenSet[str]]:
 
 
 def _effective_map_config(config: Mapping[str, Any], name: Optional[str]) -> dict:
-    """The config the BUILDER actually sees, not the one the caller typed.
+    """The config the PLAN actually validates, not the one the caller typed.
 
-    `integration_builder` injects the spec's top-level `name` as `component_name`
-    when the config omits it, and validates THAT. Validating the raw config
-    instead made a map that builds perfectly well go inert — the same mistake as
-    modelling a builder rule, one level up: modelling the builder's INPUT.
+    ``setdefault``, not a falsy check. `integration_builder` has nine
+    `component_name` injection sites and EIGHT use `setdefault` — including the
+    transform.map plan gate itself. The one falsy-form site is the apply-time
+    literal-UUID drift re-validation, and copying that outlier made a
+    present-but-falsy `component_name` derive a TRUSTED effect for a config the
+    plan refuses. Measured: that change closed one misalignment and opened four.
     """
     effective = dict(config)
-    if name and not effective.get("component_name"):
-        effective["component_name"] = name
+    if name:
+        effective.setdefault("component_name", name)
     return effective
 
 
-def _builder_would_build_this(
-    config: Mapping[str, Any], name: Optional[str] = None
+def _plan_would_build_this(
+    config: Mapping[str, Any],
+    *,
+    name: Optional[str] = None,
+    depends_on: Any = (),
+    components_by_key: Optional[Mapping[str, Any]] = None,
 ) -> bool:
-    """Whether the map builder that owns this ``map_type`` accepts this config.
+    """Whether the PLAN would build this map.
 
-    Asked, not modelled. Three separate corrections in this slice each pinned ONE
-    more fact about what a map builder accepts, and each round found another
-    table that had not been asked. So the question goes to the builder, routed
-    through the builders' own dispatch table.
+    ``validate_transform_map`` is the authority the plan itself calls, and
+    ``validate_config`` is one of its ten ordered checks. Asking the builder
+    directly meant asking a fragment: the plan supplies profile indexes that
+    ``validate_config`` skips path-existence checks without, so
+    ``MAP_FIELD_NOT_FOUND`` and ``MAP_PROFILE_REF_REQUIRED`` were invisible here.
 
-    ACCEPTANCE, not "the first error is route-class". An earlier version read the
-    error CODE and treated only a route-class refusal as disqualifying, so that
-    structured fields could still be trusted for a config refused merely for
-    being incomplete. That was order-dependent and leaked: every map builder runs
-    a deep secret-shaped-key scan BEFORE its route tables, so a route violation
-    accompanied by a secret-shaped key answered with the secret code and the
-    effect was trusted anyway.
+    Asking the whole thing also DELETES machinery rather than adding it — the
+    route dispatch and the reject-table re-check both live inside this function
+    now. That is the direction that converges: each correction in this area has
+    been smaller than the last, and this one removes the last hand-modelled
+    fragment except the ``setdefault`` above.
 
-    The narrower rule was chosen to keep an incomplete config diagnosable rather
-    than silently inert. That reason turned out not to exist: an incomplete map
-    config has its step refused at plan time and a forced apply executes nothing,
-    so the declaration going inert hides no diagnostic a caller would otherwise
-    see. With the justification gone, the simpler property is also the safer one —
-    derive only from a config the builder will actually build.
+    THE CEILING, stated rather than implied: this answers "the PLAN would build
+    this config", not "this is what will execute". The two diverge in this
+    subsystem — the raw-XML hatch is an apply-time bypass — so the raw-XML check
+    stays separate above. A declaration can promise no more than the plan can
+    establish, and the channel is documented to that bound.
 
-    Conservative on error: an unanswerable question is a rejection, so nothing
-    here can become an accidental trust.
+    Conservative on error: an unanswerable question is a refusal.
     """
-    from ..categories.components.builders.map_builder import MAP_BUILDERS
+    from ..categories.components.builders.transform_map_validation import (
+        validate_transform_map,
+    )
 
-    map_type = config.get("map_type")
-    if not isinstance(map_type, str):
-        return False
-    builder = MAP_BUILDERS.get(("transform.map", map_type))
-    if builder is None:
-        return False
     try:
-        return builder.validate_config(_effective_map_config(config, name)) is None
-    except Exception:  # noqa: BLE001 - an unanswerable question is a rejection
+        return validate_transform_map(
+            _effective_map_config(config, name),
+            depends_on or [],
+            dict(components_by_key or {}),
+        ) is None
+    except Exception:  # noqa: BLE001 - an unanswerable question is a refusal
         return False
 
 
@@ -309,6 +312,8 @@ def derive_map_effect(
     *,
     substitutable: bool = False,
     name: Optional[str] = None,
+    depends_on: Any = (),
+    components_by_key: Optional[Mapping[str, Any]] = None,
 ) -> Optional[Tuple[tuple, tuple, bool]]:
     """``(reads, writes, replay_safe)`` for a map, or None when it is OPAQUE.
 
@@ -337,9 +342,12 @@ def derive_map_effect(
     # not run. The bytes themselves are not inspectable here, so opaque.
     if config.get("xml"):
         return None
-    # Would the builder actually build this config? All four route-class tables
-    # and every other rule it applies, asked rather than modelled.
-    if not _builder_would_build_this(config, name):
+    # Would the PLAN build this map? One question to the plan's own authority,
+    # which subsumes the route dispatch, all four route-class tables, and the
+    # nine other checks the plan runs.
+    if not _plan_would_build_this(
+        config, name=name, depends_on=depends_on, components_by_key=components_by_key
+    ):
         return None
     function_types, direct_types = _map_type_vocabularies()
     map_type = config.get("map_type")
@@ -361,12 +369,9 @@ def derive_map_effect(
         # mirror of the defect that motivated deriving the vocabulary in the first
         # place, and worse in kind, because it agreed silently instead of warning.
         # So the reject keys are ASKED too, rather than assumed.
-        from ..categories.components.builders.map_builder import (
-            _DIRECT_ONLY_REJECT_KEYS,
-        )
-
-        if any(key in config for key in _DIRECT_ONLY_REJECT_KEYS):
-            return None
+        # No reject-table re-check here: `_plan_would_build_this` already ran
+        # every one of them through the plan's own authority. Re-asking would be
+        # a second copy of a question already answered.
         return ((), (), True)
     if map_type not in function_types:
         # Unrecognised, absent, or a form whose content this cannot establish
@@ -401,8 +406,10 @@ def derive_map_effect(
         parameters = mapping.get("parameters")
         if not isinstance(parameters, Mapping):
             return None
-        name = parameters.get(family.effect_parameter)
-        if not isinstance(name, str) or not name:
+        # NOT `name` — that is this function's parameter, and shadowing it here
+        # made the map's display name and a property name share one binding.
+        target = parameters.get(family.effect_parameter)
+        if not isinstance(target, str) or not target:
             return None
         if family.effect_kind == "property_get":
             # A DEFAULTED read cannot fail: the default establishes the value, so
@@ -413,9 +420,9 @@ def derive_map_effect(
             # PROPERTY_READ_BEFORE_WRITE on a flow that runs fine. Omitting it
             # establishes less, which is the safe direction.
             if parameters.get("default_value") is None:
-                reads.append((family.effect_scope, name))
+                reads.append((family.effect_scope, target))
         elif family.effect_kind == "property_set":
-            writes.append((family.effect_scope, name))
+            writes.append((family.effect_scope, target))
         else:  # pragma: no cover - closed vocabulary
             return None
     return (tuple(sorted(set(reads))), tuple(sorted(set(writes))), replay_safe)
@@ -538,6 +545,10 @@ def resolve_process_ir_effect_declarations(
                 getattr(spec, "config", None) or {},
                 substitutable=_may_be_substituted(spec, conflict_policy),
                 name=getattr(spec, "name", None),
+                depends_on=getattr(spec, "depends_on", None) or [],
+                components_by_key={
+                    getattr(item, "key", None): item for item in (components or ())
+                },
             )
             if spec
             else None

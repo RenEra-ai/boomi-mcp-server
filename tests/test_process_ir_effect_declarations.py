@@ -61,17 +61,59 @@ def _symbols():
 #: it would build this config at all, so a fixture the builder refuses is opaque
 #: for a reason that has nothing to do with the effect under test — which is
 #: exactly how a test starts passing for the wrong reason.
+#: A profile component the plan can INDEX. `validate_transform_map` resolves a
+#: `$ref` profile through the generated-profile builder, so a stub with a bare
+#: field list is not indexable and every map referencing it is refused for a
+#: reason that has nothing to do with effects.
+def _profile_component(key):
+    return IntegrationComponentSpec(
+        key=key, type="profile.json", action="create", name=key,
+        config={
+            "component_type": "profile.json",
+            "profile_type": "json.generated",
+            "component_name": key,
+            "root": {"name": "root", "kind": "object", "children": [
+                {"name": "a", "kind": "simple", "data_type": "character"}]},
+        },
+    )
+
+
+def _plan_context():
+    """``(depends_on, components_by_key)`` — the plan inputs the gate needs.
+
+    Derivation asks `validate_transform_map`, which is what the PLAN asks, and
+    that needs the referenced profile components to resolve a field index. A
+    fixture without them is refused with a profile-index error, so a test built
+    on one proves nothing about effects.
+    """
+    profiles = {key: _profile_component(key) for key in ("SP", "TP")}
+    return ["SP", "TP"], profiles
+
+
+def _derive(config, **kwargs):
+    """`derive_map_effect` with the plan context supplied.
+
+    Derivation asks the plan's own authority, which needs the referenced profile
+    components; a bare call is refused for a profile-index reason and would make
+    every assertion below pass for the wrong reason.
+    """
+    depends_on, components_by_key = _plan_context()
+    kwargs.setdefault("depends_on", depends_on)
+    kwargs.setdefault("components_by_key", components_by_key)
+    return derive_map_effect(config, **kwargs)
+
+
 def _valid_map_config(map_type="direct", **overrides):
     config = {
         "component_name": "M12.16 map",
         "map_type": map_type,
-        "source_profile_id": "aaaaaaaa-1111-1111-1111-111111111111",
+        "source_profile_id": "$ref:SP",
         "source_profile_type": "profile.json",
-        "target_profile_id": "bbbbbbbb-2222-2222-2222-222222222222",
+        "target_profile_id": "$ref:TP",
         "target_profile_type": "profile.json",
     }
     if map_type in ("direct",):
-        config["field_mappings"] = [{"source_path": "a", "target_path": "b"}]
+        config["field_mappings"] = [{"source_path": "root/a", "target_path": "root/a"}]
     config.update(overrides)
     return config
 
@@ -88,25 +130,25 @@ def _accepted(function_type, **over):
     nothing at all.
     """
     shapes = {
-        "dynamic_process_property_set": {"inputs": ["a"], "parameters": {"property_name": "OUT"}},
-        "dynamic_process_property_get": {"target_path": "t", "parameters": {"property_name": "P"}},
-        "document_property_set": {"inputs": ["a"], "parameters": {"document_property_name": "D"}},
-        "document_property_get": {"target_path": "t", "parameters": {"document_property_name": "D"}},
+        "dynamic_process_property_set": {"inputs": ["root/a"], "parameters": {"property_name": "OUT"}},
+        "dynamic_process_property_get": {"target_path": "root/a", "parameters": {"property_name": "P"}},
+        "document_property_set": {"inputs": ["root/a"], "parameters": {"document_property_name": "D"}},
+        "document_property_get": {"target_path": "root/a", "parameters": {"document_property_name": "D"}},
         "defined_process_property_get": {
-            "target_path": "t",
+            "target_path": "root/a",
             "parameters": {"process_property_component_id": "$ref:X",
                            "process_property_component_name": "P",
                            "process_property_key": "K"}},
         "defined_process_property_set": {
-            "inputs": ["a"],
+            "inputs": ["root/a"],
             "parameters": {"process_property_component_id": "$ref:X",
                            "process_property_component_name": "P",
                            "process_property_key": "K"}},
-        "sequential_value": {"target_path": "t", "parameters": {"key_name": "K"}},
-        "uppercase": {"inputs": ["a"], "target_path": "t", "parameters": {}},
+        "sequential_value": {"target_path": "root/a", "parameters": {"key_name": "K"}},
+        "uppercase": {"inputs": ["root/a"], "target_path": "root/a", "parameters": {}},
     }
     mapping = {"function_type": function_type}
-    mapping.update(shapes.get(function_type, {"inputs": ["a"], "target_path": "t", "parameters": {}}))
+    mapping.update(shapes.get(function_type, {"inputs": ["root/a"], "target_path": "root/a", "parameters": {}}))
     for key, value in over.items():
         if key == "parameters":
             mapping["parameters"] = {**mapping.get("parameters", {}), **value}
@@ -127,11 +169,24 @@ def _fn(function_type, parameters=None, **extra):
     return mapping
 
 
-def _map_component(function_mappings):
-    return IntegrationComponentSpec(
-        key="MAP", type="transform.map",
+def _map_component(function_mappings, **over):
+    """The map spec, declaring the profiles the plan must resolve."""
+    kwargs = dict(
+        key="MAP", type="transform.map", depends_on=["SP", "TP"],
         config=_valid_map_config("function", function_mappings=function_mappings),
     )
+    kwargs.update(over)
+    return IntegrationComponentSpec(**kwargs)
+
+
+def _components(*specs):
+    """A spec list the resolver can resolve — the map plus its profiles.
+
+    The resolver builds its `components_by_key` from this list, and the plan
+    authority needs the referenced profiles to resolve a field index. Omitting
+    them makes every map inert for a profile reason.
+    """
+    return [*specs, *_plan_context()[1].values()]
 
 
 def _effect(reads=(), writes=(), replay_safe=False):
@@ -193,7 +248,7 @@ def test_an_empty_envelope_normalises_to_omitted_on_the_request():
 
 
 def test_map_effect_is_derived_from_the_function_registry():
-    derived = derive_map_effect(_valid_map_config("function", function_mappings=[
+    derived = _derive(_valid_map_config("function", function_mappings=[
         _accepted("dynamic_process_property_set", parameters={"property_name": "OUT"}),
         _accepted("uppercase"),
     ]))
@@ -202,7 +257,7 @@ def test_map_effect_is_derived_from_the_function_registry():
 
 def test_a_map_with_one_unannotated_function_is_wholly_opaque():
     """Partial knowledge is never promoted to a complete effect."""
-    derived = derive_map_effect(_valid_map_config("function", function_mappings=[
+    derived = _derive(_valid_map_config("function", function_mappings=[
         _accepted("dynamic_process_property_set", parameters={"property_name": "OUT"}),
         _accepted("defined_process_property_get", parameters={"process_property_component_id": "$ref:X", "property_name": "P"}),
     ]))
@@ -210,12 +265,12 @@ def test_a_map_with_one_unannotated_function_is_wholly_opaque():
 
 
 def test_an_unknown_function_family_makes_the_map_opaque():
-    assert derive_map_effect(_valid_map_config(
+    assert _derive(_valid_map_config(
         "function", function_mappings=[_accepted("not_a_real_family")])) is None
 
 
 def test_a_sequential_value_map_is_derivable_but_not_replay_safe():
-    reads, writes, replay_safe = derive_map_effect(_valid_map_config(
+    reads, writes, replay_safe = _derive(_valid_map_config(
         "function",
         function_mappings=[_accepted("sequential_value", parameters={"key_name": "K"})]))
     assert (reads, writes) == ((), ())
@@ -228,8 +283,8 @@ def test_a_matching_map_declaration_is_accepted_and_bound_to_its_root():
         ProcessIRMapEffectDeclarationV1(
             map_ref="$ref:MAP", effect=_effect(writes=[("dpp", "OUT")], replay_safe=True)),
     ))
-    components = [_map_component([
-        _accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})])]
+    components = _components(_map_component([
+        _accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})]))
     resolution = resolve_process_ir_effect_declarations(
         roots, declarations, _symbols(), components, conflict_policy="fail")
     assert resolution.ok, resolution.findings
@@ -244,8 +299,8 @@ def test_a_forged_map_declaration_is_rejected_rather_than_believed():
         ProcessIRMapEffectDeclarationV1(
             map_ref="$ref:MAP", effect=_effect(writes=[("dpp", "SOMETHING_ELSE")], replay_safe=True)),
     ))
-    components = [_map_component([
-        _accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})])]
+    components = _components(_map_component([
+        _accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})]))
     resolution = resolve_process_ir_effect_declarations(
         roots, declarations, _symbols(), components, conflict_policy="fail")
     assert not resolution.ok
@@ -386,8 +441,8 @@ def test_capabilities_are_partitioned_per_root():
     declarations = ProcessIREffectDeclarationsV1(map_effects=(
         ProcessIRMapEffectDeclarationV1(
             map_ref="$ref:MAP", effect=_effect(writes=[("dpp", "OUT")], replay_safe=True)),))
-    components = [_map_component([
-        _accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})])]
+    components = _components(_map_component([
+        _accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})]))
     resolution = resolve_process_ir_effect_declarations(
         roots, declarations, _symbols(), components, conflict_policy="fail")
     assert resolution.ok, resolution.findings
@@ -410,8 +465,8 @@ def test_the_public_declaration_object_never_becomes_the_compiler_context():
     declarations = ProcessIREffectDeclarationsV1(map_effects=(
         ProcessIRMapEffectDeclarationV1(
             map_ref="$ref:MAP", effect=_effect(writes=[("dpp", "OUT")], replay_safe=True)),))
-    components = [_map_component([
-        _accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})])]
+    components = _components(_map_component([
+        _accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})]))
     resolution = resolve_process_ir_effect_declarations(
         roots, declarations, _symbols(), components, conflict_policy="fail")
     capabilities = resolution.capabilities_by_root["p"]
@@ -432,8 +487,8 @@ def test_one_bad_declaration_withholds_the_whole_context():
             map_ref="$ref:MAP", effect=_effect(writes=[("dpp", "OUT")], replay_safe=True)),),
         external_writers=(ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:CACHE"),),
     )
-    components = [_map_component([
-        _accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})])]
+    components = _components(_map_component([
+        _accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})]))
     resolution = resolve_process_ir_effect_declarations(
         roots, declarations, _symbols(), components, conflict_policy="fail")
     assert not resolution.ok
@@ -452,8 +507,8 @@ def test_findings_are_value_free():
     declarations = ProcessIREffectDeclarationsV1(map_effects=(
         ProcessIRMapEffectDeclarationV1(
             map_ref="$ref:MAP", effect=_effect(writes=[("dpp", canary)])),))
-    components = [_map_component([
-        _accepted("dynamic_process_property_set", parameters={"property_name": canary})])]
+    components = _components(_map_component([
+        _accepted("dynamic_process_property_set", parameters={"property_name": canary})]))
     # force a mismatch so a finding is produced at all
     declarations = ProcessIREffectDeclarationsV1(map_effects=(
         ProcessIRMapEffectDeclarationV1(
@@ -597,7 +652,7 @@ def test_an_unannotated_function_family_would_fail_closed():
 
     mapping = _accepted("uppercase")
     # CONTROL: annotated, this family derives.
-    assert derive_map_effect(
+    assert _derive(
         _valid_map_config("function", function_mappings=[mapping])
     ) == ((), (), True)
 
@@ -607,7 +662,7 @@ def test_an_unannotated_function_family_would_fail_closed():
     reg.FUNCTION_FAMILIES = MappingProxyType(patched)
     try:
         # ...and unannotated it is OPAQUE rather than silently pure.
-        assert derive_map_effect(
+        assert _derive(
             _valid_map_config("function", function_mappings=[mapping])
         ) is None
     finally:
@@ -753,10 +808,10 @@ def test_a_reference_only_map_is_opaque_not_pure():
     inspected, not version-bound — be established as touching no process state,
     which could suppress a real retry-safety or lineage error.
     """
-    assert derive_map_effect({}) is None
-    assert derive_map_effect({"component_id": "some-live-map"}) is None
+    assert _derive({}) is None
+    assert _derive({"component_id": "some-live-map"}) is None
     # ...and the control: a config that DOES say what it is still derives.
-    assert derive_map_effect(_valid_map_config("direct")) == ((), (), True)
+    assert _derive(_valid_map_config("direct")) == ((), (), True)
 
 
 def test_a_create_under_reuse_is_opaque_because_the_plan_may_substitute_it():
@@ -764,8 +819,8 @@ def test_a_create_under_reuse_is_opaque_because_the_plan_may_substitute_it():
     declarations = ProcessIREffectDeclarationsV1(map_effects=(
         ProcessIRMapEffectDeclarationV1(
             map_ref="$ref:MAP", effect=_effect(writes=[("dpp", "OUT")], replay_safe=True)),))
-    components = [_map_component([
-        _accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})])]
+    components = _components(_map_component([
+        _accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})]))
 
     reuse = resolve_process_ir_effect_declarations(
         roots, declarations, _symbols(), components, conflict_policy="reuse")
@@ -800,7 +855,7 @@ def test_the_function_lookup_is_the_builders_own():
     )
 
     assert get_function_family("  SEQUENTIAL_VALUE  ") is not None
-    derived = derive_map_effect(_valid_map_config("function", function_mappings=[
+    derived = _derive(_valid_map_config("function", function_mappings=[
         dict(_accepted("sequential_value"), function_type="  SEQUENTIAL_VALUE  ")]))
     assert derived == ((), (), False), derived
 
@@ -808,13 +863,13 @@ def test_the_function_lookup_is_the_builders_own():
 def test_a_defaulted_property_get_records_no_strict_read():
     """A contract read carries no has-default flag and lineage treats every one
     as strict, so recording a defaulted read would fail a flow that runs fine."""
-    defaulted = derive_map_effect(_valid_map_config("function", function_mappings=[
+    defaulted = _derive(_valid_map_config("function", function_mappings=[
         _accepted("dynamic_process_property_get",
                   parameters={"property_name": "P", "default_value": "fallback"})]))
     assert defaulted == ((), (), True), defaulted
     # CONTROL: without the default it IS a read, so the omission is about the
     # default rather than about the derivation never recording reads.
-    plain = derive_map_effect(_valid_map_config("function", function_mappings=[
+    plain = _derive(_valid_map_config("function", function_mappings=[
         _accepted("dynamic_process_property_get", parameters={"property_name": "P"})]))
     assert plain == ((("dpp", "P"),), (), True), plain
 
@@ -920,7 +975,7 @@ def test_a_reference_only_component_is_substitutable_under_every_policy(policy):
     )
     assert _may_be_substituted(spec, policy) is True
     # ...and the QA reproduction derives nothing rather than a pure effect
-    assert derive_map_effect(spec.config, substitutable=True) is None
+    assert _derive(spec.config, substitutable=True) is None
 
 
 def test_substitutability_uses_the_materialization_authority_not_a_copy():
@@ -981,7 +1036,7 @@ def test_every_function_map_alias_the_builder_supports_is_derivable():
     impure = [_accepted("sequential_value")]
     assert MapFunctionBuilder.SUPPORTED_MAP_TYPES, "no aliases — the test would be vacuous"
     for alias in MapFunctionBuilder.SUPPORTED_MAP_TYPES:
-        derived = derive_map_effect(_valid_map_config(alias, function_mappings=impure))
+        derived = _derive(_valid_map_config(alias, function_mappings=impure))
         assert derived == ((), (), False), (alias, derived)
 
 
@@ -990,7 +1045,7 @@ def test_every_direct_map_type_the_builder_supports_is_pure():
 
     assert DirectMapBuilder.SUPPORTED_MAP_TYPES
     for alias in DirectMapBuilder.SUPPORTED_MAP_TYPES:
-        assert derive_map_effect(_valid_map_config(alias)) == ((), (), True), alias
+        assert _derive(_valid_map_config(alias)) == ((), (), True), alias
 
 
 def test_a_script_map_is_opaque_because_its_authority_is_the_registry():
@@ -1005,7 +1060,7 @@ def test_a_script_map_is_opaque_because_its_authority_is_the_registry():
 
     assert MapScriptBuilder.SUPPORTED_MAP_TYPES
     for alias in MapScriptBuilder.SUPPORTED_MAP_TYPES:
-        assert derive_map_effect(_valid_map_config(alias)) is None, alias
+        assert _derive(_valid_map_config(alias)) is None, alias
 
 
 def test_the_vocabulary_is_read_from_the_builders_not_restated():
@@ -1022,13 +1077,13 @@ def test_the_vocabulary_is_read_from_the_builders_not_restated():
     try:
         mb.MapFunctionBuilder.SUPPORTED_MAP_TYPES = ("function",)
         assert "map_function" not in mb.MapFunctionBuilder.SUPPORTED_MAP_TYPES
-        assert derive_map_effect(_valid_map_config("map_function", function_mappings=[_noop_mapping()])) is None
+        assert _derive(_valid_map_config("map_function", function_mappings=[_noop_mapping()])) is None
         # CONTROL: the alias that remains still derives, so the None above is
         # about the narrowing rather than about the derivation breaking.
-        assert derive_map_effect(_valid_map_config("function", function_mappings=[_noop_mapping()])) == ((), (), True)
+        assert _derive(_valid_map_config("function", function_mappings=[_noop_mapping()])) == ((), (), True)
     finally:
         mb.MapFunctionBuilder.SUPPORTED_MAP_TYPES = original
-    assert derive_map_effect(_valid_map_config("map_function", function_mappings=[_noop_mapping()])) == ((), (), True)
+    assert _derive(_valid_map_config("map_function", function_mappings=[_noop_mapping()])) == ((), (), True)
 
 
 def test_a_map_type_no_builder_supports_is_opaque():
@@ -1045,7 +1100,7 @@ def test_a_map_type_no_builder_supports_is_opaque():
         | set(MapScriptBuilder.SUPPORTED_MAP_TYPES)
     )
     assert "profile" not in known
-    assert derive_map_effect(_valid_map_config("profile")) is None
+    assert _derive(_valid_map_config("profile")) is None
 
 
 # ---------------------------------------------------------------------------
@@ -1063,10 +1118,10 @@ def test_a_direct_map_carrying_function_mappings_is_opaque_not_pure():
     the vocabulary, and worse in kind: it agreed silently instead of warning.
     """
     impure = [_accepted("sequential_value")]
-    assert derive_map_effect(_valid_map_config("direct", function_mappings=impure)) is None
+    assert _derive(_valid_map_config("direct", function_mappings=impure)) is None
     # CONTROL: a well-formed direct map still derives, so the None above is about
     # the rejected key rather than about `direct` having stopped working.
-    assert derive_map_effect(_valid_map_config("direct")) == ((), (), True)
+    assert _derive(_valid_map_config("direct")) == ((), (), True)
 
 
 def test_every_direct_reject_key_makes_a_direct_map_opaque():
@@ -1081,7 +1136,7 @@ def test_every_direct_reject_key_makes_a_direct_map_opaque():
 
     assert _DIRECT_ONLY_REJECT_KEYS, "no reject keys — the sweep would be vacuous"
     for key in _DIRECT_ONLY_REJECT_KEYS:
-        assert derive_map_effect(_valid_map_config("direct", **{key: ["anything"]})) is None, key
+        assert _derive(_valid_map_config("direct", **{key: ["anything"]})) is None, key
 
 
 def test_the_direct_vocabulary_is_read_from_its_builder_too(monkeypatch):
@@ -1096,13 +1151,13 @@ def test_the_direct_vocabulary_is_read_from_its_builder_too(monkeypatch):
     try:
         mb.DirectMapBuilder.SUPPORTED_MAP_TYPES = ()
         assert "direct" not in mb.DirectMapBuilder.SUPPORTED_MAP_TYPES
-        assert derive_map_effect(_valid_map_config("direct")) is None
+        assert _derive(_valid_map_config("direct")) is None
         # CONTROL: the function vocabulary is untouched and still derives, so the
         # None above is about the narrowing rather than a wholesale break.
-        assert derive_map_effect(_valid_map_config("function", function_mappings=[_noop_mapping()])) == ((), (), True)
+        assert _derive(_valid_map_config("function", function_mappings=[_noop_mapping()])) == ((), (), True)
     finally:
         mb.DirectMapBuilder.SUPPORTED_MAP_TYPES = original
-    assert derive_map_effect(_valid_map_config("direct")) == ((), (), True)
+    assert _derive(_valid_map_config("direct")) == ((), (), True)
 
 
 @pytest.mark.parametrize("bad", [["direct"], {"a": 1}, {"direct"}, 3, None])
@@ -1113,7 +1168,7 @@ def test_a_non_string_map_type_is_opaque_and_does_not_crash(bad):
     with `error_code: None` and no machine code at all — a caller learned nothing
     from a value they had supplied.
     """
-    assert derive_map_effect(_valid_map_config(bad, function_mappings=[_noop_mapping()])) is None
+    assert _derive(_valid_map_config(bad, function_mappings=[_noop_mapping()])) is None
 
 
 def test_a_non_string_map_type_survives_the_whole_resolver():
@@ -1143,14 +1198,14 @@ def test_a_raw_xml_map_is_opaque_whatever_its_structured_fields_say():
     structured = [_accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})]
     # CONTROL: without the raw XML this config DOES derive, so the None below is
     # about the escape hatch rather than about the mappings being unreadable.
-    assert derive_map_effect(
+    assert _derive(
         _valid_map_config("map_function", function_mappings=structured)
     ) == ((), (("dpp", "OUT"),), True)
-    assert derive_map_effect(
+    assert _derive(
         _valid_map_config("map_function", xml="<Map/>", function_mappings=structured)
     ) is None
     # ...and a direct map carrying raw XML is opaque for the same reason.
-    assert derive_map_effect(_valid_map_config("direct", xml="<Map/>")) is None
+    assert _derive(_valid_map_config("direct", xml="<Map/>")) is None
 
 
 def test_the_raw_xml_bypass_matches_the_builder_predicate():
@@ -1165,7 +1220,7 @@ def test_the_raw_xml_bypass_matches_the_builder_predicate():
     comp = IntegrationComponentSpec(key="MAP", type="transform.map", config={})
     assert _resolve_preservation_policy(comp, {"xml": "<Map/>"}) is None
     # an EMPTY xml is falsy for the builder, and must be falsy here too
-    assert derive_map_effect(_valid_map_config("direct", xml="")) == ((), (), True)
+    assert _derive(_valid_map_config("direct", xml="")) == ((), (), True)
 
 
 # ---------------------------------------------------------------------------
@@ -1210,7 +1265,7 @@ def test_derivation_requires_builder_ACCEPTANCE_across_every_reject_table():
                 config = dict(base, **{key: ["v"]})
                 builder = MAP_BUILDERS[("transform.map", map_type)]
                 accepted = builder.validate_config(dict(config)) is None
-                derived = derive_map_effect(config)
+                derived = _derive(config)
                 assert (derived is not None) is accepted, (table, key, map_type, derived)
                 checked += 1
     assert checked == sum(len(k) for k in tables.values()) * 3, checked
@@ -1230,9 +1285,9 @@ def test_a_secret_shaped_key_cannot_mask_a_route_violation():
     masked = dict(base, xslt=["v"], token="sekrit")
     nested = dict(base, xslt=["v"],
                   field_mappings=[{"source_path": "x", "target_path": "y", "password": "p"}])
-    assert derive_map_effect(dict(base)) == ((), (), True)  # control: base derives
+    assert _derive(dict(base)) == ((), (), True)  # control: base derives
     for label, config in (("plain", plain), ("masked", masked), ("nested", nested)):
-        assert derive_map_effect(config) is None, label
+        assert _derive(config) is None, label
 
 
 def test_an_incomplete_config_is_opaque_and_that_costs_no_diagnostic():
@@ -1250,17 +1305,17 @@ def test_an_incomplete_config_is_opaque_and_that_costs_no_diagnostic():
     incomplete = {"map_type": "direct"}
     error = MAP_BUILDERS[("transform.map", "direct")].validate_config(dict(incomplete))
     assert error is not None
-    assert derive_map_effect(incomplete) is None
+    assert _derive(incomplete) is None
     # CONTROL: completing it makes it derive, so the None is about completeness
     # rather than about `direct` having stopped working.
-    assert derive_map_effect(_valid_map_config("direct")) == ((), (), True)
+    assert _derive(_valid_map_config("direct")) == ((), (), True)
 
 
 def test_a_map_type_with_no_builder_route_is_opaque():
     from boomi_mcp.categories.components.builders.map_builder import MAP_BUILDERS
 
     assert ("transform.map", "profile") not in MAP_BUILDERS
-    assert derive_map_effect({"map_type": "profile"}) is None
+    assert _derive({"map_type": "profile"}) is None
 
 
 # ---------------------------------------------------------------------------
@@ -1295,7 +1350,7 @@ def test_the_raw_xml_predicate_matches_the_builder_on_divergent_shapes(value, by
     builder_bypasses = _resolve_preservation_policy(comp, {"xml": value}) is None
     assert builder_bypasses is bypassed, (value, builder_bypasses)
 
-    derived = derive_map_effect(_valid_map_config("direct", xml=value))
+    derived = _derive(_valid_map_config("direct", xml=value))
     if bypassed:
         assert derived is None, (value, derived)
     else:
@@ -1331,20 +1386,66 @@ def test_both_raw_xml_bypass_sites_use_the_same_predicate():
     assert '"xml" in raw_config' not in source and '"xml" in payload' not in source
 
 
-def test_the_effective_config_includes_the_specs_top_level_name():
-    """Codex round 5 P2. `integration_builder` injects the spec's `name` as
-    `component_name` when the config omits it, and validates THAT.
+@pytest.mark.parametrize(
+    "present,expected",
+    [
+        ("__absent__", True),   # nothing to disagree about -- every predicate injects
+        ("", False),            # present-but-EMPTY: setdefault does NOT inject
+        (None, False),          # present-but-None: same
+        (0, False),             # present-but-falsy non-string
+        ([], False),            # present-but-falsy container
+        ("   ", False),         # truthy whitespace: neither predicate injects, so
+                                # they AGREE -- and the plan then refuses it,
+                                # because it strips before requiring. The axis's
+                                # own control: measured, not assumed.
+    ],
+)
+def test_the_name_injection_matches_the_plans_setdefault_form(present, expected):
+    """QA-154-r6-01 / r6-03.
 
-    Validating the raw config instead made a map that builds perfectly well go
-    inert — the same mistake as modelling a builder RULE, one level up: modelling
-    the builder's INPUT.
+    `integration_builder` has nine `component_name` injection sites and EIGHT use
+    `setdefault` — including the transform.map plan gate. The one falsy-form site
+    is the apply-time drift re-validation, and copying that outlier made a
+    present-but-falsy `component_name` derive a TRUSTED effect for a config the
+    plan refuses: measured 5 misalignments before, 8 after.
+
+    The first guard's ONLY case deleted `component_name` entirely — the one shape
+    where every candidate predicate agrees — so swapping the predicate for the
+    authority's own `setdefault` survived the whole reachable universe. These are
+    the shapes that tell them apart.
     """
+    from boomi_mcp.categories.components.builders.transform_map_validation import (
+        validate_transform_map,
+    )
+
     config = _valid_map_config("direct")
-    del config["component_name"]
-    # Without a name from either place the builder really would refuse it.
-    assert derive_map_effect(config) is None
-    # With the spec's top-level name — exactly what plan and apply supply — it builds.
-    assert derive_map_effect(config, name="M12.16 map") == ((), (), True)
+    if present == "__absent__":
+        del config["component_name"]
+    else:
+        config["component_name"] = present
+
+    depends_on, by_key = _plan_context()
+    # What the PLAN would say, using its own injection form.
+    effective = dict(config)
+    if not effective.get("component_name"):
+        effective.setdefault("component_name", "M12.16 spec name")
+    plan_accepts = validate_transform_map(dict(effective), depends_on, by_key) is None
+    assert plan_accepts is expected, (present, plan_accepts)
+
+    derived = _derive(config, name="M12.16 spec name")
+    assert (derived is not None) is expected, (present, derived)
+
+
+def test_the_effective_config_uses_setdefault_not_a_falsy_check():
+    """The two forms differ on exactly one shape, and that shape is asserted."""
+    from boomi_mcp.authoring.process_ir_effects import _effective_map_config
+
+    # absent -> injected by both forms
+    assert _effective_map_config({}, "N")["component_name"] == "N"
+    # present-but-empty -> setdefault leaves it; a falsy check would overwrite it
+    assert _effective_map_config({"component_name": ""}, "N")["component_name"] == ""
+    # present-and-truthy -> untouched by both
+    assert _effective_map_config({"component_name": "X"}, "N")["component_name"] == "X"
 
 
 def test_the_resolver_passes_the_specs_name_through():
@@ -1353,12 +1454,13 @@ def test_the_resolver_passes_the_specs_name_through():
         _accepted("dynamic_process_property_set")])
     del config["component_name"]
     spec = IntegrationComponentSpec(
-        key="MAP", type="transform.map", name="M12.16 map", action="create", config=config)
+        key="MAP", type="transform.map", name="M12.16 map", action="create",
+        depends_on=["SP", "TP"], config=config)
     declarations = ProcessIREffectDeclarationsV1(map_effects=(
         ProcessIRMapEffectDeclarationV1(
             map_ref="$ref:MAP", effect=_effect(writes=[("dpp", "OUT")], replay_safe=True)),))
     resolution = resolve_process_ir_effect_declarations(
-        [("p", _root_with_map())], declarations, _symbols(), [spec], conflict_policy="fail")
+        [("p", _root_with_map())], declarations, _symbols(), _components(spec), conflict_policy="fail")
     assert resolution.ok, resolution.findings
     assert resolution.inert == (), resolution.inert
     assert len(resolution.capabilities_by_root["p"].map_effects) == 1
@@ -1366,7 +1468,8 @@ def test_the_resolver_passes_the_specs_name_through():
     # CONTROL: an UNNAMED spec has nothing to inject, so it is genuinely inert —
     # the acceptance above is about the name arriving, not about the gate being off.
     unnamed = IntegrationComponentSpec(
-        key="MAP", type="transform.map", action="create", config=config)
+        key="MAP", type="transform.map", action="create",
+        depends_on=["SP", "TP"], config=config)
     inert = resolve_process_ir_effect_declarations(
-        [("p", _root_with_map())], declarations, _symbols(), [unnamed], conflict_policy="fail")
+        [("p", _root_with_map())], declarations, _symbols(), _components(unnamed), conflict_policy="fail")
     assert inert.inert == ("/effect_declarations/map_effects/0",)
