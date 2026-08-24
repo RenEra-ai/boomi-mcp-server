@@ -554,6 +554,62 @@ def test_mutated_away_catch_terminal_is_rejected_by_the_compiler():
     assert excinfo.value.diagnostics[0].code == PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED
 
 
+def test_a_model_constructed_catch_terminal_is_refused_by_the_compiler():
+    """#180 witness (ii) — placement enforcement on a body the PARSER never saw.
+
+    `ProcessIRV1` is exported and is not frozen, so a caller can parse a legal
+    document, replace a control body with one `model_construct` built, and hand
+    the model straight to `compile_process_ir_v1`. A gate only
+    `parse_process_ir_v1` enforces is not a gate — which is exactly why
+    production says so at `body_capabilities.py`.
+
+    `test_mutated_away_catch_terminal_is_rejected_by_the_compiler` above is the
+    nearest existing test and asserts a DIFFERENT invariant: a catch body with
+    no terminal at all is `CATCH_UNTERMINATED`. Nothing covered a catch body
+    carrying a terminal the slot does not admit — `return_documents`, the one
+    terminal a recovery path may never use, because a catch hands nothing back
+    to the caller.
+
+    The mutant is shown to have applied before the gate is invoked: the slot is
+    asserted not to admit `return_documents`, and the control document is
+    asserted to compile clean.
+    """
+    from boomi_mcp.compiler.process_ir.body_capabilities import (
+        CATCH_BODY,
+        TERMINAL_SLOT,
+        is_allowed,
+    )
+    from boomi_mcp.models.process_ir import (
+        MessageNodeV1,
+        ReturnDocumentsNodeV1,
+        TryCatchCatchBodyV1,
+    )
+
+    # THE INVARIANT THIS WITNESSES, read off the derived matrix rather than
+    # asserted from memory. If the union ever widens, this line fails first and
+    # says so, instead of the test quietly becoming vacuous.
+    assert is_allowed(CATCH_BODY, TERMINAL_SLOT, "return_documents") is False
+
+    # CONTROL: the same document, unmutated, compiles.
+    control = parse_process_ir_v1(_process_scope())
+    compile_process_ir_v1(control, _symbols())
+
+    ir = parse_process_ir_v1(_process_scope())
+    ir.body.steps[0].catch_body = TryCatchCatchBodyV1.model_construct(
+        steps=[MessageNodeV1(kind="message", text="failed")],
+        terminal=ReturnDocumentsNodeV1(kind="return_documents"),
+    )
+    # THE MUTATION TOOK EFFECT — the model really does carry the bad terminal,
+    # and `model_construct` really did skip the union that would have refused it.
+    assert ir.body.steps[0].catch_body.terminal.kind == "return_documents"
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        compile_process_ir_v1(ir, _symbols())
+    diagnostic = excinfo.value.diagnostics[0]
+    assert diagnostic.code == "PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY"
+    assert diagnostic.path == "/body/steps/0/catch_body/terminal"
+
+
 @pytest.mark.parametrize(
     "terminal",
     [

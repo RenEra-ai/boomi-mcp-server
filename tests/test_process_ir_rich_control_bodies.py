@@ -653,8 +653,29 @@ def test_authority_table_covers_every_body_model_in_the_schema():
     owes two rows. Enumerating the models we happen to remember would re-create
     the omission this test exists to catch.
     """
+    bodies = _control_body_models(ir_module.ProcessIRV1)
+    assert bodies, "model walk found no control bodies — the test would be vacuous"
+    covered = {model for model, _field in bodycaps.BODY_SLOT_AUTHORITIES_V1.values()}
+    assert covered == bodies, (
+        "every control body owes a step row and a terminal row; "
+        f"uncovered={sorted(m.__name__ for m in bodies - covered)} "
+        f"unknown={sorted(m.__name__ for m in covered - bodies)}"
+    )
+    for model in bodies:
+        slots = {field for m, field in bodycaps.BODY_SLOT_AUTHORITIES_V1.values() if m is model}
+        assert slots == {"steps", "terminal"}, model.__name__
+
+
+def _control_body_models(root):
+    """Every control body reachable from ``root`` — the authority's case set.
+
+    Extracted from the coverage test above (#180) so a witness can run the SAME
+    walk over a SYNTHETIC root. Inline, the walk could only ever be pointed at
+    the real schema, so nothing could show that the comparison it feeds would
+    actually fail on an uncovered body context.
+    """
     bodies = set()
-    stack, seen = [ir_module.ProcessIRV1], set()
+    stack, seen = [root], set()
     while stack:
         model = stack.pop()
         if model in seen:
@@ -667,16 +688,7 @@ def test_authority_table_covers_every_body_model_in_the_schema():
             for nested in _reachable_models(field.annotation):
                 if nested not in seen:
                     stack.append(nested)
-    assert bodies, "model walk found no control bodies — the test would be vacuous"
-    covered = {model for model, _field in bodycaps.BODY_SLOT_AUTHORITIES_V1.values()}
-    assert covered == bodies, (
-        "every control body owes a step row and a terminal row; "
-        f"uncovered={sorted(m.__name__ for m in bodies - covered)} "
-        f"unknown={sorted(m.__name__ for m in covered - bodies)}"
-    )
-    for model in bodies:
-        slots = {field for m, field in bodycaps.BODY_SLOT_AUTHORITIES_V1.values() if m is model}
-        assert slots == {"steps", "terminal"}, model.__name__
+    return bodies
 
 
 def _reachable_models(annotation):
@@ -1910,3 +1922,50 @@ def test_the_root_verdict_yields_to_the_control_continuation_rule():
         served.path,
         served.message,
     )
+
+
+def test_a_synthetic_additional_body_context_is_reported_as_uncovered():
+    """#180 witness (i) — the non-vacuity control for the coverage rule above.
+
+    `test_authority_table_covers_every_body_model_in_the_schema` asserts the
+    authority table equals the schema's control-body set, and floors the walk
+    with `assert bodies`. That floor proves the walk found SOMETHING; it never
+    proved the comparison would FAIL on a body context nobody added rows for —
+    which is the entire property. A table that happened to be a superset, or a
+    walk that silently missed a nesting shape, would pass either way.
+
+    So: build a root carrying one EXTRA control body, assert the walk sees it
+    (the mutation took effect), then show it is uncovered by the real authority
+    table. The real root is re-checked at the end as the opposite-direction
+    control, so a walk that reported everything as uncovered could not pass.
+    """
+    from pydantic import create_model
+
+    synthetic_body = create_model(
+        "SyntheticExtraBodyV1",
+        steps=(ir_module.TryCatchTryBodyV1.model_fields["steps"].annotation, ...),
+        terminal=(ir_module.TryCatchTryBodyV1.model_fields["terminal"].annotation, ...),
+    )
+    synthetic_root = create_model(
+        "SyntheticRootV1",
+        body=(ir_module.ProcessIRV1.model_fields["body"].annotation, ...),
+        extra_body=(synthetic_body, ...),
+    )
+
+    real = _control_body_models(ir_module.ProcessIRV1)
+    mutant = _control_body_models(synthetic_root)
+
+    # THE MUTATION TOOK EFFECT: the walk really does see the new body context.
+    assert synthetic_body in mutant, sorted(m.__name__ for m in mutant)
+    assert synthetic_body not in real
+    assert mutant == real | {synthetic_body}, sorted(
+        m.__name__ for m in mutant ^ (real | {synthetic_body}))
+
+    covered = {model for model, _field in bodycaps.BODY_SLOT_AUTHORITIES_V1.values()}
+    # ...and the comparison the real test makes would FAIL on it.
+    assert mutant - covered == {synthetic_body}
+    assert covered != mutant
+
+    # CONTROL: the real schema is still fully covered, so the check above is
+    # about the synthetic context and not about a walk that over-reports.
+    assert covered == real

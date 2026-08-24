@@ -244,7 +244,22 @@ def materialize_canonical_process_xml(
             _ref_key(slot.ref) for slot in plan.unresolved_symbol_slots
         },
     )
-    cfg, emission_plan = compile_process_ir_v1(plan.process_ir, bound)
+    # #180. The recompile is a COMPILE ENTRY, and it was the one entry the
+    # effect channel never reached: a root whose declaration turned a blocking
+    # finding into a warning planned clean, compiled clean, and then failed
+    # here — so the whole channel stopped at compile and apply refused it.
+    #
+    # The context comes off the PLAN, which recorded the very object its own
+    # compile used. Reading it here rather than accepting it as a parameter is
+    # the point: there is no argument a caller or a future call site can forget
+    # to pass. `None` keeps the strict default rather than overriding it.
+    cfg, emission_plan = (
+        compile_process_ir_v1(
+            plan.process_ir, bound, capabilities=plan.effect_capabilities
+        )
+        if plan.effect_capabilities is not None
+        else compile_process_ir_v1(plan.process_ir, bound)
+    )
 
     # The profile is RE-DERIVED and compared, never re-decided. Recompiling
     # against real ids must not change what kind of process this is; if it does,

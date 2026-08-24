@@ -3451,3 +3451,365 @@ def test_an_aliased_child_still_receives_its_own_preconditions():
     report = validate_process_ir(
         child, symbols, capabilities=resolution.capabilities_by_root["CHILD"])
     assert report.errors == (), report.errors
+
+
+# ---------------------------------------------------------------------------
+# Issue #180 — the declaration channel at the PUBLIC boundary
+#
+# `test_an_external_writer_declaration_changes_the_public_plan_verdict` above
+# closed ONE of the four families inside #154's window; the other three were
+# deferred. Every other test in this file calls the resolver, the compiler or
+# the emitter directly, which proves those parts agree with each other and not
+# that the entry a caller actually reaches gets to them. These three drive
+# `plan_authoring_request_v1` — the public entry — for map, subprocess and
+# registered script, each with a control in the opposite direction.
+# ---------------------------------------------------------------------------
+
+
+def _public_support():
+    """The shared #146/#153 public-boundary fixture, imported once."""
+    from _m12_11_support import (  # noqa: F401
+        VALID_IR_DOC,
+        process_ir_request,
+        process_unit,
+        supporting_components,
+    )
+
+    return VALID_IR_DOC, process_ir_request, process_unit, supporting_components
+
+
+def _public_plan(units, components, declarations, conflict_policy="fail"):
+    """Plan `units` through the PUBLIC entry and return the served result.
+
+    `conflict_policy` is load-bearing and defaults to `fail` here rather than to
+    the request default `reuse`. Under `reuse` the plan may substitute an
+    existing component for an authored one, so derivation refuses to speak for
+    the config in front of it and EVERY map declaration goes inert — a test left
+    on the default would report "the declaration established nothing" for a
+    reason that has nothing to do with the declaration.
+    """
+    from boomi_mcp.authoring.workflow import plan_authoring_request_v1
+
+    _doc, process_ir_request, _unit, _support = _public_support()
+    extra = {} if declarations is None else {"effect_declarations": declarations}
+    request = process_ir_request(units=tuple(units), **extra)
+    request = request.model_copy(update={"intent": request.intent.model_copy(
+        update={"components": tuple(components),
+                "conflict_policy": conflict_policy})})
+    return plan_authoring_request_v1(
+        request, profile="qa_profile", account_id="qa_account")[0]
+
+
+def _public_profile_component(key):
+    """A profile the PLAN can index — the same shape `_profile_component` uses.
+
+    Spelled out again rather than reused because this one travels in an
+    `IntegrationComponentSpec` list handed to the public request, where a stub
+    the generated-profile builder cannot index makes every map referencing it
+    refused for a profile reason instead of an effect one.
+    """
+    return IntegrationComponentSpec(
+        key=key, type="profile.json", action="create", name=key,
+        config={
+            "component_type": "profile.json",
+            "profile_type": "json.generated",
+            "component_name": key,
+            "root": {"name": "root", "kind": "object", "children": [
+                {"name": "a", "kind": "simple", "data_type": "character"}]},
+        },
+    )
+
+
+def _blocked_on_unmet_read(result):
+    """True when the served plan refused for a read-before-write."""
+    return any(
+        e.code == "AUTHORING_COMPILE_BLOCKED"
+        and "read before any write establishes it" in (e.message or "")
+        for e in result.errors
+    )
+
+
+def _contract_invalid_codes(result):
+    return [e.code for e in result.errors
+            if e.code == "PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID"]
+
+
+def test_a_map_declaration_changes_the_public_plan_verdict():
+    """#180 item 1, map family, through `plan_authoring_request_v1`.
+
+    A root reads `dpp:OUT` after a `map_ref`. Nothing else writes it, so the
+    plan refuses — the map is opaque to lineage until something vouches for it.
+    Declaring the map's effect makes the same request plan clean.
+
+    Both controls are the point. The ABSENT control keeps the accepting half
+    from passing for a build that never checked lineage at all; the UNTRUTHFUL
+    control keeps it from passing for a build that trusts whatever the caller
+    says. A declaration supplies identity, never content: the server re-derives
+    the effect from the map's own config and rejects a declaration that
+    disagrees with it.
+    """
+    import copy as _copy
+
+    doc_source, _request, process_unit, supporting_components = _public_support()
+
+    document = _copy.deepcopy(doc_source)
+    document["body"]["steps"].insert(1, {"kind": "map_ref", "map_ref": "$ref:MAP"})
+    document["body"]["steps"].insert(2, {
+        "kind": "set_dpp", "name": "ECHO",
+        "source_values": [{"value_type": "dpp", "property_name": "OUT"}]})
+
+    # A map whose DERIVED effect really is `writes dpp:OUT` — the function
+    # mapping is what the server inspects, and `_accepted` supplies the shape
+    # the builder accepts for this family.
+    map_spec = IntegrationComponentSpec(
+        key="MAP", type="transform.map", action="create", name="M12.16 map",
+        depends_on=["SP", "TP"],
+        config=_valid_map_config(
+            "function", function_mappings=[_accepted("dynamic_process_property_set")]),
+    )
+    units = (process_unit(
+        doc=document,
+        depends_on=("api_conn", "api_op", "db_conn", "db_op", "MAP", "SP", "TP")),)
+    components = tuple(supporting_components()) + (
+        map_spec, _public_profile_component("SP"), _public_profile_component("TP"))
+
+    def declaring(scope, name):
+        return ProcessIREffectDeclarationsV1(map_effects=(
+            ProcessIRMapEffectDeclarationV1(
+                map_ref="$ref:MAP",
+                effect=_effect(writes=[(scope, name)], replay_safe=True)),))
+
+    # CONTROL: no declaration -> the read has no establishing write.
+    absent = _public_plan(units, components, None)
+    assert absent.validation_report.is_valid is False
+    assert _blocked_on_unmet_read(absent), absent.errors
+
+    # ...and the declaration is what changes the answer.
+    declared = _public_plan(units, components, declaring("dpp", "OUT"))
+    assert declared.validation_report.is_valid is True, declared.errors
+    assert declared.errors == ()
+
+    # CONTROL, other direction: a declaration the map's own config does not
+    # support is REFUSED rather than believed, and the read stays unmet.
+    untruthful = _public_plan(units, components, declaring("dpp", "NOT_WRITTEN"))
+    assert untruthful.validation_report.is_valid is False
+    assert _contract_invalid_codes(untruthful) == [
+        "PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID"], untruthful.errors
+    assert _blocked_on_unmet_read(untruthful), untruthful.errors
+
+
+def test_a_map_declaration_is_inert_when_the_plan_may_substitute_the_component():
+    """The `reuse` half of the same public path — and why the test above pins
+    `conflict_policy`.
+
+    Under `reuse` the plan may bind an EXISTING component instead of the
+    authored one, so the config in the request is not necessarily the config
+    that will run. Derivation declines to speak for it, the declaration goes
+    inert, and the read stays unmet. This is the correct answer, not a gap: the
+    alternative is trusting a config the plan is free to replace.
+    """
+    import copy as _copy
+
+    doc_source, _request, process_unit, supporting_components = _public_support()
+    document = _copy.deepcopy(doc_source)
+    document["body"]["steps"].insert(1, {"kind": "map_ref", "map_ref": "$ref:MAP"})
+    document["body"]["steps"].insert(2, {
+        "kind": "set_dpp", "name": "ECHO",
+        "source_values": [{"value_type": "dpp", "property_name": "OUT"}]})
+    map_spec = IntegrationComponentSpec(
+        key="MAP", type="transform.map", action="create", name="M12.16 map",
+        depends_on=["SP", "TP"],
+        config=_valid_map_config(
+            "function", function_mappings=[_accepted("dynamic_process_property_set")]),
+    )
+    units = (process_unit(
+        doc=document,
+        depends_on=("api_conn", "api_op", "db_conn", "db_op", "MAP", "SP", "TP")),)
+    components = tuple(supporting_components()) + (
+        map_spec, _public_profile_component("SP"), _public_profile_component("TP"))
+    declarations = ProcessIREffectDeclarationsV1(map_effects=(
+        ProcessIRMapEffectDeclarationV1(
+            map_ref="$ref:MAP", effect=_effect(writes=[("dpp", "OUT")], replay_safe=True)),))
+
+    reused = _public_plan(units, components, declarations, conflict_policy="reuse")
+    assert reused.validation_report.is_valid is False
+    assert _blocked_on_unmet_read(reused), reused.errors
+    # Inert, not INVALID: the declaration is not wrong, it simply cannot be
+    # backed here. Turning "this proves nothing" into "your payload is invalid"
+    # is the overreach the resolver deliberately avoids.
+    assert _contract_invalid_codes(reused) == [], reused.errors
+
+    # ...and the SAME declaration under `fail` does establish the write, which
+    # is what keeps this test about substitutability rather than about a broken
+    # fixture.
+    pinned = _public_plan(units, components, declarations, conflict_policy="fail")
+    assert pinned.validation_report.is_valid is True, pinned.errors
+
+
+def test_a_subprocess_declaration_changes_the_public_plan_verdict_across_a_branch():
+    """#180 item 1, subprocess family, through `plan_authoring_request_v1`.
+
+    This one is deliberately shaped around the rule that cost #154 six rounds:
+    the two state compartments aggregate DIFFERENTLY at a Branch. EXECUTION
+    (dpp, cache) accumulates because every leg runs; DOCUMENT (ddp) does not,
+    because each leg re-copies the pre-Branch documents. A later leg may
+    therefore read what an earlier leg's `process_call` established — but only
+    if the server knows what that call does.
+
+    A `process_call` cannot be sequenced after anything (it is a terminal, and
+    ProcessIR v1 publishes only the non-returning form), and it may not share a
+    root-to-leaf path with a connector. A Branch leg is where a call's effect
+    can be observed by the SAME root at all, so it is the only public shape that
+    can carry this assertion.
+
+    Leg 1 calls the child; leg 2 reads `dpp:OUT`, which only the child writes.
+    """
+    from boomi_mcp.models.authoring_workflow import (
+        ProcessIRSubprocessEffectDeclarationV1,
+    )
+
+    _doc, _request, process_unit, supporting_components = _public_support()
+
+    source = {"kind": "source", "connection_ref": "$ref:db_conn",
+              "operation_ref": "$ref:db_op"}
+    parent_document = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "label": "b", "legs": [
+            {"steps": [], "terminal": {
+                "kind": "process_call", "process_ref": "$ref:CHILD"}},
+            {"steps": [{"kind": "set_dpp", "name": "ECHO", "source_values": [
+                {"value_type": "dpp", "property_name": "OUT"}]}],
+             "terminal": {"kind": "stop"}}]}]}}
+    child_document = {"version": "1", "body": {"kind": "sequence", "steps": [
+        source,
+        {"kind": "set_dpp", "name": "OUT",
+         "source_values": [{"value_type": "static", "value": "v"}]},
+        {"kind": "return_documents"}]}}
+
+    units = (
+        process_unit(key="proc", doc=parent_document, depends_on=("CHILD",)),
+        process_unit(key="CHILD", name="M12.16 Child", doc=child_document,
+                     depends_on=("db_conn", "db_op")),
+    )
+    components = tuple(supporting_components())
+
+    def declaring(writes, replay_safe):
+        return ProcessIREffectDeclarationsV1(subprocess_effects=(
+            ProcessIRSubprocessEffectDeclarationV1(
+                process_ref="$ref:CHILD",
+                effect=_effect(writes=writes, replay_safe=replay_safe)),))
+
+    # CONTROL: undeclared, the call is opaque and leg 2's read is unmet.
+    absent = _public_plan(units, components, None)
+    assert absent.validation_report.is_valid is False
+    assert _blocked_on_unmet_read(absent), absent.errors
+
+    # The child carries a connector, so its DERIVED summary is replay-UNSAFE.
+    # Declaring the write truthfully — including that axis — plans clean.
+    declared = _public_plan(
+        units, components, declaring([("dpp", "OUT")], replay_safe=False))
+    assert declared.validation_report.is_valid is True, declared.errors
+    assert declared.errors == ()
+
+    # CONTROL, other direction #1: a write the child does not make.
+    wrong_key = _public_plan(
+        units, components, declaring([("dpp", "NOT_WRITTEN")], replay_safe=False))
+    assert wrong_key.validation_report.is_valid is False
+    assert _contract_invalid_codes(wrong_key) == [
+        "PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID"], wrong_key.errors
+    assert _blocked_on_unmet_read(wrong_key), wrong_key.errors
+
+    # CONTROL, other direction #2: the right key on the WRONG replay axis. The
+    # comparison is over the whole derived triple, so a declaration that is
+    # correct about state and wrong about replay safety is refused too —
+    # otherwise a caller could launder an unsafe child into a retry region by
+    # getting only the reads and writes right.
+    wrong_axis = _public_plan(
+        units, components, declaring([("dpp", "OUT")], replay_safe=True))
+    assert wrong_axis.validation_report.is_valid is False
+    assert _contract_invalid_codes(wrong_axis) == [
+        "PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID"], wrong_axis.errors
+
+
+def test_a_script_declaration_reaches_the_public_boundary_and_is_inert_here():
+    """#180 item 1, registered-script family, through `plan_authoring_request_v1`.
+
+    The honest result, stated rather than worked around: at this HEAD the
+    shipped vetted-script registry is EMPTY by design, so no script declaration
+    can establish anything through the public entry. `_validate_processes` takes
+    no registry parameter — the production table is the only authority a public
+    caller reaches — and injecting a test registry there would be a production
+    change #180 does not authorise.
+
+    So the claim this test can make, and does, is the one that distinguishes
+    "inert because nothing is vetted" from "the public path never consults the
+    script authority at all": a MISMATCHED digest is refused at the public
+    boundary. That is only reachable if the script branch really ran.
+
+    The emptiness is asserted against `PRODUCTION_VETTED_SCRIPTS` itself, not
+    hand-modelled. The day a script is vetted this test fails loudly and is
+    rewritten to assert the stronger verdict change — which is the behaviour a
+    recorded limitation should have.
+    """
+    import copy as _copy
+
+    from boomi_mcp.authoring.vetted_scripts import PRODUCTION_VETTED_SCRIPTS
+
+    doc_source, _request, process_unit, supporting_components = _public_support()
+
+    # The limitation, pinned to its authority.
+    assert len(PRODUCTION_VETTED_SCRIPTS) == 0, (
+        "a script is now vetted; this test must be rewritten to assert the "
+        "verdict change a registry-backed declaration makes reachable")
+
+    document = _copy.deepcopy(doc_source)
+    document["body"]["steps"].insert(1, {"kind": "data_process", "steps": [
+        {"operation": "custom_scripting", "language": "groovy2", "script": _SCRIPT}]})
+    document["body"]["steps"].insert(2, {
+        "kind": "set_dpp", "name": "ECHO",
+        "source_values": [{"value_type": "dpp", "property_name": "OUT"}]})
+    units = (process_unit(doc=document),)
+    components = tuple(supporting_components())
+
+    def declaring(digest):
+        return ProcessIREffectDeclarationsV1(script_effects=(
+            ProcessIRScriptEffectDeclarationV1(
+                language="groovy2", source_sha256=digest,
+                effect=_effect(writes=[("dpp", "OUT")], replay_safe=True)),))
+
+    absent = _public_plan(units, components, None)
+    assert absent.validation_report.is_valid is False
+    assert _blocked_on_unmet_read(absent), absent.errors
+
+    # A declaration whose digest DOES name this script: bound, inert, and
+    # therefore no better than saying nothing. Not an error — the caller told
+    # the truth about identity and the server simply has no content authority.
+    matching = _public_plan(
+        units, components, declaring("sha256:" + script_digest(_SCRIPT)))
+    assert matching.validation_report.is_valid is False
+    assert _blocked_on_unmet_read(matching), matching.errors
+    assert _contract_invalid_codes(matching) == [], matching.errors
+
+    # CONTROL: a digest naming no script in the request IS refused publicly.
+    # This is what proves the branch above ran at all.
+    other = "def out = 2\n"
+    assert script_digest(other) != script_digest(_SCRIPT)
+    mismatched = _public_plan(
+        units, components, declaring("sha256:" + script_digest(other)))
+    assert mismatched.validation_report.is_valid is False
+    assert _contract_invalid_codes(mismatched) == [
+        "PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID"], mismatched.errors
+
+    # ...and the mechanism the empty registry is blocking is live: the SAME
+    # declaration against a registry a test owns does establish the write.
+    # Resolver-level by necessity — the public entry has no seam for it.
+    registry = vetted_script_registry_for_tests(VettedScriptContractV1(
+        "groovy2", _SCRIPT, writes=(("dpp", "OUT"),), replay_safe=True,
+        rationale="issue #180 public-boundary control"))
+    resolution = resolve_process_ir_effect_declarations(
+        [("p", _root_with_script())],
+        declaring("sha256:" + script_digest(_SCRIPT)),
+        _symbols(), [], script_registry=registry)
+    assert resolution.ok, resolution.findings
+    assert resolution.inert == (), resolution.inert
+    assert resolution.capabilities_by_root["p"].script_effect(
+        "groovy2", _SCRIPT).writes == (("dpp", "OUT"),)

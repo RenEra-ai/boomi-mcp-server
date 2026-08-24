@@ -42,8 +42,9 @@ MEASURED-IMPORT-COST
 Bare ``import _wave_gate_golden_corpus`` in a fresh child process: 0.02-0.03 s
 wall (three runs; ~0.010 s of it is the import itself per ``-X importtime``).
 All production imports are lazy inside the case factories, so the bare import
-stays flat.  A full ``--render`` of all 60 active cases in one child: 0.43 s
-wall, production builders included.  Measured 2026-08-16 on CPython 3.12; raw
+stays flat.  A full ``--render`` of every case active at the time in one child
+(60 of them): 0.43 s wall, production builders included.  Measured 2026-08-16
+on CPython 3.12 — a MEASUREMENT, so it keeps its count and its date; raw
 outputs in ``docs/architecture/evidence/issue-165/measurements/``.
 
 CONTRACT
@@ -64,8 +65,8 @@ CONTRACT
   CONSEQUENCE (rendering every case leaves module state unchanged). The
   consequence alone was green with the copies removed, which is why the
   antecedent exists. The antecedent's bound, measured rather than assumed: it
-  sees the corpus's own function boundary, so 57 of 60 cases are covered (the
-  three ``recipe:*`` cases call no corpus function), and state reaching
+  sees the corpus's own function boundary, so every case but three is covered
+  (the three ``recipe:*`` cases call no corpus function), and state reaching
   production without crossing that boundary — or becoming module state during a
   render — is out of its reach. That is an accepted limitation, not tracked work:
   no such leak exists today, and every in-tree protective copy is individually pinned.
@@ -1153,6 +1154,194 @@ def _issue154_case(name):
     return render
 
 
+def _issue180_effect_case(case):
+    """#180: an effect-declaration golden, rendered through the PUBLIC chain.
+
+    The three cases here are the only goldens in the corpus whose subject is a
+    DECLARATION. Each root is chosen so that it cannot compile at all without
+    one: a map whose write a later step reads, a Branch leg that reads what an
+    earlier leg's `process_call` established, and a `cache_get` over a cache
+    nothing in the request writes. Remove the declaration and there are no bytes
+    to freeze — which is what makes these goldens about the effect channel
+    rather than about the emitter.
+
+    Rendered `request -> compile_authoring_request_v1 -> materialize` so the
+    frozen bytes pin the whole public path, including the apply-time recompile
+    that #180 found was never given the trusted context at all. The fixture is
+    inlined for the same reason `_canonical_envelope_case` inlines its own: a
+    golden must render with every `test_*` module unimportable.
+    """
+    def render():
+        from boomi_mcp.authoring.workflow import (
+            _connector_metadata_from_components,
+            _normalize_intent,
+            compile_authoring_request_v1,
+        )
+        from boomi_mcp.categories.components.canonical_process_apply import (
+            materialize_canonical_process_xml,
+        )
+        from boomi_mcp.models.authoring_workflow import (
+            AuthoringRequestV1,
+            ProcessIRAuthoringIntentV1,
+            ProcessIREffectDeclarationsV1,
+            ProcessIRExternalWriterDeclarationV1,
+            ProcessIRMapEffectDeclarationV1,
+            ProcessIRStateEffectDeclarationV1,
+            ProcessIRStateReferenceV1,
+            ProcessIRSubprocessEffectDeclarationV1,
+        )
+        from boomi_mcp.models.process_component import (
+            ProcessAuthoringUnitV1,
+            ProcessComponentEnvelopeV1,
+        )
+        from boomi_mcp.models.process_ir import parse_process_ir_v1
+        from boomi_mcp.recipes.materialization import build_symbol_table
+
+        # REST-only by necessity: the database connection in the sibling
+        # fixtures is refused by the builder's own preflight, so a plan built on
+        # it never reaches the canonical apply arm this golden renders through.
+        conn = {
+            "key": "conn", "type": "connector-settings", "name": "M12.16 conn",
+            "action": "create",
+            "config": {"connector_type": "rest", "component_name": "M12.16 conn",
+                       "base_url": "https://orders.example.invalid", "auth": "NONE"},
+        }
+        op = {
+            "key": "op", "type": "connector-action", "name": "M12.16 op",
+            "action": "create", "depends_on": ["conn"],
+            "config": {"connector_type": "rest", "operation_mode": "execute",
+                       "component_name": "M12.16 op", "connection_ref_key": "conn",
+                       "method": "GET", "path": "/v1/things"},
+        }
+
+        def profile(key):
+            return {
+                "key": key, "type": "profile.json", "name": key, "action": "create",
+                "config": {"component_type": "profile.json",
+                           "profile_type": "json.generated", "component_name": key,
+                           "root": {"name": "root", "kind": "object", "children": [
+                               {"name": "a", "kind": "simple",
+                                "data_type": "character"}]}},
+            }
+
+        def unit(key, name, document, depends_on):
+            return ProcessAuthoringUnitV1(
+                envelope=ProcessComponentEnvelopeV1(
+                    component_key=key, name=name, action="create",
+                    depends_on=depends_on),
+                process_ir=parse_process_ir_v1(document))
+
+        def writes(scope, name, replay_safe):
+            return ProcessIRStateEffectDeclarationV1(
+                reads=(),
+                writes=(ProcessIRStateReferenceV1(scope=scope, name=name),),
+                replay_safe=replay_safe)
+
+        source = {"kind": "source", "connection_ref": "$ref:conn",
+                  "operation_ref": "$ref:op"}
+        read_out = {"kind": "set_dpp", "name": "ECHO", "source_values": [
+            {"value_type": "dpp", "property_name": "OUT"}]}
+
+        if case == "map_declared_effect":
+            components = (conn, op, {
+                "key": "map", "type": "transform.map", "name": "M12.16 map",
+                "action": "create", "depends_on": ["sp", "tp"],
+                "config": {"component_name": "M12.16 map", "map_type": "function",
+                           "source_profile_id": "$ref:sp",
+                           "source_profile_type": "profile.json",
+                           "target_profile_id": "$ref:tp",
+                           "target_profile_type": "profile.json",
+                           "function_mappings": [{
+                               "function_type": "dynamic_process_property_set",
+                               "inputs": ["root/a"],
+                               "parameters": {"property_name": "OUT"}}]},
+            }, profile("sp"), profile("tp"))
+            units = (unit("proc", "M12.16 Effect Map", {
+                "version": "1", "body": {"kind": "sequence", "steps": [
+                    source, {"kind": "map_ref", "map_ref": "$ref:map"}, read_out,
+                    {"kind": "return_documents"}]}},
+                ("conn", "map", "op", "sp", "tp")),)
+            declarations = ProcessIREffectDeclarationsV1(map_effects=(
+                ProcessIRMapEffectDeclarationV1(
+                    map_ref="$ref:map", effect=writes("dpp", "OUT", True)),))
+            registry = {"conn": "golden-conn-id", "op": "golden-op-id",
+                        "map": "golden-map-id", "sp": "golden-sp-id",
+                        "tp": "golden-tp-id"}
+        elif case == "subprocess_declared_effect":
+            components = (conn, op)
+            units = (
+                unit("proc", "M12.16 Effect Caller", {
+                    "version": "1", "body": {"kind": "sequence", "steps": [
+                        {"kind": "branch", "label": "b", "legs": [
+                            {"steps": [], "terminal": {
+                                "kind": "process_call",
+                                "process_ref": "$ref:child"}},
+                            {"steps": [read_out],
+                             "terminal": {"kind": "stop"}}]}]}},
+                    ("child",)),
+                unit("child", "M12.16 Effect Child", {
+                    "version": "1", "body": {"kind": "sequence", "steps": [
+                        source,
+                        {"kind": "set_dpp", "name": "OUT", "source_values": [
+                            {"value_type": "static", "value": "v"}]},
+                        {"kind": "return_documents"}]}},
+                    ("conn", "op")),
+            )
+            # The child carries a connector, so its derived summary is
+            # replay-UNSAFE; a declaration claiming otherwise is refused.
+            declarations = ProcessIREffectDeclarationsV1(subprocess_effects=(
+                ProcessIRSubprocessEffectDeclarationV1(
+                    process_ref="$ref:child",
+                    effect=writes("dpp", "OUT", False)),))
+            registry = {"conn": "golden-conn-id", "op": "golden-op-id",
+                        "child": "golden-child-id"}
+        elif case == "external_writer_declared_effect":
+            components = (conn, op, {
+                "key": "cache", "type": "documentcache", "name": "M12.16 cache",
+                "action": "create",
+                "config": {"component_name": "M12.16 cache", "cache_index": [
+                    {"name": "k", "keys": [
+                        {"profile_ref": "$ref:op", "element_path": "id"}]}]},
+            })
+            units = (unit("proc", "M12.16 Effect Writer", {
+                "version": "1", "body": {"kind": "sequence", "steps": [
+                    source,
+                    {"kind": "cache_get", "cache_ref": "$ref:cache",
+                     "external_writer": True},
+                    {"kind": "return_documents"}]}},
+                ("cache", "conn", "op")),)
+            declarations = ProcessIREffectDeclarationsV1(external_writers=(
+                ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:cache"),))
+            registry = {"conn": "golden-conn-id", "op": "golden-op-id",
+                        "cache": "golden-cache-id"}
+        else:  # pragma: no cover - the registry is closed
+            raise UnknownCase(case)
+
+        request = AuthoringRequestV1(
+            intent=ProcessIRAuthoringIntentV1(
+                integration_name="M12.16 Effect Integration",
+                units=units, components=components,
+                # `fail` is load-bearing: under `reuse` the plan may substitute
+                # an existing component, so derivation declines to speak for the
+                # authored config and every map declaration goes inert.
+                conflict_policy="fail"),
+            effect_declarations=declarations)
+        _result, internals = compile_authoring_request_v1(
+            request, profile="golden", account_id="golden")
+        spec = _normalize_intent(request).integration_spec
+        symbols = build_symbol_table(
+            list(spec.components),
+            process_keys=[u.envelope.component_key for u in spec.processes],
+            connector_metadata=_connector_metadata_from_components(spec.components),
+        )
+        return materialize_canonical_process_xml(
+            plan=internals.materialization_plans["proc"],
+            id_registry=registry,
+            symbols=symbols,
+        )
+    return render
+
+
 def _error_case(anchor):
     def render():
         from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
@@ -1177,7 +1366,7 @@ def _error_case(anchor):
 #: Dispatch below is TOTAL — an unknown arm raises rather than falling through
 #: to a default. An `if arm == "fanout": … else: …` shape was the first cut and
 #: it made only the "fanout" spelling load-bearing: mutating `"sync_preset"` to
-#: any other string left all 60 goldens byte-identical, so a third arm typed in
+#: any other string left every golden byte-identical, so a third arm typed in
 #: here would have rendered silently through the sync-preset recipe.
 RECIPE_GOLDEN_ARMS = {
     "compose_stream": "fanout",
@@ -1531,6 +1720,10 @@ def _build_registry():
         "issue154:source_target_return_documents": ("process-xml-v1", _issue154_case("source_target_return_documents")),
         "issue154:catch_cache_put_exception": ("process-xml-v1", _issue154_case("catch_cache_put_exception")),
         "issue154:connector_linear_interleave": ("process-xml-v1", _issue154_case("connector_linear_interleave")),
+        # H3 — #180 the effect-declaration channel, through the PUBLIC chain
+        "issue180:map_declared_effect": ("process-component-v1", _issue180_effect_case("map_declared_effect")),
+        "issue180:subprocess_declared_effect": ("process-component-v1", _issue180_effect_case("subprocess_declared_effect")),
+        "issue180:external_writer_declared_effect": ("process-component-v1", _issue180_effect_case("external_writer_declared_effect")),
         # I — typed recipe arms
         "recipe:compose_stream": ("process-xml-v1", _recipe_case("compose_stream")),
         "recipe:compose_all_cache": ("process-xml-v1", _recipe_case("compose_all_cache")),

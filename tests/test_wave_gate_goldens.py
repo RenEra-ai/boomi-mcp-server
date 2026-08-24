@@ -206,7 +206,7 @@ def test_rendering_every_case_mutates_no_corpus_module_state():
     """The CONSEQUENCE half of the corpus CONTRACT: one case cannot perturb
     another through module-level state.
 
-    Snapshot every module-level container, render all 60 active cases, require
+    Snapshot every module-level container, render every active case, require
     the snapshot to survive. Compared against the CURRENT attribute rather than
     the object captured at snapshot time, so a renderer that REBINDS a module
     table to a different-valued one is drift too — every later case would see
@@ -408,8 +408,8 @@ def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
     passes it straight to a production builder would go unreported here, as
     would state that only BECOMES module state during the render (a memoising
     helper's cache). The consequence test still covers the case where such state
-    is actually mutated. Coverage today: 57 of the 60 active cases contribute at
-    least one container-carrying corpus call; the three that do not are the
+    is actually mutated. Coverage: every active case except three contributes
+    at least one container-carrying corpus call; the three that do not are the
     ``recipe:*`` cases, whose factories call no corpus function at all and parse
     their inputs fresh from committed JSON. Closing the residue needs
     interception at the production boundary — a different mechanism, and an

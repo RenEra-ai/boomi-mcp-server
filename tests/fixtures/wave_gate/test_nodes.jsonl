@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10501, "minimum_collected": 10501, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10532, "minimum_collected": 10532, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind":"test","id":"pytest-000001","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml","state":"active"}
 {"kind":"test","id":"pytest-000002","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync","state":"active"}
 {"kind":"test","id":"pytest-000003","node_id":"tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves","state":"active"}
@@ -10540,3 +10540,34 @@
 {"kind": "test", "id": "pytest-010539", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000065]", "state": "active"}
 {"kind": "test", "id": "pytest-010540", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000066]", "state": "active"}
 {"kind": "test", "id": "pytest-010541", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000067]", "state": "active"}
+{"kind": "test", "id": "pytest-010542", "node_id": "tests/test_issue_180_compile_entry_context.py::test_the_entry_set_is_derived_and_covers_the_known_entries", "state": "active"}
+{"kind": "test", "id": "pytest-010543", "node_id": "tests/test_issue_180_compile_entry_context.py::test_every_compile_entry_call_site_is_context_aware_or_declared_strict", "state": "active"}
+{"kind": "test", "id": "pytest-010544", "node_id": "tests/test_issue_180_compile_entry_context.py::test_no_strict_exemption_outlives_the_call_it_exempts", "state": "active"}
+{"kind": "test", "id": "pytest-010545", "node_id": "tests/test_issue_180_compile_entry_context.py::test_the_apply_recompile_is_covered_by_this_sweep", "state": "active"}
+{"kind": "test", "id": "pytest-010546", "node_id": "tests/test_issue_180_compile_entry_context.py::test_the_check_reports_a_strict_call_it_has_not_been_told_about", "state": "active"}
+{"kind": "test", "id": "pytest-010547", "node_id": "tests/test_issue_180_compile_entry_context.py::test_every_strict_exemption_states_a_reason[key0-the LEGACY dialect adapter. A legacy document has no effect declarations to resolve \\u2014 the channel is part of the typed authoring surface \\u2014 so strict is the correct question here, not an omission.]", "state": "active"}
+{"kind": "test", "id": "pytest-010548", "node_id": "tests/test_issue_180_effect_goldens.py::test_golden_bytes_are_exact[map_declared_effect]", "state": "active"}
+{"kind": "test", "id": "pytest-010549", "node_id": "tests/test_issue_180_effect_goldens.py::test_golden_bytes_are_exact[subprocess_declared_effect]", "state": "active"}
+{"kind": "test", "id": "pytest-010550", "node_id": "tests/test_issue_180_effect_goldens.py::test_golden_bytes_are_exact[external_writer_declared_effect]", "state": "active"}
+{"kind": "test", "id": "pytest-010551", "node_id": "tests/test_issue_180_effect_goldens.py::test_emitted_graph_verifies[map_declared_effect]", "state": "active"}
+{"kind": "test", "id": "pytest-010552", "node_id": "tests/test_issue_180_effect_goldens.py::test_emitted_graph_verifies[subprocess_declared_effect]", "state": "active"}
+{"kind": "test", "id": "pytest-010553", "node_id": "tests/test_issue_180_effect_goldens.py::test_emitted_graph_verifies[external_writer_declared_effect]", "state": "active"}
+{"kind": "test", "id": "pytest-010554", "node_id": "tests/test_issue_180_effect_goldens.py::test_emission_is_deterministic[map_declared_effect]", "state": "active"}
+{"kind": "test", "id": "pytest-010555", "node_id": "tests/test_issue_180_effect_goldens.py::test_emission_is_deterministic[subprocess_declared_effect]", "state": "active"}
+{"kind": "test", "id": "pytest-010556", "node_id": "tests/test_issue_180_effect_goldens.py::test_emission_is_deterministic[external_writer_declared_effect]", "state": "active"}
+{"kind": "test", "id": "pytest-010557", "node_id": "tests/test_issue_180_effect_goldens.py::test_every_case_is_registered_in_the_golden_manifest[map_declared_effect]", "state": "active"}
+{"kind": "test", "id": "pytest-010558", "node_id": "tests/test_issue_180_effect_goldens.py::test_every_case_is_registered_in_the_golden_manifest[subprocess_declared_effect]", "state": "active"}
+{"kind": "test", "id": "pytest-010559", "node_id": "tests/test_issue_180_effect_goldens.py::test_every_case_is_registered_in_the_golden_manifest[external_writer_declared_effect]", "state": "active"}
+{"kind": "test", "id": "pytest-010560", "node_id": "tests/test_issue_180_effect_goldens.py::test_the_apply_recompile_needs_the_context_the_plan_carries", "state": "active"}
+{"kind": "test", "id": "pytest-010561", "node_id": "tests/test_issue_180_effect_goldens.py::test_the_recorded_context_is_covered_by_the_plan_fingerprint", "state": "active"}
+{"kind": "test", "id": "pytest-010562", "node_id": "tests/test_process_ir_compiler_invariants.py::test_a_nested_call_may_not_claim_the_entry_role", "state": "active"}
+{"kind": "test", "id": "pytest-010563", "node_id": "tests/test_process_ir_compiler_invariants.py::test_a_nested_claimant_beside_a_real_root_entry_is_also_rejected", "state": "active"}
+{"kind": "test", "id": "pytest-010564", "node_id": "tests/test_process_ir_effect_declarations.py::test_a_map_declaration_changes_the_public_plan_verdict", "state": "active"}
+{"kind": "test", "id": "pytest-010565", "node_id": "tests/test_process_ir_effect_declarations.py::test_a_map_declaration_is_inert_when_the_plan_may_substitute_the_component", "state": "active"}
+{"kind": "test", "id": "pytest-010566", "node_id": "tests/test_process_ir_effect_declarations.py::test_a_subprocess_declaration_changes_the_public_plan_verdict_across_a_branch", "state": "active"}
+{"kind": "test", "id": "pytest-010567", "node_id": "tests/test_process_ir_effect_declarations.py::test_a_script_declaration_reaches_the_public_boundary_and_is_inert_here", "state": "active"}
+{"kind": "test", "id": "pytest-010568", "node_id": "tests/test_process_ir_error_handling.py::test_a_model_constructed_catch_terminal_is_refused_by_the_compiler", "state": "active"}
+{"kind": "test", "id": "pytest-010569", "node_id": "tests/test_process_ir_rich_control_bodies.py::test_a_synthetic_additional_body_context_is_reported_as_uncovered", "state": "active"}
+{"kind": "test", "id": "pytest-010570", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000068]", "state": "active"}
+{"kind": "test", "id": "pytest-010571", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000069]", "state": "active"}
+{"kind": "test", "id": "pytest-010572", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000070]", "state": "active"}

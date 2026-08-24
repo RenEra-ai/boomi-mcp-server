@@ -2210,3 +2210,133 @@ def test_a_control_only_root_has_no_entry_call_at_all():
     roles = _call_roles(cfg)
     assert roles and all(role != "entry" for role in roles.values()), roles
     check_cfg_invariants(cfg)
+
+
+def _control_only_root_cfg():
+    """The `[decision[call | -]]` root: every connector call is NESTED.
+
+    Byte-identical to the document `test_a_control_only_root_has_no_entry_call_at_all`
+    lowers, so the witnesses below mutate exactly the CFG that test proves is
+    honest — rather than a lookalike whose roles might differ for some other
+    reason.
+    """
+    from boomi_mcp.compiler.process_ir.lowering import lower_process_ir_to_cfg
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    doc = {
+        "version": "1",
+        "body": {"kind": "sequence", "steps": [{
+            "kind": "decision", "label": "d", "comparison": "equals",
+            "left": {"value_type": "static", "static_value": "a"},
+            "right": {"value_type": "static", "static_value": "b"},
+            "true_arm": {
+                "steps": [{"kind": "connector_call", "operation_ref": "$ref:GETOP"}],
+                "terminal": {"kind": "stop"},
+            },
+            "false_arm": {"steps": [], "terminal": {"kind": "stop"}},
+        }]},
+    }
+    return lower_process_ir_to_cfg(parse_process_ir_v1(doc))
+
+
+def _nested_call_ids(cfg):
+    """Connector-call node ids whose source path is NOT a root-sequence step.
+
+    Derived from the same `/body/steps/N` shape the invariant itself matches on,
+    so the witness cannot drift from the rule it witnesses.
+    """
+    import re
+
+    root_step = re.compile(r"/body/steps/\d+")
+    return [
+        node.node_id
+        for node in cfg.nodes
+        if node.semantic.semantic_kind == "connector_call"
+        and not root_step.fullmatch(node.source_path or "")
+    ]
+
+
+def test_a_nested_call_may_not_claim_the_entry_role():
+    """#180 witness (iii) — the corrupted NESTED entry-role mutant.
+
+    `test_a_corrupted_entry_role_is_rejected` covers wrong / absent / duplicate
+    entry roles, all on the ROOT sequence. The nested case has its own branch and
+    its own message in `check_cfg_invariants` — "only a root-sequence connector
+    call may carry the entry call role" — and that string appeared nowhere in the
+    tests: the branch shipped untested.
+
+    `test_a_control_only_root_has_no_entry_call_at_all` is the positive half (the
+    honest lowering assigns no entry role and the invariant passes). This is the
+    negative half: corrupt a nested call into claiming the role and require the
+    invariant to refuse it.
+    """
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.invariants import check_cfg_invariants
+
+    cfg = _control_only_root_cfg()
+    nested = _nested_call_ids(cfg)
+    assert nested, "no nested connector call — the mutant would have nothing to corrupt"
+    # CONTROL: the honest CFG has no entry role anywhere, and passes.
+    assert all(role != "entry" for role in _call_roles(cfg).values()), _call_roles(cfg)
+    check_cfg_invariants(cfg)
+
+    mutant = _with_roles(cfg, {nested[0]: "entry"})
+    # PROVE THE MUTATION TOOK EFFECT before asserting anything about the guard —
+    # a no-op mutant that "passes" would report the invariant as sound.
+    assert _call_roles(mutant) != _call_roles(cfg), _call_roles(mutant)
+    assert _call_roles(mutant)[nested[0]] == "entry"
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        check_cfg_invariants(mutant)
+    diagnostic = excinfo.value.diagnostics[0]
+    assert diagnostic.code == PROCESS_IR_COMPILE_INTERNAL
+    assert "only a root-sequence connector call" in diagnostic.message
+    # The finding points at the NESTED call, not at the root spine.
+    assert diagnostic.path == "/body/steps/0/true_arm/steps/0", diagnostic.path
+
+
+def test_a_nested_claimant_beside_a_real_root_entry_is_also_rejected():
+    """The second nested shape: a root call legitimately carries the role and a
+    nested call claims it too.
+
+    This lands on a DIFFERENT branch from the test above — the count check,
+    "exactly one connector call may carry the entry call role" — and no existing
+    parametrisation reaches it with a nested claimant. Asserting the PATH is what
+    separates the two: the message alone is already produced by the root-only
+    duplicate case.
+    """
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.invariants import check_cfg_invariants
+    from boomi_mcp.compiler.process_ir.lowering import lower_process_ir_to_cfg
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    doc = {
+        "version": "1",
+        "body": {"kind": "sequence", "steps": [
+            {"kind": "connector_call", "operation_ref": "$ref:GETOP"},
+            {"kind": "decision", "label": "d", "comparison": "equals",
+             "left": {"value_type": "static", "static_value": "a"},
+             "right": {"value_type": "static", "static_value": "b"},
+             "true_arm": {
+                 "steps": [{"kind": "connector_call", "operation_ref": "$ref:GETOP2"}],
+                 "terminal": {"kind": "stop"}},
+             "false_arm": {"steps": [], "terminal": {"kind": "stop"}}},
+        ]},
+    }
+    cfg = lower_process_ir_to_cfg(parse_process_ir_v1(doc))
+    # CONTROL: the honest lowering puts the role on the ROOT call only, and passes.
+    roles = _call_roles(cfg)
+    assert sorted(roles.values()).count("entry") == 1, roles
+    check_cfg_invariants(cfg)
+
+    nested = _nested_call_ids(cfg)
+    assert nested, "no nested connector call — the mutant would have nothing to corrupt"
+    mutant = _with_roles(cfg, {nested[0]: "entry"})
+    assert _call_roles(mutant) != roles, _call_roles(mutant)
+    assert sorted(_call_roles(mutant).values()).count("entry") == 2
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        check_cfg_invariants(mutant)
+    diagnostic = excinfo.value.diagnostics[0]
+    assert diagnostic.code == PROCESS_IR_COMPILE_INTERNAL
+    assert "exactly one connector call" in diagnostic.message

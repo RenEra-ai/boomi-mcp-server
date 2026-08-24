@@ -275,7 +275,8 @@ removal `transitional_oracle` (#159) and `deletion_only` (#160) are designed to 
 now proves the survival property directly: every active golden renders to its committed
 bytes in a child where every `test_*` module is unimportable. Import cost is measured,
 not estimated: the bare corpus import is 0.02–0.03 s (production imports are lazy inside
-the factories); a full render of all 60 active cases in one child is 0.43 s (raw outputs
+the factories); a full render of every case active at the time (60 of them) in one child is
+0.43 s (a measurement, so it keeps its count; raw outputs
 in `docs/architecture/evidence/issue-165/measurements/`).
 
 **Worktree hygiene is a cross-check, not the guarantee.** The gate's read-only
@@ -567,7 +568,7 @@ on and which `test_wave_gate_goldens.py` proves with an import-blocked child
 smuggle the dependency back). The corpus carries only what a case needs: a
 fixture used by no case belongs in the test module, or it becomes dead corpus
 code the day its owner is deleted. Case-to-case independence is likewise
-asserted in BOTH directions, not described: one test renders all 60 cases and
+asserted in BOTH directions, not described: one test renders every case and
 requires every module-level container in the corpus to be unchanged afterwards
 (the consequence), and a second records the arguments every corpus FUNCTION
 receives during that render and refuses any object that is — by identity — a
@@ -594,7 +595,7 @@ own fixture-equality test. There is therefore exactly one definition of every
 case input in the tree. Invocation arguments — component name, folder, which
 variant — are pinned byte-for-byte by the committed golden. The bare corpus
 import costs 0.02–0.03 s (all production imports are lazy inside the
-factories); rendering all 60 cases in one child costs 0.43 s (measured —
+factories); rendering every case active at the time (60 of them) in one child cost 0.43 s (measured —
 `docs/architecture/evidence/issue-165/measurements/`).
 
 Renderers must **emit**, never read: no renderer touches `expected_file`, and

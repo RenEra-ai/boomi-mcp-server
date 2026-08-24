@@ -56,6 +56,9 @@ from pydantic import (BaseModel, ConfigDict, Field, ValidationError,
                       model_validator)
 from pydantic_core import PydanticCustomError
 
+from ..compiler.process_ir.semantic_validation.contracts import (
+    ProcessIRValidationCapabilitiesV1,
+)
 from ..models.authoring_workflow import DigestString
 from ..models.process_component import ProcessComponentEnvelopeV1
 from ..models.process_ir import ComponentRefV1
@@ -302,6 +305,21 @@ class ProcessComponentMaterializationPlanV1(_PlanModel):
     compiler_revision: DigestString
     emitter_revision: DigestString
     materializer_revision: DigestString
+    #: The server-built trusted context this plan was COMPILED under (#180).
+    #:
+    #: Apply re-compiles `process_ir` against real ids, and that recompile is a
+    #: compile entry like any other: without the same context it asks a
+    #: different question than the compile that certified this plan. A root
+    #: whose declaration turned a blocking finding into a warning planned
+    #: clean, compiled clean, and then failed at materialization — the effect
+    #: channel simply did not reach apply.
+    #:
+    #: The context travels ON the plan rather than being handed to each
+    #: recompile site, so a future site cannot be strict by forgetting to pass
+    #: it. It is COVERED by the fingerprint: a plan compiled under a declaration
+    #: is not the same plan as one compiled without, and the digest must say so.
+    #: Nothing a caller sends reaches it — the resolver derives it server-side.
+    effect_capabilities: Optional[ProcessIRValidationCapabilitiesV1] = None
     resolved_folder_id: Optional[str] = None
     plan_fingerprint: str
 
@@ -625,12 +643,18 @@ def build_materialization_plan(
         raise _not_relocatable_error(offenders)
 
     relocatable_symbols = placeholder_backed_symbols(symbols)
-    # #154 (QA-154-r1-01). This compile is the THIRD one the authoring path runs
-    # for a root, and it was the only one still strict. That made the effect
-    # channel worse than useless: a declaration whose entire purpose is to turn a
+    # #154 (QA-154-r1-01). This compile was strict, which made the effect channel
+    # worse than useless: a declaration whose entire purpose is to turn a
     # blocking finding into a warning validated clean at plan and then failed
     # here, so a caller who used the feature as documented was strictly worse off
     # than one who omitted it.
+    #
+    # #180 (SELF-180-02): this comment used to COUNT the compiles — "the third,
+    # and the only one still strict" — and the count was wrong. There was a
+    # fourth, the apply-time recompile in `materialize_canonical_process_xml`,
+    # and it stayed strict for exactly as long as the enumeration was believed.
+    # The authority is now `tests/test_issue_180_compile_entry_context.py`, which
+    # derives the sites from the source instead of remembering them.
     #
     # The context is INTERNAL and server-built — the same object
     # `_validate_processes` resolved. Nothing a caller sends reaches it, so this
@@ -661,6 +685,10 @@ def build_materialization_plan(
         compiler_revision=compiler_revision,
         emitter_revision=emitter_revision,
         materializer_revision=materializer_revision,
+        # #180: RECORDED, so the apply-time recompile asks the same question
+        # this compile just answered. Storing it here rather than at each
+        # recompile site is what makes the property structural.
+        effect_capabilities=capabilities,
         resolved_folder_id=resolved_folder_id,
     )
 
