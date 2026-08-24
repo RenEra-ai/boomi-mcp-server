@@ -2271,17 +2271,11 @@ def test_every_inert_reason_is_reachable_and_served():
         assert summary.effect is None and summary.inert_reason == token, (
             token, summary.inert_reason)
 
-    # The defensive path: a child whose definition will not lower. Driven by
-    # making preparation raise, which is the only thing that reaches it — a
-    # branch that cannot be reached at all has no business being served.
-    import boomi_mcp.compiler.process_ir.semantic_validation.context as ctx
-    original = ctx.prepare_validation_context
-    ctx.prepare_validation_context = lambda *a, **k: (_ for _ in ()).throw(RuntimeError)
-    try:
-        summary = E.derive_subprocess_effect(_linear_child(5))
-    finally:
-        ctx.prepare_validation_context = original
-    assert summary.inert_reason == E.INERT_UNLOWERABLE, summary
+    # There is deliberately NO reason for a lowering failure. That is a
+    # COMPILER defect, which `semantic_validation.context` requires to escape
+    # rather than become a report entry, so it must not be served as an
+    # authored inert case. The branch that once caught it needed a
+    # monkeypatched raise to witness at all — which was the tell.
 
     # `bare_reference` is raised by the RESOLVER, where a declaration names a
     # child with no authored root, so its witness is a resolution.
@@ -2303,7 +2297,7 @@ def test_every_inert_reason_is_reachable_and_served():
 
     # Every reason is served, and every served reason is one the code emits.
     served = dict(E.subprocess_inert_reasons())
-    emitted = set(witnesses) | {E.INERT_UNLOWERABLE, E.INERT_BARE_REFERENCE}
+    emitted = set(witnesses) | {E.INERT_BARE_REFERENCE}
     assert set(served) == emitted, sorted(set(served) ^ emitted)
 
     from boomi_mcp.authoring.process_ir_projection import _SEMANTIC_RULES

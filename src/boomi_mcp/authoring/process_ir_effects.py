@@ -562,7 +562,6 @@ INSPECTABLE_CHILD_KINDS = frozenset({
 #: indistinguishable ``None`` to its caller, and a branch added or removed
 #: still left the served rule stale with every test green.
 INERT_BARE_REFERENCE = "bare_reference"
-INERT_UNLOWERABLE = "unlowerable"
 INERT_UNINSPECTABLE_STEP = "uninspectable_step"
 INERT_WALK_TRUNCATED = "walk_truncated"
 
@@ -595,8 +594,6 @@ def subprocess_inert_reasons() -> Tuple[Tuple[str, str], ...]:
     return (
         (INERT_BARE_REFERENCE,
          "it is a bare reference with no authored definition to inspect"),
-        (INERT_UNLOWERABLE,
-         "its authored definition cannot be lowered for inspection"),
         (INERT_UNINSPECTABLE_STEP,
          "it contains a step whose own state effect is knowable only from a "
          "contract — a map, a scripted data process, or a further call"),
@@ -647,10 +644,15 @@ def derive_subprocess_effect(child_ir: Any) -> ChildSummaryV1:
     from ..compiler.process_ir.semantic_validation.lineage import walk_lineage
     from ..compiler.process_ir.contracts import SymbolTableV1
 
-    try:
-        prepared = prepare_validation_context(child_ir, SymbolTableV1(symbols=()))
-    except Exception:
-        return ChildSummaryV1(None, INERT_UNLOWERABLE)
+    # NOT wrapped in try/except. A failure to snapshot or lower is a COMPILER
+    # defect, and `semantic_validation.context` states as policy that such a
+    # failure never becomes a report entry — it escapes to the compiler's
+    # guarded boundary. Catching it here and serving "this child is merely
+    # inert" contradicted that policy and promised something untrue besides:
+    # the public workflow validates the same child immediately afterwards
+    # without swallowing, so the request ends in an internal compile failure,
+    # not the inert behaviour the contract described.
+    prepared = prepare_validation_context(child_ir, SymbolTableV1(symbols=()))
 
     replay_safe = True
     for node in prepared.cfg.nodes:
