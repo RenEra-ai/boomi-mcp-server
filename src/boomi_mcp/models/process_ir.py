@@ -2247,7 +2247,8 @@ class SequenceNodeV1(_ProcessIRBase):
             linear = body[:-1]
         elif body[-1] == "target":
             raise _cardinality_error(
-                "the target endpoint must be immediately followed by a stop terminal"
+                "the target endpoint must be immediately followed by a stop or "
+                "return_documents terminal"
             )
         else:
             raise _cardinality_error(

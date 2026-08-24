@@ -412,6 +412,11 @@ class LineageWalkV1(NamedTuple):
     truncated: bool
 
 
+#: Terminals that end the process NORMALLY. `exception` is deliberately absent:
+#: it terminates abnormally, so state it had written promises a caller nothing.
+_NORMAL_EXIT_KINDS = frozenset({"stop", "return_documents"})
+
+
 def _walk_lineage(
     prepared: PreparedProcessValidationV1,
     capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
@@ -432,6 +437,13 @@ def _walk_lineage(
     # A list rather than a flag so the nested `_visit` can set it without a
     # `nonlocal` declaration, matching how `findings` and `unmet` are handled.
     truncated: List[bool] = []
+    # State at every NORMAL exit — a path ending on `stop` or `return_documents`.
+    # A guarantee is what holds however the process finishes, so it is the meet
+    # over these, not the state the traversal happens to carry back. An
+    # `exception` terminal is excluded: it ends the process abnormally, so what
+    # it had written is no promise to anyone. A terminal-less path end (a Branch
+    # leg, a cache-staging leg) is not a process exit at all.
+    normal_exits: List[_State] = []
     leg_writes = _leg_write_index(prepared, capabilities)
 
     def _report(code: str, node, severity="error", evidence=()) -> None:
@@ -464,8 +476,21 @@ def _walk_lineage(
         diagnostic depend on the reader's provenance, which is the mirror image
         of the writer-side asymmetry fixed alongside it.
         """
-        unmet.append(key)
         scope, _name = key
+        # A read a typed contract vouches for an OUTSIDE writer of is not the
+        # caller's obligation — an external system establishes it — so it is
+        # reported as a named warning below and must not enter the required set
+        # either. Recording it unconditionally demanded that a caller write a
+        # cache it does not own.
+        externally_satisfied = (
+            scope == CACHE
+            and getattr(semantic, "external_writer", False)
+            and capabilities.writes_cache_externally(
+                getattr(semantic, "cache_ref", "")
+            )
+        )
+        if not externally_satisfied:
+            unmet.append(key)
         if scope != DDP and _written_in_a_later_leg(leg_writes, leg, key):
             # The write exists, in a LATER leg of the same Branch. Legs run
             # in order, so it has not happened yet. Saying "read before
@@ -612,6 +637,8 @@ def _walk_lineage(
         # --- successors -----------------------------------------------------
         edges = prepared.successors(node_id)
         if not edges:
+            if semantic.semantic_kind in _NORMAL_EXIT_KINDS:
+                normal_exits.append(state)
             return state
 
         if semantic.semantic_kind == "branch":
@@ -651,12 +678,25 @@ def _walk_lineage(
             result = _visit(edge.target_node_id, state, depth + 1, leg)
         return result
 
-    exit_state = _visit(prepared.cfg.entry_node_id, _State(), 0)
+    entry_state = _State()
+    for key in capabilities.established_at_entry:
+        entry_state = entry_state.with_write((key[0], key[1]))
+    _visit(prepared.cfg.entry_node_id, entry_state, 0)
+    # The MEET over normal exits. Using the traversal's returned state instead
+    # answered a different question: `try_catch` hands back its SCOPE-ENTRY
+    # state, so a key written on the try path AND on the catch path — a genuine
+    # guarantee under any outcome — was reported as established by neither.
+    # With no normal exit at all there is nothing to promise.
+    established = None
+    for at_exit in normal_exits:
+        established = at_exit if established is None else established.merged_with(at_exit)
     return LineageWalkV1(
         findings=tuple(findings),
         unestablished_reads=tuple(sorted(set(unmet))),
-        established_at_exit=tuple(
-            sorted(exit_state.document | exit_state.execution)
+        established_at_exit=(
+            ()
+            if established is None
+            else tuple(sorted(established.document | established.execution))
         ),
         truncated=bool(truncated),
     )

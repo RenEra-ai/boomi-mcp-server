@@ -6153,11 +6153,19 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
                 "run is one row".format(thread_id)
             )
             seen_threads.add(thread_id)
-            expected_prefix = (
-                "cdx-gate-review." if row["collector"] == "gate-attest"
-                else "cdx-review."
+            # A `gate-attest` collection is EITHER gate the dispatcher owns, and
+            # the recipe mints a different directory for each: `cdx-gate-architect.*`
+            # for the §3 plan gate, `cdx-gate-review.*` for the §6 implementation
+            # review. Accepting only the review spelling rejected a genuine,
+            # correctly attested architect round for its directory name.
+            # Still strict in the direction that matters: a commit review may not
+            # borrow a gate name, and a gate may not borrow the commit-review one.
+            expected_prefixes = (
+                ("cdx-gate-review.", "cdx-gate-architect.")
+                if row["collector"] == "gate-attest"
+                else ("cdx-review.",)
             )
-            assert os.path.basename(source_norm).startswith(expected_prefix), (
+            assert os.path.basename(source_norm).startswith(expected_prefixes), (
                 where + ": source run name does not match its claimed collector"
             )
             assert os.path.basename(source_norm) == run_dir.name, (

@@ -1193,8 +1193,9 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             category="process_ir",
             retryable=False,
             summary=(
-                "A map or script has no typed effect contract, so its reads and "
-                "writes are unknown. Unknown effects never establish state. "
+                "A map, script or called subprocess has no typed effect "
+                "contract, so its reads and writes are unknown. Unknown effects "
+                "never establish state. "
                 "Supply a contract whose content a server-side authority backs — "
                 "inspection of the resolved component, or a vetted script "
                 "registry entry — or write the state explicitly; a declaration "

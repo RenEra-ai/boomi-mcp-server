@@ -1739,7 +1739,16 @@ def _compile_processes(
     from ..compiler.process_ir.pipeline import compile_process_ir_v1
 
     symbols = build_symbol_table(
-        components, connector_metadata=connector_metadata, resolver=resolver
+        components,
+        # #153/#154: the composed roots are participants too. Omitting them does
+        # not fail loudly — reference resolution simply reports the root as
+        # UNRESOLVED — so a recipe-composed `process_call` resolved to nothing
+        # and its truthful subprocess declaration was rejected on identity
+        # before any derivation ran. Every other `build_symbol_table` call site
+        # already passes these; this one was the outlier.
+        process_keys=[key for key, _root in composed.process_roots],
+        connector_metadata=connector_metadata,
+        resolver=resolver,
     )
     # #154: resolve once, before any process compiles. A declaration that fails
     # identity or contradicts the server's derivation stops the run rather than

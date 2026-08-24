@@ -1295,10 +1295,31 @@ _EFFECT_DECLARATION_REMEDIATIONS = {
 }
 
 
+def _literal_profile_indexes(boomi_client: Any, normalized: Any):
+    """Field indexes for literal existing-profile UUIDs, or None.
+
+    #179. Reuses the integration builder's own resolver — the same one the plan
+    path uses — rather than modelling profile-index resolution a second time.
+    Returns None when there is no client or nothing to resolve, which is exactly
+    the pre-#179 behaviour, so a caller planning without a client is unchanged.
+    """
+    if boomi_client is None:
+        return None
+    try:
+        from ..categories.integration_builder import _resolve_literal_profile_indexes
+
+        return _resolve_literal_profile_indexes(
+            boomi_client, normalized.integration_spec
+        ) or None
+    except Exception:  # noqa: BLE001 - discovery is best effort; absence defers
+        return None
+
+
 def _validate_processes(
     normalized: _NormalizedIntent,
     declarations: Any = None,
     conflict_policy: str = "reuse",
+    literal_indexes: Any = None,
 ) -> Tuple[ValidationReportSummaryV1, Tuple[AuthoringDiagnosticV1, ...], Any, Any]:
     """Run the unified #143 semantic validator over every authored process.
 
@@ -1343,6 +1364,13 @@ def _validate_processes(
             "$ref:" + key: root for key, root in normalized.process_roots
         },
         conflict_policy=conflict_policy,
+        # #179. The plan's own profile indexes. Without them the effect gate
+        # asked the plan authority a question it answered "index unavailable",
+        # and that early refusal MASKED every check ordered after it — plus the
+        # index-CONDITIONAL ones ordered before it, which the authority skips
+        # when the index is None. A map the plan refuses could therefore derive
+        # a trusted effect.
+        literal_indexes=literal_indexes,
     )
     for finding in resolution.findings:
         errors += 1
@@ -1711,7 +1739,10 @@ def plan_authoring_request_v1(
 
     normalized = _normalize_intent(request)
     validation, validation_diagnostics, symbols, effect_capabilities = _validate_processes(
-        normalized, request.effect_declarations, request.intent.conflict_policy
+        normalized,
+        request.effect_declarations,
+        request.intent.conflict_policy,
+        literal_indexes=_literal_profile_indexes(boomi_client, normalized),
     )
     topology_diagnostics = _validate_topology(request, normalized, profile)
     decisions, decision_diagnostics = _evaluate_decisions(request, normalized)

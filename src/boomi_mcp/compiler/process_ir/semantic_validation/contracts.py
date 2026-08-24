@@ -417,6 +417,23 @@ class ProcessIRValidationCapabilitiesV1(_ValidationModel):
     script_effects: Tuple[ScriptEffectContractV1, ...] = ()
     subprocess_summaries: Tuple[SubprocessSummaryV1, ...] = ()
     external_writers: Tuple[ExternalWriterContractV1, ...] = ()
+    #: State a CALLER guarantees before this process runs — its preconditions.
+    #:
+    #: Empty by default, which is the strict case: a top-level process starts
+    #: from nothing. It is non-empty only for a root that some other root in the
+    #: same request CALLS, and only for the keys the server itself derived as
+    #: that child's required reads.
+    #:
+    #: Without it the required-reads channel was unusable end to end. Every root
+    #: is validated independently from empty state, so a child that genuinely
+    #: depends on caller-supplied state reported read-before-write against
+    #: ITSELF — and the whole point of deriving "required reads" is that those
+    #: reads are the caller's obligation, checked at the call site, where the
+    #: parent's own walk already enforces a trusted contract's declared reads.
+    #: Seeding them is therefore not a relaxation: the same keys are demanded of
+    #: the parent, and nothing supplies them but the server's own derivation
+    #: from this very child.
+    established_at_entry: Tuple[Tuple[str, str], ...] = ()
 
     def writes_cache_externally(self, cache_ref: str) -> bool:
         """Whether a typed contract vouches for an outside writer of this cache."""

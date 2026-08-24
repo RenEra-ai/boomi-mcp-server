@@ -173,6 +173,34 @@ def _symbol(symbols: Any, ref: str):
     return None
 
 
+def _aliases(symbols: Any, ref: str) -> FrozenSet[str]:
+    """Every ref naming the SAME component as ``ref``, itself included.
+
+    `SymbolTableV1` states that "two refs sharing one ``component_id`` are
+    allowed (intentional reuse)", so a declaration and the occurrence it
+    describes may legitimately be spelled differently. Binding on raw string
+    equality rejected exactly that case as `unbound`: the declaration named a
+    real component, the root used a real alias for it, and the resolver said
+    the declaration was about nothing.
+
+    Falls back to the bare ref when the symbol is unknown or carries no
+    component id, so an unresolvable ref still reaches its own
+    `unresolved-or-wrong-type` finding rather than silently binding wider.
+    """
+    symbol = _symbol(symbols, ref)
+    component_id = getattr(symbol, "component_id", None) if symbol else None
+    if not component_id:
+        return frozenset({ref})
+    return frozenset(
+        {ref}
+        | {
+            other.ref
+            for other in (getattr(symbols, "symbols", ()) or ())
+            if getattr(other, "component_id", None) == component_id
+        }
+    )
+
+
 def _may_be_substituted(spec: Any, conflict_policy: str) -> bool:
     """Whether the plan may bind an EXISTING artifact instead of this config.
 
@@ -272,6 +300,7 @@ def _plan_would_build_this(
     name: Optional[str] = None,
     depends_on: Any = (),
     components_by_key: Optional[Mapping[str, Any]] = None,
+    literal_indexes: Optional[Mapping[str, Any]] = None,
 ) -> bool:
     """Whether the PLAN would build this map.
 
@@ -304,6 +333,7 @@ def _plan_would_build_this(
             _effective_map_config(config, name),
             depends_on or [],
             dict(components_by_key or {}),
+            literal_indexes=dict(literal_indexes or {}) or None,
         )
     except Exception:  # noqa: BLE001 - an unanswerable question is a refusal
         return False
@@ -320,9 +350,11 @@ def _plan_would_build_this(
     # answer, not an absence. Waving it through let a map naming a connection as
     # its profile derive a trusted, pure, replay-safe effect.
     #
-    # The LITERAL existing-profile UUID branch reports no key, because there is
-    # nothing here to resolve it against: the plan supplies caller-provided or
-    # live-discovered indexes and this resolver has none. That one is deferred.
+    # The LITERAL existing-profile UUID branch reports no key when nothing can
+    # resolve it. #179 threaded the plan's own `literal_indexes` in, so for a map
+    # whose indexes ARE available this branch is no longer reached at all — the
+    # validator answers instead of deferring, and every check it had been
+    # short-circuiting now runs.
     #
     # Deferring rather than failing closed is deliberate, and it is not a
     # fail-open preference — it is accuracy. Inertness is NOT uniformly the safe
@@ -331,8 +363,35 @@ def _plan_would_build_this(
     # opaque map raises only a non-blocking warning, and a declared READ
     # disappears entirely from the strict classifiers, which iterate the trusted
     # set. Two of the three axes LOSE an error when a map goes inert.
+    # Scoped by whether an index was SUPPLIED for this map's own endpoints —
+    # not by the detail set, and not by the absence of a resolved key.
+    #
+    # #179 proposed "defer only the branch whose details are exactly {'side'}".
+    # Measured against the authority, that criterion does not hold: the
+    # no-index branch and the literal index-TYPE-MISMATCH branch BOTH report
+    # exactly {"side"}, so it would keep deferring a fully decidable refusal
+    # that is ordered before the config validation, the `$ref` branch and the
+    # document-cache-joins check — minting the same masking defect inside the
+    # fix for it, which is the outcome that issue explicitly warned against.
+    #
+    # What does separate them is data this call already holds: an endpoint the
+    # caller supplied an index for is ANSWERED (and a refusal about it is a real
+    # refusal); an endpoint nothing can resolve is the question this caller
+    # cannot ask. Only the latter defers.
     details = getattr(error, "details", None) or {}
-    return "ref_key" not in details
+    if set(details) != {"side"}:
+        return False
+    supplied = set(literal_indexes or {})
+    for side in ("source_profile_id", "target_profile_id"):
+        value = config.get(side)
+        if (
+            isinstance(value, str)
+            and value.strip()
+            and not value.startswith("$ref:")
+            and value.strip() not in supplied
+        ):
+            return True
+    return False
 
 
 def _join_cache_reads(config: Mapping[str, Any]):
@@ -346,18 +405,24 @@ def _join_cache_reads(config: Mapping[str, Any]):
     SECOND, incomplete model of a fact that already had an owner — the defect
     class this issue exists to remove, reproduced inside the fix for it.
 
-    Two joins are deliberately not recorded as reads, for the same reason a
-    DEFAULTED property get records none: a contract read carries no
-    "externally satisfied" flag, and lineage treats every contracted read as
-    strict, so recording either would turn a valid flow into a false
-    missing-writer error.
+    Two joins cannot be MODELLED at all, and both make the whole map opaque
+    rather than being skipped:
 
     * ``external_writer`` on the join — the cache is populated outside this
-      process. The lineage downgrade reads the flag off the NODE, and a map
-      semantic has no such attribute, so the warning branch is unreachable for a
-      map and the read would always be fatal.
-    * a LITERAL cache id — an existing account cache that nothing in this process
-      writes, and no ``cache_ref`` in the IR spells it that way.
+      process. A contract read carries no "externally satisfied" flag, and
+      lineage treats every contracted read as strict; the downgrade reads the
+      flag off the NODE and a map semantic has no such attribute, so recording
+      the read would be fatal on a flow that runs fine.
+    * a LITERAL cache id — an existing account cache that nothing in this
+      process writes, and no ``cache_ref`` in the IR spells it that way.
+
+    Skipping them was the wrong resolution. It bought a true-but-INCOMPLETE
+    read set and then published it as an EXACT effect, which is the one thing
+    this whole derivation forbids everywhere else: a map that joins a cache was
+    reported as reading nothing and a caller declaration matching that omission
+    was trusted. The effect model cannot say "reads it, externally satisfied",
+    so the honest answer is that this map's effect is not derivable — the same
+    answer an unannotated function already gets.
     """
     joins = config.get("document_cache_joins")
     if joins is None:
@@ -373,7 +438,8 @@ def _join_cache_reads(config: Mapping[str, Any]):
             return None
         cache_id = cache_id.strip()
         if join.get("external_writer") or not cache_id.startswith("$ref:"):
-            continue
+            # Unrepresentable, not irrelevant: the map goes opaque.
+            return None
         reads.append(("cache", cache_id))
     return tuple(reads)
 
@@ -385,6 +451,7 @@ def derive_map_effect(
     name: Optional[str] = None,
     depends_on: Any = (),
     components_by_key: Optional[Mapping[str, Any]] = None,
+    literal_indexes: Optional[Mapping[str, Any]] = None,
 ) -> Optional[Tuple[tuple, tuple, bool]]:
     """``(reads, writes, replay_safe)`` for a map, or None when it is OPAQUE.
 
@@ -417,7 +484,11 @@ def derive_map_effect(
     # which subsumes the route dispatch, all four route-class tables, and the
     # nine other checks the plan runs.
     if not _plan_would_build_this(
-        config, name=name, depends_on=depends_on, components_by_key=components_by_key
+        config,
+        name=name,
+        depends_on=depends_on,
+        components_by_key=components_by_key,
+        literal_indexes=literal_indexes,
     ):
         return None
     function_types, direct_types = _map_type_vocabularies()
@@ -518,10 +589,16 @@ def derive_map_effect(
 #:
 #: Membership is decided by ONE question, answered from the lineage authority:
 #: does the walk account for this kind's STATE? ``map``, ``data_process`` and
-#: ``process_call`` are the three kinds whose state effects are knowable only
-#: through a typed contract — exactly the three `_opaque_reason` names — so only
-#: they are excluded. Everything else is control flow, tracked state, a
-#: terminal, or a document-shaping step.
+#: ``process_call`` are the three kinds whose state effects MAY be knowable only
+#: through a typed contract — exactly the three `_opaque_reason` names.
+#:
+#: For ``data_process`` that is a per-NODE question, not a per-kind one, which
+#: is why it is not in this set: `_opaque_reason` flags a data process only when
+#: it carries a `custom_scripting` step, and a pure `split_documents` /
+#: `combine_documents` child is fully accounted for. Excluding the whole kind
+#: refused those children while the served rule said only a SCRIPTED data
+#: process is uninspectable — the code and its own contract disagreeing.
+#: `_node_is_inspectable` asks the authority per node.
 #:
 #: A connector is INSPECTABLE here even though it does external I/O, because
 #: I/O is not state: `_reads_of`/`_writes_of` attribute no key to it, so it
@@ -536,6 +613,7 @@ def derive_map_effect(
 #: nineteenth kind fails that test rather than silently landing on one side.
 INSPECTABLE_CHILD_KINDS = frozenset({
     "branch",
+    "data_process",
     "connector",
     "connector_call",
     "cache_get",
@@ -578,6 +656,29 @@ class ChildSummaryV1(NamedTuple):
     inert_reason: Optional[str]
 
 
+from ..compiler.process_ir.semantic_validation.contracts import (
+    DEFAULT_VALIDATION_CAPABILITIES,
+)
+
+
+def _node_is_inspectable(semantic) -> bool:
+    """Whether the lineage authority accounts for THIS node's state.
+
+    Asks `_opaque_reason` rather than re-deciding, because for `data_process`
+    the answer depends on the node's own steps: a scripted one is opaque
+    without a vetted contract, a pure `split_documents` / `combine_documents`
+    one is not. Kind-level exclusion got that wrong in the refusing direction
+    and contradicted the served rule.
+
+    Called with the STRICT default capabilities, which corroborate nothing — so
+    "inspectable" here means "needs no contract to be understood", never "a
+    caller said so".
+    """
+    from ..compiler.process_ir.semantic_validation.lineage import _opaque_reason
+
+    return _opaque_reason(semantic, DEFAULT_VALIDATION_CAPABILITIES) is None
+
+
 def subprocess_inert_reasons() -> Tuple[Tuple[str, str], ...]:
     """Every reason a child summary is INERT, as (token, served wording).
 
@@ -603,7 +704,9 @@ def subprocess_inert_reasons() -> Tuple[Tuple[str, str], ...]:
     )
 
 
-def derive_subprocess_effect(child_ir: Any) -> ChildSummaryV1:
+def derive_subprocess_effect(
+    child_ir: Any, *, capabilities: Any = None
+) -> ChildSummaryV1:
     """``(required_reads, must_writes, replay_safe)`` derived from a child's own IR.
 
     Every one of the three values is read off the compiler's OWN lineage walk
@@ -658,7 +761,7 @@ def derive_subprocess_effect(child_ir: Any) -> ChildSummaryV1:
     for node in prepared.cfg.nodes:
         semantic = node.semantic
         kind = semantic.semantic_kind
-        if kind not in INSPECTABLE_CHILD_KINDS:
+        if kind not in INSPECTABLE_CHILD_KINDS or not _node_is_inspectable(semantic):
             return ChildSummaryV1(None, INERT_UNINSPECTABLE_STEP)
         # A cache write is not replayable: re-running the child would write the
         # cache twice. A persisted process property survives the execution, so
@@ -678,7 +781,10 @@ def derive_subprocess_effect(child_ir: Any) -> ChildSummaryV1:
         elif kind == "set_property" and getattr(semantic, "persist", False):
             replay_safe = False
 
-    walk = walk_lineage(prepared)
+    walk = (
+        walk_lineage(prepared, capabilities) if capabilities is not None
+        else walk_lineage(prepared)
+    )
     if walk.truncated:
         # The walk stopped at its depth bound, so both sets are partial and a
         # late read or write is simply missing. Publishing them as an exact
@@ -722,6 +828,7 @@ def resolve_process_ir_effect_declarations(
     child_roots: Optional[Mapping[str, Any]] = None,
     script_registry: Optional[Mapping] = None,
     conflict_policy: str = "reuse",
+    literal_indexes: Optional[Mapping[str, Any]] = None,
 ) -> EffectResolutionV1:
     """Verify identity, derive content server-side, and build per-root context.
 
@@ -750,7 +857,15 @@ def resolve_process_ir_effect_declarations(
     map_rows: Dict[str, Any] = {}
     for index, item in enumerate(declarations.map_effects):
         pointer = "/effect_declarations/map_effects/{0}".format(index)
-        bound = [key for key, found in occurrences.items() if item.map_ref in found["map_ref"]]
+        # One (root, spelling) pair per occurrence: a root may name the same map
+        # through more than one alias, and lineage looks the contract up by the
+        # NODE's ref, so each spelling needs its own row.
+        alias = _aliases(symbols, item.map_ref)
+        bound = [
+            (key, spelling)
+            for key, found in occurrences.items()
+            for spelling in sorted(alias & set(found["map_ref"]))
+        ]
         if not bound:
             findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "unbound"))
             continue
@@ -768,6 +883,7 @@ def resolve_process_ir_effect_declarations(
                 components_by_key={
                     getattr(item, "key", None): item for item in (components or ())
                 },
+                literal_indexes=literal_indexes,
             )
             if spec
             else None
@@ -778,9 +894,11 @@ def resolve_process_ir_effect_declarations(
         if _declared(item.effect) != derived:
             findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "content-mismatch"))
             continue
-        map_rows[item.map_ref] = (bound, MapEffectContractV1(
-            map_ref=item.map_ref, effect=_as_internal_effect(*derived)
-        ))
+        map_rows[item.map_ref] = (bound, [
+            (key, MapEffectContractV1(
+                map_ref=spelling, effect=_as_internal_effect(*derived)))
+            for key, spelling in bound
+        ])
 
     # --- scripts ----------------------------------------------------------
     script_rows: List[Tuple[List[str], Any]] = []
@@ -813,38 +931,6 @@ def resolve_process_ir_effect_declarations(
             effect=_as_internal_effect(*derived),
         )))
 
-    # --- subprocesses -----------------------------------------------------
-    subprocess_rows: List[Tuple[List[str], Any]] = []
-    for index, item in enumerate(declarations.subprocess_effects):
-        pointer = "/effect_declarations/subprocess_effects/{0}".format(index)
-        bound = [key for key, found in occurrences.items() if item.process_ref in found["process_ref"]]
-        if not bound:
-            findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "unbound"))
-            continue
-        symbol = _symbol(symbols, item.process_ref)
-        if symbol is None or getattr(symbol, "component_type", None) != "process":
-            findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "unresolved-or-wrong-type"))
-            continue
-        child = child_roots.get(item.process_ref)
-        if child is None:
-            key = item.process_ref[len("$ref:"):] if item.process_ref.startswith("$ref:") else item.process_ref
-            child = child_roots.get(key)
-        summary = (
-            derive_subprocess_effect(child) if child is not None
-            else ChildSummaryV1(None, INERT_BARE_REFERENCE)
-        )
-        derived = summary.effect
-        if derived is None:
-            # Inert for the named reason; the served rule enumerates them.
-            inert.append(pointer)
-            continue
-        if _declared(item.effect) != derived:
-            findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "content-mismatch"))
-            continue
-        subprocess_rows.append((bound, SubprocessSummaryV1(
-            process_ref=item.process_ref, effect=_as_internal_effect(*derived)
-        )))
-
     # --- external writers -------------------------------------------------
     writer_rows: List[Tuple[List[str], Any]] = []
     for index, item in enumerate(declarations.external_writers):
@@ -859,9 +945,11 @@ def resolve_process_ir_effect_declarations(
         # nothing. Turning "this proves nothing" into "your payload is invalid"
         # is the same overreach as trusting an unverified claim, pointed the
         # other way.
+        alias = _aliases(symbols, item.cache_ref)
         bound = [
-            key for key, found in occurrences.items()
-            if item.cache_ref in found["cache_get_ref"]
+            (key, spelling)
+            for key, found in occurrences.items()
+            for spelling in sorted(alias & set(found["cache_get_ref"]))
         ]
         if not bound:
             # No cache_get in any root names this cache, so there is nothing for
@@ -877,13 +965,81 @@ def resolve_process_ir_effect_declarations(
         # contract nothing can act on would only trigger the compiler's own
         # unbound-contract diagnostic.
         flagged = [
-            key for key in bound
-            if item.cache_ref in occurrences[key]["external_writer_ref"]
+            (key, spelling) for key, spelling in bound
+            if spelling in occurrences[key]["external_writer_ref"]
         ]
         if not flagged:
             inert.append(pointer)
             continue
-        writer_rows.append((flagged, ExternalWriterContractV1(cache_ref=item.cache_ref)))
+        writer_rows.extend(
+            (key, ExternalWriterContractV1(cache_ref=spelling))
+            for key, spelling in flagged
+        )
+
+    # --- subprocesses -----------------------------------------------------
+    #: Preconditions per CHILD root key, accumulated as summaries are derived.
+    entry_state: Dict[str, set] = {}
+    subprocess_rows: List[Tuple[List[str], Any]] = []
+    for index, item in enumerate(declarations.subprocess_effects):
+        pointer = "/effect_declarations/subprocess_effects/{0}".format(index)
+        alias = _aliases(symbols, item.process_ref)
+        bound = [
+            (key, spelling)
+            for key, found in occurrences.items()
+            for spelling in sorted(alias & set(found["process_ref"]))
+        ]
+        if not bound:
+            findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "unbound"))
+            continue
+        symbol = _symbol(symbols, item.process_ref)
+        if symbol is None or getattr(symbol, "component_type", None) != "process":
+            findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "unresolved-or-wrong-type"))
+            continue
+        child = child_roots.get(item.process_ref)
+        if child is None:
+            key = item.process_ref[len("$ref:"):] if item.process_ref.startswith("$ref:") else item.process_ref
+            child = child_roots.get(key)
+        # The child's OWN trusted context. Deriving its summary against the
+        # STRICT default asked a different question than the child's validation
+        # answers: a cache read the child itself declares an external writer for
+        # is nobody's obligation, yet it was reported as required of the caller.
+        # The writer rows are resolved above precisely so they exist here.
+        child_key = (
+            item.process_ref[len("$ref:"):]
+            if item.process_ref.startswith("$ref:") else item.process_ref
+        )
+        child_capabilities = ProcessIRValidationCapabilitiesV1(
+            external_writers=tuple(
+                row for root_key, row in writer_rows if root_key == child_key
+            ),
+        )
+        summary = (
+            derive_subprocess_effect(child, capabilities=child_capabilities)
+            if child is not None
+            else ChildSummaryV1(None, INERT_BARE_REFERENCE)
+        )
+        derived = summary.effect
+        if derived is None:
+            # Inert for the named reason; the served rule enumerates them.
+            inert.append(pointer)
+            continue
+        if _declared(item.effect) != derived:
+            findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "content-mismatch"))
+            continue
+        subprocess_rows.extend(
+            (key, SubprocessSummaryV1(
+                process_ref=spelling, effect=_as_internal_effect(*derived)))
+            for key, spelling in bound
+        )
+        # The child's OWN validation must start from what its caller guarantees.
+        # `derived[0]` is exactly the set the server derived as required of the
+        # caller, and the parent is separately checked for establishing it at
+        # the call site, so seeding it here demands nothing new and removes the
+        # contradiction that made the channel unusable: a child with a genuine
+        # required read reported read-before-write against itself, so no request
+        # carrying a non-empty required-reads summary could ever plan.
+        if derived[0]:
+            entry_state.setdefault(child_key, set()).update(derived[0])
 
     if findings:
         # ALL-OR-NOTHING on error. A partially trusted context is a context whose
@@ -893,11 +1049,19 @@ def resolve_process_ir_effect_declarations(
     for key, _ir in process_roots:
         per_root[key] = ProcessIRValidationCapabilitiesV1(
             map_effects=tuple(
-                row for bound, row in map_rows.values() if key in bound
+                row
+                for _bound, rows in map_rows.values()
+                for root_key, row in rows
+                if root_key == key
             ),
             script_effects=tuple(row for bound, row in script_rows if key in bound),
-            subprocess_summaries=tuple(row for bound, row in subprocess_rows if key in bound),
-            external_writers=tuple(row for bound, row in writer_rows if key in bound),
+            subprocess_summaries=tuple(
+                row for root_key, row in subprocess_rows if root_key == key
+            ),
+            external_writers=tuple(
+                row for root_key, row in writer_rows if root_key == key
+            ),
+            established_at_entry=tuple(sorted(entry_state.get(key, ()))),
         )
     return EffectResolutionV1(per_root, (), inert)
 

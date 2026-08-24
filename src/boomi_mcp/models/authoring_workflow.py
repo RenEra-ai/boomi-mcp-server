@@ -1166,6 +1166,7 @@ __all__ = [
     "AuthoringIntentV1",
     "AuthoringPlanResultV1",
     "AuthoringRequestV1",
+    "ProcessIRScriptLanguageV1",
     "ProcessIRStateReferenceV1",
     "ProcessIRStateEffectDeclarationV1",
     "ProcessIRMapEffectDeclarationV1",

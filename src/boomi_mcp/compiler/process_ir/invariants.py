@@ -449,7 +449,16 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
     ]
     if calls:
         entries = [node for node in calls if node.semantic.role == ENTRY_CALL_ROLE]
-        root_calls = [node for node in calls if _ROOT_STEP_PATH.fullmatch(node.source_path)]
+        # DERIVE "first" from the authored step ORDINAL, never from position in
+        # the node list. `root_calls[0]` read the order the lowering itself
+        # produced, so the check agreed with exactly the correlated defect it
+        # exists to catch: swapping two root calls' source paths while leaving
+        # node order and edges intact left the entry role on the call the
+        # authored payload places SECOND, and the invariant passed.
+        root_calls = sorted(
+            (node for node in calls if _ROOT_STEP_PATH.fullmatch(node.source_path)),
+            key=lambda node: int(node.source_path.rsplit("/", 1)[1]),
+        )
         expected_entry = root_calls[0] if root_calls else None
         if expected_entry is None:
             # Every call is nested in a control body: no call is the flow's

@@ -1565,13 +1565,10 @@ _SEMANTIC_RULE_SOURCES = {
     "semantic_rule.retry.replay_safety": (SOURCE_RETRY, SOURCE_CONNECTORS),
     "semantic_rule.documents.explicit_split_combine": (SOURCE_CAPABILITIES,),
     "semantic_rule.references.opaque": (SOURCE_MODELS,),
-    # #154. The effect rules are facts about the RESOLVER's authorities, not
-    # about the models — the models carry only the declaration shape.
-    "semantic_rule.effect.declaration_boundary": (SOURCE_MODELS,),
-    "semantic_rule.effect.map_inspection": (SOURCE_CAPABILITIES,),
-    "semantic_rule.effect.script_registry": (SOURCE_CAPABILITIES,),
-    "semantic_rule.effect.subprocess_inspection": (SOURCE_STATE,),
-    "semantic_rule.effect.external_writer": (SOURCE_STATE,),
+    # #154. The effect rules are deliberately ABSENT: their source is derived
+    # per family from `_EFFECT_AUTHORITY_SOURCES`, keyed by the authority token
+    # the resolver publishes. Listing them here too would put a generated row
+    # back into a hand-kept map — the drift this family was moved away from.
 }
 
 
@@ -1642,6 +1639,23 @@ _EFFECT_AUTHORITY_PROSE = {
 }
 
 
+#: The served rule each declaration family's authority belongs to.
+#:
+#: The plan asked for ONE generated `semantic_rule.effect.*` family whose facts
+#: derive from `effect_authority_rows()`. Shipping generated `effect_authority.*`
+#: entries ALONGSIDE the hand-written rules created a parallel namespace instead
+#: — two served descriptions of one trust boundary, both to be kept true. The
+#: generation now binds to the rule ids that already existed, so the derived
+#: authority reaches the contract without a second family to maintain.
+_EFFECT_FAMILY_RULES = {
+    "map_effects": "semantic_rule.effect.map_inspection",
+    "script_effects": "semantic_rule.effect.script_registry",
+    "subprocess_effects": "semantic_rule.effect.subprocess_inspection",
+    "external_writers": "semantic_rule.effect.external_writer",
+    "omitted_or_inert": "semantic_rule.effect.declaration_boundary",
+}
+
+
 def _effect_authority_entries() -> List[ProcessIRAuthoringContractEntryV1]:
     """One served rule per declaration family, GENERATED from the resolver's table.
 
@@ -1653,6 +1667,10 @@ def _effect_authority_entries() -> List[ProcessIRAuthoringContractEntryV1]:
     """
     from .process_ir_effects import effect_authority_rows
 
+    by_id = {rule[0]: rule for rule in _SEMANTIC_RULES}
+    missing = set(_EFFECT_FAMILY_RULES.values()) - set(by_id)
+    if missing:
+        raise KeyError("no served rule for effect families: {0}".format(sorted(missing)))
     entries = []
     for family, authority in effect_authority_rows():
         prose = _EFFECT_AUTHORITY_PROSE.get(authority)
@@ -1662,17 +1680,23 @@ def _effect_authority_entries() -> List[ProcessIRAuthoringContractEntryV1]:
                     authority, family
                 )
             )
+        entry_id = _EFFECT_FAMILY_RULES[family]
+        rule = by_id[entry_id]
+        _unused, category, title, summary, node_kinds, related = rule
         entries.append(
             ProcessIRAuthoringContractEntryV1(
-                contract_entry_id="effect_authority.{0}".format(family),
+                contract_entry_id=entry_id,
                 entry_type="semantic_rule",
-                category="state",
-                subject=family,
-                title="Effect authority for {0}".format(family.replace("_", " ")),
-                summary=prose,
-                node_kinds=(),
+                category=category,
+                subject=entry_id.split(".", 1)[1],
+                title=title,
+                # The RULE's own wording, plus the authority statement derived
+                # from the resolver's table. One entry, so a caller cannot read
+                # two descriptions of one trust boundary and find them differing.
+                summary="{0} {1}".format(summary, prose),
+                node_kinds=node_kinds,
                 workflow_stages=("author", "plan", "repair"),
-                related_entry_ids=("semantic_rule.effect.declaration_boundary",),
+                related_entry_ids=related,
                 ordering_facts=("Authority: {0}.".format(authority),),
                 sources=(
                     _source(
@@ -1691,6 +1715,7 @@ def _effect_authority_entries() -> List[ProcessIRAuthoringContractEntryV1]:
 def _semantic_rule_entries(
     sources: ProjectionSourcesV1,
 ) -> List[ProcessIRAuthoringContractEntryV1]:
+    generated = _EFFECT_FAMILY_RULES.values()
     return _effect_authority_entries() + [
         ProcessIRAuthoringContractEntryV1(
             contract_entry_id=entry_id,
@@ -1714,6 +1739,10 @@ def _semantic_rule_entries(
             ),
         )
         for entry_id, category, title, summary, node_kinds, related in _SEMANTIC_RULES
+        # ... except the effect rules, which `_effect_authority_entries` emits
+        # with their derived authority folded in. Emitting them here too would
+        # duplicate the id.
+        if entry_id not in generated
     ]
 
 

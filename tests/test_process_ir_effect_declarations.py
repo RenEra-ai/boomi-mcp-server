@@ -1731,15 +1731,33 @@ def test_a_map_document_cache_join_is_a_cache_READ(map_type):
         plain, depends_on=depends_on, components_by_key=by_key)[0] == ()
 
 
-def test_an_externally_written_join_records_no_read():
-    """Mirrors the existing authority, which marks such a join externally
-    satisfied. A contract read carries no such flag and lineage treats every one
-    as strict, so recording it would turn a valid flow into a false
-    missing-writer error — the same reasoning as a defaulted property get."""
+def test_an_unrepresentable_join_makes_the_whole_map_opaque():
+    """§6 eval-2 F4. Skipping such a join published a PARTIAL effect as EXACT.
+
+    An externally-written join, and a literal (non-`$ref`) cache id, cannot be
+    modelled: a contract read carries no "externally satisfied" flag and lineage
+    treats every contracted read as strict, so recording the read would be fatal
+    on a flow that runs fine. Skipping it instead bought a true-but-incomplete
+    read set and then served it as exact — a map that joins a cache reported
+    reading nothing, and a caller declaration matching that omission was
+    trusted. The plan's rule is the one applied everywhere else in this
+    derivation: no partial effect is treated as complete.
+    """
     depends_on, by_key = _cache_plan_context()
-    config = _valid_map_config("direct", document_cache_joins=[_join(external_writer=True)])
-    assert derive_map_effect(
-        config, depends_on=depends_on, components_by_key=by_key) == ((), (), True)
+    for label, join in (
+        ("external_writer", _join(external_writer=True)),
+        ("literal cache id", dict(_join(), document_cache_id="LITERAL-CACHE-ID")),
+    ):
+        config = _valid_map_config("direct", document_cache_joins=[join])
+        assert derive_map_effect(
+            config, depends_on=depends_on, components_by_key=by_key) is None, label
+
+    # CONTROL: a representable join still derives its read exactly, so "opaque"
+    # is a property of the unmodellable join and not of joins in general.
+    config = _valid_map_config("direct", document_cache_joins=[_join()])
+    reads, _writes, _replay = derive_map_effect(
+        config, depends_on=depends_on, components_by_key=by_key)
+    assert ("cache", "$ref:CACHE") in reads, reads
 
 
 def test_a_subprocess_read_the_child_satisfies_is_not_required_of_the_caller():
@@ -2035,13 +2053,36 @@ def test_the_inspectable_and_opaque_child_kinds_partition_the_vocabulary():
         vocabulary.update(typing.get_args(annotation))
     assert vocabulary, "no semantic kinds discovered — the probe itself is vacuous"
 
-    # The three kinds whose STATE is knowable only through a typed contract,
-    # named by the lineage authority's own `_opaque_reason`.
-    opaque = {"map", "data_process", "process_call"}
+    # The kinds excluded at the KIND level. `data_process` is deliberately not
+    # among them: whether it is inspectable is a per-NODE question the lineage
+    # authority answers (a scripted step is opaque, a pure split/combine is
+    # not), so it is admitted here and gated by `_node_is_inspectable`.
+    # Excluding the whole kind refused pure children while the served rule said
+    # only a SCRIPTED data process is uninspectable.
+    opaque = {"map", "process_call"}
     assert INSPECTABLE_CHILD_KINDS | opaque == vocabulary, (
         "unclassified kinds: {0}".format(
             vocabulary ^ (INSPECTABLE_CHILD_KINDS | opaque)))
     assert not (INSPECTABLE_CHILD_KINDS & opaque)
+
+    # ... and the per-node gate is real in BOTH directions.
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    def data_process_child(steps):
+        return parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+            {"kind": "source", "connection_ref": "$ref:CONN",
+             "operation_ref": "$ref:GETOP"},
+            {"kind": "data_process", "steps": steps},
+            {"kind": "return_documents"}]}})
+
+    pure = data_process_child([{
+        "operation": "split_documents", "profile_type": "json",
+        "profile_ref": "$ref:PROF", "link_element_key": "k",
+        "link_element_name": "n"}])
+    assert derive_subprocess_effect(pure).effect is not None
+    scripted = data_process_child([{
+        "operation": "custom_scripting", "language": "groovy2", "script": "x"}])
+    assert derive_subprocess_effect(scripted).effect is None
 
 
 def test_every_effect_authority_row_names_its_own_authority():
@@ -2305,3 +2346,298 @@ def test_every_inert_reason_is_reachable_and_served():
                 if r[0] == "semantic_rule.effect.subprocess_inspection")
     for wording in served.values():
         assert wording in rule[3], wording
+
+
+# ---------------------------------------------------------------------------
+# §6 eval-2 F3 — identity is the COMPONENT, not the spelling
+# ---------------------------------------------------------------------------
+
+
+def _aliased_symbols():
+    """`$ref:MAP` and `$ref:MAP_ALIAS` name ONE component.
+
+    `SymbolTableV1` states that two refs sharing a `component_id` are allowed
+    (intentional reuse), so this table is legal, not contrived.
+    """
+    base = list(_symbols().symbols)
+    base.append(ComponentSymbolV1(
+        ref="$ref:MAP_ALIAS", component_id="m-1", component_type="transform.map"))
+    return SymbolTableV1(symbols=tuple(base))
+
+
+def test_a_declaration_binds_by_component_identity_not_by_spelling():
+    """§6 eval-2 F3. Raw string equality rejected a legal alias as `unbound`.
+
+    The plan requires identity through the symbol table and canonical component
+    identity, with internal rows rebound to each root's own occurrence
+    spelling. Declaring `$ref:MAP` while the root spells it `$ref:MAP_ALIAS`
+    named a real component and a real occurrence of it, and the resolver said
+    the declaration was about nothing.
+    """
+    root = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
+        {"kind": "map_ref", "map_ref": "$ref:MAP_ALIAS"},
+        {"kind": "return_documents"}]}})
+    # a direct map derives an empty, replay-SAFE effect
+    declarations = ProcessIREffectDeclarationsV1(map_effects=(
+        ProcessIRMapEffectDeclarationV1(
+            map_ref="$ref:MAP", effect=_effect(replay_safe=True)),))
+    components = _components(IntegrationComponentSpec(
+        key="MAP", type="transform.map", depends_on=["SP", "TP"],
+        config=_valid_map_config("direct")))
+
+    resolution = resolve_process_ir_effect_declarations(
+        [("p", root)], declarations, _aliased_symbols(), components,
+        conflict_policy="fail")
+    assert resolution.ok, resolution.findings
+    rows = resolution.capabilities_by_root["p"].map_effects
+    # REBOUND to the root's own spelling: lineage looks the contract up by the
+    # NODE's ref, so a row carrying the declaration's spelling would bind to
+    # nothing at the point of use.
+    assert [r.map_ref for r in rows] == ["$ref:MAP_ALIAS"], rows
+
+
+def test_an_unrelated_ref_still_does_not_bind():
+    """CONTROL for the test above. Widening identity must not bind everything.
+
+    Without this, a resolver that simply stopped checking identity would pass
+    the alias test while accepting declarations about components the root never
+    mentions.
+    """
+    root = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
+        {"kind": "map_ref", "map_ref": "$ref:MAP_ALIAS"},
+        {"kind": "return_documents"}]}})
+    symbols = SymbolTableV1(symbols=tuple(list(_aliased_symbols().symbols) + [
+        ComponentSymbolV1(ref="$ref:OTHER_MAP", component_id="m-2",
+                          component_type="transform.map")]))
+    declarations = ProcessIREffectDeclarationsV1(map_effects=(
+        ProcessIRMapEffectDeclarationV1(
+            map_ref="$ref:OTHER_MAP", effect=_effect(replay_safe=True)),))
+    resolution = resolve_process_ir_effect_declarations(
+        [("p", root)], declarations, symbols,
+        _components(IntegrationComponentSpec(
+            key="OTHER_MAP", type="transform.map", depends_on=["SP", "TP"],
+            config=_valid_map_config("direct"))),
+        conflict_policy="fail")
+    assert not resolution.ok
+    assert [f.reason for f in resolution.findings] == ["unbound"], resolution.findings
+
+
+# ---------------------------------------------------------------------------
+# §6 eval-2 F1(a) — a child's required reads are PRECONDITIONS, not its defects
+# ---------------------------------------------------------------------------
+
+
+def _child_requiring_k():
+    """A child that reads `dpp:K` and does not establish it itself."""
+    return parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [{
+        "kind": "decision", "label": "d", "comparison": "equals",
+        "left": {"value_type": "static", "static_value": "a"},
+        "right": {"value_type": "static", "static_value": "b"},
+        "true_arm": {"steps": [{"kind": "set_dpp", "name": "OUT",
+                     "source_values": [{"value_type": "dpp", "property_name": "K"}]}],
+                     "terminal": {"kind": "stop"}},
+        "false_arm": {"steps": [], "terminal": {"kind": "stop"}}}]}})
+
+
+def test_a_childs_required_read_is_demanded_of_the_caller_not_of_the_child():
+    """§6 eval-2 F1(a). Every root is validated independently from EMPTY state.
+
+    So a child whose whole purpose is to consume caller-supplied state reported
+    read-before-write against ITSELF, and no request carrying a non-empty
+    required-reads summary could plan — the channel contradicted its own
+    meaning. The server derives those reads precisely to say "the caller owes
+    these", and the caller is separately checked for them at the call site, so
+    seeding them as the child's entry state demands nothing new.
+    """
+    from boomi_mcp.compiler.process_ir.semantic_validation.pipeline import (
+        validate_process_ir,
+    )
+    from boomi_mcp.models.authoring_workflow import (
+        ProcessIRSubprocessEffectDeclarationV1,
+    )
+
+    child = _child_requiring_k()
+    assert derive_subprocess_effect(child).effect == ((("dpp", "K"),), (), True)
+
+    parent = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "process_call", "process_ref": "$ref:CHILD"}]}})
+    declarations = ProcessIREffectDeclarationsV1(subprocess_effects=(
+        ProcessIRSubprocessEffectDeclarationV1(
+            process_ref="$ref:CHILD",
+            effect=_effect(reads=[("dpp", "K")], replay_safe=True)),))
+    roots = [("parent", parent), ("CHILD", child)]
+    resolution = resolve_process_ir_effect_declarations(
+        roots, declarations, _symbols(), [],
+        child_roots={"$ref:CHILD": child, "CHILD": child})
+    assert resolution.ok, resolution.findings
+    assert resolution.capabilities_by_root["CHILD"].established_at_entry == (
+        ("dpp", "K"),)
+
+    reports = {
+        key: validate_process_ir(
+            ir, _symbols(), capabilities=resolution.capabilities_by_root.get(key))
+        for key, ir in roots
+    }
+    # The child is CORRECT — it simply has a precondition.
+    assert reports["CHILD"].errors == (), reports["CHILD"].errors
+    # ... and the demand lands on the caller, which is who can satisfy it.
+    assert any("READ_BEFORE_WRITE" in e.code for e in reports["parent"].errors), (
+        reports["parent"].errors)
+
+
+def test_a_root_nobody_calls_still_starts_from_empty_state():
+    """CONTROL. Preconditions are seeded ONLY for a root some caller calls.
+
+    Without this, a resolver that seeded every root — or seeded unconditionally
+    — would pass the test above while silently excusing a genuine
+    read-before-write in a top-level process.
+    """
+    from boomi_mcp.compiler.process_ir.semantic_validation.pipeline import (
+        validate_process_ir,
+    )
+
+    child = _child_requiring_k()
+    resolution = resolve_process_ir_effect_declarations(
+        [("standalone", child)], ProcessIREffectDeclarationsV1(), _symbols(), [])
+    assert resolution.ok, resolution.findings
+    caps = resolution.capabilities_by_root["standalone"]
+    assert caps is None or caps.established_at_entry == ()
+    report = validate_process_ir(child, _symbols(), capabilities=caps)
+    assert any("READ_BEFORE_WRITE" in e.code for e in report.errors), report.errors
+
+
+# ---------------------------------------------------------------------------
+# #179 (absorbed into #154) — thread literal profile indexes into the gate
+# ---------------------------------------------------------------------------
+
+
+def _literal_index_context():
+    """`(depends_on, components_by_key, uuids, indexes)` for literal endpoints.
+
+    The index is built by the PROFILE BUILDER's own `build_field_index`, not
+    hand-modelled here: a fixture index invented by the test would prove the
+    gate agrees with the test rather than with the plan.
+    """
+    from boomi_mcp.categories.components.builders.json_profile_builder import (
+        JSONGeneratedProfileBuilder,
+    )
+
+    depends_on, by_key = _plan_context()
+    source_uuid = "aaaaaaaa-1111-1111-1111-111111111111"
+    target_uuid = "bbbbbbbb-2222-2222-2222-222222222222"
+    indexes = {
+        uuid: {
+            "profile_component_type": "profile.json",
+            "field_index_by_path": JSONGeneratedProfileBuilder.build_field_index(
+                by_key[key].config),
+        }
+        for uuid, key in ((source_uuid, "SP"), (target_uuid, "TP"))
+    }
+    return depends_on, by_key, (source_uuid, target_uuid), indexes
+
+
+def _literal_map(**over):
+    _d, _b, (source_uuid, target_uuid), _i = _literal_index_context()
+    return dict(_valid_map_config("direct"), source_profile_id=source_uuid,
+                target_profile_id=target_uuid, **over)
+
+
+def _derive_literal(config, indexes):
+    depends_on, by_key, _u, _i = _literal_index_context()
+    return derive_map_effect(dict(config), name="MAP", depends_on=depends_on,
+                             components_by_key=by_key, literal_indexes=indexes)
+
+
+def test_a_literal_profile_map_is_answered_when_its_indexes_are_supplied():
+    """#179. With indexes threaded in, the deferral branch is not reached.
+
+    The effect gate asks the plan's own authority whether it would build the
+    map. For a literal existing-profile UUID that authority answered "index
+    unavailable" — an EARLY refusal that short-circuits every check ordered
+    after it, and that also causes the authority to SKIP its index-conditional
+    checks. #154 deferred that answer, so a map the plan refuses could derive a
+    trusted effect.
+    """
+    _d, _b, _u, indexes = _literal_index_context()
+    assert _derive_literal(_literal_map(), indexes) == ((), (), True)
+
+
+def test_an_index_conditional_refusal_is_no_longer_masked():
+    """#179 residue 2, the larger half: checks ordered BEFORE the deferral.
+
+    The authority skips path-existence checks when the index is `None`, which is
+    exactly the literal-UUID case, so ordering was never the whole mechanism. A
+    map naming a `source_path` the profile does not contain is refused by the
+    plan and must not derive.
+    """
+    import json as _json
+
+    _d, _b, _u, indexes = _literal_index_context()
+    mappings = _json.loads(_json.dumps(_valid_map_config("direct")["field_mappings"]))
+    mappings[0] = dict(mappings[0], source_path="no/such/path")
+    bad = _literal_map(field_mappings=mappings)
+
+    assert _derive_literal(bad, indexes) is None
+    # CONTROL: the same map with a path the profile DOES contain still derives,
+    # so opacity is about the bad path and not about indexes making everything
+    # opaque.
+    assert _derive_literal(_literal_map(), indexes) == ((), (), True)
+    # MUTATION WITNESS: dropping the threaded indexes re-opens the mask.
+    assert _derive_literal(bad, None) is not None
+
+
+def test_an_ordered_after_refusal_is_no_longer_masked():
+    """#179 residue 1. `document_cache_joins` is validated AFTER the profile
+    index lookup, so the early refusal hid it entirely.
+
+    Now closed twice over: the joins are unmodellable here regardless of
+    indexes (§6 eval-2 F4 made an unrepresentable join opaque), and with
+    indexes the authority reaches its own joins check as well.
+    """
+    _d, _b, _u, indexes = _literal_index_context()
+    bad = _literal_map(document_cache_joins="not-a-list")
+    assert _derive_literal(bad, indexes) is None
+    assert _derive_literal(bad, None) is None
+    # CONTROL: the same map WITHOUT the malformed joins derives, so opacity is
+    # about the joins and not about the literal endpoints. (A well-formed join
+    # deriving its cache read is covered by
+    # `test_an_unrepresentable_join_makes_the_whole_map_opaque`, which carries
+    # the cache component that case needs in its context.)
+    assert _derive_literal(_literal_map(), indexes) == ((), (), True)
+
+
+def test_only_an_endpoint_nothing_can_resolve_is_still_deferred():
+    """#179's scope criterion, CORRECTED by measurement.
+
+    That issue proposed deferring "only the branch whose details are exactly
+    {'side'}". Measured against the authority, that does not separate the
+    branches: the no-index case and the literal index-TYPE-MISMATCH case BOTH
+    report exactly {"side"}, so the proposed wording would keep deferring a
+    fully decidable refusal ordered before the config validation, the `$ref`
+    branch and the joins check — the very defect that issue warned the fix
+    could mint. What separates them is whether an index was SUPPLIED for this
+    map's own endpoints.
+    """
+    from boomi_mcp.categories.components.builders.transform_map_validation import (
+        validate_transform_map,
+    )
+
+    depends_on, by_key, (source_uuid, target_uuid), indexes = _literal_index_context()
+    config = _literal_map()
+
+    # both branches are indistinguishable by detail set — the premise
+    without = validate_transform_map(dict(config), depends_on + ["MAP"], by_key)
+    mistyped = validate_transform_map(
+        dict(config), depends_on + ["MAP"], by_key,
+        literal_indexes={source_uuid: "not-a-dict", target_uuid: "not-a-dict"})
+    for error in (without, mistyped):
+        assert getattr(error, "error_code", None) == "MAP_PROFILE_INDEX_UNAVAILABLE"
+        assert set(error.details or {}) == {"side"}
+
+    # ... and the gate separates them anyway
+    assert _derive_literal(config, None) is not None, "unresolvable endpoint defers"
+    assert _derive_literal(
+        config, {source_uuid: "not-a-dict", target_uuid: "not-a-dict"}
+    ) is None, "a supplied-but-malformed index is a real refusal"

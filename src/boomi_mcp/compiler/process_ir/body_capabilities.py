@@ -51,6 +51,7 @@ internal. No CFG edge, node id, layout coordinate, shape id, or XML is projected
 from __future__ import annotations
 
 import collections.abc
+import types
 from types import MappingProxyType
 from typing import (
     Annotated,
@@ -155,6 +156,11 @@ BODY_SLOT_AUTHORITIES_V1: Mapping[Tuple[str, str], Tuple[Any, str]] = MappingPro
 )
 
 
+#: `types.UnionType`, the runtime type of a PEP 604 `X | Y` annotation. Absent
+#: before Python 3.10, so it is resolved defensively rather than imported.
+_UNION_TYPE = getattr(types, "UnionType", None)
+
+
 def _kinds_from_annotation(annotation: Any) -> FrozenSet[str]:
     """Every ``kind`` discriminator reachable from a slot's field annotation.
 
@@ -178,7 +184,11 @@ def _kinds_from_annotation(annotation: Any) -> FrozenSet[str]:
     origin = get_origin(annotation)
     if origin is Annotated:
         return _kinds_from_annotation(get_args(annotation)[0])
-    if origin is Union:
+    # `X | Y` (PEP 604) is a `types.UnionType`, which is NOT `typing.Union`, so
+    # a single `is Union` test silently returns nothing for it — a slot annotated
+    # in the modern spelling would derive an EMPTY kind set and read as "nothing
+    # may go here" rather than failing.
+    if origin is Union or origin is _UNION_TYPE:
         out: set = set()
         for member in get_args(annotation):
             out |= _kinds_from_annotation(member)
@@ -189,8 +199,13 @@ def _kinds_from_annotation(annotation: Any) -> FrozenSet[str]:
     field = getattr(annotation, "model_fields", {}).get("kind")
     if field is None:
         return frozenset()
-    literals = get_args(field.annotation)
-    return frozenset(literals[:1])
+    # EVERY literal, not the first. A discriminator declaring more than one
+    # accepted spelling accepts all of them, so keeping `[:1]` silently dropped
+    # legal values from a matrix whose whole purpose is to be exhaustive — and
+    # the test reader repeated the same assumption, so nothing could catch it.
+    # Currently every kind model declares exactly one literal, which is why this
+    # was latent rather than wrong; a derivation must not depend on that.
+    return frozenset(get_args(field.annotation))
 
 
 def derive_body_capabilities_v1(
