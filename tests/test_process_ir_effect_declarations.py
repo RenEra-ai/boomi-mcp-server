@@ -569,7 +569,7 @@ def test_subprocess_must_writes_exclude_a_branch_local_write():
              "terminal": {"kind": "stop"}},
          "false_arm": {"steps": [], "terminal": {"kind": "stop"}}},
     ]}})
-    reads, must_writes, _replay = derive_subprocess_effect(child)
+    reads, must_writes, _replay = derive_subprocess_effect(child).effect
     names = {name for _scope, name in must_writes}
     assert "SPINE" in names
     assert "ARM_ONLY" not in names, must_writes
@@ -1756,7 +1756,7 @@ def test_a_subprocess_read_the_child_satisfies_is_not_required_of_the_caller():
         src, {"kind": "set_dpp", "name": "P", "source_values": values},
         {"kind": "set_ddp", "name": "D", "source_values": read_p},
         {"kind": "return_documents"}]}})
-    reads, writes, _ = derive_subprocess_effect(satisfied)
+    reads, writes, _ = derive_subprocess_effect(satisfied).effect
     assert ("dpp", "P") not in reads, reads
     assert ("dpp", "P") in writes
 
@@ -1764,7 +1764,7 @@ def test_a_subprocess_read_the_child_satisfies_is_not_required_of_the_caller():
     unsatisfied = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
         src, {"kind": "set_ddp", "name": "D", "source_values": read_p},
         {"kind": "return_documents"}]}})
-    assert ("dpp", "P") in derive_subprocess_effect(unsatisfied)[0]
+    assert ("dpp", "P") in derive_subprocess_effect(unsatisfied).effect[0]
 
 
 def test_a_subprocess_that_writes_a_cache_is_not_replay_safe():
@@ -1776,7 +1776,7 @@ def test_a_subprocess_that_writes_a_cache_is_not_replay_safe():
         {"kind": "cache_put", "cache_ref": "$ref:DC"},
         {"kind": "cache_get", "cache_ref": "$ref:DC"},
         {"kind": "return_documents"}]}})
-    _reads, writes, replay_safe = derive_subprocess_effect(child)
+    _reads, writes, replay_safe = derive_subprocess_effect(child).effect
     assert ("cache", "$ref:DC") in writes
     assert replay_safe is False
 
@@ -1796,7 +1796,7 @@ def test_a_child_with_an_uninspectable_step_is_INERT_not_exact_empty():
         {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
         {"kind": "map_ref", "map_ref": "$ref:MAP"},
         {"kind": "return_documents"}]}})
-    assert derive_subprocess_effect(opaque) is None
+    assert derive_subprocess_effect(opaque).effect is None
     # CONTROL: an inspectable child still derives, so INERT is about the opaque
     # step rather than about derivation having stopped working.
     plain = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
@@ -1806,7 +1806,7 @@ def test_a_child_with_an_uninspectable_step_is_INERT_not_exact_empty():
         {"kind": "return_documents"}]}})
     # replay_safe is False: the child contains a connector, whose repetition is
     # observable outside the process.
-    assert derive_subprocess_effect(plain) == ((), (("dpp", "P"),), False)
+    assert derive_subprocess_effect(plain).effect == ((), (("dpp", "P"),), False)
 
 
 def test_declaration_families_hash_the_same_in_any_authored_order():
@@ -1961,7 +1961,7 @@ def test_a_read_inside_a_control_body_is_still_required_of_the_caller():
     child = _control_only_child([
         {"kind": "set_dpp", "name": "OUT",
          "source_values": [{"value_type": "dpp", "property_name": "K"}]}])
-    reads, _writes, _replay = derive_subprocess_effect(child)
+    reads, _writes, _replay = derive_subprocess_effect(child).effect
     assert reads == (("dpp", "K"),), reads
 
 
@@ -1979,7 +1979,7 @@ def test_a_read_the_child_satisfies_itself_is_not_required_of_the_caller():
          "source_values": [{"value_type": "static", "value": "v"}]},
         {"kind": "set_dpp", "name": "OUT",
          "source_values": [{"value_type": "dpp", "property_name": "K"}]}])
-    reads, _writes, _replay = derive_subprocess_effect(child)
+    reads, _writes, _replay = derive_subprocess_effect(child).effect
     assert reads == (), reads
 
 
@@ -1994,7 +1994,7 @@ def test_a_write_on_one_decision_arm_is_never_a_guarantee():
     child = _control_only_child([
         {"kind": "set_dpp", "name": "ARM_ONLY",
          "source_values": [{"value_type": "static", "value": "v"}]}])
-    _reads, writes, _replay = derive_subprocess_effect(child)
+    _reads, writes, _replay = derive_subprocess_effect(child).effect
     assert writes == (), writes
 
 
@@ -2007,12 +2007,12 @@ def test_a_connector_anywhere_makes_the_child_replay_unsafe():
         {"kind": "set_dpp", "name": "P",
          "source_values": [{"value_type": "static", "value": "v"}]},
         {"kind": "return_documents"}]}})
-    assert derive_subprocess_effect(child)[2] is False
+    assert derive_subprocess_effect(child).effect[2] is False
     # CONTROL: the same child without the connector IS replay-safe, so the flag
     # is about the connector rather than pinned False for everything.
     assert derive_subprocess_effect(_control_only_child([
         {"kind": "set_dpp", "name": "P",
-         "source_values": [{"value_type": "static", "value": "v"}]}]))[2] is True
+         "source_values": [{"value_type": "static", "value": "v"}]}])).effect[2] is True
 
 
 def test_the_inspectable_and_opaque_child_kinds_partition_the_vocabulary():
@@ -2112,10 +2112,10 @@ def test_a_persisted_property_makes_a_child_replay_unsafe():
             step["persist"] = True
         return _control_only_child([step])
 
-    assert derive_subprocess_effect(child(True))[2] is False
+    assert derive_subprocess_effect(child(True)).effect[2] is False
     # CONTROL: the same child without the flag stays replay-safe, so the check
     # is about persistence rather than pinned False for every set_property.
-    assert derive_subprocess_effect(child(False))[2] is True
+    assert derive_subprocess_effect(child(False)).effect[2] is True
 
 
 def test_every_effect_authority_family_has_served_wording():
@@ -2171,10 +2171,10 @@ def test_a_child_the_walk_truncates_is_INERT_not_exact():
 
     # CONTROL: below the bound the late read IS required, so the assertion
     # below is about truncation and not about long children failing to parse.
-    reads, _writes, _replay = derive_subprocess_effect(_linear_child(5))
+    reads, _writes, _replay = derive_subprocess_effect(_linear_child(5)).effect
     assert ("dpp", "LATE") in reads, reads
 
-    assert derive_subprocess_effect(_linear_child(400)) is None
+    assert derive_subprocess_effect(_linear_child(400)).effect is None
 
 
 def test_the_lineage_walk_reports_its_own_truncation():
@@ -2242,48 +2242,72 @@ def test_a_registry_authority_is_served_as_a_registry():
 
 
 def test_every_inert_reason_is_reachable_and_served():
-    """Stage-2 r11 P2. The inert-case list went stale TWICE as prose.
+    """Stage-2 r12 P2. The reason table sat BESIDE the branches, not behind them.
 
-    Each time the derivation gained a way to refuse — opacity widening past
-    "bare reference", then the depth bound — the sentence enumerating them was
-    a separate edit someone had to remember, and both times it was missed. The
-    rule now composes that sentence from the resolver's own rows, and this test
-    closes the loop from the other side: every served reason gets a constructed
-    child that actually triggers it, so a row describing a branch that no
-    longer exists fails instead of remaining served fiction.
+    The r11 fix read as derived — a published list the rule composed its
+    sentence from — but nothing emitted the tokens. Every refusal was an
+    indistinguishable `None` to its caller, one refusal path had no row at all,
+    and this test "checked" the others by asserting `is None`, which any
+    refusal satisfies. A branch added or removed still left the served rule
+    stale with every test green.
+
+    Now each branch RETURNS its reason, so the assertions below distinguish
+    them: a witness per reason checking the exact token, and the reverse
+    direction — every token a witness produces must be served.
     """
-    from boomi_mcp.authoring.process_ir_effects import (
-        derive_subprocess_effect,
-        subprocess_inert_reasons,
-    )
-    from boomi_mcp.authoring.process_ir_projection import _SEMANTIC_RULES
+    from boomi_mcp.authoring import process_ir_effects as E
 
     witnesses = {
-        # nothing to inspect: no authored child root reaches the derivation
-        "bare_reference": None,
-        # a map's state effect is knowable only from a contract
-        "uninspectable_step": parse_process_ir_v1(
+        E.INERT_UNINSPECTABLE_STEP: parse_process_ir_v1(
             {"version": "1", "body": {"kind": "sequence", "steps": [
                 {"kind": "source", "connection_ref": "$ref:CONN",
                  "operation_ref": "$ref:GETOP"},
                 {"kind": "map_ref", "map_ref": "$ref:MAP"},
                 {"kind": "return_documents"}]}}),
-        "walk_truncated": _linear_child(400),
+        E.INERT_WALK_TRUNCATED: _linear_child(400),
     }
-    reasons = subprocess_inert_reasons()
-    assert {token for token, _wording in reasons} == set(witnesses), reasons
-
     for token, child in witnesses.items():
-        if child is None:
-            continue
-        assert derive_subprocess_effect(child) is None, token
+        summary = E.derive_subprocess_effect(child)
+        assert summary.effect is None and summary.inert_reason == token, (
+            token, summary.inert_reason)
 
-    # CONTROL: a child matching none of the reasons still derives, so "inert"
-    # is a property of these cases and not of the derivation being broken.
-    assert derive_subprocess_effect(_linear_child(5)) is not None
+    # The defensive path: a child whose definition will not lower. Driven by
+    # making preparation raise, which is the only thing that reaches it — a
+    # branch that cannot be reached at all has no business being served.
+    import boomi_mcp.compiler.process_ir.semantic_validation.context as ctx
+    original = ctx.prepare_validation_context
+    ctx.prepare_validation_context = lambda *a, **k: (_ for _ in ()).throw(RuntimeError)
+    try:
+        summary = E.derive_subprocess_effect(_linear_child(5))
+    finally:
+        ctx.prepare_validation_context = original
+    assert summary.inert_reason == E.INERT_UNLOWERABLE, summary
 
-    # ... and every reason's wording actually reaches the served rule.
+    # `bare_reference` is raised by the RESOLVER, where a declaration names a
+    # child with no authored root, so its witness is a resolution.
+    root = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "process_call", "process_ref": "$ref:CHILD"}]}})
+    from boomi_mcp.models.authoring_workflow import (
+        ProcessIRSubprocessEffectDeclarationV1,
+    )
+    declarations = ProcessIREffectDeclarationsV1(subprocess_effects=(
+        ProcessIRSubprocessEffectDeclarationV1(
+            process_ref="$ref:CHILD", effect=_effect()),))
+    resolution = resolve_process_ir_effect_declarations(
+        [("p", root)], declarations, _symbols(), [])
+    assert resolution.inert == ("/effect_declarations/subprocess_effects/0",)
+
+    # CONTROL: a child matching no reason derives, so "inert" is a property of
+    # these cases and not of the derivation being broken.
+    assert E.derive_subprocess_effect(_linear_child(5)).effect is not None
+
+    # Every reason is served, and every served reason is one the code emits.
+    served = dict(E.subprocess_inert_reasons())
+    emitted = set(witnesses) | {E.INERT_UNLOWERABLE, E.INERT_BARE_REFERENCE}
+    assert set(served) == emitted, sorted(set(served) ^ emitted)
+
+    from boomi_mcp.authoring.process_ir_projection import _SEMANTIC_RULES
     rule = next(r for r in _SEMANTIC_RULES
                 if r[0] == "semantic_rule.effect.subprocess_inspection")
-    for _token, wording in reasons:
+    for wording in served.values():
         assert wording in rule[3], wording

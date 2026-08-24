@@ -51,7 +51,9 @@ authored name, ref, digest, script body or property value.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
+from typing import (
+    Any, Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Sequence, Tuple,
+)
 
 from ..errors import PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID
 
@@ -551,6 +553,32 @@ INSPECTABLE_CHILD_KINDS = frozenset({
 })
 
 
+#: The reason tokens, defined once and USED by the refusal branches below.
+#:
+#: Naming them here and having each branch return its own is what makes the
+#: served list a report of outcomes rather than a description of them. The
+#: previous attempt at this fix put an equivalent table NEXT TO the branches:
+#: it read as derived, but nothing emitted the tokens, every refusal was an
+#: indistinguishable ``None`` to its caller, and a branch added or removed
+#: still left the served rule stale with every test green.
+INERT_BARE_REFERENCE = "bare_reference"
+INERT_UNLOWERABLE = "unlowerable"
+INERT_UNINSPECTABLE_STEP = "uninspectable_step"
+INERT_WALK_TRUNCATED = "walk_truncated"
+
+
+class ChildSummaryV1(NamedTuple):
+    """A child's derived effect, or the named reason there is none.
+
+    Exactly one side is populated. The reason is returned rather than folded
+    into ``None`` so the served contract can be composed from outcomes the
+    code actually produces.
+    """
+
+    effect: Optional[Tuple[tuple, tuple, bool]]
+    inert_reason: Optional[str]
+
+
 def subprocess_inert_reasons() -> Tuple[Tuple[str, str], ...]:
     """Every reason a child summary is INERT, as (token, served wording).
 
@@ -565,18 +593,20 @@ def subprocess_inert_reasons() -> Tuple[Tuple[str, str], ...]:
     lingering as served fiction.
     """
     return (
-        ("bare_reference",
+        (INERT_BARE_REFERENCE,
          "it is a bare reference with no authored definition to inspect"),
-        ("uninspectable_step",
+        (INERT_UNLOWERABLE,
+         "its authored definition cannot be lowered for inspection"),
+        (INERT_UNINSPECTABLE_STEP,
          "it contains a step whose own state effect is knowable only from a "
          "contract — a map, a scripted data process, or a further call"),
-        ("walk_truncated",
+        (INERT_WALK_TRUNCATED,
          "it is deep enough that the walk stops at its bound, leaving both "
          "sets partial rather than exact"),
     )
 
 
-def derive_subprocess_effect(child_ir: Any) -> Optional[Tuple[tuple, tuple, bool]]:
+def derive_subprocess_effect(child_ir: Any) -> ChildSummaryV1:
     """``(required_reads, must_writes, replay_safe)`` derived from a child's own IR.
 
     Every one of the three values is read off the compiler's OWN lineage walk
@@ -619,15 +649,15 @@ def derive_subprocess_effect(child_ir: Any) -> Optional[Tuple[tuple, tuple, bool
 
     try:
         prepared = prepare_validation_context(child_ir, SymbolTableV1(symbols=()))
-    except Exception:  # pragma: no cover - an unlowerable child is simply opaque
-        return None
+    except Exception:
+        return ChildSummaryV1(None, INERT_UNLOWERABLE)
 
     replay_safe = True
     for node in prepared.cfg.nodes:
         semantic = node.semantic
         kind = semantic.semantic_kind
         if kind not in INSPECTABLE_CHILD_KINDS:
-            return None
+            return ChildSummaryV1(None, INERT_UNINSPECTABLE_STEP)
         # A cache write is not replayable: re-running the child would write the
         # cache twice. A persisted process property survives the execution, so
         # replaying does not start from the same state. A connector does I/O
@@ -654,8 +684,9 @@ def derive_subprocess_effect(child_ir: Any) -> Optional[Tuple[tuple, tuple, bool
         # uninspectable child was: a caller declaration matching the truncated
         # sets would be trusted. A root sequence has no length bound, so this
         # is reachable by an ordinary long child, not just a pathological one.
-        return None
-    return (walk.unestablished_reads, walk.established_at_exit, replay_safe)
+        return ChildSummaryV1(None, INERT_WALK_TRUNCATED)
+    return ChildSummaryV1(
+        (walk.unestablished_reads, walk.established_at_exit, replay_safe), None)
 
 
 # ---------------------------------------------------------------------------
@@ -796,9 +827,14 @@ def resolve_process_ir_effect_declarations(
         if child is None:
             key = item.process_ref[len("$ref:"):] if item.process_ref.startswith("$ref:") else item.process_ref
             child = child_roots.get(key)
-        derived = derive_subprocess_effect(child) if child is not None else None
+        summary = (
+            derive_subprocess_effect(child) if child is not None
+            else ChildSummaryV1(None, INERT_BARE_REFERENCE)
+        )
+        derived = summary.effect
         if derived is None:
-            inert.append(pointer)  # reference-only child: nothing to inspect
+            # Inert for the named reason; the served rule enumerates them.
+            inert.append(pointer)
             continue
         if _declared(item.effect) != derived:
             findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "content-mismatch"))
