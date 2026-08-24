@@ -2245,24 +2245,36 @@ def test_the_lineage_walk_reports_its_own_truncation():
     assert not walk_lineage(prepare_validation_context(_linear_child(5), empty)).truncated
 
 
-def test_the_two_served_surfaces_do_not_both_state_the_derivation_rule():
-    """Stage-2 r10 P2. The rule was stated in TWO served texts; one was fixed.
+def test_the_authority_prose_states_provenance_not_the_rule():
+    """The authority sentence says WHERE a fact comes from; the rule says what
+    it is. Keeping both statements of the rule is how they drifted apart.
 
-    `semantic_rule.effect.subprocess_inspection` and the generated
-    `effect_authority.subprocess_effects` entry both described HOW the summary
-    is derived, so correcting one left the other contradicting it — a caller
-    receives both from the same contract. The duplicate statement is removed
-    rather than guarded: the authority entry says where the fact comes from and
-    points at the rule, which is the only surface that states it.
+    QA-154-r10-05: the first version of this guard required the authority prose
+    to POINT AT the rule id. That was right while the authority was a separate
+    served entry and became self-reference the moment the two were folded into
+    one — and the guard then pinned the self-pointer in place. It now checks the
+    property the fold actually needs.
     """
-    from boomi_mcp.authoring.process_ir_projection import _EFFECT_AUTHORITY_PROSE
+    from boomi_mcp.authoring.process_ir_projection import (
+        _EFFECT_AUTHORITY_PROSE,
+        _EFFECT_FAMILY_RULES,
+        _effect_authority_entries,
+    )
 
     prose = _EFFECT_AUTHORITY_PROSE["server-inspection:child-process-ir"]
-    # The specific claims that went stale, both now false of the walk.
+    # the claims that went stale when the derivation changed
     assert "root sequence" not in prose, prose
     assert "a call, a script, a map" not in prose, prose
-    # It must still point somewhere the rule IS stated.
-    assert "semantic_rule.effect.subprocess_inspection" in prose, prose
+    # no entry may cross-reference ITSELF
+    for entry in _effect_authority_entries():
+        assert entry.contract_entry_id not in entry.summary, entry.contract_entry_id
+        assert entry.contract_entry_id not in entry.related_entry_ids, entry.contract_entry_id
+    # every authority sentence names an authority rather than restating a rule
+    for authority, text in _EFFECT_AUTHORITY_PROSE.items():
+        assert "authority" in text.lower() or "INERT" in text or "inert" in text, authority
+    assert set(_EFFECT_FAMILY_RULES.values()) == {
+        e.contract_entry_id for e in _effect_authority_entries()}
+
 
 
 def test_a_registry_authority_is_served_as_a_registry():
@@ -2618,38 +2630,51 @@ def test_an_ordered_after_refusal_is_no_longer_masked():
 
 
 def test_only_an_endpoint_nothing_can_resolve_is_still_deferred():
-    """#179's scope criterion, CORRECTED by measurement.
+    """#179's remaining deferral, scoped by SUPPLIED indexes.
 
-    That issue proposed deferring "only the branch whose details are exactly
-    {'side'}". Measured against the authority, that does not separate the
-    branches: the no-index case and the literal index-TYPE-MISMATCH case BOTH
-    report exactly {"side"}, so the proposed wording would keep deferring a
-    fully decidable refusal ordered before the config validation, the `$ref`
-    branch and the joins check — the very defect that issue warned the fix
-    could mint. What separates them is whether an index was SUPPLIED for this
-    map's own endpoints.
+    Recorded correction. I first claimed #179's own criterion — "defer only when
+    the refusal's details are exactly `{side}`" — did not separate the branches,
+    citing a cell where `literal_indexes={uuid: "not-a-dict"}` also reports
+    `{side}`. That claim was WRONG twice over: the real type-mismatch branch
+    reports THREE keys (`declared_type`, `index_type`, `side`), and the cell I
+    cited is a different branch that `IntegrationSpecV1` refuses to produce, so
+    I was comparing one branch against itself. #179's criterion holds.
+
+    The predicate shipped here is EQUIVALENT to it on every input the production
+    resolver can produce, and is kept for a different reason than the one I
+    first gave: it asks a question this call can answer from its own arguments —
+    was an index supplied for this map's endpoints — instead of depending on the
+    private detail SHAPE of another module's error.
     """
+    from boomi_mcp.categories.components.builders.json_profile_builder import (
+        JSONGeneratedProfileBuilder,
+    )
     from boomi_mcp.categories.components.builders.transform_map_validation import (
         validate_transform_map,
     )
 
-    depends_on, by_key, (source_uuid, target_uuid), indexes = _literal_index_context()
+    depends_on, by_key, (source_uuid, _target_uuid), _indexes = _literal_index_context()
     config = _literal_map()
+    index = JSONGeneratedProfileBuilder.build_field_index(by_key["SP"].config)
 
-    # both branches are indistinguishable by detail set — the premise
-    without = validate_transform_map(dict(config), depends_on + ["MAP"], by_key)
+    # PREMISE, stated correctly: the two branches ARE distinguishable by detail
+    # set, which is why #179's criterion works.
+    unresolvable = validate_transform_map(dict(config), depends_on + ["MAP"], by_key)
+    assert set(unresolvable.details or {}) == {"side"}, unresolvable.details
     mistyped = validate_transform_map(
         dict(config), depends_on + ["MAP"], by_key,
-        literal_indexes={source_uuid: "not-a-dict", target_uuid: "not-a-dict"})
-    for error in (without, mistyped):
-        assert getattr(error, "error_code", None) == "MAP_PROFILE_INDEX_UNAVAILABLE"
-        assert set(error.details or {}) == {"side"}
+        literal_indexes={source_uuid: {
+            "component_id": source_uuid, "profile_component_type": "profile.xml",
+            "field_index_by_path": index}})
+    assert set(mistyped.details or {}) == {"declared_type", "index_type", "side"}, (
+        mistyped.details)
 
-    # ... and the gate separates them anyway
+    # ...and the shipped predicate agrees with it on both.
     assert _derive_literal(config, None) is not None, "unresolvable endpoint defers"
-    assert _derive_literal(
-        config, {source_uuid: "not-a-dict", target_uuid: "not-a-dict"}
-    ) is None, "a supplied-but-malformed index is a real refusal"
+    assert _derive_literal(config, {source_uuid: {
+        "component_id": source_uuid, "profile_component_type": "profile.xml",
+        "field_index_by_path": index}}) is None, "a mistyped index is a real refusal"
+
 
 
 # ---------------------------------------------------------------------------
@@ -2826,3 +2851,91 @@ def test_a_branch_leg_routing_to_a_target_is_not_a_process_exit():
     # 3. EXCLUSIVE and both arms write it, so it IS guaranteed.
     _r, writes, _s = derive_subprocess_effect(root(decision([write_p]))).effect
     assert ("dpp", "P") in writes, writes
+
+
+def test_the_exit_role_partition_is_total():
+    """QA-154-r10-01. The exit rule is stated as an EXCLUSION, and must stay one.
+
+    An inclusion list fails OPEN here: fewer exits in a meet means a larger
+    result, so a role nobody listed silently promises writes a path never makes.
+    That is how a routed `target` and then a staging `cache_put` were each
+    missed. This pins the exclusion against the compiler's own vocabulary, so a
+    seventh role forces a decision instead of defaulting to the unsafe side.
+    """
+    import typing
+
+    from boomi_mcp.compiler.process_ir import contracts as C
+    from boomi_mcp.compiler.process_ir.semantic_validation.lineage import (
+        _ABNORMAL_EXIT_ROLES,
+        _LEG_LOCAL_EXIT_ROLES,
+    )
+
+    roles = set(typing.get_args(C.CfgExitRoleV1))
+    assert roles, "no exit roles discovered — the probe itself is vacuous"
+    assert _ABNORMAL_EXIT_ROLES <= roles, _ABNORMAL_EXIT_ROLES - roles
+    assert _LEG_LOCAL_EXIT_ROLES <= roles, _LEG_LOCAL_EXIT_ROLES - roles
+    assert not (_ABNORMAL_EXIT_ROLES & _LEG_LOCAL_EXIT_ROLES)
+    # the unlisted remainder is what counts as a normal exit everywhere
+    assert roles - _ABNORMAL_EXIT_ROLES - _LEG_LOCAL_EXIT_ROLES == {
+        "stop", "return_documents"}, roles
+
+
+def _catch_terminal_child(catch_terminal_is_cache_put, catch_writes_k):
+    """The catch-body fixture, with its terminal and writes varied."""
+    import copy as _copy
+    import json as _json
+
+    fixture = _json.loads(io_read(
+        "tests/fixtures/process_ir/issue154/catch_cache_put_exception.json"))
+    write_k = {"kind": "set_dpp", "name": "K",
+               "source_values": [{"value_type": "static", "value": "v"}]}
+    doc = _copy.deepcopy(fixture)
+    node = doc["body"]["steps"][0]
+    node["try_body"]["steps"].append(write_k)
+    if catch_terminal_is_cache_put:
+        staged = [s for s in node["catch_body"]["steps"] if s.get("kind") == "cache_put"][0]
+        node["catch_body"]["terminal"] = staged
+        node["catch_body"]["steps"] = [
+            s for s in node["catch_body"]["steps"] if s.get("kind") != "cache_put"]
+    if catch_writes_k:
+        node["catch_body"]["steps"].append(write_k)
+    return parse_process_ir_v1(doc)
+
+
+def test_a_catch_body_staging_a_cache_is_a_normal_exit():
+    """QA-154-r10-01, the half `189923c` left open — and an OVER-claim.
+
+    A catch body may terminate on a `cache_put`, whose exit role is
+    `cache_stage`. Excluding that role on the ground that it is "a staging leg,
+    not a process exit" is true of a Branch leg and FALSE here: the catch path
+    completes. With it excluded only the try path was counted, so a key written
+    ONLY in the try body was reported as definitely written — and a caller's
+    real read-before-write was silenced by the trusted summary.
+    """
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    _reads, writes, _replay = derive_subprocess_effect(
+        _catch_terminal_child(True, False)).effect
+    assert ("dpp", "K") not in writes, writes
+    # CONTROL: when the catch path writes it too, it IS a guarantee.
+    _reads, writes, _replay = derive_subprocess_effect(
+        _catch_terminal_child(True, True)).effect
+    assert ("dpp", "K") in writes, writes
+
+
+def test_an_exception_terminal_is_not_a_normal_exit():
+    """QA-154-r10 refuted my "equivalent mutant" claim, with a witness.
+
+    I had asserted no authorable child distinguishes including `exception` in
+    the exit set. QA constructed one: a try body that writes `K` and reaches
+    `stop`, with a catch body that reaches `exception`. Counting the exception
+    path meets `K` away; excluding it keeps the guarantee the try path makes.
+    The conclusion was right and the justification was not — a claim asserted in
+    prose beside a correct assertion, which is this slice's recurring shape.
+    """
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    # catch terminal stays `exception` (the fixture's own shape)
+    _reads, writes, _replay = derive_subprocess_effect(
+        _catch_terminal_child(False, False)).effect
+    assert ("dpp", "K") in writes, writes

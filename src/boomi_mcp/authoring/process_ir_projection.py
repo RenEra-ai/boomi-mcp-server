@@ -808,10 +808,11 @@ _SEMANTIC_RULES: Tuple[Tuple[str, str, str, str, Tuple[str, ...], Tuple[str, ...
         "state",
         "Map effects are derived by inspecting the map",
         "The reads and writes attributed to a map come from its own function "
-        "mappings, resolved through the map-function registry, together with its "
-        "document-cache joins, each of which reads the cache it names. A map "
-        "containing any function whose effect is unannotated is wholly opaque: "
-        "partial knowledge is never reported as a complete effect.",
+        "mappings, resolved through the map-function registry, together with "
+        "its document-cache joins. A map containing any function whose effect "
+        "is unannotated, or any join whose read cannot be represented, is "
+        "wholly opaque: partial knowledge is never reported as a complete "
+        "effect.",
         ("map_ref",),
         ("node.map_ref", "semantic_rule.effect.declaration_boundary"),
     ),
@@ -1610,21 +1611,26 @@ _EFFECT_AUTHORITY_SOURCES = {
 #: than going unserved.
 _EFFECT_AUTHORITY_PROSE = {
     "server-inspection:map-function-registry":
-        "Derived by inspecting the resolved map: its function mappings through the "
-        "map-function registry, and its document-cache joins as cache reads. A map "
-        "the plan would not build, or one containing any function whose effect is "
-        "unannotated, is opaque — partial knowledge is never reported as complete.",
+        "The authority is inspection of the resolved map — its function mappings "
+        "through the map-function registry, and its document-cache joins — never "
+        "a caller's assertion about it. A join contributes the cache read it "
+        "names only when that read can be REPRESENTED; a join on a cache written "
+        "outside this process, or one naming a literal cache id, cannot be, and "
+        "makes the whole map opaque rather than being dropped from an otherwise "
+        "exact effect. A map the plan would not build, or one containing any "
+        "function whose effect is unannotated, is opaque for the same reason.",
     "server-registry:vetted-scripts":
         "Admitted only when the recomputed (language, digest) matches a server-owned "
         "vetted contract. A script whose digest matches no entry is INERT: the server "
         "knows which script it is and still has no authority for what it does.",
+    # NO cross-reference to the rule id: the generated authority is folded INTO
+    # that rule, so a pointer here aims the reader at the sentence they are
+    # already reading. It survived the fold because the pointer was correct back
+    # when the authority was a separate served entry.
     "server-inspection:child-process-ir":
-        "Derived by inspecting the child's authored definition, on the same "
-        "walk the compiler uses for lineage — so the reads it requires and the "
-        "writes it guarantees are exactly what that walk establishes. A child "
-        "the walk cannot fully account for establishes nothing: see "
-        "semantic_rule.effect.subprocess_inspection for which children those "
-        "are and how the two sets are derived.",
+        "The authority is the compiler's own lineage walk, run over the child: "
+        "the reads it requires and the writes it guarantees are exactly what "
+        "that walk establishes, never a caller's assertion about it.",
     "caller-assertion:no-state-established":
         "The one declaration with no server-side content authority, because an outside "
         "writer is not present in the artifact. It never establishes a cache write; "

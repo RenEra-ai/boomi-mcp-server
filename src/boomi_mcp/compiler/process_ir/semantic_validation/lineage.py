@@ -412,24 +412,29 @@ class LineageWalkV1(NamedTuple):
     truncated: bool
 
 
-#: Exit ROLES that end the process normally, named from the compiler's own
-#: `CfgExitRoleV1` vocabulary rather than guessed from semantic kinds.
+#: Exit roles that NEVER end the process normally. Everything else does.
 #:
-#: Keying on semantic kind was both a second model of a fact the CFG already
-#: carries and WRONG: a `target` ending a Branch leg or a Decision arm is a
-#: normal exit — the emission plan grows it a synthetic Stop — but its semantic
-#: kind is `connector`, so that path was omitted from the meet entirely. The
-#: result was an OVER-CLAIM, the one direction a guarantee must never take: a
-#: Decision whose true arm routes to a target and whose false arm writes
-#: `dpp:P` reported `P` as definitely written.
+#: Stated as the EXCLUSION, not the inclusion, because the two fail in opposite
+#: directions and only one is safe. Fewer exits in a MEET means a LARGER result
+#: — an over-claim — so an inclusion list that forgets a role silently promises
+#: writes a path never makes. That is exactly how a routed `target` and then a
+#: staging `cache_put` were each missed: both complete normally, neither was
+#: listed. An exclusion list fails the other way: a role added to the compiler
+#: and not classified here is treated as a normal exit, which can only shrink
+#: the guarantee.
 #:
-#: The three excluded roles are excluded for distinct reasons. `exception` ends
-#: abnormally, so what it wrote promises nobody anything. `cache_stage` is a
-#: target-less staging leg, not a process exit at all. `process_call` ends the
-#: path here but the CALLED process decides what happens next, so this process
-#: guarantees nothing at that point — and a child containing one is inert
-#: anyway.
-_NORMAL_EXIT_ROLES = frozenset({"stop", "return_documents", "routed_target"})
+#: `exception` ends abnormally, so what it wrote promises nobody anything.
+#: `process_call` ends the path here but the CALLED process decides what
+#: follows, so this process guarantees nothing at that point.
+#: `test_the_exit_role_partition_is_total` pins this against `CfgExitRoleV1`.
+_ABNORMAL_EXIT_ROLES = frozenset({"exception", "process_call"})
+
+#: Roles that end a path WITHOUT ending the process when they sit inside a
+#: Branch leg. Legs run SEQUENTIALLY, so a leg that routes to a target or stages
+#: a cache is followed by the next leg; treating its state as a process exit
+#: meets away everything a later leg guarantees. A `stop` or `return_documents`
+#: in a leg genuinely does end the process and still counts.
+_LEG_LOCAL_EXIT_ROLES = frozenset({"routed_target", "cache_stage"})
 
 
 def _walk_lineage(
@@ -652,16 +657,12 @@ def _walk_lineage(
         # --- successors -----------------------------------------------------
         edges = prepared.successors(node_id)
         if not edges:
-            # A routed target ends its PATH, but only a Decision arm's end is an
-            # alternative exit of the PROCESS. Branch legs run SEQUENTIALLY: a
-            # leg that routes to a target is followed by the next leg, so
-            # recording its state as a process exit meets away everything a
-            # later leg guarantees — `[target]` then `[set dpp:P, stop]` lost
-            # `P`, rejecting a truthful declaration. `leg` is non-None exactly
-            # inside a branch leg (a Decision arm inherits its enclosing leg),
-            # which is the distinction the lattice already tracks.
-            routed_inside_a_leg = node.exit_role == "routed_target" and leg is not None
-            if node.exit_role in _NORMAL_EXIT_ROLES and not routed_inside_a_leg:
+            # `leg` is non-None exactly inside a Branch leg — a Decision arm
+            # inherits its enclosing leg — which is the distinction the lattice
+            # already tracks between exclusive alternatives and sequential legs.
+            role = node.exit_role
+            leg_local = leg is not None and role in _LEG_LOCAL_EXIT_ROLES
+            if role is not None and role not in _ABNORMAL_EXIT_ROLES and not leg_local:
                 normal_exits.append(state)
             return state
 
