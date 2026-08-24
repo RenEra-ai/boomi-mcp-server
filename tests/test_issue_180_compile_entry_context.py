@@ -44,15 +44,10 @@ _SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-_PIPELINE_MODULES = (
-    "boomi_mcp.compiler.process_ir.pipeline",
-    "boomi_mcp.compiler.process_ir.semantic_validation.pipeline",
-)
-
-#: Call sites that compile a root WITHOUT trusted context on purpose, with the
-#: reason. Keyed by `(repo-relative path, entry name)`. Read by the test — not
-#: documentation. A row here that no longer matches a strict call is also a
-#: failure, so a fixed site cannot leave a stale exemption behind.
+#: Call sites that hand a capability-aware entry no trusted context ON PURPOSE,
+#: with the reason. Keyed by `(repo-relative path, entry name)`. Read by the
+#: test — not documentation. A row here that no longer matches a strict call is
+#: also a failure, so a fixed site cannot leave a stale exemption behind.
 STRICT_BY_DESIGN = {
     (
         "src/boomi_mcp/compiler/process_ir/legacy_adapters/emission.py",
@@ -62,36 +57,76 @@ STRICT_BY_DESIGN = {
         "declarations to resolve — the channel is part of the typed authoring "
         "surface — so strict is the correct question here, not an omission."
     ),
+    (
+        "src/boomi_mcp/categories/integration_builder.py",
+        "build_materialization_plan",
+    ): (
+        "the RAW `integration_spec` route's plan builder. That route carries no "
+        "`effect_declarations` field at all — only the typed AuthoringRequestV1 "
+        "does — so there is no context in existence to thread here. The typed "
+        "route never calls this function; it arrives with a compile-certified "
+        "stored plan."
+    ),
+    (
+        "src/boomi_mcp/categories/integration_builder.py",
+        "validate_legacy_process_config",
+    ): (
+        "the legacy dialect config bridge. It validates a raw legacy component "
+        "config, which has no typed declaration channel, so there is again no "
+        "context to pass rather than a context being withheld."
+    ),
 }
 
 
-def _capability_aware_entries():
-    """`{name: capabilities-parameter-index or None}` — from the SIGNATURES.
+def _omissible_capability_entries():
+    """`{name: capabilities-parameter-index or None}` — derived from `src/`.
 
-    The index is what makes a POSITIONAL argument countable: `validate_process_ir`
-    takes `capabilities` positionally, and a check that only looked for the
-    keyword would have reported a compliant call site as strict.
+    **The universe is every function whose `capabilities` parameter has a
+    DEFAULT**, found by parsing the tree — not a list of modules.
+
+    The first cut of this test named two pipeline modules and swept only their
+    functions. QA-180-r1-01 measured what that missed: 27 functions in `src/`
+    take a `capabilities` parameter and 18 of them were outside the hand-listed
+    universe — including `build_materialization_plan`, the site of this defect
+    class's FIRST instance. Dropping `capabilities=` at its call site passed the
+    check 6/6. A guard whose own universe is a hand-model is the very mechanism
+    this class is about, one level up.
+
+    A parameter with NO default is excluded, and that exclusion is derived too:
+    a call site cannot omit a required argument, so there is nothing for the
+    sweep to catch. Eight of the twenty-seven are in that position today.
     """
-    import importlib
-
     entries = {}
-    for module_name in _PIPELINE_MODULES:
-        module = importlib.import_module(module_name)
-        for name in dir(module):
-            if name.startswith("_"):
+    for file_path in sorted(_SRC.rglob("*.py")):
+        tree = ast.parse(file_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            obj = getattr(module, name)
-            if not inspect.isfunction(obj) or obj.__module__ != module_name:
+            arguments = node.args
+            positional = list(arguments.posonlyargs) + list(arguments.args)
+            positional_names = [argument.arg for argument in positional]
+            defaulted = set(
+                positional_names[len(positional_names) - len(arguments.defaults):]
+                if arguments.defaults else ()
+            )
+            keyword_defaults = {
+                argument.arg: default
+                for argument, default in zip(
+                    arguments.kwonlyargs, arguments.kw_defaults)
+            }
+            names = positional_names + [a.arg for a in arguments.kwonlyargs]
+            if "capabilities" not in names:
                 continue
-            parameters = list(inspect.signature(obj).parameters.items())
-            for index, (parameter_name, parameter) in enumerate(parameters):
-                if parameter_name != "capabilities":
-                    continue
-                entries[name] = (
-                    index
-                    if parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
-                    else None
-                )
+            if not (
+                "capabilities" in defaulted
+                or keyword_defaults.get("capabilities") is not None
+            ):
+                continue
+            entries[node.name] = (
+                positional_names.index("capabilities")
+                if "capabilities" in positional_names
+                else None
+            )
     return entries
 
 
@@ -186,25 +221,33 @@ def _sweep(entries):
 def test_the_entry_set_is_derived_and_covers_the_known_entries():
     """The coverage claim, against the authority's full case set.
 
-    The authority is the pipeline signature. Asserting the three entries the
-    authoring path actually uses are present keeps the derivation from passing
-    on an empty set — the failure mode that would make every other test here
-    vacuous.
+    `build_materialization_plan` is asserted explicitly because it is the
+    DISCRIMINATING member: it is where this defect class first appeared, it sits
+    outside the two pipeline modules the first cut of this test swept, and its
+    absence is exactly what let QA-180-r1-01's mutant pass. A universe that
+    contains it cannot have been built by naming the compiler's own modules.
     """
-    entries = _capability_aware_entries()
-    assert entries, "no capability-aware compile entry was derived"
+    entries = _omissible_capability_entries()
+    assert entries, "no capability-aware entry was derived"
     assert {
         "compile_process_ir_v1",
         "compile_process_ir_model_v1",
         "validate_process_ir",
+        "build_materialization_plan",
+        "_build_compile_time_plan",
+        "derive_subprocess_effect",
     } <= set(entries), sorted(entries)
     # The positional/keyword split is real and load-bearing.
     assert entries["compile_process_ir_v1"] is None
     assert entries["validate_process_ir"] == 2
 
+    # ...and the universe reaches OUTSIDE the compiler package, which is the
+    # property the first cut lacked.
+    assert len({name for name in entries}) > 10, sorted(entries)
+
 
 def test_every_compile_entry_call_site_is_context_aware_or_declared_strict():
-    entries = _capability_aware_entries()
+    entries = _omissible_capability_entries()
     strict = _sweep(entries)
     undeclared = sorted(
         (path, name, line) for path, name, line in strict
@@ -222,7 +265,7 @@ def test_no_strict_exemption_outlives_the_call_it_exempts():
     An allowlist nobody prunes becomes a list of sites that used to be wrong,
     and the next real one hides among them.
     """
-    entries = _capability_aware_entries()
+    entries = _omissible_capability_entries()
     live = {(path, name) for path, name, _line in _sweep(entries)}
     stale = sorted(key for key in STRICT_BY_DESIGN if key not in live)
     assert stale == [], (
@@ -239,7 +282,7 @@ def test_the_apply_recompile_is_covered_by_this_sweep():
     """
     path = _ROOT / "src/boomi_mcp/categories/components/canonical_process_apply.py"
     source = path.read_text(encoding="utf-8")
-    entries = _capability_aware_entries()
+    entries = _omissible_capability_entries()
 
     calls = [
         node for node in ast.walk(ast.parse(source))
@@ -259,19 +302,32 @@ def test_the_check_reports_a_strict_call_it_has_not_been_told_about():
     """NON-VACUITY WITNESS.
 
     A checker that parsed nothing, or matched no call, would pass on a tree full
-    of strict calls. Feed it a synthetic module containing exactly one, at a
-    path no exemption covers, and require it to be reported — and require the
-    keyword and positional spellings NOT to be reported, so the witness also
-    proves the check is not simply reporting everything.
+    of strict calls. Feed it synthetic modules at a path no exemption covers and
+    require each to be reported — with silent controls beside them, so the
+    witness also proves the check is not simply reporting everything.
     """
-    entries = _capability_aware_entries()
+    entries = _omissible_capability_entries()
 
     strict_source = "compile_process_ir_v1(ir, symbols)\n"
     reported = _strict_calls(strict_source, "src/synthetic_witness.py", entries)
     assert [(name, line) for _path, name, line in reported] == [
         ("compile_process_ir_v1", 1)], reported
 
-    # ...and the two compliant spellings are silent.
+    # QA-180-r1-01's MUTANT M1, as a witness: dropping the keyword at the
+    # plan-builder call is what the first cut of this check could not see.
+    m1 = _strict_calls(
+        "build_materialization_plan(envelope=e, process_ir=ir, symbols=s,\n"
+        "                           conflict_policy=p)\n",
+        "src/synthetic_witness.py", entries)
+    assert [name for _path, name, _line in m1] == [
+        "build_materialization_plan"], m1
+    # ...and the same call WITH the keyword is silent.
+    assert _strict_calls(
+        "build_materialization_plan(envelope=e, process_ir=ir, symbols=s,\n"
+        "                           conflict_policy=p, capabilities=c)\n",
+        "src/synthetic_witness.py", entries) == []
+
+    # ...and the two compliant spellings of the compiler entries are silent.
     assert _strict_calls(
         "compile_process_ir_v1(ir, symbols, capabilities=ctx)\n",
         "src/synthetic_witness.py", entries) == []
@@ -303,6 +359,42 @@ def test_the_check_reports_a_strict_call_it_has_not_been_told_about():
         "x = (validate_process_ir(ir, s, c)\n"
         "     if c is not None else compile_process_ir_v1(ir, s))\n",
         "src/synthetic_witness.py", entries)) == 1
+
+
+def test_a_required_capabilities_parameter_is_excluded_and_that_is_derived():
+    """The exclusion is a measurement, not a judgement call.
+
+    A parameter with no default cannot be omitted by a call site, so sweeping
+    for it would report nothing and mean nothing. Assert that such functions
+    EXIST (or this exclusion is vacuous) and that they are genuinely absent from
+    the swept universe.
+    """
+    required = []
+    for file_path in sorted(_SRC.rglob("*.py")):
+        for node in ast.walk(ast.parse(file_path.read_text(encoding="utf-8"))):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            arguments = node.args
+            positional = [a.arg for a in
+                          list(arguments.posonlyargs) + list(arguments.args)]
+            defaulted = set(
+                positional[len(positional) - len(arguments.defaults):]
+                if arguments.defaults else ())
+            keyword_defaults = {
+                a.arg: d for a, d in zip(arguments.kwonlyargs, arguments.kw_defaults)}
+            names = positional + [a.arg for a in arguments.kwonlyargs]
+            if "capabilities" not in names:
+                continue
+            if ("capabilities" in defaulted
+                    or keyword_defaults.get("capabilities") is not None):
+                continue
+            required.append(node.name)
+
+    assert required, (
+        "no function requires `capabilities`, so excluding required parameters "
+        "is a rule about nothing — re-derive it before trusting the sweep")
+    entries = _omissible_capability_entries()
+    assert not (set(required) & set(entries)), sorted(set(required) & set(entries))
 
 
 @pytest.mark.parametrize("key,reason", sorted(STRICT_BY_DESIGN.items()))

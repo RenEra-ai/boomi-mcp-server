@@ -1296,12 +1296,24 @@ def _issue180_effect_case(case):
             registry = {"conn": "golden-conn-id", "op": "golden-op-id",
                         "child": "golden-child-id"}
         elif case == "external_writer_declared_effect":
-            components = (conn, op, {
+            # The cache config is the shape frozen in
+            # `tests/fixtures/recipe_parity/compose_all_cache.json` (committed
+            # 2026-07-29, long before this slice's baseline) — `indexes` plus a
+            # top-level profile, NOT a per-key `profile_ref`. QA-180-r1-02
+            # measured the difference live: the invented shape plans clean and
+            # is then refused by the platform with
+            # `error_generated_profile_validation`, so a golden built on it
+            # would freeze bytes no account would accept.
+            components = (conn, op, profile("cp"), {
                 "key": "cache", "type": "documentcache", "name": "M12.16 cache",
-                "action": "create",
-                "config": {"component_name": "M12.16 cache", "cache_index": [
-                    {"name": "k", "keys": [
-                        {"profile_ref": "$ref:op", "element_path": "id"}]}]},
+                "action": "create", "depends_on": ["cp"],
+                "config": {"component_name": "M12.16 cache",
+                           "component_type": "documentcache",
+                           "profile_id": "$ref:cp",
+                           "profile_type": "profile.json",
+                           "indexes": [{"index_id": 1, "index_name": "by a",
+                                        "keys": [{"element_key": "1", "id": 1,
+                                                  "name": "a (root/a)"}]}]},
             })
             units = (unit("proc", "M12.16 Effect Writer", {
                 "version": "1", "body": {"kind": "sequence", "steps": [
@@ -1309,11 +1321,11 @@ def _issue180_effect_case(case):
                     {"kind": "cache_get", "cache_ref": "$ref:cache",
                      "external_writer": True},
                     {"kind": "return_documents"}]}},
-                ("cache", "conn", "op")),)
+                ("cache", "conn", "cp", "op")),)
             declarations = ProcessIREffectDeclarationsV1(external_writers=(
                 ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:cache"),))
             registry = {"conn": "golden-conn-id", "op": "golden-op-id",
-                        "cache": "golden-cache-id"}
+                        "cache": "golden-cache-id", "cp": "golden-cp-id"}
         else:  # pragma: no cover - the registry is closed
             raise UnknownCase(case)
 

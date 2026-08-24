@@ -2241,9 +2241,15 @@ def build_artifact_descriptors(
         # fingerprint. A binding that cannot notice the artifact changing is not
         # a staleness check.
         #
-        # Fingerprinted here and NOT stored: the plan is rebuilt at apply from
-        # the same inputs, and what has to match is the digest. That keeps this
-        # a fingerprint of the plan rather than a second copy of it.
+        # Fingerprinted AND retained (§6 AR1-01). An earlier draft rebuilt the
+        # plan at apply and compared only the digest; retention is what makes
+        # apply execute the very plan this compile fingerprinted rather than a
+        # look-alike rebuilt from the same inputs.
+        #
+        # QA-180-r1-03: this comment used to say the plan is "NOT stored ...
+        # rebuilt at apply", three lines above the assignment that stores it.
+        # It is the same stale-claim mechanism #180 records as SELF-180-02,
+        # pointed at retention instead of at the compile count.
         unit = units_by_key.get(component_key)
         if unit is not None:
             materialization_plan = _build_compile_time_plan(
