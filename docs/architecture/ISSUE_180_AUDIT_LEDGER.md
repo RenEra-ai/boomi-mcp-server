@@ -69,8 +69,8 @@ tier + anchor, affected SHA/delta, exactly one disposition.
 | --- | --- |
 | Loop identity | closure over the whole roster |
 | Window / cumulative evaluations | L1 Stage-1 QA: 1 of 3 · L2 Stage-2 commit review: 2 of 3 · L3 composite wave gate: 1 of 3 |
-| Current SHA / dirty | the tip recorded in the final report below, clean |
-| Per-tier counts | Critical: 1 raised, 1 fixed, **0 unresolved**. Standard: 8 raised — 7 fixed, 1 refuted-as-defect (SELF-180-04), and 1 recorded as a pre-existing out-of-subsystem limitation awaiting an owner decision (QA-180-r1-04). |
+| Current SHA / dirty | **`__CLOSING_SHA__`**, clean — the tip the composite wave gate returned EXIT=0 on, and the tip this checkpoint is decided against |
+| Per-tier counts | **Ten raw finding rows: 1 Critical + 9 Standard.** Critical: 1 raised (CDX-180-r1-01), 1 fixed, **0 unresolved**. Standard: 9 raised — 7 `fixed`, 1 `finding-refuted` (SELF-180-04, a documented consequence rather than a defect), 1 `not-validated` as an in-slice defect (QA-180-r1-04, pre-existing and out of subsystem). 7 + 1 + 1 = 9. |
 | Affected-class breadth | capability reachability · machine-served schemas/contracts · runtime behavior · apply/update preservation |
 | New defect classes | DC-180-A (a derived artifact minted before its inputs settled) · DC-180-B (an order-bearing representation entering an order-independent hash) |
 | Recurring defect classes | DC-154-A, twice — at the apply-time recompile (SELF-180-01) and one level up, in the GUARD's own universe (QA-180-r1-01). Both received the structural treatment; the second is what makes the first's fix checkable. |
