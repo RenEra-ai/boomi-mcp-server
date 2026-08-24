@@ -65,6 +65,8 @@ tier + anchor, affected SHA/delta, exactly one disposition.
 | CDX-180-r2-03 | "[P3] Record the actual checkpoint SHA" — the checkpoint cell deferred to "the tip recorded in the final report below", and the final report contained no SHA, so the cross-reference identified no tree. | Stage-2 repo commit review, round 3 | P3 | (the audit record itself) | DC-180-C adjacent — a record pointing at a tree it never names | Standard — anchor: source label P3. | `c882b93` -> fixed | `fixed` — the checkpoint now carries the literal closing SHA and its dirty state. |
 | CDX-180-r3-01 | "[P2] Reconcile the checkpoint triggered by wave evaluation 3" — adding the third composite-wave row brings the L3 loop to its third evaluation, which forces a checkpoint; CP-1 still records L3 as `1 of 3` and states that no loop reached three, and CP-2 belongs to L2. | Stage-2 repo commit review, round 4 (the closing append), run dir `/tmp/cdx-review.kSiSLE`, archived at `commit-reviews/cdx-review.kSiSLE` | P2 | (the audit record itself) | DC-180-C (a closure claim whose own accounting had not caught up with the tree) — **second instance**, first was CDX-180-r2-01 | Standard — anchor: source label P2. | `b6f41cb` -> fixed | `fixed`. **Second instance of the pair, so the correction is structural rather than another patch:** the per-loop evaluation counts in CP-1 are no longer restated in prose anywhere. They are stated ONCE, in the gate table of the final report, and CP-1 points at that table instead of carrying its own copy. The recurring mechanism here is a hand-copied count kept in two places — the same shape as the golden-count prose this slice already removed — so the fix removes the second copy rather than re-synchronising it. CP-3 below records the L3 checkpoint the third evaluation forces. |
 | CDX-180-r3-02 | "[P2] Record the affected validation's actual outcome" — the closing append's validation row explains why those tests were selected but never states whether pytest succeeded; a failed invocation would produce the same entry. | Stage-2 repo commit review, round 4 | P2 | (the audit record itself) | DC-180-D (an evidence row recording SELECTION instead of RESULT) | Standard — anchor: source label P2. | `b6f41cb` -> fixed | `fixed` — the row now carries the count and the outcome. Swept the other rows in the same table at the same time: every row's Result cell states a measured outcome, not a rationale. |
+| CDX-180-r4-01 | "[P2] Bill the closing review to the terminal loop" — `cdx-review.kSiSLE` reviewed the closing append after the wave gate's third evaluation completed, so the rostered terminal-correction loop owns it, not the already-closed inner Stage-2 loop; recording it as a Stage-2 round, and as that loop in the archive, carries the wrong checkpoint window and can skip a checkpoint due in the terminal loop. | Stage-2 / terminal loop review, `/tmp/cdx-review.VTwPj5`, archived at `commit-reviews/cdx-review.VTwPj5` | P2 | (the audit record itself) | DC-180-C (**third instance** — a record whose accounting had not caught up with the tree) | Standard — anchor: source label P2. | `9e79759` -> fixed | `fixed`. Reattributed in BOTH places — the archive rows now carry the terminal loop, and the gate table below counts the loops separately. The inner Stage-2 loop closed at its second evaluation, on the last delta that contained implementation; every review after the wave gate's first pass belongs to the terminal loop. **DC-180-C's third instance triggers the structural rule, and the structural fix is to stop the class at its source: the record no longer contains any forward-looking claim.** The gate table states only collected, attested results, so there is nothing left that can fall behind the tree. |
+| SELF-180-05 | "the review anchor advanced past two unreviewed commits" — after the terminal loop's first review collected at `c882b93`, two further commits (`953e79e`, `5c00583`) landed, and the next review was anchored at `5c00583` rather than at `c882b93`. The delta `c882b93..5c00583` was therefore never covered by any review. | Implementation, this slice; found by deriving the review lineage from the archive itself rather than from the ledger's prose | (self-found; no gate label) | (the audit record and the review coverage it claims) | DC-180-E (a review anchor advanced past an uncollected delta) | Standard — anchor: no critical class; no source label. | `9e79759` -> fixed | `fixed` — the closing review is re-anchored at **`c882b93`**, which is worktree-inclusive and therefore covers `953e79e`, `5c00583`, `b6f41cb` and `9e79759` in one delta. The rule this violated is explicit ("the anchor may never advance past an unreviewed commit"), and it was invisible in the ledger's prose: it only surfaced when the base/head chain was printed from the archived run directories. That is now how the lineage is recorded below. |
 
 ## Checkpoint records
 
@@ -80,7 +82,23 @@ tier + anchor, affected SHA/delta, exactly one disposition.
 | Outcome | **`CLOSE-CLEAN`** |
 | Rationale | The gate's third and current run passes in full on the recorded tip: manifests, the whole non-KB suite, both golden determinism passes and byte-exactness, and the plan-fingerprint seam. There is no residue of any tier in this loop to continue, defer or escalate. |
 
-### CP-2 — Stage-2 loop, third evaluation (checkpoint forced by round count)
+### CP-4 — terminal correction loop, third evaluation (checkpoint forced by round count)
+
+| Field | Value |
+| --- | --- |
+| Loop identity | L4, terminal correction loop — the reviews of the closing documentation appends |
+| Window / cumulative evaluations | 3 of 3 (`cdx-review.21oBMN`, `cdx-review.kSiSLE`, `cdx-review.VTwPj5`) |
+| Current SHA / dirty | `9e797590cfb26fc4fb8865351af39e82ebba9e8d` at the time of the checkpoint, clean |
+| Per-tier counts | Critical 0. Standard 5 across the three evaluations, every one of them about the audit RECORD; zero about the implementation, which has been clean since the inner loop's second evaluation. |
+| Affected-class breadth | one class only: the audit record's own accuracy |
+| New / recurring defect classes | DC-180-C recurred three times (a record claim that had not caught up with the tree) and DC-180-D once. DC-180-E was found by me, not by a gate. |
+| Trend evidence | severity fell P1 -> P2 -> P2/P3 -> P2 and the affected class narrowed from the shipped tree to the record; but DC-180-C recurred a THIRD time, which under the structural-fix rule forbids another instance patch. |
+| Outcome | **`CONTINUE`**, with the structural fix applied in this same batch |
+| Rationale | Not `CLOSE-CLEAN`: this evaluation's findings are real and unfixed at the moment of the checkpoint. Not `ESCALATE-OPEN`: a concrete corrective action exists and is named. The recurrence of DC-180-C is answered structurally rather than by a fourth patch — every forward-looking claim is removed from the record, so the mechanism that produced all three instances no longer has anywhere to occur. The named finite next correction is: reattribute the loops, delete the predeclared result, re-anchor the closing review at `c882b93` so no delta is uncovered, and re-validate. |
+
+### CP-2 — SUPERSEDED by CP-4. Recorded against the Stage-2 inner loop; the reviews it counted belong to the terminal correction loop (CDX-180-r4-01). Retained unaltered below, per the append-only rule, with its original text intact.
+
+#### CP-2 (original text, superseded)
 
 | Field | Value |
 | --- | --- |
@@ -193,8 +211,25 @@ reopened; it remains closed, and this slice is worked on `codex/issue-180`.
 | Gate | Evaluations | Outcome |
 | --- | --- | --- |
 | L1 Stage-1 QA (live, public MCP tool boundary, account `renera`) | 1 | 4 findings, zero Critical/High; all three families applied to real components and one was packaged and deployed |
-| L2 Stage-2 repo commit review | 5 | ev1 findings -> ev2 CLEAN -> ev3 findings on the closure record (CP-2 `CONTINUE`) -> ev4 two findings on the record's own accounting -> ev5 CLEAN. Every finding from ev3 onward is about the audit record; the implementation has been CLEAN since ev2. |
+| L2 Stage-2 repo commit review (inner loop — the deltas containing implementation) | 2 | ev1 findings -> ev2 **CLEAN**. The inner loop closed here and has not reopened. |
+| L4 Terminal correction loop (the closing documentation appends) | 3 so far | ev1 findings -> ev2 findings -> ev3 findings, all about the audit record. CP-4 `CONTINUE` with the structural fix applied. |
 | L3 Composite wave gate | 3 | ev1 EXIT=0 · ev2 FAILED (1 test — the uncited archived round) · ev3 **EXIT=0** on the corrected tree. Third evaluation forces a checkpoint: **CP-3, `CLOSE-CLEAN`**. |
+
+### Review lineage, printed from the archive
+
+Derived by reading `baseline` and `start-head` out of each archived run directory — not from this
+prose. SELF-180-05 was invisible until it was printed this way.
+
+| Run dir | base -> head | Loop |
+| --- | --- | --- |
+| `cdx-review.R7nyHW` | `245d7d79` -> `cf8fa982` | L2 ev1 |
+| `cdx-review.GsOybp` | `cf8fa982` -> `2e74bac4` | L2 ev2 — CLEAN, inner loop closes |
+| `cdx-review.21oBMN` | `2e74bac4` -> `c882b937` | L4 ev1 |
+| `cdx-review.kSiSLE` | `5c005839` -> `b6f41cb9` | L4 ev2 — **anchored too late; see SELF-180-05** |
+| `cdx-review.VTwPj5` | `b6f41cb9` -> `9e797590` | L4 ev3 — CP-4 |
+
+The closing review re-anchors at `c882b937`, which is worktree-inclusive and so covers every commit
+from there to the tip in one delta, closing the gap SELF-180-05 records.
 
 ### Which gate covers which tree — stated, not implied
 
