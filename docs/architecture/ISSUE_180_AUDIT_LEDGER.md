@@ -63,8 +63,22 @@ tier + anchor, affected SHA/delta, exactly one disposition.
 | CDX-180-r2-01 | "[P2] Validate the closure commit before declaring final-tree coverage" — the review and wave entries both stop at `2e74bac`, while the closing report and evidence are the later commit; these files are consumed by the audit-archive tests, so the final non-blocking mutation activates the terminal correction loop and makes the prior wave/review coverage stale. | Stage-2 repo commit review, round 3 (the closing docs-only delta), run dir `/tmp/cdx-review.21oBMN`, archived at `commit-reviews/cdx-review.21oBMN` | P2 | (the audit record itself — a durable artifact, not served to callers) | DC-180-C (a closure claim asserted over a tree no gate had yet seen) | Standard — anchor: source label P2; no critical class. | `c882b93` -> fixed | `fixed`, and the finding proved itself: re-running the composite wave gate on the closing tip `953e79e` FAILED with one test — `test_every_completed_run_is_cited_by_its_ledger_outside_the_frozen_legacy_set`, because round 3 had been archived without being cited here. The claim that a docs-only append cannot change a suite result was therefore false, measured rather than argued. The record now carries these rows, and the final-tree coverage statement below names exactly which gate covers which tip. |
 | CDX-180-r2-02 | "[P3] Reconcile the Standard finding count" — the ledger has ten raw finding rows, one Critical and nine Standard, and the checkpoint cell's own breakdown sums to nine while the cell claims eight. | Stage-2 repo commit review, round 3 | P3 | (the audit record itself) | n/a (single instance) | Standard — anchor: source label P3. | `c882b93` -> fixed | `fixed` — recounted mechanically from the table rather than by hand (the first count attempt mis-tiered a row whose ANCHOR text contains the word "Critical", which is precisely the hand-count hazard). 1 Critical + 9 Standard; 7 fixed + 1 refuted + 1 not-validated = 9. |
 | CDX-180-r2-03 | "[P3] Record the actual checkpoint SHA" — the checkpoint cell deferred to "the tip recorded in the final report below", and the final report contained no SHA, so the cross-reference identified no tree. | Stage-2 repo commit review, round 3 | P3 | (the audit record itself) | DC-180-C adjacent — a record pointing at a tree it never names | Standard — anchor: source label P3. | `c882b93` -> fixed | `fixed` — the checkpoint now carries the literal closing SHA and its dirty state. |
+| CDX-180-r3-01 | "[P2] Reconcile the checkpoint triggered by wave evaluation 3" — adding the third composite-wave row brings the L3 loop to its third evaluation, which forces a checkpoint; CP-1 still records L3 as `1 of 3` and states that no loop reached three, and CP-2 belongs to L2. | Stage-2 repo commit review, round 4 (the closing append), run dir `/tmp/cdx-review.kSiSLE`, archived at `commit-reviews/cdx-review.kSiSLE` | P2 | (the audit record itself) | DC-180-C (a closure claim whose own accounting had not caught up with the tree) — **second instance**, first was CDX-180-r2-01 | Standard — anchor: source label P2. | `b6f41cb` -> fixed | `fixed`. **Second instance of the pair, so the correction is structural rather than another patch:** the per-loop evaluation counts in CP-1 are no longer restated in prose anywhere. They are stated ONCE, in the gate table of the final report, and CP-1 points at that table instead of carrying its own copy. The recurring mechanism here is a hand-copied count kept in two places — the same shape as the golden-count prose this slice already removed — so the fix removes the second copy rather than re-synchronising it. CP-3 below records the L3 checkpoint the third evaluation forces. |
+| CDX-180-r3-02 | "[P2] Record the affected validation's actual outcome" — the closing append's validation row explains why those tests were selected but never states whether pytest succeeded; a failed invocation would produce the same entry. | Stage-2 repo commit review, round 4 | P2 | (the audit record itself) | DC-180-D (an evidence row recording SELECTION instead of RESULT) | Standard — anchor: source label P2. | `b6f41cb` -> fixed | `fixed` — the row now carries the count and the outcome. Swept the other rows in the same table at the same time: every row's Result cell states a measured outcome, not a rationale. |
 
 ## Checkpoint records
+
+### CP-3 — composite wave gate, third evaluation (checkpoint forced by round count)
+
+| Field | Value |
+| --- | --- |
+| Loop identity | L3, composite wave gate |
+| Window / cumulative evaluations | 3 of 3 |
+| Current SHA / dirty | `5c00583907611e7935d0fb2d2f494f2cfcfbb0b2`, clean — the tip evaluation 3 passed on |
+| Per-tier counts at the checkpoint | Critical 0. Standard 0. The third evaluation returned EXIT=0 with no findings of its own. |
+| Trend evidence | ev1 EXIT=0 · ev2 FAILED on exactly one test, itself a finding already raised and fixed (the uncited archived round) · ev3 EXIT=0. The single failure was caused by an audit-record omission, not by the implementation, and no defect class is being instance-patched. |
+| Outcome | **`CLOSE-CLEAN`** |
+| Rationale | The gate's third and current run passes in full on the recorded tip: manifests, the whole non-KB suite, both golden determinism passes and byte-exactness, and the plan-fingerprint seam. There is no residue of any tier in this loop to continue, defer or escalate. |
 
 ### CP-2 — Stage-2 loop, third evaluation (checkpoint forced by round count)
 
@@ -83,7 +97,7 @@ tier + anchor, affected SHA/delta, exactly one disposition.
 | Field | Value |
 | --- | --- |
 | Loop identity | closure over the whole roster |
-| Window / cumulative evaluations | L1 Stage-1 QA: 1 of 3 · L2 Stage-2 commit review: 2 of 3 · L3 composite wave gate: 1 of 3 |
+| Window / cumulative evaluations | Stated ONCE, in the final report's gate table — not restated here. CDX-180-r3-01 was caused by keeping a second copy of these counts in this cell and letting it fall behind the tree. |
 | Current SHA / dirty | **`5c00583907611e7935d0fb2d2f494f2cfcfbb0b2`**, clean — the tip the composite wave gate returned EXIT=0 on, and the tip this checkpoint is decided against |
 | Per-tier counts | **Ten raw finding rows: 1 Critical + 9 Standard.** Critical: 1 raised (CDX-180-r1-01), 1 fixed, **0 unresolved**. Standard: 9 raised — 7 `fixed`, 1 `finding-refuted` (SELF-180-04, a documented consequence rather than a defect), 1 `not-validated` as an in-slice defect (QA-180-r1-04, pre-existing and out of subsystem). 7 + 1 + 1 = 9. |
 | Affected-class breadth | capability reachability · machine-served schemas/contracts · runtime behavior · apply/update preservation |
@@ -94,8 +108,9 @@ tier + anchor, affected SHA/delta, exactly one disposition.
 | Outcome | **`CLOSE-CLEAN`** |
 | Rationale | Zero unresolved critical findings. Every validated blocking-class finding is fixed and re-validated on the final tree. No finding is deferred: the single item not fixed here (QA-180-r1-04) is pre-existing, outside this slice's delta and subsystem, and is recorded as a limitation with its reproduction rather than carried as debt or minted into an issue. Every required gate is current on the final tree — see the final report. |
 
-No mid-run checkpoint was due: a checkpoint is forced on every third evaluation of a loop, the three
-loops account separately, and none reached three.
+Checkpoints ARE due in this slice and are recorded: CP-2 for the Stage-2 loop's third evaluation and
+CP-3 for the composite wave gate's third. The loops account separately; the per-loop counts live in
+the final report's gate table.
 
 ## Validation evidence (chronological)
 
@@ -119,7 +134,7 @@ loops account separately, and none reached three.
 | 16 | **Composite wave gate (loop 3, evaluation 2)** — on the closing tip | `scripts/wave_gate.py wave --base 245d7d79...` at `953e79e` | stdout captured | **FAILED** — `PYTEST_FAILED ... {'passed': 10519, 'failed': 1}`. The single failure was `test_every_completed_run_is_cited_by_its_ledger_outside_the_frozen_legacy_set`: round 3 was archived without being cited. This is CDX-180-r2-01 demonstrated, not merely asserted. |
 | 17 | **Composite wave gate (loop 3, evaluation 3)** — on the corrected tree | `scripts/wave_gate.py wave --base 245d7d79...` at **`5c00583907611e7935d0fb2d2f494f2cfcfbb0b2`** | stdout captured, exit 0 | **EXIT=0** — `manifests ok (10537 required nodes, 70 active goldens)`, `non-KB suite green (10520 passed, 17 skipped, cap 30)`, `70 active goldens deterministic and byte-exact`, `plan fingerprint checked: 2 case(s)`. **This is the tip the closure is decided on.** |
 | 18 | Darkness proof for this closing append | working tree vs `5c00583` | `git diff --name-only` per path class | 0 changed under `src/`, 0 under `tests/`, 0 goldens, 0 wave-gate manifests — only this ledger |
-| 19 | Affected validation for this closing append | working tree | `pytest tests/test_wave_gate.py tests/test_issue_177_ledger_class_table_is_derived.py tests/test_issue_178_ledger_is_derived_from_its_archive.py` | the exact tests that read what this append changes — the set whose omission evaluation 2 caught |
+| 19 | Affected validation for this closing append | working tree on `5c00583` | `pytest tests/test_wave_gate.py tests/test_issue_177_ledger_class_table_is_derived.py tests/test_issue_178_ledger_is_derived_from_its_archive.py -p no:randomly -q` — the exact tests that read what this append changes, the set whose omission evaluation 2 caught | **270 passed, 0 failed** |
 
 ## Recorded limitations
 
@@ -178,8 +193,8 @@ reopened; it remains closed, and this slice is worked on `codex/issue-180`.
 | Gate | Evaluations | Outcome |
 | --- | --- | --- |
 | L1 Stage-1 QA (live, public MCP tool boundary, account `renera`) | 1 | 4 findings, zero Critical/High; all three families applied to real components and one was packaged and deployed |
-| L2 Stage-2 repo commit review | 4 | ev1 findings -> ev2 CLEAN -> ev3 findings on the closure record (CP-2 `CONTINUE`) -> ev4 CLEAN on the corrected record |
-| L3 Composite wave gate | 3 | ev1 EXIT=0 · ev2 FAILED (1 test — the uncited archived round) · ev3 EXIT=0 on the corrected tree |
+| L2 Stage-2 repo commit review | 5 | ev1 findings -> ev2 CLEAN -> ev3 findings on the closure record (CP-2 `CONTINUE`) -> ev4 two findings on the record's own accounting -> ev5 CLEAN. Every finding from ev3 onward is about the audit record; the implementation has been CLEAN since ev2. |
+| L3 Composite wave gate | 3 | ev1 EXIT=0 · ev2 FAILED (1 test — the uncited archived round) · ev3 **EXIT=0** on the corrected tree. Third evaluation forces a checkpoint: **CP-3, `CLOSE-CLEAN`**. |
 
 ### Which gate covers which tree — stated, not implied
 
