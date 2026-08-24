@@ -250,7 +250,7 @@ def _component(components: Sequence[Any], ref: str):
     return None
 
 
-def _by_identity(aliases, lookup):
+def _matched_by_identity(aliases, lookup):
     """The first alias for which ``lookup`` yields something.
 
     CONTENT must be resolved through canonical identity for the same reason
@@ -265,8 +265,13 @@ def _by_identity(aliases, lookup):
     for alias in sorted(aliases):
         found = lookup(alias)
         if found is not None:
-            return found
-    return None
+            return alias, found
+    return None, None
+
+
+def _by_identity(aliases, lookup):
+    """As :func:`_matched_by_identity`, when only the value is needed."""
+    return _matched_by_identity(aliases, lookup)[1]
 
 
 def _map_type_vocabularies() -> Tuple[FrozenSet[str], FrozenSet[str]]:
@@ -821,6 +826,23 @@ def derive_subprocess_effect(
             replay_safe = False
         elif kind == "set_property" and getattr(semantic, "persist", False):
             replay_safe = False
+        elif kind in CONTRACT_GATED_CHILD_KINDS:
+            # A contract is what made this node inspectable, so its own replay
+            # verdict is part of what it establishes. Reading only the node
+            # KINDS above missed it entirely: a child whose sole hazard is an
+            # impure contracted map or script — no connector, no cache write, no
+            # persisted property — was summarised `replay_safe=True`, so the
+            # truthful declaration was refused and one claiming replay safety
+            # was accepted.
+            from ..compiler.process_ir.semantic_validation.lineage import (
+                _trusted_effects,
+            )
+
+            for effect in _trusted_effects(
+                semantic, capabilities or DEFAULT_VALIDATION_CAPABILITIES
+            ):
+                if not effect.replay_safe:
+                    replay_safe = False
 
     walk = (
         walk_lineage(prepared, capabilities) if capabilities is not None
@@ -1072,15 +1094,21 @@ def resolve_process_ir_effect_declarations(
             bare = ref[len("$ref:"):] if ref.startswith("$ref:") else ref
             return child_roots.get(bare)
 
-        child = _by_identity(alias, _child_for)
+        # Keep WHICH alias matched: `child_key` selects the child's own
+        # capability rows and carries its required-read preconditions, so
+        # rebuilding it from the declaration's spelling keyed both to a root
+        # that does not exist — the parent got a summary while the child got no
+        # entry state and failed its own validation.
+        matched_ref, child = _matched_by_identity(alias, _child_for)
         # The child's OWN trusted context. Deriving its summary against the
         # STRICT default asked a different question than the child's validation
         # answers: a cache read the child itself declares an external writer for
         # is nobody's obligation, yet it was reported as required of the caller.
         # The writer rows are resolved above precisely so they exist here.
+        resolved_ref = matched_ref or item.process_ref
         child_key = (
-            item.process_ref[len("$ref:"):]
-            if item.process_ref.startswith("$ref:") else item.process_ref
+            resolved_ref[len("$ref:"):]
+            if resolved_ref.startswith("$ref:") else resolved_ref
         )
         # The child's OWN verified contracts, all resolved before this loop:
         # its map effects, its registry-matched scripts, and its external

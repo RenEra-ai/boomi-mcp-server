@@ -3369,3 +3369,85 @@ def test_a_throwing_arm_does_not_drop_what_the_continuing_arm_established():
     codes = {e.code for e in
              validate_process_ir(continuing, SymbolTableV1(symbols=())).errors}
     assert any("READ_BEFORE_WRITE" in c for c in codes), codes
+
+
+def test_a_contracts_replay_verdict_reaches_the_child_summary():
+    """Post-architect r21. A contract is what made the node inspectable, so its
+    replay verdict is part of what it establishes.
+
+    Reading only the node KINDS missed it: a child whose sole hazard is an
+    impure contracted map — no connector, no cache write, no persisted property
+    — was summarised `replay_safe=True`, so the truthful declaration was refused
+    and one claiming replay safety was accepted. Uses a connector-free
+    control-only root, because a connector forces the flag False on its own and
+    would hide the difference.
+    """
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+    from boomi_mcp.compiler.process_ir.semantic_validation.contracts import (
+        MapEffectContractV1,
+        ProcessIRValidationCapabilitiesV1,
+        StateEffectV1,
+    )
+
+    child = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [{
+        "kind": "decision", "label": "d", "comparison": "equals",
+        "left": {"value_type": "static", "static_value": "a"},
+        "right": {"value_type": "static", "static_value": "b"},
+        "true_arm": {"steps": [{"kind": "map_ref", "map_ref": "$ref:MAP"}],
+                     "terminal": {"kind": "stop"}},
+        "false_arm": {"steps": [], "terminal": {"kind": "stop"}}}]}})
+
+    def capabilities(replay_safe):
+        return ProcessIRValidationCapabilitiesV1(map_effects=(MapEffectContractV1(
+            map_ref="$ref:MAP", effect=StateEffectV1(
+                reads=(), writes=(("dpp", "M"),), replay_safe=replay_safe)),))
+
+    assert derive_subprocess_effect(
+        child, capabilities=capabilities(False)).effect[2] is False
+    # CONTROL: a replay-SAFE contract leaves the child replay-safe, so the flag
+    # tracks the contract rather than being pinned False by any contract.
+    assert derive_subprocess_effect(
+        child, capabilities=capabilities(True)).effect[2] is True
+
+
+def test_an_aliased_child_still_receives_its_own_preconditions():
+    """Post-architect r21. The alias lookup found the child and dropped WHICH
+    root matched, so `child_key` was rebuilt from the declaration's spelling.
+
+    The child's capability rows and its required-read entry state are selected
+    by that key, so both were attached to a root that does not exist: the parent
+    got its summary while the child got no preconditions and failed its own
+    validation — the exact contradiction the entry-state fix removed.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+    from boomi_mcp.compiler.process_ir.semantic_validation.pipeline import (
+        validate_process_ir,
+    )
+    from boomi_mcp.models.authoring_workflow import (
+        ProcessIRSubprocessEffectDeclarationV1,
+    )
+
+    symbols = SymbolTableV1(symbols=tuple(list(_symbols().symbols) + [
+        ComponentSymbolV1(ref="$ref:CHILD_ALIAS", component_id="p-1",
+                          component_type="process")]))
+    child = _child_requiring_k()
+    parent = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "process_call", "process_ref": "$ref:CHILD"}]}})
+
+    # the declaration names the child through a LEGAL alias
+    declarations = ProcessIREffectDeclarationsV1(subprocess_effects=(
+        ProcessIRSubprocessEffectDeclarationV1(
+            process_ref="$ref:CHILD_ALIAS",
+            effect=_effect(reads=[("dpp", "K")], replay_safe=True)),))
+    resolution = resolve_process_ir_effect_declarations(
+        [("parent", parent), ("CHILD", child)], declarations, symbols, [],
+        child_roots={"$ref:CHILD": child, "CHILD": child})
+    assert resolution.ok, resolution.findings
+
+    # the preconditions land on the CHILD's real root key ...
+    assert resolution.capabilities_by_root["CHILD"].established_at_entry == (
+        ("dpp", "K"),)
+    # ... so the child validates clean instead of failing against itself
+    report = validate_process_ir(
+        child, symbols, capabilities=resolution.capabilities_by_root["CHILD"])
+    assert report.errors == (), report.errors
