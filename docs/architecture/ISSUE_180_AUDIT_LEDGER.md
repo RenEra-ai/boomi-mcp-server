@@ -63,9 +63,24 @@ tier + anchor, affected SHA/delta, exactly one disposition.
 
 ## Checkpoint records
 
-No checkpoint is due yet. Stage-1 QA has had ONE evaluation (loop 1, evaluation 1) and the Stage-2
-repo commit review has had ONE (loop 2, evaluation 1); a checkpoint is forced on every third
-evaluation of a loop, and the two loops account separately.
+### CP-1 — closure
+
+| Field | Value |
+| --- | --- |
+| Loop identity | closure over the whole roster |
+| Window / cumulative evaluations | L1 Stage-1 QA: 1 of 3 · L2 Stage-2 commit review: 2 of 3 · L3 composite wave gate: 1 of 3 |
+| Current SHA / dirty | the tip recorded in the final report below, clean |
+| Per-tier counts | Critical: 1 raised, 1 fixed, **0 unresolved**. Standard: 8 raised — 7 fixed, 1 refuted-as-defect (SELF-180-04), and 1 recorded as a pre-existing out-of-subsystem limitation awaiting an owner decision (QA-180-r1-04). |
+| Affected-class breadth | capability reachability · machine-served schemas/contracts · runtime behavior · apply/update preservation |
+| New defect classes | DC-180-A (a derived artifact minted before its inputs settled) · DC-180-B (an order-bearing representation entering an order-independent hash) |
+| Recurring defect classes | DC-154-A, twice — at the apply-time recompile (SELF-180-01) and one level up, in the GUARD's own universe (QA-180-r1-01). Both received the structural treatment; the second is what makes the first's fix checkable. |
+| Resolved defect classes | DC-154-A is now closed by an invariant derived from the source rather than by an enumeration; mutant M1 fails it. |
+| Trend evidence | not applicable — no window was exhausted. Every loop closed inside its first window except the commit review, whose second evaluation returned CLEAN. |
+| Outcome | **`CLOSE-CLEAN`** |
+| Rationale | Zero unresolved critical findings. Every validated blocking-class finding is fixed and re-validated on the final tree. No finding is deferred: the single item not fixed here (QA-180-r1-04) is pre-existing, outside this slice's delta and subsystem, and is recorded as a limitation with its reproduction rather than carried as debt or minted into an issue. Every required gate is current on the final tree — see the final report. |
+
+No mid-run checkpoint was due: a checkpoint is forced on every third evaluation of a loop, the three
+loops account separately, and none reached three.
 
 ## Validation evidence (chronological)
 
@@ -83,6 +98,8 @@ evaluation of a loop, and the two loops account separately.
 | 10 | Mutation control for CDX-180-r1-02 | correction | canonicalization branch removed and restored | MUTANT: the order test fails, the content control still passes. RESTORED: both pass. |
 | 11 | Served-artifact rebaseline verification | correction | leaf-by-leaf diff of the frozen inventory, 22 172 leaves | 0 added / 0 removed / 0 retyped; 34 changed — 4 `evidence_line` (+6 each) and 30 digest echoes of one moved revision |
 | 12 | Manifest transition re-check | correction | `scripts/wave_gate.py manifests --base 245d7d79...` | first attempt REFUSED (born-tombstoned row); after regenerating the block from the baseline: `manifests ok (10537 required nodes, 70 active goldens)` |
+| 13 | **Stage-2 repo commit review (loop 2, evaluation 2)** — FIX-ONLY, delta-scoped | `--base cf8fa98`, head `2e74bac`, dirty=false | run dir `/tmp/cdx-review.GsOybp`, archived at `commit-reviews/cdx-review.GsOybp`; collector `STATUS: completed`, exit 0, teardown confirmed | **CLEAN — no findings.** "The capability canonicalization makes declaration ordering hash-independent while preserving stored ordering and content sensitivity ... no actionable defects were found." Stage 2 closes here. |
+| 14 | **Composite wave gate (loop 3, evaluation 1)** | `scripts/wave_gate.py wave --base 245d7d79...` at `2e74bac` | stdout captured | **EXIT=0** — `manifests ok (10537 required nodes, 70 active goldens)`, `non-KB suite green (10520 passed, 17 skipped, cap 30)`, `70 active goldens deterministic and byte-exact`, `plan fingerprint checked: 2 case(s)` |
 
 ## Recorded limitations
 
@@ -113,3 +130,43 @@ evaluation of a loop, and the two loops account separately.
   answer rather than a gap, and it has its own public test
   (`test_a_map_declaration_is_inert_when_the_plan_may_substitute_the_component`) with the `fail`
   control beside it.
+
+## Final report
+
+**Status: CLOSED.** Issue #180's enumerated residue is implemented into #154's tree. #154 was not
+reopened; it remains closed, and this slice is worked on `codex/issue-180`.
+
+### What the slice delivers
+
+1. **Public-boundary proof for the three remaining families.** `map`, `subprocess` and registered
+   `script` each drive `plan_authoring_request_v1` with a control in the opposite direction. The
+   subprocess case is shaped around a Branch on purpose: the execution compartment accumulates
+   across legs while the document compartment does not, which is the rule that cost #154 six rounds,
+   and it is now asserted at the entry a caller actually reaches. A fourth test pins why
+   `conflict_policy` is load-bearing: under `reuse` a map declaration correctly goes inert.
+2. **Three effect XML goldens**, rendered through the FULL public chain rather than the emitter
+   alone, registered in the wave-gate corpus (67 -> 70 active) with provenance recorded.
+3. **The three mandated witnesses**, each mutation-controlled with the mutant proven to have applied:
+   a synthetic additional-body-context witness, a model-constructed catch-terminal enforcement
+   witness, and a corrupted nested-entry-role mutant (plus a second nested variant that lands on the
+   count branch rather than the role branch).
+4. **A production defect found by doing the work, and fixed structurally.** Building the first golden
+   through the public chain surfaced that the effect-declaration channel never reached apply.
+
+### Gate outcomes on the final tree
+
+| Gate | Evaluations | Outcome |
+| --- | --- | --- |
+| L1 Stage-1 QA (live, public MCP tool boundary, account `renera`) | 1 | 4 findings, zero Critical/High; all three families applied to real components and one was packaged and deployed |
+| L2 Stage-2 repo commit review | 2 | closed **CLEAN** on evaluation 2 |
+| L3 Composite wave gate | 1 | **EXIT=0** |
+
+Test floors: 10501 -> **10537**. Active goldens: 67 -> **70**.
+
+### Open status
+
+* **#180: closed by this slice.**
+* **One item is deliberately NOT closed by it:** QA-180-r1-04, the pre-existing inability of
+  `orchestrate_deploy` to resolve a typed ProcessIR root. It is recorded above with its reproduction
+  and its evidence of pre-existence, and it is the owner's call whether it becomes work. No issue was
+  minted for it.
