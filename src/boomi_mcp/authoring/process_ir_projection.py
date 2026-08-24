@@ -85,6 +85,9 @@ SOURCE_COMPILER_DIAGNOSTICS = "runtime.compiler_diagnostics"
 SOURCE_DOCTRINE = "runtime.design_doctrine_registry"
 SOURCE_RECIPES = "runtime.recipe_registry"
 SOURCE_CONTRIBUTIONS = "runtime.recipe_contribution_kinds"
+SOURCE_MAP_FUNCTIONS = "runtime.map_function_registry"
+SOURCE_VETTED_SCRIPTS = "runtime.vetted_script_registry"
+SOURCE_EFFECT_RESOLVER = "runtime.process_ir_effect_resolver"
 
 
 class ProcessIRAuthoringQueryError(ValueError):
@@ -787,9 +790,10 @@ _SEMANTIC_RULES: Tuple[Tuple[str, str, str, str, Tuple[str, ...], Tuple[str, ...
         "state",
         "Map effects are derived by inspecting the map",
         "The reads and writes attributed to a map come from its own function "
-        "mappings, resolved through the map-function registry. A map containing "
-        "any function whose effect is unannotated is wholly opaque: partial "
-        "knowledge is never reported as a complete effect.",
+        "mappings, resolved through the map-function registry, together with its "
+        "document-cache joins, each of which reads the cache it names. A map "
+        "containing any function whose effect is unannotated is wholly opaque: "
+        "partial knowledge is never reported as a complete effect.",
         ("map_ref",),
         ("node.map_ref", "semantic_rule.effect.declaration_boundary"),
     ),
@@ -811,10 +815,16 @@ _SEMANTIC_RULES: Tuple[Tuple[str, str, str, str, Tuple[str, ...], Tuple[str, ...
         "state",
         "Subprocess effects are derived from the child's own definition",
         "A called child's summary is derived by inspecting its authored process "
-        "definition. Only writes on the child's root sequence count as "
-        "established: a write inside one Branch path or Decision arm does not "
-        "happen on every exit. A child that is a bare reference cannot be "
-        "inspected and is inert.",
+        "definition, walking every path. A read the child does not itself "
+        "establish first is required of the caller, wherever in the child it "
+        "sits; a write counts as established only where every converging path "
+        "makes it, so a write inside one Branch path or Decision arm does not. "
+        "A child is inert — establishing nothing either way — when it is a bare "
+        "reference, or when it contains a step whose own state effect is "
+        "knowable only from a contract: a map, a scripted data process, or a "
+        "further call. A connector is not such a step: it moves documents "
+        "rather than tracked state, so it leaves both sets unchanged and instead "
+        "makes the child replay-unsafe.",
         ("process_call",),
         ("node.process_call", "semantic_rule.effect.declaration_boundary"),
     ),
@@ -1549,6 +1559,30 @@ _SEMANTIC_RULE_SOURCES = {
 }
 
 
+#: Which runtime module each effect-authority row states a fact ABOUT, keyed by
+#: the same authority token the resolver publishes.
+#:
+#: Every one of these rows was served as `runtime.process_ir_models` — the
+#: module that carries the declaration SHAPE and none of these facts. It is the
+#: identical defect `_SEMANTIC_RULE_SOURCES` above exists to fix, recurring in
+#: the generated rows, so it gets the same answer rather than a second
+#: hardcode: the served source is DERIVED from the row's own authority token.
+#: `test_every_effect_authority_row_names_its_own_authority` requires this map
+#: to be TOTAL over `effect_authority_rows()`, so a family added there without a
+#: source fails loudly instead of inheriting a wrong one.
+_EFFECT_AUTHORITY_SOURCES = {
+    "server-inspection:map-function-registry": SOURCE_MAP_FUNCTIONS,
+    "server-registry:vetted-scripts": SOURCE_VETTED_SCRIPTS,
+    # A child summary is read off the lineage walk, which is what
+    # `semantic_rule.effect.subprocess_inspection` cites too.
+    "server-inspection:child-process-ir": SOURCE_STATE,
+    "caller-assertion:no-state-established": SOURCE_STATE,
+    # Not a fact about any upstream registry: it is the resolver's own policy
+    # for what a declaration it cannot verify does NOT buy.
+    "none:every-strict-finding-stands": SOURCE_EFFECT_RESOLVER,
+}
+
+
 #: Served wording for each effect-authority row, keyed by the authority token the
 #: resolver publishes. The TOKENS come from `effect_authority_rows()`; only the
 #: prose lives here, so a family added there without wording fails loudly rather
@@ -1616,7 +1650,11 @@ def _effect_authority_entries() -> List[ProcessIRAuthoringContractEntryV1]:
                 ordering_facts=("Authority: {0}.".format(authority),),
                 sources=(
                     _source(
-                        SOURCE_MODELS, "generated", "runtime_model", "compiler", family
+                        _EFFECT_AUTHORITY_SOURCES[authority],
+                        "generated",
+                        "runtime_model",
+                        "compiler",
+                        family,
                     ),
                 ),
             )

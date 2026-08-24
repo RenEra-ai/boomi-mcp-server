@@ -38,7 +38,7 @@ default back in through the side door.
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Dict, FrozenSet, List, Mapping, Optional, Set, Tuple
+from typing import Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Set, Tuple
 
 from ....errors import (
     PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID,
@@ -384,10 +384,30 @@ def _opaque_reason(
     return None
 
 
-def collect_lineage_findings(
+class LineageWalkV1(NamedTuple):
+    """Everything ONE lineage walk establishes about a process.
+
+    The three fields answer three different questions off the SAME traversal,
+    so a caller never has to re-derive path reachability with a scan of its
+    own — the failure this type exists to make unavailable.
+
+    ``unestablished_reads`` is a MAY set: a key read on ANY path before that
+    path writes it. ``established_at_exit`` is a MUST set: the meet over
+    converging paths, so a key written on only one Decision arm is absent.
+    The two approximate in OPPOSITE directions on purpose — a caller-facing
+    dependency must never be under-reported, and a guarantee must never be
+    over-reported.
+    """
+
+    findings: Tuple[ValidationDiagnosticV1, ...]
+    unestablished_reads: Tuple[StateKey, ...]
+    established_at_exit: Tuple[StateKey, ...]
+
+
+def _walk_lineage(
     prepared: PreparedProcessValidationV1,
     capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
-) -> Tuple[ValidationDiagnosticV1, ...]:
+) -> LineageWalkV1:
     """Walk the CFG, tracking established state, and report unproven reads.
 
     The walk is a depth-first traversal that carries a ``_State`` along each
@@ -396,6 +416,11 @@ def collect_lineage_findings(
     """
     findings: List[ValidationDiagnosticV1] = []
     reported: Set[Tuple[str, str]] = set()
+    # Every unestablished read, recorded BEFORE `_report` dedups by
+    # (code, node): two different keys unmet at one node collapse to a single
+    # finding, and dropping the second key with the duplicate finding would
+    # under-report the dependency set.
+    unmet: List[StateKey] = []
     leg_writes = _leg_write_index(prepared, capabilities)
 
     def _report(code: str, node, severity="error", evidence=()) -> None:
@@ -428,6 +453,7 @@ def collect_lineage_findings(
         diagnostic depend on the reader's provenance, which is the mirror image
         of the writer-side asymmetry fixed alongside it.
         """
+        unmet.append(key)
         scope, _name = key
         if scope != DDP and _written_in_a_later_leg(leg_writes, leg, key):
             # The write exists, in a LATER leg of the same Branch. Legs run
@@ -611,8 +637,35 @@ def collect_lineage_findings(
             result = _visit(edge.target_node_id, state, depth + 1, leg)
         return result
 
-    _visit(prepared.cfg.entry_node_id, _State(), 0)
-    return tuple(findings)
+    exit_state = _visit(prepared.cfg.entry_node_id, _State(), 0)
+    return LineageWalkV1(
+        findings=tuple(findings),
+        unestablished_reads=tuple(sorted(set(unmet))),
+        established_at_exit=tuple(
+            sorted(exit_state.document | exit_state.execution)
+        ),
+    )
+
+
+def collect_lineage_findings(
+    prepared: PreparedProcessValidationV1,
+    capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
+) -> Tuple[ValidationDiagnosticV1, ...]:
+    """The validation phase's view of the walk: its diagnostics."""
+    return _walk_lineage(prepared, capabilities).findings
+
+
+def walk_lineage(
+    prepared: PreparedProcessValidationV1,
+    capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
+) -> LineageWalkV1:
+    """The whole walk, for a caller that needs the state sets themselves.
+
+    Exposed so a summary of what a process REQUIRES and GUARANTEES is read off
+    the traversal that already models Branch leg ordering, Decision meet and
+    the catch fork — rather than re-derived by a second, weaker scan.
+    """
+    return _walk_lineage(prepared, capabilities)
 
 
 def _leg_member_index(
@@ -714,4 +767,4 @@ def _written_anywhere(
     return False
 
 
-__all__ = ["collect_lineage_findings"]
+__all__ = ["LineageWalkV1", "collect_lineage_findings", "walk_lineage"]

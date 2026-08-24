@@ -1787,8 +1787,15 @@ def test_a_child_with_an_uninspectable_step_is_INERT_not_exact_empty():
     read, and a declaration matching that fabrication was then trusted."""
     from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
 
+    # A `map` is uninspectable in the only sense that matters here: its STATE
+    # effect is knowable only through a typed contract, which a child summary
+    # does not carry. (`connector` is deliberately NOT this case — it does I/O
+    # but attributes no state key, so it stays inspectable and is handled on
+    # the replay axis instead.)
     opaque = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
-        {"kind": "connector_call", "operation_ref": "$ref:GETOP"}, {"kind": "stop"}]}})
+        {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
+        {"kind": "map_ref", "map_ref": "$ref:MAP"},
+        {"kind": "return_documents"}]}})
     assert derive_subprocess_effect(opaque) is None
     # CONTROL: an inspectable child still derives, so INERT is about the opaque
     # step rather than about derivation having stopped working.
@@ -1797,21 +1804,54 @@ def test_a_child_with_an_uninspectable_step_is_INERT_not_exact_empty():
         {"kind": "set_dpp", "name": "P",
          "source_values": [{"value_type": "static", "value": "v"}]},
         {"kind": "return_documents"}]}})
-    assert derive_subprocess_effect(plain) == ((), (("dpp", "P"),), True)
+    # replay_safe is False: the child contains a connector, whose repetition is
+    # observable outside the process.
+    assert derive_subprocess_effect(plain) == ((), (("dpp", "P"),), False)
 
 
-def test_declaration_families_are_canonically_ordered():
+def test_declaration_families_hash_the_same_in_any_authored_order():
     """§6 §6. These tuples enter the payload the semantic hash covers, so two
     requests declaring the SAME effects in a different order produced different
-    plan and compile hashes and forced a re-plan that established nothing."""
+    plan and compile hashes and forced a re-plan that established nothing.
+
+    Stage-2 r9 P2 moved WHERE that is enforced. Canonicalising by reordering the
+    parsed request bought hash stability with pointer fidelity: the resolver
+    enumerates these same tuples to build `/effect_declarations/<family>/<index>`
+    diagnostics, so the caller was sent to whichever item the sort put at that
+    position. Both properties hold now, at their own seams.
+    """
     a = ProcessIREffectDeclarationsV1(external_writers=(
         ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:B"),
         ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:A")))
     b = ProcessIREffectDeclarationsV1(external_writers=(
         ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:A"),
         ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:B")))
-    assert a.model_dump(mode="json") == b.model_dump(mode="json")
-    assert [w.cache_ref for w in a.external_writers] == ["$ref:A", "$ref:B"]
+    # the HASH INPUT is order-independent ...
+    assert a.canonical_payload() == b.canonical_payload()
+    # ... while the request still reads back as the caller wrote it.
+    assert [w.cache_ref for w in a.external_writers] == ["$ref:B", "$ref:A"]
+    assert [w.cache_ref for w in b.external_writers] == ["$ref:A", "$ref:B"]
+
+
+def test_a_finding_points_at_the_index_the_caller_actually_authored():
+    """The r9 P2 regression, at the seam that produces the pointer.
+
+    `$ref:UNBOUND` names nothing in the root, so the SECOND authored writer is
+    the invalid one. Sorting the request first moved it to index 0 and the
+    caller was sent to edit the declaration that was fine.
+    """
+    root = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
+        {"kind": "cache_get", "cache_ref": "$ref:ZCACHE"},
+        {"kind": "return_documents"}]}})
+    declarations = ProcessIREffectDeclarationsV1(external_writers=(
+        ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:ZCACHE"),
+        ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:UNBOUND")))
+    resolution = resolve_process_ir_effect_declarations(
+        [("p", root)], declarations, _symbols(), [])
+    unbound = [f for f in resolution.findings if f.reason == "unbound"]
+    assert len(unbound) == 1, resolution.findings
+    assert unbound[0].path == "/effect_declarations/external_writers/1", unbound[0].path
 
 
 def test_the_public_script_language_matches_the_compilers_own():
@@ -1889,3 +1929,216 @@ def test_a_declared_map_effect_reaches_compile_and_emit_on_the_legacy_topology()
     # assertion above is about the effect arriving rather than about the compile.
     _cfg2, plan2 = compile_process_ir_v1(root, symbols)
     assert emit_process(plan2, symbols).process_xml == xml
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 r9 P1 — the summary is read off the lineage walk, not a second scan
+# ---------------------------------------------------------------------------
+
+
+def _control_only_child(arm_steps):
+    """A connector-free root: exactly one Decision and nothing else (#141)."""
+    return parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "decision", "label": "d", "comparison": "equals",
+         "left": {"value_type": "static", "static_value": "a"},
+         "right": {"value_type": "static", "static_value": "b"},
+         "true_arm": {"steps": arm_steps, "terminal": {"kind": "stop"}},
+         "false_arm": {"steps": [], "terminal": {"kind": "stop"}}}]}})
+
+
+def test_a_read_inside_a_control_body_is_still_required_of_the_caller():
+    """The r9 P1 regression: a root-spine-only scan reported requiring nothing.
+
+    A child that reads `dpp:K` inside a Decision arm genuinely depends on its
+    caller establishing K. The scan this replaces matched only `/body/steps/N`,
+    so the read vanished — and BOTH directions were then wrong: a caller
+    declaring the truthful read was rejected as a content mismatch, while a
+    caller declaring nothing matched the fabricated empty summary and was
+    trusted. The dependency disappeared from the strict classifiers either way.
+    """
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    child = _control_only_child([
+        {"kind": "set_dpp", "name": "OUT",
+         "source_values": [{"value_type": "dpp", "property_name": "K"}]}])
+    reads, _writes, _replay = derive_subprocess_effect(child)
+    assert reads == (("dpp", "K"),), reads
+
+
+def test_a_read_the_child_satisfies_itself_is_not_required_of_the_caller():
+    """CONTROL for the test above, in the opposite direction.
+
+    Without this, a derivation that simply reported EVERY read would pass the
+    regression test while making every self-contained child's declaration
+    impossible to write truthfully.
+    """
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    child = _control_only_child([
+        {"kind": "set_dpp", "name": "K",
+         "source_values": [{"value_type": "static", "value": "v"}]},
+        {"kind": "set_dpp", "name": "OUT",
+         "source_values": [{"value_type": "dpp", "property_name": "K"}]}])
+    reads, _writes, _replay = derive_subprocess_effect(child)
+    assert reads == (), reads
+
+
+def test_a_write_on_one_decision_arm_is_never_a_guarantee():
+    """The two axes approximate in OPPOSITE directions.
+
+    Reads are a MAY set and writes are a MUST set. A derivation that used one
+    lattice for both would have to be wrong on one of them.
+    """
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    child = _control_only_child([
+        {"kind": "set_dpp", "name": "ARM_ONLY",
+         "source_values": [{"value_type": "static", "value": "v"}]}])
+    _reads, writes, _replay = derive_subprocess_effect(child)
+    assert writes == (), writes
+
+
+def test_a_connector_anywhere_makes_the_child_replay_unsafe():
+    """Replay safety is a MAY property: I/O on any path is observable."""
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    child = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
+        {"kind": "set_dpp", "name": "P",
+         "source_values": [{"value_type": "static", "value": "v"}]},
+        {"kind": "return_documents"}]}})
+    assert derive_subprocess_effect(child)[2] is False
+    # CONTROL: the same child without the connector IS replay-safe, so the flag
+    # is about the connector rather than pinned False for everything.
+    assert derive_subprocess_effect(_control_only_child([
+        {"kind": "set_dpp", "name": "P",
+         "source_values": [{"value_type": "static", "value": "v"}]}]))[2] is True
+
+
+def test_the_inspectable_and_opaque_child_kinds_partition_the_vocabulary():
+    """The allowlist is pinned BIDIRECTIONALLY to the compiler's own union.
+
+    The denylist this replaces named `connector_call` and silently missed
+    `connector` — the kind a `source`/`target` step actually lowers to — so the
+    most common child shape was summarised rather than refused. A hand-written
+    set on either side can drift the same way; this fails instead, on both a
+    kind added to the compiler and a kind dropped from it.
+    """
+    import typing
+
+    from boomi_mcp.authoring.process_ir_effects import INSPECTABLE_CHILD_KINDS
+    from boomi_mcp.compiler.process_ir import contracts as C
+
+    vocabulary = set()
+    for member in typing.get_args(typing.get_args(C.CfgSemanticV1)[0]):
+        annotation = member.model_fields["semantic_kind"].annotation
+        vocabulary.update(typing.get_args(annotation))
+    assert vocabulary, "no semantic kinds discovered — the probe itself is vacuous"
+
+    # The three kinds whose STATE is knowable only through a typed contract,
+    # named by the lineage authority's own `_opaque_reason`.
+    opaque = {"map", "data_process", "process_call"}
+    assert INSPECTABLE_CHILD_KINDS | opaque == vocabulary, (
+        "unclassified kinds: {0}".format(
+            vocabulary ^ (INSPECTABLE_CHILD_KINDS | opaque)))
+    assert not (INSPECTABLE_CHILD_KINDS & opaque)
+
+
+def test_every_effect_authority_row_names_its_own_authority():
+    """Stage-2 r9 P2. All five rows were served as `runtime.process_ir_models`.
+
+    That module carries the declaration SHAPE and none of these facts: map
+    effects come from the map-function registry, script effects from the vetted
+    registry, subprocess effects from inspecting the child. A served `source_id`
+    is a claim about provenance, and a wrong one sends a caller to the wrong
+    place to verify it — the same defect `_SEMANTIC_RULE_SOURCES` was
+    introduced to fix, recurring in the generated rows.
+
+    Totality is the load-bearing half: without it a family added to
+    `effect_authority_rows()` would inherit whatever the lookup defaulted to.
+    """
+    from boomi_mcp.authoring.process_ir_effects import effect_authority_rows
+    from boomi_mcp.authoring.process_ir_projection import (
+        SOURCE_MODELS,
+        _EFFECT_AUTHORITY_SOURCES,
+        _effect_authority_entries,
+    )
+
+    authorities = {authority for _family, authority in effect_authority_rows()}
+    assert set(_EFFECT_AUTHORITY_SOURCES) == authorities, sorted(
+        set(_EFFECT_AUTHORITY_SOURCES) ^ authorities)
+
+    entries = _effect_authority_entries()
+    assert len(entries) == len(authorities)
+    served = {s.source_id for entry in entries for s in entry.sources}
+    # The rows state facts about several DIFFERENT modules, so one shared source
+    # for all of them is exactly the wrong answer.
+    assert len(served) > 1, served
+    assert SOURCE_MODELS not in served, served
+
+
+def test_the_control_body_union_is_composed_from_the_linear_members():
+    """QA-154-r9-07. Nothing pinned the composition: respelling the control
+    union back to a duplicated literal Union passed the whole corpus.
+
+    This catches DIVERGENCE, which is the risk that actually materialises — a
+    second copy edited on one side only. It does NOT catch a faithful
+    re-spelling, and cannot: a duplicate that still lists exactly these members
+    in this order IS this union, and no runtime probe can tell them apart. The
+    next edit to either side is what this test is waiting for.
+    """
+    import typing
+
+    from boomi_mcp.models import process_ir as M
+
+    linear = typing.get_args(typing.get_args(M.LinearNodeV1)[0])
+    control = typing.get_args(typing.get_args(M.ControlBodyStepV1)[0])
+    assert linear == M._LINEAR_MEMBERS, linear
+    assert control == M._LINEAR_MEMBERS + (M.ConnectorCallNodeV1,), control
+
+
+def test_a_persisted_property_makes_a_child_replay_unsafe():
+    """QA-154-r9 mutation residue: deleting the persist check was invisible.
+
+    A persisted process property outlives the execution, so re-running the
+    child does not start from the same state.
+    """
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    def child(persist):
+        step = {"kind": "set_dpp", "name": "P",
+                "source_values": [{"value_type": "static", "value": "v"}]}
+        if persist:
+            step["persist"] = True
+        return _control_only_child([step])
+
+    assert derive_subprocess_effect(child(True))[2] is False
+    # CONTROL: the same child without the flag stays replay-safe, so the check
+    # is about persistence rather than pinned False for every set_property.
+    assert derive_subprocess_effect(child(False))[2] is True
+
+
+def test_every_effect_authority_family_has_served_wording():
+    """QA-154-r9 mutation residue: the prose map's fail-closed branch was never
+    exercised, and the correspondence was pinned in NEITHER direction.
+
+    A `raises` probe cannot pin it: the construction site now looks up TWO
+    hand-written maps by the same generated authority token, so an unknown
+    token raises from whichever is consulted first and the assertion passes
+    whichever branch is broken. (Measured: making the prose lookup fail OPEN
+    left a `pytest.raises(KeyError)` test green, because the sources lookup
+    raised instead.) Totality, asserted per map, is what actually distinguishes
+    them.
+    """
+    from boomi_mcp.authoring.process_ir_effects import effect_authority_rows
+    from boomi_mcp.authoring.process_ir_projection import (
+        _EFFECT_AUTHORITY_PROSE,
+        _effect_authority_entries,
+    )
+
+    authorities = {authority for _family, authority in effect_authority_rows()}
+    assert set(_EFFECT_AUTHORITY_PROSE) == authorities, sorted(
+        set(_EFFECT_AUTHORITY_PROSE) ^ authorities)
+    # ... and every row actually carries its wording through to the served entry.
+    for entry in _effect_authority_entries():
+        assert entry.summary.strip(), entry.contract_entry_id

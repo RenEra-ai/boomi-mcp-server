@@ -409,6 +409,17 @@ class ProcessIRExternalWriterDeclarationV1(_AuthoringModel):
     cache_ref: NonEmptyString
 
 
+#: How each declaration family is BOUND, named once. The uniqueness check and
+#: the canonical hash payload must agree on what "the same binding" means; two
+#: copies of this list would be free to drift into disagreeing.
+_BINDING_KEYS_V1 = (
+    ("map_effects", lambda item: (item.map_ref,)),
+    ("script_effects", lambda item: (item.language, item.source_sha256)),
+    ("subprocess_effects", lambda item: (item.process_ref,)),
+    ("external_writers", lambda item: (item.cache_ref,)),
+)
+
+
 class ProcessIREffectDeclarationsV1(_AuthoringModel):
     """The optional effect-declaration envelope on an authoring request.
 
@@ -423,36 +434,48 @@ class ProcessIREffectDeclarationsV1(_AuthoringModel):
 
     @model_validator(mode="after")
     def _binding_keys_are_unique(self) -> "ProcessIREffectDeclarationsV1":
-        """Reject duplicate bindings, and CANONICALISE the order.
+        """Reject duplicate bindings.
 
         Two declarations bound to the same thing make the result order-dependent —
         the internal contract model rejects this for the same reason, and
         rejecting it here means a caller learns about it at the boundary they
         wrote, with a pointer into their own payload.
 
-        Ordering is the same problem one step out. These tuples enter the
-        normalised payload the semantic hash covers, so two requests declaring the
-        SAME effects in a different order produced different plan and compile
-        hashes and forced a re-plan that established nothing. Order carries no
-        meaning here — every lookup is by binding key — so it is normalised rather
-        than preserved, exactly as the per-effect read/write sets already are.
+        The AUTHORED ORDER is preserved. Order carries no meaning to any lookup
+        here — every one is by binding key — and the semantic hash does need an
+        order-independent form, but reordering the parsed request to get one
+        moved the caller's items out from under the pointers that address them:
+        the resolver enumerates these tuples to build
+        ``/effect_declarations/<family>/<index>``, so an author who wrote ``B, A``
+        and got a finding on ``A`` was sent to index 0 — the position ``B``
+        occupies in their own payload. Canonicalisation belongs to the hash, and
+        lives in :meth:`canonical_payload`.
         """
-        for field, key in (
-            ("map_effects", lambda item: item.map_ref),
-            ("script_effects", lambda item: (item.language, item.source_sha256)),
-            ("subprocess_effects", lambda item: item.process_ref),
-            ("external_writers", lambda item: item.cache_ref),
-        ):
-            items = list(getattr(self, field))
-            keys = [key(item) for item in items]
+        for field, key in _BINDING_KEYS_V1:
+            keys = [key(item) for item in getattr(self, field)]
             if len(set(keys)) != len(keys):
                 raise ValueError(
                     "duplicate binding key in {0}".format(field)
                 )
-            ordered = tuple(item for _k, item in sorted(zip(keys, items), key=lambda pair: pair[0]))
-            if ordered != tuple(items):
-                object.__setattr__(self, field, ordered)
         return self
+
+    def canonical_payload(self) -> Dict[str, Any]:
+        """The order-independent form the semantic hash covers.
+
+        Two requests declaring the SAME effects in a different order must hash
+        the same, or they force a re-plan that establishes nothing. That is a
+        property of the HASH INPUT, not of the parsed request, so it is applied
+        on the way out — the same way the normalised payload already sorts
+        ``decisions`` — leaving the request itself addressable by the indices
+        the caller wrote.
+        """
+        dumped = self.model_dump(mode="json")
+        for field, key in _BINDING_KEYS_V1:
+            dumped[field] = [
+                item.model_dump(mode="json")
+                for item in sorted(getattr(self, field), key=key)
+            ]
+        return dumped
 
     def is_empty(self) -> bool:
         return not (

@@ -1275,8 +1275,9 @@ _EFFECT_DECLARATION_MESSAGES = {
 _EFFECT_DECLARATION_REMEDIATIONS = {
     "unbound": (
         "Remove the declaration, or author the step it describes. An external "
-        "writer contract additionally requires the cache_get to set "
-        "external_writer."
+        "writer contract binds to any cache_get naming that cache; authoring "
+        "external_writer on it governs whether the missing-writer error may "
+        "downgrade, not whether the declaration binds."
     ),
     "unresolved-or-wrong-type": (
         "Declare the component in the component plan and reference it by "
@@ -1667,7 +1668,7 @@ def _normalized_payload(normalized: _NormalizedIntent, request: AuthoringRequest
     # binding that rotates for no behavioural reason forces a re-plan that
     # establishes nothing.
     if request.effect_declarations is not None:
-        payload["effect_declarations"] = request.effect_declarations.model_dump(mode="json")
+        payload["effect_declarations"] = request.effect_declarations.canonical_payload()
     return payload
 
 

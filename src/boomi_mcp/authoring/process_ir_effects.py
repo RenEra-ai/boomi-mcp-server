@@ -505,85 +505,124 @@ def derive_map_effect(
     return (tuple(sorted(set(reads))), tuple(sorted(set(writes))), replay_safe)
 
 
+#: Semantic kinds whose whole effect this derivation can account for.
+#:
+#: A CLOSED ALLOWLIST, not a denylist of opaque kinds. The denylist it replaces
+#: named ``connector_call`` and never matched a ``source``/``target`` step,
+#: whose semantic kind is ``connector`` — so the single most common thing a real
+#: child contains was inspected and given an exact summary a caller could then
+#: be TRUSTED against. An allowlist fails closed: a kind added to the compiler's
+#: vocabulary later is inert here until it is deliberately classified.
+#:
+#: Membership is decided by ONE question, answered from the lineage authority:
+#: does the walk account for this kind's STATE? ``map``, ``data_process`` and
+#: ``process_call`` are the three kinds whose state effects are knowable only
+#: through a typed contract — exactly the three `_opaque_reason` names — so only
+#: they are excluded. Everything else is control flow, tracked state, a
+#: terminal, or a document-shaping step.
+#:
+#: A connector is INSPECTABLE here even though it does external I/O, because
+#: I/O is not state: `_reads_of`/`_writes_of` attribute no key to it, so it
+#: cannot change either state answer. Excluding it instead — the first attempt
+#: at this fix — was sound but very nearly vacuous: every legal root except a
+#: control-only one contains a connector, so it made almost every real child
+#: inert and cost the capability its reach. What a connector DOES decide is
+#: replay safety, and that is where it is consulted.
+#:
+#: `test_the_inspectable_and_opaque_child_kinds_partition_the_vocabulary` pins
+#: this bidirectionally against the compiler's own semantic-kind union, so a
+#: nineteenth kind fails that test rather than silently landing on one side.
+INSPECTABLE_CHILD_KINDS = frozenset({
+    "branch",
+    "connector",
+    "connector_call",
+    "cache_get",
+    "cache_put",
+    "cache_remove",
+    "decision",
+    "document_cache_retrieve",
+    "exception",
+    "flow_control",
+    "message",
+    "return_documents",
+    "set_property",
+    "stop",
+    "try_catch",
+})
+
+
 def derive_subprocess_effect(child_ir: Any) -> Optional[Tuple[tuple, tuple, bool]]:
     """``(required_reads, must_writes, replay_safe)`` derived from a child's own IR.
 
-    Reuses the lineage analysis's ``_reads_of``/``_writes_of`` against the child's
-    lowered CFG, so this is not a second model of what counts as state.
+    Every one of the three values is read off the compiler's OWN lineage walk
+    (`walk_lineage`), which already models Branch leg ordering, the Decision
+    meet and the catch fork. The scan this replaces re-derived path
+    reachability with a regex on ``source_path`` that matched only root steps,
+    and got two of the three answers wrong in the unsound direction:
 
-    Three properties, each of which was wrong in the first version and each of
-    which cost something specific:
+    **``required_reads`` is a MAY set** — a key the child reads on ANY path
+    before that path establishes it. The root-spine scan omitted a read inside
+    a Branch, Decision or Try/Catch body entirely, so a child that genuinely
+    depended on a caller-supplied key reported requiring nothing. A caller
+    declaring the truthful read was rejected as a content mismatch, while a
+    caller declaring nothing MATCHED and was trusted — the dependency vanished
+    from the strict classifiers on both routes. Over-reporting a read that only
+    one path takes is a demand the caller can always satisfy; under-reporting it
+    is a build that passes and a runtime that does not.
 
-    **Reads are those the child REQUIRES of its caller.** A read satisfied by an
-    earlier write inside the child is the child's own business and must not be
-    reported: reporting it made a valid caller payload invalid purely by declaring
-    the child's truthful summary, so the only way to keep a build green was to
-    omit the declaration — which costs exactly the thing the channel exists for.
-    Only reads on the ROOT SPINE are considered, and only until the spine writes
-    the same key; a read inside a control body is not necessarily reached, and
-    over-reporting it is the same false demand.
+    **``must_writes`` is a MUST set** — the meet over converging paths, so a
+    write on one Decision arm only is correctly absent. This is the same
+    guarantee the previous version aimed at, now obtained from the lattice that
+    defines it rather than approximated by ignoring every non-root step.
 
-    **``must_writes`` stays a strict UNDER-approximation**: only root-spine writes
-    count. A write inside ONE Branch leg or Decision arm happens on some paths and
-    not others, and promising it would let a caller's later read be considered
-    satisfied on a path where it never ran. A write made in EVERY arm is genuinely
-    guaranteed and is deliberately still not claimed — proving it needs the
-    path-sensitive meet the plan specified, and claiming it without that proof is
-    the unsound direction. The cost is a missed opportunity, not a wrong answer,
-    and it is recorded rather than hidden.
+    **``replay_safe`` is a MAY set too**, and for the same reason: a cache write
+    or a persisted property ANYWHERE in the child — including inside a control
+    body — makes re-running it observable. Spine-only was a false safety claim.
 
-    **Opacity is INERT, not exact-empty.** A child containing anything this cannot
-    model — a nested call, a script, a map, a further subprocess — has no derivable
-    summary at all. Returning an empty-but-exact summary for such a child was an
-    unsound ACCEPTANCE: it asserted "this child touches nothing" about a child
-    whose contents were never inspected, and a caller declaration matching that
-    fabrication was then trusted.
+    **Opacity is INERT, not exact-empty.** A child containing anything outside
+    `INSPECTABLE_CHILD_KINDS` has no derivable summary at all. Returning an
+    empty-but-exact summary for such a child was an unsound ACCEPTANCE: it
+    asserted "this child touches nothing" about a child whose contents were
+    never inspected, and a caller declaration matching that fabrication was
+    then trusted.
     """
-    from ..compiler.process_ir.semantic_validation import lineage as _lineage
-    from ..compiler.process_ir.lowering import lower_process_ir_to_cfg
+    from ..compiler.process_ir.semantic_validation.context import (
+        prepare_validation_context,
+    )
+    from ..compiler.process_ir.semantic_validation.lineage import walk_lineage
+    from ..compiler.process_ir.contracts import SymbolTableV1
 
     try:
-        cfg = lower_process_ir_to_cfg(child_ir)
+        prepared = prepare_validation_context(child_ir, SymbolTableV1(symbols=()))
     except Exception:  # pragma: no cover - an unlowerable child is simply opaque
         return None
 
-    #: Kinds whose effect this cannot establish by inspection. Their presence
-    #: anywhere in the child makes the whole summary inert rather than empty.
-    opaque_kinds = {"connector_call", "process_call", "data_process", "map"}
-
-    required_reads: List[Tuple[str, str]] = []
-    must_writes: List[Tuple[str, str]] = []
-    written_on_spine: set = set()
     replay_safe = True
-
-    for node in cfg.nodes:
+    for node in prepared.cfg.nodes:
         semantic = node.semantic
         kind = semantic.semantic_kind
-        if kind in opaque_kinds:
+        if kind not in INSPECTABLE_CHILD_KINDS:
             return None
-        is_root_spine = _ROOT_STEP.fullmatch(node.source_path) is not None
-        if is_root_spine:
-            for key, _has_default, _strict in _lineage._reads_of(semantic):
-                if key not in written_on_spine:
-                    required_reads.append(key)
-            for key in _lineage._writes_of(semantic):
-                must_writes.append(key)
-                written_on_spine.add(key)
-                # A cache write is not replayable: re-running the child would
-                # write the cache twice. `_writes_of` reports cache_put under the
-                # cache scope, so the scope is the test rather than the node kind.
-                if key[0] == "cache":
-                    replay_safe = False
-        # A persisted process property survives the execution, so replaying the
-        # child does not start from the same state.
-        if kind == "set_property" and getattr(semantic, "persist", False):
+        # A cache write is not replayable: re-running the child would write the
+        # cache twice. A persisted process property survives the execution, so
+        # replaying does not start from the same state. A connector does I/O
+        # whose repetition is observable outside this process entirely. All
+        # three are checked over EVERY node — a `cache_put` inside a Decision
+        # arm still happens on the path that takes it.
+        #
+        # The connector rule is a deliberate UNDER-approximation: the
+        # connector capability registry's `retry_safety` column is the real
+        # authority and would clear a read-only operation, but resolving a
+        # binding needs the symbol table a child summary does not carry.
+        # Claiming replay-safety without that evidence is the unsound
+        # direction; withholding it costs a missed opportunity.
+        if kind in ("cache_put", "connector", "connector_call"):
+            replay_safe = False
+        elif kind == "set_property" and getattr(semantic, "persist", False):
             replay_safe = False
 
-    return (
-        tuple(sorted(set(required_reads))),
-        tuple(sorted(set(must_writes))),
-        replay_safe,
-    )
+    walk = walk_lineage(prepared)
+    return (walk.unestablished_reads, walk.established_at_exit, replay_safe)
 
 
 # ---------------------------------------------------------------------------
